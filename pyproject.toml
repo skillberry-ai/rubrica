@@ -24,6 +24,11 @@ where = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py313"
+# Ruff formats Python code blocks inside Markdown. The specs and plans under
+# docs/ are prose records whose code blocks are illustrative and laid out for
+# reading; a formatter must not rewrite a committed design document. The code
+# that matters is transcribed into src/ and tests/, where ruff does apply.
+extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
