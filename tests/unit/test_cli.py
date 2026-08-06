@@ -22,6 +22,31 @@ def test_unknown_subcommand_is_a_usage_error():
     assert main(["frobnicate"]) == 2
 
 
+def test_top_level_help_exits_clean(capsys):
+    """--help is not a misconfigured harness.
+
+    argparse raises SystemExit(0) here and SystemExit(2) for a real usage
+    error; the orchestrator branches on the difference.
+    """
+    assert main(["--help"]) == 0
+    assert "usage: testgen" in capsys.readouterr().out
+
+
+def test_subcommand_help_exits_clean(capsys):
+    assert main(["validate", "--help"]) == 0
+    assert "--stage" in capsys.readouterr().out
+
+
+def test_bad_stage_choice_is_still_a_usage_error(tmp_path):
+    """The SystemExit(2) path argparse takes for an invalid --choice."""
+    run = _seeded_run(tmp_path)
+    assert main(["validate", "--run", str(run.root), "--stage", "not-a-stage"]) == 2
+
+
+def test_a_missing_required_argument_is_still_a_usage_error():
+    assert main(["validate"]) == 2
+
+
 def test_validate_a_clean_stage_exits_zero(tmp_path, capsys):
     run = _seeded_run(tmp_path)
     assert main(["validate", "--run", str(run.root), "--stage", "reconcile"]) == 0

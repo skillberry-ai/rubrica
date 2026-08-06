@@ -76,8 +76,14 @@ def main(argv: list[str] | None = None) -> int:
     # our exit code 2 instead of argparse's SystemExit(2) escaping the caller.
     try:
         args, extra = parser.parse_known_args(argv)
-    except SystemExit:
-        return USAGE
+    except SystemExit as exc:
+        # argparse raises SystemExit(0) after printing --help and SystemExit(2)
+        # for a usage error. Collapsing both to USAGE told the orchestrator the
+        # harness was misconfigured every time someone asked for help. The
+        # comparison is deliberately `== 0` rather than an int cast: exc.code
+        # can in principle be None or a string, neither of which argparse ever
+        # uses for a successful --help, and both compare False without raising.
+        return CLEAN if exc.code == 0 else USAGE
     if args.command is None or extra:
         parser.print_usage(sys.stderr)
         return USAGE
