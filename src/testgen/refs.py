@@ -8,7 +8,15 @@ boundaries, whether declared arithmetic matches the data it summarizes, and
 check_all tolerates a partially-populated run directory. It runs after every
 stage, so when reconcile finishes there is no 02-scenarios.json yet and that
 absence is normal. A stage that should have produced an artifact and did not
-is validate.validate_stage's finding, not this module's.
+is validate.validate_stage's finding, not this module's. The enumeration of
+those valid partial states is executable, in tests/unit/test_refs_states.py.
+
+**Precondition: layer 1 must have run first.** This module assumes every
+artifact present is already schema-valid -- _check_reachability and
+_check_seed_conformance index required keys directly and would raise KeyError
+on a malformed document rather than return a finding. check_all is publicly
+callable and the CLI exposes check-refs with no way to require that validate
+ran, so a caller running them out of order gets a traceback, not a finding.
 """
 
 from __future__ import annotations

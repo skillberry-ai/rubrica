@@ -12,7 +12,16 @@ from testgen.validate import (
     validate_artifact,
     validate_stage,
 )
-from tests.builders import minimal_claims, minimal_world_model
+from tests.builders import (
+    minimal_claims,
+    minimal_coverage,
+    minimal_expected,
+    minimal_manifest,
+    minimal_scenarios,
+    minimal_seed,
+    minimal_verdict,
+    minimal_world_model,
+)
 
 
 def test_every_stage_has_an_artifact_mapping():
@@ -53,6 +62,48 @@ def test_the_schemas_live_inside_the_package_so_a_wheel_can_validate():
 def test_the_schema_directory_env_override_wins(monkeypatch, tmp_path):
     monkeypatch.setenv("TESTGEN_SCHEMA_DIR", str(tmp_path))
     assert schema_dir() == tmp_path
+
+
+# Every registered artifact kind -> the builder for its minimal valid payload.
+# Keyed off ARTIFACT_SCHEMAS below, so registering a kind without adding its
+# builder here fails loudly rather than silently skipping it.
+MINIMAL_BUILDERS = {
+    "manifest": minimal_manifest,
+    "claims": minimal_claims,
+    "world-model": minimal_world_model,
+    "scenarios": minimal_scenarios,
+    "coverage": minimal_coverage,
+    "seed": minimal_seed,
+    "expected": minimal_expected,
+    "verdict": minimal_verdict,
+}
+
+
+def test_every_registered_kind_has_a_minimal_builder():
+    assert set(MINIMAL_BUILDERS) == set(ARTIFACT_SCHEMAS)
+
+
+@pytest.mark.parametrize("kind", sorted(ARTIFACT_SCHEMAS))
+def test_the_minimal_payload_for_every_kind_is_valid(tmp_path, kind):
+    """The other half of the closed-world check below: the baseline is clean,
+    so a finding there can only come from the key the next test adds."""
+    path = tmp_path / f"{kind}.json"
+    write_json(path, MINIMAL_BUILDERS[kind]())
+    assert validate_artifact(path, kind) == []
+
+
+@pytest.mark.parametrize("kind", sorted(ARTIFACT_SCHEMAS))
+def test_an_unknown_top_level_key_is_rejected_for_every_kind(tmp_path, kind):
+    """additionalProperties: false at every artifact root, not just one.
+
+    A stage that invents a top-level field is inventing contract, and a
+    downstream reader that does not know the field would silently ignore it.
+    """
+    path = tmp_path / f"{kind}.json"
+    write_json(path, MINIMAL_BUILDERS[kind](surprise_key=1))
+    findings = validate_artifact(path, kind)
+    assert findings, f"{kind} accepted an unknown top-level key"
+    assert any("surprise_key" in f.message for f in findings), [f.message for f in findings]
 
 
 def test_minimal_claims_is_valid(tmp_path):

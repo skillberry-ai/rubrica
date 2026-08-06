@@ -126,12 +126,18 @@ def test_a_miscounted_goal_denominator_is_reported(tmp_path):
 
 
 def test_duplicate_capability_ids_are_reported(tmp_path):
+    """capability_cells stays 2: _cells is a set of (capability_id,
+    outcome_class_id) pairs, so duplicating a capability wholesale adds no new
+    cell. Bumping the denominator to 4 would provoke a second, unrelated
+    finding rather than silence one, so this asserts on the exact list."""
     run = _run(tmp_path)
     world = minimal_world_model()
     world["capabilities"].append(dict(world["capabilities"][0]))
-    world["denominator"]["capability_cells"] = 4
     write_json(run.world_model, world)
-    assert any("duplicate" in f.message for f in check_world_model(run))
+    findings = check_world_model(run)
+    assert [(f.pointer, f.message) for f in findings] == [
+        ("/capabilities", "duplicate id 'cap-find-jobs'")
+    ]
 
 
 # -- scenarios ----------------------------------------------------------
@@ -224,9 +230,13 @@ def test_a_coverage_matrix_inventing_a_cell_is_reported(tmp_path):
             "covered": False,
         }
     )
+    # Both total and pct must follow the added row, or the arithmetic check
+    # fires too and the test would pass on the wrong finding.
     payload["capability_matrix"]["total"] = 3
+    payload["capability_matrix"]["pct"] = 1 / 3
     write_json(run.coverage_latest, payload)
-    assert any("cap-ghost" in f.message for f in check_coverage(run))
+    findings = check_coverage(run)
+    assert [f.message for f in findings] == ["matrix invents cell cell:cap-ghost/oc-success"]
 
 
 def test_inconsistent_covered_arithmetic_is_reported(tmp_path):

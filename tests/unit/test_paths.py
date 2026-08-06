@@ -76,8 +76,17 @@ def test_per_id_artifact_paths():
 
 
 def test_per_id_paths_refuse_unsafe_ids():
+    """Every per-id method, since paths.py is the security boundary."""
     rp = RunPaths(Path("/runs/r1"))
-    for call in (rp.claims, rp.instance_dir, rp.seed, rp.expected, rp.verdict, rp.task_dir):
+    for call in (
+        rp.claims,
+        rp.instance_dir,
+        rp.seed,
+        rp.expected,
+        rp.rationale,
+        rp.verdict,
+        rp.task_dir,
+    ):
         with pytest.raises(UnsafeSegment):
             call("../../etc/passwd")
 

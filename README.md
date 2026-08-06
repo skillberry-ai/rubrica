@@ -44,7 +44,10 @@ testgen intake \
   --input path/to/schema.json \
   --runs-dir runs \
   --target-name aap2 \
-  --target-interface mcp
+  --target-interface mcp \
+  --max-rounds 2 \
+  --max-scenarios 8
+# --max-rounds and --max-scenarios are optional; those are their defaults.
 # prints the new run directory, e.g. runs/run-20260806-123005
 
 # After each stage: shape, then references

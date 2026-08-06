@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta, timezone
 
@@ -66,6 +67,24 @@ def test_classify_falls_back_to_other(tmp_path):
 def test_sha256_matches_the_known_digest_of_empty_input(tmp_path):
     path = _write(tmp_path, "empty", "")
     assert sha256_of(path) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+def test_sha256_of_a_file_larger_than_one_chunk(tmp_path):
+    """The empty-file case runs zero loop iterations, so the read loop needs
+    a file that spans several 64 KiB chunks to be exercised at all."""
+    data = bytes(range(256)) * 1024  # 256 KiB: four full chunks
+    path = tmp_path / "big.bin"
+    path.write_bytes(data)
+    assert len(data) > (1 << 16)
+    assert sha256_of(path) == hashlib.sha256(data).hexdigest()
+
+
+def test_sha256_of_a_file_that_does_not_end_on_a_chunk_boundary(tmp_path):
+    """A partial final read is the case an off-by-one in the loop would break."""
+    data = bytes(range(256)) * 1024 + b"tail"
+    path = tmp_path / "ragged.bin"
+    path.write_bytes(data)
+    assert sha256_of(path) == hashlib.sha256(data).hexdigest()
 
 
 def test_intake_mints_a_run_id_from_the_supplied_timestamp(tmp_path):

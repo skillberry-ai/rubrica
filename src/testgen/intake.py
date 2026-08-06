@@ -26,10 +26,14 @@ _DOC_SUFFIXES = {".md", ".rst", ".txt", ".adoc"}
 
 
 def slug(value: str) -> str:
-    """Turn an arbitrary path or name into a safe artifact id."""
+    """Turn an arbitrary path or name into a safe artifact id.
+
+    Step 1 collapses every run of non-alphanumerics to a single "-", so after
+    step 2 strips leading and trailing dashes nothing but an alphanumeric can
+    be first or last. safe_segment is the check that this held.
+    """
     lowered = re.sub(r"[^A-Za-z0-9]+", "-", str(value).lower())
-    trimmed = lowered.strip("-")
-    trimmed = re.sub(r"^[^A-Za-z0-9]+", "", trimmed)[:96]
+    trimmed = lowered.strip("-")[:96]
     return safe_segment(trimmed) if trimmed else "input"
 
 
