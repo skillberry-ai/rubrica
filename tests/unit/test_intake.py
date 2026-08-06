@@ -1,0 +1,184 @@
+import json
+from datetime import UTC, datetime
+
+import pytest
+
+from testgen.artifacts import read_json
+from testgen.intake import classify, intake, sha256_of, slug
+from testgen.validate import validate_artifact
+
+NOW = datetime(2026, 8, 6, 12, 30, 5, tzinfo=UTC)
+
+
+def _write(tmp_path, name, payload):
+    path = tmp_path / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(payload if isinstance(payload, str) else json.dumps(payload), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("api.json", "api-json"),
+        ("parsec-aap2/api.json", "parsec-aap2-api-json"),
+        ("Weird Name!!.MD", "weird-name-md"),
+        ("---leading", "leading"),
+        ("", "input"),
+    ],
+)
+def test_slug_produces_safe_path_segments(raw, expected):
+    from testgen.paths import safe_segment
+
+    result = slug(raw)
+    assert result == expected
+    assert safe_segment(result) == result
+
+
+def test_classify_recognises_an_mcp_tool_schema(tmp_path):
+    assert classify(_write(tmp_path, "api.json", {"tools": []})) == "mcp_tool_schema"
+
+
+def test_classify_recognises_an_entity_schema(tmp_path):
+    assert classify(_write(tmp_path, "schema.json", {"jobs": {}})) == "entity_schema"
+
+
+def test_classify_recognises_openapi_by_content(tmp_path):
+    assert classify(_write(tmp_path, "spec.json", {"openapi": "3.1.0"})) == "openapi"
+
+
+def test_classify_recognises_a_trace_by_content(tmp_path):
+    assert classify(_write(tmp_path, "run1.json", {"trace_id": "tr-1", "spans": []})) == "trace"
+
+
+def test_classify_recognises_a_design_document(tmp_path):
+    assert classify(_write(tmp_path, "notes.md", "# Design")) == "design_doc"
+
+
+def test_classify_recognises_source_code(tmp_path):
+    assert classify(_write(tmp_path, "agent.py", "def run(): ...")) == "source_code"
+
+
+def test_classify_falls_back_to_other(tmp_path):
+    assert classify(_write(tmp_path, "blob.bin", "\x00\x01")) == "other"
+
+
+def test_sha256_matches_the_known_digest_of_empty_input(tmp_path):
+    path = _write(tmp_path, "empty", "")
+    assert sha256_of(path) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+def test_intake_mints_a_run_id_from_the_supplied_timestamp(tmp_path):
+    run = intake(
+        inputs=[_write(tmp_path / "src", "api.json", {"tools": []})],
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=NOW,
+    )
+    assert run.root.name == "run-20260806-123005"
+
+
+def test_intake_writes_a_schema_valid_manifest(tmp_path):
+    run = intake(
+        inputs=[_write(tmp_path / "src", "api.json", {"tools": []})],
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=NOW,
+    )
+    assert validate_artifact(run.manifest, "manifest") == []
+
+
+def test_intake_copies_inputs_and_records_hash_kind_and_size(tmp_path):
+    source = _write(tmp_path / "src", "api.json", {"tools": []})
+    run = intake(
+        inputs=[source],
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=NOW,
+    )
+    entry = read_json(run.manifest)["inputs"][0]
+    assert entry["artifact_id"] == "api-json"
+    assert entry["kind"] == "mcp_tool_schema"
+    assert entry["sha256"] == sha256_of(source)
+    assert entry["bytes"] == source.stat().st_size
+    copied = run.inputs_dir / "api-json.json"
+    assert copied.read_bytes() == source.read_bytes()
+
+
+def test_intake_disambiguates_colliding_artifact_ids(tmp_path):
+    first = _write(tmp_path / "a", "api.json", {"tools": [1]})
+    second = _write(tmp_path / "b", "api.json", {"tools": [2]})
+    run = intake(
+        inputs=[first, second],
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=NOW,
+    )
+    ids = [e["artifact_id"] for e in read_json(run.manifest)["inputs"]]
+    assert ids == ["api-json", "api-json-2"]
+
+
+def test_intake_records_the_limits_the_orchestrator_will_enforce(tmp_path):
+    run = intake(
+        inputs=[_write(tmp_path / "src", "api.json", {"tools": []})],
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=NOW,
+    )
+    assert read_json(run.manifest)["limits"] == {"max_rounds": 2, "max_scenarios": 8}
+
+
+def test_intake_refuses_an_empty_input_set(tmp_path):
+    with pytest.raises(ValueError, match="at least one input"):
+        intake(
+            inputs=[],
+            runs_dir=tmp_path / "runs",
+            target_name="aap2",
+            target_interface="mcp",
+            max_rounds=2,
+            max_scenarios=8,
+            now=NOW,
+        )
+
+
+def test_intake_refuses_a_missing_input(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        intake(
+            inputs=[tmp_path / "absent.json"],
+            runs_dir=tmp_path / "runs",
+            target_name="aap2",
+            target_interface="mcp",
+            max_rounds=2,
+            max_scenarios=8,
+            now=NOW,
+        )
+
+
+def test_intake_refuses_to_overwrite_an_existing_run(tmp_path):
+    kwargs = dict(
+        inputs=[_write(tmp_path / "src", "api.json", {"tools": []})],
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=NOW,
+    )
+    intake(**kwargs)
+    with pytest.raises(FileExistsError):
+        intake(**kwargs)
