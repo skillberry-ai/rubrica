@@ -541,6 +541,47 @@ which is already known. **The gates are the experiment.**
 | Multi-target | One target is enough to test the hypothesis. |
 | Declarative pipeline manifest | Where this design likely converges after 2–3 iterations; wrong place to start. |
 
+### Carried forward from the contract-spine build
+
+Surfaced by the whole-branch review after the contract spine shipped, and
+deliberately deferred rather than folded into a fix wave. **These are layer-2
+gaps in a contract that later stages are meant to be constrained by, so they
+belong at the front of the next plan, not the back.**
+
+| Carried forward | Why it matters |
+|---|---|
+| A referential check for the manifest | Layer 2 never reads `manifest.json`, so the chain `manifest.inputs[].artifact_id` → `01-claims/<aid>.json` filename → that file's own `artifact_id` → `claims[].evidence[].artifact_id` is entirely unchecked. `_claim_ids` also unions ids into a set, so two claims files defining the same claim id merge silently — a real reconciliation hazard that reads as clean. |
+| Enforce `manifest.limits` | `max_rounds` and `max_scenarios` are written by intake and read by nothing. A scenarios document with `round: 99` under `max_rounds: 2`, or 400 scenarios under a cap of 8, passes both layers. |
+| Compare `discriminating_fact` between scenario and oracle | §4 makes this field the mechanism that stops the instantiate stage inventing an easier world than the one proposed. Nothing compares the two strings, so the field is currently decorative. |
+| Constrain `trajectory.operations[].capability_id` to the scenario's own `capability_refs` | Operations are checked against the world model but not against what the scenario claimed, so an instance can exercise capabilities the scenario never declared while coverage credits it. Coverage becomes confidently wrong with no finding. |
+| Relate `coverage.holes` to the matrices | Hole refs are checked for existence, but a coverage report can declare zero holes while cells are `covered: false`. The "every uncovered cell is justified" discipline that makes the hole vocabulary worth having is unenforced. |
+| Bring `goal_matrix` up to `capability_matrix`'s rigour | `hop_depths_expected` is never compared to `goals[].expected_hop_depths`, `hop_depths_present` is never derived from the scenarios, and the covered-with-no-scenarios check has no goal-row counterpart. |
+| Switch the schemas' `id` anchors from `^…$` to `\A…\Z` | Python's `re` lets `$` match before a trailing newline; `paths.safe_segment` uses `\Z` and does not. Not reachable today, but it goes live the moment `emit` calls `run.task_dir(sid)` with an id read from `02-scenarios.json`. Eight one-word edits. |
+| Give `emit` and `smoke` real layer-1 gates | `STAGE_ARTIFACTS` maps both to `()`, so `validate --stage emit` returns exit 0 unconditionally even if emit produced nothing. Fine as a placeholder, wrong as a merged contract: an orchestrator will read 0 as success. |
+| Enforce `manifest.created_utc`'s `date-time` format | The validator is built without a `format_checker`, so `"not-a-timestamp"` validates clean. The schema documents a constraint it does not have. |
+| Re-verify input digests | Nothing confirms the bytes in `00-inputs/` are the bytes whose hash the manifest records — a hole underneath the reproducibility claim. `diff-runs` is the natural home. |
+
+### Two process changes for the next plan
+
+Both come from defects that reached the final review rather than being caught earlier:
+
+1. **Enumerate the pipeline states and require `check_all` to be clean in each.**
+   Tolerance was asserted in prose and tested for two states, which is how a
+   check that fired spuriously in normal operation shipped — with a test
+   asserting the wrong behaviour as correct. This is now
+   `tests/unit/test_refs_states.py`; extend it whenever a stage is added.
+2. **Index the plan's self-review by artifact × layer, not by spec element ×
+   task.** Both structural gaps above are invisible in a table keyed on "which
+   task implements this requirement" and obvious in one keyed on "which layer
+   checks this artifact."
+
+A third, narrower lesson: **when a plan supplies both the code and its tests,
+the tests cannot be trusted to bound the code**, because both came from the same
+understanding. Three defects here were cases where plan-mandated test text
+exercised only the path on which the plan-mandated code was correct. Having each
+task's reviewer name one input class the plan's tests do not reach is a cheap
+counter.
+
 ## 9. Testing the pipeline itself
 
 - **Code components** (`validate`, `check-refs`, `dedupe-candidates`, `emit`,
