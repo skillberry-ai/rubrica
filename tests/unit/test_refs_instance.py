@@ -238,8 +238,30 @@ def test_a_matching_verdict_has_no_findings(tmp_path):
     assert check_verdicts(_run(tmp_path, verdict=minimal_verdict())) == []
 
 
-def test_an_instance_with_no_verdict_is_reported(tmp_path):
-    assert any("no verdict" in f.message for f in check_verdicts(_run(tmp_path)))
+def test_an_instance_with_no_verdict_is_reported_once_challenge_has_run(tmp_path):
+    """The property is "every instance has a verdict", not "verdicts exist".
+
+    Two instances, one verdict: the un-challenged instance is named. A run
+    with no verdicts directory at all is the normal post-instantiate state
+    and is covered by test_check_all_is_clean_on_an_un_challenged_run.
+    """
+    run = _run(tmp_path, verdict=minimal_verdict())
+    write_json(run.seed("scn-002"), minimal_seed())
+    write_json(run.expected("scn-002"), minimal_expected(scenario_id="scn-002"))
+    payload = minimal_scenarios()
+    second = dict(payload["scenarios"][0])
+    second["id"] = "scn-002"
+    payload["scenarios"].append(second)
+    write_json(run.scenarios, payload)
+
+    findings = check_verdicts(run)
+    assert [f.message for f in findings] == ["instance scn-002 has no verdict"]
+
+
+def test_no_verdicts_directory_means_challenge_has_not_run_yet(tmp_path):
+    """The pre-challenge state is not a finding; reporting it burns the
+    orchestrator's one repair attempt on a phantom."""
+    assert check_verdicts(_run(tmp_path)) == []
 
 
 def test_a_verdict_naming_a_different_scenario_is_reported(tmp_path):
@@ -275,5 +297,17 @@ def test_an_easier_than_claimed_test_with_the_flag_is_accepted(tmp_path):
 
 # -- aggregation --------------------------------------------------------
 def test_check_all_now_includes_instance_and_verdict_findings(tmp_path):
+    """A genuinely warranted verdict finding reaches check_all's output.
+
+    challenge has run — there is a verdicts directory holding one verdict —
+    but it names the wrong scenario, so the pairing check fires.
+    """
+    run = _run(tmp_path, verdict=minimal_verdict(scenario_id="scn-999"))
+    assert any("scn-999" in f.message for f in check_all(run))
+
+
+def test_check_all_is_clean_on_an_un_challenged_run(tmp_path):
+    """The state between instantiate and challenge warrants no finding."""
     run = _run(tmp_path)
-    assert any("no verdict" in f.message for f in check_all(run))
+    assert not run.verdicts_dir.exists()
+    assert check_all(run) == []

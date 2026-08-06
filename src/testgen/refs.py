@@ -533,7 +533,15 @@ def check_instances(run: RunPaths) -> list[Finding]:
 
 
 def check_verdicts(run: RunPaths) -> list[Finding]:
-    """One coherent verdict per instantiated scenario."""
+    """One coherent verdict per instantiated scenario.
+
+    Returns nothing until challenge has produced at least one verdict: an
+    instance without a verdict is the normal state between instantiate and
+    challenge, and reporting it there would spend the orchestrator's single
+    repair attempt on a phantom.
+    """
+    if not run.verdicts_dir.is_dir():
+        return []
     scenarios_doc = _load(run.scenarios) or {"scenarios": []}
     hop_depths = {s["id"]: s.get("hop_depth") for s in scenarios_doc.get("scenarios", [])}
     instantiated = run.scenario_ids_with_instances()
