@@ -70,7 +70,42 @@ def test_an_instance_for_a_scenario_marked_duplicate_is_reported(tmp_path):
     payload["scenarios"][0]["status"] = "duplicate"
     payload["scenarios"][0]["duplicate_of"] = "scn-000"
     write_json(run.scenarios, payload)
-    assert any("duplicate" in f.message for f in check_instances(run))
+    findings = check_instances(run)
+    assert any("'duplicate'" in f.message and "active" in f.message for f in findings)
+
+
+def test_an_instance_for_a_rejected_scenario_is_reported(tmp_path):
+    """The spec requires `active`, not merely not-duplicate."""
+    run = _run(tmp_path)
+    payload = minimal_scenarios()
+    payload["scenarios"][0]["status"] = "rejected"
+    payload["scenarios"][0]["rejected_reason"] = "out_of_scope"
+    write_json(run.scenarios, payload)
+    findings = check_instances(run)
+    assert any("'rejected'" in f.message and "active" in f.message for f in findings)
+
+
+def test_an_instance_for_a_still_proposed_scenario_is_reported(tmp_path):
+    """score has not judged this scenario yet, so instantiate jumped the gun."""
+    run = _run(tmp_path)
+    payload = minimal_scenarios()
+    payload["scenarios"][0]["status"] = "proposed"
+    write_json(run.scenarios, payload)
+    findings = check_instances(run)
+    assert any("'proposed'" in f.message and "active" in f.message for f in findings)
+
+
+@pytest.mark.parametrize("status", ["proposed", "duplicate", "rejected"])
+def test_an_unfit_status_yields_exactly_one_finding_per_instance(tmp_path, status):
+    run = _run(tmp_path)
+    payload = minimal_scenarios()
+    payload["scenarios"][0]["status"] = status
+    payload["scenarios"][0]["duplicate_of"] = "scn-001"
+    payload["scenarios"][0]["rejected_reason"] = "out_of_scope"
+    write_json(run.scenarios, payload)
+    findings = [f for f in check_instances(run) if "active" in f.message]
+    assert len(findings) == 1
+    assert findings[0].artifact == run.instance_dir("scn-001")
 
 
 def test_a_seed_collection_the_world_model_does_not_declare_is_reported(tmp_path):

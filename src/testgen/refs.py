@@ -494,13 +494,19 @@ def check_instances(run: RunPaths) -> list[Finding]:
                 Finding(run.instance_dir(sid), "refs", "", f"no scenario named {sid} was proposed")
             )
             continue
-        if scenario.get("status") == "duplicate":
+        # The design spec requires every scenario_id under 04/05/06 to be
+        # `active` in 02, not merely not-duplicate: a `rejected` scenario and
+        # one still `proposed` are both unfit to instantiate, the first because
+        # score threw it out and the second because score has not judged it.
+        status = scenario.get("status")
+        if status != "active":
             out.append(
                 Finding(
                     run.instance_dir(sid),
                     "refs",
                     "",
-                    f"scenario {sid} is marked duplicate and should not have been instantiated",
+                    f"scenario {sid} has status {status!r} but only an active scenario should "
+                    "have been instantiated",
                 )
             )
 
