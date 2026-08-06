@@ -254,9 +254,8 @@ would either duplicate the verifier or hold prose nothing evaluates.
 
 `grounded_in.seed_pointer` reduces the reachability gate to a few lines of code:
 for a positive assertion the pointer must resolve and contain its value; for
-`answer_excludes` and negative expectations the check inverts — the pointer must
-resolve to nothing. That is how `log-does-not-say`-style tests become both
-expressible and verifiable.
+`answer_excludes` the check inverts — the pointer must resolve to nothing. That
+is how `log-does-not-say`-style tests become both expressible and verifiable.
 
 **Verdict** (`05-verdicts/<sid>.json`):
 
