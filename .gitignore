@@ -1,0 +1,12 @@
+# Pipeline run outputs (see docs/superpowers/specs/ — runs/<run-id>/ is disposable)
+runs/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Secrets
+.env
