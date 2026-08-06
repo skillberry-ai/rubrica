@@ -1,6 +1,10 @@
 # Pipeline run outputs (see docs/superpowers/specs/ — runs/<run-id>/ is disposable)
 runs/
 
+# Agent harness scratch: SDD ledgers, task briefs, review packages; worktrees
+.superpowers/
+.claude/worktrees/
+
 # Python
 .venv/
 __pycache__/
