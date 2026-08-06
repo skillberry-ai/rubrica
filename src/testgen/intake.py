@@ -112,7 +112,18 @@ def intake(
         if not path.is_file():
             raise FileNotFoundError(f"input artifact does not exist: {path}")
 
-    stamp = (now or datetime.now(UTC)).astimezone(UTC)
+    # A naive datetime is refused rather than interpreted: .astimezone() would
+    # assume the system local zone, so the same call on two hosts would mint
+    # two different run ids and created_utc values. Those are the two fields
+    # the design says must never come from a skill precisely because they must
+    # be stable, so guessing at the zone is worse than failing loudly.
+    if now is None:
+        stamp = datetime.now(UTC)
+    elif now.tzinfo is None:
+        raise ValueError("intake needs a timezone-aware datetime, got a naive one")
+    else:
+        stamp = now.astimezone(UTC)
+
     run = RunPaths(Path(runs_dir) / f"run-{stamp:%Y%m%d-%H%M%S}")
     if run.root.exists():
         raise FileExistsError(f"run directory already exists: {run.root}")

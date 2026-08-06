@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -79,6 +79,57 @@ def test_intake_mints_a_run_id_from_the_supplied_timestamp(tmp_path):
         now=NOW,
     )
     assert run.root.name == "run-20260806-123005"
+
+
+def test_intake_refuses_a_naive_datetime(tmp_path):
+    """Guessing the zone would make the run id host-dependent.
+
+    .astimezone() on a naive value assumes the *system local* zone, so the
+    same call on a UTC host and a US/Pacific host would mint two different
+    run ids and created_utc values -- the two fields the design says must
+    never come from a skill because they must be stable.
+    """
+    with pytest.raises(ValueError, match="timezone-aware"):
+        intake(
+            inputs=[_write(tmp_path / "src", "api.json", {"tools": []})],
+            runs_dir=tmp_path / "runs",
+            target_name="aap2",
+            target_interface="mcp",
+            max_rounds=2,
+            max_scenarios=8,
+            now=datetime(2026, 8, 6, 23, 30),
+        )
+
+
+def test_intake_converts_an_aware_non_utc_timestamp_to_utc(tmp_path):
+    """23:30+02:00 on the 6th is 21:30Z on the 6th, in both fields."""
+    run = intake(
+        inputs=[_write(tmp_path / "src", "api.json", {"tools": []})],
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=datetime(2026, 8, 6, 23, 30, tzinfo=timezone(timedelta(hours=2))),
+    )
+    assert run.root.name == "run-20260806-213000"
+    manifest = read_json(run.manifest)
+    assert manifest["created_utc"] == "2026-08-06T21:30:00Z"
+    assert manifest["run_id"] == "run-20260806-213000"
+
+
+def test_intake_converts_an_aware_timestamp_that_crosses_the_date_line(tmp_path):
+    """A -08:00 evening is the next UTC day; the run id must say so."""
+    run = intake(
+        inputs=[_write(tmp_path / "src", "api.json", {"tools": []})],
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=datetime(2026, 8, 6, 23, 30, tzinfo=timezone(timedelta(hours=-8))),
+    )
+    assert run.root.name == "run-20260807-073000"
 
 
 def test_intake_writes_a_schema_valid_manifest(tmp_path):
