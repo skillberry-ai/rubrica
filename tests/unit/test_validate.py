@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from testgen.artifacts import write_json
@@ -32,6 +34,25 @@ def test_this_tasks_schemas_exist_on_disk():
     """
     for kind in ("claims", "world-model"):
         assert (schema_dir() / ARTIFACT_SCHEMAS[kind]).is_file(), kind
+
+
+def test_the_schemas_live_inside_the_package_so_a_wheel_can_validate():
+    """schema_dir() must resolve beside validate.py, not at the repo root.
+
+    Walking up to the repository root only ever worked for the editable
+    install make setup performs; in a wheel it resolved to a nonexistent
+    path, so an installed copy silently could not validate anything.
+    """
+    import testgen
+
+    package_root = Path(testgen.__file__).resolve().parent
+    assert schema_dir() == package_root / "schema"
+    assert schema_dir().is_dir()
+
+
+def test_the_schema_directory_env_override_wins(monkeypatch, tmp_path):
+    monkeypatch.setenv("TESTGEN_SCHEMA_DIR", str(tmp_path))
+    assert schema_dir() == tmp_path
 
 
 def test_minimal_claims_is_valid(tmp_path):

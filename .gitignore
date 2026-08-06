@@ -12,5 +12,10 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
+# Build artefacts (the schemas ship as package data, so `uv build` is meaningful)
+build/
+dist/
+*.egg-info/
+
 # Secrets
 .env

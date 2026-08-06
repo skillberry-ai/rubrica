@@ -57,13 +57,17 @@ class UnknownStage(ValueError):
 def schema_dir() -> Path:
     """Directory holding the artifact schemas.
 
+    The schemas ship as package data beside this module rather than at the
+    repository root, so an installed (non-editable) copy can validate. Walking
+    up to the repo root only ever worked for an editable install.
+
     Overridable via TESTGEN_SCHEMA_DIR so a caller can validate against a
     candidate schema set without reinstalling the package.
     """
     override = os.environ.get("TESTGEN_SCHEMA_DIR")
     if override:
         return Path(override)
-    return Path(__file__).resolve().parents[2] / "schema"
+    return Path(__file__).resolve().parent / "schema"
 
 
 @functools.cache

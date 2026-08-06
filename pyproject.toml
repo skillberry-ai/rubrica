@@ -21,6 +21,11 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# The schemas are the contract, so they ship with the package: without this a
+# wheel installs code that cannot validate anything.
+[tool.setuptools.package-data]
+testgen = ["schema/*.json"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py313"

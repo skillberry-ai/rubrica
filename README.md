@@ -23,7 +23,7 @@ No skills and no LLM calls yet — those arrive in later plans.
 | `refs.py` | Layer 2: cross-artifact references, seed conformance, the reachability gate |
 | `intake.py` | Stage 0: register + hash + classify inputs, mint the run |
 | `dedupe.py` | Candidate duplicate scenario pairs (proposes; never decides) |
-| `schema/` | One JSON Schema per artifact kind |
+| `schema/` | One JSON Schema per artifact kind, shipped as package data |
 
 ## Setup
 

@@ -298,7 +298,7 @@ that invents a timestamp makes two otherwise-identical artifacts diff.
 
 ```
 skills/tg-{orchestrate,extract,reconcile,propose,score,instantiate,challenge,emit}/SKILL.md
-schema/*.json
+src/testgen/schema/*.json   (package data: an installed copy can validate)
 bin/{intake,validate,check-refs,dedupe-candidates,emit,smoke,diff-runs,compare-gold,sample-for-review}
 ```
 
