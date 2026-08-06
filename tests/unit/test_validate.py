@@ -205,3 +205,19 @@ def test_validate_stage_rejects_an_unknown_stage(tmp_path):
 
 def test_stages_with_no_json_artifact_pass_trivially(tmp_path):
     assert validate_stage(RunPaths(tmp_path), "emit") == []
+
+
+def test_validate_stage_does_not_raise_on_an_unsafe_instance_directory(tmp_path):
+    """_artifact_paths simply never sees an unsafe name any more.
+
+    It builds seed/expected paths from scenario_ids_with_instances(), which
+    now excludes them; refs.check_instances reports them instead. Previously
+    the join raised UnsafeSegment out of validate_stage.
+    """
+    from tests.builders import minimal_expected, minimal_seed
+
+    run = RunPaths(tmp_path)
+    write_json(run.seed("scn-001"), minimal_seed())
+    write_json(run.expected("scn-001"), minimal_expected())
+    (run.instances_dir / "scn 001").mkdir(parents=True, exist_ok=True)
+    assert validate_stage(run, "instantiate") == []

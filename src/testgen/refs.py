@@ -487,6 +487,23 @@ def check_instances(run: RunPaths) -> list[Finding]:
     by_id = {s["id"]: s for s in scenarios_doc.get("scenarios", [])}
     out: list[Finding] = []
 
+    # A directory name that is not a safe path segment cannot be a scenario id,
+    # so no artifact under it can be read. That is a repairable defect in the
+    # stage that wrote it, so it is an ordinary finding at exit 1 rather than
+    # an UnsafeSegment escaping to cli.py as exit 2 and taking every other
+    # finding in the run with it.
+    for name in run.unsafe_instance_dir_names():
+        out.append(
+            Finding(
+                run.instances_dir,
+                "refs",
+                "",
+                f"instance directory {name!r} is not a usable scenario id: a scenario id must "
+                "start with a letter or digit and contain only letters, digits, dots, dashes, "
+                "and underscores",
+            )
+        )
+
     for sid in run.scenario_ids_with_instances():
         scenario = by_id.get(sid)
         if scenario is None:

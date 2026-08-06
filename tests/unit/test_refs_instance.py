@@ -108,6 +108,51 @@ def test_an_unfit_status_yields_exactly_one_finding_per_instance(tmp_path, statu
     assert findings[0].artifact == run.instance_dir("scn-001")
 
 
+# -- unsafe instance directory names ------------------------------------
+def test_an_unsafe_instance_directory_name_is_a_finding_not_an_exception(tmp_path):
+    """A stage that wrote a badly-named directory is repairable at exit 1.
+
+    Before this was partitioned in paths.py, the later run.seed(sid) call
+    raised UnsafeSegment from inside check_instances; cli.py catches ValueError
+    and returned 2, telling the orchestrator the harness was misconfigured.
+    """
+    run = _run(tmp_path)
+    (run.instances_dir / "scn 001").mkdir(parents=True, exist_ok=True)
+    findings = check_instances(run)
+    assert any("'scn 001'" in f.message and "scenario id" in f.message for f in findings)
+    assert all(f.layer == "refs" for f in findings)
+
+
+def test_an_unsafe_instance_directory_is_filed_against_the_instances_directory(tmp_path):
+    run = _run(tmp_path)
+    (run.instances_dir / "scn 001").mkdir(parents=True, exist_ok=True)
+    unsafe = [f for f in check_instances(run) if "scn 001" in f.message]
+    assert len(unsafe) == 1
+    assert unsafe[0].artifact == run.instances_dir
+
+
+def test_an_unsafe_directory_does_not_discard_the_other_instances_findings(tmp_path):
+    """One bad name must not cost the operator every other finding.
+
+    The repair prompt gets the whole list, so losing the valid instance's
+    genuine defect to an unrelated bad directory name is the real damage.
+    """
+    expected = minimal_expected()
+    expected["assertions"][0]["grounded_in"]["seed_pointer"] = "/collections/jobs/9/job_id"
+    run = _run(tmp_path, expected=expected)
+    (run.instances_dir / "scn 001").mkdir(parents=True, exist_ok=True)
+    messages = [f.message for f in check_instances(run)]
+    assert any("scn 001" in m for m in messages)
+    assert any("does not resolve" in m for m in messages)
+
+
+@pytest.mark.parametrize("name", ["scn 001", ".hidden", "scn:001", "-leading"])
+def test_check_all_survives_an_unsafe_instance_directory(tmp_path, name):
+    run = _run(tmp_path)
+    (run.instances_dir / name).mkdir(parents=True, exist_ok=True)
+    assert any(repr(name) in f.message for f in check_all(run))
+
+
 def test_a_seed_collection_the_world_model_does_not_declare_is_reported(tmp_path):
     seed = minimal_seed(collections={"widgets": [{"x": 1}]})
     assert any("widgets" in f.message for f in check_instances(_run(tmp_path, seed=seed)))

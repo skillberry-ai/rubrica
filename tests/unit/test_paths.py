@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from testgen.paths import STAGES, RunPaths, UnsafeSegment, safe_segment
+from testgen.paths import STAGES, RunPaths, UnsafeSegment, is_safe_segment, safe_segment
+
+# Directory names a confused stage could plausibly write that are not usable
+# scenario ids. All of these can really exist on disk -- a literal ".." cannot,
+# which is why it is tested through safe_segment rather than through a listing.
+UNSAFE_DIR_NAMES = ("scn 001", ".hidden", "scn:001", "-leading")
 
 
 def test_stages_are_in_pipeline_order():
@@ -93,3 +98,49 @@ def test_scenario_ids_with_instances_lists_sorted_dirs(tmp_path):
 
 def test_scenario_ids_with_instances_is_empty_when_stage_has_not_run(tmp_path):
     assert RunPaths(tmp_path).scenario_ids_with_instances() == []
+
+
+def test_scenario_ids_with_instances_excludes_unsafe_names(tmp_path):
+    """The listing partitions rather than handing back a name that will raise.
+
+    Every caller joins these onto a path, so returning an unsafe one only
+    defers UnsafeSegment to a call site that cannot report it usefully.
+    """
+    rp = RunPaths(tmp_path)
+    for name in UNSAFE_DIR_NAMES + ("scn-001",):
+        (rp.instances_dir / name).mkdir(parents=True, exist_ok=True)
+    assert rp.scenario_ids_with_instances() == ["scn-001"]
+
+
+def test_unsafe_instance_dir_names_returns_the_rejected_ones_sorted(tmp_path):
+    rp = RunPaths(tmp_path)
+    for name in UNSAFE_DIR_NAMES + ("scn-001",):
+        (rp.instances_dir / name).mkdir(parents=True, exist_ok=True)
+    assert rp.unsafe_instance_dir_names() == sorted(UNSAFE_DIR_NAMES)
+
+
+def test_the_two_listings_partition_every_instance_directory(tmp_path):
+    """Nothing on disk is silently dropped by either listing."""
+    rp = RunPaths(tmp_path)
+    names = UNSAFE_DIR_NAMES + ("scn-001", "scn-002")
+    for name in names:
+        (rp.instances_dir / name).mkdir(parents=True, exist_ok=True)
+    (rp.instances_dir / "stray-file.json").write_text("{}", encoding="utf-8")
+    safe, unsafe = rp.scenario_ids_with_instances(), rp.unsafe_instance_dir_names()
+    assert set(safe) | set(unsafe) == set(names)
+    assert not set(safe) & set(unsafe)
+
+
+def test_unsafe_instance_dir_names_is_empty_when_stage_has_not_run(tmp_path):
+    assert RunPaths(tmp_path).unsafe_instance_dir_names() == []
+
+
+def test_is_safe_segment_agrees_with_safe_segment():
+    """One definition of safety, asked two ways."""
+    for good in ("scn-001", "aap2.api.json", "a"):
+        assert is_safe_segment(good)
+        assert safe_segment(good) == good
+    for bad in ("../etc", "a/b", "..", "", ".hidden", "with space", "x\x00y", 7):
+        assert not is_safe_segment(bad)
+        with pytest.raises(UnsafeSegment):
+            safe_segment(bad)

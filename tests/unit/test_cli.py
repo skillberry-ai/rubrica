@@ -84,6 +84,19 @@ def test_check_refs_prints_findings_and_exits_one(tmp_path, capsys):
     assert "[refs]" in capsys.readouterr().out
 
 
+def test_an_unsafe_instance_directory_exits_one_not_two(tmp_path, capsys):
+    """A badly-named directory is a repairable stage defect, not a bad harness.
+
+    Exit 1 buys the orchestrator its one repair attempt with the finding in
+    hand; exit 2 would tell it to halt.
+    """
+    run = _seeded_run(tmp_path)
+    write_json(run.scenarios, minimal_scenarios())
+    (run.instances_dir / "scn 001").mkdir(parents=True, exist_ok=True)
+    assert main(["check-refs", "--run", str(run.root)]) == 1
+    assert "scn 001" in capsys.readouterr().out
+
+
 def test_dedupe_candidates_emits_json_on_stdout(tmp_path, capsys):
     run = _seeded_run(tmp_path)
     payload = minimal_scenarios()

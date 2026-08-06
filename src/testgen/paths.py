@@ -30,6 +30,17 @@ class UnsafeSegment(ValueError):
     """Raised when an id from an artifact would escape the run directory."""
 
 
+def is_safe_segment(value: str) -> bool:
+    """Whether `value` is safe to use as one path segment.
+
+    The one definition of segment safety in the system. safe_segment raises on
+    the negative answer, for call sites joining a path; callers that need to
+    partition a list of names rather than abort on the first bad one ask this
+    instead.
+    """
+    return isinstance(value, str) and bool(_SAFE_SEGMENT.match(value)) and ".." not in value
+
+
 def safe_segment(value: str) -> str:
     """Return `value` if it is safe to use as one path segment, else raise.
 
@@ -37,7 +48,7 @@ def safe_segment(value: str) -> str:
     into a path unchecked: "../../etc" is a plausible thing for a confused
     stage to emit, and the run directory is the only place we write.
     """
-    if not isinstance(value, str) or not _SAFE_SEGMENT.match(value) or ".." in value:
+    if not is_safe_segment(value):
         raise UnsafeSegment(f"unsafe path segment: {value!r}")
     return value
 
@@ -128,13 +139,32 @@ class RunPaths:
         return self.suite_dir / safe_segment(scenario_id)
 
     # -- listings --------------------------------------------------------
+    def _instance_dir_names(self) -> list[str]:
+        if not self.instances_dir.is_dir():
+            return []
+        return sorted(p.name for p in self.instances_dir.iterdir() if p.is_dir())
+
     def scenario_ids_with_instances(self) -> list[str]:
         """Scenario ids that have an instance directory, sorted.
 
         Stage 5 and stage 6 iterate over this rather than re-reading
         02-scenarios.json, so a scenario rejected after instantiation is
         still visible to them and can be reported rather than vanishing.
+
+        Names that are not safe path segments are excluded and surfaced by
+        unsafe_instance_dir_names() instead. Returning them raw made every
+        later seed()/expected() call raise UnsafeSegment, which cli.py mapped
+        to exit 2 -- so one badly-named directory both misreported a
+        repairable stage defect as a misconfigured harness and discarded every
+        other finding in the run.
         """
-        if not self.instances_dir.is_dir():
-            return []
-        return sorted(p.name for p in self.instances_dir.iterdir() if p.is_dir())
+        return [name for name in self._instance_dir_names() if is_safe_segment(name)]
+
+    def unsafe_instance_dir_names(self) -> list[str]:
+        """Instance directory names that are not safe path segments, sorted.
+
+        refs.check_instances turns each into an ordinary finding, so a stage
+        that wrote a badly-named directory is reported at exit 1 alongside
+        everything else rather than aborting the run.
+        """
+        return [name for name in self._instance_dir_names() if not is_safe_segment(name)]
