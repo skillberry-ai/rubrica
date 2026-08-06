@@ -54,6 +54,7 @@ def minimal_world_model(**over: Any) -> dict[str, Any]:
                 "fields": [
                     {"name": "job_id", "type": "integer"},
                     {"name": "status", "type": "string"},
+                    {"name": "controller", "type": "string"},
                 ],
                 "claims": ["clm-001"],
             }

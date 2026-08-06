@@ -18,6 +18,8 @@ from typing import Any
 
 from testgen.artifacts import ArtifactError, read_json
 from testgen.findings import Finding
+from testgen.invariants import InvariantForm
+from testgen.invariants import evaluate as evaluate_invariant
 from testgen.paths import RunPaths
 
 _CELL_RE = re.compile(r"\Acell:([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
@@ -314,10 +316,287 @@ def check_coverage(run: RunPaths) -> list[Finding]:
     return out
 
 
+class _Unset:
+    def __repr__(self) -> str:
+        return "<unset>"
+
+
+UNSET = _Unset()
+
+# Declared field type -> the predicate a seed value must satisfy. `integer`
+# excludes bool deliberately: bool is an int subclass in Python, and a seed
+# writing `true` where an id belongs is a real defect, not a wide integer.
+_TYPE_CHECKS: dict[str, Any] = {
+    "string": lambda v: isinstance(v, str),
+    "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    "boolean": lambda v: isinstance(v, bool),
+    "array": lambda v: isinstance(v, list),
+    "object": lambda v: isinstance(v, dict),
+}
+
+_DATA_KINDS = ("answer_contains", "answer_excludes", "value_equals")
+_TRAJECTORY_KINDS = ("tool_called", "tool_not_called")
+
+
+def resolve_pointer(document: Any, pointer: str) -> Any:
+    """Resolve an RFC 6901 JSON Pointer, returning UNSET if it does not exist.
+
+    Written here rather than pulled from a library because the whole surface
+    is fifteen lines and the reachability gate depends on its exact
+    does-not-resolve semantics.
+    """
+    if pointer == "":
+        return document
+    if not pointer.startswith("/"):
+        raise ValueError(f"not a JSON pointer: {pointer!r}")
+    current = document
+    for raw in pointer.split("/")[1:]:
+        token = raw.replace("~1", "/").replace("~0", "~")
+        if isinstance(current, dict):
+            if token not in current:
+                return UNSET
+            current = current[token]
+        elif isinstance(current, list):
+            if not token.isdigit() or int(token) >= len(current):
+                return UNSET
+            current = current[int(token)]
+        else:
+            return UNSET
+    return current
+
+
+def _is_empty(value: Any) -> bool:
+    return value is UNSET or value is None or value in ("", [], {})
+
+
+def _check_seed_conformance(report, world: dict, seed: dict) -> None:
+    """Seed collections, fields, and types against the world model's entities."""
+    entities = {e["collection"]: e for e in world.get("entities", [])}
+    collections = seed.get("collections", {})
+    for name in sorted(set(collections) - set(entities)):
+        report(
+            f"/collections/{name}",
+            f"seed declares collection {name!r}, which no world-model entity declares",
+        )
+    for name, records in sorted(collections.items()):
+        entity = entities.get(name)
+        if entity is None:
+            continue
+        declared = {f["name"]: f["type"] for f in entity.get("fields", [])}
+        for i, record in enumerate(records):
+            pointer = f"/collections/{name}/{i}"
+            for missing in sorted(set(declared) - set(record)):
+                report(pointer, f"record is missing declared field {missing!r}")
+            for extra in sorted(set(record) - set(declared)):
+                report(
+                    pointer,
+                    f"record carries undeclared field {extra!r}; a simulation backend will "
+                    "drop or recompute it, so a label relying on it would break at run time",
+                )
+            for field, type_name in sorted(declared.items()):
+                if field not in record:
+                    continue
+                check = _TYPE_CHECKS.get(type_name)
+                if check is not None and not check(record[field]):
+                    report(
+                        f"{pointer}/{field}",
+                        f"field {field!r} is declared {type_name} but holds {record[field]!r}",
+                    )
+
+
+def _check_invariants(report_invariant, world: dict, seed: dict) -> None:
+    collections = seed.get("collections", {})
+    for entity in world.get("entities", []):
+        for invariant in entity.get("invariants", []):
+            machine = invariant.get("machine")
+            if not machine:
+                continue
+            try:
+                violations = evaluate_invariant(machine, collections)
+            except InvariantForm as exc:
+                report_invariant("", f"invariant {invariant['id']}: {exc}")
+                continue
+            for violation in violations:
+                report_invariant("", f"invariant {invariant['id']}: {violation}")
+
+
+def _check_reachability(report, world: dict, seed: dict, expected: dict) -> None:
+    """Every assertion is grounded in this scenario's own seed.
+
+    Resolution happens against `seed` and nothing else, so an assertion can
+    never reach another scenario's world.
+    """
+    capability_ids = {cap["id"] for cap in world.get("capabilities", [])}
+    for i, assertion in enumerate(expected.get("assertions", [])):
+        kind = assertion["kind"]
+        pointer = f"/assertions/{i}"
+        if kind in _TRAJECTORY_KINDS:
+            if assertion.get("capability_id") not in capability_ids:
+                report(
+                    f"{pointer}/capability_id",
+                    f"no such capability: {assertion.get('capability_id')}",
+                )
+            continue
+        if kind not in _DATA_KINDS:
+            continue
+        seed_pointer = assertion["grounded_in"]["seed_pointer"]
+        resolved = resolve_pointer(seed, seed_pointer)
+        if kind == "answer_excludes":
+            if not _is_empty(resolved):
+                report(
+                    f"{pointer}/grounded_in/seed_pointer",
+                    f"answer_excludes is grounded at {seed_pointer}, which resolves to a value "
+                    f"({resolved!r}); the seed does contain what the assertion claims it lacks",
+                )
+            continue
+        if resolved is UNSET:
+            report(
+                f"{pointer}/grounded_in/seed_pointer",
+                f"{seed_pointer} does not resolve in this scenario's seed",
+            )
+            continue
+        rendered = str(resolved)
+        value = assertion["value"]
+        if kind == "answer_contains" and value not in rendered:
+            report(
+                f"{pointer}/value",
+                f"asserted value {value!r} is not present at {seed_pointer} (found {resolved!r})",
+            )
+        if kind == "value_equals" and rendered != value:
+            report(
+                f"{pointer}/value",
+                f"asserted value {value!r} does not equal the seed value {resolved!r} at "
+                f"{seed_pointer}",
+            )
+
+    for i, operation in enumerate(expected.get("trajectory", {}).get("operations", [])):
+        if operation["capability_id"] not in capability_ids:
+            report(
+                f"/trajectory/operations/{i}/capability_id",
+                f"no such capability: {operation['capability_id']}",
+            )
+
+
+def check_instances(run: RunPaths) -> list[Finding]:
+    """Seed conformance, machine invariants, and the reachability gate."""
+    world = _load(run.world_model)
+    if world is None:
+        return []
+    scenarios_doc = _load(run.scenarios) or {"scenarios": []}
+    by_id = {s["id"]: s for s in scenarios_doc.get("scenarios", [])}
+    out: list[Finding] = []
+
+    for sid in run.scenario_ids_with_instances():
+        scenario = by_id.get(sid)
+        if scenario is None:
+            out.append(
+                Finding(run.instance_dir(sid), "refs", "", f"no scenario named {sid} was proposed")
+            )
+            continue
+        if scenario.get("status") == "duplicate":
+            out.append(
+                Finding(
+                    run.instance_dir(sid),
+                    "refs",
+                    "",
+                    f"scenario {sid} is marked duplicate and should not have been instantiated",
+                )
+            )
+
+        seed = _load(run.seed(sid))
+        expected = _load(run.expected(sid))
+        if seed is None or expected is None:
+            continue
+
+        seed_path, expected_path = run.seed(sid), run.expected(sid)
+
+        def out_seed(pointer: str, message: str, path=seed_path) -> None:
+            out.append(Finding(path, "refs", pointer, message))
+
+        def out_inv(pointer: str, message: str, path=seed_path) -> None:
+            out.append(Finding(path, "invariant", pointer, message))
+
+        def out_exp(pointer: str, message: str, path=expected_path) -> None:
+            out.append(Finding(path, "refs", pointer, message))
+
+        _check_seed_conformance(out_seed, world, seed)
+        _check_invariants(out_inv, world, seed)
+        if expected.get("scenario_id") != sid:
+            out_exp(
+                "/scenario_id",
+                f"expected.json names scenario {expected.get('scenario_id')} but lives in the "
+                f"instance directory for {sid}",
+            )
+        _check_reachability(out_exp, world, seed, expected)
+    return out
+
+
+def check_verdicts(run: RunPaths) -> list[Finding]:
+    """One coherent verdict per instantiated scenario."""
+    scenarios_doc = _load(run.scenarios) or {"scenarios": []}
+    hop_depths = {s["id"]: s.get("hop_depth") for s in scenarios_doc.get("scenarios", [])}
+    instantiated = run.scenario_ids_with_instances()
+    out: list[Finding] = []
+
+    for sid in instantiated:
+        path = run.verdict(sid)
+        verdict = _load(path)
+        if verdict is None:
+            out.append(Finding(run.instance_dir(sid), "refs", "", f"instance {sid} has no verdict"))
+            continue
+
+        def report(pointer: str, message: str, path=path) -> None:
+            out.append(Finding(path, "refs", pointer, message))
+
+        if verdict.get("scenario_id") != sid:
+            report(
+                "/scenario_id",
+                f"verdict names scenario {verdict.get('scenario_id')} but is filed under {sid}",
+            )
+        if verdict.get("verdict") == "accept":
+            if not verdict.get("derivable_without_guessing", True):
+                report(
+                    "/verdict",
+                    "verdict is accept but the test is reported as not derivable without "
+                    "guessing; those cannot both be true",
+                )
+            if not verdict.get("uniquely_determined", True):
+                report(
+                    "/verdict",
+                    "verdict is accept but the answer is reported as not uniquely determined; "
+                    "those cannot both be true",
+                )
+        claimed = hop_depths.get(sid)
+        found = verdict.get("minimum_tool_calls_found")
+        if (
+            isinstance(claimed, int)
+            and isinstance(found, int)
+            and found < claimed
+            and "difficulty_overstated" not in verdict.get("flags", [])
+        ):
+            report(
+                "/minimum_tool_calls_found",
+                f"adversary solved this in {found} call(s) but the scenario claims hop_depth "
+                f"{claimed}; the difficulty_overstated flag is required",
+            )
+
+    if run.verdicts_dir.is_dir():
+        known = set(instantiated)
+        for path in sorted(run.verdicts_dir.glob("*.json")):
+            if path.stem not in known:
+                out.append(
+                    Finding(path, "refs", "", f"verdict for {path.stem}, which has no instance")
+                )
+    return out
+
+
 def check_all(run: RunPaths) -> list[Finding]:
     """Every layer-2 check that the run directory currently has inputs for."""
     findings: list[Finding] = []
     findings.extend(check_world_model(run))
     findings.extend(check_scenarios(run))
     findings.extend(check_coverage(run))
+    findings.extend(check_instances(run))
+    findings.extend(check_verdicts(run))
     return findings
