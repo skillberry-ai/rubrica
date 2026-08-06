@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "world-model-0.1.json",
+  "title": "Reconciled world model",
+  "type": "object",
+  "required": [
+    "schema_version", "target", "capabilities", "entities",
+    "actors", "goals", "contradictions", "gaps", "denominator"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "target": {
+      "type": "object",
+      "required": ["name", "interface"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "interface": { "type": "string", "minLength": 1 },
+        "notes": { "type": "string" }
+      }
+    },
+    "capabilities": { "type": "array", "items": { "$ref": "#/$defs/capability" } },
+    "entities": { "type": "array", "items": { "$ref": "#/$defs/entity" } },
+    "actors": { "type": "array", "items": { "$ref": "#/$defs/actor" } },
+    "goals": { "type": "array", "items": { "$ref": "#/$defs/goal" } },
+    "contradictions": { "type": "array", "items": { "$ref": "#/$defs/contradiction" } },
+    "gaps": { "type": "array", "items": { "$ref": "#/$defs/gap" } },
+    "denominator": {
+      "type": "object",
+      "required": ["version", "capability_cells", "goals"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "integer", "minimum": 1 },
+        "capability_cells": { "type": "integer", "minimum": 0 },
+        "goals": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "maxLength": 128
+    },
+    "claim_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/id" }
+    },
+    "capability": {
+      "type": "object",
+      "required": ["id", "operation", "params", "outcome_classes", "claims", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "operation": { "type": "string", "minLength": 1 },
+        "params": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type", "required"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "type": { "type": "string", "minLength": 1 },
+              "required": { "type": "boolean" }
+            }
+          }
+        },
+        "outcome_classes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "kind", "description"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "$ref": "#/$defs/id" },
+              "kind": {
+                "enum": ["success", "empty", "not_found", "error", "underspecified"]
+              },
+              "description": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "claims": { "$ref": "#/$defs/claim_refs" },
+        "confidence": { "enum": ["high", "medium", "low"] }
+      }
+    },
+    "entity": {
+      "type": "object",
+      "required": ["id", "name", "collection", "fields", "claims"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string", "minLength": 1 },
+        "collection": { "$ref": "#/$defs/id" },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "type"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "type": {
+                "enum": ["string", "integer", "number", "boolean", "array", "object"]
+              }
+            }
+          }
+        },
+        "relations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "target_entity_id", "cardinality"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "target_entity_id": { "$ref": "#/$defs/id" },
+              "cardinality": { "enum": ["one", "many"] }
+            }
+          }
+        },
+        "invariants": { "type": "array", "items": { "$ref": "#/$defs/invariant" } },
+        "claims": { "$ref": "#/$defs/claim_refs" }
+      }
+    },
+    "invariant": {
+      "type": "object",
+      "required": ["id", "statement"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "statement": { "type": "string", "minLength": 1 },
+        "machine": { "$ref": "#/$defs/machine" },
+        "prose": { "type": "string", "minLength": 1 }
+      },
+      "oneOf": [
+        { "required": ["machine"], "not": { "required": ["prose"] } },
+        { "required": ["prose"], "not": { "required": ["machine"] } }
+      ]
+    },
+    "machine": {
+      "type": "object",
+      "required": ["form"],
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["form", "collection", "left", "op", "right"],
+          "additionalProperties": false,
+          "properties": {
+            "form": { "const": "compare" },
+            "collection": { "$ref": "#/$defs/id" },
+            "left": { "type": "string", "minLength": 1 },
+            "op": { "enum": ["==", "!=", "<", "<=", ">", ">="] },
+            "right": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "field": { "type": "string", "minLength": 1 },
+                "literal": true
+              },
+              "oneOf": [{ "required": ["field"] }, { "required": ["literal"] }]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["form", "collection", "field", "of", "local_key", "foreign_key"],
+          "additionalProperties": false,
+          "properties": {
+            "form": { "const": "count" },
+            "collection": { "$ref": "#/$defs/id" },
+            "field": { "type": "string", "minLength": 1 },
+            "of": { "$ref": "#/$defs/id" },
+            "local_key": { "type": "string", "minLength": 1 },
+            "foreign_key": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "form", "collection", "field", "of", "source_field",
+            "separator", "order_by", "local_key", "foreign_key"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "form": { "const": "join" },
+            "collection": { "$ref": "#/$defs/id" },
+            "field": { "type": "string", "minLength": 1 },
+            "of": { "$ref": "#/$defs/id" },
+            "source_field": { "type": "string", "minLength": 1 },
+            "separator": { "type": "string" },
+            "order_by": { "type": "string", "minLength": 1 },
+            "local_key": { "type": "string", "minLength": 1 },
+            "foreign_key": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["form", "collection", "field"],
+          "additionalProperties": false,
+          "properties": {
+            "form": { "const": "unique" },
+            "collection": { "$ref": "#/$defs/id" },
+            "field": { "type": "string", "minLength": 1 },
+            "within": { "type": "string", "minLength": 1 },
+            "increasing": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "actor": {
+      "type": "object",
+      "required": ["id", "name", "claims"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string", "minLength": 1 },
+        "claims": { "$ref": "#/$defs/claim_refs" }
+      }
+    },
+    "goal": {
+      "type": "object",
+      "required": ["id", "actor_id", "statement", "expected_hop_depths", "claims"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "actor_id": { "$ref": "#/$defs/id" },
+        "statement": { "type": "string", "minLength": 1 },
+        "expected_hop_depths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1, "maximum": 5 }
+        },
+        "claims": { "$ref": "#/$defs/claim_refs" }
+      }
+    },
+    "contradiction": {
+      "type": "object",
+      "required": ["id", "claim_a", "claim_b", "nature", "resolution", "rationale"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "claim_a": { "$ref": "#/$defs/id" },
+        "claim_b": { "$ref": "#/$defs/id" },
+        "nature": { "type": "string", "minLength": 1 },
+        "resolution": {
+          "enum": ["unresolved", "preferred_a", "preferred_b", "both_possible"]
+        },
+        "rationale": { "type": "string", "minLength": 1 }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "required": ["id", "subject", "unknown", "why_it_matters", "blocks"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "subject": { "type": "string", "minLength": 1 },
+        "unknown": { "type": "string", "minLength": 1 },
+        "why_it_matters": { "type": "string", "minLength": 1 },
+        "blocks": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["propose", "score", "instantiate", "challenge", "emit", "smoke"]
+          }
+        },
+        "suggested_input": { "type": "string" }
+      }
+    }
+  }
+}
