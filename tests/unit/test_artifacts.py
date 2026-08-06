@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -66,3 +67,18 @@ def test_append_decision_creates_then_appends(tmp_path):
     append_decision(path, "round 1: continue")
     append_decision(path, "round 2: converged\n")
     assert path.read_text(encoding="utf-8") == "round 1: continue\nround 2: converged\n"
+
+
+def test_a_failure_after_the_temp_file_exists_cleans_it_up(tmp_path, monkeypatch):
+    path = tmp_path / "a.json"
+    write_json(path, {"keep": True})
+
+    def boom(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", boom)
+    with pytest.raises(OSError):
+        write_json(path, {"v": 2})
+
+    assert read_json(path) == {"keep": True}
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a.json"]
