@@ -1169,9 +1169,14 @@ def test_every_mapped_kind_has_a_registered_schema():
     assert mapped <= set(ARTIFACT_SCHEMAS)
 
 
-def test_registered_schemas_exist_on_disk():
-    for filename in ARTIFACT_SCHEMAS.values():
-        assert (schema_dir() / filename).is_file(), filename
+def test_this_tasks_schemas_exist_on_disk():
+    """Only the two schemas this task creates.
+
+    The other six registered kinds arrive in Tasks 4 and 5; Task 5 adds the
+    test that every registered kind has a file.
+    """
+    for kind in ("claims", "world-model"):
+        assert (schema_dir() / ARTIFACT_SCHEMAS[kind]).is_file(), kind
 
 
 def test_minimal_claims_is_valid(tmp_path):
@@ -2575,6 +2580,18 @@ def test_verdict_notes_may_not_be_empty(tmp_path):
 def test_difficulty_overstated_is_the_only_flag(tmp_path):
     assert _findings(tmp_path, "verdict", minimal_verdict(flags=["too_easy"]))
     assert _findings(tmp_path, "verdict", minimal_verdict(flags=["difficulty_overstated"])) == []
+
+
+def test_every_registered_artifact_kind_now_has_a_schema_file():
+    """All eight kinds registered in validate.ARTIFACT_SCHEMAS exist on disk.
+
+    Task 3 could only assert this for the two schemas it created. With Tasks 4
+    and 5 landed, the registry and the schema directory must agree completely.
+    """
+    from testgen.validate import ARTIFACT_SCHEMAS, schema_dir
+
+    for kind, filename in ARTIFACT_SCHEMAS.items():
+        assert (schema_dir() / filename).is_file(), kind
 ```
 
 - [ ] **Step 5: Run the tests to verify they fail**
@@ -2585,7 +2602,7 @@ Expected: FAIL — missing-schema `KeyError` for the three new kinds.
 - [ ] **Step 6: Run the tests to verify the schemas make them pass**
 
 Run: `uv run pytest tests/unit/test_schemas_instance.py -q`
-Expected: PASS, 19 tests.
+Expected: PASS, 20 tests.
 
 - [ ] **Step 7: Amend the design spec to match**
 
@@ -4387,9 +4404,15 @@ def check_instances(run: RunPaths) -> list[Finding]:
             continue
 
         seed_path, expected_path = run.seed(sid), run.expected(sid)
-        out_seed = lambda p, m: out.append(Finding(seed_path, "refs", p, m))  # noqa: E731
-        out_inv = lambda p, m: out.append(Finding(seed_path, "invariant", p, m))  # noqa: E731
-        out_exp = lambda p, m: out.append(Finding(expected_path, "refs", p, m))  # noqa: E731
+
+        def out_seed(pointer: str, message: str, path=seed_path) -> None:
+            out.append(Finding(path, "refs", pointer, message))
+
+        def out_inv(pointer: str, message: str, path=seed_path) -> None:
+            out.append(Finding(path, "invariant", pointer, message))
+
+        def out_exp(pointer: str, message: str, path=expected_path) -> None:
+            out.append(Finding(path, "refs", pointer, message))
 
         _check_seed_conformance(out_seed, world, seed)
         _check_invariants(out_inv, world, seed)
