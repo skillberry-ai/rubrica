@@ -74,3 +74,109 @@ def minimal_world_model(**over: Any) -> dict[str, Any]:
     }
     payload.update(over)
     return payload
+
+
+def minimal_scenarios(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "denominator_version": 1,
+        "scenarios": [
+            {
+                "id": "scn-001",
+                "round": 1,
+                "goal_id": "goal-triage",
+                "actor_id": "act-sre",
+                "title": "Find the failing job on prod0",
+                "user_intent": "A job failed on prod0. Which one, and why?",
+                "hop_depth": 2,
+                "capability_refs": [
+                    {"capability_id": "cap-find-jobs", "outcome_class_id": "oc-success"}
+                ],
+                "discriminating_fact": "exactly one prod0 job failed inside the window",
+                "status": "active",
+                "provenance": {
+                    "hole_refs": ["cell:cap-find-jobs/oc-success"],
+                    "claim_ids": ["clm-001"],
+                    "round": 1,
+                },
+            }
+        ],
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_coverage(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "round": 1,
+        "denominator_version": 1,
+        "capability_matrix": {
+            "cells": [
+                {
+                    "capability_id": "cap-find-jobs",
+                    "outcome_class_id": "oc-success",
+                    "scenario_ids": ["scn-001"],
+                    "covered": True,
+                },
+                {
+                    "capability_id": "cap-find-jobs",
+                    "outcome_class_id": "oc-empty",
+                    "scenario_ids": [],
+                    "covered": False,
+                },
+            ],
+            "covered": 1,
+            "total": 2,
+            "pct": 0.5,
+        },
+        "goal_matrix": {
+            "rows": [
+                {
+                    "goal_id": "goal-triage",
+                    "scenario_ids": ["scn-001"],
+                    "hop_depths_present": [2],
+                    "hop_depths_expected": [1, 2],
+                    "covered": False,
+                }
+            ],
+            "covered": 0,
+            "total": 1,
+            "pct": 0.0,
+        },
+        "holes": [
+            {
+                "ref": "cell:cap-find-jobs/oc-empty",
+                "reason": "not_yet_attempted",
+                "justification": "no scenario has exercised the empty-result path yet",
+            }
+        ],
+        "progress": {"new_cells_this_round": 1, "rounds_without_progress": 0},
+        "verdict": "continue",
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_manifest(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "run_id": "run-20260806-120000",
+        "created_utc": "2026-08-06T12:00:00Z",
+        "target": {"name": "aap2", "interface": "mcp"},
+        "inputs": [
+            {
+                "artifact_id": "aap2-api",
+                "source_path": "harness-skills/parsec-aap2/api.json",
+                "sha256": "a" * 64,
+                "kind": "mcp_tool_schema",
+                "bytes": 4096,
+            }
+        ],
+        "stages": {
+            "reconcile": {"model": "claude-opus-5", "effort": "high", "skill_sha256": "b" * 64}
+        },
+        "limits": {"max_rounds": 2, "max_scenarios": 8},
+    }
+    payload.update(over)
+    return payload

@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scenarios-0.1.json",
+  "title": "Proposed test scenarios",
+  "type": "object",
+  "required": ["schema_version", "denominator_version", "scenarios"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "denominator_version": { "type": "integer", "minimum": 1 },
+    "scenarios": { "type": "array", "items": { "$ref": "#/$defs/scenario" } }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "maxLength": 128
+    },
+    "hole_ref": {
+      "type": "string",
+      "pattern": "^(cell:[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*|goal:[A-Za-z0-9][A-Za-z0-9._-]*)$"
+    },
+    "scenario": {
+      "type": "object",
+      "required": [
+        "id", "round", "goal_id", "actor_id", "title", "user_intent",
+        "hop_depth", "capability_refs", "discriminating_fact", "status", "provenance"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "round": { "type": "integer", "minimum": 1 },
+        "goal_id": { "$ref": "#/$defs/id" },
+        "actor_id": { "$ref": "#/$defs/id" },
+        "title": { "type": "string", "minLength": 1 },
+        "user_intent": { "type": "string", "minLength": 1 },
+        "hop_depth": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "capability_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["capability_id", "outcome_class_id"],
+            "additionalProperties": false,
+            "properties": {
+              "capability_id": { "$ref": "#/$defs/id" },
+              "outcome_class_id": { "$ref": "#/$defs/id" }
+            }
+          }
+        },
+        "discriminating_fact": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["proposed", "active", "duplicate", "rejected"] },
+        "duplicate_of": { "$ref": "#/$defs/id" },
+        "rejected_reason": {
+          "enum": ["ambiguous", "not_derivable", "wrong_label", "out_of_scope", "blocked_by_gap"]
+        },
+        "provenance": {
+          "type": "object",
+          "required": ["hole_refs", "claim_ids", "round"],
+          "additionalProperties": false,
+          "properties": {
+            "hole_refs": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/hole_ref" }
+            },
+            "claim_ids": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+            "round": { "type": "integer", "minimum": 1 }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "duplicate" } }, "required": ["status"] },
+          "then": { "required": ["duplicate_of"] }
+        },
+        {
+          "if": { "properties": { "status": { "const": "rejected" } }, "required": ["status"] },
+          "then": { "required": ["rejected_reason"] }
+        }
+      ]
+    }
+  }
+}

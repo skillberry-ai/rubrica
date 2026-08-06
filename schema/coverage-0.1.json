@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "coverage-0.1.json",
+  "title": "Coverage report for one enrichment round",
+  "type": "object",
+  "required": [
+    "schema_version", "round", "denominator_version",
+    "capability_matrix", "goal_matrix", "holes", "progress", "verdict"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "round": { "type": "integer", "minimum": 1 },
+    "denominator_version": { "type": "integer", "minimum": 1 },
+    "capability_matrix": {
+      "type": "object",
+      "required": ["cells", "covered", "total", "pct"],
+      "additionalProperties": false,
+      "properties": {
+        "cells": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["capability_id", "outcome_class_id", "scenario_ids", "covered"],
+            "additionalProperties": false,
+            "properties": {
+              "capability_id": { "$ref": "#/$defs/id" },
+              "outcome_class_id": { "$ref": "#/$defs/id" },
+              "scenario_ids": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+              "covered": { "type": "boolean" }
+            }
+          }
+        },
+        "covered": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 },
+        "pct": { "$ref": "#/$defs/fraction" }
+      }
+    },
+    "goal_matrix": {
+      "type": "object",
+      "required": ["rows", "covered", "total", "pct"],
+      "additionalProperties": false,
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "goal_id", "scenario_ids", "hop_depths_present",
+              "hop_depths_expected", "covered"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "goal_id": { "$ref": "#/$defs/id" },
+              "scenario_ids": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+              "hop_depths_present": { "$ref": "#/$defs/hop_depths" },
+              "hop_depths_expected": { "$ref": "#/$defs/hop_depths" },
+              "covered": { "type": "boolean" }
+            }
+          }
+        },
+        "covered": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 },
+        "pct": { "$ref": "#/$defs/fraction" }
+      }
+    },
+    "holes": { "type": "array", "items": { "$ref": "#/$defs/hole" } },
+    "progress": {
+      "type": "object",
+      "required": ["new_cells_this_round", "rounds_without_progress"],
+      "additionalProperties": false,
+      "properties": {
+        "new_cells_this_round": { "type": "integer", "minimum": 0 },
+        "rounds_without_progress": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "verdict": {
+      "enum": ["continue", "converged", "halted_no_progress", "halted_round_cap"]
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "maxLength": 128
+    },
+    "fraction": { "type": "number", "minimum": 0, "maximum": 1 },
+    "hop_depths": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "integer", "minimum": 1, "maximum": 5 }
+    },
+    "hole_ref": {
+      "type": "string",
+      "pattern": "^(cell:[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*|goal:[A-Za-z0-9][A-Za-z0-9._-]*)$"
+    },
+    "hole": {
+      "type": "object",
+      "required": ["ref", "reason", "justification"],
+      "additionalProperties": false,
+      "properties": {
+        "ref": { "$ref": "#/$defs/hole_ref" },
+        "reason": {
+          "enum": ["not_yet_attempted", "unreachable", "out_of_scope", "blocked_by_gap"]
+        },
+        "justification": { "type": "string", "minLength": 1 },
+        "gap_id": { "$ref": "#/$defs/id" }
+      },
+      "if": { "properties": { "reason": { "const": "blocked_by_gap" } }, "required": ["reason"] },
+      "then": { "required": ["gap_id"] }
+    }
+  }
+}
