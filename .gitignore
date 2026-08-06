@@ -17,5 +17,10 @@ build/
 dist/
 *.egg-info/
 
+# `make setup` uses `uv pip install`, which neither writes nor reads a lockfile;
+# one only appears if someone runs `uv lock`/`uv sync` by hand. Track it later if
+# the workflow starts using it.
+uv.lock
+
 # Secrets
 .env
