@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "verdict-0.1.json",
+  "title": "Adversarial verdict for one instantiated scenario",
+  "type": "object",
+  "required": [
+    "schema_version", "scenario_id", "uniquely_determined",
+    "derivable_without_guessing", "minimum_tool_calls_found", "verdict", "notes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "scenario_id": { "$ref": "#/$defs/id" },
+    "uniquely_determined": { "type": "boolean" },
+    "alternative_answers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["answer", "world_consistent_reason"],
+        "additionalProperties": false,
+        "properties": {
+          "answer": { "type": "string", "minLength": 1 },
+          "world_consistent_reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "derivable_without_guessing": { "type": "boolean" },
+    "minimum_tool_calls_found": { "type": "integer", "minimum": 0 },
+    "verdict": { "enum": ["accept", "re-seed", "reject"] },
+    "flags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["difficulty_overstated"] }
+    },
+    "notes": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "uniquely_determined": { "const": false } },
+        "required": ["uniquely_determined"]
+      },
+      "then": {
+        "required": ["alternative_answers"],
+        "properties": { "alternative_answers": { "minItems": 1 } }
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "maxLength": 128
+    }
+  }
+}

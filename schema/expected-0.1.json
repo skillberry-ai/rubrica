@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "expected-0.1.json",
+  "title": "Oracle for one scenario",
+  "type": "object",
+  "required": [
+    "schema_version", "scenario_id", "discriminating_fact",
+    "answer_reference", "assertions", "trajectory", "completion"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "scenario_id": { "$ref": "#/$defs/id" },
+    "discriminating_fact": { "type": "string", "minLength": 1 },
+    "answer_reference": { "type": "string", "minLength": 1 },
+    "assertions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/assertion" }
+    },
+    "trajectory": {
+      "type": "object",
+      "required": ["match", "operations"],
+      "additionalProperties": false,
+      "properties": {
+        "match": { "enum": ["subset", "exact-set", "exact-sequence"] },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["capability_id", "args"],
+            "additionalProperties": false,
+            "properties": {
+              "capability_id": { "$ref": "#/$defs/id" },
+              "args": { "type": "object" }
+            }
+          }
+        }
+      }
+    },
+    "completion": {
+      "type": "object",
+      "required": ["status", "nonempty_answer"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["ok", "error"] },
+        "nonempty_answer": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "maxLength": 128
+    },
+    "assertion": {
+      "type": "object",
+      "required": ["kind", "value", "rationale"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "answer_contains",
+            "answer_excludes",
+            "tool_called",
+            "tool_not_called",
+            "value_equals"
+          ]
+        },
+        "target": { "type": "string", "minLength": 1 },
+        "value": { "type": "string", "minLength": 1 },
+        "rationale": { "type": "string", "minLength": 1 },
+        "capability_id": { "$ref": "#/$defs/id" },
+        "grounded_in": {
+          "type": "object",
+          "required": ["seed_pointer"],
+          "additionalProperties": false,
+          "properties": {
+            "seed_pointer": { "type": "string", "pattern": "^/" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": { "enum": ["answer_contains", "answer_excludes", "value_equals"] }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["grounded_in"],
+            "not": { "required": ["capability_id"] },
+            "additionalProperties": false,
+            "properties": {
+              "kind": true,
+              "target": true,
+              "value": true,
+              "rationale": true,
+              "grounded_in": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "enum": ["tool_called", "tool_not_called"] } },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["capability_id"],
+            "not": { "required": ["grounded_in"] },
+            "additionalProperties": false,
+            "properties": {
+              "kind": true,
+              "target": true,
+              "value": true,
+              "rationale": true,
+              "capability_id": true
+            }
+          }
+        }
+      ]
+    }
+  }
+}

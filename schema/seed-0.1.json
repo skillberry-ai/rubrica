@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "seed-0.1.json",
+  "title": "Seed world for one scenario (envelope only)",
+  "description": "A seed's real shape comes from the world model's entities, so this schema constrains only the envelope. Collection names, field names and types, and invariants are checked by refs.py against the world model.",
+  "type": "object",
+  "required": ["schema_version", "collections"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "collections": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "object" }
+      }
+    }
+  }
+}

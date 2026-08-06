@@ -180,3 +180,63 @@ def minimal_manifest(**over: Any) -> dict[str, Any]:
     }
     payload.update(over)
     return payload
+
+
+def minimal_seed(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "collections": {
+            "jobs": [
+                {"job_id": 90420, "status": "failed", "controller": "prod0"},
+                {"job_id": 90421, "status": "successful", "controller": "prod0"},
+            ]
+        },
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_expected(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "scenario_id": "scn-001",
+        "discriminating_fact": "exactly one prod0 job has status failed",
+        "answer_reference": "Job 90420 failed on prod0.",
+        "assertions": [
+            {
+                "kind": "answer_contains",
+                "target": "answer",
+                "value": "90420",
+                "rationale": "the failing job id must appear in the answer",
+                "grounded_in": {"seed_pointer": "/collections/jobs/0/job_id"},
+            },
+            {
+                "kind": "tool_called",
+                "target": "query_aap2.find_jobs",
+                "value": "at least once",
+                "rationale": "the agent must query rather than guess",
+                "capability_id": "cap-find-jobs",
+            },
+        ],
+        "trajectory": {
+            "match": "subset",
+            "operations": [{"capability_id": "cap-find-jobs", "args": {"controller": "prod0"}}],
+        },
+        "completion": {"status": "ok", "nonempty_answer": True},
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_verdict(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "scenario_id": "scn-001",
+        "uniquely_determined": True,
+        "derivable_without_guessing": True,
+        "minimum_tool_calls_found": 2,
+        "verdict": "accept",
+        "notes": "answered independently from the seed and matched the oracle",
+    }
+    payload.update(over)
+    return payload

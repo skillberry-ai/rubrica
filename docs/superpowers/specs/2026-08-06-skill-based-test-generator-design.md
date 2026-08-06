@@ -236,13 +236,21 @@ field, not a convention:
 
 ```
 {scenario_id, discriminating_fact, answer_reference,
- assertions: [{kind: answer_contains|answer_excludes|tool_called|tool_not_called|value_equals,
+ assertions: [{kind: answer_contains|answer_excludes|value_equals,
                target, value, rationale,
-               grounded_in: {seed_pointer}}],       ← JSON pointer into this scenario's seed.json
+               grounded_in: {seed_pointer}}          ← JSON pointer into this scenario's seed.json
+              |{kind: tool_called|tool_not_called,
+               target, value, rationale, capability_id}],  ← grounded in the world model instead
  trajectory: {match: subset|exact-set|exact-sequence, operations},
- completion: {status, nonempty_answer},
- negative_expectations: [...]}
+ completion: {status, nonempty_answer}}
 ```
+
+Grounding differs by assertion kind. Data assertions point into the seed;
+trajectory assertions name a capability, because a JSON pointer into seed data
+would be meaningless for them. There is no separate `negative_expectations`
+field: everything it was for — "must not claim a root cause the data does not
+support" — is `answer_excludes`, and a second field expressing the same thing
+would either duplicate the verifier or hold prose nothing evaluates.
 
 `grounded_in.seed_pointer` reduces the reachability gate to a few lines of code:
 for a positive assertion the pointer must resolve and contain its value; for
