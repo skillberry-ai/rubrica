@@ -37,6 +37,7 @@ def minimal_world_model(**over: Any) -> dict[str, Any]:
             {
                 "id": "cap-find-jobs",
                 "operation": "query_aap2.find_jobs",
+                "binding": {"tool": "query_aap2", "fixed_args": {"action": "find_jobs"}},
                 "params": [{"name": "controller", "type": "string", "required": True}],
                 "outcome_classes": [
                     {"id": "oc-success", "kind": "success", "description": "jobs returned"},

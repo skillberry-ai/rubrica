@@ -55,6 +55,16 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "operation": { "type": "string", "minLength": 1 },
+        "binding": {
+          "type": "object",
+          "description": "How this capability is invoked on the target: the tool name a transcript will show, plus the arguments that identify this capability rather than a sibling sharing the tool. Optional in the schema and required by emit, which reports a finding for an accepted scenario whose capability has none.",
+          "required": ["tool", "fixed_args"],
+          "additionalProperties": false,
+          "properties": {
+            "tool": { "type": "string", "minLength": 1 },
+            "fixed_args": { "type": "object" }
+          }
+        },
         "params": {
           "type": "array",
           "items": {
