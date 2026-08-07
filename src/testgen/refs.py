@@ -79,9 +79,8 @@ def _claim_index(run: RunPaths) -> dict[str, list[Path]]:
         payload = _load(path)
         if not isinstance(payload, dict):
             continue
-        for claim in payload.get("claims", []):
-            if "id" in claim:
-                index.setdefault(claim["id"], []).append(path)
+        for claim in payload["claims"]:
+            index.setdefault(claim["id"], []).append(path)
     return index
 
 
@@ -119,18 +118,15 @@ def check_manifest(run: RunPaths) -> list[Finding]:
     def report(pointer: str, message: str) -> None:
         out.append(Finding(run.manifest, "refs", pointer, message))
 
-    # The schema constrains created_utc's shape; only a parse rejects month 13
-    # or hour 99. Layer 1 cannot express that and jsonschema's date-time format
-    # is a no-op without rfc3339-validator, which this project does not depend on.
-    #
-    # manifest.get (rather than indexing) and the (TypeError, ValueError) catch
-    # are a deliberate exception to "layer 2 may assume layer 1 ran": the
-    # manifest gates every other check in this function, and check_all is
-    # publicly callable on a run directory where validate never ran, so a
-    # traceback here would be strictly worse than a finding. This exception is
-    # for created_utc only, not a general pattern -- every other field below is
-    # indexed directly because the schema already guarantees its shape.
-    created = manifest.get("created_utc")
+    # A JSON Schema `format` keyword cannot express calendar validity: the
+    # schema declares created_utc's format as date-time, but jsonschema's
+    # date-time format is a no-op without rfc3339-validator, which this
+    # project does not depend on -- so month 13 and hour 99 pass layer 1
+    # unchallenged. This strptime call is what actually rejects them, which
+    # makes it a genuine layer-2 check, not defensive tolerance of a run that
+    # skipped validate; the try/except is only converting strptime's
+    # documented raise into a finding instead of a traceback.
+    created = manifest["created_utc"]
     try:
         datetime.strptime(created, "%Y-%m-%dT%H:%M:%SZ")
     except (TypeError, ValueError):
@@ -140,7 +136,7 @@ def check_manifest(run: RunPaths) -> list[Finding]:
         )
 
     registered: dict[str, int] = {}
-    for i, entry in enumerate(manifest.get("inputs", [])):
+    for i, entry in enumerate(manifest["inputs"]):
         artifact_id = entry["artifact_id"]
         if artifact_id in registered:
             report(
@@ -171,7 +167,7 @@ def check_manifest(run: RunPaths) -> list[Finding]:
         payload = _load(path)
         if not isinstance(payload, dict):
             continue
-        declared = payload.get("artifact_id")
+        declared = payload["artifact_id"]
         if declared != path.stem:
             out.append(
                 Finding(
@@ -191,8 +187,8 @@ def check_manifest(run: RunPaths) -> list[Finding]:
                     f"artifact_id {declared!r} is not registered in the manifest",
                 )
             )
-        for i, claim in enumerate(payload.get("claims", [])):
-            for j, evidence in enumerate(claim.get("evidence", [])):
+        for i, claim in enumerate(payload["claims"]):
+            for j, evidence in enumerate(claim["evidence"]):
                 if evidence["artifact_id"] not in registered:
                     out.append(
                         Finding(
