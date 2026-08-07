@@ -35,6 +35,11 @@ from testgen.paths import RunPaths
 _CELL_RE = re.compile(r"\Acell:([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
 _GOAL_RE = re.compile(r"\Agoal:([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
 
+# A scenario that still counts: one the pipeline has not discarded. Shared with
+# dedupe.py, which must exclude the same set -- re-proposing a pair resolved in
+# an earlier round is how the enrichment loop fails to converge.
+OPEN_STATUSES = frozenset({"proposed", "active"})
+
 
 def cell_ref(capability_id: str, outcome_class_id: str) -> str:
     """Canonical hole reference for one capability x outcome-class cell."""
@@ -198,6 +203,71 @@ def check_manifest(run: RunPaths) -> list[Finding]:
                             f"evidence cites unregistered artifact: {evidence['artifact_id']}",
                         )
                     )
+    return out
+
+
+def check_limits(run: RunPaths) -> list[Finding]:
+    """The manifest's loop and suite bounds against what the run actually holds.
+
+    intake writes these and, until now, nothing read them. They are the reason
+    run cost is finite, so an unenforced cap is not a documentation gap: it is
+    the absence of the bound.
+
+    `limits`, `max_rounds`, `max_scenarios`, and every key indexed below are
+    `required` by their schemas, so on a schema-valid document they are always
+    present and already the declared type -- there is nothing left for an
+    isinstance guard to catch. A malformed document raises, per this module's
+    documented precondition that layer 1 ran first.
+    """
+    manifest = _load(run.manifest)
+    if manifest is None:
+        return []
+    limits = manifest["limits"]
+    max_rounds = limits["max_rounds"]
+    max_scenarios = limits["max_scenarios"]
+    out: list[Finding] = []
+
+    scenarios_doc = _load(run.scenarios)
+    if scenarios_doc is not None:
+        scenarios = scenarios_doc["scenarios"]
+
+        def report(pointer: str, message: str) -> None:
+            out.append(Finding(run.scenarios, "refs", pointer, message))
+
+        for i, scenario in enumerate(scenarios):
+            if scenario["round"] > max_rounds:
+                report(
+                    f"/scenarios/{i}/round",
+                    f"scenario is tagged round {scenario['round']} but the manifest caps "
+                    f"the enrichment loop at max_rounds={max_rounds}",
+                )
+            provenance_round = scenario["provenance"]["round"]
+            if provenance_round > max_rounds:
+                report(
+                    f"/scenarios/{i}/provenance/round",
+                    f"provenance records round {provenance_round} but the manifest caps "
+                    f"the enrichment loop at max_rounds={max_rounds}",
+                )
+        open_count = sum(1 for s in scenarios if s["status"] in OPEN_STATUSES)
+        if open_count > max_scenarios:
+            report(
+                "/scenarios",
+                f"{open_count} scenarios are proposed or active but the manifest caps the "
+                f"suite at max_scenarios={max_scenarios}; duplicate and rejected scenarios "
+                "do not count against it",
+            )
+
+    coverage = _load(run.coverage_latest)
+    if coverage is not None and coverage["round"] > max_rounds:
+        out.append(
+            Finding(
+                run.coverage_latest,
+                "refs",
+                "/round",
+                f"coverage is reported for round {coverage['round']} but the manifest caps the "
+                f"enrichment loop at max_rounds={max_rounds}",
+            )
+        )
     return out
 
 
@@ -747,6 +817,7 @@ def check_all(run: RunPaths) -> list[Finding]:
     """Every layer-2 check that the run directory currently has inputs for."""
     findings: list[Finding] = []
     findings.extend(check_manifest(run))
+    findings.extend(check_limits(run))
     findings.extend(check_world_model(run))
     findings.extend(check_scenarios(run))
     findings.extend(check_coverage(run))

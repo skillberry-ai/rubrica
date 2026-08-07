@@ -17,9 +17,7 @@ from dataclasses import dataclass
 from itertools import combinations
 from typing import Any
 
-from testgen.refs import cell_ref
-
-_OPEN_STATUSES = frozenset({"proposed", "active"})
+from testgen.refs import OPEN_STATUSES, cell_ref
 
 
 @dataclass(frozen=True)
@@ -42,7 +40,7 @@ def _cells(scenario: dict[str, Any]) -> frozenset[str]:
 def candidate_pairs(scenarios: list[dict[str, Any]]) -> list[Candidate]:
     """Candidate duplicate pairs, ordered by scenario id for stable output."""
     open_scenarios = sorted(
-        (s for s in scenarios if s.get("status") in _OPEN_STATUSES),
+        (s for s in scenarios if s.get("status") in OPEN_STATUSES),
         key=lambda s: s["id"],
     )
     out: list[Candidate] = []
