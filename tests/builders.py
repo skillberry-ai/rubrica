@@ -201,7 +201,7 @@ def minimal_expected(**over: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": "0.1",
         "scenario_id": "scn-001",
-        "discriminating_fact": "exactly one prod0 job has status failed",
+        "discriminating_fact": "exactly one prod0 job failed inside the window",
         "answer_reference": "Job 90420 failed on prod0.",
         "assertions": [
             {

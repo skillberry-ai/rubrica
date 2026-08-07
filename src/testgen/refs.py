@@ -621,21 +621,33 @@ def _check_invariants(report_invariant, world: dict, seed: dict) -> None:
                 report_invariant("", f"invariant {invariant['id']}: {violation}")
 
 
-def _check_reachability(report, world: dict, seed: dict, expected: dict) -> None:
+def _check_reachability(
+    report, world: dict, seed: dict, expected: dict, scenario_caps: set
+) -> None:
     """Every assertion is grounded in this scenario's own seed.
 
     Resolution happens against `seed` and nothing else, so an assertion can
     never reach another scenario's world.
+
+    `scenario_caps` is the scenario's own declared capability_refs. A positive
+    trajectory claim must stay inside it: coverage credits the scenario for the
+    cells it declared, so an instance exercising a capability the scenario never
+    claimed makes coverage confidently wrong. tool_not_called is exempt --
+    forbidding a call to an unclaimed capability is exactly what the kind is for.
     """
     capability_ids = {cap["id"] for cap in world.get("capabilities", [])}
-    for i, assertion in enumerate(expected.get("assertions", [])):
+    for i, assertion in enumerate(expected["assertions"]):
         kind = assertion["kind"]
         pointer = f"/assertions/{i}"
         if kind in _TRAJECTORY_KINDS:
-            if assertion.get("capability_id") not in capability_ids:
+            capability_id = assertion.get("capability_id")
+            if capability_id not in capability_ids:
+                report(f"{pointer}/capability_id", f"no such capability: {capability_id}")
+            elif kind == "tool_called" and capability_id not in scenario_caps:
                 report(
                     f"{pointer}/capability_id",
-                    f"no such capability: {assertion.get('capability_id')}",
+                    f"asserts a call to {capability_id}, which the scenario does not claim in "
+                    "capability_refs; coverage would credit cells this test does not exercise",
                 )
             continue
         if kind not in _DATA_KINDS:
@@ -670,11 +682,18 @@ def _check_reachability(report, world: dict, seed: dict, expected: dict) -> None
                 f"{seed_pointer}",
             )
 
-    for i, operation in enumerate(expected.get("trajectory", {}).get("operations", [])):
-        if operation["capability_id"] not in capability_ids:
+    for i, operation in enumerate(expected["trajectory"]["operations"]):
+        capability_id = operation["capability_id"]
+        if capability_id not in capability_ids:
             report(
                 f"/trajectory/operations/{i}/capability_id",
-                f"no such capability: {operation['capability_id']}",
+                f"no such capability: {capability_id}",
+            )
+        elif capability_id not in scenario_caps:
+            report(
+                f"/trajectory/operations/{i}/capability_id",
+                f"the trajectory uses {capability_id}, which the scenario does not claim in "
+                "capability_refs; coverage would credit cells this test does not exercise",
             )
 
 
@@ -745,13 +764,22 @@ def check_instances(run: RunPaths) -> list[Finding]:
 
         _check_seed_conformance(out_seed, world, seed)
         _check_invariants(out_inv, world, seed)
-        if expected.get("scenario_id") != sid:
+        if expected["scenario_id"] != sid:
             out_exp(
                 "/scenario_id",
-                f"expected.json names scenario {expected.get('scenario_id')} but lives in the "
+                f"expected.json names scenario {expected['scenario_id']} but lives in the "
                 f"instance directory for {sid}",
             )
-        _check_reachability(out_exp, world, seed, expected)
+        scenario_fact = scenario["discriminating_fact"]
+        if expected["discriminating_fact"] != scenario_fact:
+            out_exp(
+                "/discriminating_fact",
+                f"the oracle's discriminating_fact is {expected['discriminating_fact']!r} but "
+                f"the scenario declared {scenario_fact!r}; copy the scenario's verbatim -- a "
+                "paraphrase is indistinguishable from substituting an easier fact",
+            )
+        scenario_caps = {ref["capability_id"] for ref in scenario["capability_refs"]}
+        _check_reachability(out_exp, world, seed, expected, scenario_caps)
     return out
 
 

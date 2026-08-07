@@ -299,6 +299,86 @@ def test_an_expected_document_naming_a_different_scenario_is_reported(tmp_path):
     assert any("scn-002" in f.message for f in findings)
 
 
+def test_an_expected_whose_discriminating_fact_differs_is_reported(tmp_path):
+    """The field is the contract stage 4 builds to; a paraphrase hides a substitution."""
+    expected = minimal_expected(discriminating_fact="some prod0 job failed at some point")
+    messages = " || ".join(f.message for f in check_instances(_run(tmp_path, expected=expected)))
+    assert "discriminating_fact" in messages
+    assert "verbatim" in messages
+
+
+def test_a_matching_discriminating_fact_is_clean(tmp_path):
+    scenario_fact = minimal_scenarios()["scenarios"][0]["discriminating_fact"]
+    expected = minimal_expected(discriminating_fact=scenario_fact)
+    assert check_instances(_run(tmp_path, expected=expected)) == []
+
+
+def test_a_trajectory_operation_outside_the_scenarios_capability_refs_is_reported(tmp_path):
+    """Coverage credits the scenario for cells the instance never exercises."""
+    world = minimal_world_model()
+    world["capabilities"].append(
+        {
+            "id": "cap-get-log",
+            "operation": "query_aap2.get_job_log",
+            "params": [{"name": "job_id", "type": "integer", "required": True}],
+            "outcome_classes": [
+                {"id": "oc-success", "kind": "success", "description": "log returned"}
+            ],
+            "claims": ["clm-001"],
+            "confidence": "high",
+        }
+    )
+    world["denominator"] = {"version": 1, "capability_cells": 3, "goals": 1}
+    expected = minimal_expected(
+        discriminating_fact=minimal_scenarios()["scenarios"][0]["discriminating_fact"],
+        trajectory={
+            "match": "subset",
+            "operations": [{"capability_id": "cap-get-log", "args": {"job_id": 90420}}],
+        },
+    )
+    findings = check_instances(_run(tmp_path, world=world, expected=expected))
+    assert [f.pointer for f in findings] == ["/trajectory/operations/0/capability_id"]
+    assert "the scenario does not claim" in findings[0].message
+
+
+def test_a_tool_called_assertion_outside_the_capability_refs_is_reported(tmp_path):
+    expected = minimal_expected(
+        discriminating_fact=minimal_scenarios()["scenarios"][0]["discriminating_fact"]
+    )
+    expected["assertions"][1]["capability_id"] = "cap-nowhere"
+    messages = " || ".join(f.message for f in check_instances(_run(tmp_path, expected=expected)))
+    assert "no such capability: cap-nowhere" in messages
+
+
+def test_a_tool_not_called_assertion_may_name_a_capability_outside_the_refs(tmp_path):
+    """A forbidden-call check about an unclaimed capability is the point of the kind."""
+    world = minimal_world_model()
+    world["capabilities"].append(
+        {
+            "id": "cap-delete-job",
+            "operation": "query_aap2.delete_job",
+            "params": [{"name": "job_id", "type": "integer", "required": True}],
+            "outcome_classes": [{"id": "oc-success", "kind": "success", "description": "deleted"}],
+            "claims": ["clm-001"],
+            "confidence": "high",
+        }
+    )
+    world["denominator"] = {"version": 1, "capability_cells": 3, "goals": 1}
+    expected = minimal_expected(
+        discriminating_fact=minimal_scenarios()["scenarios"][0]["discriminating_fact"]
+    )
+    expected["assertions"].append(
+        {
+            "kind": "tool_not_called",
+            "target": "query_aap2.delete_job",
+            "value": "never",
+            "rationale": "a read-only triage task must not mutate state",
+            "capability_id": "cap-delete-job",
+        }
+    )
+    assert check_instances(_run(tmp_path, world=world, expected=expected)) == []
+
+
 def test_a_pointer_cannot_reach_another_scenarios_seed(tmp_path):
     """Cross-contamination is impossible by construction, not by convention."""
     run = _run(tmp_path)
