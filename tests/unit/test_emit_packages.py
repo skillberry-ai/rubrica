@@ -82,6 +82,11 @@ def test_the_verifier_and_entrypoint_are_copied_verbatim(tmp_path):
         assert (run.task_dir(SID) / "tests" / name).read_bytes() == (
             suite_template_dir() / name
         ).read_bytes()
+    # shutil.copyfile does not preserve permission bits: without an explicit
+    # chmod, the copy would land at the umask default and Harbor could never
+    # execute the container's verifier entrypoint.
+    mode = (run.task_dir(SID) / "tests" / "test.sh").stat().st_mode
+    assert mode & 0o111, "test.sh must keep its executable bit"
 
 
 def test_the_golden_holds_the_reference_answer_and_the_expected_calls(tmp_path):
@@ -131,6 +136,20 @@ def test_a_rejected_scenario_is_skipped_without_a_finding(tmp_path):
     assert not run.task_dir(SID).exists()
 
 
+def test_an_active_scenario_with_a_reject_verdict_is_skipped_without_a_finding(tmp_path):
+    """Status and verdict come from different stages and can legitimately disagree.
+
+    The brief's own reject-path test sets status to "rejected" too, so it never
+    exercises this line on its own: it is filtered out earlier by the status
+    guard. This scenario stays active so the verdict check is what does the work.
+    """
+    run = _run(tmp_path, verdict=minimal_verdict(verdict="reject"))
+    emitted, findings = emit_run(run)
+    assert emitted == []
+    assert findings == []
+    assert not run.task_dir(SID).exists()
+
+
 def test_an_instance_with_no_verdict_is_a_finding(tmp_path):
     """emit runs once, after challenge, so here the absence is real."""
     run = _run(tmp_path, verdict=None)
@@ -145,6 +164,30 @@ def test_a_re_seed_verdict_is_a_finding(tmp_path):
     emitted, findings = emit_run(run)
     assert emitted == []
     assert any("re-seed" in f.message for f in findings)
+
+
+def test_a_partially_instantiated_instance_is_a_finding_not_a_crash(tmp_path):
+    """instantiate can die mid-instance, leaving a directory with no seed/expected.
+
+    Before this test existed, mutating the guard away turned this into an
+    unhandled AttributeError from inside to_contract instead of a finding --
+    exactly the "stage defect surfaces as a crash" failure mode the exit-code
+    contract exists to prevent.
+    """
+    run = RunPaths(tmp_path)
+    run.root.mkdir(parents=True, exist_ok=True)
+    write_json(run.manifest, minimal_manifest())
+    write_json(run.world_model, minimal_world_model())
+    write_json(run.scenarios, minimal_scenarios())
+    run.instance_dir(SID).mkdir(parents=True, exist_ok=True)
+    write_json(run.verdict(SID), minimal_verdict())
+
+    emitted, findings = emit_run(run)
+
+    assert emitted == []
+    assert len(findings) == 1
+    assert "is missing seed.json or expected.json" in findings[0].message
+    assert not run.task_dir(SID).exists()
 
 
 def test_an_unbound_capability_becomes_a_finding_and_writes_no_package(tmp_path):
@@ -173,6 +216,80 @@ def test_re_emitting_replaces_a_stale_package(tmp_path):
     stale.write_text("left over from an earlier emit")
     emit_run(run)
     assert not stale.exists()
+
+
+def test_a_single_unbound_capability_does_not_cost_the_whole_suite(tmp_path):
+    """A finding for one instance must not prevent a sibling from emitting."""
+    world = minimal_world_model()
+    world["capabilities"].append(
+        {
+            "id": "cap-unbound",
+            "operation": "query_aap2.other",
+            "params": [],
+            "outcome_classes": [
+                {"id": "oc-other", "kind": "success", "description": "the other outcome"}
+            ],
+            "claims": ["clm-001"],
+            "confidence": "high",
+        }
+    )
+    world["denominator"]["capability_cells"] = 3
+
+    scenarios = minimal_scenarios()
+    scenarios["scenarios"].append(
+        {
+            "id": "scn-000",
+            "round": 1,
+            "goal_id": "goal-triage",
+            "actor_id": "act-sre",
+            "title": "Exercise the unbound capability",
+            "user_intent": "Trigger the other outcome.",
+            "hop_depth": 1,
+            "capability_refs": [{"capability_id": "cap-unbound", "outcome_class_id": "oc-other"}],
+            "discriminating_fact": "the unbound capability never gets a binding",
+            "status": "active",
+            "provenance": {"hole_refs": [], "claim_ids": ["clm-001"], "round": 1},
+        }
+    )
+
+    run = RunPaths(tmp_path)
+    run.root.mkdir(parents=True, exist_ok=True)
+    write_json(run.manifest, minimal_manifest())
+    write_json(run.world_model, world)
+    write_json(run.scenarios, scenarios)
+
+    write_json(run.seed(SID), minimal_seed())
+    write_json(run.expected(SID), minimal_expected())
+    write_json(run.verdict(SID), minimal_verdict())
+
+    write_json(run.seed("scn-000"), minimal_seed())
+    write_json(
+        run.expected("scn-000"),
+        minimal_expected(
+            scenario_id="scn-000",
+            assertions=[
+                {
+                    "kind": "tool_called",
+                    "target": "query_aap2.other",
+                    "value": "at least once",
+                    "rationale": "exercises the unbound capability",
+                    "capability_id": "cap-unbound",
+                }
+            ],
+            trajectory={
+                "match": "subset",
+                "operations": [{"capability_id": "cap-unbound", "args": {}}],
+            },
+        ),
+    )
+    write_json(run.verdict("scn-000"), minimal_verdict(scenario_id="scn-000"))
+
+    emitted, findings = emit_run(run)
+
+    assert emitted == [SID]
+    assert run.task_dir(SID).is_dir()
+    assert not run.task_dir("scn-000").exists()
+    assert any("cap-unbound" in f.message for f in findings)
 
 
 def test_emit_is_byte_stable_across_runs(tmp_path):

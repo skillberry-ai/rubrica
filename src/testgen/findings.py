@@ -16,7 +16,7 @@ class Finding:
     """
 
     artifact: Path
-    layer: str  # "schema" | "refs" | "invariant"
+    layer: str  # "schema" | "refs" | "invariant" | "emit"
     pointer: str
     message: str
 
