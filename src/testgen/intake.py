@@ -25,6 +25,17 @@ _SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".go", ".rs", ".java", ".rb"}
 _DOC_SUFFIXES = {".md", ".rst", ".txt", ".adoc"}
 
 
+class UsageError(ValueError):
+    """Raised when intake was called with arguments it cannot act on.
+
+    Named rather than a bare ValueError so cli.py can map *these* to exit 2
+    without also mapping every ValueError raised anywhere downstream. A
+    coverage document with a non-numeric `pct` is a repairable score-stage
+    defect, and reporting it as a misconfigured harness told the orchestrator to
+    halt when one repair would have cleared it.
+    """
+
+
 def slug(value: str) -> str:
     """Turn an arbitrary path or name into a safe artifact id.
 
@@ -110,7 +121,7 @@ def intake(
     directory: a re-run gets a new id so the old artifacts stay diffable.
     """
     if not inputs:
-        raise ValueError("intake needs at least one input artifact")
+        raise UsageError("intake needs at least one input artifact")
     inputs = [Path(p) for p in inputs]
     for path in inputs:
         if not path.is_file():
@@ -124,7 +135,7 @@ def intake(
     if now is None:
         stamp = datetime.now(UTC)
     elif now.tzinfo is None:
-        raise ValueError("intake needs a timezone-aware datetime, got a naive one")
+        raise UsageError("intake needs a timezone-aware datetime, got a naive one")
     else:
         stamp = now.astimezone(UTC)
 

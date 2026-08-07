@@ -13,10 +13,14 @@ class Finding:
     `pointer` is a JSON Pointer into the artifact, or "" for the document
     root. `layer` names the checking layer that produced it, so a reader can
     tell a shape error from a reference error without parsing the message.
+
+    "internal" is the layer cli.py uses when a checking layer raised instead of
+    returning: the artifact is malformed in a way layer 1 must reject first, and
+    the exit code still has to carry a line rather than a bare 1.
     """
 
     artifact: Path
-    layer: str  # "schema" | "refs" | "invariant" | "emit"
+    layer: str  # "schema" | "refs" | "invariant" | "emit" | "internal"
     pointer: str
     message: str
 

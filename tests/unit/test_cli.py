@@ -4,7 +4,12 @@ from pathlib import Path
 from testgen.artifacts import write_json
 from testgen.cli import main
 from testgen.paths import RunPaths
-from tests.builders import minimal_claims, minimal_scenarios, minimal_world_model
+from tests.builders import (
+    minimal_claims,
+    minimal_manifest,
+    minimal_scenarios,
+    minimal_world_model,
+)
 
 
 def _seeded_run(tmp_path):
@@ -95,6 +100,98 @@ def test_an_unsafe_instance_directory_exits_one_not_two(tmp_path, capsys):
     (run.instances_dir / "scn 001").mkdir(parents=True, exist_ok=True)
     assert main(["check-refs", "--run", str(run.root)]) == 1
     assert "scn 001" in capsys.readouterr().out
+
+
+def test_a_non_numeric_coverage_pct_exits_one_not_two(tmp_path, capsys):
+    """A repairable score-stage defect must never be reported as a bad harness.
+
+    `float("half")` raised ValueError out of _check_matrix_arithmetic, and the
+    bare ValueError in cli.py's catch tuple -- there for intake's own usage
+    checks -- turned it into exit 2, telling the orchestrator to halt when one
+    repair would have cleared it.
+    """
+    from tests.builders import minimal_coverage
+
+    run = _seeded_run(tmp_path)
+    write_json(run.scenarios, minimal_scenarios())
+    coverage = minimal_coverage()
+    coverage["capability_matrix"]["pct"] = "half"
+    write_json(run.coverage_latest, coverage)
+
+    assert main(["check-refs", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert "/capability_matrix/pct" in out
+    assert "'half'" in out
+
+
+def test_an_unexpected_exception_exits_one_with_a_finding_on_stdout(tmp_path, capsys):
+    """A 1 with an empty stdout makes the orchestrator retry blind.
+
+    refs.py and emit.py both document the layer-1 precondition that makes these
+    unreachable in the happy path. When a caller runs check-refs without
+    validate, the KeyError must still arrive as a line naming the run and the
+    exception rather than a bare exit code.
+    """
+    run = _seeded_run(tmp_path)
+    manifest = minimal_manifest()
+    del manifest["limits"]
+    write_json(run.manifest, manifest)
+
+    assert main(["check-refs", "--run", str(run.root)]) == 1
+    captured = capsys.readouterr()
+    assert "[internal]" in captured.out
+    assert "KeyError" in captured.out
+    assert "validate" in captured.out, "the line must say what to run next"
+    assert str(run.root) in captured.out
+    assert "Traceback" not in captured.out, "the traceback belongs on stderr"
+    assert "Traceback" in captured.err
+
+
+def test_an_emit_over_a_malformed_oracle_exits_one_with_a_finding(tmp_path, capsys):
+    """The same, through emit, which holds the most direct indexing in the project."""
+    from tests.builders import minimal_expected, minimal_seed, minimal_verdict, minimal_world_model
+
+    run = _seeded_run(tmp_path)
+    write_json(run.world_model, minimal_world_model())
+    write_json(run.scenarios, minimal_scenarios())
+    write_json(run.seed("scn-001"), minimal_seed())
+    expected = minimal_expected()
+    del expected["completion"]
+    write_json(run.expected("scn-001"), expected)
+    write_json(run.verdict("scn-001"), minimal_verdict())
+
+    assert main(["emit", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert "[internal]" in out
+    assert "KeyError" in out
+
+
+def test_an_escaping_unsafe_segment_exits_one_not_two(tmp_path, capsys, monkeypatch):
+    """UnsafeSegment is a ValueError subclass, so the bare catch tuple hid it too.
+
+    Every id-joining call site in the project now derives its ids from a
+    safe-segment-filtered listing, so no artifact can currently drive
+    UnsafeSegment out to the CLI -- writing a run directory that provokes one
+    would be a test whose values never reach the behaviour its name claims. The
+    check is that cli.py's *mapping* is right, so the exception is raised where
+    a future unhardened call site would raise it: exit 1 with a line, not the
+    exit 2 that tells the orchestrator the harness is broken.
+    """
+    from testgen import refs
+    from testgen.paths import UnsafeSegment
+
+    run = _seeded_run(tmp_path)
+
+    def explode(_run):
+        raise UnsafeSegment("unsafe path segment: '../escape'")
+
+    monkeypatch.setattr(refs, "check_all", explode)
+
+    assert main(["check-refs", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert "[internal]" in out
+    assert "UnsafeSegment" in out
+    assert "../escape" in out, "exit 1 must never mean 'no information'"
 
 
 def test_dedupe_candidates_emits_json_on_stdout(tmp_path, capsys):
