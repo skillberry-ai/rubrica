@@ -22,6 +22,8 @@ ran, so a caller running them out of order gets a traceback, not a finding.
 from __future__ import annotations
 
 import re
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from testgen.artifacts import ArtifactError, read_json
@@ -63,16 +65,29 @@ def _load(path) -> Any | None:
         return None
 
 
-def _claim_ids(run: RunPaths) -> set[str]:
-    """Every claim id across every 01-claims file."""
-    ids: set[str] = set()
+def _claim_index(run: RunPaths) -> dict[str, list[Path]]:
+    """Claim id -> every claims file defining it, one entry per definition.
+
+    A list rather than a set: two definitions of one id in the *same* file is
+    as much of a reconciliation hazard as two across files, and a set would
+    hide it. check_manifest reports any id with more than one entry.
+    """
+    index: dict[str, list[Path]] = {}
     if not run.claims_dir.is_dir():
-        return ids
+        return index
     for path in sorted(run.claims_dir.glob("*.json")):
         payload = _load(path)
-        if isinstance(payload, dict):
-            ids.update(c["id"] for c in payload.get("claims", []) if "id" in c)
-    return ids
+        if not isinstance(payload, dict):
+            continue
+        for claim in payload.get("claims", []):
+            if "id" in claim:
+                index.setdefault(claim["id"], []).append(path)
+    return index
+
+
+def _claim_ids(run: RunPaths) -> set[str]:
+    """Every claim id across every 01-claims file."""
+    return set(_claim_index(run))
 
 
 def _cells(world: dict) -> set[tuple[str, str]]:
@@ -86,6 +101,108 @@ def _cells(world: dict) -> set[tuple[str, str]]:
 
 def _dupes(values: list[str]) -> list[str]:
     return sorted({v for v in values if values.count(v) > 1})
+
+
+def check_manifest(run: RunPaths) -> list[Finding]:
+    """The manifest against 01-claims, and each claim's evidence against the manifest.
+
+    Checked in one direction only: every claims file must name a registered
+    input, never the reverse. A registered input with no claims file yet is the
+    normal state during the extract fan-out, and reporting it there would fire
+    on a run in which nothing is wrong.
+    """
+    manifest = _load(run.manifest)
+    if manifest is None:
+        return []
+    out: list[Finding] = []
+
+    def report(pointer: str, message: str) -> None:
+        out.append(Finding(run.manifest, "refs", pointer, message))
+
+    # The schema constrains created_utc's shape; only a parse rejects month 13
+    # or hour 99. Layer 1 cannot express that and jsonschema's date-time format
+    # is a no-op without rfc3339-validator, which this project does not depend on.
+    #
+    # manifest.get (rather than indexing) and the (TypeError, ValueError) catch
+    # are a deliberate exception to "layer 2 may assume layer 1 ran": the
+    # manifest gates every other check in this function, and check_all is
+    # publicly callable on a run directory where validate never ran, so a
+    # traceback here would be strictly worse than a finding. This exception is
+    # for created_utc only, not a general pattern -- every other field below is
+    # indexed directly because the schema already guarantees its shape.
+    created = manifest.get("created_utc")
+    try:
+        datetime.strptime(created, "%Y-%m-%dT%H:%M:%SZ")
+    except (TypeError, ValueError):
+        report(
+            "/created_utc",
+            f"{created!r} is not a real UTC timestamp of the form YYYY-MM-DDTHH:MM:SSZ",
+        )
+
+    registered: dict[str, int] = {}
+    for i, entry in enumerate(manifest.get("inputs", [])):
+        artifact_id = entry["artifact_id"]
+        if artifact_id in registered:
+            report(
+                f"/inputs/{i}/artifact_id",
+                f"artifact_id {artifact_id!r} is already registered at "
+                f"/inputs/{registered[artifact_id]}",
+            )
+            continue
+        registered[artifact_id] = i
+
+    for claim_id, paths in sorted(_claim_index(run).items()):
+        if len(paths) > 1:
+            names = ", ".join(sorted(p.name for p in paths))
+            out.append(
+                Finding(
+                    run.claims_dir,
+                    "refs",
+                    "",
+                    f"claim id {claim_id!r} is defined more than once, in {names}; every "
+                    "world-model reference to it would resolve ambiguously",
+                )
+            )
+
+    if not run.claims_dir.is_dir():
+        return out
+
+    for path in sorted(run.claims_dir.glob("*.json")):
+        payload = _load(path)
+        if not isinstance(payload, dict):
+            continue
+        declared = payload.get("artifact_id")
+        if declared != path.stem:
+            out.append(
+                Finding(
+                    path,
+                    "refs",
+                    "/artifact_id",
+                    f"file declares artifact_id {declared!r} but is named {path.name}; the "
+                    "filename is how every other stage addresses it",
+                )
+            )
+        elif declared not in registered:
+            out.append(
+                Finding(
+                    path,
+                    "refs",
+                    "/artifact_id",
+                    f"artifact_id {declared!r} is not registered in the manifest",
+                )
+            )
+        for i, claim in enumerate(payload.get("claims", [])):
+            for j, evidence in enumerate(claim.get("evidence", [])):
+                if evidence["artifact_id"] not in registered:
+                    out.append(
+                        Finding(
+                            path,
+                            "refs",
+                            f"/claims/{i}/evidence/{j}/artifact_id",
+                            f"evidence cites unregistered artifact: {evidence['artifact_id']}",
+                        )
+                    )
+    return out
 
 
 def check_world_model(run: RunPaths) -> list[Finding]:
@@ -633,6 +750,7 @@ def check_verdicts(run: RunPaths) -> list[Finding]:
 def check_all(run: RunPaths) -> list[Finding]:
     """Every layer-2 check that the run directory currently has inputs for."""
     findings: list[Finding] = []
+    findings.extend(check_manifest(run))
     findings.extend(check_world_model(run))
     findings.extend(check_scenarios(run))
     findings.extend(check_coverage(run))
