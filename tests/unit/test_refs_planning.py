@@ -27,6 +27,15 @@ def _run(tmp_path, *, claims=True, world=True, scenarios=False, coverage=False):
     return run
 
 
+def _scored_run(tmp_path, *, coverage):
+    """A run holding a world model, scenarios, and the given coverage payload."""
+    run = RunPaths(tmp_path)
+    write_json(run.world_model, minimal_world_model())
+    write_json(run.scenarios, minimal_scenarios())
+    write_json(run.coverage_latest, coverage)
+    return run
+
+
 # -- hole refs ----------------------------------------------------------
 def test_cell_and_goal_refs_round_trip():
     assert parse_hole_ref(cell_ref("cap-a", "oc-b")) == ("cell", ("cap-a", "oc-b"))
@@ -236,7 +245,13 @@ def test_a_coverage_matrix_inventing_a_cell_is_reported(tmp_path):
     payload["capability_matrix"]["pct"] = 1 / 3
     write_json(run.coverage_latest, payload)
     findings = check_coverage(run)
-    assert [f.message for f in findings] == ["matrix invents cell cell:cap-ghost/oc-success"]
+    # The invented cell isn't a real cell, so no hole can name it either -- it
+    # is also uncovered and unjustified, which is a second, legitimate finding
+    # now that holes are related to the matrices.
+    assert [f.message for f in findings] == [
+        "matrix invents cell cell:cap-ghost/oc-success",
+        "cell:cap-ghost/oc-success is uncovered but no hole justifies it",
+    ]
 
 
 def test_inconsistent_covered_arithmetic_is_reported(tmp_path):
@@ -280,6 +295,80 @@ def test_a_blocked_by_gap_hole_naming_no_real_gap_is_reported(tmp_path):
     payload["holes"][0]["gap_id"] = "gap-ghost"
     write_json(run.coverage_latest, payload)
     assert any("gap-ghost" in f.message for f in check_coverage(run))
+
+
+def test_an_uncovered_cell_with_no_hole_is_reported(tmp_path):
+    """Without this, a report can claim zero holes while cells sit uncovered."""
+    coverage = minimal_coverage(holes=[])
+    run = _scored_run(tmp_path, coverage=coverage)
+    messages = " || ".join(f.message for f in check_coverage(run))
+    assert "cell:cap-find-jobs/oc-empty is uncovered but no hole justifies it" in messages
+    assert "goal:goal-triage is uncovered but no hole justifies it" in messages
+
+
+def test_a_hole_naming_a_covered_row_is_reported(tmp_path):
+    coverage = minimal_coverage()
+    coverage["holes"].append(
+        {
+            "ref": "cell:cap-find-jobs/oc-success",
+            "reason": "not_yet_attempted",
+            "justification": "claims a hole in a cell the same report marks covered",
+        }
+    )
+    run = _scored_run(tmp_path, coverage=coverage)
+    messages = " || ".join(f.message for f in check_coverage(run))
+    assert "cell:cap-find-jobs/oc-success" in messages
+    assert "the matrix marks covered" in messages
+
+
+def test_hop_depths_expected_must_match_the_world_model(tmp_path):
+    coverage = minimal_coverage()
+    coverage["goal_matrix"]["rows"][0]["hop_depths_expected"] = [1]
+    run = _scored_run(tmp_path, coverage=coverage)
+    findings = [f for f in check_coverage(run) if "hop_depths_expected" in f.pointer]
+    assert len(findings) == 1
+    assert "[1, 2]" in findings[0].message
+
+
+def test_hop_depths_present_must_be_derived_from_the_listed_scenarios(tmp_path):
+    coverage = minimal_coverage()
+    coverage["goal_matrix"]["rows"][0]["hop_depths_present"] = [1, 2]
+    run = _scored_run(tmp_path, coverage=coverage)
+    findings = [f for f in check_coverage(run) if "hop_depths_present" in f.pointer]
+    assert len(findings) == 1
+    assert "scn-001" in findings[0].message or "[2]" in findings[0].message
+
+
+def test_a_goal_row_marked_covered_without_scenarios_is_reported(tmp_path):
+    coverage = minimal_coverage()
+    row = coverage["goal_matrix"]["rows"][0]
+    row["scenario_ids"] = []
+    row["hop_depths_present"] = []
+    row["covered"] = True
+    coverage["goal_matrix"]["covered"] = 1
+    coverage["goal_matrix"]["pct"] = 1.0
+    run = _scored_run(tmp_path, coverage=coverage)
+    findings = [f for f in check_coverage(run) if f.pointer.endswith("/covered")]
+    assert len(findings) == 1
+    assert "lists no scenarios" in findings[0].message
+
+
+def test_a_goal_row_covered_at_only_some_expected_hop_depths_is_not_covered(tmp_path):
+    """The builder payload is exactly this case: expected [1, 2], present [2]."""
+    coverage = minimal_coverage()
+    row = coverage["goal_matrix"]["rows"][0]
+    row["covered"] = True
+    coverage["goal_matrix"]["covered"] = 1
+    coverage["goal_matrix"]["pct"] = 1.0
+    run = _scored_run(tmp_path, coverage=coverage)
+    messages = " || ".join(f.message for f in check_coverage(run))
+    assert "hop depth" in messages
+
+
+def test_the_builder_coverage_payload_is_clean(tmp_path):
+    """Guards the builders: every later state test depends on this staying true."""
+    run = _scored_run(tmp_path, coverage=minimal_coverage())
+    assert check_coverage(run) == []
 
 
 # -- check_all ----------------------------------------------------------

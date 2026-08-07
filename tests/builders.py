@@ -150,7 +150,12 @@ def minimal_coverage(**over: Any) -> dict[str, Any]:
                 "ref": "cell:cap-find-jobs/oc-empty",
                 "reason": "not_yet_attempted",
                 "justification": "no scenario has exercised the empty-result path yet",
-            }
+            },
+            {
+                "ref": "goal:goal-triage",
+                "reason": "not_yet_attempted",
+                "justification": "only the 2-hop path is covered; hop depth 1 has no scenario",
+            },
         ],
         "progress": {"new_cells_this_round": 1, "rounds_without_progress": 0},
         "verdict": "continue",

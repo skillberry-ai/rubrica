@@ -492,14 +492,55 @@ def check_coverage(run: RunPaths) -> list[Finding]:
         report("/goal_matrix/rows", f"matrix omits goal {missing_goal}")
     for invented_goal in sorted(seen_goals - goal_ids):
         report("/goal_matrix/rows", f"matrix invents goal {invented_goal}")
+
+    goals_by_id = {g["id"]: g for g in world["goals"]}
+    hop_by_scenario = {s["id"]: s["hop_depth"] for s in scenarios_doc["scenarios"]}
     for i, row in enumerate(rows):
-        for j, sid in enumerate(row.get("scenario_ids", [])):
+        for j, sid in enumerate(row["scenario_ids"]):
             if sid not in scenario_ids:
                 report(f"/goal_matrix/rows/{i}/scenario_ids/{j}", f"no such scenario: {sid}")
+        goal = goals_by_id.get(row["goal_id"])
+        expected_depths: set[int] = set()
+        if goal is not None:
+            expected_depths = set(goal["expected_hop_depths"])
+            if set(row["hop_depths_expected"]) != expected_depths:
+                report(
+                    f"/goal_matrix/rows/{i}/hop_depths_expected",
+                    f"row expects hop depths {sorted(row['hop_depths_expected'])} but the "
+                    f"world model declares {sorted(expected_depths)} for {row['goal_id']}",
+                )
+        present = {
+            hop_by_scenario[sid]
+            for sid in row["scenario_ids"]
+            if isinstance(hop_by_scenario.get(sid), int)
+        }
+        if set(row["hop_depths_present"]) != present:
+            report(
+                f"/goal_matrix/rows/{i}/hop_depths_present",
+                f"row reports hop depths {sorted(row['hop_depths_present'])} but its "
+                f"scenarios have {sorted(present)}",
+            )
+        # A goal row is covered iff it has a scenario and every expected hop
+        # depth is present. A goal exercised at one depth when two are expected
+        # is a partial row, and calling it covered is how a goal denominator
+        # reaches 100% without testing the hard half of the goal.
+        if not row["scenario_ids"]:
+            if row["covered"]:
+                report(
+                    f"/goal_matrix/rows/{i}/covered",
+                    f"goal {row['goal_id']} is marked covered but lists no scenarios",
+                )
+        elif bool(row["covered"]) != (expected_depths <= present):
+            report(
+                f"/goal_matrix/rows/{i}/covered",
+                f"goal {row['goal_id']} is marked covered={row['covered']} but its scenarios "
+                f"reach hop depths {sorted(present)} against an expected {sorted(expected_depths)}",
+            )
     _check_matrix_arithmetic(
         report, "/goal_matrix", [bool(r.get("covered")) for r in rows], goal_matrix
     )
 
+    hole_refs: set[str] = set()
     for i, hole in enumerate(coverage.get("holes", [])):
         try:
             kind, parts = parse_hole_ref(hole["ref"])
@@ -510,9 +551,26 @@ def check_coverage(run: RunPaths) -> list[Finding]:
             report(f"/holes/{i}/ref", f"hole names no real cell: {hole['ref']}")
         if kind == "goal" and parts[0] not in goal_ids:
             report(f"/holes/{i}/ref", f"hole names no real goal: {hole['ref']}")
+        hole_refs.add(hole["ref"])
         gap_id = hole.get("gap_id")
         if gap_id is not None and gap_id not in gap_ids:
             report(f"/holes/{i}/gap_id", f"no such gap: {gap_id}")
+
+    # Every uncovered row must be justified, and no justified row may be
+    # covered. Without both directions the hole vocabulary is decorative: a
+    # report could show 60% and explain none of the missing 40%.
+    uncovered = {
+        cell_ref(c["capability_id"], c["outcome_class_id"])
+        for c in matrix_cells
+        if not c["covered"]
+    } | {goal_ref(r["goal_id"]) for r in rows if not r["covered"]}
+    covered = {
+        cell_ref(c["capability_id"], c["outcome_class_id"]) for c in matrix_cells if c["covered"]
+    } | {goal_ref(r["goal_id"]) for r in rows if r["covered"]}
+    for ref in sorted(uncovered - hole_refs):
+        report("/holes", f"{ref} is uncovered but no hole justifies it")
+    for ref in sorted(hole_refs & covered):
+        report("/holes", f"hole {ref} names a row the matrix marks covered")
     return out
 
 
