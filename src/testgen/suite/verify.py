@@ -234,7 +234,11 @@ def score_trajectory(calls, trajectory):
         "match": match,
         "actual": [{"tool": name, "args": args} for name, args in calls],
         "unmatched": [op for i, op in enumerate(operations) if i not in matched],
-        "extra_calls": max(0, len(calls) - len(operations)),
+        # Calls that matched nothing are extra even under a partial match:
+        # len(calls) - len(operations) undercounts whenever some calls matched
+        # and others didn't, e.g. two calls against two operations where only
+        # one call matches -- that's one extra call, not zero.
+        "extra_calls": max(0, len(calls) - len(matched)),
     }
     return score, detail
 
@@ -284,6 +288,45 @@ def compute_reward(contract, calls, answer, ok):
     return reward, detail
 
 
+_VALID_MATCH_MODES = ("subset", "exact-set", "exact-sequence")
+
+
+def _contract_problems(contract):
+    """-> a list of contract-shape problems, empty if the contract is well-formed.
+
+    An unrecognised kind fails closed in score_assertions (counted as failed).
+    Without this check, an unrecognised trajectory.match failed open instead --
+    it fell through to "subset", the most lenient mode, so a one-character typo
+    like "exact_set" would silently score as if the mode were the loosest one
+    declared. Weights that don't sum to 1.0 have the same shape: a malformed
+    contract produces a reward outside [0, 1] that looks like a normal, if
+    unusually high, score. Both are bypassed-authoring-gate problems, not agent
+    problems, so main() refuses on them exactly like a CONTRACT mismatch.
+    """
+    problems = []
+
+    declared = contract.get("contract")
+    if declared != CONTRACT:
+        problems.append(f"expected contract {CONTRACT!r}, got {declared!r}")
+
+    match = (contract.get("trajectory") or {}).get("match", "subset")
+    if match not in _VALID_MATCH_MODES:
+        problems.append(f"unknown trajectory.match {match!r}, expected one of {_VALID_MATCH_MODES}")
+
+    weights = contract.get("weights")
+    if isinstance(weights, dict):
+        weight_assertions = float(weights.get("assertions", DEFAULT_WEIGHTS["assertions"]))
+        weight_trajectory = float(weights.get("trajectory", DEFAULT_WEIGHTS["trajectory"]))
+        total = weight_assertions + weight_trajectory
+        if abs(total - 1.0) > 1e-9:
+            problems.append(
+                f"weights must sum to 1.0, got assertions={weight_assertions!r} + "
+                f"trajectory={weight_trajectory!r} = {total!r}"
+            )
+
+    return problems
+
+
 def _read_logs(agent_logs):
     """Concatenate every transcript file in the agent log directory.
 
@@ -308,13 +351,15 @@ def main(argv=None):
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    declared = contract.get("contract")
-    if declared != CONTRACT:
-        # Refuse rather than write a misleading 0. A contract this verifier
-        # cannot read is a bypassed authoring gate, not a bad agent run, and
-        # reporting it as 0 would invert that conclusion. No reward.txt is
-        # written, so the platform sees a missing reward instead of a real one.
-        message = f"expected contract {CONTRACT!r}, got {declared!r}"
+    problems = _contract_problems(contract)
+    if problems:
+        # Refuse rather than write a misleading 0 -- or, for a weights
+        # problem, an inflated reward that looks like a normal score. A
+        # contract this verifier cannot read is a bypassed authoring gate, not
+        # a bad agent run, and scoring it would invert that conclusion. No
+        # reward.txt is written, so the platform sees a missing reward
+        # instead of a real one.
+        message = "; ".join(problems)
         (out / "reward-detail.json").write_text(json.dumps({"error": message}, indent=2))
         print(f"verify.py: {message}", file=sys.stderr)
         return 2

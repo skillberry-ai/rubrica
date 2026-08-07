@@ -111,6 +111,20 @@ def test_no_expected_operations_scores_one():
     assert score == 1.0
 
 
+def test_extra_calls_counts_calls_that_matched_nothing():
+    """len(calls) - len(operations) undercounts: a call that matched nothing
+    is extra even when the total call count doesn't exceed the operation
+    count."""
+    calls = _calls(("query_aap2", {"action": "find_jobs"}), ("query_aap2", {"action": "find_jobs"}))
+    trajectory = {
+        "match": "subset",
+        "operations": [_op(action="find_jobs"), _op(action="get_job_log")],
+    }
+    score, detail = score_trajectory(calls, trajectory)
+    assert score == 0.5
+    assert detail["extra_calls"] == 1
+
+
 # -- compute_reward ---------------------------------------------------------
 
 
@@ -218,6 +232,31 @@ def test_main_refuses_an_unreadable_contract_rather_than_scoring_zero(tmp_path):
     assert code == 2
     assert not (out / "reward.txt").exists()
     assert "bench/v2" in json.loads((out / "reward-detail.json").read_text())["error"]
+
+
+def test_main_refuses_an_unrecognized_trajectory_match_mode(tmp_path):
+    """A one-character typo must not silently fall through to subset, the most
+    lenient mode -- that's the exact asymmetry an unknown assertion kind
+    (which fails closed) does not have."""
+    contract = _contract(trajectory={"match": "exact_set", "operations": [_op(action="find_jobs")]})
+    expected, logs, out = _write_run(tmp_path, contract, "")
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    assert not (out / "reward.txt").exists()
+    assert "exact_set" in json.loads((out / "reward-detail.json").read_text())["error"]
+
+
+def test_main_refuses_weights_that_do_not_sum_to_one(tmp_path):
+    """A weights bug must not silently produce a reward outside [0, 1] that
+    looks like a normal, if unusually high, score."""
+    contract = _contract(weights={"assertions": 0.9, "trajectory": 0.9})
+    expected, logs, out = _write_run(tmp_path, contract, "")
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    assert not (out / "reward.txt").exists()
+    error = json.loads((out / "reward-detail.json").read_text())["error"]
+    assert "weights" in error
+    assert "1.8" in error
 
 
 def test_main_reads_both_jsonl_and_txt_logs(tmp_path):
