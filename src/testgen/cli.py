@@ -22,6 +22,7 @@ from pathlib import Path
 from testgen import refs
 from testgen.artifacts import ArtifactError, read_json
 from testgen.dedupe import candidate_pairs
+from testgen.emit import emit_run
 from testgen.findings import format_findings
 from testgen.intake import intake
 from testgen.paths import STAGES, RunPaths
@@ -53,6 +54,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "dedupe-candidates", help="propose candidate duplicate scenario pairs as JSON"
     )
     p_dedupe.add_argument("--run", required=True)
+
+    p_emit = subparsers.add_parser("emit", help="compile accepted instances into Harbor packages")
+    p_emit.add_argument("--run", required=True)
     return parser
 
 
@@ -118,6 +122,13 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return CLEAN
+
+        if args.command == "emit":
+            run = _run_dir(args.run)
+            emitted, findings = emit_run(run)
+            for sid in emitted:
+                print(run.task_dir(sid))
+            return _report(findings)
     except (FileNotFoundError, FileExistsError, ArtifactError, UnknownStage, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return USAGE
