@@ -18,6 +18,7 @@ the executed file cannot differ.
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -135,6 +136,14 @@ def _delimited(answer, value):
         start = index + 1
 
 
+# The closed assertion vocabulary, split by the field each kind scores against:
+# an answer kind reads `value`, a tool kind reads `tool` and `args`. Stated once
+# here because _contract_problems types those fields per kind, and a second copy
+# of the vocabulary is how the gate and the scorer drift apart.
+_ANSWER_KINDS = ("answer_contains", "answer_excludes", "value_equals")
+_TOOL_KINDS = ("tool_called", "tool_not_called")
+
+
 def _assertion_satisfied(answer, calls, assertion):
     """-> True, False, or None when the kind is not in the closed vocabulary."""
     kind = assertion.get("kind")
@@ -151,7 +160,7 @@ def _assertion_satisfied(answer, calls, assertion):
         return not _contains(answer, value)
     if kind == "value_equals":
         return _delimited(answer, value)
-    if kind in ("tool_called", "tool_not_called"):
+    if kind in _TOOL_KINDS:
         hit = any(call_matches(assertion, call) for call in calls)
         return hit if kind == "tool_called" else not hit
     return None
@@ -263,12 +272,16 @@ def compute_reward(contract, calls, answer, ok):
     tools, but the components stay visible in `reward` so the gate is
     distinguishable from a genuinely wrong answer.
 
-    Every default this function falls back to -- `status`, `nonempty_answer`,
-    the empty assertion list, the empty trajectory, DEFAULT_WEIGHTS -- is
-    unreachable through main(), because _contract_problems refuses a contract
-    that omits or mistypes any of them. Read them as what a directly-called
-    pure function does with a contract it has been told is well-formed, not as
-    tolerance at the scoring seam. Tolerance there is score inflation.
+    Two of the defaults this function falls back to are reachable through
+    main(), and both are safe by construction rather than by tolerance: an
+    absent or null `completion` scores as {"status": "ok", "nonempty_answer":
+    true}, the *strictest* setting of both gates, and absent weights fall back
+    to DEFAULT_WEIGHTS, this file's own constant rather than anything a contract
+    could have got wrong. The other two -- the empty assertion list and the
+    empty trajectory -- are unreachable and must stay so: _contract_problems
+    refuses a contract that omits or mistypes either, because both score a full
+    mark for a component nobody declared. Read none of the four as tolerance at
+    the scoring seam. Tolerance there is score inflation.
     """
     completion = contract.get("completion") or {}
     gate = 1.0
@@ -308,16 +321,25 @@ _VALID_COMPLETION_STATUSES = ("ok", "error")
 
 
 def _is_number(value):
-    """Whether `value` is a real number. Booleans are not: True is not a weight."""
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    """Whether `value` is a real, finite number.
+
+    Booleans are not: True is not a weight. Neither are NaN and +/-Infinity,
+    which json.loads accepts as bare tokens: NaN clears the sum check below --
+    `abs(nan - 1.0) > 1e-9` is False -- and then scores every run `reward: nan`,
+    a reward outside [0, 1], which is the one thing that check exists to prevent.
+    """
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def _contract_problems(contract):
     """-> a list of contract-shape problems, empty if the contract is well-formed.
 
-    **The invariant: once this returns [], compute_reward can neither raise nor
-    score a field it did not read.** Every field compute_reward touches is
-    type-checked here, and every closed vocabulary it compares against is
+    **The invariant, with its two stated limits: once this returns [], no
+    *contract* field can make compute_reward raise, and no component it scores
+    comes from a contract field this gate left untyped -- except `tool`, and
+    except the transcript, both recorded at the end of this docstring rather
+    than assumed away.** Every other field compute_reward reads off the contract
+    is type-checked here, and every closed vocabulary it compares against is
     checked for membership. Both halves matter, and each was violated:
 
     - A field compute_reward *scored without reading* inflated the reward. A
@@ -333,7 +355,17 @@ def _contract_problems(contract):
       through the old `if isinstance(weights, dict)` guard -- which made the
       weights check a no-op for exactly the input it guarded against -- and
       compute_reward then raised AttributeError. A traceback exits 1 with no
-      payload, where the specified refuse path is exit 2 with an `error`.
+      payload, where the specified refuse path is exit 2 with an `error`. The
+      same hole sat one field over, and outlasted the weights fix: this loop
+      checked that each `assertions[i]` and each `trajectory.operations[i]` *was
+      an object* and never typed the fields inside it, so `value: 5` reached
+      `value.lower()` and `args: ["a"]` reached `args.items()`. Eight such
+      contracts cleared this gate and exited 1 with a traceback, no reward.txt
+      and no reward-detail.json. Hence the per-kind `value` and `args` checks:
+      the fields a kind is scored against are typed for that kind, which also
+      refuses an absent `args` on a tool assertion or an operation -- absent args
+      match any call to the named tool, a looser match than the contract
+      declared, and the schema requires the key.
 
     Closed vocabularies fail closed here, uniformly. An unrecognised assertion
     kind already failed closed inside score_assertions (counted as failed).
@@ -348,12 +380,31 @@ def _contract_problems(contract):
       fail and a crashed agent scored as a completed one. A one-character typo
       in a two-value enum must not do that.
     - Weights that don't sum to 1.0 produce a reward outside [0, 1] that looks
-      like a normal, if unusually high, score.
+      like a normal, if unusually high, score. NaN reaches the same place through
+      the sum check itself -- see _is_number.
 
     All of these are bypassed-authoring-gate problems, not agent problems, so
     main() refuses on them exactly like a CONTRACT mismatch. Scoring them would
     invert that conclusion, which is the one thing this file's docstring says
     must not happen.
+
+    The two limits named at the top, so that this gate's silence is not read as
+    a guarantee it does not give:
+
+    - The transcript. compute_reward's other three arguments come from
+      parse_transcript, not from the contract, and a `result` event carrying a
+      non-string `result` still reaches `answer.strip()` and raises. That is a
+      broken log rather than a bypassed authoring gate, and parse_transcript's
+      own docstring says a broken log must score rather than crash -- so
+      choosing between dropping such an answer and str()-ing it is a scoring
+      decision, not a shape check, and it is not made here.
+    - `tool`, on an assertion and on an operation. It cannot raise: it is only
+      ever compared for equality. On an operation and on a `tool_called` it also
+      fails closed, scoring 0 for the item. On a `tool_not_called` it does not:
+      an exclusion naming no tool matches no call and is therefore satisfied by
+      every run, so an absent or empty `tool` scores a free point -- the same
+      vacuous truth _assertion_satisfied refuses for an empty `answer_excludes`
+      value. Requiring a non-empty string `tool` for both _TOOL_KINDS closes it.
     """
     problems = []
 
@@ -391,6 +442,18 @@ def _contract_problems(contract):
         for i, assertion in enumerate(assertions):
             if not isinstance(assertion, dict):
                 problems.append(f"assertions[{i}] must be an object, got {assertion!r}")
+                continue
+            kind = assertion.get("kind")
+            value = assertion.get("value", "")
+            args = assertion.get("args")
+            if kind in _ANSWER_KINDS and not isinstance(value, str):
+                problems.append(
+                    f"assertions[{i}].value must be a string for kind {kind!r}, got {value!r}"
+                )
+            if kind in _TOOL_KINDS and not isinstance(args, dict):
+                problems.append(
+                    f"assertions[{i}].args must be an object for kind {kind!r}, got {args!r}"
+                )
 
     trajectory = contract.get("trajectory")
     if not isinstance(trajectory, dict):
@@ -416,6 +479,11 @@ def _contract_problems(contract):
                     problems.append(
                         f"trajectory.operations[{i}] must be an object, got {operation!r}"
                     )
+                elif not isinstance(operation.get("args"), dict):
+                    problems.append(
+                        f"trajectory.operations[{i}].args must be an object, got "
+                        f"{operation.get('args')!r}"
+                    )
 
     weights = contract.get("weights")
     if weights is not None and not isinstance(weights, dict):
@@ -434,7 +502,7 @@ def _contract_problems(contract):
         # escaping this function is a traceback in place of the refuse payload.
         bad = [(name, value) for name, value in pairs if not _is_number(value)]
         for name, value in bad:
-            problems.append(f"weights.{name} must be a number, got {value!r}")
+            problems.append(f"weights.{name} must be a finite number, got {value!r}")
         if not bad:
             total = float(pairs[0][1]) + float(pairs[1][1])
             if abs(total - 1.0) > 1e-9:
