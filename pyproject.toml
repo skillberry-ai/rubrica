@@ -24,7 +24,7 @@ where = ["src"]
 # The schemas are the contract, so they ship with the package: without this a
 # wheel installs code that cannot validate anything.
 [tool.setuptools.package-data]
-testgen = ["schema/*.json"]
+testgen = ["schema/*.json", "suite/*.py", "suite/*.sh"]
 
 [tool.ruff]
 line-length = 100
