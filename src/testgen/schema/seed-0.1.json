@@ -11,7 +11,7 @@
     "collections": {
       "type": "object",
       "minProperties": 1,
-      "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+      "propertyNames": { "pattern": "\\A[A-Za-z0-9][A-Za-z0-9._-]*\\Z" },
       "additionalProperties": {
         "type": "array",
         "items": { "type": "object" }

@@ -1,6 +1,16 @@
+import json
+
+import pytest
+
 from testgen.artifacts import write_json
-from testgen.validate import validate_artifact
-from tests.builders import minimal_expected, minimal_seed, minimal_verdict
+from testgen.validate import ARTIFACT_SCHEMAS, schema_dir, validate_artifact
+from tests.builders import (
+    minimal_expected,
+    minimal_manifest,
+    minimal_scenarios,
+    minimal_seed,
+    minimal_verdict,
+)
 
 
 def _findings(tmp_path, kind, payload):
@@ -129,3 +139,71 @@ def test_every_registered_artifact_kind_now_has_a_schema_file():
 
     for kind, filename in ARTIFACT_SCHEMAS.items():
         assert (schema_dir() / filename).is_file(), kind
+
+
+@pytest.mark.parametrize("kind", sorted(ARTIFACT_SCHEMAS))
+def test_no_schema_pattern_uses_a_caret_dollar_anchor(kind, tmp_path):
+    """Python's re lets $ match before a trailing newline; \\Z does not.
+
+    paths.safe_segment uses \\Z, so an id ending in a newline clears layer 1
+    and then raises UnsafeSegment, which the CLI maps to exit 2 -- a repairable
+    stage defect misreported as a broken harness.
+    """
+    text = (schema_dir() / ARTIFACT_SCHEMAS[kind]).read_text(encoding="utf-8")
+    schema = json.loads(text)
+
+    def patterns(node):
+        """Every string value of a "pattern" key, at any depth."""
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "pattern" and isinstance(value, str):
+                    yield value
+                else:
+                    yield from patterns(value)
+        elif isinstance(node, list):
+            for item in node:
+                yield from patterns(item)
+
+    found = list(patterns(schema))
+    assert found, f"{kind} declares no patterns; the table in the plan says it should"
+    for pattern in found:
+        assert not pattern.startswith("^"), f"{kind}: {pattern!r} still uses ^"
+        assert not pattern.endswith("$"), f"{kind}: {pattern!r} still uses $"
+        assert pattern.startswith("\\A"), f"{kind}: {pattern!r} is not anchored with \\A"
+
+
+def test_a_scenario_id_ending_in_a_newline_is_rejected(tmp_path):
+    payload = minimal_scenarios()
+    payload["scenarios"][0]["id"] = "scn-001\n"
+    path = tmp_path / "02-scenarios.json"
+    write_json(path, payload)
+    assert validate_artifact(path, "scenarios") != []
+
+
+def test_a_seed_pointer_not_starting_with_a_slash_is_rejected(tmp_path):
+    payload = minimal_expected()
+    payload["assertions"][0]["grounded_in"]["seed_pointer"] = "collections/jobs/0"
+    path = tmp_path / "expected.json"
+    write_json(path, payload)
+    assert validate_artifact(path, "expected") != []
+
+
+@pytest.mark.parametrize(
+    "created_utc",
+    [
+        "not-a-timestamp",
+        "2026-08-06T12:00:00+05:30",
+        "2026-08-06 12:00:00Z",
+        "2026-08-06T12:00:00Z\n",
+    ],
+)
+def test_a_created_utc_that_is_not_a_utc_stamp_is_rejected(tmp_path, created_utc):
+    path = tmp_path / "manifest.json"
+    write_json(path, minimal_manifest(created_utc=created_utc))
+    assert validate_artifact(path, "manifest") != []
+
+
+def test_the_canonical_created_utc_is_accepted(tmp_path):
+    path = tmp_path / "manifest.json"
+    write_json(path, minimal_manifest(created_utc="2026-08-06T12:00:00Z"))
+    assert validate_artifact(path, "manifest") == []

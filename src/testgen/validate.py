@@ -8,6 +8,14 @@ orchestrator dispatches the next stage (design spec section 5).
 Findings are returned, never raised: the orchestrator's contract is one
 bounded repair attempt with the findings appended to the stage prompt, which
 needs the full list rather than the first failure.
+
+**The schemas anchor patterns with `\\A` and `\\Z`, not `^` and `$`.** JSON
+Schema specifies ECMA-262 regexes, where those escapes are not defined, so
+these schemas are portable only to a Python validator. That is a deliberate
+trade: Python's `re` lets `$` match immediately before a trailing newline, so
+`"scn-001\\n"` would satisfy every id pattern and then raise UnsafeSegment when
+joined into a path -- surfacing a repairable stage defect as exit 2, a
+misconfigured harness. Nothing outside this package validates these artifacts.
 """
 
 from __future__ import annotations

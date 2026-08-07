@@ -13,12 +13,12 @@
   "$defs": {
     "id": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "pattern": "\\A[A-Za-z0-9][A-Za-z0-9._-]*\\Z",
       "maxLength": 128
     },
     "hole_ref": {
       "type": "string",
-      "pattern": "^(cell:[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*|goal:[A-Za-z0-9][A-Za-z0-9._-]*)$"
+      "pattern": "\\A(cell:[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*|goal:[A-Za-z0-9][A-Za-z0-9._-]*)\\Z"
     },
     "scenario": {
       "type": "object",

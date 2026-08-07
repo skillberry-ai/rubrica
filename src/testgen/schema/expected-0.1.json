@@ -51,7 +51,7 @@
   "$defs": {
     "id": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+      "pattern": "\\A[A-Za-z0-9][A-Za-z0-9._-]*\\Z",
       "maxLength": 128
     },
     "assertion": {
@@ -76,7 +76,7 @@
           "required": ["seed_pointer"],
           "additionalProperties": false,
           "properties": {
-            "seed_pointer": { "type": "string", "pattern": "^/" }
+            "seed_pointer": { "type": "string", "pattern": "\\A/" }
           }
         }
       },
