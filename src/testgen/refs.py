@@ -40,6 +40,24 @@ _GOAL_RE = re.compile(r"\Agoal:([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
 # an earlier round is how the enrichment loop fails to converge.
 OPEN_STATUSES = frozenset({"proposed", "active"})
 
+# A scenario the pipeline has *ruled on*: fit to instantiate when it was ruled
+# on, or thrown out afterwards. This is the status set that may legitimately
+# appear under 04/05/06.
+#
+# The design spec's layer-2 enumeration (section 5, clause 2) originally said
+# `active`, which contradicts the same spec's challenge loop: a rejected
+# scenario is marked `rejected` in 02-scenarios.json *after* it has been
+# instantiated and judged, so requiring `active` made check-refs permanently
+# dirty in a state the spec prescribes, with no repair able to clear it. The
+# spec's reasoned commitment wins over its one-clause enumeration -- the
+# artifact record of the rejection is what makes the honest-hole report ("87%,
+# 3 cells lost to rejected scenarios") possible, so that record must survive.
+#
+# `proposed` and `duplicate` stay out on purpose. A `proposed` scenario
+# instantiated before score ruled on it is a real defect, and so is an
+# instance for a scenario dedupe folded into another.
+JUDGED_STATUSES = frozenset({"active", "rejected"})
+
 
 def cell_ref(capability_id: str, outcome_class_id: str) -> str:
     """Canonical hole reference for one capability x outcome-class cell."""
@@ -420,7 +438,15 @@ def check_scenarios(run: RunPaths) -> list[Finding]:
 def _check_matrix_arithmetic(
     report, pointer: str, covered_flags: list[bool], declared: dict
 ) -> None:
-    """Covered/total/pct must agree with the rows they summarize."""
+    """Covered/total/pct must agree with the rows they summarize.
+
+    `pct` is converted rather than compared directly, because a schema-valid
+    `number` can arrive as an int. The conversion is guarded: `float("half")`
+    raises ValueError, and a coverage document carrying a non-numeric pct is a
+    repairable score-stage defect, so it has to become an ordinary finding. Left
+    unguarded it escaped to cli.py and was reported as exit 2 -- a misconfigured
+    harness -- which is the one thing the exit-code contract forbids.
+    """
     total = len(covered_flags)
     covered = sum(1 for flag in covered_flags if flag)
     if declared.get("total") != total:
@@ -431,7 +457,15 @@ def _check_matrix_arithmetic(
             f"declared covered={declared.get('covered')} but {covered} rows are marked covered",
         )
     expected_pct = (covered / total) if total else 0.0
-    if abs(float(declared.get("pct", -1)) - expected_pct) > 1e-9:
+    declared_pct = declared.get("pct", -1)
+    if isinstance(declared_pct, bool) or not isinstance(declared_pct, (int, float)):
+        report(
+            f"{pointer}/pct",
+            f"declared pct={declared_pct!r} is not a number, so it cannot be checked against "
+            f"covered/total, which is {expected_pct}",
+        )
+        return
+    if abs(float(declared_pct) - expected_pct) > 1e-9:
         report(
             f"{pointer}/pct",
             f"declared pct={declared.get('pct')} but covered/total is {expected_pct}",
@@ -788,19 +822,21 @@ def check_instances(run: RunPaths) -> list[Finding]:
                 Finding(run.instance_dir(sid), "refs", "", f"no scenario named {sid} was proposed")
             )
             continue
-        # The design spec requires every scenario_id under 04/05/06 to be
-        # `active` in 02, not merely not-duplicate: a `rejected` scenario and
-        # one still `proposed` are both unfit to instantiate, the first because
-        # score threw it out and the second because score has not judged it.
+        # Every scenario_id under 04/05/06 must have been *judged* in 02:
+        # `active`, or `rejected` after the fact by challenge. A `rejected`
+        # scenario that was already instantiated is the state the design spec
+        # prescribes for the reject path, so it is not a finding; a `proposed`
+        # one is, because score has not ruled on it yet, and so is a
+        # `duplicate`, because dedupe folded it into another scenario.
         status = scenario.get("status")
-        if status != "active":
+        if status not in JUDGED_STATUSES:
             out.append(
                 Finding(
                     run.instance_dir(sid),
                     "refs",
                     "",
-                    f"scenario {sid} has status {status!r} but only an active scenario should "
-                    "have been instantiated",
+                    f"scenario {sid} has status {status!r} but only a judged scenario (active, "
+                    "or rejected after the fact) should have been instantiated",
                 )
             )
 
@@ -844,10 +880,17 @@ def check_instances(run: RunPaths) -> list[Finding]:
 def check_verdicts(run: RunPaths) -> list[Finding]:
     """One coherent verdict per instantiated scenario.
 
-    Returns nothing until challenge has produced at least one verdict: an
-    instance without a verdict is the normal state between instantiate and
-    challenge, and reporting it there would spend the orchestrator's single
-    repair attempt on a phantom.
+    Returns nothing until 05-verdicts/ exists: with no verdict directory at all
+    the run has not reached challenge, and reporting every instance as
+    unjudged there would spend the orchestrator's single repair attempt on a
+    phantom.
+
+    Note what that does *not* tolerate. Once the directory exists -- i.e. once
+    the first verdict has landed -- every instance without one is reported. The
+    challenge fan-out window, where some instances are judged and others are
+    still in flight, is therefore *not* tolerated; the guard is `is_dir()`, not
+    a count. That is deliberate: check-refs is dispatched after the fan-out
+    completes, so a missing verdict at that point is real.
     """
     if not run.verdicts_dir.is_dir():
         return []
@@ -921,10 +964,25 @@ _PACKAGE_FILES = (
 
 
 def check_suite(run: RunPaths) -> list[Finding]:
-    """Each emitted package is complete and addresses an active scenario.
+    """Each emitted package is complete and addresses a judged scenario.
 
     A package missing its verifier or its contract is worse than no package: it
     reaches the platform, fails to score, and reads as an agent failure.
+
+    A `rejected` scenario is tolerated here, not reported. emit prunes the
+    package for a scenario that stopped qualifying, but nothing orders emit and
+    check-refs, so between challenge marking a scenario `rejected` and the next
+    emit the package is legitimately still on disk. Reporting it would make
+    check-refs dirty in a state the design spec prescribes, and no repair the
+    orchestrator dispatched could clear it. See JUDGED_STATUSES.
+
+    **The `.get()` calls below are deliberate, not an inconsistency with this
+    module's layer-1 precondition.** Everywhere else this module indexes
+    schema-required keys directly, because layer 1 gated the artifact first.
+    Here the files being read live under 06-suite/, and nothing orders
+    `validate --stage emit` before `check-refs` -- so this is the one place
+    where an ungated document can legitimately arrive. Tolerating a missing key
+    is what turns that into an ordinary finding instead of a traceback.
     """
     scenarios_doc = _load(run.scenarios) or {"scenarios": []}
     by_id = {s["id"]: s for s in scenarios_doc.get("scenarios", [])}
@@ -939,14 +997,14 @@ def check_suite(run: RunPaths) -> list[Finding]:
         scenario = by_id.get(sid)
         if scenario is None:
             out.append(Finding(task, "refs", "", f"no scenario named {sid} was proposed"))
-        elif scenario.get("status") != "active":
+        elif scenario.get("status") not in JUDGED_STATUSES:
             out.append(
                 Finding(
                     task,
                     "refs",
                     "",
-                    f"scenario {sid} has status {scenario.get('status')!r} but only an active "
-                    "scenario should have been emitted",
+                    f"scenario {sid} has status {scenario.get('status')!r} but only a judged "
+                    "scenario (active, or rejected after the fact) should have been emitted",
                 )
             )
 

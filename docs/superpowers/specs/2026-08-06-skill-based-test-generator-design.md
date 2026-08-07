@@ -277,8 +277,15 @@ cross-checking stage 2's `hop_depth` claim.
    Bounded, not a retry spiral.
 2. **Referential integrity** — `bin/check-refs`, expressing what JSON Schema
    cannot: every `capability_id` in 02 exists in 01; every `scenario_id` under
-   04/05/06 is `active` in 02; every `seed_pointer` resolves within its *own*
-   scenario's seed; `machine:` invariants hold over each seed.
+   04/05/06 is judged (`active` or `rejected`) in 02; every `seed_pointer`
+   resolves within its *own* scenario's seed; `machine:` invariants hold over
+   each seed. `rejected` is admitted here rather than `active` alone because the
+   challenge loop below marks a scenario `rejected` *after* it has been
+   instantiated and judged, and that artifact record of the rejection is
+   precisely what the honest-hole report ("87%, 3 cells lost to rejected
+   scenarios") is built from — requiring `active` would make this check
+   permanently dirty in a state the pipeline prescribes, and would delete the
+   evidence the report needs. `proposed` and `duplicate` are still findings.
 3. **Smoke** — stage 7: does the emitted suite actually execute.
 
 ### Reproducibility hooks

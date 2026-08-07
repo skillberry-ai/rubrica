@@ -428,3 +428,99 @@ def test_a_scored_result_must_carry_a_reward(tmp_path):
     path = tmp_path / "07-report.json"
     write_json(path, payload)
     assert validate_artifact(path, "report") != []
+
+
+def test_a_report_over_no_tasks_is_rejected(tmp_path):
+    """The "passes trivially" defect the emit and smoke gates exist to remove.
+
+    tasks: [] with verdict: "healthy" validated clean and `validate --stage
+    smoke` reported success -- a green smoke gate over a suite nobody ran.
+    """
+    from testgen.artifacts import write_json
+    from testgen.paths import RunPaths
+    from testgen.validate import validate_artifact, validate_stage
+    from tests.builders import minimal_report
+
+    payload = minimal_report(
+        tasks=[],
+        summary={
+            "mean_reward_by_role": {},
+            "all_pass_tasks": 0,
+            "all_fail_tasks": 0,
+            "oracle_failures": 0,
+            "unscoreable": 0,
+        },
+    )
+    run = RunPaths(tmp_path)
+    write_json(run.report, payload)
+    findings = validate_artifact(run.report, "report")
+    assert findings
+    assert any(f.pointer == "/tasks" for f in findings), [f.pointer for f in findings]
+    assert validate_stage(run, "smoke") != [], "the smoke gate must not pass over no tasks"
+
+
+# -- the coverage stage's two artifacts ------------------------------------
+def test_the_score_stage_reports_a_coverage_directory_with_no_latest(tmp_path):
+    """Every coverage check added in Tasks 2 and 4 was bypassable without this.
+
+    _artifact_paths globbed 03-coverage/*.json, so round-1.json alone satisfied
+    the gate -- while refs.check_limits and refs.check_coverage both read
+    coverage_latest and return [] when it is absent. A score stage that wrote the
+    round file and forgot the pointer passed both gates with every coverage
+    check skipped.
+    """
+    from testgen.artifacts import write_json
+    from testgen.paths import RunPaths
+    from testgen.validate import validate_stage
+    from tests.builders import minimal_coverage
+
+    run = RunPaths(tmp_path)
+    write_json(run.coverage_round(1), minimal_coverage())
+    assert not run.coverage_latest.exists()
+
+    findings = validate_stage(run, "score")
+
+    assert len(findings) == 1, [str(f) for f in findings]
+    assert findings[0].artifact == run.coverage_latest
+    assert "missing artifact" in findings[0].message
+
+
+def test_the_score_stage_still_validates_the_round_files(tmp_path):
+    """Requiring latest.json must not stop the round files being checked."""
+    from testgen.artifacts import write_json
+    from testgen.paths import RunPaths
+    from testgen.validate import validate_stage
+    from tests.builders import minimal_coverage
+
+    run = RunPaths(tmp_path)
+    write_json(run.coverage_latest, minimal_coverage())
+    write_json(run.coverage_round(1), minimal_coverage(schema_version="0.9"))
+
+    findings = validate_stage(run, "score")
+
+    assert len(findings) == 1, [str(f) for f in findings]
+    assert findings[0].artifact == run.coverage_round(1)
+
+
+def test_the_score_stage_is_clean_with_latest_and_its_rounds(tmp_path):
+    from testgen.artifacts import write_json
+    from testgen.paths import RunPaths
+    from testgen.validate import validate_stage
+    from tests.builders import minimal_coverage
+
+    run = RunPaths(tmp_path)
+    write_json(run.coverage_latest, minimal_coverage())
+    write_json(run.coverage_round(1), minimal_coverage())
+    assert validate_stage(run, "score") == []
+
+
+def test_the_score_stage_reports_a_run_with_no_coverage_directory(tmp_path):
+    """No 03-coverage/ at all is still "produced no coverage artifact"."""
+    from testgen.paths import RunPaths
+    from testgen.validate import validate_stage
+
+    run = RunPaths(tmp_path)
+    run.root.mkdir(parents=True, exist_ok=True)
+    findings = validate_stage(run, "score")
+    assert len(findings) == 1
+    assert "produced no coverage artifact" in findings[0].message

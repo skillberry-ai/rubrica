@@ -12,6 +12,12 @@ including index n, so the run directory grows the way a real run does. Every
 state is assembled from tests/builders.py, whose payloads are mutually
 consistent, so no finding is legitimately warranted in any of them.
 
+Not every state adds a file. The last one, `post-rejection`, *rewrites*
+02-scenarios.json and 03-coverage/latest.json to the state the design spec's
+reject path prescribes, and emit prunes a package rather than writing one. A
+state is any run directory the pipeline legitimately passes through, not only a
+growing one.
+
 **When you add a stage, add its state here.** Append a (name, builder) pair
 in pipeline order; the parametrization picks it up and the failure message
 names the state that broke.
@@ -24,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from testgen.artifacts import write_json
+from testgen.artifacts import read_json, write_json
 from testgen.emit import emit_run
 from testgen.paths import RunPaths
 from testgen.refs import check_all
@@ -81,6 +87,59 @@ def _smoke(run: RunPaths) -> None:
     write_json(run.report, minimal_report())
 
 
+# The reopened cell, justified as an honest hole. `not_yet_attempted` is the
+# schema's vocabulary for "no accepted scenario exercises this"; the
+# justification names the rejection, which is the record §362's report is
+# built from.
+REOPENED_HOLE = {
+    "ref": "cell:cap-find-jobs/oc-success",
+    "reason": "not_yet_attempted",
+    "justification": (
+        "scn-001 claimed this cell and challenge rejected it as ambiguous, so no accepted "
+        "scenario exercises it; the cell is uncovered again"
+    ),
+}
+
+
+def _post_rejection(run: RunPaths) -> None:
+    """challenge rejected scn-001 after it was instantiated, judged, and emitted.
+
+    The design spec's reject path: mark the scenario `rejected` in
+    02-scenarios.json, recompute coverage so the cell it claimed is uncovered
+    again and carries an honest hole, and re-run emit. The instance, the verdict
+    and the coverage record all stay -- they are what the report's "87%, 3 cells
+    lost to rejected scenarios" is built from.
+
+    check_all must be clean here. It was not: check_instances and check_suite
+    both required `active`, so check-refs went permanently dirty in a state the
+    pipeline prescribes and no repair the orchestrator dispatched could clear it.
+    And emit only replaced the package it was about to rewrite, so the package
+    for the rejected scenario stayed under 06-suite/ and would have shipped to
+    Harbor and been scored.
+    """
+    scenarios = minimal_scenarios()
+    scenarios["scenarios"][0]["status"] = "rejected"
+    scenarios["scenarios"][0]["rejected_reason"] = "ambiguous"
+    write_json(run.scenarios, scenarios)
+
+    coverage = minimal_coverage()
+    cell = coverage["capability_matrix"]["cells"][0]
+    cell["scenario_ids"] = []
+    cell["covered"] = False
+    coverage["capability_matrix"]["covered"] = 0
+    coverage["capability_matrix"]["pct"] = 0.0
+    row = coverage["goal_matrix"]["rows"][0]
+    row["scenario_ids"] = []
+    row["hop_depths_present"] = []
+    coverage["holes"].insert(0, dict(REOPENED_HOLE))
+    coverage["progress"] = {"new_cells_this_round": 0, "rounds_without_progress": 1}
+    write_json(run.coverage_latest, coverage)
+
+    emitted, findings = emit_run(run)
+    assert (emitted, findings) == ([], []), f"emit after a rejection: {findings}"
+    assert not run.task_dir(SID).exists(), "emit must prune the rejected scenario's package"
+
+
 # Pipeline order. Cumulative: each state is every builder up to and including
 # its own. "empty" carries no builder -- a run directory that exists and
 # holds nothing is the state check_all sees before intake writes anything.
@@ -95,6 +154,7 @@ STATES: list[tuple[str, Callable[[RunPaths], None] | None]] = [
     ("challenge", _challenge),
     ("emit", _emit),
     ("smoke", _smoke),
+    ("post-rejection", _post_rejection),
 ]
 
 STATE_NAMES = [name for name, _ in STATES]
@@ -133,8 +193,43 @@ def test_the_states_are_cumulative_so_the_last_one_is_a_complete_run(tmp_path):
     assert run.seed(SID).is_file()
     assert run.expected(SID).is_file()
     assert run.verdict(SID).is_file()
-    assert (run.task_dir(SID) / "tests" / "expected.json").is_file()
     assert run.report.is_file()
+    # 06-suite/<sid> is deliberately *absent* in the last state: it rejects
+    # scn-001, and emit prunes the package for a scenario that no longer
+    # qualifies. test_the_emit_state_really_wrote_a_package below is what
+    # guarantees there was a package to prune.
+    assert not run.task_dir(SID).exists()
+    # The rejection is recorded rather than erased. That record is what the
+    # honest-hole report ("87%, 3 cells lost to rejected scenarios") is built
+    # from, and it is the reason layer 2 admits `rejected` under 04/05/06.
+    scenario = read_json(run.scenarios)["scenarios"][0]
+    assert scenario["status"] == "rejected"
+    assert scenario["rejected_reason"]
+    holes = read_json(run.coverage_latest)["holes"]
+    assert any(hole["ref"] == REOPENED_HOLE["ref"] for hole in holes)
+
+
+def test_the_emit_state_really_wrote_a_package(tmp_path):
+    """The other half of the prune assertion above.
+
+    Without this, the last state's `not task_dir().exists()` would pass just as
+    happily over a package emit never wrote at all.
+    """
+    run = build_state(tmp_path, "emit")
+    assert (run.task_dir(SID) / "tests" / "expected.json").is_file()
+
+
+def test_the_post_rejection_state_still_holds_the_instance_and_the_verdict(tmp_path):
+    """Pins the shape of the state, not just its cleanliness.
+
+    A "fix" that swept 04-instances/ and 05-verdicts/ clean on rejection would
+    also make check_all clean here, and would destroy the artifact record the
+    report is built from.
+    """
+    run = build_state(tmp_path, "post-rejection")
+    assert run.scenario_ids_with_instances() == [SID]
+    assert run.verdict(SID).is_file()
+    assert run.scenario_ids_with_tasks() == []
 
 
 def test_the_state_before_challenge_has_instances_but_no_verdicts(tmp_path):

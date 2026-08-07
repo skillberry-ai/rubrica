@@ -81,11 +81,28 @@ def test_a_package_for_a_scenario_that_was_never_proposed_is_reported(tmp_path):
     assert "was proposed" in messages
 
 
-def test_a_package_for_a_non_active_scenario_is_reported(tmp_path):
+def test_a_package_for_an_unjudged_scenario_is_reported(tmp_path):
+    """A package for a scenario score has not ruled on is a real defect."""
+    run = _emitted_run(tmp_path)
+    scenarios = minimal_scenarios()
+    scenarios["scenarios"][0]["status"] = "proposed"
+    write_json(run.scenarios, scenarios)
+    messages = " || ".join(f.message for f in check_suite(run))
+    assert "'proposed'" in messages
+    assert "judged" in messages
+
+
+def test_a_package_for_a_rejected_scenario_is_tolerated(tmp_path):
+    """emit prunes it, but nothing orders emit before check-refs.
+
+    Between challenge marking a scenario `rejected` and the next emit, the
+    package is legitimately still on disk. Reporting it made check-refs
+    permanently dirty in a state the design spec prescribes, and no repair the
+    orchestrator dispatched could clear it. See refs.JUDGED_STATUSES.
+    """
     run = _emitted_run(tmp_path)
     scenarios = minimal_scenarios()
     scenarios["scenarios"][0]["status"] = "rejected"
     scenarios["scenarios"][0]["rejected_reason"] = "ambiguous"
     write_json(run.scenarios, scenarios)
-    messages = " || ".join(f.message for f in check_suite(run))
-    assert "rejected" in messages
+    assert check_suite(run) == []

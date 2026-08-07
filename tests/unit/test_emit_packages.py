@@ -186,8 +186,38 @@ def test_a_partially_instantiated_instance_is_a_finding_not_a_crash(tmp_path):
 
     assert emitted == []
     assert len(findings) == 1
-    assert "is missing seed.json or expected.json" in findings[0].message
+    assert "is missing seed.json, expected.json" in findings[0].message
     assert not run.task_dir(SID).exists()
+
+
+def test_a_present_but_truncated_expected_is_reported_as_unparseable_not_missing(tmp_path):
+    """The repair for a truncated file is not the repair for an absent one.
+
+    Reporting a truncated expected.json as "missing" sends the repair prompt to
+    author the oracle again from scratch, discarding labels a human may already
+    have read, instead of fixing the one thing that is wrong.
+    """
+    run = _run(tmp_path)
+    run.expected(SID).write_text('{"schema_version": "0.1", "scenario_i', encoding="utf-8")
+
+    emitted, findings = emit_run(run)
+
+    assert emitted == []
+    assert len(findings) == 1
+    assert "has unparseable JSON in expected.json" in findings[0].message
+    assert "missing" not in findings[0].message
+
+
+def test_one_file_absent_and_the_other_unparseable_are_reported_separately(tmp_path):
+    run = _run(tmp_path)
+    run.seed(SID).unlink()
+    run.expected(SID).write_text("{", encoding="utf-8")
+
+    _, findings = emit_run(run)
+
+    assert len(findings) == 1
+    assert "is missing seed.json" in findings[0].message
+    assert "has unparseable JSON in expected.json" in findings[0].message
 
 
 def test_an_unbound_capability_becomes_a_finding_and_writes_no_package(tmp_path):
@@ -207,6 +237,93 @@ def test_a_missing_world_model_is_a_finding_not_a_crash(tmp_path):
     emitted, findings = emit_run(run)
     assert emitted == []
     assert len(findings) == 1
+
+
+def test_a_missing_scenario_list_is_a_finding_not_an_empty_suite(tmp_path):
+    """02-scenarios.json and 01-world-model.json are equally required inputs.
+
+    Degrading to {"scenarios": []} exited 0 having written nothing, which told
+    the orchestrator an empty suite was a successful emit.
+    """
+    run = _run(tmp_path)
+    run.scenarios.unlink()
+    emitted, findings = emit_run(run)
+    assert emitted == []
+    assert len(findings) == 1
+    assert "02-scenarios.json" in findings[0].message
+
+
+# -- pruning ---------------------------------------------------------------
+def test_a_package_is_pruned_when_its_scenario_is_later_rejected(tmp_path):
+    """06-suite/ must be a function of the current run state and nothing else.
+
+    A complete, well-formed package for a scenario the adversary threw out as
+    ambiguous would otherwise stay under 06-suite/, ship to Harbor, and be
+    scored as a test somebody accepted. Nobody did.
+    """
+    run = _run(tmp_path)
+    assert emit_run(run) == ([SID], [])
+    assert run.task_dir(SID).is_dir()
+
+    scenarios = minimal_scenarios()
+    scenarios["scenarios"][0]["status"] = "rejected"
+    scenarios["scenarios"][0]["rejected_reason"] = "ambiguous"
+    write_json(run.scenarios, scenarios)
+
+    emitted, findings = emit_run(run)
+
+    assert emitted == []
+    assert findings == []
+    assert not run.task_dir(SID).exists(), "a rejected scenario's package must not ship"
+
+
+def test_a_package_is_pruned_when_its_verdict_flips_to_re_seed(tmp_path):
+    run = _run(tmp_path)
+    assert emit_run(run) == ([SID], [])
+    write_json(run.verdict(SID), minimal_verdict(verdict="re-seed"))
+
+    emitted, findings = emit_run(run)
+
+    assert emitted == []
+    assert any("re-seed" in f.message for f in findings)
+    assert not run.task_dir(SID).exists()
+
+
+def test_a_package_is_pruned_when_its_scenario_disappears_from_the_list(tmp_path):
+    run = _run(tmp_path)
+    assert emit_run(run) == ([SID], [])
+    write_json(run.scenarios, minimal_scenarios(scenarios=[]))
+
+    emitted, _ = emit_run(run)
+
+    assert emitted == []
+    assert not run.task_dir(SID).exists()
+
+
+def test_pruning_leaves_a_package_the_current_run_still_emits(tmp_path):
+    """The guard against a prune that deletes the suite it just wrote."""
+    run = _run(tmp_path)
+    emit_run(run)
+    emitted, findings = emit_run(run)
+    assert (emitted, findings) == ([SID], [])
+    assert (run.task_dir(SID) / "tests" / "expected.json").is_file()
+
+
+def test_a_missing_input_does_not_prune_the_whole_suite(tmp_path):
+    """A mistyped run directory must not destroy work in response to a typo.
+
+    emit_run's early returns report a missing *input*, where the emitted set is
+    empty for want of information rather than because nothing qualifies.
+    """
+    run = _run(tmp_path)
+    assert emit_run(run) == ([SID], [])
+    run.world_model.unlink()
+
+    emitted, findings = emit_run(run)
+
+    assert emitted == []
+    assert len(findings) == 1
+    assert run.task_dir(SID).is_dir(), "a missing world model must not delete the suite"
 
 
 def test_re_emitting_replaces_a_stale_package(tmp_path):
@@ -290,6 +407,45 @@ def test_a_single_unbound_capability_does_not_cost_the_whole_suite(tmp_path):
     assert run.task_dir(SID).is_dir()
     assert not run.task_dir("scn-000").exists()
     assert any("cap-unbound" in f.message for f in findings)
+
+
+# -- the emit -> layer-1 seam ----------------------------------------------
+def test_a_real_emitted_contract_passes_the_layer_1_gate_emit_is_judged_by(tmp_path):
+    """The seam nothing tested: what emit writes against the schema that gates it.
+
+    Every other suite-expected test validates tests/builders.py's hand-written
+    transcription of the contract, not the file emit_run actually produces. If
+    the two drift, `validate --stage emit` fails on every package -- and because
+    emit is deterministic, the orchestrator's one repair attempt reproduces the
+    failure byte-for-byte and hard-stops.
+    """
+    from testgen.validate import validate_artifact
+
+    run = _run(tmp_path)
+    assert emit_run(run) == ([SID], [])
+    contract = run.task_dir(SID) / "tests" / "expected.json"
+    assert validate_artifact(contract, "suite-expected") == []
+
+
+def test_the_suite_expected_schema_pins_the_weights_verify_py_actually_uses():
+    """One fact, three encodings; this couples two of them.
+
+    verify.DEFAULT_WEIGHTS is the constant emit.py imports. The schema pins the
+    same two numbers again with `const`, and nothing in the code connects them,
+    so re-tuning the weights in verify.py would silently make every package emit
+    produces fail emit's own layer-1 gate. Both sources are read here at test
+    time rather than transcribed, so the assertion cannot go stale.
+    """
+    import json as _json
+
+    from testgen.suite.verify import DEFAULT_WEIGHTS
+    from testgen.validate import ARTIFACT_SCHEMAS, schema_dir
+
+    schema = _json.loads(
+        (schema_dir() / ARTIFACT_SCHEMAS["suite-expected"]).read_text(encoding="utf-8")
+    )
+    pinned = schema["properties"]["weights"]["properties"]
+    assert {name: spec["const"] for name, spec in pinned.items()} == DEFAULT_WEIGHTS
 
 
 def test_emit_is_byte_stable_across_runs(tmp_path):

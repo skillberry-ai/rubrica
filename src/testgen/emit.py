@@ -8,6 +8,17 @@ It is code rather than a skill because of the reproducibility criterion: if emit
 were a prompt, two runs with identical stage-4 and stage-5 artifacts could still
 produce different suites, and variance could no longer be attributed to a stage.
 A thin tg-emit skill exists purely as the human-facing entry point.
+
+**Precondition: layer 1 must have run first.** Exactly as in refs.py, and for
+the same reason: this module holds the most direct key indexing in the project
+(`scenario["user_intent"]`, `expected["completion"]`, `binding["tool"]`) and
+would raise KeyError or TypeError on a malformed document rather than return a
+finding. `emit_run` is publicly callable and the CLI exposes `emit` with no way
+to require that `validate --stage instantiate` and `--stage challenge` ran, so a
+caller running them out of order gets an exception, not a finding. cli.py turns
+that exception into a finding-shaped line on stdout so the exit code still
+carries information, but the artifact is not repaired by that -- run layer 1
+first.
 """
 
 from __future__ import annotations
@@ -243,18 +254,61 @@ def _load(path) -> Any | None:
         return None
 
 
+def _unreadable_instance(run: RunPaths, sid: str, seed: Any | None, expected: Any | None) -> str:
+    """Name each unusable instance file, distinguishing absent from unparseable.
+
+    read_json fails the same way for both, but the repair does not. Reporting a
+    truncated expected.json as "missing" sends the repair prompt to author the
+    oracle again from scratch, discarding labels a human may already have read;
+    saying it is present but unparseable asks for the one thing that is wrong.
+    """
+    bad = [
+        path
+        for path, payload in ((run.seed(sid), seed), (run.expected(sid), expected))
+        if payload is None
+    ]
+    absent = [path.name for path in bad if not path.exists()]
+    unparseable = [path.name for path in bad if path.exists()]
+    clauses = []
+    if absent:
+        clauses.append(f"is missing {', '.join(absent)}")
+    if unparseable:
+        clauses.append(f"has unparseable JSON in {', '.join(unparseable)}")
+    return f"instance {sid} " + " and ".join(clauses)
+
+
 def emit_run(run: RunPaths) -> tuple[list[str], list[Finding]]:
-    """Write a Harbor package for every accepted instance.
+    """Write a Harbor package for every accepted instance, and prune the rest.
 
     Returns (emitted scenario ids, findings). A findings list means the suite is
     incomplete and the caller exits 1; packages for the instances that did
     translate are still written, so a single unbound capability does not cost
     the whole suite.
+
+    **Pruning is not optional.** 06-suite/ is shipped to Harbor and scored as a
+    whole, so it must be a function of the current run state and nothing else.
+    Replacing only the package this run rewrites leaves behind a complete,
+    well-formed package for a scenario that has since stopped qualifying -- one
+    the adversary threw out as ambiguous, one whose verdict flipped from
+    `accept` to `re-seed`, one whose scenario disappeared from
+    02-scenarios.json -- and that package would ship and be scored as a test
+    somebody accepted. Nobody did.
+
+    Pruning runs only after the emit loop actually ran. The two early returns
+    below report a missing *input*, where the emitted set is empty for want of
+    information rather than because nothing qualifies; deleting the whole suite
+    on a mistyped run directory would destroy work in response to a typo.
     """
     world = _load(run.world_model)
     if world is None:
         return [], [Finding(run.root, "emit", "", "no world model: emit needs 01-world-model.json")]
-    scenarios_doc = _load(run.scenarios) or {"scenarios": []}
+    # Symmetric with the world model: both are required inputs, so a missing
+    # scenario list is a finding rather than a silent degradation to an empty
+    # suite. Degrading exited 0 having written nothing, which told the
+    # orchestrator an empty suite was a successful emit.
+    scenarios_doc = _load(run.scenarios)
+    if scenarios_doc is None:
+        return [], [Finding(run.root, "emit", "", "no scenario list: emit needs 02-scenarios.json")]
     by_id = {s["id"]: s for s in scenarios_doc.get("scenarios", [])}
 
     emitted: list[str] = []
@@ -299,7 +353,7 @@ def emit_run(run: RunPaths) -> tuple[list[str], list[Finding]]:
                     run.instance_dir(sid),
                     "emit",
                     "",
-                    f"instance {sid} is missing seed.json or expected.json",
+                    _unreadable_instance(run, sid, seed, expected),
                 )
             )
             continue
@@ -335,5 +389,14 @@ def emit_run(run: RunPaths) -> tuple[list[str], list[Finding]]:
             shutil.copyfile(suite_template_dir() / name, task / "tests" / name)
         (task / "tests" / "test.sh").chmod(0o755)
         emitted.append(sid)
+
+    # Prune. Every directory under 06-suite/ that this run did not emit is a
+    # package for a scenario that no longer qualifies, so it goes. The names
+    # come from scenario_ids_with_tasks(), which is safe-segment filtered, so
+    # every path removed is one this module wrote; a hand-created directory with
+    # an unsafe name is left alone rather than deleted on a guess.
+    for sid in run.scenario_ids_with_tasks():
+        if sid not in emitted:
+            shutil.rmtree(run.task_dir(sid))
 
     return emitted, findings

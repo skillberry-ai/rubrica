@@ -126,7 +126,20 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
     if kind == "claims":
         return sorted(run.claims_dir.glob("*.json")) if run.claims_dir.is_dir() else []
     if kind == "coverage":
-        return sorted(run.coverage_dir.glob("*.json")) if run.coverage_dir.is_dir() else []
+        # latest.json is a singleton artifact that happens to live in a
+        # directory of round files, so it is required the way manifest.json and
+        # 02-scenarios.json are, not merely globbed. Globbing alone let
+        # round-1.json satisfy the gate on its own -- and since refs.check_limits
+        # and refs.check_coverage both read coverage_latest and return [] when it
+        # is absent, a score stage that wrote the round file and forgot the
+        # pointer passed *both* gates with every coverage check bypassed.
+        # Returning the absent path makes validate_artifact report it by name.
+        if not run.coverage_dir.is_dir():
+            return []
+        rounds = sorted(run.coverage_dir.glob("*.json"))
+        if run.coverage_latest.is_file():
+            return rounds
+        return [run.coverage_latest, *rounds]
     if kind == "verdict":
         return sorted(run.verdicts_dir.glob("*.json")) if run.verdicts_dir.is_dir() else []
     if kind == "seed":

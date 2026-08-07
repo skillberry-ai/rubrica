@@ -71,18 +71,23 @@ def test_an_instance_for_a_scenario_marked_duplicate_is_reported(tmp_path):
     payload["scenarios"][0]["duplicate_of"] = "scn-000"
     write_json(run.scenarios, payload)
     findings = check_instances(run)
-    assert any("'duplicate'" in f.message and "active" in f.message for f in findings)
+    assert any("'duplicate'" in f.message and "judged" in f.message for f in findings)
 
 
-def test_an_instance_for_a_rejected_scenario_is_reported(tmp_path):
-    """The spec requires `active`, not merely not-duplicate."""
+def test_an_instance_for_a_rejected_scenario_is_tolerated(tmp_path):
+    """The state the design spec's reject path prescribes, so not a finding.
+
+    challenge marks a scenario `rejected` in 02-scenarios.json *after* it has
+    been instantiated and judged, and the instance directory stays as the record
+    the honest-hole report is built from. Reporting it made check-refs
+    permanently dirty with no repair able to clear it. See refs.JUDGED_STATUSES.
+    """
     run = _run(tmp_path)
     payload = minimal_scenarios()
     payload["scenarios"][0]["status"] = "rejected"
     payload["scenarios"][0]["rejected_reason"] = "out_of_scope"
     write_json(run.scenarios, payload)
-    findings = check_instances(run)
-    assert any("'rejected'" in f.message and "active" in f.message for f in findings)
+    assert check_instances(run) == []
 
 
 def test_an_instance_for_a_still_proposed_scenario_is_reported(tmp_path):
@@ -92,18 +97,18 @@ def test_an_instance_for_a_still_proposed_scenario_is_reported(tmp_path):
     payload["scenarios"][0]["status"] = "proposed"
     write_json(run.scenarios, payload)
     findings = check_instances(run)
-    assert any("'proposed'" in f.message and "active" in f.message for f in findings)
+    assert any("'proposed'" in f.message and "judged" in f.message for f in findings)
 
 
-@pytest.mark.parametrize("status", ["proposed", "duplicate", "rejected"])
+@pytest.mark.parametrize("status", ["proposed", "duplicate"])
 def test_an_unfit_status_yields_exactly_one_finding_per_instance(tmp_path, status):
+    """`rejected` is deliberately absent: it is judged, so it is admitted."""
     run = _run(tmp_path)
     payload = minimal_scenarios()
     payload["scenarios"][0]["status"] = status
     payload["scenarios"][0]["duplicate_of"] = "scn-001"
-    payload["scenarios"][0]["rejected_reason"] = "out_of_scope"
     write_json(run.scenarios, payload)
-    findings = [f for f in check_instances(run) if "active" in f.message]
+    findings = [f for f in check_instances(run) if "judged" in f.message]
     assert len(findings) == 1
     assert findings[0].artifact == run.instance_dir("scn-001")
 
