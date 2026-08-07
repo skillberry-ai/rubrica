@@ -334,13 +334,14 @@ def _is_number(value):
 def _contract_problems(contract):
     """-> a list of contract-shape problems, empty if the contract is well-formed.
 
-    **The invariant, with its two stated limits: once this returns [], no
+    **The invariant, with its one stated limit: once this returns [], no
     *contract* field can make compute_reward raise, and no component it scores
-    comes from a contract field this gate left untyped -- except `tool`, and
-    except the transcript, both recorded at the end of this docstring rather
-    than assumed away.** Every other field compute_reward reads off the contract
-    is type-checked here, and every closed vocabulary it compares against is
-    checked for membership. Both halves matter, and each was violated:
+    comes from a contract field this gate left untyped. The single thing outside
+    it is the transcript, which is not a contract field at all -- recorded at the
+    end of this docstring rather than assumed away.** Every field compute_reward
+    reads off the contract is type-checked here, and every closed vocabulary it
+    compares against is checked for membership. Both halves matter, and each was
+    violated:
 
     - A field compute_reward *scored without reading* inflated the reward. A
       contract with no `assertions` scored 1.0 for assertions, because
@@ -366,6 +367,19 @@ def _contract_problems(contract):
       refuses an absent `args` on a tool assertion or an operation -- absent args
       match any call to the named tool, a looser match than the contract
       declared, and the schema requires the key.
+    - A field it read as a *default* inflated the reward again, one field further
+      over. `tool` cannot raise, because it is only ever compared for equality
+      against a call name; on an operation and on a `tool_called` a missing or
+      mistyped one also fails closed, scoring 0 for the item. On a
+      `tool_not_called` it did not: `call_matches` compares
+      `spec.get("tool", "")`, no call is ever named "", so an exclusion naming no
+      tool matched nothing and was therefore *satisfied* -- a free point for
+      asserting nothing, measured at assertions=1.0 on a run that called the
+      wrong tool. That is the same vacuous truth _assertion_satisfied already
+      refuses for an empty `answer_excludes` value. So `tool` must be a non-empty
+      string for both _TOOL_KINDS, and for every operation too: the schema
+      requires it there as well, and leaving one of the pair untyped is how the
+      two drift apart.
 
     Closed vocabularies fail closed here, uniformly. An unrecognised assertion
     kind already failed closed inside score_assertions (counted as failed).
@@ -388,8 +402,8 @@ def _contract_problems(contract):
     invert that conclusion, which is the one thing this file's docstring says
     must not happen.
 
-    The two limits named at the top, so that this gate's silence is not read as
-    a guarantee it does not give:
+    The one limit named at the top, so that this gate's silence is not read as a
+    guarantee it does not give:
 
     - The transcript. compute_reward's other three arguments come from
       parse_transcript, not from the contract, and a `result` event carrying a
@@ -398,13 +412,6 @@ def _contract_problems(contract):
       own docstring says a broken log must score rather than crash -- so
       choosing between dropping such an answer and str()-ing it is a scoring
       decision, not a shape check, and it is not made here.
-    - `tool`, on an assertion and on an operation. It cannot raise: it is only
-      ever compared for equality. On an operation and on a `tool_called` it also
-      fails closed, scoring 0 for the item. On a `tool_not_called` it does not:
-      an exclusion naming no tool matches no call and is therefore satisfied by
-      every run, so an absent or empty `tool` scores a free point -- the same
-      vacuous truth _assertion_satisfied refuses for an empty `answer_excludes`
-      value. Requiring a non-empty string `tool` for both _TOOL_KINDS closes it.
     """
     problems = []
 
@@ -446,6 +453,7 @@ def _contract_problems(contract):
             kind = assertion.get("kind")
             value = assertion.get("value", "")
             args = assertion.get("args")
+            tool = assertion.get("tool")
             if kind in _ANSWER_KINDS and not isinstance(value, str):
                 problems.append(
                     f"assertions[{i}].value must be a string for kind {kind!r}, got {value!r}"
@@ -453,6 +461,11 @@ def _contract_problems(contract):
             if kind in _TOOL_KINDS and not isinstance(args, dict):
                 problems.append(
                     f"assertions[{i}].args must be an object for kind {kind!r}, got {args!r}"
+                )
+            if kind in _TOOL_KINDS and not (isinstance(tool, str) and tool):
+                problems.append(
+                    f"assertions[{i}].tool must be a non-empty string for kind {kind!r}, got "
+                    f"{tool!r}"
                 )
 
     trajectory = contract.get("trajectory")
@@ -479,10 +492,16 @@ def _contract_problems(contract):
                     problems.append(
                         f"trajectory.operations[{i}] must be an object, got {operation!r}"
                     )
-                elif not isinstance(operation.get("args"), dict):
+                    continue
+                op_tool, op_args = operation.get("tool"), operation.get("args")
+                if not isinstance(op_args, dict):
                     problems.append(
-                        f"trajectory.operations[{i}].args must be an object, got "
-                        f"{operation.get('args')!r}"
+                        f"trajectory.operations[{i}].args must be an object, got {op_args!r}"
+                    )
+                if not (isinstance(op_tool, str) and op_tool):
+                    problems.append(
+                        f"trajectory.operations[{i}].tool must be a non-empty string, got "
+                        f"{op_tool!r}"
                     )
 
     weights = contract.get("weights")

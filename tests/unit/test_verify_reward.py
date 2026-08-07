@@ -458,16 +458,26 @@ def _answer_assertion(kind, value):
     return {"id": "a0", "kind": kind, "value": value, "rationale": "the job id"}
 
 
-_NO_ARGS = object()
+OMIT = object()
 
 
-def _tool_assertion(kind, args=_NO_ARGS, tool="query_aap2"):
-    """A tool assertion; `args` left at its default omits the key entirely."""
+def _tool_assertion(kind, args=OMIT, tool="query_aap2"):
+    """A tool assertion; either field left at OMIT drops the key entirely."""
     assertion = {"id": "a0", "kind": kind, "value": "at least once", "rationale": "the lookup"}
-    assertion["tool"] = tool
-    if args is not _NO_ARGS:
+    if tool is not OMIT:
+        assertion["tool"] = tool
+    if args is not OMIT:
         assertion["args"] = args
     return assertion
+
+
+def _operation(tool=OMIT, args=OMIT):
+    operation = {}
+    if tool is not OMIT:
+        operation["tool"] = tool
+    if args is not OMIT:
+        operation["args"] = args
+    return operation
 
 
 @pytest.mark.parametrize("kind", ["answer_contains", "answer_excludes", "value_equals"])
@@ -527,7 +537,7 @@ def test_main_refuses_a_trajectory_operation_whose_args_are_not_an_object(tmp_pa
 
 
 def test_main_refuses_a_trajectory_operation_with_no_args_at_all(tmp_path):
-    contract = _contract(trajectory={"match": "subset", "operations": [{"tool": "query_aap2"}]})
+    contract = _contract(trajectory={"match": "subset", "operations": [_operation(tool="t")]})
     _refuses(
         tmp_path,
         contract,
@@ -570,6 +580,72 @@ def test_a_well_typed_tool_assertion_still_scores(tmp_path):
     expected, logs, out = _write_run(tmp_path, contract, transcript)
     assert main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)]) == 0
     assert (out / "reward.txt").read_text() == "1.0"
+
+
+# -- an exclusion that names no tool ---------------------------------------
+#
+# call_matches compares `spec.get("tool", "")` against the call name, and no call
+# is ever named "". So a tool_not_called with an absent or empty `tool` matched
+# nothing and was therefore *satisfied* by every run: a free point for asserting
+# nothing, in the one place a bug silently inflates every score. It is the same
+# vacuous truth _assertion_satisfied already refuses for an empty
+# answer_excludes value.
+
+
+def test_main_refuses_a_tool_not_called_that_names_no_tool_instead_of_scoring_it(tmp_path):
+    """The finding itself: the inflation, not merely the missing type.
+
+    Measured before the fix on the WRONG_ANSWER_TRANSCRIPT run -- the agent called
+    the wrong tool and answered "I could not determine which job failed" --
+    assertions scored 1.0 and the reward 1.0, where the healthy contract in
+    test_a_healthy_contract_scores_the_wrong_answer_run_zero scores 0.0. A total
+    failure turned into a full mark.
+    """
+    contract = _contract(
+        assertions=[_tool_assertion("tool_not_called", {"action": "delete_job"}, tool=OMIT)]
+    )
+    _refuses(
+        tmp_path,
+        contract,
+        WRONG_ANSWER_TRANSCRIPT,
+        expect_in_error="assertions[0].tool must be a non-empty string for kind 'tool_not_called'",
+    )
+
+
+@pytest.mark.parametrize("kind", ["tool_called", "tool_not_called"])
+@pytest.mark.parametrize("tool", [OMIT, "", 5, ["query_aap2"], None])
+def test_main_refuses_a_tool_assertion_without_a_usable_tool_name(tmp_path, kind, tool):
+    """Empty is refused alongside absent and mistyped: "" is what inflated.
+
+    A non-string cannot raise -- `tool` is only ever compared for equality -- so
+    this is a fail-closed case for tool_called and an inflation for
+    tool_not_called. Both refuse, because both are bypassed authoring gates.
+    """
+    contract = _contract(assertions=[_tool_assertion(kind, {"action": "delete_job"}, tool=tool)])
+    _refuses(
+        tmp_path,
+        contract,
+        WRONG_ANSWER_TRANSCRIPT,
+        expect_in_error=f"assertions[0].tool must be a non-empty string for kind {kind!r}",
+    )
+
+
+@pytest.mark.parametrize("tool", [OMIT, "", 5, None])
+def test_main_refuses_a_trajectory_operation_without_a_usable_tool_name(tmp_path, tool):
+    """An operation gets the same check, though it only ever fails closed.
+
+    The schema requires `tool` for a call as well, and leaving one of the pair
+    untyped is how the two drift apart.
+    """
+    contract = _contract(
+        trajectory={"match": "subset", "operations": [_operation(tool=tool, args={})]}
+    )
+    _refuses(
+        tmp_path,
+        contract,
+        WRONG_ANSWER_TRANSCRIPT,
+        expect_in_error="trajectory.operations[0].tool must be a non-empty string",
+    )
 
 
 def test_a_tool_assertion_with_an_unscored_non_string_value_still_scores(tmp_path):
