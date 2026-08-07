@@ -16,7 +16,10 @@ src/testgen/suite/verify.py is what the tests exercise, so the tested file and
 the executed file cannot differ.
 """
 
+import argparse
 import json
+import sys
+from pathlib import Path
 
 CONTRACT = "testgen/v1"
 
@@ -188,3 +191,144 @@ def score_assertions(answer, calls, assertions):
     if total == 0:
         return 1.0, detail
     return (total - len(failed)) / total, detail
+
+
+def _match_unordered(operations, calls):
+    """-> the set of expected-operation indices satisfied, greedily.
+
+    Each actual call is consumed by at most one expected operation. Without
+    that, a single call would satisfy a two-operation trajectory and hop depth
+    -- the whole difficulty signal -- would stop being measured.
+    """
+    used, matched = set(), set()
+    for i, operation in enumerate(operations):
+        for j, call in enumerate(calls):
+            if j in used or not call_matches(operation, call):
+                continue
+            used.add(j)
+            matched.add(i)
+            break
+    return matched
+
+
+def score_trajectory(calls, trajectory):
+    """-> (score, detail) for one of the three declared match modes."""
+    operations = trajectory.get("operations") or []
+    match = trajectory.get("match", "subset")
+
+    if match == "exact-sequence":
+        pairwise = len(operations) == len(calls) and all(
+            call_matches(operation, call) for operation, call in zip(operations, calls, strict=True)
+        )
+        matched = set(range(len(operations))) if pairwise else set()
+        score = 1.0 if pairwise else 0.0
+    else:
+        matched = _match_unordered(operations, calls)
+        complete = len(matched) == len(operations)
+        if match == "exact-set":
+            score = 1.0 if complete and len(calls) == len(operations) else 0.0
+        else:
+            score = 1.0 if not operations else len(matched) / len(operations)
+
+    detail = {
+        "match": match,
+        "actual": [{"tool": name, "args": args} for name, args in calls],
+        "unmatched": [op for i, op in enumerate(operations) if i not in matched],
+        "extra_calls": max(0, len(calls) - len(operations)),
+    }
+    return score, detail
+
+
+def compute_reward(contract, calls, answer, ok):
+    """-> (reward, detail).
+
+    `reward` holds only scalars. Everything a human needs to understand the
+    number goes in `detail`, written alongside as reward-detail.json: a bare
+    0.625 with no way to see which check failed costs real debugging time.
+
+    The completion gate multiplies rather than contributes. A run that crashed
+    or answered nothing has not earned partial credit for calling the right
+    tools, but the components stay visible in `reward` so the gate is
+    distinguishable from a genuinely wrong answer.
+    """
+    completion = contract.get("completion") or {}
+    gate = 1.0
+    if completion.get("status", "ok") == "ok" and not ok:
+        gate = 0.0
+    if completion.get("nonempty_answer", True) and not answer.strip():
+        gate = 0.0
+
+    assertion_score, assertion_detail = score_assertions(
+        answer, calls, contract.get("assertions") or []
+    )
+    trajectory_score, trajectory_detail = score_trajectory(calls, contract.get("trajectory") or {})
+
+    weights = contract.get("weights") or {}
+    weight_assertions = float(weights.get("assertions", DEFAULT_WEIGHTS["assertions"]))
+    weight_trajectory = float(weights.get("trajectory", DEFAULT_WEIGHTS["trajectory"]))
+    combined = weight_assertions * assertion_score + weight_trajectory * trajectory_score
+
+    reward = {
+        "reward": round(gate * combined, 6),
+        "completion": gate,
+        "assertions": round(assertion_score, 6),
+        "trajectory": round(trajectory_score, 6),
+    }
+    detail = {
+        "scenario_id": contract.get("scenario_id"),
+        "gate": gate,
+        "weights": {"assertions": weight_assertions, "trajectory": weight_trajectory},
+        "assertions": assertion_detail,
+        "trajectory": trajectory_detail,
+    }
+    return reward, detail
+
+
+def _read_logs(agent_logs):
+    """Concatenate every transcript file in the agent log directory.
+
+    Globs *.jsonl and *.txt, so --out must not point at --agent-logs: a second
+    run would otherwise read its own reward.txt back as transcript input.
+    """
+    parts = []
+    for pattern in ("*.jsonl", "*.txt"):
+        for path in sorted(Path(agent_logs).glob(pattern)):
+            parts.append(path.read_text(errors="replace"))
+    return "\n".join(parts)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected", default="/tests/expected.json")
+    parser.add_argument("--agent-logs", default="/logs/agent")
+    parser.add_argument("--out", default="/logs/verifier")
+    args = parser.parse_args(argv)
+
+    contract = json.loads(Path(args.expected).read_text())
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+
+    declared = contract.get("contract")
+    if declared != CONTRACT:
+        # Refuse rather than write a misleading 0. A contract this verifier
+        # cannot read is a bypassed authoring gate, not a bad agent run, and
+        # reporting it as 0 would invert that conclusion. No reward.txt is
+        # written, so the platform sees a missing reward instead of a real one.
+        message = f"expected contract {CONTRACT!r}, got {declared!r}"
+        (out / "reward-detail.json").write_text(json.dumps({"error": message}, indent=2))
+        print(f"verify.py: {message}", file=sys.stderr)
+        return 2
+
+    calls, answer, ok = parse_transcript(_read_logs(args.agent_logs))
+    reward, detail = compute_reward(contract, calls, answer, ok)
+
+    (out / "reward.json").write_text(json.dumps(reward, indent=2, sort_keys=True))
+    (out / "reward.txt").write_text(str(reward["reward"]))
+    (out / "reward-detail.json").write_text(
+        json.dumps(detail, indent=2, sort_keys=True, default=str)
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
