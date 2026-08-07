@@ -40,11 +40,14 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "seed": "seed-0.1.json",
     "expected": "expected-0.1.json",
     "verdict": "verdict-0.1.json",
+    "suite-expected": "suite-expected-0.1.json",
+    "report": "report-0.1.json",
 }
 
-# Which artifact kinds each stage must produce. Stages that emit no JSON
-# artifact of their own map to an empty tuple and pass layer 1 trivially;
-# they are gated by check-refs and by the smoke report instead.
+# Which artifact kinds each stage must produce. Every stage now has a real
+# gate: a stage that produced none of its required kinds fails layer 1
+# rather than passing trivially, so the orchestrator never dispatches the
+# next stage against an empty or missing output.
 STAGE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "intake": ("manifest",),
     "extract": ("claims",),
@@ -53,8 +56,8 @@ STAGE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "score": ("coverage",),
     "instantiate": ("seed", "expected"),
     "challenge": ("verdict",),
-    "emit": (),
-    "smoke": (),
+    "emit": ("suite-expected",),
+    "smoke": ("report",),
 }
 
 
@@ -130,6 +133,12 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         return [run.seed(sid) for sid in run.scenario_ids_with_instances()]
     if kind == "expected":
         return [run.expected(sid) for sid in run.scenario_ids_with_instances()]
+    if kind == "suite-expected":
+        return [
+            run.task_dir(sid) / "tests" / "expected.json" for sid in run.scenario_ids_with_tasks()
+        ]
+    if kind == "report":
+        return [run.report] if run.report.is_file() else []
     raise KeyError(f"unknown artifact kind {kind!r}")
 
 

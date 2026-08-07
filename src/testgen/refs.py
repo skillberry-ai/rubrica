@@ -908,6 +908,62 @@ def check_verdicts(run: RunPaths) -> list[Finding]:
     return out
 
 
+_PACKAGE_FILES = (
+    "task.toml",
+    "instruction.md",
+    "seed.json",
+    "golden.json",
+    "provenance.md",
+    "tests/expected.json",
+    "tests/verify.py",
+    "tests/test.sh",
+)
+
+
+def check_suite(run: RunPaths) -> list[Finding]:
+    """Each emitted package is complete and addresses an active scenario.
+
+    A package missing its verifier or its contract is worse than no package: it
+    reaches the platform, fails to score, and reads as an agent failure.
+    """
+    scenarios_doc = _load(run.scenarios) or {"scenarios": []}
+    by_id = {s["id"]: s for s in scenarios_doc.get("scenarios", [])}
+    out: list[Finding] = []
+
+    for sid in run.scenario_ids_with_tasks():
+        task = run.task_dir(sid)
+        for name in _PACKAGE_FILES:
+            if not (task / name).is_file():
+                out.append(Finding(task, "refs", "", f"emitted package is missing {name}"))
+
+        scenario = by_id.get(sid)
+        if scenario is None:
+            out.append(Finding(task, "refs", "", f"no scenario named {sid} was proposed"))
+        elif scenario.get("status") != "active":
+            out.append(
+                Finding(
+                    task,
+                    "refs",
+                    "",
+                    f"scenario {sid} has status {scenario.get('status')!r} but only an active "
+                    "scenario should have been emitted",
+                )
+            )
+
+        contract = _load(task / "tests" / "expected.json")
+        if contract is not None and contract.get("scenario_id") != sid:
+            out.append(
+                Finding(
+                    task / "tests" / "expected.json",
+                    "refs",
+                    "/scenario_id",
+                    f"contract names scenario {contract.get('scenario_id')} but lives in the "
+                    f"task directory for {sid}",
+                )
+            )
+    return out
+
+
 def check_all(run: RunPaths) -> list[Finding]:
     """Every layer-2 check that the run directory currently has inputs for."""
     findings: list[Finding] = []
@@ -918,4 +974,5 @@ def check_all(run: RunPaths) -> list[Finding]:
     findings.extend(check_coverage(run))
     findings.extend(check_instances(run))
     findings.extend(check_verdicts(run))
+    findings.extend(check_suite(run))
     return findings

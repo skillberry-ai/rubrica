@@ -160,6 +160,23 @@ class RunPaths:
         """
         return [name for name in self._instance_dir_names() if is_safe_segment(name)]
 
+    def scenario_ids_with_tasks(self) -> list[str]:
+        """Scenario ids that have an emitted task directory, sorted.
+
+        Names that are not safe path segments are excluded, for the same reason
+        scenario_ids_with_instances excludes them: returning one makes every
+        later task_dir() call raise UnsafeSegment, which the CLI maps to exit 2.
+        Unlike the instances directory this one is written only by emit, which
+        derives every name from an id safe_segment already vetted -- so an
+        unsafe name here means someone edited the run directory by hand, and
+        skipping it is the honest response.
+        """
+        if not self.suite_dir.is_dir():
+            return []
+        return sorted(
+            p.name for p in self.suite_dir.iterdir() if p.is_dir() and is_safe_segment(p.name)
+        )
+
     def unsafe_instance_dir_names(self) -> list[str]:
         """Instance directory names that are not safe path segments, sorted.
 

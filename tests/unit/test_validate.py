@@ -17,8 +17,10 @@ from tests.builders import (
     minimal_coverage,
     minimal_expected,
     minimal_manifest,
+    minimal_report,
     minimal_scenarios,
     minimal_seed,
+    minimal_suite_expected,
     minimal_verdict,
     minimal_world_model,
 )
@@ -76,6 +78,8 @@ MINIMAL_BUILDERS = {
     "seed": minimal_seed,
     "expected": minimal_expected,
     "verdict": minimal_verdict,
+    "suite-expected": minimal_suite_expected,
+    "report": minimal_report,
 }
 
 
@@ -275,8 +279,16 @@ def test_validate_stage_rejects_an_unknown_stage(tmp_path):
         validate_stage(RunPaths(tmp_path), "reconsile")
 
 
-def test_stages_with_no_json_artifact_pass_trivially(tmp_path):
-    assert validate_stage(RunPaths(tmp_path), "emit") == []
+def test_every_stage_now_has_a_real_gate(tmp_path):
+    """Placeholder behaviour this task removes: every stage used to map to
+    () and pass trivially. emit and smoke are the last two stages that did,
+    and an empty run now fails both -- exit 0 here would tell the
+    orchestrator that an empty suite, or a run with no report, was a
+    success.
+    """
+    run = RunPaths(tmp_path)
+    assert validate_stage(run, "emit") != []
+    assert validate_stage(run, "smoke") != []
 
 
 def test_validate_stage_does_not_raise_on_an_unsafe_instance_directory(tmp_path):
@@ -293,3 +305,126 @@ def test_validate_stage_does_not_raise_on_an_unsafe_instance_directory(tmp_path)
     write_json(run.expected("scn-001"), minimal_expected())
     (run.instances_dir / "scn 001").mkdir(parents=True, exist_ok=True)
     assert validate_stage(run, "instantiate") == []
+
+
+def test_the_emit_stage_reports_a_run_that_produced_no_package(tmp_path):
+    """Exit 0 here would tell the orchestrator an empty suite was a success."""
+    from testgen.paths import RunPaths
+    from testgen.validate import validate_stage
+
+    run = RunPaths(tmp_path)
+    run.root.mkdir(parents=True, exist_ok=True)
+    findings = validate_stage(run, "emit")
+    assert len(findings) == 1
+    assert "produced no suite-expected artifact" in findings[0].message
+
+
+def test_the_smoke_stage_reports_a_run_with_no_report(tmp_path):
+    from testgen.paths import RunPaths
+    from testgen.validate import validate_stage
+
+    run = RunPaths(tmp_path)
+    run.root.mkdir(parents=True, exist_ok=True)
+    findings = validate_stage(run, "smoke")
+    assert len(findings) == 1
+    assert "produced no report artifact" in findings[0].message
+
+
+def test_an_emitted_contract_validates(tmp_path):
+    from testgen.artifacts import write_json
+    from testgen.validate import validate_artifact
+    from tests.builders import minimal_suite_expected
+
+    path = tmp_path / "expected.json"
+    write_json(path, minimal_suite_expected())
+    assert validate_artifact(path, "suite-expected") == []
+
+
+def test_a_contract_with_the_wrong_contract_string_is_rejected(tmp_path):
+    from testgen.artifacts import write_json
+    from testgen.validate import validate_artifact
+    from tests.builders import minimal_suite_expected
+
+    path = tmp_path / "expected.json"
+    write_json(path, minimal_suite_expected(contract="bench/v2"))
+    assert validate_artifact(path, "suite-expected") != []
+
+
+def test_a_data_assertion_carrying_a_tool_is_rejected(tmp_path):
+    """The two assertion shapes must stay distinguishable in the emitted file."""
+    from testgen.artifacts import write_json
+    from testgen.validate import validate_artifact
+    from tests.builders import minimal_suite_expected
+
+    payload = minimal_suite_expected()
+    payload["assertions"][0]["tool"] = "query_aap2"
+    path = tmp_path / "expected.json"
+    write_json(path, payload)
+    assert validate_artifact(path, "suite-expected") != []
+
+
+def test_a_trajectory_assertion_without_a_tool_is_rejected(tmp_path):
+    from testgen.artifacts import write_json
+    from testgen.validate import validate_artifact
+    from tests.builders import minimal_suite_expected
+
+    payload = minimal_suite_expected()
+    del payload["assertions"][1]["tool"]
+    path = tmp_path / "expected.json"
+    write_json(path, payload)
+    assert validate_artifact(path, "suite-expected") != []
+
+
+def test_weights_other_than_verifys_defaults_are_rejected(tmp_path):
+    """Authoring-time backstop for verify.py's runtime refusal.
+
+    verify.py exits 2 without writing a reward when a contract's weights do
+    not sum to 1.0. emit only ever writes verify.DEFAULT_WEIGHTS, so the
+    schema pins those exact constants with const -- JSON Schema has no sum
+    constraint -- catching the defect at validate time instead of at score
+    time.
+    """
+    from testgen.artifacts import write_json
+    from testgen.validate import validate_artifact
+    from tests.builders import minimal_suite_expected
+
+    payload = minimal_suite_expected()
+    payload["weights"] = {"assertions": 0.5, "trajectory": 0.5}
+    path = tmp_path / "expected.json"
+    write_json(path, payload)
+    assert validate_artifact(path, "suite-expected") != []
+
+
+def test_a_minimal_report_validates(tmp_path):
+    from testgen.artifacts import write_json
+    from testgen.validate import validate_artifact
+    from tests.builders import minimal_report
+
+    path = tmp_path / "07-report.json"
+    write_json(path, minimal_report())
+    assert validate_artifact(path, "report") == []
+
+
+def test_an_unscored_result_need_not_carry_a_reward(tmp_path):
+    """Unscoreable is not zero: verify.py refuses rather than reporting 0.0."""
+    from testgen.artifacts import write_json
+    from testgen.validate import validate_artifact
+    from tests.builders import minimal_report
+
+    payload = minimal_report()
+    payload["tasks"][0]["results"][0] = {"role": "oracle", "scored": False}
+    path = tmp_path / "07-report.json"
+    write_json(path, payload)
+    assert validate_artifact(path, "report") == []
+
+
+def test_a_scored_result_must_carry_a_reward(tmp_path):
+    from testgen.artifacts import write_json
+    from testgen.validate import validate_artifact
+    from tests.builders import minimal_report
+
+    payload = minimal_report()
+    payload["tasks"][0]["results"][0] = {"role": "oracle", "scored": True}
+    path = tmp_path / "07-report.json"
+    write_json(path, payload)
+    assert validate_artifact(path, "report") != []

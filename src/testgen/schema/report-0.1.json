@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "report-0.1.json",
+  "title": "Smoke report",
+  "description": "Stage 7. Three agent roles run the emitted suite: a weak baseline that should fail nearly everything, the agent under test, and an oracle handed the reference answer that should pass nearly everything. The third run is a test of the test suite -- if the oracle fails, the gold labels or the verifier are broken, not the agent.",
+  "type": "object",
+  "required": ["schema_version", "run_id", "agents", "tasks", "summary", "verdict"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "run_id": { "$ref": "#/$defs/id" },
+    "agents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["role", "model"],
+        "additionalProperties": false,
+        "properties": {
+          "role": { "$ref": "#/$defs/role" },
+          "model": { "type": "string", "minLength": 1 },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["scenario_id", "results", "all_pass", "all_fail"],
+        "additionalProperties": false,
+        "properties": {
+          "scenario_id": { "$ref": "#/$defs/id" },
+          "results": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/result" }
+          },
+          "all_pass": { "type": "boolean" },
+          "all_fail": { "type": "boolean" }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "mean_reward_by_role", "all_pass_tasks", "all_fail_tasks",
+        "oracle_failures", "unscoreable"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mean_reward_by_role": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/role" },
+          "additionalProperties": { "$ref": "#/$defs/fraction" }
+        },
+        "all_pass_tasks": { "type": "integer", "minimum": 0 },
+        "all_fail_tasks": { "type": "integer", "minimum": 0 },
+        "oracle_failures": { "type": "integer", "minimum": 0 },
+        "unscoreable": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "verdict": {
+      "description": "healthy: a real spread. degenerate_trivial: the weak baseline passes too much, so the suite is not testing anything. broken_labels: the oracle fails too much, which indicts the labels or the verifier rather than the agent. inconclusive: too few scoreable tasks to say.",
+      "enum": ["healthy", "degenerate_trivial", "broken_labels", "inconclusive"]
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "\\A[A-Za-z0-9][A-Za-z0-9._-]*\\Z",
+      "maxLength": 128
+    },
+    "fraction": { "type": "number", "minimum": 0, "maximum": 1 },
+    "role": { "enum": ["weak_baseline", "under_test", "oracle"] },
+    "result": {
+      "type": "object",
+      "required": ["role", "scored"],
+      "additionalProperties": false,
+      "properties": {
+        "role": { "$ref": "#/$defs/role" },
+        "scored": { "type": "boolean" },
+        "reward": { "$ref": "#/$defs/fraction" },
+        "completion": { "$ref": "#/$defs/fraction" },
+        "assertions": { "$ref": "#/$defs/fraction" },
+        "trajectory": { "$ref": "#/$defs/fraction" },
+        "notes": { "type": "string" }
+      },
+      "if": { "properties": { "scored": { "const": true } }, "required": ["scored"] },
+      "then": { "required": ["reward", "completion", "assertions", "trajectory"] }
+    }
+  }
+}

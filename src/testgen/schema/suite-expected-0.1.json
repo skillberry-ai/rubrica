@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "suite-expected-0.1.json",
+  "title": "Scoring contract for one emitted task",
+  "description": "What suite/verify.py consumes inside the task container. A projection of 04-instances/<sid>/expected.json onto tool names a transcript will show; grounded_in is deliberately absent, since the container has no seed to resolve a pointer against.",
+  "type": "object",
+  "required": ["contract", "scenario_id", "completion", "assertions", "trajectory", "weights"],
+  "additionalProperties": false,
+  "properties": {
+    "contract": { "const": "testgen/v1" },
+    "scenario_id": { "$ref": "#/$defs/id" },
+    "completion": {
+      "type": "object",
+      "required": ["status", "nonempty_answer"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "enum": ["ok", "error"] },
+        "nonempty_answer": { "type": "boolean" }
+      }
+    },
+    "assertions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/assertion" }
+    },
+    "trajectory": {
+      "type": "object",
+      "required": ["match", "operations"],
+      "additionalProperties": false,
+      "properties": {
+        "match": { "enum": ["subset", "exact-set", "exact-sequence"] },
+        "operations": { "type": "array", "items": { "$ref": "#/$defs/call" } }
+      }
+    },
+    "weights": {
+      "type": "object",
+      "required": ["assertions", "trajectory"],
+      "additionalProperties": false,
+      "properties": {
+        "assertions": { "const": 0.8 },
+        "trajectory": { "const": 0.2 }
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "\\A[A-Za-z0-9][A-Za-z0-9._-]*\\Z",
+      "maxLength": 128
+    },
+    "fraction": { "type": "number", "minimum": 0, "maximum": 1 },
+    "call": {
+      "type": "object",
+      "required": ["tool", "args"],
+      "additionalProperties": false,
+      "properties": {
+        "tool": { "type": "string", "minLength": 1 },
+        "args": { "type": "object" }
+      }
+    },
+    "assertion": {
+      "type": "object",
+      "required": ["id", "kind", "value", "rationale"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": {
+          "enum": [
+            "answer_contains",
+            "answer_excludes",
+            "tool_called",
+            "tool_not_called",
+            "value_equals"
+          ]
+        },
+        "target": { "type": "string", "minLength": 1 },
+        "value": { "type": "string", "minLength": 1 },
+        "rationale": { "type": "string", "minLength": 1 },
+        "tool": { "type": "string", "minLength": 1 },
+        "args": { "type": "object" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": { "enum": ["answer_contains", "answer_excludes", "value_equals"] }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "additionalProperties": false,
+            "properties": {
+              "id": true, "kind": true, "target": true, "value": true, "rationale": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "enum": ["tool_called", "tool_not_called"] } },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["tool", "args"],
+            "additionalProperties": false,
+            "properties": {
+              "id": true, "kind": true, "target": true, "value": true,
+              "rationale": true, "tool": true, "args": true
+            }
+          }
+        }
+      ]
+    }
+  }
+}

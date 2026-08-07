@@ -235,6 +235,96 @@ def minimal_expected(**over: Any) -> dict[str, Any]:
     return payload
 
 
+def minimal_suite_expected(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "contract": "testgen/v1",
+        "scenario_id": "scn-001",
+        "completion": {"status": "ok", "nonempty_answer": True},
+        "assertions": [
+            {
+                "id": "a0",
+                "kind": "answer_contains",
+                "target": "answer",
+                "value": "90420",
+                "rationale": "the failing job id must appear in the answer",
+            },
+            {
+                "id": "a1",
+                "kind": "tool_called",
+                "target": "query_aap2.find_jobs",
+                "value": "at least once",
+                "rationale": "the agent must query rather than guess",
+                "tool": "query_aap2",
+                "args": {"action": "find_jobs"},
+            },
+        ],
+        "trajectory": {
+            "match": "subset",
+            "operations": [
+                {"tool": "query_aap2", "args": {"action": "find_jobs", "controller": "prod0"}}
+            ],
+        },
+        "weights": {"assertions": 0.8, "trajectory": 0.2},
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_report(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "run_id": "run-20260806-120000",
+        "agents": [
+            {"role": "weak_baseline", "model": "claude-haiku-4-5-20251001", "notes": "no tools"},
+            {"role": "under_test", "model": "claude-sonnet-5"},
+            {"role": "oracle", "model": "claude-sonnet-5", "notes": "handed golden.json"},
+        ],
+        "tasks": [
+            {
+                "scenario_id": "scn-001",
+                "results": [
+                    {
+                        "role": "weak_baseline",
+                        "scored": True,
+                        "reward": 0.0,
+                        "completion": 1.0,
+                        "assertions": 0.0,
+                        "trajectory": 0.0,
+                    },
+                    {
+                        "role": "under_test",
+                        "scored": True,
+                        "reward": 0.8,
+                        "completion": 1.0,
+                        "assertions": 1.0,
+                        "trajectory": 0.0,
+                    },
+                    {
+                        "role": "oracle",
+                        "scored": True,
+                        "reward": 1.0,
+                        "completion": 1.0,
+                        "assertions": 1.0,
+                        "trajectory": 1.0,
+                    },
+                ],
+                "all_pass": False,
+                "all_fail": False,
+            }
+        ],
+        "summary": {
+            "mean_reward_by_role": {"weak_baseline": 0.0, "under_test": 0.8, "oracle": 1.0},
+            "all_pass_tasks": 0,
+            "all_fail_tasks": 0,
+            "oracle_failures": 0,
+            "unscoreable": 0,
+        },
+        "verdict": "healthy",
+    }
+    payload.update(over)
+    return payload
+
+
 def minimal_verdict(**over: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": "0.1",

@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from testgen.artifacts import write_json
+from testgen.emit import emit_run
 from testgen.paths import RunPaths
 from testgen.refs import check_all
 from tests.builders import (
@@ -32,6 +33,7 @@ from tests.builders import (
     minimal_coverage,
     minimal_expected,
     minimal_manifest,
+    minimal_report,
     minimal_scenarios,
     minimal_seed,
     minimal_verdict,
@@ -70,6 +72,15 @@ def _challenge(run: RunPaths) -> None:
     write_json(run.verdict(SID), minimal_verdict())
 
 
+def _emit(run: RunPaths) -> None:
+    emitted, findings = emit_run(run)
+    assert (emitted, findings) == ([SID], []), f"emit failed in the states table: {findings}"
+
+
+def _smoke(run: RunPaths) -> None:
+    write_json(run.report, minimal_report())
+
+
 # Pipeline order. Cumulative: each state is every builder up to and including
 # its own. "empty" carries no builder -- a run directory that exists and
 # holds nothing is the state check_all sees before intake writes anything.
@@ -82,6 +93,8 @@ STATES: list[tuple[str, Callable[[RunPaths], None] | None]] = [
     ("score", _score),
     ("instantiate", _instantiate),
     ("challenge", _challenge),
+    ("emit", _emit),
+    ("smoke", _smoke),
 ]
 
 STATE_NAMES = [name for name, _ in STATES]
@@ -120,6 +133,8 @@ def test_the_states_are_cumulative_so_the_last_one_is_a_complete_run(tmp_path):
     assert run.seed(SID).is_file()
     assert run.expected(SID).is_file()
     assert run.verdict(SID).is_file()
+    assert (run.task_dir(SID) / "tests" / "expected.json").is_file()
+    assert run.report.is_file()
 
 
 def test_the_state_before_challenge_has_instances_but_no_verdicts(tmp_path):
