@@ -555,6 +555,10 @@ deliberately deferred rather than folded into a fix wave. **These are layer-2
 gaps in a contract that later stages are meant to be constrained by, so they
 belong at the front of the next plan, not the back.**
 
+**Status: nine of the ten shipped in the closure-and-emit build.** Only
+*re-verify input digests* remains, still waiting on `diff-runs` as its natural
+home. The nine are kept below as the record of what was owed and why.
+
 | Carried forward | Why it matters |
 |---|---|
 | A referential check for the manifest | Layer 2 never reads `manifest.json`, so the chain `manifest.inputs[].artifact_id` → `01-claims/<aid>.json` filename → that file's own `artifact_id` → `claims[].evidence[].artifact_id` is entirely unchecked. `_claim_ids` also unions ids into a set, so two claims files defining the same claim id merge silently — a real reconciliation hazard that reads as clean. |
@@ -568,9 +572,29 @@ belong at the front of the next plan, not the back.**
 | Enforce `manifest.created_utc`'s `date-time` format | The validator is built without a `format_checker`, so `"not-a-timestamp"` validates clean. The schema documents a constraint it does not have. |
 | Re-verify input digests | Nothing confirms the bytes in `00-inputs/` are the bytes whose hash the manifest records — a hole underneath the reproducibility claim. `diff-runs` is the natural home. |
 
-### Two process changes for the next plan
+### Carried forward from the closure-and-emit build
 
-Both come from defects that reached the final review rather than being caught earlier:
+Surfaced by that build's whole-branch review and its fix-wave re-review, and
+parked with rulings rather than fixed. **None is reachable through the
+deterministic pipeline — every one needs a hand-authored or tampered artifact —
+but so did `weights: 5`, which was fixed, so reachability alone is not the test.**
+
+| Carried forward | Why it matters |
+|---|---|
+| Re-verify input digests | The one item still owed from the contract-spine list. Nothing confirms the bytes in `00-inputs/` are the bytes whose hash the manifest records — a hole underneath the reproducibility claim. `diff-runs` is the natural home. |
+| Cross-check `07-report.json` against `06-suite/` | `check_all` has no report checker at all, so a report can list a scenario whose package `emit` has pruned and `validate --stage smoke` stays clean. Newly reachable *because* emit now prunes. Belongs with the smoke producer, which owns the artifact. |
+| `parse_transcript` on a non-string `result` | A transcript whose `result` is not a string crashes `compute_reward` at `answer.strip()`. The fix is a scoring decision — drop the event or coerce with `str()` — and it changes what a malformed agent log scores, so it needs a deliberate ruling rather than a guard. |
+| A syntactically invalid `expected.json` in a package | Exits 1 with a traceback from `json.loads` before `_contract_problems` runs, so the refusal path never engages. The gate cannot defend a file it could not parse; wrapping the read is the fix. |
+| `emit` prunes on a repairable upstream defect | A missing `binding` or a truncated oracle deletes the complete package a prior emit wrote. Defensible — emit is deterministic, so a repair restores it byte-for-byte, and a stale suite would be scored as accepted tests — but the docstring draws the line at "a missing *input*" and a truncated oracle is not that. |
+| An unsafe directory name under `06-suite/` | Skipped by `scenario_ids_with_tasks()`, so it is neither pruned nor reported, and would ship. There is no `unsafe_task_dir_names()` counterpart to the one `04-instances/` has. Requires manual tampering. |
+| `cli.py`'s `except Exception` blames the artifact | A genuine bug in `testgen` code is reported as "your artifact is malformed; run validate". If `validate` is then clean the orchestrator gets contradictory signals. The traceback on stderr mitigates it. |
+| `intake` sits outside the exception net | Its own `try` returns before the outer handler, so an unexpected exception there exits 1 with empty stdout — the mode that net was added to close. Crash surface is small: `slug` cannot emit an unsafe segment and IO raises `OSError`. |
+| `refs._load` swallows `ArtifactError` | An unparseable `02-scenarios.json` produces four findings blaming `03-coverage/latest.json` and `04-instances/`, and never names the broken file — so a repair prompt rewrites the wrong artifact. `emit._unreadable_instance` fixed this shape in the smaller instance; the bigger one is untouched. |
+
+### Three process changes for the next plan
+
+The first two come from the contract-spine build; the third is what the
+closure-and-emit build added, and it is the one that caught the most.
 
 1. **Enumerate the pipeline states and require `check_all` to be clean in each.**
    Tolerance was asserted in prose and tested for two states, which is how a
@@ -581,13 +605,55 @@ Both come from defects that reached the final review rather than being caught ea
    task.** Both structural gaps above are invisible in a table keyed on "which
    task implements this requirement" and obvious in one keyed on "which layer
    checks this artifact."
+3. **Require deletion-mutation evidence for every check, and name the state each
+   check must stay silent in.** The first half was added mid-build after three
+   consecutive tasks shipped a test whose *name* claimed a check its *values*
+   never reached, and it then caught nearly every remaining defect — a check is
+   not tested until deleting it makes a named test fail. But it is a
+   per-*check* counter, and every defect the whole-branch review found was
+   per-*seam*: two checks that each mutate correctly and jointly disagree, a
+   constant duplicated into a schema, a gate whose complement is unguarded.
+   Deletion-mutation cannot see any of those. The dual is the fix: for every new
+   check, name the pipeline state in which it must stay silent and add that
+   state to `tests/unit/test_refs_states.py`. That file was under-populated by
+   four reachable states, one of which *was* the Critical.
 
-A third, narrower lesson: **when a plan supplies both the code and its tests,
-the tests cannot be trusted to bound the code**, because both came from the same
-understanding. Three defects here were cases where plan-mandated test text
-exercised only the path on which the plan-mandated code was correct. Having each
-task's reviewer name one input class the plan's tests do not reach is a cheap
-counter.
+A narrower lesson, now confirmed twice: **when a plan supplies both the code and
+its tests, the tests cannot be trusted to bound the code**, because both came
+from the same understanding. In the contract-spine build three defects were
+plan-mandated test text exercising only the path on which the plan-mandated code
+was correct; in the closure-and-emit build **four of the seven tasks that needed
+a fix round needed it for a plan defect, not an implementation defect.** Having
+each task's reviewer name one input class the plan's tests do not reach is a
+cheap counter, and it worked.
+
+**The most expensive lesson, and the newest: scan the plan against *this
+document*, not only against itself.** The closure-and-emit build's pre-flight
+scan checked task-versus-task and found nothing. But the plan contained both
+readings of the post-rejection question — one task mandated tolerating a
+`rejected` scenario, another mandated reporting it — and the arbiter between them
+was §8's own layer-2 clause, in a file the scan never opened. Three components
+shipped three different answers, each individually correct and
+mutation-verified, and no per-task review could see they were answering one
+question. The states table that exists to prevent exactly that did not enumerate
+the state. **The spec's pipeline sketch and its "deferred, not forgotten"
+paragraphs are where the reachable-state commitments live; a plan review that
+skips them is checking internal consistency and calling it correctness.**
+
+A corollary worth writing down because it cost a false result: **a ruling can
+create a gap.** Relaxing a layer-2 check in exchange for keeping the rejection
+record left the prescribed coverage recomputation enforced by nothing, so a run
+could report coverage credited to a scenario the adversary threw out with both
+gates green. The old strict check had been an accidental tripwire; removing it
+without replacing it re-opened a defect an earlier task existed to close. When a
+ruling trades a check away, name what now enforces the thing the check was
+standing in for.
+
+One tooling note, because it silently corrupts mutation evidence: **a
+byte-length-preserving mutate-then-restore within the same second leaves
+CPython's mutated `.pyc` live**, since `.pyc` validation checks source size and
+mtime-to-the-second only. Every mutation harness here must set
+`PYTHONDONTWRITEBYTECODE=1` or sweep `__pycache__` between mutate and restore.
 
 ## 9. Testing the pipeline itself
 
