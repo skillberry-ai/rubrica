@@ -622,7 +622,7 @@ def _check_invariants(report_invariant, world: dict, seed: dict) -> None:
 
 
 def _check_reachability(
-    report, world: dict, seed: dict, expected: dict, scenario_caps: set
+    report, world: dict, seed: dict, expected: dict, scenario_caps: set[str]
 ) -> None:
     """Every assertion is grounded in this scenario's own seed.
 

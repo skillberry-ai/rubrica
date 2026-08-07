@@ -350,6 +350,46 @@ def test_a_tool_called_assertion_outside_the_capability_refs_is_reported(tmp_pat
     assert "no such capability: cap-nowhere" in messages
 
 
+def test_a_tool_called_assertion_naming_a_real_capability_outside_the_refs_is_reported(tmp_path):
+    """The assertion-level mirror of the trajectory-operations scoping check.
+
+    cap-nowhere (used above) is absent from the world model entirely, so it is
+    caught by the sibling "no such capability" branch and never reaches the
+    scoping check. This uses a capability that *is* in the world model but is
+    not in the scenario's capability_refs, which is the only way to exercise
+    the `kind == "tool_called" and capability_id not in scenario_caps` branch.
+    """
+    world = minimal_world_model()
+    world["capabilities"].append(
+        {
+            "id": "cap-get-log",
+            "operation": "query_aap2.get_job_log",
+            "params": [{"name": "job_id", "type": "integer", "required": True}],
+            "outcome_classes": [
+                {"id": "oc-success", "kind": "success", "description": "log returned"}
+            ],
+            "claims": ["clm-001"],
+            "confidence": "high",
+        }
+    )
+    world["denominator"] = {"version": 1, "capability_cells": 3, "goals": 1}
+    expected = minimal_expected(
+        discriminating_fact=minimal_scenarios()["scenarios"][0]["discriminating_fact"]
+    )
+    expected["assertions"].append(
+        {
+            "kind": "tool_called",
+            "target": "query_aap2.get_job_log",
+            "value": "at least once",
+            "rationale": "the scenario never claimed this capability",
+            "capability_id": "cap-get-log",
+        }
+    )
+    findings = check_instances(_run(tmp_path, world=world, expected=expected))
+    assert [f.pointer for f in findings] == ["/assertions/2/capability_id"]
+    assert "the scenario does not claim" in findings[0].message
+
+
 def test_a_tool_not_called_assertion_may_name_a_capability_outside_the_refs(tmp_path):
     """A forbidden-call check about an unclaimed capability is the point of the kind."""
     world = minimal_world_model()
