@@ -232,6 +232,35 @@ def test_the_post_rejection_state_still_holds_the_instance_and_the_verdict(tmp_p
     assert run.scenario_ids_with_tasks() == []
 
 
+def test_the_non_recomputed_post_rejection_state_is_reported(tmp_path):
+    """Pins the *incorrect* variant of the state above -- the one nothing pinned.
+
+    _post_rejection recomputes coverage by hand, so the table proves only the
+    correct variant clean; every value it writes into 03-coverage/latest.json
+    could have reached no behaviour at all and the suite would look identical.
+    This is the same state with §361's "recompute coverage" skipped: the scenario
+    is marked rejected in 02 and latest.json is left alone. check_all returned
+    zero findings there, and so did `validate --stage score`, while latest.json
+    reported pct 0.5 with the cell covered by the scenario the adversary threw
+    out -- coverage credited to a discarded scenario with both gates green.
+
+    Exactly one finding, so the assertion also proves nothing *else* fires: the
+    instance, the verdict and the package all legitimately survive a rejection.
+    """
+    run = build_state(tmp_path, "smoke")
+    assert check_all(run) == [], "the baseline this state is measured against"
+
+    scenarios = minimal_scenarios()
+    scenarios["scenarios"][0]["status"] = "rejected"
+    scenarios["scenarios"][0]["rejected_reason"] = "ambiguous"
+    write_json(run.scenarios, scenarios)
+
+    findings = check_all(run)
+    assert [f.pointer for f in findings] == ["/capability_matrix/cells/0"]
+    assert "recompute coverage" in findings[0].message, "the finding must say what to do"
+    assert findings[0].artifact == run.coverage_latest
+
+
 def test_the_state_before_challenge_has_instances_but_no_verdicts(tmp_path):
     """Pins the shape of the state that regressed, not just its cleanliness."""
     run = build_state(tmp_path, "instantiate")

@@ -489,6 +489,40 @@ def check_coverage(run: RunPaths) -> list[Finding]:
     gap_ids = {g["id"] for g in world.get("gaps", [])}
     scenarios_doc = _load(run.scenarios) or {"scenarios": []}
     scenario_ids = {s["id"] for s in scenarios_doc.get("scenarios", [])}
+    live_ids = {s["id"] for s in scenarios_doc.get("scenarios", []) if s["status"] in OPEN_STATUSES}
+
+    def check_live_credit(pointer: str, label: str, ids: list[str]) -> None:
+        """A row marked covered must be credited to a scenario that still counts.
+
+        `covered` means an accepted scenario exercises the row. When challenge
+        rejects that scenario, the design spec's reject path is "mark rejected in
+        02, recompute coverage" -- because the cell is a hole again. Nothing
+        enforced the recomputation: this function checked only that a cited
+        scenario_id *existed*, so the post-rejection state with the recomputation
+        skipped left both check-refs and `validate --stage score` green while
+        latest.json still reported the cell covered by the scenario the adversary
+        threw out as ambiguous. Coverage confidently wrong with no finding is the
+        defect class this module exists to catch.
+
+        `duplicate` counts as dead alongside `rejected`, which is why this reuses
+        OPEN_STATUSES rather than naming one status: a folded scenario is never
+        instantiated and never emitted (see JUDGED_STATUSES) and does not count
+        against max_scenarios either, so no test ships for the row it claimed and
+        the credit belongs to the scenario it was folded into. Both cases are
+        repaired the same way, by recomputing.
+
+        A row credited to a mix of live and dead scenarios stays covered: a live
+        scenario still exercises it. Only a row whose every credit is dead has
+        lost its coverage.
+        """
+        if ids and not (set(ids) & live_ids):
+            report(
+                pointer,
+                f"{label} is marked covered but every scenario crediting it "
+                f"({', '.join(sorted(ids))}) is rejected or a duplicate, so no accepted scenario "
+                "exercises it; a rejection reopens the row, so the score stage must recompute "
+                "coverage and justify the row as a hole",
+            )
 
     world_version = world.get("denominator", {}).get("version")
     if coverage.get("denominator_version") != world_version:
@@ -514,6 +548,12 @@ def check_coverage(run: RunPaths) -> list[Finding]:
                 f"/capability_matrix/cells/{i}",
                 f"cell {cell_ref(cell['capability_id'], cell['outcome_class_id'])} is marked "
                 "covered but lists no scenarios",
+            )
+        elif cell.get("covered"):
+            check_live_credit(
+                f"/capability_matrix/cells/{i}",
+                f"cell {cell_ref(cell['capability_id'], cell['outcome_class_id'])}",
+                cell.get("scenario_ids", []),
             )
     _check_matrix_arithmetic(
         report, "/capability_matrix", [bool(c.get("covered")) for c in matrix_cells], matrix
@@ -554,10 +594,14 @@ def check_coverage(run: RunPaths) -> list[Finding]:
                 f"row reports hop depths {sorted(row['hop_depths_present'])} but its "
                 f"scenarios have {sorted(present)}",
             )
-        # A goal row is covered iff it has a scenario and every expected hop
-        # depth is present. A goal exercised at one depth when two are expected
-        # is a partial row, and calling it covered is how a goal denominator
-        # reaches 100% without testing the hard half of the goal.
+        # A goal row is covered iff it has a *live* scenario and every expected
+        # hop depth is present. A goal exercised at one depth when two are
+        # expected is a partial row, and calling it covered is how a goal
+        # denominator reaches 100% without testing the hard half of the goal. The
+        # live-credit half is checked on both matrices, because both feed
+        # _check_matrix_arithmetic and the hole reconciliation below: a one-sided
+        # check would leave the goal denominator confidently wrong in exactly the
+        # state the capability denominator now reports.
         if not row["scenario_ids"]:
             if row["covered"]:
                 report(
@@ -569,6 +613,10 @@ def check_coverage(run: RunPaths) -> list[Finding]:
                 f"/goal_matrix/rows/{i}/covered",
                 f"goal {row['goal_id']} is marked covered={row['covered']} but its scenarios "
                 f"reach hop depths {sorted(present)} against an expected {sorted(expected_depths)}",
+            )
+        if row["covered"]:
+            check_live_credit(
+                f"/goal_matrix/rows/{i}", f"goal {row['goal_id']}", row["scenario_ids"]
             )
     _check_matrix_arithmetic(
         report, "/goal_matrix", [bool(r.get("covered")) for r in rows], goal_matrix

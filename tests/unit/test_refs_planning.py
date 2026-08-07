@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from testgen.artifacts import write_json
@@ -363,6 +365,100 @@ def test_a_goal_row_covered_at_only_some_expected_hop_depths_is_not_covered(tmp_
     run = _scored_run(tmp_path, coverage=coverage)
     messages = " || ".join(f.message for f in check_coverage(run))
     assert "hop depth" in messages
+
+
+# -- coverage credited to a scenario that no longer counts ------------------
+#
+# check_coverage checked that a cited scenario_id *existed* and never that it was
+# still live, so a cell could stay covered by a scenario challenge rejected or
+# dedupe folded away, with check-refs and validate --stage score both green.
+
+
+def _two_scenarios(dead_status, **dead_extra):
+    """scn-001 (hop 2) with the given status, plus a live scn-002 (hop 1)."""
+    doc = minimal_scenarios()
+    first = doc["scenarios"][0]
+    first["status"] = dead_status
+    first.update(dead_extra)
+    second = json.loads(json.dumps(first))
+    second["id"] = "scn-002"
+    second["hop_depth"] = 1
+    second["status"] = "active"
+    second.pop("rejected_reason", None)
+    second.pop("duplicate_of", None)
+    doc["scenarios"].append(second)
+    return doc
+
+
+def _run_with(tmp_path, scenarios, coverage):
+    run = RunPaths(tmp_path)
+    write_json(run.world_model, minimal_world_model())
+    write_json(run.scenarios, scenarios)
+    write_json(run.coverage_latest, coverage)
+    return run
+
+
+@pytest.mark.parametrize(
+    "status, extra",
+    [
+        ("rejected", {"rejected_reason": "ambiguous"}),
+        ("duplicate", {"duplicate_of": "scn-002"}),
+    ],
+)
+def test_a_covered_cell_credited_only_to_a_dead_scenario_is_reported(tmp_path, status, extra):
+    """A rejection reopens the cell; a dedupe fold moves the credit elsewhere.
+
+    Both are handled by the same rule because OPEN_STATUSES is the same "still
+    counts" set the max_scenarios cap uses: a duplicate is never instantiated and
+    never emitted, so no test ships for the cell it claimed.
+    """
+    run = _run_with(tmp_path, _two_scenarios(status, **extra), minimal_coverage())
+    findings = [f for f in check_coverage(run) if f.pointer == "/capability_matrix/cells/0"]
+    assert len(findings) == 1
+    assert "scn-001" in findings[0].message
+    assert "recompute coverage" in findings[0].message, "the finding must say what to do"
+
+
+def test_a_covered_goal_row_credited_only_to_a_rejected_scenario_is_reported(tmp_path):
+    """The goal matrix gets the same rule as the capability matrix.
+
+    Both feed _check_matrix_arithmetic and the hole reconciliation, so checking
+    only the cells would leave the goal denominator confidently wrong in exactly
+    the state the capability denominator reports.
+    """
+    scenarios = _two_scenarios("rejected", rejected_reason="ambiguous")
+    scenarios["scenarios"][1]["status"] = "rejected"
+    scenarios["scenarios"][1]["rejected_reason"] = "ambiguous"
+
+    coverage = minimal_coverage()
+    row = coverage["goal_matrix"]["rows"][0]
+    row["scenario_ids"] = ["scn-001", "scn-002"]
+    row["hop_depths_present"] = [1, 2]
+    row["covered"] = True
+    coverage["goal_matrix"]["covered"] = 1
+    coverage["goal_matrix"]["pct"] = 1.0
+    # The goal is covered now, so its honest-hole entry has to go with it.
+    coverage["holes"] = [h for h in coverage["holes"] if h["ref"] != goal_ref("goal-triage")]
+
+    run = _run_with(tmp_path, scenarios, coverage)
+    findings = [f for f in check_coverage(run) if f.pointer == "/goal_matrix/rows/0"]
+    assert len(findings) == 1
+    assert "scn-001, scn-002" in findings[0].message
+    assert "recompute coverage" in findings[0].message
+
+
+def test_a_covered_row_credited_to_both_a_live_and_a_dead_scenario_is_clean(tmp_path):
+    """The narrowness of the rule: one live scenario still exercises the cell.
+
+    Firing on *any* dead credit would make check-refs dirty for the whole run
+    after a single rejection in a well-covered cell, which is the phantom-repair
+    failure the states table exists to prevent.
+    """
+    scenarios = _two_scenarios("rejected", rejected_reason="ambiguous")
+    coverage = minimal_coverage()
+    coverage["capability_matrix"]["cells"][0]["scenario_ids"] = ["scn-001", "scn-002"]
+    run = _run_with(tmp_path, scenarios, coverage)
+    assert check_coverage(run) == []
 
 
 def test_the_builder_coverage_payload_is_clean(tmp_path):
