@@ -212,7 +212,15 @@ def _match_unordered(operations, calls):
 
 
 def score_trajectory(calls, trajectory):
-    """-> (score, detail) for one of the three declared match modes."""
+    """-> (score, detail) for one of the three declared match modes.
+
+    The "subset" fallback below is unreachable from main(): _contract_problems
+    requires trajectory.match to be present and one of the three modes, so a
+    contract that reaches here through the entrypoint has already declared one.
+    It stays because this is a pure function called directly by its own tests,
+    and because falling back is the right behaviour for a caller that has
+    already been told the contract is well-formed.
+    """
     operations = trajectory.get("operations") or []
     match = trajectory.get("match", "subset")
 
@@ -254,6 +262,13 @@ def compute_reward(contract, calls, answer, ok):
     or answered nothing has not earned partial credit for calling the right
     tools, but the components stay visible in `reward` so the gate is
     distinguishable from a genuinely wrong answer.
+
+    Every default this function falls back to -- `status`, `nonempty_answer`,
+    the empty assertion list, the empty trajectory, DEFAULT_WEIGHTS -- is
+    unreachable through main(), because _contract_problems refuses a contract
+    that omits or mistypes any of them. Read them as what a directly-called
+    pure function does with a contract it has been told is well-formed, not as
+    tolerance at the scoring seam. Tolerance there is score inflation.
     """
     completion = contract.get("completion") or {}
     gate = 1.0
@@ -289,40 +304,144 @@ def compute_reward(contract, calls, answer, ok):
 
 
 _VALID_MATCH_MODES = ("subset", "exact-set", "exact-sequence")
+_VALID_COMPLETION_STATUSES = ("ok", "error")
+
+
+def _is_number(value):
+    """Whether `value` is a real number. Booleans are not: True is not a weight."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _contract_problems(contract):
     """-> a list of contract-shape problems, empty if the contract is well-formed.
 
-    An unrecognised kind fails closed in score_assertions (counted as failed).
-    Without this check, an unrecognised trajectory.match failed open instead --
-    it fell through to "subset", the most lenient mode, so a one-character typo
-    like "exact_set" would silently score as if the mode were the loosest one
-    declared. Weights that don't sum to 1.0 have the same shape: a malformed
-    contract produces a reward outside [0, 1] that looks like a normal, if
-    unusually high, score. Both are bypassed-authoring-gate problems, not agent
-    problems, so main() refuses on them exactly like a CONTRACT mismatch.
+    **The invariant: once this returns [], compute_reward can neither raise nor
+    score a field it did not read.** Every field compute_reward touches is
+    type-checked here, and every closed vocabulary it compares against is
+    checked for membership. Both halves matter, and each was violated:
+
+    - A field compute_reward *scored without reading* inflated the reward. A
+      contract with no `assertions` scored 1.0 for assertions, because
+      score_assertions([]) == 1.0 is an honest vacuous truth for a pure
+      function and a catastrophe at this seam: a run that called the wrong tool
+      and answered "I could not determine which job failed" scored 0.8 instead
+      of 0.0. Same for a contract with no `trajectory`. So `assertions` must be
+      a non-empty list and `trajectory.operations` must be a list -- the
+      vacuous-truth functions are left alone, because they are right about
+      their own inputs.
+    - A field it *could not read* crashed it. A non-dict `weights` slipped
+      through the old `if isinstance(weights, dict)` guard -- which made the
+      weights check a no-op for exactly the input it guarded against -- and
+      compute_reward then raised AttributeError. A traceback exits 1 with no
+      payload, where the specified refuse path is exit 2 with an `error`.
+
+    Closed vocabularies fail closed here, uniformly. An unrecognised assertion
+    kind already failed closed inside score_assertions (counted as failed).
+    These did not:
+
+    - `trajectory.match`, absent, fell through to "subset", the most lenient
+      mode -- so a contract that declared no mode at all scored under the
+      loosest one, while an explicit `null` correctly refused. Same field, same
+      file, opposite behaviour. The key is now required.
+    - `completion.status`, unrecognised, silently disabled the crash gate: the
+      test was `status == "ok"`, so "OK" or "weird" or null made the equality
+      fail and a crashed agent scored as a completed one. A one-character typo
+      in a two-value enum must not do that.
+    - Weights that don't sum to 1.0 produce a reward outside [0, 1] that looks
+      like a normal, if unusually high, score.
+
+    All of these are bypassed-authoring-gate problems, not agent problems, so
+    main() refuses on them exactly like a CONTRACT mismatch. Scoring them would
+    invert that conclusion, which is the one thing this file's docstring says
+    must not happen.
     """
     problems = []
+
+    if not isinstance(contract, dict):
+        return [f"contract must be a JSON object, got {type(contract).__name__}"]
 
     declared = contract.get("contract")
     if declared != CONTRACT:
         problems.append(f"expected contract {CONTRACT!r}, got {declared!r}")
 
-    match = (contract.get("trajectory") or {}).get("match", "subset")
-    if match not in _VALID_MATCH_MODES:
-        problems.append(f"unknown trajectory.match {match!r}, expected one of {_VALID_MATCH_MODES}")
+    completion = contract.get("completion")
+    if completion is not None and not isinstance(completion, dict):
+        problems.append(f"completion must be an object, got {completion!r}")
+    elif isinstance(completion, dict):
+        status = completion.get("status")
+        if status not in _VALID_COMPLETION_STATUSES:
+            problems.append(
+                f"unknown completion.status {status!r}, expected one of "
+                f"{_VALID_COMPLETION_STATUSES}"
+            )
+        nonempty = completion.get("nonempty_answer", True)
+        if not isinstance(nonempty, bool):
+            problems.append(
+                f"completion.nonempty_answer must be a boolean, got {nonempty!r}; a falsy "
+                "non-boolean silently disables the empty-answer gate"
+            )
+
+    assertions = contract.get("assertions")
+    if not isinstance(assertions, list) or not assertions:
+        problems.append(
+            f"assertions must be a non-empty list, got {assertions!r}; an empty or absent list "
+            "scores a full mark for asserting nothing"
+        )
+    else:
+        for i, assertion in enumerate(assertions):
+            if not isinstance(assertion, dict):
+                problems.append(f"assertions[{i}] must be an object, got {assertion!r}")
+
+    trajectory = contract.get("trajectory")
+    if not isinstance(trajectory, dict):
+        problems.append(
+            f"trajectory must be an object, got {trajectory!r}; an absent trajectory scores a "
+            "full mark for a trajectory nobody declared"
+        )
+    else:
+        match = trajectory.get("match")
+        if match not in _VALID_MATCH_MODES:
+            problems.append(
+                f"unknown trajectory.match {match!r}, expected one of {_VALID_MATCH_MODES}"
+            )
+        operations = trajectory.get("operations")
+        if not isinstance(operations, list):
+            problems.append(
+                f"trajectory.operations must be a list, got {operations!r}; an absent list "
+                "scores a full mark for a trajectory nobody declared"
+            )
+        else:
+            for i, operation in enumerate(operations):
+                if not isinstance(operation, dict):
+                    problems.append(
+                        f"trajectory.operations[{i}] must be an object, got {operation!r}"
+                    )
 
     weights = contract.get("weights")
-    if isinstance(weights, dict):
-        weight_assertions = float(weights.get("assertions", DEFAULT_WEIGHTS["assertions"]))
-        weight_trajectory = float(weights.get("trajectory", DEFAULT_WEIGHTS["trajectory"]))
-        total = weight_assertions + weight_trajectory
-        if abs(total - 1.0) > 1e-9:
-            problems.append(
-                f"weights must sum to 1.0, got assertions={weight_assertions!r} + "
-                f"trajectory={weight_trajectory!r} = {total!r}"
-            )
+    if weights is not None and not isinstance(weights, dict):
+        problems.append(f"weights must be an object, got {weights!r}")
+    else:
+        # A missing weights object is not a problem: compute_reward falls back
+        # to DEFAULT_WEIGHTS, which is this file's own constant rather than
+        # anything the contract could have got wrong.
+        weights = weights or {}
+        pairs = [
+            ("assertions", weights.get("assertions", DEFAULT_WEIGHTS["assertions"])),
+            ("trajectory", weights.get("trajectory", DEFAULT_WEIGHTS["trajectory"])),
+        ]
+        # Type-checked before float() rather than inside a try: float("abc")
+        # raises ValueError and float(None) raises TypeError, and either one
+        # escaping this function is a traceback in place of the refuse payload.
+        bad = [(name, value) for name, value in pairs if not _is_number(value)]
+        for name, value in bad:
+            problems.append(f"weights.{name} must be a number, got {value!r}")
+        if not bad:
+            total = float(pairs[0][1]) + float(pairs[1][1])
+            if abs(total - 1.0) > 1e-9:
+                problems.append(
+                    f"weights must sum to 1.0, got assertions={pairs[0][1]!r} + "
+                    f"trajectory={pairs[1][1]!r} = {total!r}"
+                )
 
     return problems
 

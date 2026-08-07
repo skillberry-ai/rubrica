@@ -259,6 +259,202 @@ def test_main_refuses_weights_that_do_not_sum_to_one(tmp_path):
     assert "1.8" in error
 
 
+# -- the refuse path: every field compute_reward reads ----------------------
+#
+# The invariant: once _contract_problems returns [], compute_reward can neither
+# raise nor score a field it did not read. Each case below broke one half of it.
+# `transcript` is the run the reviewer used to demonstrate the inflation -- the
+# agent called the wrong tool and answered "I could not determine which job
+# failed", which a healthy contract scores 0.0.
+WRONG_ANSWER_TRANSCRIPT = "\n".join(
+    [
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "tool_use", "name": "other_tool", "input": {"action": "nope"}}
+                    ]
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "result": "I could not determine which job failed",
+            }
+        ),
+    ]
+)
+
+CRASHED_TRANSCRIPT = json.dumps(
+    {"type": "result", "subtype": "error", "is_error": True, "result": "Job 90420 failed."}
+)
+
+
+def _refuses(tmp_path, contract, transcript="", *, expect_in_error=None):
+    """Run main() and assert it refused with a payload rather than scoring."""
+    expected, logs, out = _write_run(tmp_path, contract, transcript)
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2, "a bypassed authoring gate must refuse, not score"
+    assert not (out / "reward.txt").exists(), "the platform must see a missing reward"
+    error = json.loads((out / "reward-detail.json").read_text())["error"]
+    if expect_in_error is not None:
+        assert expect_in_error in error, error
+    return error
+
+
+def test_a_healthy_contract_scores_the_wrong_answer_run_zero(tmp_path):
+    """The baseline the cases below are measured against."""
+    expected, logs, out = _write_run(tmp_path, _contract(), WRONG_ANSWER_TRANSCRIPT)
+    assert main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)]) == 0
+    assert (out / "reward.txt").read_text() == "0.0"
+
+
+def test_main_refuses_a_contract_with_no_assertions(tmp_path):
+    """score_assertions([]) == 1.0 is an honest vacuous truth and a catastrophe here.
+
+    A contract whose assertions were dropped scored 0.8 for the run above --
+    a total failure turned into a high score, which is the one thing this
+    file's docstring says must not happen.
+    """
+    contract = _contract()
+    del contract["assertions"]
+    _refuses(tmp_path, contract, WRONG_ANSWER_TRANSCRIPT, expect_in_error="assertions")
+
+
+def test_main_refuses_a_contract_whose_assertions_are_empty(tmp_path):
+    _refuses(
+        tmp_path,
+        _contract(assertions=[]),
+        WRONG_ANSWER_TRANSCRIPT,
+        expect_in_error="non-empty list",
+    )
+
+
+def test_main_refuses_a_contract_with_no_trajectory(tmp_path):
+    """score_trajectory with no operations returns 1.0, for the same reason.
+
+    The expected message is the type check specifically, not just the substring
+    "trajectory": with the type check dropped, the match check catches an absent
+    trajectory anyway, so a looser assertion would pass over the mutation.
+    """
+    contract = _contract()
+    del contract["trajectory"]
+    _refuses(
+        tmp_path,
+        contract,
+        WRONG_ANSWER_TRANSCRIPT,
+        expect_in_error="trajectory must be an object",
+    )
+
+
+@pytest.mark.parametrize("trajectory", ["subset", 3, ["find_jobs"]])
+def test_main_refuses_a_trajectory_that_is_not_an_object(tmp_path, trajectory):
+    """The input the type check exists for: truthy, so `or {}` cannot save it.
+
+    A non-dict trajectory reached `.get("operations")` and raised AttributeError
+    -- exit 1 with a traceback where the refuse path is exit 2 with a payload.
+    """
+    _refuses(
+        tmp_path,
+        _contract(trajectory=trajectory),
+        expect_in_error="trajectory must be an object",
+    )
+
+
+def test_main_refuses_a_trajectory_with_no_operations_list(tmp_path):
+    _refuses(
+        tmp_path,
+        _contract(trajectory={"match": "subset"}),
+        WRONG_ANSWER_TRANSCRIPT,
+        expect_in_error="trajectory.operations must be a list",
+    )
+
+
+def test_main_refuses_an_absent_trajectory_match(tmp_path):
+    """Absent must refuse exactly as an explicit null already did.
+
+    Falling through to "subset" meant a contract that declared no match mode at
+    all scored under the loosest one, while `match: null` refused -- same field,
+    same file, opposite behaviour.
+    """
+    contract = _contract(trajectory={"operations": [_op(action="find_jobs")]})
+    _refuses(tmp_path, contract, expect_in_error="unknown trajectory.match None")
+
+
+@pytest.mark.parametrize("status", ["weird", "OK", None, 1])
+def test_main_refuses_an_unrecognized_completion_status(tmp_path, status):
+    """A one-character typo in a two-value enum must not disable the crash gate.
+
+    `completion.get("status", "ok") == "ok"` fails for "OK" just as it fails for
+    "weird", so the gate never applied and a crashed agent scored 0.4 where a
+    healthy contract scores 0.0.
+    """
+    contract = _contract(completion={"status": status, "nonempty_answer": True})
+    _refuses(tmp_path, contract, CRASHED_TRANSCRIPT, expect_in_error="completion.status")
+
+
+def test_a_healthy_contract_gates_a_crashed_run_to_zero(tmp_path):
+    """The baseline for the status cases above."""
+    expected, logs, out = _write_run(tmp_path, _contract(), CRASHED_TRANSCRIPT)
+    assert main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)]) == 0
+    assert (out / "reward.txt").read_text() == "0.0"
+    assert json.loads((out / "reward-detail.json").read_text())["gate"] == 0.0
+
+
+@pytest.mark.parametrize("nonempty", [0, None, "", "no"])
+def test_main_refuses_a_non_boolean_nonempty_answer(tmp_path, nonempty):
+    """A falsy non-boolean silently disables the empty-answer gate."""
+    contract = _contract(completion={"status": "ok", "nonempty_answer": nonempty})
+    _refuses(tmp_path, contract, expect_in_error="completion.nonempty_answer")
+
+
+def test_main_refuses_a_non_dict_completion(tmp_path):
+    _refuses(tmp_path, _contract(completion="ok"), expect_in_error="completion must be an object")
+
+
+@pytest.mark.parametrize(
+    "weights",
+    [5, "heavy", [0.8, 0.2], {"assertions": "abc", "trajectory": 0.2}, {"assertions": None}],
+)
+def test_main_refuses_a_malformed_weights_instead_of_crashing_over_it(tmp_path, weights):
+    """The old guard made the weights check a no-op for exactly its bad input.
+
+    `if isinstance(weights, dict)` skipped a non-dict entirely and compute_reward
+    then raised AttributeError; a string or None weight raised out of
+    _contract_problems itself. Each exited 1 with a traceback and no payload,
+    where the specified refuse path is exit 2 with an `error`.
+    """
+    _refuses(tmp_path, _contract(weights=weights), expect_in_error="weights")
+
+
+def test_main_refuses_a_contract_that_is_not_an_object(tmp_path):
+    _refuses(tmp_path, [1, 2, 3], expect_in_error="must be a JSON object")
+
+
+@pytest.mark.parametrize("bad", [["a0"], [None], [1]])
+def test_main_refuses_an_assertion_that_is_not_an_object(tmp_path, bad):
+    _refuses(tmp_path, _contract(assertions=bad), expect_in_error="must be an object")
+
+
+def test_main_refuses_a_trajectory_operation_that_is_not_an_object(tmp_path):
+    contract = _contract(trajectory={"match": "subset", "operations": ["query_aap2"]})
+    _refuses(tmp_path, contract, expect_in_error="operations[0] must be an object")
+
+
+def test_a_refusal_reports_every_problem_not_just_the_first(tmp_path):
+    """The container gets one shot; a partial diagnosis wastes it."""
+    contract = _contract(assertions=[], weights=5)
+    contract["trajectory"] = {"operations": []}
+    error = _refuses(tmp_path, contract)
+    assert "assertions" in error
+    assert "trajectory.match" in error
+    assert "weights" in error
+
+
 def test_main_reads_both_jsonl_and_txt_logs(tmp_path):
     expected, logs, out = _write_run(tmp_path, _contract(), "")
     (logs / "extra.txt").write_text(
