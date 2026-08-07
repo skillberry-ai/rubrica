@@ -215,9 +215,18 @@ def check_limits(run: RunPaths) -> list[Finding]:
 
     `limits`, `max_rounds`, `max_scenarios`, and every key indexed below are
     `required` by their schemas, so on a schema-valid document they are always
-    present and already the declared type -- there is nothing left for an
-    isinstance guard to catch. A malformed document raises, per this module's
-    documented precondition that layer 1 ran first.
+    present -- but not guaranteed to be a Python `int`: jsonschema's `type:
+    integer` accepts any float with a zero fractional part, so a schema-valid
+    manifest can carry max_rounds as 2.0. No isinstance guard is added here
+    for that, because `>` compares int and float transparently and needs no
+    help. A guard would be actively wrong: the brief this function was
+    transcribed from wrapped the entire round-check loop in `if
+    isinstance(max_rounds, int):`, which would make a float bound silently
+    turn the check into a no-op instead of enforcing it -- the exact
+    unenforced-cap defect this task exists to close, not a safer version of
+    it. A malformed document (e.g. a non-numeric bound) raises on the `>`
+    comparison, per this module's documented precondition that layer 1 ran
+    first.
     """
     manifest = _load(run.manifest)
     if manifest is None:

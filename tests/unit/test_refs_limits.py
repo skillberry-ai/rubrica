@@ -92,6 +92,29 @@ def test_a_coverage_round_beyond_max_rounds_is_reported(tmp_path):
 
 
 def test_the_cap_is_a_ceiling_not_an_equality(tmp_path):
-    manifest = minimal_manifest(limits={"max_rounds": 9, "max_scenarios": 9})
-    run = _run(tmp_path, manifest=manifest, scenarios=minimal_scenarios())
+    """round == max_rounds, provenance.round == max_rounds, and open_count ==
+    max_scenarios must each be clean -- a value far from any bound (as the
+    brief's original test used) would pass just as well under >= as under >,
+    so it cannot tell the two apart. Pinning exact equality is what would
+    catch check_limits using >= for any of the three comparisons.
+    """
+    manifest = minimal_manifest(limits={"max_rounds": 2, "max_scenarios": 2})
+    at_the_round_cap = _scenario("scn-001", round=2)
+    at_the_round_cap["provenance"] = dict(at_the_round_cap["provenance"], round=2)
+    scenarios = minimal_scenarios(scenarios=[at_the_round_cap, _scenario("scn-002", round=1)])
+    run = _run(tmp_path, manifest=manifest, scenarios=scenarios)
     assert check_limits(run) == []
+
+
+def test_a_float_max_rounds_still_enforces_the_bound(tmp_path):
+    """jsonschema's `type: integer` accepts a float with a zero fractional
+    part, so a schema-valid manifest can carry max_rounds as 2.0 rather than
+    2. The bound must still be enforced -- an isinstance(max_rounds, int)
+    guard would silently no-op the whole check instead.
+    """
+    manifest = minimal_manifest(limits={"max_rounds": 2.0, "max_scenarios": 8})
+    scenarios = minimal_scenarios(scenarios=[_scenario("scn-001", round=99)])
+    run = _run(tmp_path, manifest=manifest, scenarios=scenarios)
+    messages = _messages(check_limits(run))
+    assert "round 99" in messages
+    assert "max_rounds=2.0" in messages
