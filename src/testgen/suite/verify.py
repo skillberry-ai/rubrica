@@ -16,10 +16,7 @@ src/testgen/suite/verify.py is what the tests exercise, so the tested file and
 the executed file cannot differ.
 """
 
-import argparse  # noqa: F401 -- unused until Task 8 adds main()
 import json
-import sys  # noqa: F401 -- unused until Task 8 adds main()
-from pathlib import Path  # noqa: F401 -- unused until Task 8 adds main()
 
 CONTRACT = "testgen/v1"
 
@@ -102,6 +99,14 @@ def call_matches(spec, call):
 
 
 def _contains(answer, value):
+    """Whether `value` occurs in `answer`, case-insensitively.
+
+    An empty value never counts as found: an empty answer_contains would be
+    vacuously satisfied by anything, and that is exactly the silent score
+    inflation this file exists to prevent.
+    """
+    if not value:
+        return False
     return value.lower() in answer.lower()
 
 
@@ -134,6 +139,12 @@ def _assertion_satisfied(answer, calls, assertion):
     if kind == "answer_contains":
         return _contains(answer, value)
     if kind == "answer_excludes":
+        # An empty value is malformed, not a real exclusion: an assertion that
+        # excludes nothing must fail rather than score, the same way an
+        # unrecognised kind does -- not_contains("") would otherwise be
+        # vacuously True and hand out a point for asserting nothing.
+        if not value:
+            return False
         return not _contains(answer, value)
     if kind == "value_equals":
         return _delimited(answer, value)

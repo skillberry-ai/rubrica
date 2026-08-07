@@ -184,6 +184,14 @@ def test_tool_not_called_fails_when_the_call_was_made():
     assert detail["failed"][0]["kind"] == "tool_not_called"
 
 
+def test_tool_called_fails_when_the_call_was_not_made():
+    calls = [("query_aap2", {"action": "find_jobs"})]
+    assertion = _assertion("tool_called", tool="query_aap2", args={"action": "delete_job"})
+    score, detail = score_assertions("done", calls, [assertion])
+    assert score == 0.0
+    assert detail["failed"][0]["kind"] == "tool_called"
+
+
 def test_a_partially_satisfied_set_scores_the_fraction():
     assertions = [
         _assertion("answer_contains", value="90420"),
@@ -206,3 +214,19 @@ def test_an_empty_assertion_list_scores_one():
     score, detail = score_assertions("anything", [], [])
     assert score == 1.0
     assert detail["total"] == 0
+
+
+def test_answer_contains_with_an_empty_value_is_not_satisfied():
+    """An empty value would otherwise be vacuously found in any answer, handing
+    out a point for asserting nothing -- the silent inflation this file exists
+    to prevent."""
+    score, _ = score_assertions("anything", [], [_assertion("answer_contains", value="")])
+    assert score == 0.0
+
+
+def test_answer_excludes_with_an_empty_value_is_not_satisfied():
+    """An assertion that excludes nothing is malformed, not a real exclusion:
+    it must fail rather than vacuously score, the same way an unrecognised
+    kind fails rather than scores."""
+    score, _ = score_assertions("anything", [], [_assertion("answer_excludes", value="")])
+    assert score == 0.0
