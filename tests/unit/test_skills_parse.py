@@ -16,6 +16,7 @@ from testgen.errors import UsageError
 from testgen.paths import STAGES
 from testgen.skills import (
     CODE_ONLY_STAGES,
+    CONTRACT_HEADING,
     ORCHESTRATOR,
     SECTIONS,
     SKILL_FILENAME,
@@ -23,6 +24,7 @@ from testgen.skills import (
     discover,
     expected_skill_names,
     load,
+    section_body,
     skill_sha256,
     skills_dir,
 )
@@ -190,3 +192,132 @@ def test_skills_dir_resolves_beside_the_module_and_honours_the_override(tmp_path
     assert skills_dir() == Path(skills_module.__file__).resolve().parent / "skills"
     monkeypatch.setenv("TESTGEN_SKILLS_DIR", str(tmp_path))
     assert skills_dir() == tmp_path
+
+
+def test_a_fenced_block_inside_a_section_does_not_inflate_headings(tmp_path):
+    """A `## ` line inside a fenced code block is not a heading.
+
+    A Method section that shows a markdown snippet -- entirely plausible
+    prose for a skill that must itself describe SKILL.md structure -- must
+    not silently inflate and reorder the `headings` tuple that Task 12's
+    ordering checks depend on.
+    """
+    directory = tmp_path / "tg-extract"
+    directory.mkdir()
+    text = "\n".join(
+        [
+            "---",
+            "name: tg-extract",
+            "description: A skill, for testing.",
+            "---",
+            "",
+            "# tg-extract",
+            "",
+            "## Contract",
+            "",
+            CONTRACT,
+            "## 3. Method",
+            "",
+            "Example output a downstream reader might paste back:",
+            "",
+            "```markdown",
+            "## Not a real heading",
+            "```",
+            "",
+            "## 4. Invariants",
+            "",
+            "Body text.",
+            "",
+        ]
+    )
+    path = directory / SKILL_FILENAME
+    path.write_text(text, encoding="utf-8")
+    skill = load(path)
+    assert skill.headings == ("Contract", "3. Method", "4. Invariants")
+    assert "Not a real heading" not in skill.headings
+
+
+def test_an_impostor_toml_fence_before_contract_is_ignored(tmp_path):
+    """A valid-TOML fence in the prose before `## Contract`, declaring a
+    different stage with a plausible value for every key, must not be
+    mistaken for the contract -- only a fence inside the `## Contract`
+    section counts. This is the silent case: the impostor is not invalid
+    TOML (exit 2) and not obviously wrong (an ordinary Task 2 finding), so
+    nothing downstream would notice unless the search is scoped to the
+    section.
+    """
+    directory = tmp_path / "tg-extract"
+    directory.mkdir()
+    text = "\n".join(
+        [
+            "---",
+            "name: tg-extract",
+            "description: A skill, for testing.",
+            "---",
+            "",
+            "# tg-extract",
+            "",
+            "Purpose paragraph with an example that gives plausible values",
+            "for every key a real contract would need:",
+            "",
+            "```toml",
+            'stage = "reconcile"',
+            'reads = ["manifest"]',
+            'writes = ["reconciled"]',
+            'schemas = ["reconciled"]',
+            'invokes = ["validate"]',
+            "```",
+            "",
+            "## Contract",
+            "",
+            CONTRACT,
+        ]
+    )
+    path = directory / SKILL_FILENAME
+    path.write_text(text, encoding="utf-8")
+    assert load(path).contract["stage"] == "extract"
+
+
+def test_no_contract_heading_at_all_is_a_usage_error_naming_the_file(tmp_path):
+    """A stray toml fence elsewhere in the file does not stand in for a
+    missing `## Contract` heading -- that is a malformed file, the same class
+    as a missing block, and the error names the file so a human can find it.
+    """
+    directory = tmp_path / "tg-extract"
+    directory.mkdir()
+    text = "\n".join(
+        [
+            "---",
+            "name: tg-extract",
+            "description: A skill, for testing.",
+            "---",
+            "",
+            "# tg-extract",
+            "",
+            "## 3. Method",
+            "",
+            "```toml",
+            'stage = "extract"',
+            "```",
+            "",
+        ]
+    )
+    path = directory / SKILL_FILENAME
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(UsageError) as excinfo:
+        load(path)
+    assert str(path) in str(excinfo.value)
+    assert CONTRACT_HEADING in str(excinfo.value)
+
+
+def test_section_body_at_eof_returns_the_last_sections_text_not_empty(tmp_path):
+    """Section 5 is last in every real skill. An implementation of
+    `section_body` that required a following `## ` heading would read every
+    refusal section as empty, and Task 2's emptiness check would then fire on
+    every correct skill.
+    """
+    path = write_skill(tmp_path, "tg-extract")
+    skill = load(path)
+    body = section_body(skill, SECTIONS[-1])
+    assert body.strip() != ""
+    assert "Body text." in body
