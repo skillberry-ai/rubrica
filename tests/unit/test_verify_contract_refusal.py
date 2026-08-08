@@ -98,8 +98,63 @@ def test_a_non_object_event_is_skipped_and_counted():
 
 
 def test_an_assistant_event_with_a_non_object_message_is_skipped():
-    calls, _, _, _ = parse_transcript(json.dumps({"type": "assistant", "message": "oops"}))
+    calls, _, _, notes = parse_transcript(json.dumps({"type": "assistant", "message": "oops"}))
     assert calls == []
+    assert any("message was not an object" in note for note in notes)
+
+
+def test_an_assistant_event_with_non_list_content_is_skipped_and_noted():
+    event = {"type": "assistant", "message": {"content": {"not": "a list"}}}
+    calls, _, _, notes = parse_transcript(json.dumps(event))
+    assert calls == []
+    assert any("message.content was not a list" in note for note in notes)
+
+
+def test_a_tool_use_block_with_non_dict_input_is_recorded_with_no_args_and_noted():
+    """input: ["a"] must not be dropped silently -- the call still happened."""
+    event = {
+        "type": "assistant",
+        "message": {"content": [{"type": "tool_use", "name": "query_aap2", "input": ["a"]}]},
+    }
+    calls, _, _, notes = parse_transcript(json.dumps(event))
+    assert calls == [("query_aap2", {})]
+    assert any("input was not an object" in note for note in notes)
+
+
+def test_a_tool_use_block_with_a_non_string_name_is_recorded_as_is_and_noted():
+    """The name is recorded rather than coerced: call_matches compares it
+    against a contract `tool`, which is always a string, so a non-string name
+    simply never matches -- the same fail-closed outcome as elsewhere here.
+    """
+    event = {
+        "type": "assistant",
+        "message": {"content": [{"type": "tool_use", "name": 123, "input": {}}]},
+    }
+    calls, _, _, notes = parse_transcript(json.dumps(event))
+    assert calls == [(123, {})]
+    assert any("name was a int rather than a string" in note for note in notes)
+
+
+def test_a_non_string_result_followed_by_a_healthy_one_leaves_no_stale_note():
+    """The note tracks whichever result event actually becomes `answer`.
+
+    A partial transcript plus a terminal error event can yield two result
+    events; the last one wins. A note pinned to the first, discarded, event
+    would tell a human reading reward-detail.json that no answer was read
+    when the run was in fact scored with one.
+    """
+    text = "\n".join([_result_line({"text": "90420"}), _result_line("Job 90420 failed.")])
+    _, answer, _, notes = parse_transcript(text)
+    assert answer == "Job 90420 failed."
+    assert notes == []
+
+
+def test_a_healthy_result_followed_by_a_non_string_one_leaves_the_note():
+    """The reverse order: the malformed event is the one that wins."""
+    text = "\n".join([_result_line("Job 90420 failed."), _result_line({"text": "90420"})])
+    _, answer, _, notes = parse_transcript(text)
+    assert answer == ""
+    assert any("rather than a string" in note for note in notes)
 
 
 def test_the_notes_reach_reward_detail(tmp_path):

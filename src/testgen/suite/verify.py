@@ -37,10 +37,13 @@ def parse_transcript(text):
     transcript still scores rather than crashing -- a crash would be reported as
     a broken agent when the truth is a broken log.
 
-    `notes` is what keeps those concessions honest. A skipped line or a coerced
-    field changes the score, so it is carried out to reward-detail.json rather
-    than applied silently. Distinct notes are recorded once each, so a wholly
-    corrupt log cannot flood the detail file.
+    `notes` is what keeps those concessions honest. A skipped line, a dropped
+    assistant event, a coerced tool_use field, or a coerced result field all
+    change the score -- silently absorbing one would lower `trajectory` or fail
+    a `tool_called` assertion with no indication that the log, not the agent,
+    is why -- so each is carried out to reward-detail.json rather than applied
+    silently. Distinct notes are recorded once each, so a wholly corrupt log
+    cannot flood the detail file.
 
     A `result` that is not a string scores as **no answer**, deliberately not as
     `str(value)`: str({"text": "90420"}) contains "90420", so coercion would
@@ -48,9 +51,22 @@ def parse_transcript(text):
     compute_reward's docstring rules that out -- tolerance at the scoring seam is
     score inflation. No answer means the nonempty_answer gate fires, which is the
     honest reading of a log this verifier cannot understand.
+
+    Only the result event that actually becomes `answer` -- the last one -- may
+    leave a note behind: a malformed result followed by a healthy one must not
+    leave a stale note claiming no answer was read when `answer` in fact holds
+    the healthy one, since reward-detail.json is what a human reads to
+    reconcile the score.
     """
     calls, answer, ok = [], "", False
     notes, skipped = [], 0
+    # Set by a malformed result event, cleared by any later one: only the
+    # event that actually becomes `answer` -- the last one, per the comment
+    # below -- may leave a note behind. Without this, a malformed result
+    # followed by a healthy one left a stale note claiming no answer was
+    # read, while `answer` held the healthy one: the one artifact used to
+    # adjudicate a score would have disagreed with the score itself.
+    pending_result_note = None
 
     def note(message):
         if message not in notes:
@@ -72,25 +88,55 @@ def parse_transcript(text):
             continue
         if event.get("type") == "assistant":
             message = event.get("message")
-            content = message.get("content") if isinstance(message, dict) else None
-            for block in content if isinstance(content, list) else []:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    args = block.get("input")
-                    calls.append((block.get("name", ""), args if isinstance(args, dict) else {}))
+            if not isinstance(message, dict):
+                note("an assistant event's message was not an object; no tool calls read from it")
+                continue
+            content = message.get("content")
+            if not isinstance(content, list):
+                note(
+                    "an assistant event's message.content was not a list; its tool calls "
+                    "could not be read"
+                )
+                continue
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                name = block.get("name", "")
+                if not isinstance(name, str):
+                    # Recorded, not coerced: call_matches compares it against a
+                    # contract `tool`, which _contract_problems requires to be a
+                    # string, so a non-string name simply never matches -- the
+                    # same fail-closed outcome as everywhere else in this file.
+                    note(
+                        f"a tool_use block's name was a {type(name).__name__} rather than a "
+                        "string; recorded as-is"
+                    )
+                args = block.get("input")
+                if args is None:
+                    args = {}
+                elif not isinstance(args, dict):
+                    note("a tool_use block's input was not an object; recorded as no args")
+                    args = {}
+                calls.append((name, args))
         elif event.get("type") == "result":
             # Last result event wins: exactly one is written per run, but a
             # partial transcript plus a terminal error event can yield two.
             value = event.get("result", "")
             if value is None:
                 value = ""
+                pending_result_note = None
             elif not isinstance(value, str):
-                note(
+                pending_result_note = (
                     f"a result event carried a {type(value).__name__} rather than a string; "
                     "scored as no answer"
                 )
                 value = ""
+            else:
+                pending_result_note = None
             answer = value
             ok = event.get("subtype") == "success" and not event.get("is_error", False)
+    if pending_result_note:
+        note(pending_result_note)
     if skipped:
         notes.append(f"skipped {skipped} line(s) that were not parseable JSON objects")
     return calls, answer, ok, notes
@@ -451,6 +497,8 @@ def _contract_problems(contract):
     """
     problems = []
 
+    # Unreachable from main(): read_contract already refused a non-dict
+    # contract before this runs. Kept as defence-in-depth for a direct caller.
     if not isinstance(contract, dict):
         return [f"contract must be a JSON object, got {type(contract).__name__}"]
 

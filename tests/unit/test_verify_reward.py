@@ -8,7 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from testgen.suite.verify import CONTRACT, compute_reward, main, score_trajectory
+from testgen.suite.verify import (
+    CONTRACT,
+    _contract_problems,
+    compute_reward,
+    main,
+    score_trajectory,
+)
 
 
 def _calls(*pairs):
@@ -431,9 +437,13 @@ def test_main_refuses_a_malformed_weights_instead_of_crashing_over_it(tmp_path, 
     _refuses(tmp_path, _contract(weights=weights), expect_in_error="weights")
 
 
-def test_main_refuses_a_contract_that_is_not_an_object(tmp_path):
-    """read_contract now catches this before _contract_problems ever runs."""
-    _refuses(tmp_path, [1, 2, 3], expect_in_error="not an object")
+def test_contract_problems_refuses_a_contract_that_is_not_an_object():
+    """Unreachable from main() -- read_contract catches a non-dict contract
+    first, so main() never calls _contract_problems with one -- but kept as
+    defence-in-depth for a direct caller, and exercised directly here so that
+    defence stays live rather than only aspirational.
+    """
+    assert _contract_problems([1, 2, 3]) == ["contract must be a JSON object, got list"]
 
 
 @pytest.mark.parametrize("bad", [["a0"], [None], [1]])
