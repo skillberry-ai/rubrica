@@ -25,7 +25,8 @@ from typing import Any
 
 from testgen.artifacts import sha256_of
 from testgen.errors import UsageError
-from testgen.paths import STAGES
+from testgen.findings import Finding
+from testgen.paths import STAGES, RunPaths
 
 SKILL_FILENAME = "SKILL.md"
 
@@ -228,3 +229,157 @@ def discover(root: Path | str | None = None) -> list[Skill]:
         for child in sorted(root.iterdir())
         if (child / SKILL_FILENAME).is_file()
     ]
+
+
+def _is_subsequence(needles: tuple[str, ...], haystack: tuple[str, ...]) -> bool:
+    """Whether every item of `needles` occurs in `haystack`, in the same
+    relative order, with other items allowed in between.
+
+    Deliberately weaker than "is a prefix" or "equals": a skill may add its
+    own `##` headings (a worked example, a glossary) between or after the five
+    required ones, and only their relative order is part of the contract.
+    """
+    iterator = iter(haystack)
+    return all(any(item == needle for item in iterator) for needle in needles)
+
+
+def check_contract(skill: Skill) -> list[Finding]:
+    """One skill's declaration against the code that owns each name.
+
+    Findings, never raises: every problem here names a line a human can edit,
+    which is exit 1's contract. An unreadable file is load()'s UsageError and
+    exit 2, because there is nothing to name.
+    """
+    # Imported here rather than at module scope: cli imports skills for the
+    # check-skills subcommand, so a top-level import of cli from skills would
+    # be circular. Same pattern refs.check_report uses for smoke.
+    from testgen.cli import subcommand_names
+    from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS
+
+    out: list[Finding] = []
+
+    def report(pointer: str, message: str) -> None:
+        out.append(Finding(skill.path, "skill", pointer, message))
+
+    stage = skill.contract.get("stage")
+    if skill.name == ORCHESTRATOR:
+        if stage is not None:
+            report(
+                "/stage",
+                f"{ORCHESTRATOR} is not a stage: it dispatches them, so it must not "
+                "declare a stage",
+            )
+    elif stage not in STAGES:
+        report("/stage", f"declares stage {stage!r}, which is not one of: {', '.join(STAGES)}")
+    elif skill.name != f"tg-{stage}":
+        report(
+            "/stage",
+            f"lives in {skill.name}/ but declares stage {stage!r}; the orchestrator "
+            f"dispatches it as {skill.name} and validates it as {stage!r}",
+        )
+
+    for key in ("reads", "writes"):
+        for i, name in enumerate(skill.declared(key)):
+            if not isinstance(name, str) or not hasattr(RunPaths, name):
+                report(
+                    f"/{key}/{i}",
+                    f"names {name!r}, which is not a RunPaths attribute; declare artifacts "
+                    "by their RunPaths name, never as a literal path",
+                )
+
+    if skill.name != ORCHESTRATOR and stage in STAGES:
+        declared = set(skill.declared("schemas"))
+        required = set(STAGE_ARTIFACTS[stage])
+        for kind in sorted(declared - required):
+            if kind not in ARTIFACT_SCHEMAS:
+                report("/schemas", f"declares artifact kind {kind!r}, which has no schema")
+            else:
+                report(
+                    "/schemas",
+                    f"declares artifact kind {kind!r}, which stage {stage!r} is not gated on",
+                )
+        omitted = sorted(required - declared)
+        if omitted:
+            report(
+                "/schemas",
+                f"omits artifact kind(s) {', '.join(repr(k) for k in omitted)}, which stage "
+                f"{stage!r} is gated on",
+            )
+
+    known = subcommand_names()
+    for i, name in enumerate(skill.declared("invokes")):
+        if name not in known:
+            report(
+                f"/invokes/{i}",
+                f"invokes {name!r}, which is not a testgen subcommand; the subcommands are: "
+                f"{', '.join(known)}",
+            )
+
+    for heading in SECTIONS:
+        if heading not in skill.headings:
+            report("", f"has no '## {heading}' section")
+    if not _is_subsequence(tuple(h for h in SECTIONS if h in skill.headings), skill.headings):
+        report("", f"sections are out of order; the required order is: {', '.join(SECTIONS)}")
+
+    refusals = SECTIONS[-1]
+    # section_body is Task 1's, fence-aware and EOF-aware. Do not re-implement
+    # the slice here: section 5 is last in every real skill, so a second
+    # implementation that required a following heading would read every
+    # refusal section as empty and this check would fire on every correct
+    # skill.
+    if refusals in skill.headings and not section_body(skill, refusals).strip():
+        report(
+            "",
+            f"'## {refusals}' is empty; a skill with no stated refusal conditions "
+            "confabulates under under-specification rather than recording a gap",
+        )
+    return out
+
+
+def check_all(root: Path | str | None = None) -> list[Finding]:
+    """Every skill's contract, plus the roster check no single skill can make.
+
+    Deliberately does not build on discover(): discover() calls load() on
+    every SKILL.md it finds, unconditionally, so an unrecognised directory
+    with a broken SKILL.md (a scratch copy, a typo'd name) would raise before
+    this function got to say what is actually wrong with it -- that it is not
+    one of the skills this pipeline dispatches. So a directory's name is
+    checked against expected_skill_names() *before* it is loaded: a name this
+    build does not recognise is reported without parsing its contents, and
+    only a directory this build does recognise as one of its own skills is
+    handed to load(), whose UsageError is left to propagate for that name --
+    an official skill's SKILL.md that cannot even be parsed is human-authored
+    and unrepairable by re-prompting, the same exit-2 class as a malformed
+    --agents roster, and folding it into the finding list here would
+    silently downgrade it to a repairable exit-1 defect.
+    """
+    root = Path(root) if root is not None else skills_dir()
+    if not root.is_dir():
+        raise UsageError(f"skills directory does not exist: {root}")
+
+    expected = set(expected_skill_names())
+    found_names: set[str] = set()
+    out: list[Finding] = []
+
+    for child in sorted(root.iterdir()):
+        skill_path = child / SKILL_FILENAME
+        if not skill_path.is_file():
+            continue
+        name = child.name
+        if name not in expected:
+            out.append(
+                Finding(
+                    skill_path,
+                    "skill",
+                    "",
+                    f"{name} is not a skill this pipeline dispatches; the skills are: "
+                    f"{', '.join(sorted(expected))}",
+                )
+            )
+            continue
+        found_names.add(name)
+        out.extend(check_contract(load(skill_path)))
+
+    for name in sorted(expected - found_names):
+        out.append(Finding(root, "skill", "", f"no skill named {name}, which paths.STAGES demands"))
+    return out

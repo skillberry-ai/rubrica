@@ -33,10 +33,7 @@ import tomli_w
 from testgen.artifacts import ArtifactError, read_json, write_json
 from testgen.findings import Finding
 from testgen.paths import RunPaths
-from testgen.suite.verify import CONTRACT, DEFAULT_WEIGHTS
-
-_DATA_KINDS = ("answer_contains", "answer_excludes", "value_equals")
-_TRAJECTORY_KINDS = ("tool_called", "tool_not_called")
+from testgen.suite.verify import CONTRACT, DATA_KINDS, DEFAULT_WEIGHTS, TRAJECTORY_KINDS
 
 # Harbor task metadata. Pinned rather than discovered: a suite emitted against
 # one Harbor task schema and scored against another is a silent mismatch.
@@ -121,10 +118,10 @@ def to_contract(
         }
         if "target" in assertion:
             entry["target"] = assertion["target"]
-        if kind in _DATA_KINDS:
+        if kind in DATA_KINDS:
             assertions.append(entry)
             continue
-        if kind in _TRAJECTORY_KINDS:
+        if kind in TRAJECTORY_KINDS:
             capability_id = assertion["capability_id"]
             binding = bound.get(capability_id)
             if binding is None:

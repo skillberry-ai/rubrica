@@ -31,6 +31,7 @@ from testgen.findings import Finding
 from testgen.invariants import InvariantForm
 from testgen.invariants import evaluate as evaluate_invariant
 from testgen.paths import RunPaths, is_safe_segment
+from testgen.suite.verify import DATA_KINDS, TRAJECTORY_KINDS
 
 _CELL_RE = re.compile(r"\Acell:([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
 _GOAL_RE = re.compile(r"\Agoal:([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
@@ -796,9 +797,6 @@ _TYPE_CHECKS: dict[str, Any] = {
     "object": lambda v: isinstance(v, dict),
 }
 
-_DATA_KINDS = ("answer_contains", "answer_excludes", "value_equals")
-_TRAJECTORY_KINDS = ("tool_called", "tool_not_called")
-
 
 def resolve_pointer(document: Any, pointer: str) -> Any:
     """Resolve an RFC 6901 JSON Pointer, returning UNSET if it does not exist.
@@ -900,7 +898,7 @@ def _check_reachability(
     for i, assertion in enumerate(expected["assertions"]):
         kind = assertion["kind"]
         pointer = f"/assertions/{i}"
-        if kind in _TRAJECTORY_KINDS:
+        if kind in TRAJECTORY_KINDS:
             capability_id = assertion.get("capability_id")
             if capability_id not in capability_ids:
                 report(f"{pointer}/capability_id", f"no such capability: {capability_id}")
@@ -911,7 +909,7 @@ def _check_reachability(
                     "capability_refs; coverage would credit cells this test does not exercise",
                 )
             continue
-        if kind not in _DATA_KINDS:
+        if kind not in DATA_KINDS:
             continue
         seed_pointer = assertion["grounded_in"]["seed_pointer"]
         resolved = resolve_pointer(seed, seed_pointer)

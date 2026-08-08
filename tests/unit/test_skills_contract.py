@@ -1,0 +1,301 @@
+"""Every contract declaration, against the code that owns the name.
+
+The checks here are the only mechanical grip this project has on a prompt. A
+schema gates an artifact a stage wrote; nothing gates the text that told the
+stage what to write, so a SKILL.md naming `world-model` (the schema kind) where
+it means `world_model` (the RunPaths attribute) would be discovered by a model
+at run time, after the dispatch was paid for.
+
+Each test below mutates one key of an otherwise-valid contract, which is the
+deletion-mutation dual: the fixture is valid, so a finding can only come from
+the mutated key.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from testgen.cli import subcommand_names
+from testgen.paths import STAGES, RunPaths
+from testgen.skills import (
+    ORCHESTRATOR,
+    SECTIONS,
+    SKILL_FILENAME,
+    check_all,
+    check_contract,
+    expected_skill_names,
+    load,
+)
+from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS
+
+CONTRACTS: dict[str, dict[str, object]] = {
+    "tg-extract": {
+        "stage": "extract",
+        "reads": ["manifest", "input_file"],
+        "writes": ["claims"],
+        "schemas": ["claims"],
+        "invokes": ["validate"],
+    },
+    ORCHESTRATOR: {
+        "reads": ["manifest"],
+        "writes": ["decisions"],
+        "invokes": ["validate", "check-refs"],
+    },
+}
+
+
+def _toml(contract: dict[str, object]) -> str:
+    lines = []
+    for key, value in contract.items():
+        if isinstance(value, str):
+            lines.append(f'{key} = "{value}"')
+        else:
+            inner = ", ".join(f'"{v}"' for v in value)
+            lines.append(f"{key} = [{inner}]")
+    return "```toml\n" + "\n".join(lines) + "\n```\n"
+
+
+def write_skill(
+    root: Path, name: str, contract=None, headings=SECTIONS, refusals="Refuse."
+) -> Path:
+    """A valid SKILL.md for `name`, with knobs for each negative case."""
+    contract = CONTRACTS[name] if contract is None else contract
+    directory = root / name
+    directory.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "---",
+        f"name: {name}",
+        "description: d.",
+        "---",
+        "",
+        f"# {name}",
+        "",
+        "Purpose.",
+        "",
+        "## Contract",
+        "",
+        _toml(contract),
+    ]
+    for heading in headings:
+        body = refusals if heading == SECTIONS[-1] else "Body."
+        lines += ["", f"## {heading}", "", body]
+    path = directory / SKILL_FILENAME
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def messages(findings) -> str:
+    return " | ".join(f.message for f in findings)
+
+
+def test_a_valid_contract_produces_no_findings(tmp_path):
+    """The baseline every mutation below is measured against."""
+    assert check_contract(load(write_skill(tmp_path, "tg-extract"))) == []
+
+
+def test_the_orchestrator_contract_is_valid_without_a_stage(tmp_path):
+    assert check_contract(load(write_skill(tmp_path, ORCHESTRATOR))) == []
+
+
+def test_an_unknown_stage_is_reported(tmp_path):
+    contract = dict(CONTRACTS["tg-extract"], stage="extraction")
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    assert [f.pointer for f in findings] == ["/stage"]
+    assert "extraction" in messages(findings)
+
+
+def test_a_stage_that_disagrees_with_the_directory_name_is_reported(tmp_path):
+    """A SKILL.md in tg-propose/ declaring stage="score" would be dispatched for
+    propose and validated as score -- the two halves of one run disagreeing about
+    which stage just ran.
+    """
+    contract = dict(CONTRACTS["tg-extract"], stage="score", schemas=["coverage"])
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    assert "/stage" in [f.pointer for f in findings]
+    assert "tg-extract" in messages(findings) and "score" in messages(findings)
+
+
+def test_the_orchestrator_may_not_declare_a_stage(tmp_path):
+    contract = dict(CONTRACTS[ORCHESTRATOR], stage="reconcile")
+    findings = check_contract(load(write_skill(tmp_path, ORCHESTRATOR, contract)))
+    assert [f.pointer for f in findings] == ["/stage"]
+
+
+@pytest.mark.parametrize("key", ["reads", "writes"])
+def test_a_path_that_is_not_a_RunPaths_attribute_is_reported(tmp_path, key):
+    """The schema kind is `world-model`; the RunPaths attribute is `world_model`.
+    A skill that declares the former names nothing the code can resolve.
+    """
+    contract = dict(CONTRACTS["tg-extract"])
+    contract[key] = ["world-model"]
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    assert [f.pointer for f in findings] == [f"/{key}/0"]
+    assert "world-model" in messages(findings)
+
+
+@pytest.mark.parametrize("key", ["reads", "writes"])
+def test_every_declared_name_is_checked_not_only_the_first(tmp_path, key):
+    """Otherwise a loop that returns on its first finding would pass the test
+    above while leaving every later entry unchecked.
+    """
+    contract = dict(CONTRACTS["tg-extract"])
+    contract[key] = ["manifest", "world-model", "nope"]
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    assert [f.pointer for f in findings] == [f"/{key}/1", f"/{key}/2"]
+
+
+def test_an_omitted_artifact_kind_is_reported(tmp_path):
+    """instantiate is gated on both seed and expected. A skill that names only
+    the seed is the drift a subset check would wave through -- and an oracle
+    nobody wrote is a scenario that emits no test.
+    """
+    contract = {
+        "stage": "instantiate",
+        "reads": ["world_model", "scenarios"],
+        "writes": ["seed", "expected", "rationale"],
+        "schemas": ["seed"],
+        "invokes": ["validate"],
+    }
+    findings = check_contract(load(write_skill(tmp_path, "tg-instantiate", contract)))
+    assert [f.pointer for f in findings] == ["/schemas"]
+    assert "expected" in messages(findings)
+
+
+def test_an_invented_artifact_kind_is_reported(tmp_path):
+    contract = dict(CONTRACTS["tg-extract"], schemas=["claims", "report"])
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    assert [f.pointer for f in findings] == ["/schemas"]
+    assert "report" in messages(findings)
+
+
+def test_an_omission_and_an_invention_are_reported_separately(tmp_path):
+    """Two messages, not one: "omits X" and "declares Y" tell the editor which
+    direction is wrong, and a single symmetric-difference message does not.
+    """
+    contract = dict(CONTRACTS["tg-extract"], schemas=["report"])
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    assert len(findings) == 2
+    assert {"claims", "report"} <= set(messages(findings).replace("'", " ").split())
+
+
+def test_an_unknown_subcommand_is_reported(tmp_path):
+    """`check_refs` with an underscore is the plausible typo: it is how the
+    Python function is spelled and it is not what argparse accepts.
+    """
+    contract = dict(CONTRACTS["tg-extract"], invokes=["validate", "check_refs"])
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    assert [f.pointer for f in findings] == ["/invokes/1"]
+    assert "check_refs" in messages(findings)
+
+
+def test_every_real_subcommand_is_accepted(tmp_path):
+    """Pins the check against the CLI rather than a hand-kept list: if a
+    subcommand is added and subcommand_names() does not see it, this fails.
+    """
+    contract = dict(CONTRACTS["tg-extract"], invokes=list(subcommand_names()))
+    assert check_contract(load(write_skill(tmp_path, "tg-extract", contract))) == []
+
+
+def test_a_missing_section_is_reported(tmp_path):
+    without_refusals = SECTIONS[:-1]
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", headings=without_refusals)))
+    assert SECTIONS[-1] in messages(findings)
+
+
+def test_sections_out_of_order_are_reported(tmp_path):
+    """Method before Inputs reads as a skill that acts before it reads."""
+    scrambled = (SECTIONS[2], SECTIONS[0], SECTIONS[1], SECTIONS[3], SECTIONS[4])
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", headings=scrambled)))
+    assert findings, "an out-of-order section list must be reported"
+
+
+def test_extra_headings_between_the_sections_are_allowed(tmp_path):
+    """A subsequence, not an equality: a skill may add its own headings."""
+    with_extras = (
+        SECTIONS[0],
+        SECTIONS[1],
+        "Worked example",
+        SECTIONS[2],
+        SECTIONS[3],
+        SECTIONS[4],
+    )
+    assert check_contract(load(write_skill(tmp_path, "tg-extract", headings=with_extras))) == []
+
+
+def test_an_empty_refusal_section_is_reported(tmp_path):
+    """Section 5 is the most important prompt-level decision in the system. A
+    heading with nothing under it is how that decision silently is not made.
+    """
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", refusals="")))
+    assert findings, "an empty refusal-conditions section must be reported"
+    assert SECTIONS[-1] in messages(findings)
+
+
+def test_a_refusal_section_at_end_of_file_is_read_correctly(tmp_path):
+    """The section-body slice must handle EOF, not only the next `## ` heading.
+    Section 5 is last in every real skill, so an implementation that looks for a
+    following heading would find every refusal section empty -- and the test
+    above would pass for the wrong reason.
+    """
+    assert check_contract(load(write_skill(tmp_path, "tg-extract"))) == []
+    path = write_skill(tmp_path, "tg-extract")
+    assert path.read_text(encoding="utf-8").rstrip().endswith("Refuse.")
+
+
+def test_check_all_reports_a_skill_STAGES_demands_but_the_directory_lacks(tmp_path):
+    write_skill(tmp_path, "tg-extract")
+    findings = check_all(tmp_path)
+    missing = messages(findings)
+    for name in expected_skill_names():
+        if name != "tg-extract":
+            assert name in missing, f"{name} must be reported missing"
+
+
+def test_check_all_reports_a_directory_that_is_not_a_known_skill(tmp_path):
+    for name in expected_skill_names():
+        contract = CONTRACTS.get(name)
+        if contract is None:
+            continue
+        write_skill(tmp_path, name)
+    write_skill(tmp_path, "tg-extract")
+    (tmp_path / "tg-extractt" / "SKILL.md").parent.mkdir()
+    (tmp_path / "tg-extractt" / "SKILL.md").write_text("stray\n", encoding="utf-8")
+    assert "tg-extractt" in messages(check_all(tmp_path))
+
+
+def test_the_RunPaths_names_the_real_skills_use_all_exist():
+    """Guards the check itself against the attribute API moving under it.
+
+    If paths.RunPaths ever renames `coverage_latest`, this fails here rather
+    than in the middle of a dispatched score stage.
+    """
+    for name in (
+        "manifest",
+        "input_file",
+        "claims",
+        "world_model",
+        "scenarios",
+        "coverage_round",
+        "coverage_latest",
+        "seed",
+        "expected",
+        "rationale",
+        "verdict",
+        "task_dir",
+        "report",
+        "decisions",
+    ):
+        assert hasattr(RunPaths, name), name
+
+
+def test_every_stage_in_STAGES_has_a_schema_entry():
+    """The precondition check 4 rests on. STAGE_ARTIFACTS must be total over
+    STAGES, or `STAGE_ARTIFACTS[stage]` raises KeyError inside check_contract
+    and a repairable declaration becomes an exit-2 traceback.
+    """
+    for stage in STAGES:
+        assert stage in STAGE_ARTIFACTS
+        for kind in STAGE_ARTIFACTS[stage]:
+            assert kind in ARTIFACT_SCHEMAS

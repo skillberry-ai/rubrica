@@ -635,3 +635,40 @@ def test_an_unreadable_config_file_is_a_usage_error_not_a_finding(tmp_path, caps
     assert code == 2, captured.out
     assert captured.out.strip() == "", "a misconfigured harness must not print findings"
     assert "unusable" in captured.err
+
+
+# test_check_skills_is_clean_on_the_shipped_skills is deliberately not written
+# here: check_all reports every name expected_skill_names() returns that has
+# no skill yet, and until Task 13 ships the last of them that is every real
+# skill still missing. A suite red for eleven tasks stops being a signal.
+# Task 13 adds it once the roster is complete.
+
+
+def test_check_skills_reports_findings_at_exit_1_with_lines_on_stdout(tmp_path, capsys):
+    """The exit-code contract: a 1 must never mean "no information"."""
+    (tmp_path / "tg-extract").mkdir()
+    (tmp_path / "tg-extract" / "SKILL.md").write_text(
+        '---\nname: tg-extract\n---\n\n## Contract\n\n```toml\nstage = "nope"\n```\n',
+        encoding="utf-8",
+    )
+    assert main(["check-skills", "--skills-dir", str(tmp_path)]) == 1
+    out = capsys.readouterr().out
+    assert out.strip(), "exit 1 with an empty stdout is the failure mode the CLI closed"
+    assert "[skill]" in out
+
+
+def test_check_skills_on_a_missing_directory_is_exit_2(tmp_path, capsys):
+    """A human-authored path nothing can repair by re-prompting."""
+    assert main(["check-skills", "--skills-dir", str(tmp_path / "nope")]) == 2
+    assert capsys.readouterr().err.startswith("error: ")
+
+
+def test_check_skills_on_an_unparseable_skill_is_exit_2(tmp_path, capsys):
+    """A SKILL.md with no contract block at all: same ruling as a malformed
+    --agents roster. Contrast with the exit-1 test above, where the block parses
+    and declares something wrong -- that names a line to edit, so it is a finding.
+    """
+    (tmp_path / "tg-extract").mkdir()
+    (tmp_path / "tg-extract" / "SKILL.md").write_text("# no contract\n", encoding="utf-8")
+    assert main(["check-skills", "--skills-dir", str(tmp_path)]) == 2
+    assert capsys.readouterr().err.startswith("error: ")

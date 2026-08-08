@@ -223,8 +223,14 @@ def _delimited(answer, value):
 # an answer kind reads `value`, a tool kind reads `tool` and `args`. Stated once
 # here because _contract_problems types those fields per kind, and a second copy
 # of the vocabulary is how the gate and the scorer drift apart.
-_ANSWER_KINDS = ("answer_contains", "answer_excludes", "value_equals")
-_TOOL_KINDS = ("tool_called", "tool_not_called")
+#
+# Public, and imported by emit.py, refs.py and skills.py rather than copied:
+# this file is the scorer, so it is the authority on what can be scored. It
+# cannot import *from* the package -- it is copied standalone into the task
+# container and must stay stdlib-only -- so the dependency runs one way only.
+DATA_KINDS = ("answer_contains", "answer_excludes", "value_equals")
+TRAJECTORY_KINDS = ("tool_called", "tool_not_called")
+ASSERTION_KINDS = DATA_KINDS + TRAJECTORY_KINDS
 
 
 def _assertion_satisfied(answer, calls, assertion):
@@ -243,7 +249,7 @@ def _assertion_satisfied(answer, calls, assertion):
         return not _contains(answer, value)
     if kind == "value_equals":
         return _delimited(answer, value)
-    if kind in _TOOL_KINDS:
+    if kind in TRAJECTORY_KINDS:
         hit = any(call_matches(assertion, call) for call in calls)
         return hit if kind == "tool_called" else not hit
     return None
@@ -460,7 +466,7 @@ def _contract_problems(contract):
       asserting nothing, measured at assertions=1.0 on a run that called the
       wrong tool. That is the same vacuous truth _assertion_satisfied already
       refuses for an empty `answer_excludes` value. So `tool` must be a non-empty
-      string for both _TOOL_KINDS, and for every operation too: the schema
+      string for both TRAJECTORY_KINDS, and for every operation too: the schema
       requires it there as well, and leaving one of the pair untyped is how the
       two drift apart.
 
@@ -538,15 +544,15 @@ def _contract_problems(contract):
             value = assertion.get("value", "")
             args = assertion.get("args")
             tool = assertion.get("tool")
-            if kind in _ANSWER_KINDS and not isinstance(value, str):
+            if kind in DATA_KINDS and not isinstance(value, str):
                 problems.append(
                     f"assertions[{i}].value must be a string for kind {kind!r}, got {value!r}"
                 )
-            if kind in _TOOL_KINDS and not isinstance(args, dict):
+            if kind in TRAJECTORY_KINDS and not isinstance(args, dict):
                 problems.append(
                     f"assertions[{i}].args must be an object for kind {kind!r}, got {args!r}"
                 )
-            if kind in _TOOL_KINDS and not (isinstance(tool, str) and tool):
+            if kind in TRAJECTORY_KINDS and not (isinstance(tool, str) and tool):
                 problems.append(
                     f"assertions[{i}].tool must be a non-empty string for kind {kind!r}, got "
                     f"{tool!r}"

@@ -665,7 +665,7 @@ def test_a_tool_assertion_with_an_unscored_non_string_value_still_scores(tmp_pat
     _assertion_satisfied never reads `value` for a tool kind, so typing it there
     would refuse a contract over a field that cannot affect the reward -- the same
     over-reach as typing `rationale` or `target`. This pins the kind split: widen
-    the value check past _ANSWER_KINDS and this test refuses instead of scoring.
+    the value check past DATA_KINDS and this test refuses instead of scoring.
     """
     assertion = _tool_assertion("tool_not_called", {"action": "delete_job"})
     assertion["value"] = 5

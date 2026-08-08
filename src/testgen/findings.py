@@ -13,14 +13,19 @@ class Finding:
     `pointer` is a JSON Pointer into the artifact, or "" for the document
     root. `layer` names the checking layer that produced it, so a reader can
     tell a shape error from a reference error without parsing the message.
+    The layers: "schema" | "refs" | "invariant" | "emit" | "internal" |
+    "recall" | "review" | "skill".
 
     "internal" is the layer cli.py uses when a checking layer raised instead of
     returning: the artifact is malformed in a way layer 1 must reject first, and
-    the exit code still has to carry a line rather than a bare 1.
+    the exit code still has to carry a line rather than a bare 1. "skill" is
+    skills.check_contract's and check_all's layer: the artifact is a SKILL.md
+    rather than a run artifact, and the check is against the code that owns
+    each declared name rather than against a schema.
     """
 
     artifact: Path
-    layer: str  # "schema" | "refs" | "invariant" | "emit" | "internal" | "recall" | "review"
+    layer: str
     pointer: str
     message: str
 

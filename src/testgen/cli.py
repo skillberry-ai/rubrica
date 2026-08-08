@@ -38,7 +38,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from testgen import refs
+from testgen import refs, skills
 from testgen.artifacts import ArtifactError, read_json
 from testgen.dedupe import candidate_pairs
 from testgen.emit import emit_run
@@ -54,12 +54,37 @@ from testgen.validate import UnknownStage, validate_stage
 
 CLEAN, FINDINGS, USAGE = 0, 1, 2
 
+# Every `testgen` subcommand, as (name, help). The one declared source both
+# _build_parser and subcommand_names() read: _build_parser iterates this to
+# create each subparser (then adds that subcommand's own arguments to the
+# result), and subcommand_names() just reads off the names. A hand-kept
+# second list here is exactly how skills.check_contract's validation of a
+# SKILL.md's `invokes` list against the real CLI would go stale the first
+# time a subcommand was added.
+SUBCOMMANDS: tuple[tuple[str, str], ...] = (
+    ("intake", "register inputs and mint a run"),
+    ("validate", "schema-validate one stage's output"),
+    ("check-refs", "cross-artifact and reachability checks"),
+    ("dedupe-candidates", "propose candidate duplicate scenario pairs as JSON"),
+    ("emit", "compile accepted instances into Harbor packages"),
+    ("smoke", "run the emitted suite against the agent roster"),
+    ("compare-gold", "recall and novelty against the authored bench tasks"),
+    ("diff-runs", "per-stage stability across two runs"),
+    ("sample-for-review", "write a stratified review packet for the emitted suite"),
+    ("check-skills", "check every skill's contract against the code it names"),
+)
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="testgen", description=__doc__)
     subparsers = parser.add_subparsers(dest="command")
+    # One add_parser call per declared name, so SUBCOMMANDS is the roster and
+    # this loop cannot omit or misspell one. Each subcommand's own arguments
+    # are added below, keyed off the same dict, because they differ too much
+    # (required vs. optional, choices, types) to fold into the tuple itself.
+    parsers = {name: subparsers.add_parser(name, help=help_) for name, help_ in SUBCOMMANDS}
 
-    p_intake = subparsers.add_parser("intake", help="register inputs and mint a run")
+    p_intake = parsers["intake"]
     p_intake.add_argument("--input", action="append", required=True, metavar="PATH")
     p_intake.add_argument("--runs-dir", required=True)
     p_intake.add_argument("--target-name", required=True)
@@ -67,41 +92,50 @@ def _build_parser() -> argparse.ArgumentParser:
     p_intake.add_argument("--max-rounds", type=int, default=2)
     p_intake.add_argument("--max-scenarios", type=int, default=8)
 
-    p_validate = subparsers.add_parser("validate", help="schema-validate one stage's output")
+    p_validate = parsers["validate"]
     p_validate.add_argument("--run", required=True)
     p_validate.add_argument("--stage", required=True, choices=list(STAGES))
 
-    p_refs = subparsers.add_parser("check-refs", help="cross-artifact and reachability checks")
+    p_refs = parsers["check-refs"]
     p_refs.add_argument("--run", required=True)
 
-    p_dedupe = subparsers.add_parser(
-        "dedupe-candidates", help="propose candidate duplicate scenario pairs as JSON"
-    )
+    p_dedupe = parsers["dedupe-candidates"]
     p_dedupe.add_argument("--run", required=True)
 
-    p_emit = subparsers.add_parser("emit", help="compile accepted instances into Harbor packages")
+    p_emit = parsers["emit"]
     p_emit.add_argument("--run", required=True)
 
-    p_smoke = subparsers.add_parser("smoke", help="run the emitted suite against the agent roster")
+    p_smoke = parsers["smoke"]
     p_smoke.add_argument("--run", required=True)
     p_smoke.add_argument("--agents", required=True, metavar="PATH")
 
-    p_gold = subparsers.add_parser(
-        "compare-gold", help="recall and novelty against the authored bench tasks"
-    )
+    p_gold = parsers["compare-gold"]
     p_gold.add_argument("--run", required=True)
     p_gold.add_argument("--gold", required=True, metavar="PATH")
 
-    p_diff = subparsers.add_parser("diff-runs", help="per-stage stability across two runs")
+    p_diff = parsers["diff-runs"]
     p_diff.add_argument("--a", required=True)
     p_diff.add_argument("--b", required=True)
 
-    p_review = subparsers.add_parser(
-        "sample-for-review", help="write a stratified review packet for the emitted suite"
-    )
+    p_review = parsers["sample-for-review"]
     p_review.add_argument("--run", required=True)
     p_review.add_argument("--size", type=int, default=DEFAULT_SAMPLE_SIZE)
+
+    p_skills = parsers["check-skills"]
+    p_skills.add_argument("--skills-dir", default=None, metavar="PATH")
     return parser
+
+
+def subcommand_names() -> tuple[str, ...]:
+    """Every `testgen` subcommand, as argparse accepts it.
+
+    skills.check_contract validates each skill's `invokes` list against this,
+    so a SKILL.md telling a model to run `testgen check_refs` fails in CI
+    rather than at run time. Reads SUBCOMMANDS -- the same tuple _build_parser
+    iterates over -- rather than a second list, so the parser and this check
+    cannot disagree.
+    """
+    return tuple(name for name, _ in SUBCOMMANDS)
 
 
 def _run_dir(raw: str) -> RunPaths:
@@ -243,6 +277,19 @@ def main(argv: list[str] | None = None) -> int:
                 for reason in report["incomparable_reasons"]:
                     print(f"warning: {reason}", file=sys.stderr)
             return CLEAN
+
+        if args.command == "check-skills":
+            # Its own UsageError catch, for the same reason smoke and
+            # sample-for-review have one: UsageError is a ValueError and the
+            # outer narrow catch deliberately excludes ValueError. A SKILL.md
+            # that cannot be parsed at all is human-authored and unrepairable
+            # by re-prompting, so it is exit 2.
+            try:
+                findings = skills.check_all(args.skills_dir)
+            except UsageError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return USAGE
+            return _report(findings)
     except (FileNotFoundError, ArtifactError, UnknownStage) as exc:
         # A run directory that cannot be read, an artifact that is absent or is
         # not JSON at all, an unknown stage name: the harness was pointed at
