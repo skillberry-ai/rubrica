@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 from testgen.artifacts import write_json
@@ -10,6 +11,8 @@ from tests.builders import (
     minimal_scenarios,
     minimal_world_model,
 )
+from tests.unit.test_refs_states import build_state
+from tests.unit.test_smoke_subprocess import COMPETENT, TOOLLESS
 
 
 def _seeded_run(tmp_path):
@@ -282,3 +285,74 @@ def test_intake_defaults_the_first_slice_limits(tmp_path, capsys):
     printed = capsys.readouterr().out.strip()
     manifest = read_json(Path(printed) / "manifest.json")
     assert manifest["limits"] == {"max_rounds": 2, "max_scenarios": 8}
+
+
+def _write_roster(tmp_path, weak_is_competent=False):
+    """An agents.json whose three commands are scripted stand-ins, not models.
+
+    weak_is_competent hands the weak baseline the same script as the oracle, so
+    a degenerate suite (a tool-less agent is not required to pass it) can be
+    provoked on demand.
+    """
+    weak_script = tmp_path / "weak.py"
+    weak_script.write_text(COMPETENT if weak_is_competent else TOOLLESS, encoding="utf-8")
+    under_script = tmp_path / "under.py"
+    under_script.write_text(COMPETENT, encoding="utf-8")
+    oracle_script = tmp_path / "oracle.py"
+    oracle_script.write_text(COMPETENT, encoding="utf-8")
+
+    roster = tmp_path / "agents.json"
+    write_json(
+        roster,
+        {
+            "schema_version": "0.1",
+            "agents": [
+                {
+                    "role": "weak_baseline",
+                    "model": "model-weak",
+                    "command": [sys.executable, str(weak_script)],
+                },
+                {
+                    "role": "under_test",
+                    "model": "model-under",
+                    "command": [sys.executable, str(under_script)],
+                },
+                {
+                    "role": "oracle",
+                    "model": "model-oracle",
+                    "command": [sys.executable, str(oracle_script)],
+                },
+            ],
+        },
+    )
+    return roster
+
+
+def test_smoke_exits_zero_on_a_healthy_suite(tmp_path, capsys):
+    run = build_state(tmp_path / "run", "emit")
+    roster = _write_roster(tmp_path)
+    code = main(["smoke", "--run", str(run.root), "--agents", str(roster)])
+    assert code == 0
+    assert str(run.report) in capsys.readouterr().out
+
+
+def test_smoke_exits_two_on_an_unusable_roster(tmp_path, capsys):
+    run = build_state(tmp_path / "run", "emit")
+    assert main(["smoke", "--run", str(run.root), "--agents", str(tmp_path / "nope.json")]) == 2
+    assert "unusable agent roster" in capsys.readouterr().err
+
+
+def test_smoke_exits_one_with_findings_on_a_degenerate_suite(tmp_path, capsys):
+    run = build_state(tmp_path / "run", "emit")
+    roster = _write_roster(tmp_path, weak_is_competent=True)
+    assert main(["smoke", "--run", str(run.root), "--agents", str(roster)]) == 1
+    out = capsys.readouterr().out
+    assert "[smoke]" in out and "not testing anything" in out
+
+
+def test_smoke_exits_two_when_the_directory_has_no_manifest(tmp_path, capsys):
+    """A directory without a manifest is not a run, and no stage repair makes one."""
+    run = build_state(tmp_path / "run", "emit")
+    run.manifest.unlink()
+    roster = _write_roster(tmp_path)
+    assert main(["smoke", "--run", str(run.root), "--agents", str(roster)]) == 2

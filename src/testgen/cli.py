@@ -46,6 +46,7 @@ from testgen.errors import UsageError
 from testgen.findings import Finding, format_findings
 from testgen.intake import intake
 from testgen.paths import STAGES, RunPaths
+from testgen.smoke import load_agents, preflight, smoke_run
 from testgen.validate import UnknownStage, validate_stage
 
 CLEAN, FINDINGS, USAGE = 0, 1, 2
@@ -77,6 +78,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_emit = subparsers.add_parser("emit", help="compile accepted instances into Harbor packages")
     p_emit.add_argument("--run", required=True)
+
+    p_smoke = subparsers.add_parser("smoke", help="run the emitted suite against the agent roster")
+    p_smoke.add_argument("--run", required=True)
+    p_smoke.add_argument("--agents", required=True, metavar="PATH")
     return parser
 
 
@@ -157,6 +162,22 @@ def main(argv: list[str] | None = None) -> int:
             emitted, findings = emit_run(run)
             for sid in emitted:
                 print(run.task_dir(sid))
+            return _report(findings)
+
+        if args.command == "smoke":
+            run = _run_dir(args.run)
+            # An inner catch, because UsageError is a ValueError and the outer
+            # narrow catch deliberately does not include ValueError -- without
+            # this a typo'd roster path would reach `except Exception` and be
+            # reported as a malformed artifact at exit 1.
+            try:
+                specs = preflight(load_agents(Path(args.agents)))
+            except UsageError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return USAGE
+            report, findings = smoke_run(run, specs)
+            if report is not None:
+                print(run.report)
             return _report(findings)
     except (FileNotFoundError, ArtifactError, UnknownStage) as exc:
         # A run directory that cannot be read, an artifact that is absent or is

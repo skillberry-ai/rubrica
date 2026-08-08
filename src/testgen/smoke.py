@@ -32,10 +32,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from testgen.artifacts import read_json
+from testgen.artifacts import read_json, write_json
 from testgen.emit import AGENT_TIMEOUT_SEC, VERIFIER_TIMEOUT_SEC
 from testgen.errors import UsageError
-from testgen.findings import format_findings
+from testgen.findings import Finding, format_findings
+from testgen.paths import RunPaths
 from testgen.validate import validate_artifact
 
 # Pipeline order, and the order the report lists agents in.
@@ -558,3 +559,175 @@ def verdict_for(tasks: list[dict], summary: dict, roles: tuple[str, ...]) -> str
     if means.get("weak_baseline", 0.0) > WEAK_BASELINE_CEILING:
         return "degenerate_trivial"
     return "healthy"
+
+
+_VERDICT_MESSAGES = {
+    "degenerate_trivial": (
+        "the weak baseline mean reward is above {ceiling}, so the suite is not testing "
+        "anything: a tool-less agent passes it. Redesign distractors and raise hop depth "
+        "rather than trusting the under_test number"
+    ),
+    "broken_labels": (
+        "the oracle mean reward is below {floor}. An agent handed the reference answer "
+        "cannot pass these tasks, which indicts the gold labels or the verifier -- not the "
+        "agent. Fix the labels before reading any other number in this report"
+    ),
+    "inconclusive": (
+        "too little comparable data to judge the suite: fewer than {minimum} task(s) were "
+        "scored by every declared role, or the roster is missing a role that "
+        "degenerate-suite detection needs"
+    ),
+}
+
+
+def _result_entry(role: str, reward: dict | None, notes: list[str]) -> dict:
+    """One report result. An unscoreable role gets no reward key at all.
+
+    Not `reward: 0.0`. report-0.1.json requires the four components only when
+    `scored` is true, and a 0.0 here would be averaged as a real score by every
+    later reader -- turning "we could not measure this" into "this failed".
+    """
+    usable = components(reward) if isinstance(reward, dict) else None
+    if usable is None and isinstance(reward, dict):
+        notes = [*notes, "verifier returned a reward outside [0, 1] or of the wrong type"]
+    entry: dict = {"role": role, "scored": usable is not None}
+    if usable is not None:
+        entry.update(usable)
+    note = "; ".join(n for n in notes if n)
+    if note:
+        entry["notes"] = note
+    return entry
+
+
+def smoke_run(run: RunPaths, specs: tuple[AgentSpec, ...]) -> tuple[dict | None, list[Finding]]:
+    """Run every role over every emitted package and write 07-report.json.
+
+    Returns (report, findings). The report is None only when there is nothing to
+    run: report-0.1.json sets `tasks` minItems 1 deliberately, because a report
+    over no tasks with verdict `healthy` would validate clean and claim a
+    successful smoke over a suite nobody ran.
+
+    **smoke is a gate, not only a reporter.** A verdict other than `healthy` comes
+    back as a finding, so the caller exits 1 and the orchestrator learns the suite
+    is not fit to trust. Exiting 0 with `broken_labels` printed inside a JSON file
+    is how a broken suite gets shipped.
+
+    A crashing or hanging agent costs that (role, task) its score and nothing
+    else. The remaining roles still run, because the comparison across roles is
+    the entire product.
+    """
+    # Read before anything runs. This raises ArtifactError on a directory with no
+    # manifest, which cli.py maps to exit 2 -- and reading it after the agent loop
+    # would burn every agent invocation in the run before discovering that the
+    # thing it was pointed at is not a run.
+    run_id = read_json(run.manifest)["run_id"]
+
+    findings: list[Finding] = []
+    sids = run.scenario_ids_with_tasks()
+    if not sids:
+        return None, [
+            Finding(
+                run.suite_dir,
+                "smoke",
+                "",
+                "no emitted packages to run; emit must produce at least one package before "
+                "smoke, and a report over no tasks cannot be written",
+            )
+        ]
+
+    roles = tuple(spec.role for spec in specs)
+    for role in REQUIRED_ROLES:
+        if role not in roles:
+            findings.append(
+                Finding(
+                    run.report,
+                    "smoke",
+                    "/agents",
+                    f"the roster declares no {role!r} agent. Design spec section 7 makes it "
+                    "load-bearing for degenerate-suite detection, so this run cannot be judged "
+                    "healthy however good the scores look",
+                )
+            )
+
+    tasks: list[dict] = []
+    for sid in sids:
+        task_dir = run.task_dir(sid)
+        results = []
+        for spec in specs:
+            base = run.smoke_dir(spec.role, sid)
+            agent_logs = base / "agent"
+            agent_code, agent_note = run_agent(
+                spec,
+                task_dir=task_dir,
+                logs_dir=agent_logs,
+                stderr_path=base / "agent-stderr.txt",
+                scenario_id=sid,
+            )
+            _, verified_reward, verify_note = verify_package(
+                task_dir,
+                agent_logs=agent_logs,
+                out_dir=base / "verifier",
+                stderr_path=base / "verifier-stderr.txt",
+            )
+            # A crashing (nonzero exit) or hanging (None, i.e. timed out) agent
+            # produced no answer this role earned a score for. verify.py cannot
+            # tell "the agent crashed" from "the agent legitimately answered
+            # nothing" -- an empty transcript scores a real, low reward rather
+            # than refusing -- so that distinction has to be made here, at the
+            # one place that still has the agent's own exit status. Without it,
+            # a crash would be reported as a bad-but-real answer instead of the
+            # missing data point it actually is.
+            reward = verified_reward if agent_code == 0 else None
+            results.append(_result_entry(spec.role, reward, [agent_note, verify_note]))
+        task = {"scenario_id": sid, "results": results}
+        all_pass, all_fail = task_flags(task, roles)
+        tasks.append({**task, "all_pass": all_pass, "all_fail": all_fail})
+
+    summary = summarize(tasks, roles)
+    verdict = verdict_for(tasks, summary, roles)
+    report = {
+        "schema_version": "0.1",
+        # Indexed directly: manifest.json is a gated stage output, and a directory
+        # without one is not a run. The ArtifactError becomes exit 2, which is the
+        # honest answer -- no repair to a stage would produce a manifest.
+        "run_id": run_id,
+        "agents": [
+            {
+                "role": spec.role,
+                "model": spec.model,
+                **({"notes": spec.notes} if spec.notes else {}),
+            }
+            for spec in specs
+        ],
+        "tasks": tasks,
+        "summary": summary,
+        "verdict": verdict,
+    }
+    write_json(run.report, report)
+
+    for i, task in enumerate(tasks):
+        for j, result in enumerate(task["results"]):
+            if not result["scored"]:
+                findings.append(
+                    Finding(
+                        run.report,
+                        "smoke",
+                        f"/tasks/{i}/results/{j}",
+                        f"{result['role']} produced no score for {task['scenario_id']}: "
+                        f"{result.get('notes', 'no diagnostic')}",
+                    )
+                )
+    if verdict != "healthy":
+        findings.append(
+            Finding(
+                run.report,
+                "smoke",
+                "/verdict",
+                _VERDICT_MESSAGES[verdict].format(
+                    ceiling=WEAK_BASELINE_CEILING,
+                    floor=ORACLE_FLOOR,
+                    minimum=MIN_COMPARABLE_TASKS,
+                ),
+            )
+        )
+    return report, findings
