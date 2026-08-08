@@ -140,6 +140,81 @@ def test_a_timed_out_agent_is_scored_on_the_partial_transcript_it_produced(tmp_p
     assert any("timed out" in f.message for f in findings)  # gate still speaks up
 
 
+def test_a_timeout_with_no_reward_is_not_reported_as_having_scored_anyway(tmp_path):
+    """A recorded note must never be false.
+
+    The timeout finding says the role "scored anyway on its partial transcript:
+    the reward is real, not padded". When the verifier produced no reward, the
+    result at that very pointer carries no reward key at all -- so the sentence is
+    not a harmless duplicate of the unscoreable finding, it is a false record of a
+    score that does not exist. The timeout itself is still reported, in the
+    unscoreable finding's note.
+    """
+    run = _run(tmp_path)
+    (run.task_dir(SID) / "tests" / "verify.py").write_text("raise SystemExit(9)\n", "utf-8")
+    specs = (
+        _spec(tmp_path, "weak_baseline", TOOLLESS),
+        _spec(tmp_path, "under_test", SLOW_BUT_CORRECT, timeout_sec=2.0),
+        _spec(tmp_path, "oracle", COMPETENT),
+    )
+    report, findings = smoke_run(run, specs)
+    results = report["tasks"][0]["results"]
+    index = next(i for i, r in enumerate(results) if r["role"] == "under_test")
+    assert results[index]["scored"] is False
+    assert "reward" not in results[index]
+    assert "timed out" in results[index]["notes"]
+
+    pointer = f"/tasks/0/results/{index}"
+    at_pointer = [f for f in findings if f.pointer == pointer]
+    assert at_pointer, "the unscoreable result must still be reported"
+    assert not any("the reward is real" in f.message for f in at_pointer), (
+        "a result with no reward key must not be described as having scored anyway"
+    )
+    assert any("timed out" in f.message for f in at_pointer), "the timeout must still be recorded"
+
+
+def test_a_role_whose_log_directory_cannot_be_cleared_is_unscoreable_not_timed_out(tmp_path):
+    """A previous attempt's transcript must never be scored as this attempt's.
+
+    run_agent clears the agent log directory of everything verify.py reads back,
+    and fails closed when it cannot: the command is not launched and the result is
+    unscoreable. A subdirectory named *.jsonl is the unremovable entry here -- the
+    same shape verify.py's own _read_logs raises on. It must not be reported as a
+    timeout, because nothing timed out.
+    """
+    run = _run(tmp_path)
+    logs = run.smoke_dir("under_test", SID) / "agent"
+    logs.mkdir(parents=True, exist_ok=True)
+    (logs / "blocking.jsonl").mkdir()
+
+    report, findings = smoke_run(run, _roster(tmp_path))
+    results = {r["role"]: r for r in report["tasks"][0]["results"]}
+    assert results["under_test"]["scored"] is False
+    assert "reward" not in results["under_test"]
+    assert "could not clear the agent log directory" in results["under_test"]["notes"]
+    assert report["summary"]["unscoreable"] == 1
+    assert not any("timed out" in f.message for f in findings), "nothing timed out"
+    assert any("under_test" in f.message for f in findings)
+
+
+def test_a_discarded_verifier_score_is_recorded_where_an_operator_would_find_it(tmp_path):
+    """verify.py cannot see the crash, so a real reward.json sits next to the report.
+
+    Without the note, an operator reading measurement/smoke/<role>/<sid>/verifier/
+    would find a score the report says does not exist and nothing on disk
+    explaining the mismatch.
+    """
+    run = _run(tmp_path)
+    report, _ = smoke_run(run, _roster(tmp_path, under=CRASHER))
+    result = next(r for r in report["tasks"][0]["results"] if r["role"] == "under_test")
+    assert result["scored"] is False
+
+    on_disk = read_json(run.smoke_dir("under_test", SID) / "verifier" / "reward.json")
+    assert "discarded" in result["notes"]
+    assert str(on_disk["reward"]) in result["notes"], "the note must name the score it discarded"
+    assert "agent exited 7" in result["notes"], "and why it was discarded"
+
+
 def test_a_roster_without_the_oracle_is_a_finding_and_still_reports(tmp_path):
     run = _run(tmp_path)
     specs = tuple(s for s in _roster(tmp_path) if s.role != "oracle")

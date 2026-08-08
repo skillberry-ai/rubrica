@@ -32,7 +32,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from testgen.artifacts import read_json, write_json
+from testgen.artifacts import ArtifactError, read_json, write_json
 from testgen.emit import AGENT_TIMEOUT_SEC, VERIFIER_TIMEOUT_SEC
 from testgen.errors import UsageError
 from testgen.findings import Finding, format_findings
@@ -74,11 +74,24 @@ def load_agents(path: Path | str) -> tuple[AgentSpec, ...]:
     decision a human is allowed to make, and the run still produces real data --
     so smoke_run reports it as a finding and refuses to call the result healthy,
     rather than refusing to run.
+
+    **Every way this file can be unreadable is a UsageError too, not just a schema
+    failure.** artifacts.read_json turns only FileNotFoundError into an
+    ArtifactError, so --agents pointing at a directory, at a non-UTF-8 file, or at
+    a file with mode 000 raised IsADirectoryError / UnicodeDecodeError /
+    PermissionError straight out of here -- and cli.py's catch-all reported it as
+    "an artifact in this run is malformed" at exit 1, sending the orchestrator to
+    spend its one repair attempt rewriting stage artifacts that were fine. The
+    catch is here rather than in read_json on purpose: an unreadable *stage*
+    artifact really is a repairable stage defect and must stay a finding.
     """
-    findings = validate_artifact(Path(path), "agents")
-    if findings:
-        raise UsageError(f"unusable agent roster:\n{format_findings(findings)}")
-    roster = read_json(path)
+    try:
+        findings = validate_artifact(Path(path), "agents")
+        if findings:
+            raise UsageError(f"unusable agent roster:\n{format_findings(findings)}")
+        roster = read_json(path)
+    except (OSError, UnicodeDecodeError, ArtifactError) as exc:
+        raise UsageError(f"unusable agent roster: {path}: {exc}") from exc
     specs = [
         AgentSpec(
             role=entry["role"],
@@ -142,6 +155,19 @@ def preflight(specs: tuple[AgentSpec, ...]) -> tuple[AgentSpec, ...]:
     agent invocations before it and leaves a half-populated report on disk.
     shutil.which handles both a bare name on PATH and a name with a directory
     component, and requires the executable bit either way.
+
+    **The restriction this imposes: command[0] must be runnable as written, before
+    substitution.** `substitute` fills placeholders in every argv element, this
+    one included, but it runs per (role, task) inside the agent loop -- long after
+    the roster has to be accepted or refused. So a roster whose executable is
+    `{task_dir}/run-agent` is refused here, and the placeholders are usable only
+    in the arguments after it. That is the deliberate resolution of the two
+    docstrings' apparent disagreement, and it is the cheaper side of the trade: a
+    non-runnable executable is a misconfigured roster, which owes the operator an
+    exit 2 before anything runs, and letting one through would surface it as
+    subprocess.run's FileNotFoundError per task -- reported as a repairable stage
+    finding at exit 1 about an artifact that is fine. agents-0.1.json's `command`
+    description states the same restriction where a roster author will read it.
     """
     resolved = []
     for spec in specs:
@@ -149,7 +175,9 @@ def preflight(specs: tuple[AgentSpec, ...]) -> tuple[AgentSpec, ...]:
         if found is None:
             raise UsageError(
                 f"agent role {spec.role!r} names an executable that is not runnable: "
-                f"{spec.command[0]!r}"
+                f"{spec.command[0]!r}. The executable must resolve as written, before "
+                f"{{task_dir}}/{{logs_dir}}/{{scenario_id}} are substituted; use a placeholder "
+                "only in the arguments after it"
             )
         resolved.append(
             dataclasses.replace(spec, command=(str(Path(found).resolve()), *spec.command[1:]))
@@ -177,7 +205,16 @@ def scrubbed_env() -> dict[str, str]:
 # reward-detail.json for a human or this module to read, reward.txt as the
 # bare float Harbor's test.sh reads. verify_package unlinks exactly these
 # three before running, and nothing else in out_dir -- see its docstring.
-_VERIFIER_OUTPUTS = ("reward.json", "reward.txt", "reward-detail.json")
+#
+# One definition per file, not one for the clear and another at each read.
+# These names are the scoring seam: verify_package reads _REWARD_JSON for the
+# score and _refusal_note reads _REWARD_DETAIL_JSON for the verifier's own
+# stated reason, and a rename that reached the unlink tuple but missed a read
+# would clear a file this module then went looking for under its old name.
+_REWARD_JSON = "reward.json"
+_REWARD_TXT = "reward.txt"
+_REWARD_DETAIL_JSON = "reward-detail.json"
+_VERIFIER_OUTPUTS = (_REWARD_JSON, _REWARD_TXT, _REWARD_DETAIL_JSON)
 
 
 def verifier_argv(task_dir: Path, *, agent_logs: Path, out_dir: Path) -> list[str]:
@@ -198,6 +235,57 @@ def verifier_argv(task_dir: Path, *, agent_logs: Path, out_dir: Path) -> list[st
         "--out",
         str(out_dir),
     ]
+
+
+# The glob patterns verify.py::_read_logs concatenates out of the agent log
+# directory. run_agent clears exactly these before launching the agent, so a
+# previous attempt's transcript cannot be scored as this one's -- the same
+# staleness verify_package clears on the output side of the scoring seam.
+#
+# Defined here and pinned against verify.py's behaviour by
+# test_the_transcript_globs_are_exactly_what_the_verifier_reads: if the verifier
+# ever reads a third pattern, the clear would miss it and that test fails.
+# verify.py is stdlib-only and imports nothing from testgen, so it cannot import
+# this constant; the test is what keeps the two ends of the seam honest.
+_TRANSCRIPT_GLOBS = ("*.jsonl", "*.txt")
+
+# The note run_agent returns when it could not clear the agent log directory,
+# and the prefix smoke_run recognises that outcome by.
+#
+# run_agent's returncode is None both here and on a timeout, and the two are
+# opposite situations: a timeout leaves a real partial transcript that can carry
+# an earned score, while this leaves no transcript from this attempt at all. One
+# definition, read by the producer and the consumer, rather than the same
+# sentence written twice on either side of the branch that depends on it.
+_LOGS_NOT_CLEARED = "could not clear the agent log directory"
+
+
+def _never_launched(note: str) -> bool:
+    """Whether `note` is run_agent reporting that it never launched the command."""
+    return note.startswith(_LOGS_NOT_CLEARED)
+
+
+def _clear_transcripts(logs_dir: Path) -> str:
+    """Remove every file verify.py would read from `logs_dir`. -> a note, or "".
+
+    A glob-scoped unlink over _TRANSCRIPT_GLOBS, never shutil.rmtree: logs_dir is
+    caller-supplied, and an rmtree over a wrong path would erase the emitted
+    package or the whole run rather than merely leaving stale transcripts behind.
+    verify_package's own clear is scoped the same way for the same reason.
+
+    Fails closed. An OSError -- including the IsADirectoryError from a
+    *subdirectory* named `*.jsonl`, which _read_logs would itself raise on -- is
+    returned as a note rather than swallowed or raised: a transcript we could not
+    clear is exactly the transcript we must not score, and raising would cost
+    every other role its data on every remaining task.
+    """
+    for pattern in _TRANSCRIPT_GLOBS:
+        for stale in sorted(logs_dir.glob(pattern)):
+            try:
+                stale.unlink()
+            except OSError as exc:
+                return f"{_LOGS_NOT_CLEARED} {logs_dir}: {exc}"
+    return ""
 
 
 def _decode(output: str | bytes | None) -> str:
@@ -240,6 +328,16 @@ def run_agent(
     writes its own transcript files into logs_dir works too, because verify.py
     concatenates every *.jsonl and *.txt it finds there.
 
+    **logs_dir is cleared of transcripts first.** run.smoke_dir(role, sid) is
+    deterministic per (role, task), and overwriting agent-stdout.jsonl does not
+    remove the `session-1.jsonl` a previous attempt's runner wrote for itself --
+    which verify.py would concatenate, and whose `result` event would win, because
+    parse_transcript takes the last one and "agent-stdout.jsonl" sorts first. A
+    correct answer from attempt 1 would then be scored as attempt 2's. If the
+    clear fails, the command is **not launched** and the returncode is None with
+    _LOGS_NOT_CLEARED as the note: a directory we could not clear is one whose
+    contents must not be scored as this attempt's.
+
     **stderr goes outside logs_dir on purpose.** verify.py globs *.txt in the
     agent log directory, so a diagnostic written inside it would be read back as
     transcript input -- and a warning line that happened to quote the reference
@@ -259,6 +357,9 @@ def run_agent(
             "verify.py would read it back as transcript"
         )
     logs_dir.mkdir(parents=True, exist_ok=True)
+    not_cleared = _clear_transcripts(logs_dir)
+    if not_cleared:
+        return None, not_cleared
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
     argv = substitute(spec.command, task_dir=task_dir, logs_dir=logs_dir, scenario_id=scenario_id)
     stdout_path = logs_dir / "agent-stdout.jsonl"
@@ -362,7 +463,7 @@ def verify_package(
         return None, None, f"verifier timed out after {timeout_sec} s"
     stderr_path.write_text(completed.stderr, encoding="utf-8")
 
-    reward_path = out_dir / "reward.json"
+    reward_path = out_dir / _REWARD_JSON
     if completed.returncode != 0 or not reward_path.is_file():
         return completed.returncode, None, _refusal_note(out_dir, completed)
     try:
@@ -381,7 +482,7 @@ def _refusal_note(out_dir: Path, completed: subprocess.CompletedProcess) -> str:
     that message names the contract field that is wrong. Falling back to stderr
     first would report a Python traceback where a one-line diagnosis exists.
     """
-    detail = out_dir / "reward-detail.json"
+    detail = out_dir / _REWARD_DETAIL_JSON
     if detail.is_file():
         try:
             payload = json.loads(detail.read_text(encoding="utf-8"))
@@ -430,6 +531,14 @@ def components(reward: dict) -> dict[str, float] | None:
     because json.loads accepts NaN and Infinity as bare tokens. verify.py's
     _contract_problems normally prevents all of this; this is the check that the
     *copied* verifier still honoured it.
+
+    **The isfinite call is redundant, kept for legibility rather than for
+    coverage.** The range test rejects every non-finite value on its own: NaN
+    makes `0.0 <= value <= 1.0` False because every comparison with NaN is False,
+    and +/-inf falls outside the range. Deleting `math.isfinite` changes no
+    result. It is written out because "not finite" is the reason a reader needs
+    for NaN, and deriving that reason from the range test is a step nobody should
+    have to take at the scoring seam.
     """
     values: dict[str, float] = {}
     for key in _COMPONENTS:
@@ -683,9 +792,21 @@ def smoke_run(run: RunPaths, specs: tuple[AgentSpec, ...]) -> tuple[dict | None,
             # so one discarded timeout would silently void the other two roles'
             # scores on the same task too.
             crashed = agent_code not in (0, None)  # nonzero exit only; None means timed out
-            reward = None if crashed else verified_reward
+            # The third outcome: run_agent could not clear the agent log
+            # directory, so it never launched the command. verify.py has just
+            # scored whatever that directory still held, which belongs to a
+            # previous attempt -- unscoreable, for the same reason a crash is.
+            never_ran = _never_launched(agent_note)
+            discarded_because = (
+                f"agent exited {agent_code}, not 0"
+                if crashed
+                else "the agent was never launched"
+                if never_ran
+                else ""
+            )
+            reward = None if discarded_because else verified_reward
             notes = [agent_note, verify_note]
-            if crashed and verified_reward is not None:
+            if discarded_because and verified_reward is not None:
                 # verify.py cannot see the crash, so it scored the empty transcript
                 # anyway and wrote a real reward.json next to it -- without this,
                 # an operator reading the verifier's own output would find a score
@@ -693,10 +814,10 @@ def smoke_run(run: RunPaths, specs: tuple[AgentSpec, ...]) -> tuple[dict | None,
                 # the mismatch.
                 notes.append(
                     f"verifier's score ({verified_reward.get('reward')}) was discarded: "
-                    f"agent exited {agent_code}, not 0"
+                    f"{discarded_because}"
                 )
             results.append(_result_entry(spec.role, reward, notes))
-            if agent_code is None:
+            if agent_code is None and not never_ran:
                 timed_out.append((len(tasks), len(results) - 1, spec.role))
         task = {"scenario_id": sid, "results": results}
         all_pass, all_fail = task_flags(task, roles)
@@ -737,6 +858,14 @@ def smoke_run(run: RunPaths, specs: tuple[AgentSpec, ...]) -> tuple[dict | None,
                     )
                 )
     for i, j, role in timed_out:
+        if not tasks[i]["results"][j]["scored"]:
+            # A timeout whose verifier produced no reward is already reported by
+            # the unscoreable loop above, with the timeout in its note. Saying
+            # "scored anyway on its partial transcript: the reward is real" at the
+            # same pointer as a result carrying no reward at all is not a
+            # duplicate, it is a false record -- and a recorded note must never be
+            # false.
+            continue
         findings.append(
             Finding(
                 run.report,

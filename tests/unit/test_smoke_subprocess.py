@@ -184,6 +184,140 @@ def test_run_agent_refuses_a_stderr_path_inside_the_agent_log_directory(tmp_path
         )
 
 
+def test_a_previous_attempts_transcript_is_not_scored_as_this_ones(tmp_path):
+    """The input side of the scoring seam, mirroring verify_package's out_dir clear.
+
+    run.smoke_dir(role, sid) is deterministic per (role, task) and run_agent
+    overwrites only agent-stdout.jsonl, so a runner that wrote its own
+    `session-1.jsonl` on attempt 1 left it there for attempt 2 -- and verify.py
+    concatenates every *.jsonl sorted, with parse_transcript taking the *last*
+    result event, so "agent-stdout.jsonl" sorting first means the stale file's
+    answer wins. A correct answer from attempt 1 was reported as attempt 2's
+    reward of 1.0, verdict healthy, exit 0, no finding.
+    """
+    run = _emitted(tmp_path)
+    logs, out, base = _paths(run)
+
+    # Attempt 1: a runner that writes its own transcript file into logs_dir -- a
+    # shape run_agent's docstring explicitly supports -- and answers correctly.
+    run_agent(
+        _spec(_script(tmp_path, "attempt1.py", COMPETENT)),
+        task_dir=run.task_dir(SID),
+        logs_dir=logs,
+        stderr_path=base / "agent-stderr.txt",
+        scenario_id=SID,
+    )
+    (logs / "agent-stdout.jsonl").rename(logs / "session-1.jsonl")
+    _, first_reward, _ = verify_package(
+        run.task_dir(SID),
+        agent_logs=logs,
+        out_dir=out,
+        stderr_path=base / "verifier-stderr.txt",
+    )
+    assert first_reward["reward"] == 1.0, "the fixture must really score attempt 1"
+
+    # Attempt 2: the same (role, task), streaming stream-json to stdout, wrong.
+    code, note = run_agent(
+        _spec(_script(tmp_path, "attempt2.py", TOOLLESS)),
+        task_dir=run.task_dir(SID),
+        logs_dir=logs,
+        stderr_path=base / "agent-stderr.txt",
+        scenario_id=SID,
+    )
+    assert (code, note) == (0, "")
+    assert not (logs / "session-1.jsonl").exists(), "the stale transcript must be gone"
+    _, reward, _ = verify_package(
+        run.task_dir(SID),
+        agent_logs=logs,
+        out_dir=out,
+        stderr_path=base / "verifier-stderr.txt",
+    )
+    assert reward["reward"] == 0.0, f"attempt 1's transcript was scored as attempt 2's: {reward}"
+
+
+def test_the_transcript_globs_are_exactly_what_the_verifier_reads(tmp_path):
+    """Pins smoke._TRANSCRIPT_GLOBS against verify.py::_read_logs' behaviour.
+
+    The same discipline as test_the_verifier_is_invoked_the_way_test_sh_invokes_it:
+    the clear in run_agent is only correct if it covers every pattern the verifier
+    reads back, and verify.py is stdlib-only and imports nothing from testgen, so
+    it cannot share the constant. Asserted behaviourally rather than by parsing
+    verify.py's source: a file per candidate extension with a unique marker, and
+    the set of markers that come back must be exactly the set _TRANSCRIPT_GLOBS
+    claims. A verifier that grew a third pattern fails here.
+    """
+    from testgen.smoke import _TRANSCRIPT_GLOBS
+    from testgen.suite import verify
+
+    logs = tmp_path / "agent-logs"
+    logs.mkdir()
+    names = ("t.jsonl", "t.txt", "t.json", "t.log", "t.md", "t.yaml", "t.ndjson", "plain")
+    # Delimited, because an undelimited "marker-for-t.json" is a substring of
+    # "marker-for-t.jsonl" and the .json file would look read when it was not.
+    for name in names:
+        (logs / name).write_text(f"<marker:{name}>\n", encoding="utf-8")
+
+    read = verify._read_logs(logs)
+    seen = {name for name in names if f"<marker:{name}>" in read}
+    assert seen == {f"t{Path(pattern).suffix}" for pattern in _TRANSCRIPT_GLOBS}
+
+
+def test_a_transcript_that_cannot_be_removed_makes_the_task_unscoreable(tmp_path):
+    """The subdirectory case, which _read_logs would itself raise on.
+
+    A directory named `*.jsonl` cannot be unlinked (IsADirectoryError, an OSError),
+    and the clear must fail closed on it exactly as it does on a permissions
+    failure -- returning a note rather than raising, so one bad directory does not
+    cost every other role its data on every remaining task.
+    """
+    run = _emitted(tmp_path)
+    logs, _out, base = _paths(run)
+    logs.mkdir(parents=True, exist_ok=True)
+    (logs / "not-a-file.jsonl").mkdir()
+
+    code, note = run_agent(
+        _spec(_script(tmp_path, "never.py", COMPETENT)),
+        task_dir=run.task_dir(SID),
+        logs_dir=logs,
+        stderr_path=base / "agent-stderr.txt",
+        scenario_id=SID,
+    )
+    assert code is None
+    assert "could not clear the agent log directory" in note
+    assert not (logs / "agent-stdout.jsonl").exists(), "the command must not have been launched"
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)"
+)
+def test_a_read_only_agent_log_directory_fails_closed_rather_than_scoring_stale_input(tmp_path):
+    """Fail closed on a real filesystem denial, the same discipline verify_package has.
+
+    A read-only log directory reproduces a read-only mount or a permissions
+    mismatch rather than mocking Path.unlink. Scoring whatever the directory still
+    holds would be scoring a previous attempt, which is the defect the clear
+    exists to prevent.
+    """
+    run = _emitted(tmp_path)
+    logs, _out, base = _paths(run)
+    logs.mkdir(parents=True, exist_ok=True)
+    (logs / "session-1.jsonl").write_text("stale\n", encoding="utf-8")
+    logs.chmod(0o555)  # removing an entry needs write permission on the parent
+    try:
+        code, note = run_agent(
+            _spec(_script(tmp_path, "never2.py", COMPETENT)),
+            task_dir=run.task_dir(SID),
+            logs_dir=logs,
+            stderr_path=base / "agent-stderr.txt",
+            scenario_id=SID,
+        )
+    finally:
+        logs.chmod(0o755)
+    assert code is None
+    assert "could not clear the agent log directory" in note
+    assert (logs / "session-1.jsonl").read_text() == "stale\n"
+
+
 def test_the_agent_runs_with_the_task_directory_as_its_cwd(tmp_path):
     run = _emitted(tmp_path)
     logs, _, base = _paths(run)

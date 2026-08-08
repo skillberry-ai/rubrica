@@ -19,7 +19,7 @@
           "role": { "enum": ["weak_baseline", "under_test", "oracle"] },
           "model": { "type": "string", "minLength": 1 },
           "command": {
-            "description": "argv. prefixItems bounds only the executable, which must be a non-empty string; later elements may legitimately be empty.",
+            "description": "argv. prefixItems bounds only the executable, which must be a non-empty string; later elements may legitimately be empty. The executable must be runnable as written -- a bare name on PATH or a path with the executable bit -- because smoke's preflight resolves it and refuses the whole roster before any agent runs, which happens before any {task_dir}/{logs_dir}/{scenario_id} substitution. Use a placeholder only in the arguments after the executable.",
             "type": "array",
             "minItems": 1,
             "prefixItems": [{ "type": "string", "minLength": 1 }],

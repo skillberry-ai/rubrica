@@ -178,6 +178,35 @@ def test_preflight_refuses_a_command_that_cannot_run():
         preflight((spec,))
 
 
+def test_preflight_refuses_a_placeholder_in_the_executable_and_says_why():
+    """The documented restriction, stated where an operator will hit it.
+
+    `substitute` fills placeholders in every argv element, but it runs per (role,
+    task) inside the agent loop -- long after the roster has to be accepted or
+    refused. So the executable must resolve as written, and the message has to say
+    so: letting `{task_dir}/run-agent` through would move the failure into
+    subprocess.run, where a FileNotFoundError becomes an exit-1 stage finding
+    about a run whose artifacts are fine. agents-0.1.json's `command` description
+    states the same restriction.
+    """
+    spec = AgentSpec(role="under_test", model="m", command=("{task_dir}/run-agent", "--x"))
+    with pytest.raises(UsageError, match="before .task_dir.") as excinfo:
+        preflight((spec,))
+    assert "only in the arguments after it" in str(excinfo.value)
+
+
+def test_the_schema_states_the_same_restriction_preflight_enforces():
+    """One rule, and the roster author reads the schema, not preflight's docstring."""
+    from testgen.artifacts import read_json
+    from testgen.validate import schema_dir
+
+    description = read_json(schema_dir() / "agents-0.1.json")["properties"]["agents"]["items"][
+        "properties"
+    ]["command"]["description"]
+    assert "runnable as written" in description
+    assert "only in the arguments after the executable" in description
+
+
 def test_preflight_names_the_role_that_is_broken():
     specs = (
         AgentSpec(role="weak_baseline", model="m", command=("true",)),
