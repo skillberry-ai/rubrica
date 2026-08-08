@@ -20,6 +20,7 @@ from testgen.artifacts import append_decision, read_json, write_json
 from testgen.errors import UsageError
 from testgen.paths import STAGES, RunPaths
 from testgen.skills import skill_sha256
+from testgen.validate import manifest_stage_efforts
 
 # The one spelling of the artifact timestamp format. intake writes
 # manifest.created_utc with it and decide stamps each notebook line with it;
@@ -50,6 +51,25 @@ def record_stage(run: RunPaths, *, stage: str, model: str, effort: str, skill: P
     """
     if stage not in STAGES:
         raise UsageError(f"unknown stage {stage!r}; expected one of {', '.join(STAGES)}")
+    # Rejected here rather than left for the manifest schema's minLength: 1 to
+    # catch three steps downstream. A blank model would still write at exit 0
+    # and only surface as an exit-1 finding the next time someone happens to
+    # run `validate` -- misattributing a bad orchestrator argument to the
+    # manifest, the same misdirection the missing OSError catch above causes
+    # for a filesystem problem. Stricter than the schema on purpose: "   "
+    # satisfies minLength: 1 but records nothing anyone could use as a model
+    # name, so it is refused the same way decide refuses a whitespace-only note.
+    if not model.strip():
+        raise UsageError("a stage's model cannot be empty")
+    # Same shape, for the same reason: effort's argparse `choices` protects the
+    # CLI, but record_stage is a library function a caller can invoke directly
+    # (this module's own tests do), and nothing before this line stopped an
+    # empty or invented effort from being written and only rejected later by
+    # the manifest schema's enum.
+    if effort not in manifest_stage_efforts():
+        raise UsageError(
+            f"unknown effort {effort!r}; expected one of {', '.join(manifest_stage_efforts())}"
+        )
     if not Path(skill).is_file():
         raise UsageError(f"skill file does not exist: {skill}")
     manifest = read_json(run.manifest)

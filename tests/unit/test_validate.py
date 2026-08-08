@@ -536,6 +536,14 @@ def test_manifest_stage_efforts_tracks_a_schema_override(tmp_path, monkeypatch):
     Without this the caching could be hiding a read that happens once against
     the shipped schema and never again -- which would make the "no second copy"
     claim false in exactly the case a candidate schema is being tried.
+
+    No cache_clear() here: the cache is keyed on schema_dir() (same pattern
+    _validator_for uses for the same reason), so the override takes effect on
+    the very next call with no teardown discipline required to make this test
+    meaningful. An earlier version of this test called manifest_stage_efforts
+    .cache_clear() before and after -- that only worked because the function
+    was cached on zero arguments back then, and it is gone now that the public
+    function is not the cached one.
     """
     from testgen.artifacts import read_json
     from testgen.validate import ARTIFACT_SCHEMAS, manifest_stage_efforts, schema_dir
@@ -547,8 +555,4 @@ def test_manifest_stage_efforts_tracks_a_schema_override(tmp_path, monkeypatch):
     ]
     write_json(tmp_path / ARTIFACT_SCHEMAS["manifest"], original)
     monkeypatch.setenv("TESTGEN_SCHEMA_DIR", str(tmp_path))
-    manifest_stage_efforts.cache_clear()
-    try:
-        assert manifest_stage_efforts() == ("low", "ludicrous")
-    finally:
-        manifest_stage_efforts.cache_clear()
+    assert manifest_stage_efforts() == ("low", "ludicrous")

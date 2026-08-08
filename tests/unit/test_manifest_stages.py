@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from testgen.artifacts import read_json, write_json
 from testgen.cli import main
+from testgen.errors import UsageError
+from testgen.manifest import record_stage
 from testgen.paths import RunPaths
 from testgen.skills import skill_sha256
 from testgen.stability import comparability, stage_config
@@ -451,3 +455,91 @@ def test_decide_refuses_a_note_with_an_embedded_newline(tmp_path, capsys):
     )
     assert capsys.readouterr().err.startswith("error: ")
     assert not run.decisions.exists()
+
+
+# -- round 1 fixes: OSError symmetry, and record_stage's own boundary check --
+
+
+def test_decide_on_an_unwritable_decisions_path_is_exit_2_not_exit_1(tmp_path, capsys):
+    """decisions.md as a directory raises IsADirectoryError -- an OSError --
+    out of append_decision's open(). decide's handler used to catch only
+    UsageError, so this fell through to cli.py's catch-all and became exit 1
+    with a fabricated "internal" finding: a filesystem problem no stage could
+    ever fix, reported as if a stage produced bad output. record-stage's
+    handler already caught (UsageError, OSError); decide's now matches.
+    """
+    run = _run(tmp_path)
+    run.decisions.mkdir(parents=True)
+    assert main(["decide", "--run", str(run.root), "--note", "x"]) == 2
+    assert capsys.readouterr().err.startswith("error: ")
+
+
+def test_record_stage_refuses_a_blank_model(tmp_path, capsys):
+    """The manifest schema requires model minLength: 1, but that only ever
+    fires three steps downstream in `validate`. Enforced here so a bad
+    orchestrator argument is exit 2 at the point of the mistake, not an exit-1
+    finding blamed on the manifest later.
+    """
+    run = _run(tmp_path)
+    assert (
+        main(
+            [
+                "record-stage",
+                "--run",
+                str(run.root),
+                "--stage",
+                "extract",
+                "--model",
+                "",
+                "--effort",
+                "high",
+                "--skill",
+                str(_skill(tmp_path)),
+            ]
+        )
+        == 2
+    )
+    assert capsys.readouterr().err.startswith("error: ")
+    assert read_json(run.manifest)["stages"] == {}
+
+
+def test_record_stage_refuses_a_whitespace_only_model(tmp_path, capsys):
+    """Stricter than the schema on purpose: "   " has length 3, so it clears
+    minLength: 1, but it names no model anyone could act on -- the same
+    reasoning decide already applies to a whitespace-only note.
+    """
+    run = _run(tmp_path)
+    assert (
+        main(
+            [
+                "record-stage",
+                "--run",
+                str(run.root),
+                "--stage",
+                "extract",
+                "--model",
+                "   ",
+                "--effort",
+                "high",
+                "--skill",
+                str(_skill(tmp_path)),
+            ]
+        )
+        == 2
+    )
+    assert capsys.readouterr().err.startswith("error: ")
+    assert read_json(run.manifest)["stages"] == {}
+
+
+def test_record_stage_rejects_an_unknown_effort_called_directly(tmp_path):
+    """argparse's `choices` protects the CLI (test_an_unknown_effort_is_exit_2
+    above), but record_stage is a library function this test calls without
+    going through argparse at all -- the same route a future direct caller
+    would take. Without record_stage's own check, this would write an invalid
+    manifest and defer the failure to the next `validate` run, the identical
+    shape the blank-model tests close for `model`.
+    """
+    run = _run(tmp_path)
+    with pytest.raises(UsageError, match="extreme"):
+        record_stage(run, stage="extract", model="m", effort="extreme", skill=_skill(tmp_path))
+    assert read_json(run.manifest)["stages"] == {}

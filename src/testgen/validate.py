@@ -94,19 +94,34 @@ def schema_dir() -> Path:
 
 
 @functools.cache
+def _manifest_stage_efforts(schema_root: Path) -> tuple[str, ...]:
+    """The cached half of manifest_stage_efforts, keyed on schema_root.
+
+    Same reason _validator_for below takes schema_root as a cache key rather
+    than reading schema_dir() inside: a plain zero-argument @functools.cache
+    would return the first schema it ever saw for the life of the process, so
+    a test overriding TESTGEN_SCHEMA_DIR after some earlier call (parser
+    construction happens on every CLI invocation, so there always is an
+    earlier call) would silently get the old effort list back -- correct only
+    as long as every caller remembered to `.cache_clear()` first. Keying on
+    the root makes that scaffolding unnecessary rather than merely documented.
+    """
+    schema = read_json(schema_root / ARTIFACT_SCHEMAS["manifest"])
+    stage = schema["properties"]["stages"]["additionalProperties"]
+    return tuple(stage["properties"]["effort"]["enum"])
+
+
 def manifest_stage_efforts() -> tuple[str, ...]:
-    """The effort levels manifest.stages accepts, read out of the schema.
+    """The effort levels manifest.stages accepts, read out of the active schema.
 
     `record-stage` uses this as its argparse choices, so the CLI cannot accept
     an effort the manifest schema will reject -- and there is no second copy of
-    the enum to keep in step. Cached because the CLI reads it at parser-build
-    time on every invocation; a caller that overrides TESTGEN_SCHEMA_DIR mid
-    process (only tests do this) must call `.cache_clear()` itself, the same
-    contract functools.cache always has.
+    the enum to keep in step. Reads the *active* schema_dir() on every call
+    (cheap: a small JSON file, cached per root by _manifest_stage_efforts), so
+    a TESTGEN_SCHEMA_DIR override takes effect immediately with no cache to
+    clear.
     """
-    schema = read_json(schema_dir() / ARTIFACT_SCHEMAS["manifest"])
-    stage = schema["properties"]["stages"]["additionalProperties"]
-    return tuple(stage["properties"]["effort"]["enum"])
+    return _manifest_stage_efforts(schema_dir())
 
 
 @functools.cache

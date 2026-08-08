@@ -326,9 +326,19 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "decide":
             run = _run_dir(args.run)
+            # (UsageError, OSError), matching record-stage above -- not just
+            # UsageError. decisions.md being a directory, or the run directory
+            # being read-only with no decisions.md yet, raises a bare OSError
+            # out of append_decision's open(); without OSError here that falls
+            # through to the catch-all below and becomes exit 1 with a
+            # fabricated "internal" finding, the same misreading
+            # smoke.load_agents' docstring already names for --agents: a
+            # harness-level filesystem problem told the orchestrator a stage
+            # was broken and sent it to spend its one repair attempt re-running
+            # a stage that was fine.
             try:
                 decide(run, args.note)
-            except UsageError as exc:
+            except (UsageError, OSError) as exc:
                 print(f"error: {exc}", file=sys.stderr)
                 return USAGE
             print(run.decisions)
