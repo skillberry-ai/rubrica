@@ -669,8 +669,17 @@ but so did `weights: 5`, which was fixed, so reachability alone is not the test.
 |---|---|
 | An unsafe directory name under `06-suite/` | Skipped by `scenario_ids_with_tasks()`, so it is neither pruned nor reported, and would ship. There is no `unsafe_task_dir_names()` counterpart to the one `04-instances/` has. Requires manual tampering. |
 | `cli.py`'s `except Exception` blames the artifact | A genuine bug in `testgen` code is reported as "your artifact is malformed; run validate". If `validate` is then clean the orchestrator gets contradictory signals. The traceback on stderr mitigates it. |
-| `intake` sits outside the exception net | Its own `try` returns before the outer handler, so an unexpected exception there exits 1 with empty stdout — the mode that net was added to close. Crash surface is small: `slug` cannot emit an unsafe segment and IO raises `OSError`. |
+| `intake` sits outside the exception net | Its own `try` returns before the outer handler, so an unexpected exception there exits 1 with empty stdout — the mode that net was added to close. Crash surface is small: `slug` cannot emit an unsafe segment and IO raises `OSError`. Re-examined in the measurement build; still holds. |
 | Re-verifying digests **across** runs | Partly addressed: `diff-runs`' comparability precondition now refuses to call two runs comparable unless their manifests record identical `input_digests`. What it does not do is re-hash either run's `00-inputs/` bytes itself — it compares the two manifests' *recorded* digests, trusting each at face value. That trust is exactly what `refs.check_inputs` closes, but only within one run; `diff-runs` does not chain to it. Two runs tampered identically, or a run whose `check_inputs` was never run, can still report `comparable: true` on a false premise. |
+
+### Parked from the measurement build
+
+The whole-branch review and its single fix wave surfaced three additional findings, adjudicated as parked rather than fixed because none is load-bearing: the finding line is present and parseable, nothing downstream depends on the specific target artifact, or the defect is isolated to a single subcommand and the measurement pipeline runs without triggering it.
+
+| Parked | Why it matters |
+|---|---|
+| `cli.py`'s catch-all finding names the wrong run for `diff-runs` | The exception handler builds its finding against `args.run`, falling back to `args.a`. Since `diff-runs` is the only subcommand taking two run directories (`--a` and `--b`), a defect in run **b** surfaces as a malformed artifact in run **a** — which an orchestrator would attempt to repair. The finding line is still present and parseable, which is strictly better than the empty exit 1 it replaced, and nothing downstream reads the artifact field. The fix would require naming both roots or dropping the "this run" phrasing for `diff-runs`. |
+| `dedupe-candidates` maps a stage defect to exit 2 | It reads `02-scenarios.json` through a path whose narrow exception catch turns an unparseable file into exit 2 (`misconfigured harness`), while `validate`, `check-refs`, `emit`, `compare-gold` and `sample-for-review` all return exit 1 with a finding for the same file. This violates the module docstring: a repairable stage defect must never surface as a misconfigured harness, because the orchestrator halts instead of spending its one repair attempt. The line is untouched by this branch and represents a single-subcommand inconsistency in a class the branch otherwise closed. |
 
 ### Process changes for the next plan
 
