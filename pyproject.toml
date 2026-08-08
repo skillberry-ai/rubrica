@@ -22,9 +22,11 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 # The schemas are the contract, so they ship with the package: without this a
-# wheel installs code that cannot validate anything.
+# wheel installs code that cannot validate anything. The skills are the
+# pipeline's producers, and for the same reason: an installed copy that can
+# validate and emit but cannot find its own skills is a copy that cannot run.
 [tool.setuptools.package-data]
-testgen = ["schema/*.json", "suite/*.py", "suite/*.sh"]
+testgen = ["schema/*.json", "suite/*.py", "suite/*.sh", "skills/*/SKILL.md"]
 
 [tool.ruff]
 line-length = 100
