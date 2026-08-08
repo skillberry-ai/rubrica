@@ -631,8 +631,9 @@ belong at the front of the next plan, not the back.**
 hole this list existed to name. `manifest.stored_as` closes the related naming
 gap alongside it: each input entry now carries the filename it was registered
 under, so a reader (or `check_inputs` itself) does not have to re-derive
-intake's slugging rule to know which file a digest belongs to. The nine are
-kept below as the record of what was owed and why.
+intake's slugging rule to know which file a digest belongs to. The ten are
+kept below, now a historical record rather than a to-do, of what was owed and
+why.
 
 | Carried forward | Why it matters |
 |---|---|
@@ -713,15 +714,17 @@ contract-spine build three defects were plan-mandated test text exercising
 only the path on which the plan-mandated code was correct; in the
 closure-and-emit build four of the seven tasks that needed a fix round needed
 it for a plan defect, not an implementation defect; the measurement build's
-ledger (`progress.md`) records roughly eighteen such instances across its
-twelve tasks. Having each task's reviewer name one input class the plan's
-tests do not reach remains a cheap counter — item 4 below is what it grew
-into once there were enough instances to see the shapes repeating.
+ledger (`progress.md`) records fourteen more such instances across its twelve
+tasks — the fifth through eighteenth in a numbering that runs across all
+three builds, not eighteen of its own. Having each task's reviewer name one
+input class the plan's tests do not reach remains a cheap counter — item 4
+below is what it grew into once there were enough instances to see the shapes
+repeating.
 
 The measurement build adds five more, each drawn from that ledger:
 
 4. **Three test-weakness shapes, now a self-check checklist.** Most of the
-   eighteen instances above reduce to three recurring shapes. *Substring-of-
+   fourteen instances above reduce to three recurring shapes. *Substring-of-
    message*: Task 8's `mean_reward_by_role` example, where deleting a check
    left twenty tests green because a different finding's message happened to
    contain the literal word the assertion searched for. *Fixture-cannot-
