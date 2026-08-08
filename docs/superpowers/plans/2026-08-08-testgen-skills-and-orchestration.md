@@ -166,12 +166,22 @@ prompt-level decision in the system.>
   - `CODE_ONLY_STAGES: frozenset[str]` — stages with no skill.
   - `ORCHESTRATOR = "tg-orchestrate"`
   - `SECTIONS: tuple[str, ...]` — the five section headings, in order.
-  - `class Skill` — frozen dataclass: `name: str`, `path: Path`, `contract: dict[str, Any]`, `headings: tuple[str, ...]`, `body: str`.
+  - `CONTRACT_HEADING = "Contract"` — deliberately **not** a member of `SECTIONS`, which is the five numbered sections. One definition of the heading name.
+  - `class Skill` — frozen dataclass: `name: str`, `path: Path`, `contract: dict[str, Any]`, `headings: tuple[str, ...]`, `body: str`, plus a `declared(key) -> list[str]` helper that returns `[]` for an absent or non-list key (tolerant on purpose: an absent key is Task 2's finding to report by name, and raising here would make it exit 2).
   - `skills_dir() -> Path`
   - `discover(root: Path | None = None) -> list[Skill]`
   - `load(path: Path) -> Skill`
+  - `section_body(skill: Skill, heading: str) -> str` — the text under one `## ` heading, up to the next one **or end of file**. Public, with three callers: Task 2's refusal-emptiness check, Task 12's Method-ordering slice, and `load` itself.
   - `skill_sha256(path: Path) -> str`
   - `expected_skill_names() -> tuple[str, ...]`
+
+**The parsing must be section-aware and fence-aware, and both halves are load-bearing.** Find the contract block **inside the `## Contract` section only**, not anywhere in the file: a stray valid-TOML fence in the prose above it that happens to supply plausible values for every key would otherwise be parsed as the contract, silently. And skip fenced regions when detecting headings: a `## ` line inside a code block would otherwise land in `headings`, which Task 12's ordering check depends on being right. Do the fence tracking with a legible line-by-line loop that toggles a flag on ```` ``` ```` lines — not with a regex. A regex that tracks fence state is unreadable, and this codebase prefers a commented loop. A file with no `## Contract` heading at all is a `UsageError` naming the file, the same class as a missing block.
+
+**The Contract section must hold exactly one ` ```toml ` fence, and any other count is refused.** Slicing to the section is necessary but not sufficient: a decoy inside it — a "deprecated example" or a before/after pair, both plausible authoring patterns — wins on a plain `search()`, silently. Count with `finditer` and raise `UsageError` naming the file and the count. **Refuse; do not choose.** Taking the first or the last is a guess, and this project's rule everywhere else is that an ambiguous input is reported rather than resolved in the reader's favour. Do **not** make the TOML regex itself fence-aware to disambiguate — counting matches in one already-sliced section is enough, and growing this into a markdown parser would be its own defect.
+
+**Map a decode failure to `UsageError` too.** `path.read_text(encoding="utf-8")` raises `UnicodeDecodeError`, which is a subclass of `ValueError` and **not** of `OSError` — so `except OSError` alone lets it propagate. That is not a cosmetic gap: `cli.py`'s outer catch deliberately excludes `ValueError`, so once Task 2 wires this into `check-skills` an unhandled decode error becomes **exit 1 with an `[internal]` finding blaming a run directory**, telling the orchestrator to spend its one bounded repair attempt re-running a stage over a mis-encoded prompt file no stage wrote. Catch `(OSError, UnicodeDecodeError)`.
+
+**`section_body` must handle EOF.** Section 5 is last in every real skill, so an implementation that required a following `## ` heading would read every refusal section as empty — and Task 2's emptiness check would then fire on every correct skill.
 
 **Design notes the brief must carry verbatim:**
 
@@ -281,24 +291,19 @@ def test_the_headings_tuple_preserves_document_order_not_sorted_order(tmp_path):
 
 
 def test_skill_sha256_is_the_digest_of_the_whole_file(tmp_path):
-    """The manifest's reproducibility hook hashes the skill that was used --
-    prose included, because a changed Method section changes the run.
+    """The manifest's reproducibility hook hashes the skill that was used.
+
+    Whole-file equality against an independently computed digest, and that is
+    deliberately the *only* assertion here. Because it pins the digest to the
+    true hash of the bytes, any implementation satisfying it must also change
+    output whenever the file changes -- prose included. So a changed Method
+    section changes the recorded hash, which is what makes the hook meaningful,
+    and a separate "editing the prose changes the digest" test would be
+    subsumed rather than additive. See the plan's self-check note: that pair
+    was mandated on a rationale that turned out to be false twice.
     """
     path = write_skill(tmp_path, "tg-extract")
     assert skill_sha256(path) == hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def test_editing_only_the_prose_changes_the_hash(tmp_path):
-    """The half of the statement above that a digest-equality assertion cannot
-    make on its own: hashing only the contract block would satisfy that test.
-    """
-    path = write_skill(tmp_path, "tg-extract")
-    before = skill_sha256(path)
-    path.write_text(
-        path.read_text(encoding="utf-8").replace("Body text.", "Different body text."),
-        encoding="utf-8",
-    )
-    assert skill_sha256(path) != before
 
 
 def test_discover_finds_every_skill_directory_sorted(tmp_path):
@@ -401,8 +406,8 @@ from the one the schemas close: a SKILL.md can name an artifact path that does
 not exist, a stage that was renamed, or a CLI subcommand spelled with an
 underscore, and nothing downstream notices until a model has already been paid
 to follow it. This module gives that text one machine-readable declaration --
-the `## Contract` block -- and skills_contract.check_all (see check_contract
-below) is what holds it to the code that owns each name.
+the `## Contract` block -- and check_contract, which arrives here in Task 2, is
+what holds it to the code that owns each name.
 
 **A malformed SKILL.md is exit 2, not a finding.** It is human-authored, like
 --agents and --gold: no stage produces it, so no repair prompt fixes it. A
@@ -591,14 +596,41 @@ Assisted-By: Claude (Anthropic AI) <noreply@anthropic.com>"
 ```
 
 **Self-check before reporting DONE.** For each test above, name which of the
-three weakness shapes it could be and why it is not. Two are worth stating
-explicitly in your report: `test_skill_sha256_is_the_digest_of_the_whole_file`
-is shape 3 on its own (a digest-equality assertion holds identically whether
-the hash covers the whole file or just the block, because the fixture's block
-*is* most of the file) — `test_editing_only_the_prose_changes_the_hash` is what
-closes it. And `test_expected_skill_names_are_derived_from_STAGES` would be
-shape 1 against a literal list of eight names, which is why it asserts against
-`STAGES` itself.
+three weakness shapes it could be and why it is not, and **verify the claim
+rather than reasoning about it** — a claim about a test has to be true the same
+way the test does. The way to verify a shape-3 claim is to mutate the mechanism
+and run the single test in isolation.
+
+Worked example, because this plan got it wrong twice in a row and the second
+attempt is more instructive than the first.
+
+**First wrong answer.** It is tempting to say
+`test_skill_sha256_is_the_digest_of_the_whole_file` is shape 3 on its own — that
+a digest-equality assertion holds identically whether the hash covers the whole
+file or only the contract block. **Check it.** Mutate `skill_sha256` to hash the
+extracted block and run that one test: it fails, because the fixture's contract
+block is about 117 of 384 bytes and the two digests are nothing alike. The claim
+is false.
+
+**Second wrong answer**, which is the one worth learning from: having been
+corrected, this plan then kept a companion test
+(`test_editing_only_the_prose_changes_the_hash`) on the revised rationale that
+it "pins sensitivity to any edit." Also false. Under the same block-only
+mutation *both* tests fail — and more fundamentally, a test asserting exact
+equality with `hashlib.sha256(path.read_bytes())` mathematically subsumes any
+"changing the bytes changes the digest" claim, because that is what a
+cryptographic hash is. There is no mutation that passes the first and fails the
+second. So the companion test was deleted and its intent moved into the
+survivor's docstring.
+
+The lesson generalizes past this one test: **a rationale for keeping a test is a
+claim, and a claim has to be checked the same way the test does.** Two plausible
+English justifications in a row were both wrong here, and each survived until
+someone ran a mutation. Report the mutation you ran and its result — not the
+reasoning that led you to expect it.
+
+`test_expected_skill_names_are_derived_from_STAGES` would be shape 1 against a
+literal list of eight names, which is why it asserts against `STAGES` itself.
 
 ---
 
@@ -994,21 +1026,6 @@ def subcommand_names() -> tuple[str, ...]:
 - [ ] **Step 6: Add the checks to `skills.py`**
 
 ```python
-def _section_body(skill: Skill, heading: str) -> str:
-    """The text under one `## ` heading, up to the next one or end of file.
-
-    EOF matters: section 5 is last in every real skill, so an implementation
-    that required a following heading would read every refusal section as
-    empty and the emptiness check would fire on every correct skill.
-    """
-    pattern = re.compile(
-        r"^##[ \t]+" + re.escape(heading) + r"[ \t]*$(?P<body>.*?)(?=^##[ \t]|\Z)",
-        re.MULTILINE | re.DOTALL,
-    )
-    match = pattern.search(skill.body)
-    return match.group("body") if match else ""
-
-
 def _is_subsequence(needles: tuple[str, ...], haystack: tuple[str, ...]) -> bool:
     iterator = iter(haystack)
     return all(any(item == needle for item in iterator) for needle in needles)
@@ -1093,7 +1110,11 @@ def check_contract(skill: Skill) -> list[Finding]:
         report("", f"sections are out of order; the required order is: {', '.join(SECTIONS)}")
 
     refusals = SECTIONS[-1]
-    if refusals in skill.headings and not _section_body(skill, refusals).strip():
+    # section_body is Task 1's, fence-aware and EOF-aware. Do not re-implement
+    # the slice here: section 5 is last in every real skill, so a second
+    # implementation that required a following heading would read every refusal
+    # section as empty and this check would fire on every correct skill.
+    if refusals in skill.headings and not section_body(skill, refusals).strip():
         report(
             "",
             f"'## {refusals}' is empty; a skill with no stated refusal conditions "
@@ -4443,13 +4464,18 @@ SKILL = skills_dir() / "tg-challenge" / "SKILL.md"
 
 
 def _method_body() -> str:
+    """The Method section alone, so the ordering below is about that section.
+
+    Uses skills.section_body rather than splitting on "\\n## " by hand: that
+    naive split is not fence-aware, and this skill's Method section contains a
+    fenced block. A hand-rolled slice would cut at a `## ` line inside it and
+    the ordering assertion would then be about a fragment.
+    """
+    from testgen.skills import section_body
+
     skill = load(SKILL)
-    marker = f"## {SECTIONS[2]}"  # "3. Method"
-    assert marker in skill.body, "the Method section must exist"
-    after = skill.body.split(marker, 1)[1]
-    # Up to the next `## ` heading, so the ordering below is about the Method
-    # section alone rather than about the whole document.
-    return after.split("\n## ", 1)[0]
+    assert SECTIONS[2] in skill.headings, "the Method section must exist"
+    return section_body(skill, SECTIONS[2])
 
 
 def test_the_contract_matches_the_stage_gate():
