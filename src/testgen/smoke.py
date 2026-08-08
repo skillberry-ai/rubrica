@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 import shutil
 import subprocess
 import sys
@@ -391,3 +392,169 @@ def _refusal_note(out_dir: Path, completed: subprocess.CompletedProcess) -> str:
     if tail:
         return f"verifier exited {completed.returncode}: {tail[-1][:200]}"
     return f"verifier exited {completed.returncode} with no diagnostic"
+
+
+# A task "passes" for a role at or above PASS_THRESHOLD and "fails" at or below
+# FAIL_CEILING. Both absorb float slack and nothing more: a weight pair summing
+# to 1.0 in exact arithmetic does not always sum to 1.0 in IEEE 754, so a
+# perfectly correct run can score 0.9999999999999999.
+PASS_THRESHOLD = 0.999
+FAIL_CEILING = 0.001
+
+# Above this, the weak baseline is passing too much and the suite is not testing
+# anything. Below the floor, the oracle cannot pass its own reference answers and
+# the labels or the verifier are broken -- not the agent.
+WEAK_BASELINE_CEILING = 0.30
+ORACLE_FLOOR = 0.80
+
+# Fewer comparable tasks than this and the verdict is inconclusive. One, not a
+# larger number: the first slice caps the suite at ~8 scenarios, so any larger
+# floor would make a slice-1 run inconclusive by construction and the degenerate
+# flags would never get a chance to fire. The flags do the real work; this only
+# stops a verdict being pronounced over nothing.
+MIN_COMPARABLE_TASKS = 1
+
+_COMPONENTS = ("reward", "completion", "assertions", "trajectory")
+
+
+def components(reward: dict) -> dict[str, float] | None:
+    """The four fractions from a verifier's reward.json, or None if unusable.
+
+    report-0.1.json bounds every one of these to [0, 1], so an out-of-range value
+    cannot go into the report: writing it would make `validate --stage smoke`
+    fail on an artifact smoke itself produced, and the orchestrator would retry
+    the stage that is not at fault.
+
+    Booleans are excluded because True is not a reward, and non-finite values
+    because json.loads accepts NaN and Infinity as bare tokens. verify.py's
+    _contract_problems normally prevents all of this; this is the check that the
+    *copied* verifier still honoured it.
+    """
+    values: dict[str, float] = {}
+    for key in _COMPONENTS:
+        value = reward.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            return None
+        values[key] = float(value)
+    return values
+
+
+def _scored(result: dict) -> bool:
+    return bool(result.get("scored"))
+
+
+def comparable(task: dict, roles: tuple[str, ...]) -> bool:
+    """Whether every declared role produced a score for this task.
+
+    Means and flags are computed over comparable tasks only. A role that failed
+    to run on the two hardest tasks would otherwise have its mean taken over the
+    six easy ones and compared against another role's mean over all eight -- the
+    ragged-denominator mistake, which flatters exactly the role that crashed most.
+    """
+    scored = {result["role"] for result in task["results"] if _scored(result)}
+    return set(roles) <= scored
+
+
+def task_flags(task: dict, roles: tuple[str, ...]) -> tuple[bool, bool]:
+    """(all_pass, all_fail) for one task.
+
+    Both are False for a task that is not comparable. Counting an unscoreable
+    result as a failure would report a task nobody managed to run as a hard one,
+    and a suite full of them as well-designed -- the same "default silently
+    substituting for a real value" shape that produced every plan defect in the
+    previous build.
+    """
+    if not comparable(task, roles):
+        return False, False
+    rewards = [r["reward"] for r in task["results"] if r["role"] in set(roles) and _scored(r)]
+    if not rewards:
+        # `all([])` is True, so an empty reward list would report both flags at
+        # once -- "every role passed" and "every role failed" about the same task.
+        # Reachable through check_report, which reads reports layer 1 has not
+        # gated: a report with `agents: []` gives an empty `roles`, comparable()
+        # answers True vacuously, and this is what stops the vacuum from becoming
+        # two contradictory claims. It is the same empty-means-full-marks trap
+        # compute_reward's docstring names at the scoring seam.
+        return False, False
+    return (
+        all(value >= PASS_THRESHOLD for value in rewards),
+        all(value <= FAIL_CEILING for value in rewards),
+    )
+
+
+def mean_reward_by_role(tasks: list[dict], roles: tuple[str, ...]) -> dict[str, float]:
+    """Mean reward per role, over comparable tasks only.
+
+    A role with no comparable task is omitted rather than reported as 0.0, which
+    would read as "scored zero" instead of "never measured". report-0.1.json
+    permits the omission for exactly that reason.
+    """
+    usable = [task for task in tasks if comparable(task, roles)]
+    means: dict[str, float] = {}
+    for role in roles:
+        rewards = [
+            result["reward"]
+            for task in usable
+            for result in task["results"]
+            if result["role"] == role and _scored(result)
+        ]
+        if rewards:
+            means[role] = round(sum(rewards) / len(rewards), 6)
+    return means
+
+
+def summarize(tasks: list[dict], roles: tuple[str, ...]) -> dict:
+    """The report's summary block, recomputed from nothing but `tasks`.
+
+    refs.check_report calls this rather than re-deriving the arithmetic, so the
+    producer and the checker cannot disagree about what the numbers mean.
+
+    An *unscoreable* oracle counts as an oracle failure alongside a low-scoring
+    one. Both say the suite is broken rather than the agent, which is the only
+    thing oracle_failures is for: a verifier that refused the contract is as much
+    a broken-labels signal as an oracle that answered wrongly.
+    """
+    flags = [task_flags(task, roles) for task in tasks]
+    oracle_failures = 0
+    unscoreable = 0
+    for task in tasks:
+        for result in task["results"]:
+            if not _scored(result):
+                unscoreable += 1
+            if result["role"] == "oracle" and (
+                not _scored(result) or result["reward"] < PASS_THRESHOLD
+            ):
+                oracle_failures += 1
+    return {
+        "mean_reward_by_role": mean_reward_by_role(tasks, roles),
+        "all_pass_tasks": sum(1 for all_pass, _ in flags if all_pass),
+        "all_fail_tasks": sum(1 for _, all_fail in flags if all_fail),
+        "oracle_failures": oracle_failures,
+        "unscoreable": unscoreable,
+    }
+
+
+def verdict_for(tasks: list[dict], summary: dict, roles: tuple[str, ...]) -> str:
+    """The report's headline, in a fixed precedence.
+
+    The order is the point. `broken_labels` outranks `degenerate_trivial`,
+    because if the oracle cannot pass its own reference answers then neither the
+    labels nor the verifier can be trusted and nothing the weak baseline scored
+    means anything yet. Reporting degenerate_trivial first would send someone to
+    rewrite scenarios when the scoring path is what is broken.
+
+    A roster missing a REQUIRED_ROLE is inconclusive even when every score looks
+    perfect: `healthy` would be a claim about a spread the run did not measure.
+    """
+    if set(REQUIRED_ROLES) - set(roles):
+        return "inconclusive"
+    if sum(1 for task in tasks if comparable(task, roles)) < MIN_COMPARABLE_TASKS:
+        return "inconclusive"
+    means = summary["mean_reward_by_role"]
+    if means.get("oracle", 0.0) < ORACLE_FLOOR:
+        return "broken_labels"
+    if means.get("weak_baseline", 0.0) > WEAK_BASELINE_CEILING:
+        return "degenerate_trivial"
+    return "healthy"
