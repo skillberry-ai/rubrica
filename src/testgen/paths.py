@@ -172,8 +172,6 @@ class RunPaths:
 
     @property
     def review_sample(self) -> Path:
-        # Dead until Task 12, which replaces the review-packet stub with the real
-        # sampler this file's rows come from.
         return self.review_dir / "sample.json"
 
     def smoke_dir(self, role: str, scenario_id: str) -> Path:

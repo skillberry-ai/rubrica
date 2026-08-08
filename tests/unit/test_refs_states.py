@@ -35,6 +35,7 @@ from testgen.emit import emit_run
 from testgen.paths import RunPaths
 from testgen.recall import compare_run
 from testgen.refs import check_all
+from testgen.review import sample_run
 from tests.builders import (
     MINIMAL_INPUT_BYTES,
     MINIMAL_INPUT_NAME,
@@ -125,9 +126,8 @@ def _measurement(run: RunPaths) -> None:
     """
     report, findings = compare_run(run, _gold_path(run))
     assert findings == [], f"compare-gold in the states table: {findings}"
-    run.review_dir.mkdir(parents=True, exist_ok=True)
-    # Task 12 replaces this stub with the real review packet.
-    run.review_packet.write_text("# Review packet\n", encoding="utf-8")
+    sampled, findings = sample_run(run)
+    assert (len(sampled), findings) == (1, []), f"sample-for-review in the states table: {findings}"
 
 
 # The reopened cell, justified as an honest hole. `not_yet_attempted` is the
@@ -241,6 +241,7 @@ def test_the_states_are_cumulative_so_the_last_one_is_a_complete_run(tmp_path):
     assert run.report.is_file()
     assert run.recall.is_file()
     assert run.review_packet.is_file()
+    assert run.review_sample.is_file()
     # 06-suite/<sid> is deliberately *absent* in the last state: it rejects
     # scn-001, and emit prunes the package for a scenario that no longer
     # qualifies. test_the_emit_state_really_wrote_a_package below is what

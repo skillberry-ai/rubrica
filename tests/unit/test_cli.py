@@ -422,3 +422,23 @@ def test_diff_runs_warns_on_stderr_when_the_runs_read_different_inputs(tmp_path,
 def test_diff_runs_exits_two_on_a_nonexistent_b_directory(tmp_path):
     run_a = build_state(tmp_path / "a", "emit")
     assert main(["diff-runs", "--a", str(run_a.root), "--b", str(tmp_path / "absent")]) == 2
+
+
+def test_sample_for_review_exits_zero_and_prints_the_packet_path(tmp_path, capsys):
+    run = build_state(tmp_path / "run", "emit")
+    assert main(["sample-for-review", "--run", str(run.root)]) == 0
+    out = capsys.readouterr().out
+    assert out.strip() == str(run.review_packet)
+    assert run.review_sample.is_file()
+
+
+def test_sample_for_review_exits_one_when_emit_has_not_run(tmp_path, capsys):
+    run = build_state(tmp_path / "run", "challenge")
+    assert main(["sample-for-review", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert "[review]" in out
+    assert "no emitted packages" in out
+
+
+def test_sample_for_review_exits_two_on_a_nonexistent_run_directory(tmp_path):
+    assert main(["sample-for-review", "--run", str(tmp_path / "absent")]) == 2

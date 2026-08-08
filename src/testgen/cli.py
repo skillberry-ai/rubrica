@@ -47,6 +47,7 @@ from testgen.findings import Finding, format_findings
 from testgen.intake import intake
 from testgen.paths import STAGES, RunPaths
 from testgen.recall import compare_run, render
+from testgen.review import DEFAULT_SAMPLE_SIZE, sample_run
 from testgen.smoke import load_agents, preflight, smoke_run
 from testgen.stability import diff_runs
 from testgen.validate import UnknownStage, validate_stage
@@ -94,6 +95,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_diff = subparsers.add_parser("diff-runs", help="per-stage stability across two runs")
     p_diff.add_argument("--a", required=True)
     p_diff.add_argument("--b", required=True)
+
+    p_review = subparsers.add_parser(
+        "sample-for-review", help="write a stratified review packet for the emitted suite"
+    )
+    p_review.add_argument("--run", required=True)
+    p_review.add_argument("--size", type=int, default=DEFAULT_SAMPLE_SIZE)
     return parser
 
 
@@ -200,6 +207,13 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"error: {exc}", file=sys.stderr)
                 return USAGE
             print(render(report))
+            return _report(findings)
+
+        if args.command == "sample-for-review":
+            run = _run_dir(args.run)
+            sampled, findings = sample_run(run, args.size)
+            if sampled:
+                print(run.review_packet)
             return _report(findings)
 
         if args.command == "diff-runs":

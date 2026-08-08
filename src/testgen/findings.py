@@ -20,7 +20,7 @@ class Finding:
     """
 
     artifact: Path
-    layer: str  # "schema" | "refs" | "invariant" | "emit" | "internal" | "recall"
+    layer: str  # "schema" | "refs" | "invariant" | "emit" | "internal" | "recall" | "review"
     pointer: str
     message: str
 
