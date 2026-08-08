@@ -25,6 +25,8 @@ Every task's requirements implicitly include this section. Values are verbatim.
   1. *Substring-of-message* — the assertion searches for a literal that some other finding's message also contains, so deleting the check leaves the test green.
   2. *Fixture-cannot-reach* — the fixture has one of everything, so it cannot distinguish "filtered correctly" from "never filtered at all". It has nothing left over for the check to have missed.
   3. *Holds-identically-before-and-after* (hash luck) — the expected answer coincides with the mechanism under test, so the test cannot detect its substitution.
+- **At every fix, ask what the same mistake is one scope narrower.** Added mid-build, after this plan hit it twice in its first two tasks. Task 1 closed "the contract block is found anywhere in the file" and the identical defect survived *inside* the Contract section. Task 2 closed "the declared value is the wrong container type" and the identical defect survived at the *element* type. Both narrower cases were reachable, and in both cases the fix's own new tests missed them — because a test written to cover the case you just understood does not reach the case one level in. This is not deletion-mutation and not the three shapes below; it is a question to ask out loud in every fix round, and the answer goes in the report even when it is "none."
+- **A verified claim beats a plausible one, and a rationale is a claim.** Also added mid-build: this plan asserted twice, in successive rounds, that a particular test was weak, and both rationales were false — each survived until someone ran a mutation. When a report says a test is weak, redundant, or load-bearing, that statement must come with the mutation that established it, not the reasoning that suggested it.
 - **A skill is text, so text-level tests must assert structure, not vibes.** A test on a `SKILL.md` must assert a *structural* property — a required heading is present, heading A precedes heading B, a declared set equals a set imported from code — never a bare free-text substring, unless the substring is a value imported from code and the test says so. A free-text substring assertion on prose is shape 1 by construction.
 - **DCO and signing are mandatory on every commit:** `git commit -S -s`. Never commit without `-S`. If signing fails, stop and report it — do not fall back to an unsigned commit and do not work around signing. Use `Assisted-By: Claude (Anthropic AI) <noreply@anthropic.com>`; never `Co-Authored-By`, `Made-with`, or any trailer GitHub parses as co-authorship.
 
@@ -657,7 +659,13 @@ literal list of eight names, which is why it asserts against `STAGES` itself.
 
 1. **`stage`** — present and in `paths.STAGES`, unless the skill is `ORCHESTRATOR`, where it must be *absent*. Message for a wrong value: `f"declares stage {value!r}, which is not one of: {', '.join(STAGES)}"`. Message for the orchestrator declaring one: `"tg-orchestrate is not a stage: it dispatches them, so it must not declare a stage"`.
 2. **`stage` matches the directory name** — `skill.name == f"tg-{stage}"`. A `SKILL.md` in `tg-propose/` declaring `stage = "score"` would be dispatched for propose and validated as score.
-3. **`reads` and `writes`** — every entry is an attribute of `paths.RunPaths`. Use `hasattr(RunPaths, name)`, which covers both properties and methods and needs no instance. Message: `f"names {name!r}, which is not a RunPaths attribute; declare artifacts by their RunPaths name, never as a literal path"`.
+3. **`reads` and `writes`** — every entry is an attribute of `paths.RunPaths`. Use `hasattr(RunPaths, name)`, which covers both properties and methods and needs no instance — **and reject a name starting with `_`**, because a skill declares artifacts through the public layout API and `hasattr(RunPaths, "_instance_dir_names")` is `True`. Message: `f"names {name!r}, which is not a RunPaths attribute; declare artifacts by their RunPaths name, never as a literal path"`.
+
+3a. **Every list-valued key is present-and-a-list *with string elements*, or reported.** `Skill.declared()` returns `[]` for a key that is present but not a list, and that tolerance is deliberate — it is what keeps `load()` from raising on something a human can edit, so the problem stays a finding at exit 1 instead of becoming a misconfigured harness at exit 2. But it means `reads = "manifest"` (a bare TOML string rather than an array) produces **zero findings**, which is the worst failure this module can have: silence from the one component whose entire job is catching declaration mistakes, on a mistake a person will actually make — TOML makes `x = "a"` and `x = ["a"]` look equally reasonable. So **check the type in `check_contract`, where findings belong, and leave `declared()` alone.** For each of `reads`, `writes`, `invokes`, `schemas`: a key present but not a list is one finding naming the key, what was found, and that an array is required, at pointer `/<key>`. Same for `stage` present but not a string. **Skip the per-element loop and the `schemas` set comparison when the type check has already fired** — one finding about the type, not a type finding plus a cascade contradicting it. The cascade is not merely noisy: with the `schemas` type check disabled, `set("claims")` iterates *characters*, so a bare string produces seven findings, six of them claiming a schema kind named `c`, `l`, `a`… An orchestrator parsing those lines would attempt a repair against nonsense, which is worse than silence.
+
+**And check the element type, not only the container type.** `schemas = [{kind = "claims"}]` — an array of tables, a natural TOML idiom someone reaches for wanting more structure — clears `isinstance(..., list)` and then raises `TypeError: unhashable type: 'dict'` on the `set()` call. Through the CLI that reaches `cli.py`'s generic `except Exception` and surfaces as exit 1 with `[internal] .: check-skills raised TypeError`, advising the reader to run `testgen validate` and repair an artifact in a run directory — wrong tool, wrong path, for a mistake that lives in a `SKILL.md`. Validate each element is a string **before** the `set()` and report the offending element and its type. Do not wrap the `set()` in `try/except TypeError`: catching the symptom makes the finding describe a Python error instead of the contract mistake, and naming the line to edit is this module's whole job. `reads`/`writes` are already safe here because they short-circuit on `isinstance(name, str)` per element; `invokes` is safe because `in` over a tuple needs no hashability and yields an ordinary finding.
+
+**A pattern worth carrying to every later task, because this build has now hit it twice.** Task 1 closed "the contract block is found anywhere in the file" and the identical defect survived one scope narrower, *inside* the Contract section. Task 2 closed the container type and the identical defect survived one scope narrower, at the *element* type. Both narrower cases were reachable, and neither was caught by the fix's own tests. So at every fix, ask: **what is the same mistake one scope narrower than the one I just closed?**
 4. **`schemas`** — `set(schemas) == set(STAGE_ARTIFACTS[stage])`, and every entry is a key of `ARTIFACT_SCHEMAS`. Absent for the orchestrator. Two messages, so a reader knows which direction is wrong: omitted kinds → `f"omits artifact kind(s) {...}, which stage {stage!r} is gated on"`; invented kinds → `f"declares artifact kind(s) {...}, which stage {stage!r} is not gated on"`.
 5. **`invokes`** — every entry is in `cli.subcommand_names()`. Message: `f"invokes {name!r}, which is not a testgen subcommand; the subcommands are: {', '.join(subcommand_names())}"`.
 
@@ -807,10 +815,24 @@ def test_the_orchestrator_contract_is_valid_without_a_stage(tmp_path):
 
 
 def test_an_unknown_stage_is_reported(tmp_path):
-    contract = dict(CONTRACTS["tg-extract"], stage="extraction")
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
-    assert [f.pointer for f in findings] == ["/stage"]
-    assert "extraction" in messages(findings)
+    """The fixture is `tg-bogus/` declaring stage="bogus" for a specific reason.
+
+    An unknown stage value that nevertheless satisfies `name == f"tg-{stage}"`,
+    so the stage-mismatch arm of the elif chain cannot fire as a substitute.
+    The obvious fixture -- tg-extract declaring stage="extraction" -- does not
+    discriminate: deleting the "not in STAGES" check leaves it green, because
+    "tg-extract" != "tg-extraction" and the next arm reports instead, with a
+    message containing the same word this assertion searches for. That is the
+    substring-of-message shape, and it survived a full mutation pass.
+
+    The count assertion is what makes the fallthrough visible; a pointer-only
+    assertion would pass against either arm.
+    """
+    contract = dict(CONTRACTS["tg-extract"], stage="bogus", schemas=["claims"])
+    findings = check_contract(load(write_skill(tmp_path, "tg-bogus", contract)))
+    assert len(findings) == 1
+    assert findings[0].pointer == "/stage"
+    assert "bogus" in messages(findings)
 
 
 def test_a_stage_that_disagrees_with_the_directory_name_is_reported(tmp_path):
@@ -996,32 +1018,39 @@ Expected: collection error — `cannot import name 'check_contract' from 'testge
 
 - [ ] **Step 5: Expose the subcommand names from `cli.py`**
 
-Add immediately after `_build_parser()`:
+**One declared source, read by both the parser and the check.** Add a module-level tuple of `(name, help)` pairs that `_build_parser` *iterates over* to create each subparser, and have `subcommand_names()` return the names from it. Then no private argparse attribute is touched and the parser and the check cannot disagree — which is the property that matters, because a second hand-kept list goes stale the first time a subcommand is added.
 
 ```python
-def subcommand_names() -> tuple[str, ...]:
-    """Every `testgen` subcommand, as argparse accepts it.
+# Every subcommand, declared once. _build_parser iterates this to create each
+# subparser and subcommand_names() reads it, so a skill's `invokes` list is
+# validated against the same source argparse accepts -- a SKILL.md telling a
+# model to run `testgen check_refs` fails in CI rather than at run time. Walking
+# parser._subparsers._group_actions would work and is a private argparse API;
+# a second hand-kept list would drift. This is neither.
+SUBCOMMANDS: tuple[tuple[str, str], ...] = (
+    ("intake", "register inputs and mint a run"),
+    ("validate", "schema-validate one stage's output"),
+    ("check-refs", "cross-artifact and reachability checks"),
+    ("check-skills", "check every skill's contract against the code it names"),
+    ("dedupe-candidates", "propose candidate duplicate scenario pairs as JSON"),
+    ("emit", "compile accepted instances into Harbor packages"),
+    ("smoke", "run the emitted suite against the agent roster"),
+    ("compare-gold", "recall and novelty against the authored bench tasks"),
+    ("diff-runs", "per-stage stability across two runs"),
+    ("sample-for-review", "write a stratified review packet for the emitted suite"),
+    ("record-stage", "record a stage's model, effort, and skill hash in the manifest"),
+    ("decide", "append one orchestrator decision to the run's decisions.md"),
+)
 
-    skills.check_contract validates each skill's `invokes` list against this,
-    so a SKILL.md telling a model to run `testgen check_refs` fails in CI
-    rather than at run time. Read off the parser rather than listed, because a
-    second list is how the check goes stale the first time a subcommand is
-    added.
-    """
-    actions = _build_parser()._subparsers._group_actions  # noqa: SLF001
-    return tuple(sorted(name for action in actions for name in action.choices))
+
+def subcommand_names() -> tuple[str, ...]:
+    """Every `testgen` subcommand, as argparse accepts it."""
+    return tuple(name for name, _ in SUBCOMMANDS)
 ```
 
-> **Implementer note.** That private-attribute walk is fragile and there is a
-> supported way: `_build_parser()` already returns the parser, so refactor
-> `_build_parser` to also hand back the `subparsers` object, or keep a
-> module-level `SUBCOMMANDS` tuple that `_build_parser` *iterates over* to
-> create each parser. **Prefer the second**: build the subparsers from a
-> declared tuple of `(name, help)` pairs, so `subcommand_names()` returns that
-> tuple and the parser and the check read the same source. If you take that
-> route, `subcommand_names()` becomes a one-liner and no private attribute is
-> touched. Do not ship the `noqa` version — it is written above only so you can
-> see what it was replacing.
+`record-stage` and `decide` are listed here even though Task 3 adds them, so the tuple is written once. If you are implementing Task 2 before Task 3, include them in `SUBCOMMANDS` and let `_build_parser` create their subparsers with the arguments Task 3 specifies — or add the two entries in Task 3 and leave them out here. Either is fine; **say which you did**, because a `SUBCOMMANDS` entry with no arguments attached would make `testgen record-stage --run X` a usage error rather than an unknown command, and the two failure modes read differently to an orchestrator.
+
+> **Implementer note.** `_build_parser` currently configures each subparser with different arguments, so iterating a flat `(name, help)` tuple gets you the parser objects but not their arguments. The arrangement that keeps one source without contorting the code: iterate `SUBCOMMANDS` to create the subparsers into a dict keyed by name, then add each one's arguments from that dict. If you find a cleaner shape, take it and explain the choice — the requirement is one source of truth for the *names*, not a particular loop.
 
 - [ ] **Step 6: Add the checks to `skills.py`**
 
@@ -1124,12 +1153,43 @@ def check_contract(skill: Skill) -> list[Finding]:
 
 
 def check_all(root: Path | str | None = None) -> list[Finding]:
-    """Every skill's contract, plus the roster check no single skill can make."""
+    """Every skill's contract, plus the roster check no single skill can make.
+
+    **Recognise the directory name before loading it.** `discover()` calls
+    `load()` on every directory holding a SKILL.md, and `load()` raises
+    UsageError on one it cannot parse -- so calling discover() unconditionally
+    means a stray directory with unparseable content aborts the whole check.
+    Worse than aborting: cli.py's `check-skills` handler catches UsageError and
+    returns exit 2, so a stray directory that should be an ordinary finding
+    ("this is not a skill this pipeline dispatches") silently becomes a
+    misconfigured harness, and every real finding in the run is discarded with
+    it. A name we do not recognise is reported without being parsed.
+    """
     root = Path(root) if root is not None else skills_dir()
-    found = discover(root)
+    if not root.is_dir():
+        raise UsageError(f"skills directory does not exist: {root}")
     out: list[Finding] = []
-    by_name = {skill.name: skill for skill in found}
     expected = set(expected_skill_names())
+
+    # Partition by directory name first, parse second. See the docstring:
+    # load() raises on a file it cannot parse, and an unrecognised directory
+    # name has nothing worth parsing -- its finding is about the name.
+    present = sorted(
+        child.name for child in root.iterdir() if (child / SKILL_FILENAME).is_file()
+    )
+    for name in present:
+        if name not in expected:
+            out.append(
+                Finding(
+                    root / name / SKILL_FILENAME,
+                    "skill",
+                    "",
+                    f"{name} is not a skill this pipeline dispatches; the skills are: "
+                    f"{', '.join(sorted(expected))}",
+                )
+            )
+    found = [load(root / name / SKILL_FILENAME) for name in present if name in expected]
+    by_name = {skill.name: skill for skill in found}
     for name in sorted(expected - set(by_name)):
         out.append(
             Finding(root, "skill", "", f"no skill named {name}, which paths.STAGES demands")
