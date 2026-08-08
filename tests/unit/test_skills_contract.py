@@ -100,19 +100,35 @@ def test_the_orchestrator_contract_is_valid_without_a_stage(tmp_path):
 
 
 def test_an_unknown_stage_is_reported(tmp_path):
-    contract = dict(CONTRACTS["tg-extract"], stage="extraction")
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    """tg-bogus/ declaring stage="bogus": the directory name agrees with the
+    stage (f"tg-{stage}" == "tg-bogus"), so the stage-mismatch arm cannot fire
+    as a substitute the way it does for stage="extraction" in a tg-extract/
+    directory (that fixture's mismatch arm also names "extraction" in its
+    message, so a pointer-and-substring check alone cannot tell which arm
+    produced the finding). Asserting the count is what makes a disabled
+    unknown-stage check visible: with it disabled, the elif chain falls
+    through to the mismatch arm, which does not fire here (the names agree),
+    so the count drops from 1 to 0 rather than staying at 1 via a different
+    message.
+    """
+    contract = dict(CONTRACTS["tg-extract"], stage="bogus")
+    findings = check_contract(load(write_skill(tmp_path, "tg-bogus", contract)))
+    assert len(findings) == 1
     assert [f.pointer for f in findings] == ["/stage"]
-    assert "extraction" in messages(findings)
+    assert "bogus" in messages(findings)
 
 
 def test_a_stage_that_disagrees_with_the_directory_name_is_reported(tmp_path):
     """A SKILL.md in tg-propose/ declaring stage="score" would be dispatched for
     propose and validated as score -- the two halves of one run disagreeing about
-    which stage just ran.
+    which stage just ran. "score" is a real member of STAGES, so the
+    unknown-stage arm cannot be the one that fires here -- only the mismatch arm
+    can, which is the fixture this test needs to isolate that arm from the one
+    above.
     """
     contract = dict(CONTRACTS["tg-extract"], stage="score", schemas=["coverage"])
     findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    assert len(findings) == 1
     assert "/stage" in [f.pointer for f in findings]
     assert "tg-extract" in messages(findings) and "score" in messages(findings)
 
@@ -121,6 +137,19 @@ def test_the_orchestrator_may_not_declare_a_stage(tmp_path):
     contract = dict(CONTRACTS[ORCHESTRATOR], stage="reconcile")
     findings = check_contract(load(write_skill(tmp_path, ORCHESTRATOR, contract)))
     assert [f.pointer for f in findings] == ["/stage"]
+
+
+def test_a_non_string_stage_is_reported(tmp_path):
+    """`stage = ["extract"]` is a shape mistake (brackets typed where a bare
+    string was meant), not a spelling one -- a distinct finding from "unknown
+    stage" so the message says "must be a string" rather than the misleading
+    "which is not one of: ...".
+    """
+    contract = dict(CONTRACTS["tg-extract"], stage=["extract"])
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    assert len(findings) == 1
+    assert [f.pointer for f in findings] == ["/stage"]
+    assert "must be a string" in messages(findings)
 
 
 @pytest.mark.parametrize("key", ["reads", "writes"])
@@ -136,6 +165,19 @@ def test_a_path_that_is_not_a_RunPaths_attribute_is_reported(tmp_path, key):
 
 
 @pytest.mark.parametrize("key", ["reads", "writes"])
+def test_a_private_RunPaths_attribute_is_reported(tmp_path, key):
+    """`_instance_dir_names` is a real RunPaths attribute -- hasattr() alone
+    would accept it -- but it is a private helper, not part of the layout API
+    a skill declares artifacts through.
+    """
+    contract = dict(CONTRACTS["tg-extract"])
+    contract[key] = ["_instance_dir_names"]
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    assert [f.pointer for f in findings] == [f"/{key}/0"]
+    assert "_instance_dir_names" in messages(findings)
+
+
+@pytest.mark.parametrize("key", ["reads", "writes"])
 def test_every_declared_name_is_checked_not_only_the_first(tmp_path, key):
     """Otherwise a loop that returns on its first finding would pass the test
     above while leaving every later entry unchecked.
@@ -144,6 +186,23 @@ def test_every_declared_name_is_checked_not_only_the_first(tmp_path, key):
     contract[key] = ["manifest", "world-model", "nope"]
     findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
     assert [f.pointer for f in findings] == [f"/{key}/1", f"/{key}/2"]
+
+
+@pytest.mark.parametrize("key", ["reads", "writes"])
+def test_a_non_list_reads_or_writes_is_reported_once_not_as_a_cascade(tmp_path, key):
+    """`reads = "manifest"` (bare string, brackets forgotten) is the worst
+    failure shape this module could have if left unchecked: Skill.declared()
+    tolerates it into [], and a loop over [] reports nothing at all, silence
+    from the one component whose job is catching declaration mistakes. This
+    must be exactly one finding, naming the key -- not zero, and not a
+    finding per character of the string (which iterating "manifest" directly
+    would produce).
+    """
+    contract = dict(CONTRACTS["tg-extract"])
+    contract[key] = "manifest"
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    assert [f.pointer for f in findings] == [f"/{key}"]
+    assert "manifest" in messages(findings) and "list" in messages(findings)
 
 
 def test_an_omitted_artifact_kind_is_reported(tmp_path):
@@ -180,6 +239,19 @@ def test_an_omission_and_an_invention_are_reported_separately(tmp_path):
     assert {"claims", "report"} <= set(messages(findings).replace("'", " ").split())
 
 
+def test_a_non_list_schemas_is_reported_once_not_alongside_the_omission_check(tmp_path):
+    """`schemas = "claims"` must not also trip the omission check: set("claims")
+    is its characters, not its declared kind, and a set built from that would
+    say "omits ... 'a', 'c', 'i', 'l', 'm', 's'" alongside the shape finding --
+    two messages that contradict each other about what is wrong. This must be
+    exactly one finding.
+    """
+    contract = dict(CONTRACTS["tg-extract"], schemas="claims")
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    assert [f.pointer for f in findings] == ["/schemas"]
+    assert "claims" in messages(findings) and "list" in messages(findings)
+
+
 def test_an_unknown_subcommand_is_reported(tmp_path):
     """`check_refs` with an underscore is the plausible typo: it is how the
     Python function is spelled and it is not what argparse accepts.
@@ -196,6 +268,16 @@ def test_every_real_subcommand_is_accepted(tmp_path):
     """
     contract = dict(CONTRACTS["tg-extract"], invokes=list(subcommand_names()))
     assert check_contract(load(write_skill(tmp_path, "tg-extract", contract))) == []
+
+
+def test_a_non_list_invokes_is_reported(tmp_path):
+    """`invokes = "validate"` (bare string) must be reported by shape, not
+    silently treated as declaring nothing.
+    """
+    contract = dict(CONTRACTS["tg-extract"], invokes="validate")
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    assert [f.pointer for f in findings] == ["/invokes"]
+    assert "validate" in messages(findings) and "list" in messages(findings)
 
 
 def test_a_missing_section_is_reported(tmp_path):

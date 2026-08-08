@@ -262,7 +262,20 @@ def check_contract(skill: Skill) -> list[Finding]:
         out.append(Finding(skill.path, "skill", pointer, message))
 
     stage = skill.contract.get("stage")
-    if skill.name == ORCHESTRATOR:
+    # A wrong-typed stage is checked before every branch below that assumes
+    # `stage` is a string or None: `stage not in STAGES` would already catch
+    # a non-string value (no int or list is ever a member of a tuple of
+    # stage names), but folding that into "unknown stage" makes the message
+    # say "which is not one of: ..." for a TOML author who wrote `stage =
+    # ["extract"]` by accident -- a shape mistake, not a spelling one. One
+    # named check, and the elif chain below never runs on a bad type, so this
+    # never cascades into a second, confusing finding for the same key.
+    if stage is not None and not isinstance(stage, str):
+        report(
+            "/stage",
+            f"declares stage {stage!r}, which must be a string, not {type(stage).__name__}",
+        )
+    elif skill.name == ORCHESTRATOR:
         if stage is not None:
             report(
                 "/stage",
@@ -279,8 +292,30 @@ def check_contract(skill: Skill) -> list[Finding]:
         )
 
     for key in ("reads", "writes"):
-        for i, name in enumerate(skill.declared(key)):
-            if not isinstance(name, str) or not hasattr(RunPaths, name):
+        value = skill.contract.get(key, [])
+        if not isinstance(value, list):
+            # Checked directly against the contract, not skill.declared(key):
+            # declared() is deliberately tolerant (returns [] for a bad
+            # shape) so load() itself never raises on this, but that same
+            # tolerance means the per-element loop below would silently
+            # iterate zero times and report nothing -- the worst failure
+            # shape this module has, since a real author who forgets the
+            # brackets around a single name (`reads = "manifest"`) gets no
+            # finding at all. `continue` skips the loop so a bad shape
+            # produces one finding about the shape, not zero.
+            report(
+                f"/{key}",
+                f"declares {key} = {value!r}, which must be a list, not {type(value).__name__}",
+            )
+            continue
+        for i, name in enumerate(value):
+            if not isinstance(name, str) or not hasattr(RunPaths, name) or name.startswith("_"):
+                # name.startswith("_") is folded into the same finding as "not
+                # an attribute at all": a skill declares artifacts through
+                # RunPaths's public layout API, and a private helper (e.g.
+                # _instance_dir_names) is an implementation detail, not part
+                # of the contract, even though hasattr() would otherwise
+                # accept it.
                 report(
                     f"/{key}/{i}",
                     f"names {name!r}, which is not a RunPaths attribute; declare artifacts "
@@ -288,32 +323,54 @@ def check_contract(skill: Skill) -> list[Finding]:
                 )
 
     if skill.name != ORCHESTRATOR and stage in STAGES:
-        declared = set(skill.declared("schemas"))
-        required = set(STAGE_ARTIFACTS[stage])
-        for kind in sorted(declared - required):
-            if kind not in ARTIFACT_SCHEMAS:
-                report("/schemas", f"declares artifact kind {kind!r}, which has no schema")
-            else:
-                report(
-                    "/schemas",
-                    f"declares artifact kind {kind!r}, which stage {stage!r} is not gated on",
-                )
-        omitted = sorted(required - declared)
-        if omitted:
+        schemas_value = skill.contract.get("schemas", [])
+        if not isinstance(schemas_value, list):
+            # Same shape-before-content ordering as reads/writes above: if
+            # schemas itself is the wrong type, the omission/invention checks
+            # below would compare a set built from set("a string") -- its
+            # characters, not its declared kind -- and produce a confusing
+            # second finding that contradicts this one. Reporting the shape
+            # and stopping keeps it to one finding.
             report(
                 "/schemas",
-                f"omits artifact kind(s) {', '.join(repr(k) for k in omitted)}, which stage "
-                f"{stage!r} is gated on",
+                f"declares schemas = {schemas_value!r}, which must be a list, not "
+                f"{type(schemas_value).__name__}",
             )
+        else:
+            declared = set(schemas_value)
+            required = set(STAGE_ARTIFACTS[stage])
+            for kind in sorted(declared - required):
+                if kind not in ARTIFACT_SCHEMAS:
+                    report("/schemas", f"declares artifact kind {kind!r}, which has no schema")
+                else:
+                    report(
+                        "/schemas",
+                        f"declares artifact kind {kind!r}, which stage {stage!r} is not gated on",
+                    )
+            omitted = sorted(required - declared)
+            if omitted:
+                report(
+                    "/schemas",
+                    f"omits artifact kind(s) {', '.join(repr(k) for k in omitted)}, which "
+                    f"stage {stage!r} is gated on",
+                )
 
     known = subcommand_names()
-    for i, name in enumerate(skill.declared("invokes")):
-        if name not in known:
-            report(
-                f"/invokes/{i}",
-                f"invokes {name!r}, which is not a testgen subcommand; the subcommands are: "
-                f"{', '.join(known)}",
-            )
+    invokes_value = skill.contract.get("invokes", [])
+    if not isinstance(invokes_value, list):
+        report(
+            "/invokes",
+            f"declares invokes = {invokes_value!r}, which must be a list, not "
+            f"{type(invokes_value).__name__}",
+        )
+    else:
+        for i, name in enumerate(invokes_value):
+            if name not in known:
+                report(
+                    f"/invokes/{i}",
+                    f"invokes {name!r}, which is not a testgen subcommand; the subcommands "
+                    f"are: {', '.join(known)}",
+                )
 
     for heading in SECTIONS:
         if heading not in skill.headings:
