@@ -198,7 +198,13 @@ def _decode(output: str | bytes | None) -> str:
     text=True decodes a *successful* communicate() return, but a timeout raises
     from inside communicate() with the raw bytes it had collected so far, before
     that decoding step runs -- so the partial output on a timeout is bytes even
-    though the call asked for text.
+    though the call asked for text. None means the process was killed before it
+    produced anything at all -- a hung-from-the-start agent, most often.
+
+    utf-8 is hardcoded rather than left to locale.getencoding(): the agent's
+    stdout is stream-json by definition, which is UTF-8, so there is no
+    encoding to detect. errors="replace" keeps a stream cut mid-character by
+    the kill readable instead of raising on it.
     """
     if output is None:
         return ""
@@ -229,12 +235,20 @@ def run_agent(
     agent log directory, so a diagnostic written inside it would be read back as
     transcript input -- and a warning line that happened to quote the reference
     answer would satisfy an answer_contains assertion the agent never earned.
+    That is a property of the seam, not a convention the tests happen to
+    follow, so it is enforced here rather than left to every future caller
+    (stage 7's smoke_run does not exist yet) to remember on its own.
 
     A timeout writes out whatever the command had already produced. A partial
     transcript still scores, and killing the whole smoke run because one agent
     hung would discard every other role's data on every remaining task, which is
     the comparison the run exists to make.
     """
+    if logs_dir == stderr_path.parent or logs_dir in stderr_path.parents:
+        raise ValueError(
+            f"stderr_path {stderr_path} is inside the agent log directory {logs_dir}; "
+            "verify.py would read it back as transcript"
+        )
     logs_dir.mkdir(parents=True, exist_ok=True)
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
     argv = substitute(spec.command, task_dir=task_dir, logs_dir=logs_dir, scenario_id=scenario_id)
@@ -285,10 +299,28 @@ def verify_package(
     verifier exits 2 and writes no reward.txt when it refuses a contract it
     cannot read, because that is a bypassed authoring gate rather than a bad
     agent run -- and scoring it zero would invert exactly that conclusion.
+    (reward.txt is the platform's contract -- Harbor reads that bare float, not
+    reward.json. This function reads reward.json, reward.txt's richer sibling
+    that carries the same number as a JSON object; verify.py writes both
+    together, so "no reward.txt" and "no reward.json" are the same event here.)
+
+    out_dir is cleared before the verifier runs. It is per-(role, task) and
+    nothing else in this module gives it a fresh name per attempt, so a
+    verifier that exits 0 without writing anything -- a mangled copy that does
+    nothing being exactly the case this task exists to catch -- would otherwise
+    leave a previous run's reward.json in place to be read back as this run's
+    score. The returncode/is_file guard below already catches a nonzero exit
+    over a stale file; the clear closes the zero-exit case that guard cannot
+    see.
     """
     verify_py = task_dir / "tests" / "verify.py"
     if not verify_py.is_file():
         return None, None, "package has no tests/verify.py"
+    if out_dir == agent_logs:
+        raise ValueError(
+            f"out_dir {out_dir} must not be agent_logs; the verifier would read its own output"
+        )
+    shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True, exist_ok=True)
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
     try:

@@ -13,6 +13,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from testgen.emit import emit_run
 from testgen.smoke import AgentSpec, run_agent, scrubbed_env, verify_package
 from tests.unit.test_refs_states import build_state
@@ -137,6 +139,50 @@ def test_a_timeout_keeps_whatever_the_agent_had_already_written(tmp_path):
     assert "90420" in (logs / "agent-stdout.jsonl").read_text()
 
 
+def test_a_timeout_before_any_output_still_writes_an_empty_transcript(tmp_path):
+    """exc.stdout is None, not bytes, when the agent produced no output before the kill.
+
+    _decode's None branch is a separate code path from its bytes branch, and this
+    is the only test that exercises it: a hung-from-the-start agent must not raise
+    out of run_agent and discard every remaining role's data on every remaining
+    task.
+    """
+    run = _emitted(tmp_path)
+    logs, _, base = _paths(run)
+    code, note = run_agent(
+        _spec(
+            _script(tmp_path, "silent_slow.py", "import time\ntime.sleep(30)\n"), timeout_sec=1.5
+        ),
+        task_dir=run.task_dir(SID),
+        logs_dir=logs,
+        stderr_path=base / "agent-stderr.txt",
+        scenario_id=SID,
+    )
+    assert code is None
+    assert "timed out" in note
+    assert (logs / "agent-stdout.jsonl").read_text() == ""
+
+
+def test_run_agent_refuses_a_stderr_path_inside_the_agent_log_directory(tmp_path):
+    """The seam enforces this itself; it must not depend on every caller's discipline.
+
+    Stage 7's smoke_run is the real caller and does not exist yet. If it ever
+    passed logs_dir / "agent-stderr.txt", every test in this file that pins the
+    stderr-outside-logs_dir property would stay green while the hazard the
+    property exists to prevent came back.
+    """
+    run = _emitted(tmp_path)
+    logs, _, _base = _paths(run)
+    with pytest.raises(ValueError):
+        run_agent(
+            _spec(_script(tmp_path, "z.py", COMPETENT)),
+            task_dir=run.task_dir(SID),
+            logs_dir=logs,
+            stderr_path=logs / "agent-stderr.txt",
+            scenario_id=SID,
+        )
+
+
 def test_the_agent_runs_with_the_task_directory_as_its_cwd(tmp_path):
     run = _emitted(tmp_path)
     logs, _, base = _paths(run)
@@ -201,6 +247,90 @@ def test_the_verifier_that_runs_is_the_copied_one(tmp_path):
     assert code == 9
 
 
+def test_a_stale_reward_is_not_reused_when_the_verifier_exits_nonzero(tmp_path):
+    """out_dir is per-(role, task); without a clear, a re-run would see the last score."""
+    run = _emitted(tmp_path)
+    logs, out, base = _paths(run)
+    run_agent(
+        _spec(_script(tmp_path, "good7.py", COMPETENT)),
+        task_dir=run.task_dir(SID),
+        logs_dir=logs,
+        stderr_path=base / "agent-stderr.txt",
+        scenario_id=SID,
+    )
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "reward.json").write_text('{"reward": 1.0}', encoding="utf-8")  # a previous run's score
+    (run.task_dir(SID) / "tests" / "verify.py").write_text("raise SystemExit(9)\n", "utf-8")
+    code, reward, _ = verify_package(
+        run.task_dir(SID),
+        agent_logs=logs,
+        out_dir=out,
+        stderr_path=base / "verifier-stderr.txt",
+    )
+    assert code == 9
+    assert reward is None, f"a stale reward.json was reported as this run's score: {reward}"
+
+
+_FRESH_REWARD_THEN_ERROR_VERIFIER = """\
+import argparse, json, pathlib, sys
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--expected")
+parser.add_argument("--agent-logs")
+parser.add_argument("--out")
+args = parser.parse_args()
+out = pathlib.Path(args.out)
+out.mkdir(parents=True, exist_ok=True)
+(out / "reward.json").write_text(json.dumps({"reward": 1.0}))
+sys.exit(1)
+"""
+
+
+def test_a_freshly_written_reward_is_not_trusted_if_the_verifier_still_exits_nonzero(tmp_path):
+    """The returncode half of the guard, independent of staleness.
+
+    out_dir is cleared before the verifier runs (see verify_package's
+    docstring), so a *stale* reward.json from a previous attempt cannot cause
+    this. This is the other half: even a reward.json the verifier just wrote
+    on *this* attempt must not be trusted if the process that wrote it did not
+    exit 0 -- a verifier that scores and then crashes on some unrelated
+    cleanup step is not a run whose score should reach the report.
+    """
+    run = _emitted(tmp_path)
+    logs, out, base = _paths(run)
+    run_agent(
+        _spec(_script(tmp_path, "good7b.py", COMPETENT)),
+        task_dir=run.task_dir(SID),
+        logs_dir=logs,
+        stderr_path=base / "agent-stderr.txt",
+        scenario_id=SID,
+    )
+    (run.task_dir(SID) / "tests" / "verify.py").write_text(
+        _FRESH_REWARD_THEN_ERROR_VERIFIER, encoding="utf-8"
+    )
+    code, reward, note = verify_package(
+        run.task_dir(SID),
+        agent_logs=logs,
+        out_dir=out,
+        stderr_path=base / "verifier-stderr.txt",
+    )
+    assert code == 1
+    assert reward is None, f"a reward.json from a nonzero exit was reported as a score: {reward}"
+
+
+def test_verify_package_refuses_out_dir_equal_to_agent_logs(tmp_path):
+    """verify.py's own docstring names this hazard: a run reading its own reward.txt back."""
+    run = _emitted(tmp_path)
+    logs, _out, base = _paths(run)
+    with pytest.raises(ValueError):
+        verify_package(
+            run.task_dir(SID),
+            agent_logs=logs,
+            out_dir=logs,
+            stderr_path=base / "verifier-stderr.txt",
+        )
+
+
 def test_a_verifier_that_imports_testgen_fails_as_it_would_in_the_container(tmp_path):
     """The scrub is what makes the stdlib-only constraint enforced by something.
 
@@ -215,15 +345,50 @@ def test_a_verifier_that_imports_testgen_fails_as_it_would_in_the_container(tmp_
     assert reward is None
 
 
+_STDLIB_PROBE_VERIFIER = """\
+import argparse, json, math, pathlib, sys
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--expected")
+parser.add_argument("--agent-logs")
+parser.add_argument("--out")
+args = parser.parse_args()
+out = pathlib.Path(args.out)
+out.mkdir(parents=True, exist_ok=True)
+(out / "reward.json").write_text(json.dumps({"reward": math.floor(1.0)}))
+sys.exit(0)
+"""
+
+
 def test_the_stdlib_is_still_reachable_under_the_scrub(tmp_path):
     """The other half: the scrub must not be so aggressive it breaks the verifier.
 
-    verify.py imports argparse, json, math, sys and pathlib. If -S removed any of
-    those, every task would be unscoreable and the suite would read as broken.
+    The real verify.py imports argparse, json, math, sys and pathlib among
+    stdlib modules; this test's own stand-in verifier imports exactly that set
+    and nothing else, and its only way to produce a reward is by using all
+    five. If -S removed any of them, the import would raise, the process would
+    exit nonzero, and reward would be None -- so unlike a test that merely
+    scores a real task (which -S passing or failing would not distinguish),
+    this one actually fails when the scrub is too aggressive.
     """
     run = _emitted(tmp_path)
-    _, reward, _ = _score(run, COMPETENT, tmp_path, "good4.py")
-    assert reward is not None
+    logs, out, base = _paths(run)
+    run_agent(
+        _spec(_script(tmp_path, "good4.py", COMPETENT)),
+        task_dir=run.task_dir(SID),
+        logs_dir=logs,
+        stderr_path=base / "agent-stderr.txt",
+        scenario_id=SID,
+    )
+    (run.task_dir(SID) / "tests" / "verify.py").write_text(_STDLIB_PROBE_VERIFIER, encoding="utf-8")
+    code, reward, note = verify_package(
+        run.task_dir(SID),
+        agent_logs=logs,
+        out_dir=out,
+        stderr_path=base / "verifier-stderr.txt",
+    )
+    assert reward == {"reward": 1}, note
+    assert code == 0
     assert "PYTHONPATH" in scrubbed_env()
     assert scrubbed_env()["PYTHONPATH"] == ""
 
@@ -242,6 +407,8 @@ def test_a_refused_contract_is_unscoreable_and_not_a_zero(tmp_path):
     assert reward is None
     assert "contract" in note
     assert not (_paths(run)[1] / "reward.txt").exists()
+    stated = json.loads((_paths(run)[1] / "reward-detail.json").read_text())["error"]
+    assert note == stated, "the note must be the verifier's own stated reason, not its stderr tail"
 
 
 def test_a_package_with_no_verifier_is_unscoreable(tmp_path):
@@ -250,6 +417,95 @@ def test_a_package_with_no_verifier_is_unscoreable(tmp_path):
     _, reward, note = _score(run, COMPETENT, tmp_path, "good6.py")
     assert reward is None
     assert "no tests/verify.py" in note
+
+
+def test_a_verifier_that_times_out_is_unscoreable(tmp_path):
+    """Distinct from run_agent's timeout: this is the verifier itself hanging."""
+    run = _emitted(tmp_path)
+    logs, out, base = _paths(run)
+    run_agent(
+        _spec(_script(tmp_path, "good8.py", COMPETENT)),
+        task_dir=run.task_dir(SID),
+        logs_dir=logs,
+        stderr_path=base / "agent-stderr.txt",
+        scenario_id=SID,
+    )
+    (run.task_dir(SID) / "tests" / "verify.py").write_text(
+        "import time\ntime.sleep(30)\n", encoding="utf-8"
+    )
+    code, reward, note = verify_package(
+        run.task_dir(SID),
+        agent_logs=logs,
+        out_dir=out,
+        stderr_path=base / "verifier-stderr.txt",
+        timeout_sec=1.0,
+    )
+    assert (code, reward, note) == (None, None, "verifier timed out after 1.0 s")
+
+
+_UNREADABLE_JSON_VERIFIER = """\
+import argparse, pathlib, sys
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--expected")
+parser.add_argument("--agent-logs")
+parser.add_argument("--out")
+args = parser.parse_args()
+out = pathlib.Path(args.out)
+out.mkdir(parents=True, exist_ok=True)
+(out / "reward.json").write_text("not json at all")
+sys.exit(0)
+"""
+
+
+def test_a_verifier_that_writes_unreadable_json_is_unscoreable(tmp_path):
+    """emit could ship a copy that gets this far and still corrupts its own output."""
+    run = _emitted(tmp_path)
+    logs, out, base = _paths(run)
+    run_agent(
+        _spec(_script(tmp_path, "good9.py", COMPETENT)),
+        task_dir=run.task_dir(SID),
+        logs_dir=logs,
+        stderr_path=base / "agent-stderr.txt",
+        scenario_id=SID,
+    )
+    (run.task_dir(SID) / "tests" / "verify.py").write_text(
+        _UNREADABLE_JSON_VERIFIER, encoding="utf-8"
+    )
+    code, reward, note = verify_package(
+        run.task_dir(SID),
+        agent_logs=logs,
+        out_dir=out,
+        stderr_path=base / "verifier-stderr.txt",
+    )
+    assert code == 0
+    assert reward is None
+    assert "unreadable reward.json" in note
+
+
+def test_a_verifier_that_writes_a_non_object_reward_is_unscoreable(tmp_path):
+    """A valid-JSON, wrong-shape reward.json must not be handed to the report as a score."""
+    run = _emitted(tmp_path)
+    logs, out, base = _paths(run)
+    run_agent(
+        _spec(_script(tmp_path, "good10.py", COMPETENT)),
+        task_dir=run.task_dir(SID),
+        logs_dir=logs,
+        stderr_path=base / "agent-stderr.txt",
+        scenario_id=SID,
+    )
+    (run.task_dir(SID) / "tests" / "verify.py").write_text(
+        _UNREADABLE_JSON_VERIFIER.replace('"not json at all"', '"[1.0]"'), encoding="utf-8"
+    )
+    code, reward, note = verify_package(
+        run.task_dir(SID),
+        agent_logs=logs,
+        out_dir=out,
+        stderr_path=base / "verifier-stderr.txt",
+    )
+    assert code == 0
+    assert reward is None
+    assert "not an object" in note
 
 
 def test_the_verifier_is_invoked_the_way_test_sh_invokes_it(tmp_path):
