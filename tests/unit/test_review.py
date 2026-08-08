@@ -10,10 +10,15 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 
-from testgen.artifacts import read_json, write_json
+import pytest
+
+from testgen.artifacts import ArtifactError, read_json, write_json
+from testgen.errors import UsageError
+from testgen.paths import RunPaths
 from testgen.review import (
     DEFAULT_SAMPLE_SIZE,
     RUBRIC,
@@ -266,6 +271,55 @@ def test_sample_run_reports_when_no_high_confidence_accept_exists(tmp_path):
     write_json(run.scenarios, scenarios)
     _, findings = sample_run(run, DEFAULT_SAMPLE_SIZE)
     assert any("high-confidence" in f.message for f in findings)
+
+
+def test_an_unreadable_scenario_list_names_the_artifact_and_writes_nothing(tmp_path):
+    """A default hop depth of 0 collapses the stratification this tool exists for.
+
+    `_load(run.scenarios) or {"scenarios": []}` gave every candidate hop_depth 0,
+    so a three-task packet came out drawn from one stratum, at exit 0, with no
+    finding -- indistinguishable from a suite that really is flat.
+    """
+    run = build_state(tmp_path, "emit")
+    run.scenarios.write_text("{not json", encoding="utf-8")
+
+    sampled, findings = sample_run(run, DEFAULT_SAMPLE_SIZE)
+    assert sampled == []
+    assert len(findings) == 1
+    assert findings[0].artifact == run.scenarios
+    assert "02-scenarios.json" in str(findings[0])
+    assert not run.review_packet.exists()
+    assert not run.review_sample.exists()
+
+
+def test_a_non_positive_size_is_a_usage_error_before_anything_is_written(tmp_path):
+    """An empty packet at exit 0 cannot be told from a review that found nothing."""
+    run = build_state(tmp_path, "emit")
+    with pytest.raises(UsageError):
+        sample_run(run, 0)
+    with pytest.raises(UsageError):
+        sample_run(run, -1)
+    assert not run.review_packet.exists()
+    assert not run.review_sample.exists()
+
+
+def test_a_directory_that_is_not_a_run_is_refused_before_the_packet_is_written(tmp_path):
+    """manifest.json is read first, the way smoke_run reads it.
+
+    It used to be read last, after the packet and the record were already on disk,
+    so a directory that is not a run got a measurement/review/ tree written into
+    it before the ArtifactError was raised.
+    """
+    run = build_state(tmp_path / "real", "emit")
+    stray = RunPaths(tmp_path / "not-a-run")
+    stray.root.mkdir(parents=True)
+    # The suite directory is copied in so the refusal cannot be attributed to
+    # there being nothing to review.
+    shutil.copytree(run.suite_dir, stray.suite_dir)
+
+    with pytest.raises(ArtifactError):
+        sample_run(stray, DEFAULT_SAMPLE_SIZE)
+    assert not stray.measurement_dir.exists()
 
 
 def test_sample_run_is_idempotent(tmp_path):

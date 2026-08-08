@@ -19,6 +19,7 @@ import json
 from typing import Any
 
 from testgen.artifacts import ArtifactError, read_json, sha256_of, write_json
+from testgen.errors import UsageError
 from testgen.findings import Finding
 from testgen.paths import RunPaths
 
@@ -66,8 +67,14 @@ def candidates(run: RunPaths) -> list[dict[str, Any]]:
 
     Emitted packages only. A reviewer can act on a task that shipped; a scenario
     the pipeline discarded is not something to ask four questions about.
+
+    Raises ArtifactError when 02-scenarios.json cannot be read. Defaulting it to
+    an empty document gave every candidate `hop_depth: 0`, which collapses the
+    stratification this tool exists for -- a packet of three tasks all at one
+    depth, written at exit 0 with no finding, looking exactly like a suite that
+    really is flat. recall.generated_tasks makes the same distinction.
     """
-    document = _load(run.scenarios) or {"scenarios": []}
+    document = read_json(run.scenarios)
     scenarios = {s["id"]: s for s in document.get("scenarios", [])}
     entries = []
     for sid in run.scenario_ids_with_tasks():
@@ -104,6 +111,8 @@ def stratified(entries: list[dict[str, Any]], size: int) -> list[dict[str, Any]]
     the run most in need of review producing the least of it.
     """
     if size <= 0:
+        # sample_run refuses a non-positive size as a UsageError before it gets
+        # here, so this only keeps the pure function total for a direct caller.
         return []
     strata: dict[int, list[dict[str, Any]]] = {}
     for entry in sorted(entries, key=_order_key):
@@ -201,8 +210,38 @@ def sample_run(run: RunPaths, size: int = DEFAULT_SAMPLE_SIZE) -> tuple[list[dic
 
     sample.json carries no timestamp, so two runs of the same suite produce
     byte-identical records and a diff shows only what actually changed.
+
+    Two refusals happen before anything is written.
+
+    A `size` of zero or less is a UsageError, which cli.py maps to exit 2. It used
+    to overwrite an existing packet with an empty one and exit 0, which is
+    indistinguishable from success -- and a review packet nobody can tell is empty
+    on purpose is worse than no packet. intake validates its own numeric arguments
+    the same way.
+
+    manifest.json is read first, the way smoke_run reads it, so a directory that
+    is not a run exits 2 rather than having a measurement/review/ tree written
+    into it. It used to be read last, after the packet was already on disk.
     """
-    pool = candidates(run)
+    if size <= 0:
+        raise UsageError(
+            f"--size must be at least 1, got {size}; a packet of no tasks cannot be told "
+            "apart from a review that found nothing to say"
+        )
+    run_id = read_json(run.manifest)["run_id"]
+    try:
+        pool = candidates(run)
+    except ArtifactError as exc:
+        return [], [
+            Finding(
+                run.scenarios,
+                "review",
+                "",
+                f"{exc}; the review packet cannot be stratified by hop depth without it, and "
+                "a packet built from a default depth of 0 would collapse the stratification "
+                "this tool exists for. Nothing was written",
+            )
+        ]
     if not pool:
         return [], [
             Finding(
@@ -231,7 +270,7 @@ def sample_run(run: RunPaths, size: int = DEFAULT_SAMPLE_SIZE) -> tuple[list[dic
         run.review_sample,
         {
             "format": "testgen-review/1",
-            "run_id": read_json(run.manifest)["run_id"],
+            "run_id": run_id,
             "size_requested": size,
             "sampled": sampled,
             "rubric": list(RUBRIC),

@@ -30,6 +30,7 @@ from testgen.recall import (
 from tests.builders import (
     minimal_expected,
     minimal_gold,
+    minimal_manifest,
     minimal_scenarios,
     minimal_seed,
     minimal_verdict,
@@ -337,6 +338,68 @@ def test_compare_is_deterministic(tmp_path):
     assert compare(run, minimal_gold()) == compare(run, minimal_gold())
 
 
+def test_the_recall_report_says_which_run_it_measured(tmp_path):
+    """07-report.json and review/sample.json both carry it.
+
+    recall.json was the one measurement output that could not say what it was
+    about once it left its directory.
+    """
+    from testgen.artifacts import read_json
+
+    run = build_state(tmp_path, "emit")
+    report, _ = compare_run(run, _gold_file(tmp_path))
+    assert report["run_id"] == read_json(run.manifest)["run_id"]
+    assert read_json(run.recall)["run_id"] == report["run_id"]
+
+
+@pytest.mark.parametrize("breakage", ["absent", "malformed"])
+def test_an_unreadable_scenario_list_reports_no_recall_rather_than_zero(tmp_path, breakage):
+    """Absence must not read as agreement -- stability.comparability's rule, here.
+
+    Swallowing the ArtifactError into an empty mapping made every emitted package
+    look like a package whose scenario had vanished, and compare_run wrote a
+    durable "Generated tasks that shipped: 0 / Recall: 0.00" that blamed the gold
+    list for an artifact this tool could not read.
+    """
+    run = build_state(tmp_path, "emit")
+    if breakage == "absent":
+        run.scenarios.unlink()
+    else:
+        run.scenarios.write_text("{not json", encoding="utf-8")
+
+    report, findings = compare_run(run, _gold_file(tmp_path))
+    assert report["recall"] is None, "an unreadable suite is not a suite that matched nothing"
+    assert report["generated_total"] is None
+    assert report["unreadable"]
+    assert "02-scenarios.json" in report["unreadable"]
+    assert report["unmatched_gold"] == [], "the gold list must not be blamed"
+
+    named = [f for f in findings if f.artifact == run.scenarios]
+    assert len(named) == 1, findings
+    assert "02-scenarios.json" in str(named[0])
+
+    text = run.recall_md.read_text(encoding="utf-8")
+    assert "- **Recall:** not applicable" in text
+    assert "- **Generated tasks that shipped:** not readable" in text
+    assert "No recall is reported" in text
+
+
+def test_a_spurious_explanation_claims_nothing_about_how_many_tasks_covered_it(tmp_path):
+    """The `why` string reaches recall.md, which a human reads.
+
+    It used to say the coverage was "spread across more than one" authored task.
+    One gold task whose cells are a strict superset of the scenario's -- jaccard
+    1/3, below the match floor -- produces the same classification and makes that
+    claim false.
+    """
+    scenario = _generated("scn-001", refs=(("cap-a", "oc-1"),))
+    gold = [_gold("bench-001", refs=(("cap-a", "oc-1"), ("cap-b", "oc-1"), ("cap-c", "oc-1")))]
+    kind, why = classify_novelty(scenario, gold)
+    assert kind == "spurious"
+    assert "more than one" not in why
+    assert assign_matches(gold, [scenario])[0] == [], "the pair must really be below the floor"
+
+
 # -- render ------------------------------------------------------------------
 
 
@@ -403,11 +466,15 @@ def _emitted_run(tmp_path, scenario_refs):
     """A run with one emitted package per (sid, refs) pair in scenario_refs.
 
     Builds only what emit_run reads (world model, scenario list, seed,
-    expected, verdict) -- there is no coverage document here because nothing
-    in this test reads one.
+    expected, verdict) plus the manifest -- there is no coverage document here
+    because nothing in this test reads one. The manifest is here because
+    compare reads it before anything else, the way smoke_run does: a directory
+    without one is not a run, and compare_run must not write recall.json into
+    one.
     """
     run = RunPaths(tmp_path)
     run.root.mkdir(parents=True, exist_ok=True)
+    write_json(run.manifest, minimal_manifest())
     write_json(run.world_model, minimal_world_model())
     write_json(
         run.scenarios,

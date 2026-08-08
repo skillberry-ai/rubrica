@@ -35,12 +35,20 @@ def load_gold(path: Path | str) -> dict[str, Any]:
     """Read and schema-validate the bench task list.
 
     UsageError, not findings: a person wrote this file, so there is no stage to
-    hand a repair prompt to. Same treatment smoke.load_agents gives its roster.
+    hand a repair prompt to. Same treatment smoke.load_agents gives its roster,
+    including the unreadable cases artifacts.read_json does not convert:
+    --gold pointing at a directory, at a non-UTF-8 file, or at a file with mode
+    000 raised out of here and became a finding at exit 1 blaming this run's
+    artifacts for a misconfigured invocation. read_json is deliberately *not*
+    widened, because an unreadable stage artifact must stay a finding.
     """
-    findings = validate_artifact(Path(path), "gold")
-    if findings:
-        raise UsageError(f"unusable gold task list:\n{format_findings(findings)}")
-    return read_json(path)
+    try:
+        findings = validate_artifact(Path(path), "gold")
+        if findings:
+            raise UsageError(f"unusable gold task list:\n{format_findings(findings)}")
+        return read_json(path)
+    except (OSError, UnicodeDecodeError, ArtifactError) as exc:
+        raise UsageError(f"unusable gold task list: {path}: {exc}") from exc
 
 
 def cells(capability_refs: list[dict[str, Any]]) -> frozenset[tuple[str, str]]:
@@ -56,16 +64,22 @@ def generated_tasks(run: RunPaths) -> list[dict[str, Any]]:
     pipeline with a scenario the adversary rejected would count a test it did not
     deliver. A package whose scenario has vanished from 02 is skipped rather than
     guessed at; refs.check_suite reports that separately.
+
+    Raises ArtifactError when 02-scenarios.json cannot be read at all. It used to
+    be swallowed into an empty mapping, which is a different claim: every emitted
+    package then looked like a package whose scenario had vanished, and compare
+    wrote a durable "Generated tasks that shipped: 0, Recall: 0.00" that blamed
+    the gold list for an artifact this tool could not read.
+    stability.comparability makes the same distinction for the same reason --
+    absence must not read as agreement.
     """
     scenarios = _load_scenarios(run)
     return [scenarios[sid] for sid in run.scenario_ids_with_tasks() if sid in scenarios]
 
 
 def _load_scenarios(run: RunPaths) -> dict[str, dict[str, Any]]:
-    try:
-        document = read_json(run.scenarios)
-    except ArtifactError:
-        return {}
+    """The scenarios by id. Raises ArtifactError if 02-scenarios.json is unreadable."""
+    document = read_json(run.scenarios)
     return {s["id"]: s for s in document.get("scenarios", [])}
 
 
@@ -139,6 +153,13 @@ _NOISE_CAVEAT = (
     "one test from two different tests."
 )
 
+_UNREADABLE_CAVEAT = (
+    "**No recall is reported: {reason}.** The generated suite could not be read, so there is "
+    'nothing to compare the authored tasks against. A recall of 0.00 here would read as "the '
+    'pipeline found none of them" -- a claim about the pipeline, made from an artifact this '
+    "tool could not read. Repair `02-scenarios.json` and re-run."
+)
+
 _NO_GOLD_CAVEAT = (
     "There are no gold tasks to compare against, so there is no recall to report. "
     "The novelty section below still stands on its own, and every entry in it is a "
@@ -188,8 +209,8 @@ def classify_novelty(scenario: dict[str, Any], gold_tasks: list[dict[str, Any]])
         )
     return "spurious", (
         "every capability cell and the (goal, hop depth) pair already appear in the authored "
-        "tasks, spread across more than one of them, so this adds no coverage axis and looks "
-        "new only because no single authored task overlapped it enough to pair"
+        "tasks, so this adds no coverage axis and looks new only because no single authored "
+        "task overlapped it enough to pair"
     )
 
 
@@ -198,34 +219,65 @@ def compare(run: RunPaths, gold: dict[str, Any]) -> dict[str, Any]:
 
     `recall` is None rather than 0.0 when no gold tasks were supplied: 0.0 reads as
     "the pipeline found none of them", which is a claim about the pipeline rather
-    than about the missing input.
+    than about the missing input. It is None for the same reason when
+    02-scenarios.json could not be read -- `unreadable` then carries why, and
+    compare_run turns it into a finding naming the artifact.
+
+    manifest.json is read first and indexed directly, the way smoke_run reads it:
+    a directory without one is not a run, the ArtifactError becomes exit 2, and
+    compare_run must not write measurement/recall.json into a directory that is
+    not a run.
     """
+    run_id = read_json(run.manifest)["run_id"]
     gold_tasks = gold.get("tasks", [])
-    generated = generated_tasks(run)
+    denominator = len(gold_tasks)
+    # A format tag, not a schema_version: no JSON Schema gates this file,
+    # because this project's own code writes it and unit tests gate it
+    # instead. Claiming a schema_version would say otherwise.
+    header = {
+        "format": "testgen-recall/1",
+        # Which run this number is about. 07-report.json and review/sample.json
+        # both carry it, and a recall.json copied out of its directory was the
+        # one measurement output that could not say what it measured.
+        "run_id": run_id,
+        "target": gold.get("target"),
+        "gold_denominator": denominator,
+        "human_confirmation_required": True,
+    }
+    try:
+        generated = generated_tasks(run)
+    except ArtifactError as exc:
+        return {
+            **header,
+            "generated_total": None,
+            "matched": [],
+            # Not every gold id: "nothing matched these" is a claim about the
+            # suite, and there is no readable suite here to make it about.
+            "unmatched_gold": [],
+            "recall": None,
+            "novel": [],
+            "unreadable": str(exc),
+        }
     matches, unmatched_gold, unmatched_generated = assign_matches(gold_tasks, generated)
     novel = []
     for scenario in unmatched_generated:
         kind, why = classify_novelty(scenario, gold_tasks)
         novel.append({"scenario_id": scenario["id"], "kind": kind, "why": why})
-    denominator = len(gold_tasks)
     return {
-        # A format tag, not a schema_version: no JSON Schema gates this file,
-        # because this project's own code writes it and unit tests gate it
-        # instead. Claiming a schema_version would say otherwise.
-        "format": "testgen-recall/1",
-        "target": gold.get("target"),
-        "gold_denominator": denominator,
+        **header,
         "generated_total": len(generated),
         "matched": matches,
         "unmatched_gold": unmatched_gold,
         "recall": round(len(matches) / denominator, 6) if denominator else None,
         "novel": novel,
-        "human_confirmation_required": True,
+        "unreadable": None,
     }
 
 
 def caveat(report: dict[str, Any]) -> str:
     """The sentence design spec section 7 requires beside every recall number."""
+    if report.get("unreadable"):
+        return _UNREADABLE_CAVEAT.format(reason=report["unreadable"])
     denominator = report["gold_denominator"]
     if not denominator:
         return _NO_GOLD_CAVEAT
@@ -246,7 +298,8 @@ def render(report: dict[str, Any]) -> str:
         caveat(report),
         "",
         f"- **Authored tasks:** {report['gold_denominator']}",
-        f"- **Generated tasks that shipped:** {report['generated_total']}",
+        "- **Generated tasks that shipped:** "
+        + ("not readable" if report["generated_total"] is None else str(report["generated_total"])),
         f"- **Matched:** {len(report['matched'])}",
         "- **Recall:** "
         + ("not applicable" if report["recall"] is None else f"{report['recall']:.2f}"),
@@ -288,8 +341,22 @@ def compare_run(run: RunPaths, gold_path: Path | str) -> tuple[dict[str, Any], l
     """
     report = compare(run, load_gold(gold_path))
     write_json(run.recall, report)
-    (run.measurement_dir / "recall.md").write_text(render(report), encoding="utf-8")
+    run.recall_md.write_text(render(report), encoding="utf-8")
     findings = []
+    if report["unreadable"]:
+        # Named, not silently folded into a recall of 0.00. The report already
+        # says `recall: null` and why; this is the line the orchestrator branches
+        # on, and it names the artifact to repair rather than the gold list.
+        findings.append(
+            Finding(
+                run.scenarios,
+                "recall",
+                "",
+                f"{report['unreadable']}; no recall could be measured for this run. Repair "
+                "02-scenarios.json -- the number in measurement/recall.json is null rather "
+                "than 0.00 because an unreadable suite is not a suite that matched nothing",
+            )
+        )
     if report["unmatched_gold"]:
         findings.append(
             Finding(

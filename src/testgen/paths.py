@@ -163,6 +163,17 @@ class RunPaths:
         return self.measurement_dir / "recall.json"
 
     @property
+    def recall_md(self) -> Path:
+        """The human-facing rendering of recall.json.
+
+        Here rather than joined inline by recall.compare_run: this module is the
+        single source of truth for artifact paths, and its sibling recall.json
+        was already a property, so the one file the tool writes outside this
+        module was the one nothing else could find by name.
+        """
+        return self.measurement_dir / "recall.md"
+
+    @property
     def review_dir(self) -> Path:
         return self.measurement_dir / "review"
 
@@ -210,7 +221,10 @@ class RunPaths:
 
         Names that are not safe path segments are excluded, for the same reason
         scenario_ids_with_instances excludes them: returning one makes every
-        later task_dir() call raise UnsafeSegment, which the CLI maps to exit 2.
+        later task_dir() call raise UnsafeSegment, and UnsafeSegment is not in
+        cli.py's narrow catch tuple, so it reaches the catch-all and becomes a
+        single `[internal]` finding at exit 1 -- one badly-named directory
+        discarding every other finding the run would have reported.
         Unlike the instances directory this one is written only by emit, which
         derives every name from an id safe_segment already vetted -- so an
         unsafe name here means someone edited the run directory by hand, and
