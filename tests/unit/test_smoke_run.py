@@ -8,7 +8,11 @@ Python scripts standing in for a weak baseline, a competent agent, and an oracle
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
+
+import pytest
 
 from testgen.artifacts import read_json
 from testgen.smoke import ROLES, AgentSpec, smoke_run
@@ -195,6 +199,46 @@ def test_a_role_whose_log_directory_cannot_be_cleared_is_unscoreable_not_timed_o
     assert report["summary"]["unscoreable"] == 1
     assert not any("timed out" in f.message for f in findings), "nothing timed out"
     assert any("under_test" in f.message for f in findings)
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)"
+)
+def test_a_stale_transcript_that_could_not_be_cleared_is_never_scored(tmp_path):
+    """The case where the stale transcript is still perfectly readable.
+
+    The test above blocks the clear with a subdirectory, which also stops verify.py
+    reading anything -- so the result would come out unscoreable even without the
+    never-launched branch. Here the previous attempt's transcript is a real file
+    with the correct answer and the *directory* is read-only, so verify.py scores
+    it 1.0. Nothing in this attempt earned that, and smoke_run must discard it and
+    say so.
+    """
+    run = _run(tmp_path)
+    logs = run.smoke_dir("under_test", SID) / "agent"
+    logs.mkdir(parents=True, exist_ok=True)
+    # Attempt 1's own transcript file, the shape run_agent's docstring supports.
+    stale = tmp_path / "stale.py"
+    stale.write_text(COMPETENT, encoding="utf-8")
+    subprocess.run(
+        [sys.executable, str(stale)],
+        stdout=(logs / "session-1.jsonl").open("w", encoding="utf-8"),
+        check=True,
+    )
+    logs.chmod(0o555)
+    try:
+        report, findings = smoke_run(run, _roster(tmp_path))
+    finally:
+        logs.chmod(0o755)
+
+    result = next(r for r in report["tasks"][0]["results"] if r["role"] == "under_test")
+    assert result["scored"] is False, "a previous attempt's answer must not become a score"
+    assert "reward" not in result
+    assert "never launched" in result["notes"], "the discard has to say why"
+    on_disk = read_json(run.smoke_dir("under_test", SID) / "verifier" / "reward.json")
+    assert on_disk["reward"] == 1.0, "the verifier really did score the stale transcript"
+    assert str(on_disk["reward"]) in result["notes"]
+    assert not any("timed out" in f.message for f in findings), "nothing timed out"
 
 
 def test_a_discarded_verifier_score_is_recorded_where_an_operator_would_find_it(tmp_path):

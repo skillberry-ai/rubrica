@@ -817,6 +817,11 @@ def smoke_run(run: RunPaths, specs: tuple[AgentSpec, ...]) -> tuple[dict | None,
                     f"{discarded_because}"
                 )
             results.append(_result_entry(spec.role, reward, notes))
+            # `not never_ran` keeps this list true to its name rather than
+            # guarding an observable outcome: a never-launched result is always
+            # unscoreable, and the loop that consumes timed_out already skips
+            # unscoreable results, so no test can distinguish its presence. It is
+            # here because "timed out" would be a false statement about the entry.
             if agent_code is None and not never_ran:
                 timed_out.append((len(tasks), len(results) - 1, spec.role))
         task = {"scenario_id": sid, "results": results}
