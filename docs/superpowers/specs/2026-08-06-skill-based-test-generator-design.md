@@ -156,8 +156,17 @@ runs/<run-id>/
   05-verdicts/<sid>.json
   06-suite/<sid>/         Harbor package
   07-report.json
+  measurement/            outputs of the measurement tools, which are not stages
+    smoke/<role>/<sid>/    agent/ (transcript) + verifier/ (reward.json, reward.txt)
+    recall.json recall.md  compare-gold
+    review/                packet.md, sample.json
   decisions.md            append-only orchestrator log
 ```
+
+`measurement/` is outside the numbered prefixes on purpose. Those name pipeline
+stages the orchestrator dispatches, and `STAGES`/`STAGE_ARTIFACTS` must not grow
+an entry for a tool nothing dispatches. `diff-runs` writes nothing at all: it
+spans two runs and belongs to neither.
 
 Artifacts are the **only** channel between stages. A dispatched subagent receives
 exactly three things: the run directory path, its stage name, and its skill. No
@@ -269,6 +278,20 @@ is how `log-does-not-say`-style tests become both expressible and verifiable.
 `minimum_tool_calls_found` is the adversary independently measuring difficulty,
 cross-checking stage 2's `hop_depth` claim.
 
+Each entry in `manifest.json`'s `inputs` list carries a `stored_as` field — the
+filename the artifact was registered under inside `00-inputs/` — so a reader
+re-verifying a digest does not have to re-derive intake's naming rule. Two
+definitions of that rule is how they drift.
+
+Two schemas in `src/testgen/schema/` are not stage artifacts at all:
+`agents-0.1.json` and `gold-0.1.json` validate the human-authored config files
+the measurement tools take as input (the agent roster, the hand-authored gold
+benchmark). A schema gates artifacts the code did not write. Measurement
+outputs, which this project's own code writes, are gated by unit tests
+instead; a schema over them would only restate the writer. A failure in a
+human-authored config is exit 2, not exit 1: there is no stage to hand a
+repair prompt to.
+
 ### Three validation layers
 
 1. **Schema** — `bin/validate <run-dir> <stage>` runs after every stage; output
@@ -308,6 +331,10 @@ skills/tg-{orchestrate,extract,reconcile,propose,score,instantiate,challenge,emi
 src/testgen/schema/*.json   (package data: an installed copy can validate)
 bin/{intake,validate,check-refs,dedupe-candidates,emit,smoke,diff-runs,compare-gold,sample-for-review}
 ```
+
+Shipped as one console script with subcommands — `testgen intake`,
+`testgen validate`, … — rather than a `bin/` directory of separate files. The
+names and the responsibilities are as listed; only the packaging differs.
 
 Dedupe folds into stage 3 rather than standing alone: recognizing that "find the
 oldest failing job on prod0" and "which prod0 job failed longest ago" are the
@@ -520,6 +547,49 @@ becomes a trend line. Sample preferentially from high-confidence `accept`
 verdicts: that is precisely where a correlated labeler/adversary blind spot
 hides.
 
+**Decisions this build made, for the next reader who needs to know why a
+number is what it is:**
+
+- The thresholds are named constants, not magic numbers scattered through the
+  code: `WEAK_BASELINE_CEILING` (0.30), `ORACLE_FLOOR` (0.80), and
+  `PASS_THRESHOLD` / `FAIL_CEILING` (0.999 / 0.001) for the per-task all-pass /
+  all-fail flags. `broken_labels` (oracle mean below its floor) outranks
+  `degenerate_trivial` (weak-baseline mean above its ceiling) when both trip:
+  a suite whose oracle cannot pass its own reference answer is not
+  trustworthy evidence about whether the suite is trivial either.
+- Every mean is taken over **comparable** tasks only — a task where every
+  declared role actually produced a score — never over however many rows
+  happened to land. A task with one timed-out role would otherwise silently
+  drop out of that role's mean while still counting in the others', turning a
+  ragged denominator into a false signal. `unscoreable` is its own bucket,
+  neither `all_pass` nor `all_fail`: a task no role could score is not
+  evidence the suite is easy or hard.
+- `smoke` scores an agent by executing the package's own copied `verify.py`
+  under `python -S` with a scrubbed environment, not by re-implementing
+  scoring logic against the transcript. This is the stdlib-only constraint
+  enforced by actually running it, rather than declared and hoped for.
+- A transcript's non-string `result` scores as **no answer** — never coerced
+  with `str()` — and the reason is recorded in `reward-detail.json`. Silently
+  stringifying a malformed result would let a broken agent's structured
+  garbage pass an `answer_contains` check by accident.
+- `compare-gold` proposes matches, it does not declare them: a gold task and a
+  generated task must share a goal identity and clear a cell-overlap floor
+  before either is even eligible, matches are assigned one-to-one, and the
+  result is handed to a human to confirm, not treated as ground truth.
+- `diff-runs` reports every per-stage number even when the two runs are
+  incomparable — comparability is a precondition on trusting the *headline*
+  verdict, not on computing it, because a reader deciding whether the
+  incomparability itself matters needs the numbers to decide with. Every
+  Jaccard is reported alongside both set sizes and the actual difference, not
+  as a bare fraction: 1.0 on two empty sets and 1.0 on two 40-element sets are
+  not the same claim.
+- `sample-for-review` picks its sample deterministically from `hashlib.sha256`
+  of the scenario id, never the builtin `hash()` — which is salted per
+  process and would make the same run sample differently on every
+  invocation — and the packet carries the seed's digest rather than the seed
+  itself, so a reviewer can confirm which world a label was authored against
+  without the simulated backend burying the four questions that matter.
+
 ## 8. First slice
 
 - **aap2 only**, one simulation skill.
@@ -555,9 +625,14 @@ deliberately deferred rather than folded into a fix wave. **These are layer-2
 gaps in a contract that later stages are meant to be constrained by, so they
 belong at the front of the next plan, not the back.**
 
-**Status: nine of the ten shipped in the closure-and-emit build.** Only
-*re-verify input digests* remains, still waiting on `diff-runs` as its natural
-home. The nine are kept below as the record of what was owed and why.
+**Status: fully closed as of the measurement build.** The tenth and last item,
+*re-verify input digests*, is closed by `refs.check_inputs`, which re-hashes
+`00-inputs/`'s bytes against the digest `manifest.json` recorded for them — the
+hole this list existed to name. `manifest.stored_as` closes the related naming
+gap alongside it: each input entry now carries the filename it was registered
+under, so a reader (or `check_inputs` itself) does not have to re-derive
+intake's slugging rule to know which file a digest belongs to. The nine are
+kept below as the record of what was owed and why.
 
 | Carried forward | Why it matters |
 |---|---|
@@ -579,22 +654,29 @@ parked with rulings rather than fixed. **None is reachable through the
 deterministic pipeline — every one needs a hand-authored or tampered artifact —
 but so did `weights: 5`, which was fixed, so reachability alone is not the test.**
 
-| Carried forward | Why it matters |
+**Five of the nine closed in the measurement build; four stay parked below.**
+
+| Closed this build | Where |
 |---|---|
-| Re-verify input digests | The one item still owed from the contract-spine list. Nothing confirms the bytes in `00-inputs/` are the bytes whose hash the manifest records — a hole underneath the reproducibility claim. `diff-runs` is the natural home. |
-| Cross-check `07-report.json` against `06-suite/` | `check_all` has no report checker at all, so a report can list a scenario whose package `emit` has pruned and `validate --stage smoke` stays clean. Newly reachable *because* emit now prunes. Belongs with the smoke producer, which owns the artifact. |
-| `parse_transcript` on a non-string `result` | A transcript whose `result` is not a string crashes `compute_reward` at `answer.strip()`. The fix is a scoring decision — drop the event or coerce with `str()` — and it changes what a malformed agent log scores, so it needs a deliberate ruling rather than a guard. |
-| A syntactically invalid `expected.json` in a package | Exits 1 with a traceback from `json.loads` before `_contract_problems` runs, so the refusal path never engages. The gate cannot defend a file it could not parse; wrapping the read is the fix. |
-| `emit` prunes on a repairable upstream defect | A missing `binding` or a truncated oracle deletes the complete package a prior emit wrote. Defensible — emit is deterministic, so a repair restores it byte-for-byte, and a stale suite would be scored as accepted tests — but the docstring draws the line at "a missing *input*" and a truncated oracle is not that. |
+| Cross-check `07-report.json` against `06-suite/` | `refs.check_report`. Distinguishes a scenario absent because `emit` pruned it from one absent because the challenge loop rejected it — the two look identical to a checker that only asks "is it there," and only one of them is a defect. |
+| `parse_transcript` on a non-string `result` | Ruled: a non-string `result` scores as no answer, never `str()`-coerced, with the reason recorded in `reward-detail.json`. See §7's Measurement harness for why coercion was rejected. |
+| A syntactically invalid `expected.json` in a package | `verify.read_contract` now refuses before `_contract_problems` runs, so a file that cannot even parse hits the same refusal path as one that parses but fails the contract, instead of an uncaught `json.loads` traceback. |
+| `emit` prunes on a repairable upstream defect | The docstring was the actual defect, not the behavior: it drew the line at "a missing *input*" while the code correctly also pruned on a truncated oracle. Corrected to describe what the code does. |
+| `refs._load` swallows `ArtifactError` | `check_readable` now names the artifact that actually failed to parse and short-circuits `check_all` before it can blame `03-coverage/latest.json` or `04-instances/` for a defect that lives in `02-scenarios.json`. |
+
+| Still parked | Why it matters |
+|---|---|
 | An unsafe directory name under `06-suite/` | Skipped by `scenario_ids_with_tasks()`, so it is neither pruned nor reported, and would ship. There is no `unsafe_task_dir_names()` counterpart to the one `04-instances/` has. Requires manual tampering. |
 | `cli.py`'s `except Exception` blames the artifact | A genuine bug in `testgen` code is reported as "your artifact is malformed; run validate". If `validate` is then clean the orchestrator gets contradictory signals. The traceback on stderr mitigates it. |
 | `intake` sits outside the exception net | Its own `try` returns before the outer handler, so an unexpected exception there exits 1 with empty stdout — the mode that net was added to close. Crash surface is small: `slug` cannot emit an unsafe segment and IO raises `OSError`. |
-| `refs._load` swallows `ArtifactError` | An unparseable `02-scenarios.json` produces four findings blaming `03-coverage/latest.json` and `04-instances/`, and never names the broken file — so a repair prompt rewrites the wrong artifact. `emit._unreadable_instance` fixed this shape in the smaller instance; the bigger one is untouched. |
+| Re-verifying digests **across** runs | Partly addressed: `diff-runs`' comparability precondition now refuses to call two runs comparable unless their manifests record identical `input_digests`. What it does not do is re-hash either run's `00-inputs/` bytes itself — it compares the two manifests' *recorded* digests, trusting each at face value. That trust is exactly what `refs.check_inputs` closes, but only within one run; `diff-runs` does not chain to it. Two runs tampered identically, or a run whose `check_inputs` was never run, can still report `comparable: true` on a false premise. |
 
-### Three process changes for the next plan
+### Process changes for the next plan
 
 The first two come from the contract-spine build; the third is what the
-closure-and-emit build added, and it is the one that caught the most.
+closure-and-emit build added, and it was the one that caught the most. All
+three held through the measurement build's twelve tasks and are kept
+unchanged below.
 
 1. **Enumerate the pipeline states and require `check_all` to be clean in each.**
    Tolerance was asserted in prose and tested for two states, which is how a
@@ -616,44 +698,93 @@ closure-and-emit build added, and it is the one that caught the most.
    Deletion-mutation cannot see any of those. The dual is the fix: for every new
    check, name the pipeline state in which it must stay silent and add that
    state to `tests/unit/test_refs_states.py`. That file was under-populated by
-   four reachable states, one of which *was* the Critical.
+   four reachable states, one of which *was* the Critical. (A tooling note that
+   belongs with this one because it silently corrupts the evidence: a
+   byte-length-preserving mutate-then-restore within the same second leaves
+   CPython's mutated `.pyc` live, since `.pyc` validation checks source size and
+   mtime-to-the-second only. Every mutation harness here must set
+   `PYTHONDONTWRITEBYTECODE=1` or sweep `__pycache__` between mutate and
+   restore.)
 
-A narrower lesson, now confirmed twice: **when a plan supplies both the code and
-its tests, the tests cannot be trusted to bound the code**, because both came
-from the same understanding. In the contract-spine build three defects were
-plan-mandated test text exercising only the path on which the plan-mandated code
-was correct; in the closure-and-emit build **four of the seven tasks that needed
-a fix round needed it for a plan defect, not an implementation defect.** Having
-each task's reviewer name one input class the plan's tests do not reach is a
-cheap counter, and it worked.
+A narrower lesson, confirmed for a third time and now emphatically: **when a
+plan supplies both the code and its tests, the tests cannot be trusted to
+bound the code**, because both came from the same understanding. In the
+contract-spine build three defects were plan-mandated test text exercising
+only the path on which the plan-mandated code was correct; in the
+closure-and-emit build four of the seven tasks that needed a fix round needed
+it for a plan defect, not an implementation defect; the measurement build's
+ledger (`progress.md`) records roughly eighteen such instances across its
+twelve tasks. Having each task's reviewer name one input class the plan's
+tests do not reach remains a cheap counter — item 4 below is what it grew
+into once there were enough instances to see the shapes repeating.
 
-**The most expensive lesson, and the newest: scan the plan against *this
-document*, not only against itself.** The closure-and-emit build's pre-flight
-scan checked task-versus-task and found nothing. But the plan contained both
-readings of the post-rejection question — one task mandated tolerating a
-`rejected` scenario, another mandated reporting it — and the arbiter between them
-was §8's own layer-2 clause, in a file the scan never opened. Three components
-shipped three different answers, each individually correct and
-mutation-verified, and no per-task review could see they were answering one
-question. The states table that exists to prevent exactly that did not enumerate
-the state. **The spec's pipeline sketch and its "deferred, not forgotten"
-paragraphs are where the reachable-state commitments live; a plan review that
-skips them is checking internal consistency and calling it correctness.**
+The measurement build adds five more, each drawn from that ledger:
 
-A corollary worth writing down because it cost a false result: **a ruling can
-create a gap.** Relaxing a layer-2 check in exchange for keeping the rejection
-record left the prescribed coverage recomputation enforced by nothing, so a run
-could report coverage credited to a scenario the adversary threw out with both
-gates green. The old strict check had been an accidental tripwire; removing it
-without replacing it re-opened a defect an earlier task existed to close. When a
-ruling trades a check away, name what now enforces the thing the check was
-standing in for.
+4. **Three test-weakness shapes, now a self-check checklist.** Most of the
+   eighteen instances above reduce to three recurring shapes. *Substring-of-
+   message*: Task 8's `mean_reward_by_role` example, where deleting a check
+   left twenty tests green because a different finding's message happened to
+   contain the literal word the assertion searched for. *Fixture-cannot-
+   reach*: Task 9's "only emitted scenarios" test, where a fixture with one of
+   everything cannot distinguish "filtered correctly" from "never filtered at
+   all" — the fixture has nothing left over for the check to have missed.
+   *Holds-identically-before-and-after*, i.e. hash luck: Task 12's three checks
+   whose expected answers happened to coincide with the sha256 tie-break,
+   including a determinism test that could not detect the salted `hash()`
+   substitution its own docstring named, because it compared orderings within
+   one process, where the salt is constant across every comparison it made.
+   Once this checklist was added to task dispatches, implementers found real
+   gaps in three consecutive tasks — it earns its place as a standing
+   self-check, not a one-time retrospective finding.
+5. **A fix round needs the same scrutiny as the task it fixes.** Task 5's
+   round-1 fix introduced a Critical worse than the finding it closed: a
+   `shutil.rmtree` on a caller-supplied path that silently deleted the emitted
+   package, or the whole run, if the path was wrong. Deletion-mutation could
+   not see it, because the hazard was a new capability with no caller yet to
+   exercise it — there was nothing to delete-and-check. What caught it was
+   asking the re-reviewer point-blank what happens if a caller passes the
+   wrong path, a question deletion-mutation cannot ask on its own.
+6. **"Nothing fails when I delete it" cuts both ways.** The same Task 5
+   episode is the sharpest example: the fix round's mutation pass exposed five
+   unpinned checks and, in the same breath, certified the destructive
+   `rmtree` as harmless, because nothing in the suite exercised the path
+   where it mattered. A per-check counter measures how well the checks are
+   pinned; it says nothing about whether the surrounding code is safe to run.
+7. **Ask reviewers to run the experiment, not read the code.** Task 7's
+   defect was found only by execution: a timed-out agent, marked
+   unscoreable, voided all three roles' means through `comparable()`'s strict
+   requirement — collapsing the verdict to `inconclusive` even though two of
+   the three roles had scored perfectly. Two individually correct decisions
+   (score the partial transcript on a timeout; require every declared role to
+   score before a task counts toward any mean) jointly deleted data that a
+   code read did not surface, because each rule looks right in isolation and
+   only their interaction is wrong.
+8. **When a plan states a principle and its own code contradicts it, the
+   principle governs.** This generalizes the closure-and-emit build's "a
+   ruling can create a gap" corollary from one incident into a standing
+   adjudication rule, because it recurred a third time: Task 3's
+   silent-concessions-versus-recorded-notes question, Task 8's `check_report`
+   docstring promising `.get()`-style tolerance while the code indexed
+   directly, and the timeout ruling in item 7 above. Writing the rule down
+   lets the next build resolve the contradiction on the spot instead of
+   stopping to ask.
 
-One tooling note, because it silently corrupts mutation evidence: **a
-byte-length-preserving mutate-then-restore within the same second leaves
-CPython's mutated `.pyc` live**, since `.pyc` validation checks source size and
-mtime-to-the-second only. Every mutation harness here must set
-`PYTHONDONTWRITEBYTECODE=1` or sweep `__pycache__` between mutate and restore.
+**Which of these survive when the producer is a prompt rather than code.**
+Plan 4 replaces most of this build's producers — the six stage skills and the
+orchestrator — with prompts, and not every counter above transfers unchanged.
+Deletion-mutation (item 3) has no meaning for a prompt: there is no line to
+delete and no diff to recompile. Fixture reachability (items 3's dual, and
+item 4's *fixture-cannot-reach* shape) transfers and matters more, not less —
+§9's negative refusal fixtures are exactly the "one of everything" shape that
+cannot tell "the skill refused correctly" from "the skill never checked."
+"Run the experiment, not read the code" (item 7) transfers best of all: a
+prompt's failure mode is behavioral, so an execution trace is the only
+artifact that will show it, and reading a `SKILL.md` tells you what it asked
+for, not what a model did with it. What does not transfer is the confidence
+this build earned from its own numbers — pinned-check counts, mutation-kill
+rates — because those numbers were counting something (lines, branches) that
+a skill's markdown does not have. The next build should expect to find these
+shapes again, not to find these counters again.
 
 ## 9. Testing the pipeline itself
 
