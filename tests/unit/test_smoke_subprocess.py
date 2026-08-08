@@ -10,6 +10,7 @@ import surface it would have in the container.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -312,6 +313,9 @@ def test_a_stale_reward_is_cleared_before_a_verifier_that_exits_zero_and_writes_
     assert "diagnostic" in note, note
 
 
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)"
+)
 def test_an_unremovable_stale_output_makes_the_task_unscoreable_without_raising(tmp_path):
     """Fail closed: an unlink failure must not let verify_package proceed or raise.
 
