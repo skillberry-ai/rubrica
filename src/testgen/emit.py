@@ -298,6 +298,15 @@ def emit_run(run: RunPaths) -> tuple[list[str], list[Finding]]:
     below report a missing *input*, where the emitted set is empty for want of
     information rather than because nothing qualifies; deleting the whole suite
     on a mistyped run directory would destroy work in response to a typo.
+
+    A *per-instance* defect -- no verdict, an unbound capability, an oracle that
+    no longer parses -- prunes that scenario's package rather than sparing it,
+    and that is not the early-return case above. The package on disk was built
+    from an oracle nobody can now read, so leaving it in place would ship a test
+    whose gold label cannot be checked against anything. emit is deterministic,
+    so repairing the oracle and re-emitting restores the package byte for byte:
+    the cost is bounded to one re-run, which is the right trade against shipping
+    a test that looks accepted and is not.
     """
     world = _load(run.world_model)
     if world is None:

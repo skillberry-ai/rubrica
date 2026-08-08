@@ -88,6 +88,53 @@ def _load(path) -> Any | None:
         return None
 
 
+def _readable_targets(run: RunPaths) -> list[Path]:
+    """Every JSON document in the run that a layer-2 check goes on to read.
+
+    Pipeline order, so the first finding names the earliest broken artifact --
+    the one a repair should start from. tests/unit/test_refs_readable.py breaks
+    each of these in turn, which is what keeps the list complete: an artifact
+    missing here is one whose truncation still misdirects the repair.
+    """
+    targets = [run.manifest]
+    if run.claims_dir.is_dir():
+        targets += sorted(run.claims_dir.glob("*.json"))
+    targets += [run.world_model, run.scenarios]
+    if run.coverage_dir.is_dir():
+        targets += sorted(run.coverage_dir.glob("*.json"))
+    for sid in run.scenario_ids_with_instances():
+        targets += [run.seed(sid), run.expected(sid)]
+    if run.verdicts_dir.is_dir():
+        targets += sorted(run.verdicts_dir.glob("*.json"))
+    for sid in run.scenario_ids_with_tasks():
+        task = run.task_dir(sid)
+        targets += [
+            task / "seed.json",
+            task / "golden.json",
+            task / "tests" / "expected.json",
+        ]
+    targets.append(run.report)
+    return targets
+
+
+def check_readable(run: RunPaths) -> list[Finding]:
+    """Every artifact that is present but is not parseable JSON, named.
+
+    Absence is deliberately not reported: a stage that has not run yet is
+    validate_stage's finding, and reporting it here would fire in states where
+    nothing is wrong.
+    """
+    out: list[Finding] = []
+    for path in _readable_targets(run):
+        if not path.is_file():
+            continue
+        try:
+            read_json(path)
+        except ArtifactError as exc:
+            out.append(Finding(path, "refs", "", str(exc)))
+    return out
+
+
 def _claim_index(run: RunPaths) -> dict[str, list[Path]]:
     """Claim id -> every claims file defining it, one entry per definition.
 
@@ -1145,7 +1192,17 @@ def check_suite(run: RunPaths) -> list[Finding]:
 
 
 def check_all(run: RunPaths) -> list[Finding]:
-    """Every layer-2 check that the run directory currently has inputs for."""
+    """Every layer-2 check that the run directory currently has inputs for.
+
+    An unparseable artifact short-circuits everything below it. Every checker
+    treats an unreadable document as an absent one, so continuing produces
+    findings that blame artifacts which are fine and never names the one that is
+    broken -- and the orchestrator's single bounded repair attempt then rewrites
+    the wrong file.
+    """
+    unreadable = check_readable(run)
+    if unreadable:
+        return unreadable
     findings: list[Finding] = []
     findings.extend(check_manifest(run))
     findings.extend(check_inputs(run))
