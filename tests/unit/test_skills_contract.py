@@ -86,6 +86,38 @@ def write_skill(
     return path
 
 
+def write_skill_with_raw_contract(root: Path, name: str, toml_body: str) -> Path:
+    """Like write_skill, but for contracts _toml() cannot render: it only
+    knows how to serialize a bare string or a flat list of strings, so an
+    array-of-tables or a nested array (the two shapes that reach set()
+    un-stringified) has to be written out as literal TOML text instead.
+    """
+    directory = root / name
+    directory.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "---",
+        f"name: {name}",
+        "description: d.",
+        "---",
+        "",
+        f"# {name}",
+        "",
+        "Purpose.",
+        "",
+        "## Contract",
+        "",
+        "```toml",
+        toml_body,
+        "```",
+    ]
+    for heading in SECTIONS:
+        body = "Refuse." if heading == SECTIONS[-1] else "Body."
+        lines += ["", f"## {heading}", "", body]
+    path = directory / SKILL_FILENAME
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
 def messages(findings) -> str:
     return " | ".join(f.message for f in findings)
 
@@ -250,6 +282,48 @@ def test_a_non_list_schemas_is_reported_once_not_alongside_the_omission_check(tm
     findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
     assert [f.pointer for f in findings] == ["/schemas"]
     assert "claims" in messages(findings) and "list" in messages(findings)
+
+
+def test_a_schemas_array_of_tables_is_reported_not_a_crash(tmp_path):
+    """`schemas = [{kind = "claims"}]` is a plausible reach for more structure
+    -- an array of tables is a natural TOML idiom -- but a dict is unhashable,
+    so set(schemas_value) raises TypeError before the fix. This must surface
+    as a finding naming the dict and its type, not a Python exception.
+    """
+    toml_body = (
+        'stage = "extract"\n'
+        'reads = ["manifest", "input_file"]\n'
+        'writes = ["claims"]\n'
+        'schemas = [{kind = "claims"}]\n'
+        'invokes = ["validate"]'
+    )
+    findings = check_contract(
+        load(write_skill_with_raw_contract(tmp_path, "tg-extract", toml_body))
+    )
+    assert [f.pointer for f in findings] == ["/schemas"]
+    assert "claims" in messages(findings) and "dict" in messages(findings)
+
+
+def test_a_schemas_nested_array_is_reported_not_a_crash(tmp_path):
+    """`schemas = [["claims"]]` is a second, differently-shaped ill-typed
+    element: a list is unhashable too, so set(schemas_value) raises the same
+    TypeError as the array-of-tables case above, by a different route (a
+    nested array rather than a table). Both must be caught by the same
+    per-element type check, not just the one shape that happened to be
+    named first.
+    """
+    toml_body = (
+        'stage = "extract"\n'
+        'reads = ["manifest", "input_file"]\n'
+        'writes = ["claims"]\n'
+        'schemas = [["claims"]]\n'
+        'invokes = ["validate"]'
+    )
+    findings = check_contract(
+        load(write_skill_with_raw_contract(tmp_path, "tg-extract", toml_body))
+    )
+    assert [f.pointer for f in findings] == ["/schemas"]
+    assert "must be a string" in messages(findings)
 
 
 def test_an_unknown_subcommand_is_reported(tmp_path):

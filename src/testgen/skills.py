@@ -337,23 +337,46 @@ def check_contract(skill: Skill) -> list[Finding]:
                 f"{type(schemas_value).__name__}",
             )
         else:
-            declared = set(schemas_value)
-            required = set(STAGE_ARTIFACTS[stage])
-            for kind in sorted(declared - required):
-                if kind not in ARTIFACT_SCHEMAS:
-                    report("/schemas", f"declares artifact kind {kind!r}, which has no schema")
-                else:
+            # Same shape-before-content ordering one level in: a well-typed
+            # list can still hold ill-typed elements (`schemas = [{kind =
+            # "claims"}]` or `schemas = [["claims"]]` -- an array of tables is
+            # a natural TOML idiom someone reaches for meaning more
+            # structure). set(schemas_value) would raise TypeError on the
+            # dict (unhashable) or silently accept the list (hashable only
+            # by identity, so it can never equal a string in `required` and
+            # would just look like a phantom invented kind) -- either way
+            # not a finding a human can act on. Checking every element's
+            # type before the set() call, and skipping the omission/
+            # invention comparison entirely when one fails, keeps this to
+            # one finding per bad element instead of a crash or a confusing
+            # mix of a shape complaint and a wrong content complaint.
+            bad = [(i, kind) for i, kind in enumerate(schemas_value) if not isinstance(kind, str)]
+            if bad:
+                for i, kind in bad:
                     report(
                         "/schemas",
-                        f"declares artifact kind {kind!r}, which stage {stage!r} is not gated on",
+                        f"declares artifact kind {kind!r} at index {i}, which must be a "
+                        f"string, not {type(kind).__name__}",
                     )
-            omitted = sorted(required - declared)
-            if omitted:
-                report(
-                    "/schemas",
-                    f"omits artifact kind(s) {', '.join(repr(k) for k in omitted)}, which "
-                    f"stage {stage!r} is gated on",
-                )
+            else:
+                declared = set(schemas_value)
+                required = set(STAGE_ARTIFACTS[stage])
+                for kind in sorted(declared - required):
+                    if kind not in ARTIFACT_SCHEMAS:
+                        report("/schemas", f"declares artifact kind {kind!r}, which has no schema")
+                    else:
+                        report(
+                            "/schemas",
+                            f"declares artifact kind {kind!r}, which stage {stage!r} is not "
+                            "gated on",
+                        )
+                omitted = sorted(required - declared)
+                if omitted:
+                    report(
+                        "/schemas",
+                        f"omits artifact kind(s) {', '.join(repr(k) for k in omitted)}, which "
+                        f"stage {stage!r} is gated on",
+                    )
 
     known = subcommand_names()
     invokes_value = skill.contract.get("invokes", [])
