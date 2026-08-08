@@ -17,6 +17,7 @@ from tests.builders import (
     minimal_claims,
     minimal_coverage,
     minimal_expected,
+    minimal_gold,
     minimal_manifest,
     minimal_report,
     minimal_scenarios,
@@ -82,6 +83,7 @@ MINIMAL_BUILDERS = {
     "suite-expected": minimal_suite_expected,
     "report": minimal_report,
     "agents": minimal_agents,
+    "gold": minimal_gold,
 }
 
 

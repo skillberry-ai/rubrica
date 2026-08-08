@@ -1,5 +1,5 @@
 from testgen.artifacts import write_json
-from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, validate_artifact
+from testgen.validate import ARTIFACT_SCHEMAS, CONFIG_KINDS, STAGE_ARTIFACTS, validate_artifact
 from tests.builders import minimal_coverage, minimal_manifest, minimal_scenarios
 
 
@@ -201,7 +201,11 @@ def test_the_config_schemas_belong_to_no_stage():
     agents.json and gold.json are handed to a subcommand by a person; they never
     live in a run directory, and _artifact_paths has no branch for them -- so a
     stage claiming to produce one would raise KeyError inside layer 1.
+
+    The disjointness check is what keeps a future config kind from being added
+    to CONFIG_KINDS but forgotten as a stage's output (or the reverse): the two
+    sets are asserted disjoint here rather than merely by convention.
     """
     produced = {kind for kinds in STAGE_ARTIFACTS.values() for kind in kinds}
-    assert produced.isdisjoint({"agents", "gold"})
+    assert produced.isdisjoint(CONFIG_KINDS)
     assert produced <= set(ARTIFACT_SCHEMAS)

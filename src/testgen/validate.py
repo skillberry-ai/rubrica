@@ -46,7 +46,15 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     # deliberately absent from STAGE_ARTIFACTS: no stage produces them and
     # `validate --stage X` must never look for them.
     "agents": "agents-0.1.json",
+    "gold": "gold-0.1.json",
 }
+
+# Config artifact kinds: human-authored, never joined into a run path, never
+# produced by a stage. The one definition of this set -- tests that need to
+# know which kinds are config rather than stage output import it rather than
+# restating the literal, which is how {"agents", "gold"} drifted out of sync
+# with ARTIFACT_SCHEMAS before this constant existed.
+CONFIG_KINDS: frozenset[str] = frozenset({"agents", "gold"})
 
 # Which artifact kinds each stage must produce. Every stage now has a real
 # gate: a stage that produced none of its required kinds fails layer 1

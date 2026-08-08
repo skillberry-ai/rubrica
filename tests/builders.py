@@ -370,6 +370,26 @@ def minimal_agents(**over: Any) -> dict[str, Any]:
     return payload
 
 
+def minimal_gold(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "target": "aap2",
+        "tasks": [
+            {
+                "id": "bench-001",
+                "goal_id": "goal-triage",
+                "hop_depth": 2,
+                "capability_refs": [
+                    {"capability_id": "cap-find-jobs", "outcome_class_id": "oc-success"}
+                ],
+                "notes": "the hand-authored triage task scn-001 should match",
+            }
+        ],
+    }
+    payload.update(over)
+    return payload
+
+
 def minimal_verdict(**over: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": "0.1",

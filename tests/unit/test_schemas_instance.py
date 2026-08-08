@@ -3,7 +3,7 @@ import json
 import pytest
 
 from testgen.artifacts import write_json
-from testgen.validate import ARTIFACT_SCHEMAS, schema_dir, validate_artifact
+from testgen.validate import ARTIFACT_SCHEMAS, CONFIG_KINDS, schema_dir, validate_artifact
 from tests.builders import (
     minimal_expected,
     minimal_manifest,
@@ -145,10 +145,7 @@ def test_every_registered_artifact_kind_now_has_a_schema_file():
 # path, and carry no id-shaped field -- role is a closed enum, not a segment --
 # so there is nothing here for paths.safe_segment's \\A..\\Z convention to apply
 # to. They are exempt from the pattern-anchoring check below.
-_CONFIG_KINDS = {"agents", "gold"}
-
-
-@pytest.mark.parametrize("kind", sorted(set(ARTIFACT_SCHEMAS) - _CONFIG_KINDS))
+@pytest.mark.parametrize("kind", sorted(set(ARTIFACT_SCHEMAS) - CONFIG_KINDS))
 def test_no_schema_pattern_uses_a_caret_dollar_anchor(kind, tmp_path):
     """Python's re lets $ match before a trailing newline; \\Z does not.
 
