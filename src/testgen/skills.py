@@ -182,19 +182,30 @@ def load(path: Path | str) -> Skill:
     path = Path(path)
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
+        # UnicodeDecodeError is a ValueError, not an OSError, so it needs its
+        # own arm here: cli.py's outer catch deliberately excludes ValueError
+        # (that is the class of error a repair prompt could plausibly fix),
+        # and a mis-encoded prompt file is not one of those -- it is exactly
+        # the human-authored, unrepairable case UsageError exists for.
         raise UsageError(f"unreadable skill file: {path} ({exc})") from exc
 
     headings = tuple(title for title, _ in _headings_with_lines(text.splitlines()))
 
     contract_section = _section_text(text, CONTRACT_HEADING, path)
-    match = _TOML_BLOCK.search(contract_section)
-    if match is None:
+    # Exactly one fence, not "the first" or "the last": a second toml block
+    # in a section whose entire purpose is to hold one -- a deprecated or
+    # before/after example, say -- is ambiguous, and an ambiguous
+    # human-authored file is refused rather than resolved in the reader's
+    # favour by a guess.
+    matches = list(_TOML_BLOCK.finditer(contract_section))
+    if len(matches) != 1:
         raise UsageError(
-            f"{path} has no ```toml contract block in its ## {CONTRACT_HEADING} section"
+            f"{path} has {len(matches)} ```toml blocks in its ## {CONTRACT_HEADING} "
+            "section; exactly one is required"
         )
     try:
-        contract = tomllib.loads(match.group("body"))
+        contract = tomllib.loads(matches[0].group("body"))
     except tomllib.TOMLDecodeError as exc:
         raise UsageError(f"{path} has a contract block that is not valid TOML: {exc}") from exc
 

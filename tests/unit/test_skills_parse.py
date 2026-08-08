@@ -97,22 +97,17 @@ def test_the_headings_tuple_preserves_document_order_not_sorted_order(tmp_path):
 def test_skill_sha256_is_the_digest_of_the_whole_file(tmp_path):
     """The manifest's reproducibility hook hashes the skill that was used --
     prose included, because a changed Method section changes the run.
+
+    Asserted as exact equality against an independently computed
+    hashlib.sha256(path.read_bytes()) rather than, say, inequality before and
+    after editing the prose: any implementation that satisfies an equality
+    against the whole file's bytes must by construction change output
+    whenever those bytes change, so a change-detection test on top of this
+    one would be subsumed -- there is no mutation that passes this assertion
+    and fails a "does editing the prose change the hash" one.
     """
     path = write_skill(tmp_path, "tg-extract")
     assert skill_sha256(path) == hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def test_editing_only_the_prose_changes_the_hash(tmp_path):
-    """The half of the statement above that a digest-equality assertion cannot
-    make on its own: hashing only the contract block would satisfy that test.
-    """
-    path = write_skill(tmp_path, "tg-extract")
-    before = skill_sha256(path)
-    path.write_text(
-        path.read_text(encoding="utf-8").replace("Body text.", "Different body text."),
-        encoding="utf-8",
-    )
-    assert skill_sha256(path) != before
 
 
 def test_discover_finds_every_skill_directory_sorted(tmp_path):
@@ -142,6 +137,25 @@ def test_a_missing_skill_file_is_a_usage_error(tmp_path):
         load(tmp_path / "tg-extract" / SKILL_FILENAME)
 
 
+def test_invalid_utf8_bytes_are_a_usage_error(tmp_path):
+    """A mis-encoded SKILL.md is refused, not a crash.
+
+    UnicodeDecodeError is a ValueError, not an OSError, so an `except OSError`
+    around read_text lets it propagate. cli.py's outer catch deliberately
+    excludes ValueError -- that is the class of error a repair prompt could
+    plausibly fix -- so an unhandled UnicodeDecodeError would surface as exit
+    1 with an [internal] finding blaming the run directory, telling the
+    orchestrator to spend its one bounded repair attempt re-running a stage
+    when the actual problem is a mis-encoded prompt file that no stage wrote.
+    """
+    directory = tmp_path / "tg-extract"
+    directory.mkdir()
+    path = directory / SKILL_FILENAME
+    path.write_bytes(b"\xff\xfe# tg-extract\n")
+    with pytest.raises(UsageError):
+        load(path)
+
+
 def test_a_skill_with_no_contract_block_is_a_usage_error(tmp_path):
     path = write_skill(tmp_path, "tg-extract", contract="Just prose, no block.")
     with pytest.raises(UsageError):
@@ -164,6 +178,20 @@ def test_a_non_toml_fenced_block_is_not_mistaken_for_the_contract(tmp_path):
         contract='```json\n{"stage": "wrong"}\n```\n\n' + CONTRACT,
     )
     assert load(path).contract["stage"] == "extract"
+
+
+def test_two_toml_blocks_in_the_contract_section_is_a_usage_error(tmp_path):
+    """Exactly one ```toml``` fence is required in the Contract section --
+    not the first, not the last. A "deprecated example" or before/after
+    block sitting alongside the real one is ambiguous, and this project
+    refuses an ambiguous human-authored file rather than resolving it in the
+    reader's favour by guessing which block was meant.
+    """
+    decoy = '```toml\nstage = "wrong"\n```\n\n'
+    path = write_skill(tmp_path, "tg-extract", contract=decoy + CONTRACT)
+    with pytest.raises(UsageError) as excinfo:
+        load(path)
+    assert "2 ```toml blocks" in str(excinfo.value)
 
 
 def test_expected_skill_names_are_derived_from_STAGES(tmp_path):
