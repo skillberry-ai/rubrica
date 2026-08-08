@@ -4333,6 +4333,7 @@ The precedence is the design. A scenario that reaches a capability gold never to
 **Interfaces:**
 - Produces: `recall.NOVELTY_KINDS`, `recall.classify_novelty(scenario, gold_tasks) -> tuple[str, str]` returning `(kind, why)`, `recall.compare(run, gold) -> dict`, `recall.render(report) -> str`, `recall.compare_run(run, gold_path) -> tuple[dict, list[Finding]]`.
 - CLI: `testgen compare-gold --run DIR --gold PATH`. Writes `measurement/recall.json`, prints the rendered markdown to stdout, exits 0. A malformed gold file is exit 2.
+  - **Superseded by the whole-branch review.** Prose on stdout collides with the finding lines exit 1 puts there, which is the hazard `diff-runs` names and avoids. Shipped behaviour: stdout carries only `measurement/recall.md`'s path, the way `smoke` prints its report path, and the rendering goes to stderr where a human still sees it.
 - The report carries `"format": "testgen-recall/1"` and **no `schema_version`** — per the global constraint, measurement outputs the code writes are gated by unit tests, and a `schema_version` on a file with no schema is a claim there is one.
 
 - [ ] **Step 1: Write the failing tests**
@@ -4725,6 +4726,8 @@ Expected: PASS
 ```
 
 Mixing the rendered markdown and finding lines on stdout is deliberate and matches `emit`, which prints task directories before its findings: a human reads the report, and a machine parsing findings reads the `[recall] ...` lines. Add CLI tests for exit 0 on a full match, exit 1 on an unmatched gold task, and exit 2 on a malformed gold file.
+
+**Reversed by the whole-branch review.** The analogy to `emit` does not hold: `emit` prints one path per line, which a line parser can take or leave, while `render` produces a 25-line document whose lines are indistinguishable from findings. `print(run.recall_md)` on stdout, `print(render(report), file=sys.stderr)` for the human. See `test_compare_gold_prints_only_the_path_it_wrote_on_stdout`.
 
 - [ ] **Step 5: Replace the states-table stub with the real output**
 

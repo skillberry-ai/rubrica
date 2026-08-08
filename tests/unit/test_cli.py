@@ -1,8 +1,11 @@
 import json
+import os
 import sys
 from pathlib import Path
 
-from testgen.artifacts import write_json
+import pytest
+
+from testgen.artifacts import read_json, write_json
 from testgen.cli import main
 from testgen.paths import RunPaths
 from tests.builders import (
@@ -365,13 +368,24 @@ def _write_gold(tmp_path, payload=None):
     return path
 
 
-def test_compare_gold_exits_zero_on_a_full_match(tmp_path, capsys):
+def test_compare_gold_prints_only_the_path_it_wrote_on_stdout(tmp_path, capsys):
+    """stdout is the findings channel, so prose must not share it.
+
+    Exit 1 means finding lines on stdout, one per line. A 25-line markdown
+    document printed to the same stream ahead of them is indistinguishable from
+    findings to the orchestrator's line parser -- the hazard diff-runs names and
+    avoids. smoke prints the path to the report it wrote; so does this. The
+    rendering still reaches a human, on stderr.
+    """
     run = build_state(tmp_path / "run", "emit")
     gold = _write_gold(tmp_path)
     assert main(["compare-gold", "--run", str(run.root), "--gold", str(gold)]) == 0
-    out = capsys.readouterr().out
-    assert "Recall and novelty" in out
-    assert (run.measurement_dir / "recall.json").is_file()
+    captured = capsys.readouterr()
+    assert captured.out.strip() == str(run.recall_md)
+    assert "Recall and novelty" not in captured.out
+    assert "Recall and novelty" in captured.err
+    assert run.recall.is_file()
+    assert run.recall_md.is_file()
 
 
 def test_compare_gold_exits_one_on_an_unmatched_gold_task(tmp_path, capsys):
@@ -442,3 +456,182 @@ def test_sample_for_review_exits_one_when_emit_has_not_run(tmp_path, capsys):
 
 def test_sample_for_review_exits_two_on_a_nonexistent_run_directory(tmp_path):
     assert main(["sample-for-review", "--run", str(tmp_path / "absent")]) == 2
+
+
+def test_sample_for_review_with_a_size_of_zero_is_a_usage_error_and_writes_nothing(
+    tmp_path, capsys
+):
+    """An empty packet at exit 0 is indistinguishable from success.
+
+    --size 0 used to overwrite an existing packet with a packet of no tasks and
+    exit clean, which reads as "reviewed, nothing to say". intake validates its
+    own numeric arguments as a usage error; so does this.
+    """
+    run = build_state(tmp_path / "run", "emit")
+    assert main(["sample-for-review", "--run", str(run.root)]) == 0
+    capsys.readouterr()
+    first = run.review_packet.read_text()
+    sample_before = run.review_sample.read_text()
+
+    assert main(["sample-for-review", "--run", str(run.root), "--size", "0"]) == 2
+    captured = capsys.readouterr()
+    assert "size" in captured.err
+    assert captured.out.strip() == "", "a usage error must not print a path or a finding"
+    assert run.review_packet.read_text() == first, "the existing packet must be untouched"
+    assert run.review_sample.read_text() == sample_before
+
+
+# -- the 1-vs-2 contract, across every subcommand ----------------------------
+
+
+def _argv_for(command, run, tmp_path):
+    """A well-formed invocation of `command` against `run`."""
+    if command == "diff-runs":
+        return ["diff-runs", "--a", str(run.root), "--b", str(run.root)]
+    argv = [command, "--run", str(run.root)]
+    if command == "validate":
+        argv += ["--stage", "reconcile"]
+    if command == "smoke":
+        argv += ["--agents", str(_write_roster(tmp_path))]
+    if command == "compare-gold":
+        argv += ["--gold", str(_write_gold(tmp_path))]
+    return argv
+
+
+# The call each subcommand makes after its arguments are resolved, as
+# (module path, attribute), so a test can force an exception out of it.
+_EXPLODE_TARGETS = {
+    "validate": ("testgen.cli", "validate_stage"),
+    "check-refs": ("testgen.refs", "check_all"),
+    "dedupe-candidates": ("testgen.cli", "candidate_pairs"),
+    "emit": ("testgen.cli", "emit_run"),
+    "smoke": ("testgen.cli", "smoke_run"),
+    "compare-gold": ("testgen.cli", "compare_run"),
+    "sample-for-review": ("testgen.cli", "sample_run"),
+    "diff-runs": ("testgen.cli", "diff_runs"),
+}
+
+
+@pytest.mark.parametrize("command", sorted(_EXPLODE_TARGETS))
+def test_every_subcommand_turns_an_unexpected_exception_into_a_finding(
+    tmp_path, capsys, monkeypatch, command
+):
+    """main() is total, and exit 1 always carries information -- for every subcommand.
+
+    The catch-all handler built its finding from `args.run`, and diff-runs is the
+    only subcommand without one: it raised AttributeError *inside the handler*,
+    giving exit 1 with zero stdout lines -- verbatim the failure mode cli.py's
+    docstring says it closed -- and main() stopped returning an int at all. A
+    single-subcommand test could not have caught that, so this is parametrized
+    over every subcommand that routes through the handler.
+
+    intake is excluded deliberately: it has its own block with its own catch and
+    returns before this one, because it reads paths a person supplied rather than
+    artifacts a stage wrote, so its failures are usage errors with no stage to
+    send a finding to.
+    """
+    module_name, attribute = _EXPLODE_TARGETS[command]
+    module = __import__(module_name, fromlist=[attribute])
+
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("forced through the handler")
+
+    monkeypatch.setattr(module, attribute, explode)
+
+    run = build_state(tmp_path / "run", "emit")
+    code = main(_argv_for(command, run, tmp_path))
+    captured = capsys.readouterr()
+    assert isinstance(code, int), "main must return an int, never raise"
+    assert code == 1
+    assert [line for line in captured.out.splitlines() if line.strip()], (
+        "exit 1 must never mean 'no information'"
+    )
+    assert "[internal]" in captured.out
+    assert "RuntimeError" in captured.out
+    assert "forced through the handler" in captured.out
+    assert "Traceback" in captured.err
+
+
+def test_diff_runs_over_a_malformed_scenario_reports_a_finding_not_an_empty_exit_one(
+    tmp_path, capsys
+):
+    """The reproduction, without monkeypatching anything.
+
+    A scenario missing goal_id is a repairable propose-stage defect, and
+    stability.goal_cell_claims indexes it directly -- the layer-1 precondition
+    refs.py and emit.py both document. It must arrive as a finding line.
+    """
+    run = build_state(tmp_path / "run", "emit")
+    scenarios = read_json(run.scenarios)
+    del scenarios["scenarios"][0]["goal_id"]
+    write_json(run.scenarios, scenarios)
+
+    code = main(["diff-runs", "--a", str(run.root), "--b", str(run.root)])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "[internal]" in captured.out
+    assert "KeyError" in captured.out
+    assert str(run.root) in captured.out, "the line must name the run it is about"
+
+
+@pytest.mark.parametrize("command", ["smoke", "compare-gold", "sample-for-review"])
+def test_a_directory_that_is_not_a_run_is_a_usage_error_and_nothing_is_written(
+    tmp_path, capsys, command
+):
+    """One empty directory, one answer from every tool that writes into a run.
+
+    These three used to disagree: smoke read the manifest first and exited 2,
+    while compare-gold and sample-for-review exited 1 -- and compare-gold left a
+    measurement/recall.json behind in a directory that is not a run. No stage
+    repair produces a manifest, so 2 is the honest answer and nothing belongs on
+    disk.
+
+    diff-runs is deliberately not here. It spans two runs and belongs to neither,
+    so it writes nothing, reports incomparability as data in its JSON plus a
+    stderr warning, and exits 0 -- comparability() already names an unreadable
+    manifest as the reason.
+    """
+    empty = tmp_path / "not-a-run"
+    empty.mkdir()
+    run = RunPaths(empty)
+    assert main(_argv_for(command, run, tmp_path)) == 2, capsys.readouterr().out
+    assert list(empty.iterdir()) == [], "nothing may be written into a non-run"
+
+
+# -- a misconfigured invocation is never a finding about the run -------------
+
+
+@pytest.mark.parametrize("breakage", ["directory", "non-utf8", "mode-000"])
+@pytest.mark.parametrize("flag", ["--agents", "--gold"])
+def test_an_unreadable_config_file_is_a_usage_error_not_a_finding(tmp_path, capsys, flag, breakage):
+    """A person wrote these files, so there is no stage to send a repair prompt to.
+
+    read_json converts only FileNotFoundError, so a config path pointing at a
+    directory, at a non-UTF-8 file, or at a file with mode 000 raised
+    IsADirectoryError / UnicodeDecodeError / PermissionError out to cli.py's
+    catch-all and was reported as "an artifact in this run is malformed" at exit
+    1 -- sending the orchestrator to spend its one repair attempt rewriting stage
+    artifacts that were fine.
+    """
+    if breakage == "mode-000" and os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_state(tmp_path / "run", "emit")
+    path = tmp_path / "config-input"
+    if breakage == "directory":
+        path.mkdir()
+    elif breakage == "non-utf8":
+        path.write_bytes(b"\xff\xfe\x00\x00{}")
+    else:
+        path.write_text("{}", encoding="utf-8")
+        path.chmod(0o000)
+
+    command = "smoke" if flag == "--agents" else "compare-gold"
+    try:
+        code = main([command, "--run", str(run.root), flag, str(path)])
+    finally:
+        if breakage == "mode-000":
+            path.chmod(0o644)
+    captured = capsys.readouterr()
+    assert code == 2, captured.out
+    assert captured.out.strip() == "", "a misconfigured harness must not print findings"
+    assert "unusable" in captured.err

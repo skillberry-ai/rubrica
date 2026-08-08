@@ -206,12 +206,28 @@ def main(argv: list[str] | None = None) -> int:
             except UsageError as exc:
                 print(f"error: {exc}", file=sys.stderr)
                 return USAGE
-            print(render(report))
+            # The path, not the document. Exit 1 means finding lines on stdout,
+            # and a 25-line markdown report printed to the same stream ahead of
+            # them leaves an orchestrator parsing stdout with prose it must
+            # somehow tell from findings -- the hazard diff-runs names and avoids.
+            # compare_run has already written the rendering to measurement/,
+            # so `smoke`'s discipline applies: print where it is. The prose goes
+            # to stderr, where a human still sees it and no parser is affected.
+            print(run.recall_md)
+            print(render(report), file=sys.stderr)
             return _report(findings)
 
         if args.command == "sample-for-review":
             run = _run_dir(args.run)
-            sampled, findings = sample_run(run, args.size)
+            # UsageError is a ValueError, which the outer catch deliberately
+            # excludes -- without this, --size 0 would reach `except Exception`
+            # and be reported as a malformed artifact at exit 1. Same shape as
+            # smoke's inner catch above.
+            try:
+                sampled, findings = sample_run(run, args.size)
+            except UsageError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return USAGE
             if sampled:
                 print(run.review_packet)
             return _report(findings)
@@ -240,10 +256,16 @@ def main(argv: list[str] | None = None) -> int:
         # finding-shaped line so the orchestrator has something to act on
         # instead of a bare 1 and an empty stdout.
         traceback.print_exc(file=sys.stderr)
+        # `args.run` is not universal: diff-runs is the only subcommand without
+        # it, and `Path(args.run)` raised AttributeError *inside this handler* --
+        # exit 1 with an empty stdout, verbatim the failure mode this module's
+        # docstring says it closed, and main() stopped returning an int at all.
+        # diff-runs' run-shaped argument is --a, and "." is the last resort so
+        # this line can never be the thing that fails.
         return _report(
             [
                 Finding(
-                    Path(args.run),
+                    Path(getattr(args, "run", None) or getattr(args, "a", ".")),
                     "internal",
                     "",
                     f"{args.command} raised {type(exc).__name__}: {exc}. An artifact in this run "

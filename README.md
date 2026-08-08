@@ -143,9 +143,13 @@ testgen smoke --run runs/run-20260806-123005 --agents agents.json
 
 # Compare what was generated against the hand-authored gold tasks
 testgen compare-gold --run runs/run-20260806-123005 --gold gold.json
-# writes measurement/recall.json + measurement/recall.md and prints the
-# rendered markdown; exits 1 if any gold task went unmatched:
+# writes measurement/recall.json + measurement/recall.md and prints only the
+# path on stdout, because stdout is the findings channel; the rendered
+# markdown goes to stderr. Exits 1 if any gold task went unmatched:
+# runs/run-20260806-123005/measurement/recall.md
+# [recall] .../measurement/recall.json#/unmatched_gold: 1 authored task(s) ...
 #
+# ...and on stderr, for a human:
 # **Recall is a smoke signal, not a metric to optimize.** With a denominator
 # of 2, one task is 50%: 1/2 against 2/2 is noise, not improvement. ...
 # - **Recall:** 0.50
