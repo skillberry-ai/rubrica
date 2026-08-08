@@ -650,6 +650,7 @@ def smoke_run(run: RunPaths, specs: tuple[AgentSpec, ...]) -> tuple[dict | None,
             )
 
     tasks: list[dict] = []
+    timed_out: list[tuple[int, int, str]] = []
     for sid in sids:
         task_dir = run.task_dir(sid)
         results = []
@@ -669,16 +670,34 @@ def smoke_run(run: RunPaths, specs: tuple[AgentSpec, ...]) -> tuple[dict | None,
                 out_dir=base / "verifier",
                 stderr_path=base / "verifier-stderr.txt",
             )
-            # A crashing (nonzero exit) or hanging (None, i.e. timed out) agent
-            # produced no answer this role earned a score for. verify.py cannot
-            # tell "the agent crashed" from "the agent legitimately answered
-            # nothing" -- an empty transcript scores a real, low reward rather
-            # than refusing -- so that distinction has to be made here, at the
-            # one place that still has the agent's own exit status. Without it,
-            # a crash would be reported as a bad-but-real answer instead of the
-            # missing data point it actually is.
-            reward = verified_reward if agent_code == 0 else None
-            results.append(_result_entry(spec.role, reward, [agent_note, verify_note]))
+            # Only a nonzero exit is treated as unscoreable here. A crash leaves
+            # an empty transcript, and verify.py cannot tell that apart from "the
+            # agent legitimately answered nothing" -- it scores an empty
+            # transcript as a real, low (often all-zero) reward rather than
+            # refusing -- so this is the one place left with the agent's own
+            # exit status to make that distinction. A timeout (agent_code is
+            # None) is different: run_agent writes out whatever the command had
+            # already produced before it was killed, and that partial transcript
+            # can carry a real, earned score. Discarding it here would not just
+            # blank one cell -- comparable() requires every role to have scored,
+            # so one discarded timeout would silently void the other two roles'
+            # scores on the same task too.
+            crashed = agent_code not in (0, None)  # nonzero exit only; None means timed out
+            reward = None if crashed else verified_reward
+            notes = [agent_note, verify_note]
+            if crashed and verified_reward is not None:
+                # verify.py cannot see the crash, so it scored the empty transcript
+                # anyway and wrote a real reward.json next to it -- without this,
+                # an operator reading the verifier's own output would find a score
+                # the report says does not exist, with nothing on disk explaining
+                # the mismatch.
+                notes.append(
+                    f"verifier's score ({verified_reward.get('reward')}) was discarded: "
+                    f"agent exited {agent_code}, not 0"
+                )
+            results.append(_result_entry(spec.role, reward, notes))
+            if agent_code is None:
+                timed_out.append((len(tasks), len(results) - 1, spec.role))
         task = {"scenario_id": sid, "results": results}
         all_pass, all_fail = task_flags(task, roles)
         tasks.append({**task, "all_pass": all_pass, "all_fail": all_fail})
@@ -717,6 +736,18 @@ def smoke_run(run: RunPaths, specs: tuple[AgentSpec, ...]) -> tuple[dict | None,
                         f"{result.get('notes', 'no diagnostic')}",
                     )
                 )
+    for i, j, role in timed_out:
+        findings.append(
+            Finding(
+                run.report,
+                "smoke",
+                f"/tasks/{i}/results/{j}",
+                f"{role} timed out on {tasks[i]['scenario_id']} but scored anyway on its "
+                "partial transcript: the reward is real, not padded, but may understate "
+                f"{role} -- check whether the timeout budget is the actual constraint "
+                "before reading this number as a capability result",
+            )
+        )
     if verdict != "healthy":
         findings.append(
             Finding(

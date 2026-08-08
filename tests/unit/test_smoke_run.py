@@ -20,12 +20,17 @@ SID = "scn-001"
 
 CRASHER = "import sys\nsys.exit(7)\n"
 
+SLOW_BUT_CORRECT = COMPETENT + "import sys, time\nsys.stdout.flush()\ntime.sleep(30)\n"
 
-def _spec(tmp_path, role, body, name=None):
+
+def _spec(tmp_path, role, body, name=None, timeout_sec=60.0):
     script = tmp_path / (name or f"{role}.py")
     script.write_text(body, encoding="utf-8")
     return AgentSpec(
-        role=role, model=f"model-{role}", command=(sys.executable, str(script)), timeout_sec=60.0
+        role=role,
+        model=f"model-{role}",
+        command=(sys.executable, str(script)),
+        timeout_sec=timeout_sec,
     )
 
 
@@ -113,6 +118,26 @@ def test_an_unscoreable_result_carries_no_reward_key_at_all(tmp_path):
     result = next(r for r in report["tasks"][0]["results"] if r["role"] == "under_test")
     assert "reward" not in result
     assert result["notes"]
+
+
+def test_a_timed_out_agent_is_scored_on_the_partial_transcript_it_produced(tmp_path):
+    """run_agent writes a hung agent's partial transcript out precisely so it can
+    score. Discarding it drops the task from comparable() and shrinks the
+    denominator for all three roles, not just the one that hung."""
+    run = _run(tmp_path)
+    specs = (
+        _spec(tmp_path, "weak_baseline", TOOLLESS),
+        _spec(tmp_path, "under_test", SLOW_BUT_CORRECT, timeout_sec=2.0),
+        _spec(tmp_path, "oracle", COMPETENT),
+    )
+    report, findings = smoke_run(run, specs)
+    result = next(r for r in report["tasks"][0]["results"] if r["role"] == "under_test")
+    assert result["scored"] is True and result["reward"] == 1.0
+    assert "timed out" in result["notes"]
+    assert report["summary"]["unscoreable"] == 0
+    assert report["summary"]["mean_reward_by_role"]["oracle"] == 1.0  # denominator intact
+    assert report["verdict"] == "healthy"
+    assert any("timed out" in f.message for f in findings)  # gate still speaks up
 
 
 def test_a_roster_without_the_oracle_is_a_finding_and_still_reports(tmp_path):

@@ -16,6 +16,7 @@ from testgen.smoke import (
     PASS_THRESHOLD,
     ROLES,
     WEAK_BASELINE_CEILING,
+    _result_entry,
     comparable,
     components,
     mean_reward_by_role,
@@ -263,3 +264,31 @@ def test_a_well_formed_reward_is_accepted():
         "assertions": 1.0,
         "trajectory": 0.0,
     }
+
+
+# -- _result_entry -------------------------------------------------------------
+
+
+def test_an_out_of_range_reward_is_not_written_as_a_score():
+    entry = _result_entry(
+        "oracle", {"reward": 1.5, "completion": 1.0, "assertions": 1.0, "trajectory": 1.0}, []
+    )
+    assert entry["scored"] is False
+    assert "reward" not in entry
+    assert "outside [0, 1]" in entry["notes"]
+
+
+def test_a_reward_carrying_extra_keys_does_not_leak_them_into_the_report():
+    entry = _result_entry(
+        "oracle",
+        {
+            "reward": 1.0,
+            "completion": 1.0,
+            "assertions": 1.0,
+            "trajectory": 1.0,
+            "debug_dump": "x",
+        },
+        [],
+    )
+    assert entry["scored"] is True
+    assert set(entry) == {"role", "scored", "reward", "completion", "assertions", "trajectory"}
