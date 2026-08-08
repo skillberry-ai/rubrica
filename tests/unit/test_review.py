@@ -9,6 +9,9 @@ one failure mode design spec section 10 says the pipeline cannot fix itself.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 
 from testgen.artifacts import read_json, write_json
 from testgen.review import (
@@ -80,8 +83,16 @@ def test_a_scenario_with_no_verdict_is_low_confidence_not_excluded(tmp_path):
 
 
 def test_high_confidence_entries_come_first():
-    entries = [_entry("a", band="low"), _entry("b", band="high")]
-    assert [e["scenario_id"] for e in stratified(entries, 1)] == ["b"]
+    """The sha256 tie-break is chosen to oppose the band preference.
+
+    sha256("d") sorts before sha256("c"), so a digest-only sort (no band
+    preference at all) would pick "d". The expected ["c"] can only come from
+    the band term actually running -- do not "tidy" these ids back to a/b,
+    whose digests happen to agree with the band order and would let a
+    deleted band preference pass unnoticed.
+    """
+    entries = [_entry("d", band="low"), _entry("c", band="high")]
+    assert [e["scenario_id"] for e in stratified(entries, 1)] == ["c"]
 
 
 def test_the_sample_spreads_across_hop_depths_before_going_deep():
@@ -89,11 +100,17 @@ def test_the_sample_spreads_across_hop_depths_before_going_deep():
 
     Three samples all at hop depth 1 would tell a reviewer nothing about whether
     the deep scenarios are fair.
+
+    The depth-1 ids are chosen so a flat `sorted(entries, key=_order_key)[:2]`
+    (no round-robin at all) draws both of its first two picks from depth 1 --
+    "a2", "p2", and "p3" sort ahead of "b1" by sha256 digest. The expected
+    spread across [1, 3] can only come from the round-robin actually running;
+    do not rename these ids casually.
     """
     entries = [
-        _entry("a1", hop_depth=1),
         _entry("a2", hop_depth=1),
-        _entry("a3", hop_depth=1),
+        _entry("p2", hop_depth=1),
+        _entry("p3", hop_depth=1),
         _entry("b1", hop_depth=3),
     ]
     sampled = stratified(entries, 2)
@@ -109,6 +126,40 @@ def test_the_sample_is_deterministic():
     entries = [_entry(f"scn-{i:03d}", hop_depth=(i % 3) + 1) for i in range(20)]
     first = [e["scenario_id"] for e in stratified(entries, 5)]
     assert first == [e["scenario_id"] for e in stratified(list(reversed(entries)), 5)]
+
+
+def test_the_sample_is_stable_across_process_hash_salts():
+    """sha256, not the salted builtin hash().
+
+    The forward-vs-reversed assertion above pins input-order independence --
+    a different property. It cannot see a swap to builtin hash(), because both
+    of its calls run inside this one test, sharing this one process's hash
+    salt, so they stay consistent with each other regardless of which key
+    function did the sorting. Seeing the salt requires two separate processes:
+    run the same computation under two different PYTHONHASHSEED values and
+    require the same answer from both, which sha256 (seed-independent) gives
+    and hash() (salted per process) would not.
+    """
+    script = (
+        "from testgen.review import stratified\n"
+        "entries = [\n"
+        "    {'scenario_id': f'scn-{i:03d}', 'band': 'high', 'hop_depth': (i % 3) + 1}\n"
+        "    for i in range(20)\n"
+        "]\n"
+        "print(','.join(e['scenario_id'] for e in stratified(entries, 5)))\n"
+    )
+    outputs = []
+    for seed in ("0", "1"):
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        outputs.append(result.stdout.strip())
+    assert outputs[0] != "", "the subprocess produced no output"
+    assert outputs[0] == outputs[1]
 
 
 def test_asking_for_more_than_exists_returns_everything():
