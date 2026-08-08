@@ -111,6 +111,14 @@ def comparability(a: RunPaths, b: RunPaths) -> list[str]:
         if not isinstance(_load(run.manifest), dict):
             reasons.append(f"run {label} has no readable manifest.json, so nothing can be pinned")
     if reasons:
+        # Kept deliberately, and it does not change `comparable`: with either
+        # manifest unreadable the run is incomparable either way. What it guards
+        # is the *reasons list a human reads to localize the break*. When only one
+        # manifest is unreadable, that side's digests and stage config are empty
+        # while the other side's are real, so falling through would append "the
+        # two runs read different input bytes" and one "stage X is recorded only
+        # in run a" per stage -- every one of them derived from the absence rather
+        # than from a difference, burying the single fact that explains them all.
         return reasons
 
     digests_a, digests_b = input_digests(a), input_digests(b)

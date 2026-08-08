@@ -108,6 +108,13 @@ def test_a_stage_run_under_a_different_effort_or_skill_hash_is_caught(tmp_path):
 
 
 def test_a_stage_recorded_in_only_one_run_is_reported(tmp_path):
+    """And attributed to the right side.
+
+    A human reads this reason to localize a reproducibility break, so naming the
+    wrong run is worse than saying nothing: `propose` is recorded only in run b
+    here, and asserting merely that "propose" appears somewhere let the two labels
+    be swapped without a single test noticing.
+    """
     a, b = _pair(tmp_path)
     manifest = read_json(b.manifest)
     manifest["stages"]["propose"] = {
@@ -116,7 +123,24 @@ def test_a_stage_recorded_in_only_one_run_is_reported(tmp_path):
         "skill_sha256": "d" * 64,
     }
     write_json(b.manifest, manifest)
-    assert any("propose" in reason for reason in comparability(a, b))
+    reasons = [reason for reason in comparability(a, b) if "propose" in reason]
+    assert reasons == ["stage 'propose' is recorded only in run b"]
+
+
+def test_only_the_unreadable_manifest_is_reported_not_the_cascade_it_causes(tmp_path):
+    """comparability returns early on an unreadable manifest, and that is load-bearing.
+
+    Not for `comparable`, which is False either way, but for the reasons list a
+    human reads. With one manifest gone, that side's input digests and stage
+    config are empty while the other side's are real, so falling through would
+    append "the two runs read different input bytes" plus one "recorded only in
+    run a" per stage -- every one derived from the absence rather than from a
+    difference, burying the single fact that explains them all.
+    """
+    a, b = _pair(tmp_path)
+    b.manifest.unlink()
+    reasons = comparability(a, b)
+    assert reasons == ["run b has no readable manifest.json, so nothing can be pinned"]
 
 
 def test_an_unreadable_manifest_makes_the_runs_incomparable_rather_than_equal(tmp_path):
