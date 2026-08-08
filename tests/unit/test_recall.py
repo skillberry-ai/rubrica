@@ -88,6 +88,19 @@ def test_a_package_whose_scenario_vanished_is_skipped(tmp_path):
     assert generated_tasks(run) == []
 
 
+def test_a_scenario_present_but_not_emitted_is_excluded(tmp_path):
+    """Recall is about the suite that shipped.
+
+    scn-001 is still listed in 02-scenarios.json here -- challenge rejected it,
+    so emit pruned its 06-suite/ package. Crediting the pipeline with a scenario
+    the adversary rejected would count a test it did not deliver, so a scenario
+    present but not emitted must be excluded, not merely one absent from 02
+    entirely (that is test_a_package_whose_scenario_vanished_is_skipped above).
+    """
+    run = build_state(tmp_path, "post-rejection")
+    assert generated_tasks(run) == []
+
+
 # -- cells -------------------------------------------------------------------
 
 
@@ -180,3 +193,24 @@ def test_the_best_available_pair_wins_and_the_assignment_is_deterministic():
     for order in ([close, loose], [loose, close]):
         matches, _, _ = assign_matches(gold, order)
         assert [m["scenario_id"] for m in matches] == ["scn-close"]
+
+
+def test_ties_are_broken_by_id_not_input_order():
+    """The best-pair test above never ties: close (1.0) and loose (2/3) differ in
+    score, so descending-score ordering alone would satisfy it with no tie-break
+    at all. A tie is not contrived -- two near-duplicate bench tasks over the same
+    goal sharing one capability cell, against two near-duplicate generated
+    scenarios, is a plausible shape for a ten-task gold set, and without a total
+    order the same inputs could resolve to two different match sets across runs,
+    making recall look like it moved when nothing did.
+    """
+    gold = [_gold("bench-b"), _gold("bench-a")]
+    for gens in (
+        [_generated("scn-y"), _generated("scn-x")],
+        [_generated("scn-x"), _generated("scn-y")],
+    ):
+        matches, _, _ = assign_matches(gold, gens)
+        assert sorted((m["gold_id"], m["scenario_id"]) for m in matches) == [
+            ("bench-a", "scn-x"),
+            ("bench-b", "scn-y"),
+        ]
