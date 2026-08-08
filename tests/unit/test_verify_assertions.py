@@ -41,7 +41,7 @@ def test_a_transcript_yields_its_calls_answer_and_success_flag():
         _tool_use("query_aap2", {"action": "find_jobs", "controller": "prod0"}),
         _result("Job 90420 failed."),
     )
-    calls, answer, ok = parse_transcript(text)
+    calls, answer, ok, _ = parse_transcript(text)
     assert calls == [("query_aap2", {"action": "find_jobs", "controller": "prod0"})]
     assert answer == "Job 90420 failed."
     assert ok is True
@@ -50,19 +50,19 @@ def test_a_transcript_yields_its_calls_answer_and_success_flag():
 def test_a_malformed_line_is_skipped_rather_than_fatal():
     """A truncated transcript must still score; crashing would report a broken agent."""
     text = "not json\n{\n" + _transcript(_result("done"))
-    calls, answer, ok = parse_transcript(text)
+    calls, answer, ok, _ = parse_transcript(text)
     assert calls == []
     assert answer == "done"
 
 
 def test_an_error_result_is_not_ok():
-    _, _, ok = parse_transcript(_transcript(_result("boom", subtype="error", is_error=True)))
+    _, _, ok, _ = parse_transcript(_transcript(_result("boom", subtype="error", is_error=True)))
     assert ok is False
 
 
 def test_the_last_result_event_wins():
     text = _transcript(_result("first"), _result("second"))
-    _, answer, _ = parse_transcript(text)
+    _, answer, _, _ = parse_transcript(text)
     assert answer == "second"
 
 
@@ -73,12 +73,12 @@ def test_a_tool_use_with_no_input_yields_empty_args():
             "message": {"content": [{"type": "tool_use", "name": "query_aap2"}]},
         }
     )
-    calls, _, _ = parse_transcript(text)
+    calls, _, _, _ = parse_transcript(text)
     assert calls == [("query_aap2", {})]
 
 
 def test_an_empty_transcript_yields_no_answer_and_not_ok():
-    calls, answer, ok = parse_transcript("")
+    calls, answer, ok, _ = parse_transcript("")
     assert (calls, answer, ok) == ([], "", False)
 
 

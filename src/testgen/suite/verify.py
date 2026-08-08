@@ -31,32 +31,69 @@ DEFAULT_WEIGHTS = {"assertions": 0.8, "trajectory": 0.2}
 
 
 def parse_transcript(text):
-    """Read a stream-json transcript into (calls, answer, ok).
+    """Read a stream-json transcript into (calls, answer, ok, notes).
 
     Each call is (tool_name, args). Malformed lines are skipped so a truncated
     transcript still scores rather than crashing -- a crash would be reported as
     a broken agent when the truth is a broken log.
+
+    `notes` is what keeps those concessions honest. A skipped line or a coerced
+    field changes the score, so it is carried out to reward-detail.json rather
+    than applied silently. Distinct notes are recorded once each, so a wholly
+    corrupt log cannot flood the detail file.
+
+    A `result` that is not a string scores as **no answer**, deliberately not as
+    `str(value)`: str({"text": "90420"}) contains "90420", so coercion would
+    satisfy an answer_contains assertion against a dict the agent never uttered.
+    compute_reward's docstring rules that out -- tolerance at the scoring seam is
+    score inflation. No answer means the nonempty_answer gate fires, which is the
+    honest reading of a log this verifier cannot understand.
     """
     calls, answer, ok = [], "", False
-    for line in text.splitlines():
-        line = line.strip()
-        if not line.startswith("{"):
+    notes, skipped = [], 0
+
+    def note(message):
+        if message not in notes:
+            notes.append(message)
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line.startswith(("{", "[")):
+            # Not shaped like JSON at all -- ordinary log noise, not counted:
+            # a corrupt event is recorded below, but noise between events is not.
             continue
         try:
             event = json.loads(line)
         except (json.JSONDecodeError, ValueError):
+            skipped += 1
+            continue
+        if not isinstance(event, dict):
+            skipped += 1
             continue
         if event.get("type") == "assistant":
-            for block in event.get("message", {}).get("content", []):
+            message = event.get("message")
+            content = message.get("content") if isinstance(message, dict) else None
+            for block in content if isinstance(content, list) else []:
                 if isinstance(block, dict) and block.get("type") == "tool_use":
                     args = block.get("input")
                     calls.append((block.get("name", ""), args if isinstance(args, dict) else {}))
         elif event.get("type") == "result":
             # Last result event wins: exactly one is written per run, but a
             # partial transcript plus a terminal error event can yield two.
-            answer = event.get("result", "") or ""
+            value = event.get("result", "")
+            if value is None:
+                value = ""
+            elif not isinstance(value, str):
+                note(
+                    f"a result event carried a {type(value).__name__} rather than a string; "
+                    "scored as no answer"
+                )
+                value = ""
+            answer = value
             ok = event.get("subtype") == "success" and not event.get("is_error", False)
-    return calls, answer, ok
+    if skipped:
+        notes.append(f"skipped {skipped} line(s) that were not parseable JSON objects")
+    return calls, answer, ok, notes
 
 
 def _as_number(value):
@@ -407,11 +444,10 @@ def _contract_problems(contract):
 
     - The transcript. compute_reward's other three arguments come from
       parse_transcript, not from the contract, and a `result` event carrying a
-      non-string `result` still reaches `answer.strip()` and raises. That is a
-      broken log rather than a bypassed authoring gate, and parse_transcript's
-      own docstring says a broken log must score rather than crash -- so
-      choosing between dropping such an answer and str()-ing it is a scoring
-      decision, not a shape check, and it is not made here.
+      non-string `result` is a broken log rather than a bypassed authoring gate.
+      Choosing between dropping such an answer and str()-ing it is a scoring
+      decision, not a shape check, so it is ruled on in parse_transcript's own
+      docstring, not here.
     """
     problems = []
 
@@ -533,6 +569,31 @@ def _contract_problems(contract):
     return problems
 
 
+def read_contract(path):
+    """-> (contract, problems). A file that could not be read is itself a problem.
+
+    main() used to call json.loads directly, so a truncated expected.json raised
+    out of the verifier before _contract_problems ran: the refusal path that
+    exists to keep an authoring failure from being scored as a zero never
+    engaged, and the platform saw a crashed verifier rather than a stated
+    refusal. A gate cannot defend a file it did not manage to parse.
+    """
+    try:
+        text = Path(path).read_text()
+    except OSError as exc:
+        return None, [f"contract at {path} could not be read: {exc}"]
+    try:
+        contract = json.loads(text)
+    except ValueError as exc:
+        return None, [f"contract at {path} is not parseable JSON: {exc}"]
+    if not isinstance(contract, dict):
+        return None, [
+            f"contract at {path} is a {type(contract).__name__}, not an object; every field "
+            "this verifier reads would be absent"
+        ]
+    return contract, []
+
+
 def _read_logs(agent_logs):
     """Concatenate every transcript file in the agent log directory.
 
@@ -553,11 +614,14 @@ def main(argv=None):
     parser.add_argument("--out", default="/logs/verifier")
     args = parser.parse_args(argv)
 
-    contract = json.loads(Path(args.expected).read_text())
+    # out is created before the contract is read: a refusal has to be able to
+    # write reward-detail.json, and an absent contract is one of the refusals.
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    problems = _contract_problems(contract)
+    contract, problems = read_contract(args.expected)
+    if not problems:
+        problems = _contract_problems(contract)
     if problems:
         # Refuse rather than write a misleading 0 -- or, for a weights
         # problem, an inflated reward that looks like a normal score. A
@@ -570,8 +634,10 @@ def main(argv=None):
         print(f"verify.py: {message}", file=sys.stderr)
         return 2
 
-    calls, answer, ok = parse_transcript(_read_logs(args.agent_logs))
+    calls, answer, ok, notes = parse_transcript(_read_logs(args.agent_logs))
     reward, detail = compute_reward(contract, calls, answer, ok)
+    if notes:
+        detail["transcript_notes"] = notes
 
     (out / "reward.json").write_text(json.dumps(reward, indent=2, sort_keys=True))
     (out / "reward.txt").write_text(str(reward["reward"]))

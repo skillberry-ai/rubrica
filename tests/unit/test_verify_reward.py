@@ -432,7 +432,8 @@ def test_main_refuses_a_malformed_weights_instead_of_crashing_over_it(tmp_path, 
 
 
 def test_main_refuses_a_contract_that_is_not_an_object(tmp_path):
-    _refuses(tmp_path, [1, 2, 3], expect_in_error="must be a JSON object")
+    """read_contract now catches this before _contract_problems ever runs."""
+    _refuses(tmp_path, [1, 2, 3], expect_in_error="not an object")
 
 
 @pytest.mark.parametrize("bad", [["a0"], [None], [1]])
