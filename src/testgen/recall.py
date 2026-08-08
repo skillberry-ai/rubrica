@@ -17,9 +17,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from testgen.artifacts import ArtifactError, read_json
+from testgen.artifacts import ArtifactError, read_json, write_json
 from testgen.errors import UsageError
-from testgen.findings import format_findings
+from testgen.findings import Finding, format_findings
 from testgen.metrics import jaccard
 from testgen.paths import RunPaths
 from testgen.validate import validate_artifact
@@ -122,3 +122,194 @@ def assign_matches(
             key=lambda s: s["id"],
         ),
     )
+
+
+# Ordered by how much a reader should care, and the order the checks run in. A
+# scenario that reached a capability nobody authored is the most interesting
+# result this tool can produce, and running the checks the other way round would
+# file it under the blandest label that also happens to be true.
+NOVELTY_KINDS = ("new_capability", "new_outcome_class", "new_hop_depth", "spurious")
+
+_NOISE_CAVEAT = (
+    "**Recall is a smoke signal, not a metric to optimize.** With a denominator of "
+    "{denominator}, one task is {step:.0%}: {matched}/{denominator} against "
+    "{next_up}/{denominator} is noise, not improvement. Every match below is a "
+    "proposal for **human confirmation** -- matching is goal identity plus "
+    "capability-cell overlap, and no similarity number can tell two phrasings of "
+    "one test from two different tests."
+)
+
+_NO_GOLD_CAVEAT = (
+    "There are no gold tasks to compare against, so there is no recall to report. "
+    "The novelty section below still stands on its own, and every entry in it is a "
+    "proposal for **human confirmation**."
+)
+
+
+def classify_novelty(scenario: dict[str, Any], gold_tasks: list[dict[str, Any]]) -> tuple[str, str]:
+    """Why one unmatched scenario is interesting. -> (kind, why).
+
+    A goal gold never covers is folded into new_hop_depth rather than given a
+    fifth category: it has no authored depths, so every depth it reaches is new,
+    and the `why` string names the goal so the reason is not lost. That keeps the
+    vocabulary the design spec fixed.
+    """
+    authored_capabilities = {
+        ref["capability_id"] for task in gold_tasks for ref in task["capability_refs"]
+    }
+    authored_cells = (
+        frozenset().union(*(cells(task["capability_refs"]) for task in gold_tasks))
+        if gold_tasks
+        else frozenset()
+    )
+    authored_depths = {(task["goal_id"], task["hop_depth"]) for task in gold_tasks}
+
+    scenario_cells = cells(scenario["capability_refs"])
+    new_capabilities = sorted(
+        {capability for capability, _ in scenario_cells} - authored_capabilities
+    )
+    if new_capabilities:
+        return "new_capability", (
+            f"exercises {', '.join(new_capabilities)}, which no authored task touches"
+        )
+    new_cells = sorted(scenario_cells - authored_cells)
+    if new_cells:
+        return "new_outcome_class", (
+            "reaches "
+            + ", ".join(f"{capability}/{outcome}" for capability, outcome in new_cells)
+            + ", an outcome class no authored task reaches for that capability"
+        )
+    pair = (scenario["goal_id"], scenario["hop_depth"])
+    if pair not in authored_depths:
+        covered = sorted(depth for goal, depth in authored_depths if goal == pair[0])
+        return "new_hop_depth", (
+            f"reaches goal {pair[0]} at hop depth {pair[1]}; authored depths for that goal "
+            f"are {covered or 'none -- the goal itself is unauthored'}"
+        )
+    return "spurious", (
+        "every capability cell and the (goal, hop depth) pair already appear in the authored "
+        "tasks, spread across more than one of them, so this adds no coverage axis and looks "
+        "new only because no single authored task overlapped it enough to pair"
+    )
+
+
+def compare(run: RunPaths, gold: dict[str, Any]) -> dict[str, Any]:
+    """The recall-and-novelty report for one run against one gold list.
+
+    `recall` is None rather than 0.0 when no gold tasks were supplied: 0.0 reads as
+    "the pipeline found none of them", which is a claim about the pipeline rather
+    than about the missing input.
+    """
+    gold_tasks = gold.get("tasks", [])
+    generated = generated_tasks(run)
+    matches, unmatched_gold, unmatched_generated = assign_matches(gold_tasks, generated)
+    novel = []
+    for scenario in unmatched_generated:
+        kind, why = classify_novelty(scenario, gold_tasks)
+        novel.append({"scenario_id": scenario["id"], "kind": kind, "why": why})
+    denominator = len(gold_tasks)
+    return {
+        # A format tag, not a schema_version: no JSON Schema gates this file,
+        # because this project's own code writes it and unit tests gate it
+        # instead. Claiming a schema_version would say otherwise.
+        "format": "testgen-recall/1",
+        "target": gold.get("target"),
+        "gold_denominator": denominator,
+        "generated_total": len(generated),
+        "matched": matches,
+        "unmatched_gold": unmatched_gold,
+        "recall": round(len(matches) / denominator, 6) if denominator else None,
+        "novel": novel,
+        "human_confirmation_required": True,
+    }
+
+
+def caveat(report: dict[str, Any]) -> str:
+    """The sentence design spec section 7 requires beside every recall number."""
+    denominator = report["gold_denominator"]
+    if not denominator:
+        return _NO_GOLD_CAVEAT
+    matched = len(report["matched"])
+    return _NOISE_CAVEAT.format(
+        denominator=denominator,
+        step=1 / denominator,
+        matched=matched,
+        next_up=min(matched + 1, denominator),
+    )
+
+
+def render(report: dict[str, Any]) -> str:
+    """The human-facing markdown. The caveat is not optional and not at the end."""
+    lines = [
+        "# Recall and novelty against the authored bench tasks",
+        "",
+        caveat(report),
+        "",
+        f"- **Authored tasks:** {report['gold_denominator']}",
+        f"- **Generated tasks that shipped:** {report['generated_total']}",
+        f"- **Matched:** {len(report['matched'])}",
+        "- **Recall:** "
+        + ("not applicable" if report["recall"] is None else f"{report['recall']:.2f}"),
+        "",
+        "## Proposed matches",
+        "",
+    ]
+    if report["matched"]:
+        lines += ["| Authored | Generated | Cell overlap |", "|---|---|---|"]
+        lines += [
+            f"| `{m['gold_id']}` | `{m['scenario_id']}` | {m['jaccard']:.2f} |"
+            for m in report["matched"]
+        ]
+    else:
+        lines.append("None.")
+    lines += ["", "## Authored tasks nothing matched", ""]
+    lines += (
+        [f"- `{gold_id}`" for gold_id in report["unmatched_gold"]]
+        if report["unmatched_gold"]
+        else ["None."]
+    )
+    lines += ["", "## Generated tasks nothing authored", ""]
+    lines += (
+        [f"- `{n['scenario_id']}` — **{n['kind']}**: {n['why']}" for n in report["novel"]]
+        if report["novel"]
+        else ["None."]
+    )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def compare_run(run: RunPaths, gold_path: Path | str) -> tuple[dict[str, Any], list[Finding]]:
+    """Write measurement/recall.json and return (report, findings).
+
+    Findings, not a bare report: a gold task nothing matched is worth the
+    orchestrator's attention, and so is a `spurious` entry. Neither is a defect in
+    an artifact, so both are reported once, aggregated, rather than one finding per
+    row -- the point is the shape of the gap, not a list.
+    """
+    report = compare(run, load_gold(gold_path))
+    write_json(run.recall, report)
+    (run.measurement_dir / "recall.md").write_text(render(report), encoding="utf-8")
+    findings = []
+    if report["unmatched_gold"]:
+        findings.append(
+            Finding(
+                run.recall,
+                "recall",
+                "/unmatched_gold",
+                f"{len(report['unmatched_gold'])} authored task(s) have no generated "
+                f"counterpart: {', '.join(report['unmatched_gold'])}. With a denominator of "
+                f"{report['gold_denominator']} this is a smoke signal, not a score",
+            )
+        )
+    spurious = [entry["scenario_id"] for entry in report["novel"] if entry["kind"] == "spurious"]
+    if spurious:
+        findings.append(
+            Finding(
+                run.recall,
+                "recall",
+                "/novel",
+                f"{len(spurious)} generated task(s) add no coverage axis over the authored "
+                f"set: {', '.join(spurious)}",
+            )
+        )
+    return report, findings

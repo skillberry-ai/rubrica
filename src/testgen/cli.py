@@ -46,6 +46,7 @@ from testgen.errors import UsageError
 from testgen.findings import Finding, format_findings
 from testgen.intake import intake
 from testgen.paths import STAGES, RunPaths
+from testgen.recall import compare_run, render
 from testgen.smoke import load_agents, preflight, smoke_run
 from testgen.validate import UnknownStage, validate_stage
 
@@ -82,6 +83,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_smoke = subparsers.add_parser("smoke", help="run the emitted suite against the agent roster")
     p_smoke.add_argument("--run", required=True)
     p_smoke.add_argument("--agents", required=True, metavar="PATH")
+
+    p_gold = subparsers.add_parser(
+        "compare-gold", help="recall and novelty against the authored bench tasks"
+    )
+    p_gold.add_argument("--run", required=True)
+    p_gold.add_argument("--gold", required=True, metavar="PATH")
     return parser
 
 
@@ -178,6 +185,16 @@ def main(argv: list[str] | None = None) -> int:
             report, findings = smoke_run(run, specs)
             if report is not None:
                 print(run.report)
+            return _report(findings)
+
+        if args.command == "compare-gold":
+            run = _run_dir(args.run)
+            try:
+                report, findings = compare_run(run, Path(args.gold))
+            except UsageError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return USAGE
+            print(render(report))
             return _report(findings)
     except (FileNotFoundError, ArtifactError, UnknownStage) as exc:
         # A run directory that cannot be read, an artifact that is absent or is

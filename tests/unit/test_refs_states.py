@@ -33,6 +33,7 @@ import pytest
 from testgen.artifacts import read_json, write_json
 from testgen.emit import emit_run
 from testgen.paths import RunPaths
+from testgen.recall import compare_run
 from testgen.refs import check_all
 from tests.builders import (
     MINIMAL_INPUT_BYTES,
@@ -40,6 +41,7 @@ from tests.builders import (
     minimal_claims,
     minimal_coverage,
     minimal_expected,
+    minimal_gold,
     minimal_manifest,
     minimal_report,
     minimal_scenarios,
@@ -99,21 +101,30 @@ def _smoke(run: RunPaths) -> None:
     write_json(run.report, minimal_report())
 
 
-def _measurement(run: RunPaths) -> None:
-    """The measurement tools' outputs, which are not stage artifacts.
+def _gold_path(run: RunPaths) -> Path:
+    """Write a minimal gold list into the run directory and return its path.
 
-    They live under measurement/ rather than a numbered prefix, and no layer-2
-    check reads them. This state exists so that stays true: a checker that
-    started globbing the run directory rather than naming its artifacts would
-    find these and report them.
+    Deliberately *not* under measurement/: the gold list is an input a person
+    supplies, not an output the pipeline writes. It lives inside the run
+    directory only because the state builder receives nothing but `run` --
+    writing to run.root.parent would land in pytest's shared tmp base and
+    collide across tests. Nothing in the project globs the run root, so no
+    checker sees it.
     """
-    # Task 10 replaces this stub with recall.compare's real output. "format" is
-    # deliberate, not "schema_version": this file is written by this project's
-    # own code and validated by unit tests rather than a schema, and claiming a
-    # schema_version would assert a schema that does not exist.
-    write_json(
-        run.recall, {"format": "testgen-recall/1", "denominator": 0, "matched": [], "novel": []}
-    )
+    path = run.root / "gold.json"
+    write_json(path, minimal_gold())
+    return path
+
+
+def _measurement(run: RunPaths) -> None:
+    """The measurement tools' real outputs, written by the tools themselves.
+
+    Hand-shaping these would let the state drift from what the tools write, which
+    is how a state stops proving anything. compare_run and sample_run are called
+    for the same reason _emit calls emit_run.
+    """
+    report, findings = compare_run(run, _gold_path(run))
+    assert findings == [], f"compare-gold in the states table: {findings}"
     run.review_dir.mkdir(parents=True, exist_ok=True)
     # Task 12 replaces this stub with the real review packet.
     run.review_packet.write_text("# Review packet\n", encoding="utf-8")

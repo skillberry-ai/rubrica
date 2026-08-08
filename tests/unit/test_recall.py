@@ -11,15 +11,30 @@ import json
 
 import pytest
 
+from testgen.artifacts import write_json
+from testgen.emit import emit_run
 from testgen.errors import UsageError
+from testgen.paths import RunPaths
 from testgen.recall import (
     MATCH_JACCARD_FLOOR,
+    NOVELTY_KINDS,
     assign_matches,
     cells,
+    classify_novelty,
+    compare,
+    compare_run,
     generated_tasks,
     load_gold,
+    render,
 )
-from tests.builders import minimal_gold, minimal_scenarios
+from tests.builders import (
+    minimal_expected,
+    minimal_gold,
+    minimal_scenarios,
+    minimal_seed,
+    minimal_verdict,
+    minimal_world_model,
+)
 from tests.unit.test_refs_states import build_state
 
 
@@ -214,3 +229,235 @@ def test_ties_are_broken_by_id_not_input_order():
             ("bench-a", "scn-x"),
             ("bench-b", "scn-y"),
         ]
+
+
+# -- classify_novelty --------------------------------------------------------
+
+
+def _kind(scenario, gold=None):
+    return classify_novelty(scenario, gold if gold is not None else [_gold("bench-001")])[0]
+
+
+def test_a_capability_gold_never_touches_is_the_headline():
+    assert _kind(_generated("scn-9", refs=(("cap-unknown", "oc-success"),))) == "new_capability"
+
+
+def test_a_known_capability_in_an_unknown_outcome_class_is_a_new_outcome_class():
+    assert _kind(_generated("scn-9", refs=(("cap-find-jobs", "oc-empty"),))) == "new_outcome_class"
+
+
+def test_a_known_cell_at_an_unauthored_hop_depth_is_a_new_hop_depth():
+    assert _kind(_generated("scn-9", hop_depth=4)) == "new_hop_depth"
+
+
+def test_a_goal_gold_never_covers_is_a_new_hop_depth_too():
+    """A goal absent from gold has no authored depths, so every depth is new.
+
+    Folding it in here rather than adding a fifth category keeps the vocabulary
+    the spec fixed, and the `why` string names the goal so the reason is not lost.
+    """
+    kind, why = classify_novelty(_generated("scn-9", goal_id="goal-unseen"), [_gold("bench-001")])
+    assert kind == "new_hop_depth"
+    assert "goal-unseen" in why
+
+
+def test_a_recombination_of_authored_coverage_is_spurious():
+    """Last in the precedence, and a real category.
+
+    Every cell and the (goal, hop depth) pair already appear in gold -- spread
+    across two authored tasks -- so this adds no coverage axis. It looks new only
+    because no single gold task overlapped it enough to pair.
+    """
+    gold = [
+        _gold("bench-001", refs=(("cap-a", "oc-1"),) * 1),
+        _gold("bench-002", refs=(("cap-b", "oc-1"),) * 1),
+    ]
+    scenario = _generated("scn-9", refs=(("cap-a", "oc-1"), ("cap-b", "oc-1"), ("cap-a", "oc-1")))
+    kind, why = classify_novelty(scenario, gold)
+    assert kind == "spurious"
+    assert why
+
+
+def test_the_precedence_is_capability_then_class_then_depth():
+    """A scenario that is new on every axis at once must report the strongest.
+
+    Reporting new_hop_depth for a scenario that reached a capability nobody
+    authored buries the most interesting result compare-gold can produce.
+    """
+    scenario = _generated("scn-9", refs=(("cap-unknown", "oc-unknown"),), hop_depth=5)
+    assert _kind(scenario) == "new_capability"
+    assert NOVELTY_KINDS[0] == "new_capability"
+
+
+def test_every_scenario_gets_exactly_one_kind_from_the_closed_vocabulary():
+    for scenario in (
+        _generated("a"),
+        _generated("b", refs=(("cap-x", "oc-1"),)),
+        _generated("c", hop_depth=1),
+        _generated("d", goal_id="goal-other"),
+    ):
+        assert _kind(scenario) in NOVELTY_KINDS
+
+
+# -- compare -----------------------------------------------------------------
+
+
+def test_compare_reports_recall_over_the_gold_denominator(tmp_path):
+    run = build_state(tmp_path, "emit")
+    report = compare(run, minimal_gold())
+    assert report["gold_denominator"] == 1
+    assert report["recall"] == 1.0
+    assert report["matched"][0]["scenario_id"] == "scn-001"
+    assert report["unmatched_gold"] == []
+    assert report["novel"] == []
+    assert report["human_confirmation_required"] is True
+    assert "schema_version" not in report
+
+
+def test_compare_categorizes_what_matched_nothing(tmp_path):
+    run = build_state(tmp_path, "emit")
+    gold = minimal_gold(tasks=[_gold("bench-001", goal_id="goal-elsewhere")])
+    report = compare(run, gold)
+    assert report["recall"] == 0.0
+    assert report["unmatched_gold"] == ["bench-001"]
+    assert [entry["kind"] for entry in report["novel"]] == ["new_hop_depth"]
+    assert report["novel"][0]["scenario_id"] == "scn-001"
+
+
+def test_an_empty_gold_list_reports_no_recall_rather_than_a_zero(tmp_path):
+    """0.0 would read as "the pipeline found none of them"."""
+    run = build_state(tmp_path, "emit")
+    report = compare(run, minimal_gold(tasks=[]))
+    assert report["gold_denominator"] == 0
+    assert report["recall"] is None
+
+
+def test_compare_is_deterministic(tmp_path):
+    run = build_state(tmp_path, "emit")
+    assert compare(run, minimal_gold()) == compare(run, minimal_gold())
+
+
+# -- render ------------------------------------------------------------------
+
+
+def test_the_rendered_report_states_the_noise_caveat_with_the_real_denominator(tmp_path):
+    """Mandated by design spec section 7, and derived rather than boilerplate.
+
+    A recall number without this sentence beside it will be optimized, and with a
+    denominator of ten it is ten points per task.
+    """
+    run = build_state(tmp_path, "emit")
+    text = render(compare(run, minimal_gold(tasks=[_gold(f"bench-{i:03d}") for i in range(10)])))
+    assert "denominator of 10" in text
+    assert "noise" in text
+    assert "not a metric to optimize" in text
+
+
+def test_the_caveat_changes_with_the_denominator(tmp_path):
+    run = build_state(tmp_path, "emit")
+    text = render(compare(run, minimal_gold()))
+    assert "denominator of 1" in text
+    assert "denominator of 10" not in text
+
+
+def test_an_empty_gold_list_renders_a_different_sentence(tmp_path):
+    run = build_state(tmp_path, "emit")
+    text = render(compare(run, minimal_gold(tasks=[])))
+    assert "no gold tasks" in text
+    assert "noise" not in text
+
+
+def test_the_rendered_report_says_matches_need_human_confirmation(tmp_path):
+    run = build_state(tmp_path, "emit")
+    assert "human confirmation" in render(compare(run, minimal_gold()))
+
+
+def test_every_novel_scenario_appears_in_the_rendering(tmp_path):
+    run = build_state(tmp_path, "emit")
+    gold = minimal_gold(tasks=[_gold("bench-001", goal_id="goal-elsewhere")])
+    text = render(compare(run, gold))
+    assert "scn-001" in text
+    assert "new_hop_depth" in text
+
+
+# -- compare_run's /novel finding ---------------------------------------------
+
+
+def _scenario_doc(sid, refs):
+    return {
+        "id": sid,
+        "round": 1,
+        "goal_id": "goal-triage",
+        "actor_id": "act-sre",
+        "title": f"title for {sid}",
+        "user_intent": "intent",
+        "hop_depth": 2,
+        "capability_refs": [{"capability_id": c, "outcome_class_id": o} for c, o in refs],
+        "discriminating_fact": "fact",
+        "status": "active",
+        "provenance": {"hole_refs": [], "claim_ids": ["clm-001"], "round": 1},
+    }
+
+
+def _emitted_run(tmp_path, scenario_refs):
+    """A run with one emitted package per (sid, refs) pair in scenario_refs.
+
+    Builds only what emit_run reads (world model, scenario list, seed,
+    expected, verdict) -- there is no coverage document here because nothing
+    in this test reads one.
+    """
+    run = RunPaths(tmp_path)
+    run.root.mkdir(parents=True, exist_ok=True)
+    write_json(run.world_model, minimal_world_model())
+    write_json(
+        run.scenarios,
+        minimal_scenarios(scenarios=[_scenario_doc(sid, refs) for sid, refs in scenario_refs]),
+    )
+    for sid, _refs in scenario_refs:
+        write_json(run.seed(sid), minimal_seed())
+        write_json(run.expected(sid), minimal_expected(scenario_id=sid))
+        write_json(run.verdict(sid), minimal_verdict(scenario_id=sid))
+    emitted, findings = emit_run(run)
+    assert findings == [], findings
+    assert sorted(emitted) == sorted(sid for sid, _ in scenario_refs)
+    return run
+
+
+def test_the_novel_finding_names_only_the_spurious_entries_not_every_novel_one(tmp_path):
+    """The /novel finding is a filter over report["novel"], not a pass-through.
+
+    Three single-cell gold tasks, spread so no one of them alone clears the
+    match floor against a scenario that recombines all three -- that scenario
+    is spurious. scn-new-cap reaches a capability none of them touch, so it is
+    new_capability, not spurious. Without a fixture that puts both kinds in the
+    same run, a filter that let every novel entry through -- reporting the
+    new_capability scenario as if it added no coverage axis -- would pass every
+    other test in this file untouched.
+    """
+    gold = minimal_gold(
+        tasks=[
+            _gold("bench-001", refs=(("cap-a", "oc-1"),)),
+            _gold("bench-002", refs=(("cap-b", "oc-1"),)),
+            _gold("bench-003", refs=(("cap-c", "oc-1"),)),
+        ]
+    )
+    run = _emitted_run(
+        tmp_path,
+        [
+            ("scn-spurious", (("cap-a", "oc-1"), ("cap-b", "oc-1"), ("cap-c", "oc-1"))),
+            ("scn-new-cap", (("cap-z", "oc-1"),)),
+        ],
+    )
+    gold_path = tmp_path / "gold.json"
+    write_json(gold_path, gold)
+
+    report, findings = compare_run(run, gold_path)
+    assert {entry["scenario_id"]: entry["kind"] for entry in report["novel"]} == {
+        "scn-spurious": "spurious",
+        "scn-new-cap": "new_capability",
+    }
+
+    novel_findings = [f for f in findings if f.pointer == "/novel"]
+    assert len(novel_findings) == 1
+    assert "scn-spurious" in novel_findings[0].message
+    assert "scn-new-cap" not in novel_findings[0].message

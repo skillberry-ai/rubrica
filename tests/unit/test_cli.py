@@ -7,6 +7,7 @@ from testgen.cli import main
 from testgen.paths import RunPaths
 from tests.builders import (
     minimal_claims,
+    minimal_gold,
     minimal_manifest,
     minimal_scenarios,
     minimal_world_model,
@@ -356,3 +357,38 @@ def test_smoke_exits_two_when_the_directory_has_no_manifest(tmp_path, capsys):
     run.manifest.unlink()
     roster = _write_roster(tmp_path)
     assert main(["smoke", "--run", str(run.root), "--agents", str(roster)]) == 2
+
+
+def _write_gold(tmp_path, payload=None):
+    path = tmp_path / "gold.json"
+    write_json(path, payload if payload is not None else minimal_gold())
+    return path
+
+
+def test_compare_gold_exits_zero_on_a_full_match(tmp_path, capsys):
+    run = build_state(tmp_path / "run", "emit")
+    gold = _write_gold(tmp_path)
+    assert main(["compare-gold", "--run", str(run.root), "--gold", str(gold)]) == 0
+    out = capsys.readouterr().out
+    assert "Recall and novelty" in out
+    assert (run.measurement_dir / "recall.json").is_file()
+
+
+def test_compare_gold_exits_one_on_an_unmatched_gold_task(tmp_path, capsys):
+    run = build_state(tmp_path / "run", "emit")
+    payload = minimal_gold()
+    payload["tasks"][0]["goal_id"] = "goal-elsewhere"
+    gold = _write_gold(tmp_path, payload)
+    assert main(["compare-gold", "--run", str(run.root), "--gold", str(gold)]) == 1
+    out = capsys.readouterr().out
+    assert "[recall]" in out
+    assert "bench-001" in out
+
+
+def test_compare_gold_exits_two_on_a_malformed_gold_file(tmp_path, capsys):
+    run = build_state(tmp_path / "run", "emit")
+    payload = minimal_gold()
+    payload["tasks"][0]["hop_depth"] = 99
+    gold = _write_gold(tmp_path, payload)
+    assert main(["compare-gold", "--run", str(run.root), "--gold", str(gold)]) == 2
+    assert "unusable gold" in capsys.readouterr().err
