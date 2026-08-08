@@ -171,6 +171,13 @@ def scrubbed_env() -> dict[str, str]:
     return {"PATH": "/usr/bin:/bin", "PYTHONPATH": "", "PYTHONDONTWRITEBYTECODE": "1"}
 
 
+# The three names verify.py writes into out_dir: reward.json and
+# reward-detail.json for a human or this module to read, reward.txt as the
+# bare float Harbor's test.sh reads. verify_package unlinks exactly these
+# three before running, and nothing else in out_dir -- see its docstring.
+_VERIFIER_OUTPUTS = ("reward.json", "reward.txt", "reward-detail.json")
+
+
 def verifier_argv(task_dir: Path, *, agent_logs: Path, out_dir: Path) -> list[str]:
     """The verifier invocation, matching the three arguments test.sh passes.
 
@@ -304,14 +311,27 @@ def verify_package(
     that carries the same number as a JSON object; verify.py writes both
     together, so "no reward.txt" and "no reward.json" are the same event here.)
 
-    out_dir is cleared before the verifier runs. It is per-(role, task) and
-    nothing else in this module gives it a fresh name per attempt, so a
-    verifier that exits 0 without writing anything -- a mangled copy that does
-    nothing being exactly the case this task exists to catch -- would otherwise
-    leave a previous run's reward.json in place to be read back as this run's
-    score. The returncode/is_file guard below already catches a nonzero exit
-    over a stale file; the clear closes the zero-exit case that guard cannot
-    see.
+    The three files verify.py writes (reward.json, reward.txt,
+    reward-detail.json) are unlinked from out_dir before the verifier runs. It
+    is per-(role, task) and nothing else in this module gives it a fresh name
+    per attempt, so a verifier that exits 0 without writing anything -- a
+    mangled copy that does nothing being exactly the case this task exists to
+    catch -- would otherwise leave a previous run's reward.json in place to be
+    read back as this run's score. The returncode/is_file guard below already
+    catches a nonzero exit over a stale file; the unlink closes the zero-exit
+    case that guard cannot see.
+
+    This removes exactly those three names and nothing else -- not
+    shutil.rmtree(out_dir), which would also erase out_dir if a caller ever
+    passed task_dir or the run root by mistake, silently destroying the
+    package or the whole run rather than merely writing reward files somewhere
+    odd. If any of the three cannot be removed, that failure is not swallowed:
+    a stale reward.json we could not clear is exactly the file we must not
+    read, so verify_package returns unscoreable rather than proceeding, and
+    the note names the file. That failure must not propagate, the same
+    reasoning as treating an agent timeout as a result rather than an
+    exception: one unremovable file must not cost every remaining role its
+    data on every remaining task.
     """
     verify_py = task_dir / "tests" / "verify.py"
     if not verify_py.is_file():
@@ -320,8 +340,12 @@ def verify_package(
         raise ValueError(
             f"out_dir {out_dir} must not be agent_logs; the verifier would read its own output"
         )
-    shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True, exist_ok=True)
+    for name in _VERIFIER_OUTPUTS:
+        try:
+            (out_dir / name).unlink(missing_ok=True)
+        except OSError as exc:
+            return None, None, f"could not clear stale {name} from a previous run: {exc}"
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         completed = subprocess.run(

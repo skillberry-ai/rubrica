@@ -271,6 +271,82 @@ def test_a_stale_reward_is_not_reused_when_the_verifier_exits_nonzero(tmp_path):
     assert reward is None, f"a stale reward.json was reported as this run's score: {reward}"
 
 
+_EXITS_ZERO_WITHOUT_WRITING_VERIFIER = "import sys\nsys.exit(0)\n"
+
+
+def test_a_stale_reward_is_cleared_before_a_verifier_that_exits_zero_and_writes_nothing(tmp_path):
+    """The scenario the out_dir clear exists for -- the layer-3 scenario this task is named for.
+
+    test_a_stale_reward_is_not_reused_when_the_verifier_exits_nonzero (above) pins
+    the returncode half of the guard: its mangled verifier exits 9, which the
+    `completed.returncode != 0` check catches on its own, whether or not out_dir
+    was ever cleared. This test pins the half that check cannot see: a mangled
+    verify.py that exits 0 without writing anything -- emit shipping a broken copy
+    into the package, exactly the failure this module exists to catch -- with a
+    previous attempt's reward.json still sitting in out_dir. Without the unlink in
+    verify_package, that stale {"reward": 1.0} would pass both halves of the guard
+    (returncode == 0, reward.json.is_file()) and be reported as this run's score.
+    """
+    run = _emitted(tmp_path)
+    logs, out, base = _paths(run)
+    run_agent(
+        _spec(_script(tmp_path, "good12.py", COMPETENT)),
+        task_dir=run.task_dir(SID),
+        logs_dir=logs,
+        stderr_path=base / "agent-stderr.txt",
+        scenario_id=SID,
+    )
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "reward.json").write_text('{"reward": 1.0}', encoding="utf-8")  # a previous run's score
+    (run.task_dir(SID) / "tests" / "verify.py").write_text(
+        _EXITS_ZERO_WITHOUT_WRITING_VERIFIER, encoding="utf-8"
+    )
+    code, reward, note = verify_package(
+        run.task_dir(SID),
+        agent_logs=logs,
+        out_dir=out,
+        stderr_path=base / "verifier-stderr.txt",
+    )
+    assert code == 0
+    assert reward is None, f"a stale reward.json was reported as this run's score: {reward}"
+    assert "diagnostic" in note, note
+
+
+def test_an_unremovable_stale_output_makes_the_task_unscoreable_without_raising(tmp_path):
+    """Fail closed: an unlink failure must not let verify_package proceed or raise.
+
+    A read-only out_dir reproduces a real failure mode -- a read-only mount, a
+    permissions mismatch -- rather than mocking Path.unlink: this module's seams
+    are tested against real subprocesses and real filesystem behaviour, and an
+    unlink failure is exactly the kind of "the thing on the other end behaves
+    differently than hoped" case a mock would paper over rather than exercise.
+    """
+    run = _emitted(tmp_path)
+    logs, out, base = _paths(run)
+    run_agent(
+        _spec(_script(tmp_path, "good13.py", COMPETENT)),
+        task_dir=run.task_dir(SID),
+        logs_dir=logs,
+        stderr_path=base / "agent-stderr.txt",
+        scenario_id=SID,
+    )
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "reward.json").write_text('{"reward": 1.0}', encoding="utf-8")
+    out.chmod(0o555)  # read-only dir: removing an entry needs write permission on the parent
+    try:
+        code, reward, note = verify_package(
+            run.task_dir(SID),
+            agent_logs=logs,
+            out_dir=out,
+            stderr_path=base / "verifier-stderr.txt",
+        )
+    finally:
+        out.chmod(0o755)  # restore so tmp_path's own cleanup can remove the directory
+    assert code is None
+    assert reward is None, f"an unremovable stale reward.json was reported as a score: {reward}"
+    assert "reward.json" in note, note
+
+
 _FRESH_REWARD_THEN_ERROR_VERIFIER = """\
 import argparse, json, pathlib, sys
 
@@ -361,15 +437,18 @@ sys.exit(0)
 
 
 def test_the_stdlib_is_still_reachable_under_the_scrub(tmp_path):
-    """The other half: the scrub must not be so aggressive it breaks the verifier.
+    """The scrub, as a whole, must not starve the verifier of the stdlib it needs.
 
-    The real verify.py imports argparse, json, math, sys and pathlib among
-    stdlib modules; this test's own stand-in verifier imports exactly that set
-    and nothing else, and its only way to produce a reward is by using all
-    five. If -S removed any of them, the import would raise, the process would
-    exit nonzero, and reward would be None -- so unlike a test that merely
-    scores a real task (which -S passing or failing would not distinguish),
-    this one actually fails when the scrub is too aggressive.
+    This is not a test of -S alone: -S only skips importing site, and was never
+    going to remove argparse/json/math/pathlib/sys, which are stdlib rather than
+    site-packages -- so the test cannot fail for that reason. What it actually
+    guards is scrubbed_env()'s emptied PYTHONPATH and minimal PATH *together
+    with* -S: the real verify.py imports exactly those five modules among
+    others, and this stand-in imports that same set and nothing else, producing
+    its reward only by using all five. If a future tightening of scrubbed_env()
+    or an added interpreter flag broke one of them, this test would catch it
+    here -- as a nonzero exit and reward is None -- rather than at every real
+    task, where it would look like a broken suite instead of a broken harness.
     """
     run = _emitted(tmp_path)
     logs, out, base = _paths(run)
