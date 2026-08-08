@@ -4,8 +4,8 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from testgen.artifacts import read_json
-from testgen.intake import classify, intake, sha256_of, slug
+from testgen.artifacts import read_json, sha256_of
+from testgen.intake import classify, intake, slug
 from testgen.validate import validate_artifact
 
 NOW = datetime(2026, 8, 6, 12, 30, 5, tzinfo=UTC)
@@ -237,6 +237,50 @@ def test_intake_refuses_a_missing_input(tmp_path):
             max_scenarios=8,
             now=NOW,
         )
+
+
+def test_the_manifest_records_the_name_each_input_was_stored_under(tmp_path):
+    source = tmp_path / "api.json"
+    source.write_text('{"tools": []}', encoding="utf-8")
+    run = intake(
+        inputs=[source],
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+    )
+    entry = read_json(run.manifest)["inputs"][0]
+    # slug("api.json") is "api-json" (test_slug_produces_safe_path_segments pins
+    # this), and stored_name appends the suffix on top of that, exactly as
+    # test_intake_copies_inputs_and_records_hash_kind_and_size already pins for
+    # this same source name -- so the registered name is "api-json.json", not a
+    # copy of the source's own name.
+    assert entry["stored_as"] == "api-json.json"
+    assert run.input_file(entry["stored_as"]).is_file()
+    assert sha256_of(run.input_file(entry["stored_as"])) == entry["sha256"]
+
+
+def test_a_suffix_that_would_make_an_unsafe_name_is_dropped(tmp_path):
+    """The extension is cosmetic; the artifact id is the identity.
+
+    A source named `weird.js on` would otherwise be stored as `weird-js on`,
+    which manifest.stored_as cannot safely reference and paths.input_file would
+    raise on -- turning a registrable input into an exit 2.
+    """
+    source = tmp_path / "weird.js on"
+    source.write_text("{}", encoding="utf-8")
+    run = intake(
+        inputs=[source],
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+    )
+    entry = read_json(run.manifest)["inputs"][0]
+    assert entry["stored_as"] == "weird-js-on"
+    assert run.input_file("weird-js-on").is_file()
 
 
 def test_intake_refuses_to_overwrite_an_existing_run(tmp_path):

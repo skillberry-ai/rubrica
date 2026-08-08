@@ -7,7 +7,16 @@ instead of buried in fifty lines of valid boilerplate.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
+
+# The registered input copy that minimal_manifest describes. The manifest's
+# sha256 is the real digest of these bytes, so any state builder that writes
+# them satisfies refs.check_inputs by construction rather than by tolerance --
+# the previous "a" * 64 placeholder could only ever have passed a check that
+# was not looking.
+MINIMAL_INPUT_NAME = "aap2-api.json"
+MINIMAL_INPUT_BYTES = b'{"tools": [{"name": "query_aap2"}]}\n'
 
 
 def minimal_claims(**over: Any) -> dict[str, Any]:
@@ -175,9 +184,10 @@ def minimal_manifest(**over: Any) -> dict[str, Any]:
             {
                 "artifact_id": "aap2-api",
                 "source_path": "harness-skills/parsec-aap2/api.json",
-                "sha256": "a" * 64,
+                "stored_as": MINIMAL_INPUT_NAME,
+                "sha256": hashlib.sha256(MINIMAL_INPUT_BYTES).hexdigest(),
                 "kind": "mcp_tool_schema",
-                "bytes": 4096,
+                "bytes": len(MINIMAL_INPUT_BYTES),
             }
         ],
         "stages": {

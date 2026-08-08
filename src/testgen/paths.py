@@ -112,6 +112,16 @@ class RunPaths:
         return self.root / "decisions.md"
 
     # -- per-id artifacts ------------------------------------------------
+    def input_file(self, stored_as: str) -> Path:
+        """The registered copy of one input artifact, by its manifest name.
+
+        `stored_as` comes from manifest.inputs[].stored_as, which intake writes.
+        That is what makes the manifest self-describing: a reader re-verifying a
+        digest does not have to re-derive intake's naming rule, and there is only
+        one definition of that rule to keep correct.
+        """
+        return self.inputs_dir / safe_segment(stored_as)
+
     def claims(self, artifact_id: str) -> Path:
         return self.claims_dir / f"{safe_segment(artifact_id)}.json"
 

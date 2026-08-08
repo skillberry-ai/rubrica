@@ -27,11 +27,12 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["artifact_id", "source_path", "sha256", "kind", "bytes"],
+        "required": ["artifact_id", "source_path", "stored_as", "sha256", "kind", "bytes"],
         "additionalProperties": false,
         "properties": {
           "artifact_id": { "$ref": "#/$defs/id" },
           "source_path": { "type": "string", "minLength": 1 },
+          "stored_as": { "$ref": "#/$defs/id" },
           "sha256": { "$ref": "#/$defs/sha256" },
           "kind": {
             "enum": [

@@ -144,6 +144,17 @@ def test_unsafe_instance_dir_names_is_empty_when_stage_has_not_run(tmp_path):
     assert RunPaths(tmp_path).unsafe_instance_dir_names() == []
 
 
+def test_input_file_resolves_under_the_inputs_directory():
+    run = RunPaths("/runs/run-1")
+    assert run.input_file("aap2-api.json") == Path("/runs/run-1/00-inputs/aap2-api.json")
+
+
+def test_input_file_refuses_an_unsafe_stored_name():
+    run = RunPaths("/runs/run-1")
+    with pytest.raises(UnsafeSegment):
+        run.input_file("../../etc/passwd")
+
+
 def test_is_safe_segment_agrees_with_safe_segment():
     """One definition of safety, asked two ways."""
     for good in ("scn-001", "aap2.api.json", "a"):

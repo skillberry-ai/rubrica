@@ -35,6 +35,8 @@ from testgen.emit import emit_run
 from testgen.paths import RunPaths
 from testgen.refs import check_all
 from tests.builders import (
+    MINIMAL_INPUT_BYTES,
+    MINIMAL_INPUT_NAME,
     minimal_claims,
     minimal_coverage,
     minimal_expected,
@@ -50,7 +52,17 @@ SID = "scn-001"
 
 
 def _intake(run: RunPaths) -> None:
+    """The manifest plus the registered copy whose digest it records.
+
+    Writing the manifest alone was a fiction: intake copies every input into
+    00-inputs/ and hashes it, and refs.check_inputs re-verifies that. The
+    builder's sha256 is the digest of MINIMAL_INPUT_BYTES, so this state
+    satisfies the check by construction -- if it needed a tolerance in
+    check_inputs to pass, the check would not be worth having.
+    """
     write_json(run.manifest, minimal_manifest())
+    run.inputs_dir.mkdir(parents=True, exist_ok=True)
+    run.input_file(MINIMAL_INPUT_NAME).write_bytes(MINIMAL_INPUT_BYTES)
 
 
 def _extract(run: RunPaths) -> None:
@@ -186,6 +198,7 @@ def test_the_states_are_cumulative_so_the_last_one_is_a_complete_run(tmp_path):
     """
     run = build_state(tmp_path, STATE_NAMES[-1])
     assert run.manifest.is_file()
+    assert run.input_file(MINIMAL_INPUT_NAME).is_file()
     assert run.claims("aap2-api").is_file()
     assert run.world_model.is_file()
     assert run.scenarios.is_file()

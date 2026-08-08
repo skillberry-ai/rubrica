@@ -26,11 +26,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from testgen.artifacts import ArtifactError, read_json
+from testgen.artifacts import ArtifactError, read_json, sha256_of
 from testgen.findings import Finding
 from testgen.invariants import InvariantForm
 from testgen.invariants import evaluate as evaluate_invariant
-from testgen.paths import RunPaths
+from testgen.paths import RunPaths, is_safe_segment
 
 _CELL_RE = re.compile(r"\Acell:([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
 _GOAL_RE = re.compile(r"\Agoal:([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
@@ -221,6 +221,80 @@ def check_manifest(run: RunPaths) -> list[Finding]:
                             f"evidence cites unregistered artifact: {evidence['artifact_id']}",
                         )
                     )
+    return out
+
+
+def check_inputs(run: RunPaths) -> list[Finding]:
+    """The bytes in 00-inputs/ against the digests the manifest records.
+
+    The reproducibility claim rests on this and nothing checked it. Two runs are
+    comparable only if they read the same inputs, and manifest.inputs[].sha256 is
+    the only record of what those were; a registered copy edited after intake
+    makes every claim derived from it unattributable while every other gate in
+    the project stays green.
+
+    This re-hashes on every check-refs call, which is once per stage. Slice 1
+    registers an api.json, a schema.json and a handful of traces, so the cost is
+    milliseconds. If a large source tree is ever registered, the fix is a
+    size-and-mtime shortcut here, not skipping the check.
+
+    `stored_as` is validated rather than joined blindly: paths.input_file raises
+    UnsafeSegment, which cli.py maps to exit 2, and a bad value in a stage output
+    is a repairable defect that must arrive as a finding instead.
+    """
+    manifest = _load(run.manifest)
+    if manifest is None:
+        return []
+    out: list[Finding] = []
+    for i, entry in enumerate(manifest["inputs"]):
+        artifact_id = entry["artifact_id"]
+        stored_as = entry["stored_as"]
+        if not is_safe_segment(stored_as):
+            out.append(
+                Finding(
+                    run.manifest,
+                    "refs",
+                    f"/inputs/{i}/stored_as",
+                    f"{stored_as!r} is not a safe path segment, so the registered copy of "
+                    f"{artifact_id!r} cannot be located",
+                )
+            )
+            continue
+        path = run.input_file(stored_as)
+        if not path.is_file():
+            out.append(
+                Finding(
+                    run.manifest,
+                    "refs",
+                    f"/inputs/{i}/stored_as",
+                    f"registered input {artifact_id!r} has no stored copy at {path}",
+                )
+            )
+            continue
+        actual = sha256_of(path)
+        if actual != entry["sha256"]:
+            out.append(
+                Finding(
+                    path,
+                    "refs",
+                    "",
+                    f"stored bytes hash to {actual} but the manifest records {entry['sha256']} "
+                    f"for {artifact_id!r}; the registered copy has been edited since intake, so "
+                    "nothing derived from it is attributable to these inputs",
+                )
+            )
+            continue
+        size = path.stat().st_size
+        if size != entry["bytes"]:
+            out.append(
+                Finding(
+                    path,
+                    "refs",
+                    "",
+                    f"stored copy is {size} bytes but the manifest records {entry['bytes']} for "
+                    f"{artifact_id!r}",
+                )
+            )
     return out
 
 
@@ -1074,6 +1148,7 @@ def check_all(run: RunPaths) -> list[Finding]:
     """Every layer-2 check that the run directory currently has inputs for."""
     findings: list[Finding] = []
     findings.extend(check_manifest(run))
+    findings.extend(check_inputs(run))
     findings.extend(check_limits(run))
     findings.extend(check_world_model(run))
     findings.extend(check_scenarios(run))

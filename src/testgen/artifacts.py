@@ -11,6 +11,7 @@ half-written artifact that the next stage would read as valid JSON.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -33,6 +34,15 @@ def read_json(path: Path | str) -> Any:
         return json.loads(text)
     except json.JSONDecodeError as exc:
         raise ArtifactError(f"malformed JSON in {path}: {exc}") from exc
+
+
+def sha256_of(path: Path | str) -> str:
+    """Hex digest of a file's bytes, streamed so a large trace is fine."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 16), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def write_json(path: Path | str, payload: Any) -> None:

@@ -111,6 +111,23 @@ def test_manifest_rejects_a_short_sha(tmp_path):
     assert _findings(tmp_path, "manifest", payload)
 
 
+def test_manifest_requires_stored_as(tmp_path):
+    """stored_as is what makes the manifest self-describing for refs.check_inputs.
+
+    Without it, a reader re-verifying a digest would have to re-derive
+    intake's naming rule instead of reading the name intake actually used.
+    """
+    payload = minimal_manifest()
+    del payload["inputs"][0]["stored_as"]
+    assert _findings(tmp_path, "manifest", payload)
+
+
+def test_manifest_rejects_an_unsafe_stored_as(tmp_path):
+    payload = minimal_manifest()
+    payload["inputs"][0]["stored_as"] = "../../etc/passwd"
+    assert _findings(tmp_path, "manifest", payload)
+
+
 def test_manifest_rejects_an_unknown_stage_name(tmp_path):
     payload = minimal_manifest()
     payload["stages"]["reconsile"] = payload["stages"].pop("reconcile")

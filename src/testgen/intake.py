@@ -11,15 +11,14 @@ to disagree in its claims.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
-from testgen.artifacts import write_json
-from testgen.paths import RunPaths, safe_segment
+from testgen.artifacts import sha256_of, write_json
+from testgen.paths import RunPaths, is_safe_segment, safe_segment
 
 _SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".go", ".rs", ".java", ".rb"}
 _DOC_SUFFIXES = {".md", ".rst", ".txt", ".adoc"}
@@ -48,13 +47,17 @@ def slug(value: str) -> str:
     return safe_segment(trimmed) if trimmed else "input"
 
 
-def sha256_of(path: Path) -> str:
-    """Hex digest of a file's bytes, streamed so a large trace is fine."""
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 16), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def stored_name(artifact_id: str, source: Path) -> str:
+    """The filename an input is registered under inside 00-inputs/.
+
+    The suffix is cosmetic and the artifact id is the identity, so a suffix that
+    would make the name an unsafe path segment is dropped rather than sanitised
+    into something unrecognisable or raised on. Raising would turn a perfectly
+    registrable input into a misconfigured-harness exit 2; keeping it would put
+    a name in manifest.stored_as that paths.input_file refuses to join.
+    """
+    candidate = f"{artifact_id}{Path(source).suffix.lower()}"
+    return candidate if is_safe_segment(candidate) else artifact_id
 
 
 def _json_or_none(path: Path):
@@ -146,12 +149,14 @@ def intake(
     run.inputs_dir.mkdir(parents=True)
     entries = []
     for path, artifact_id in zip(inputs, _unique_ids(inputs), strict=True):
-        destination = run.inputs_dir / f"{artifact_id}{path.suffix.lower()}"
+        stored_as = stored_name(artifact_id, path)
+        destination = run.inputs_dir / stored_as
         shutil.copy2(path, destination)
         entries.append(
             {
                 "artifact_id": artifact_id,
                 "source_path": str(path),
+                "stored_as": stored_as,
                 "sha256": sha256_of(path),
                 "kind": classify(path),
                 "bytes": path.stat().st_size,
