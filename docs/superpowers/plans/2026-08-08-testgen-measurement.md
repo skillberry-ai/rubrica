@@ -3377,7 +3377,6 @@ def test_an_emitted_package_the_report_never_ran_is_reported(tmp_path):
     """
     run = _smoked(tmp_path)
     payload = read_json(run.report)
-    payload["tasks"][0]["scenario_id"] = payload["tasks"][0]["scenario_id"]
     payload["tasks"] = []
     write_json(run.report, payload)
     assert any("was never run" in f.message for f in check_report(run))
