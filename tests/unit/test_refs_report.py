@@ -45,7 +45,12 @@ def test_a_report_naming_a_scenario_that_was_never_proposed_is_reported(tmp_path
     payload = read_json(run.report)
     payload["tasks"][0]["scenario_id"] = "scn-ghost"
     write_json(run.report, payload)
-    assert any("scn-ghost" in f.message for f in check_report(run))
+    # Pinned on the pointer, not just the message: with the `scenario is None`
+    # branch deleted, this used to still fail -- via an AttributeError at the
+    # following elif, which also indexes `scenario`. That crash proved the
+    # mutation was detected, not that this test asserts on the branch's own
+    # finding. This pointer is unique to this branch for a ghost id.
+    assert any(f.pointer == "/tasks/0/scenario_id" for f in check_report(run))
 
 
 def test_an_active_scenario_with_no_package_is_reported(tmp_path):
@@ -124,7 +129,13 @@ def test_a_declared_role_missing_from_a_task_is_reported(tmp_path):
         r for r in payload["tasks"][0]["results"] if r["role"] != "oracle"
     ]
     write_json(run.report, payload)
-    assert any("oracle" in f.message for f in check_report(run))
+    # Pinned on the pointer, not just the message: the seam-recomputation
+    # findings (/summary/mean_reward_by_role, /verdict) also incidentally
+    # contain the substring "oracle" once its result is stripped -- the former
+    # because it repr's the stale declared dict, which still has an "oracle"
+    # key. Only this loop emits /tasks/0/results.
+    findings = check_report(run)
+    assert any(f.pointer == "/tasks/0/results" and "oracle" in f.message for f in findings)
 
 
 def test_a_roster_without_a_required_role_is_reported(tmp_path):
@@ -134,7 +145,12 @@ def test_a_roster_without_a_required_role_is_reported(tmp_path):
     for task in payload["tasks"]:
         task["results"] = [r for r in task["results"] if r["role"] != "weak_baseline"]
     write_json(run.report, payload)
-    assert any("weak_baseline" in f.message for f in check_report(run))
+    # Pinned on the pointer, not just the message: /summary/mean_reward_by_role
+    # also repr's the stale declared dict, which still has a "weak_baseline"
+    # key, and /verdict fires too (smoke.verdict_for has its own REQUIRED_ROLES
+    # gate). Only this loop emits /agents.
+    findings = check_report(run)
+    assert any(f.pointer == "/agents" and "weak_baseline" in f.message for f in findings)
 
 
 @pytest.mark.parametrize(
@@ -169,6 +185,68 @@ def test_a_task_flag_that_does_not_match_its_results_is_reported(tmp_path):
     payload["tasks"][0]["all_pass"] = True
     write_json(run.report, payload)
     assert any("all_pass" in f.pointer for f in check_report(run))
+
+
+def test_a_task_with_no_results_is_reported_without_crashing(tmp_path):
+    """The precondition check_report disclaims: nothing orders `validate
+    --stage smoke` before check-refs, so a report missing a schema-required
+    key can legitimately arrive. smoke.comparable indexes `task["results"]`
+    directly and would raise KeyError; the guard before the seam turns that
+    into a finding naming the one task instead of a traceback naming none."""
+    run = _smoked(tmp_path)
+    payload = read_json(run.report)
+    del payload["tasks"][0]["results"]
+    write_json(run.report, payload)
+    findings = check_report(run)  # must not raise
+    assert any(f.pointer == "/tasks/0/results" for f in findings)
+
+
+def test_a_result_with_no_role_is_reported_without_crashing(tmp_path):
+    """smoke.summarize indexes `result["role"]` for every result, scored or
+    not, before it even checks whether the result was scored."""
+    run = _smoked(tmp_path)
+    payload = read_json(run.report)
+    del payload["tasks"][0]["results"][0]["role"]
+    write_json(run.report, payload)
+    findings = check_report(run)  # must not raise
+    assert any(f.pointer == "/tasks/0/results" for f in findings)
+
+
+def test_a_scored_result_with_no_reward_is_reported_without_crashing(tmp_path):
+    """smoke.task_flags and smoke.summarize both index `result["reward"]`
+    directly once a result is scored."""
+    run = _smoked(tmp_path)
+    payload = read_json(run.report)
+    del payload["tasks"][0]["results"][0]["reward"]
+    write_json(run.report, payload)
+    findings = check_report(run)  # must not raise
+    assert any(f.pointer == "/tasks/0/results" for f in findings)
+
+
+def test_a_task_with_no_scenario_id_does_not_crash_the_duplicate_check(tmp_path):
+    """`named` can hold None; sorting the raw set used to raise TypeError
+    (str vs NoneType) before the ghost-scenario finding for this task could
+    even be produced."""
+    run = _smoked(tmp_path)
+    payload = read_json(run.report)
+    second = dict(payload["tasks"][0])
+    del second["scenario_id"]
+    payload["tasks"].append(second)
+    write_json(run.report, payload)
+    findings = check_report(run)  # must not raise
+    assert any(f.pointer == "/tasks/1/scenario_id" for f in findings)
+
+
+def test_a_present_report_that_is_not_an_object_is_reported(tmp_path):
+    """The tolerance is applied at depth 0 (absent -- see
+    test_no_report_is_not_a_finding) and must not be abandoned at depth 2
+    (present, but not even an object): both are ungated arrivals, and only the
+    first is legitimate."""
+    run = _smoked(tmp_path)
+    write_json(run.report, ["not", "an", "object"])
+    findings = check_report(run)
+    assert len(findings) == 1
+    assert findings[0].pointer == ""
 
 
 def test_a_verdict_that_does_not_match_the_data_is_reported(tmp_path):

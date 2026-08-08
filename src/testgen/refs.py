@@ -1191,6 +1191,32 @@ def check_suite(run: RunPaths) -> list[Finding]:
     return out
 
 
+def _malformed_task_results(task: dict) -> str | None:
+    """None if `task["results"]` is shaped well enough for smoke's own functions
+    to index directly; otherwise a message naming what is missing.
+
+    check_report's `.get()` tolerance stops at the top of each result: smoke's
+    `comparable`, `task_flags`, and `summarize` all index `results`, `role`
+    (unconditionally, for every result -- `summarize` checks `result["role"] ==
+    "oracle"` before it looks at whether the result was even scored), and
+    `reward` (for a scored result) directly, because layer 1 normally guarantees
+    they are there. A report that arrives before `validate --stage smoke` has
+    run can be missing any of them. This is what turns that into a finding
+    naming one task instead of a traceback that names none.
+    """
+    results = task.get("results")
+    if not isinstance(results, list):
+        return "results is missing or not a list"
+    for result in results:
+        if not isinstance(result, dict):
+            return "a result is not an object"
+        if "role" not in result:
+            return "a result has no role"
+        if result.get("scored") and "reward" not in result:
+            return "a scored result has no reward"
+    return None
+
+
 def check_report(run: RunPaths) -> list[Finding]:
     """07-report.json against 06-suite/, and its own arithmetic against its results.
 
@@ -1214,13 +1240,29 @@ def check_report(run: RunPaths) -> list[Finding]:
 
     `.get()` throughout: nothing orders `validate --stage smoke` before
     check-refs, so an ungated report can legitimately arrive. Same exception
-    check_suite documents, same reason.
+    check_suite documents, same reason. That tolerance has to hold all the way
+    down to smoke's own functions, not just at this module's boundary: a task
+    whose `results` don't have the shape smoke indexes directly is excluded from
+    the flag comparison and from the summary/verdict recomputation, via
+    `_malformed_task_results`, rather than handed to smoke to crash on. A
+    present report that is not even an object gets one whole-document finding
+    instead of being silently waved through the way an absent one is.
     """
     from testgen import smoke
 
     report = _load(run.report)
-    if not isinstance(report, dict):
+    if report is None:
         return []
+    if not isinstance(report, dict):
+        return [
+            Finding(
+                run.report,
+                "refs",
+                "",
+                "07-report.json is valid JSON but not an object, so none of its fields "
+                "can be checked",
+            )
+        ]
     out: list[Finding] = []
 
     def report_finding(pointer: str, message: str) -> None:
@@ -1254,6 +1296,7 @@ def check_report(run: RunPaths) -> list[Finding]:
 
     tasks = [task for task in report.get("tasks") or [] if isinstance(task, dict)]
     named: list[str] = []
+    well_formed_tasks: list[dict] = []
     for i, task in enumerate(tasks):
         sid = task.get("scenario_id")
         named.append(sid)
@@ -1284,6 +1327,17 @@ def check_report(run: RunPaths) -> list[Finding]:
                     f"{role} is declared in /agents but produced no result for {sid!r}, so its "
                     "mean is taken over a different task set than the other roles",
                 )
+        malformed = _malformed_task_results(task)
+        if malformed is not None:
+            report_finding(
+                f"/tasks/{i}/results",
+                f"{malformed}, so this task cannot be checked against smoke's own "
+                "arithmetic; excluded from the flag and summary recomputation below "
+                "rather than crashing it",
+            )
+            continue
+        well_formed_tasks.append(task)
+
         expected_pass, expected_fail = smoke.task_flags(task, roles)
         for key, value in (("all_pass", expected_pass), ("all_fail", expected_fail)):
             if task.get(key) is not value:
@@ -1292,7 +1346,11 @@ def check_report(run: RunPaths) -> list[Finding]:
                     f"declared {task.get(key)!r} but the results say {value!r}",
                 )
 
-    for sid in sorted(set(named)):
+    # key=str: `named` can hold None for a task with no scenario_id (already
+    # reported above, via the ghost-scenario branch), and None does not compare
+    # against str -- sorting the raw set would raise before that finding's
+    # message could be read.
+    for sid in sorted(set(named), key=str):
         if named.count(sid) > 1:
             report_finding(
                 "/tasks",
@@ -1306,7 +1364,7 @@ def check_report(run: RunPaths) -> list[Finding]:
             "has executed",
         )
 
-    expected_summary = smoke.summarize(tasks, roles)
+    expected_summary = smoke.summarize(well_formed_tasks, roles)
     declared_summary = report.get("summary") or {}
     for key, value in expected_summary.items():
         if declared_summary.get(key) != value:
@@ -1315,7 +1373,7 @@ def check_report(run: RunPaths) -> list[Finding]:
                 f"declared {declared_summary.get(key)!r} but the results give {value!r}",
             )
 
-    expected_verdict = smoke.verdict_for(tasks, expected_summary, roles)
+    expected_verdict = smoke.verdict_for(well_formed_tasks, expected_summary, roles)
     if report.get("verdict") != expected_verdict:
         report_finding(
             "/verdict",
