@@ -24,12 +24,15 @@ output.
 from __future__ import annotations
 
 import dataclasses
+import json
 import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from testgen.artifacts import read_json
-from testgen.emit import AGENT_TIMEOUT_SEC
+from testgen.emit import AGENT_TIMEOUT_SEC, VERIFIER_TIMEOUT_SEC
 from testgen.errors import UsageError
 from testgen.findings import format_findings
 from testgen.validate import validate_artifact
@@ -150,3 +153,185 @@ def preflight(specs: tuple[AgentSpec, ...]) -> tuple[AgentSpec, ...]:
             dataclasses.replace(spec, command=(str(Path(found).resolve()), *spec.command[1:]))
         )
     return tuple(resolved)
+
+
+def scrubbed_env() -> dict[str, str]:
+    """The environment an emitted verifier runs in.
+
+    PYTHONPATH is emptied and PATH is minimal so that an emitted verifier which
+    quietly grew a third-party or testgen import fails here rather than on the
+    platform. The interpreter is additionally invoked with -S (see
+    verifier_argv), which is what actually removes site-packages: under the dev
+    interpreter testgen is installed editable, so clearing PYTHONPATH alone
+    leaves it importable and the stdlib-only constraint enforced by nothing.
+
+    PYTHONDONTWRITEBYTECODE keeps __pycache__ out of the emitted package, which
+    would otherwise appear in 06-suite/ and be shipped.
+    """
+    return {"PATH": "/usr/bin:/bin", "PYTHONPATH": "", "PYTHONDONTWRITEBYTECODE": "1"}
+
+
+def verifier_argv(task_dir: Path, *, agent_logs: Path, out_dir: Path) -> list[str]:
+    """The verifier invocation, matching the three arguments test.sh passes.
+
+    Kept in one function so the local invocation and the container's cannot
+    drift: a package that scores here has to score there, and the only way to
+    keep that true is for the argument list to have one definition.
+    """
+    return [
+        sys.executable,
+        "-S",
+        str(task_dir / "tests" / "verify.py"),
+        "--expected",
+        str(task_dir / "tests" / "expected.json"),
+        "--agent-logs",
+        str(agent_logs),
+        "--out",
+        str(out_dir),
+    ]
+
+
+def _decode(output: str | bytes | None) -> str:
+    """Normalise a subprocess's captured stream to str, treating None as empty.
+
+    Exists for TimeoutExpired.stdout/.stderr specifically: subprocess.run's
+    text=True decodes a *successful* communicate() return, but a timeout raises
+    from inside communicate() with the raw bytes it had collected so far, before
+    that decoding step runs -- so the partial output on a timeout is bytes even
+    though the call asked for text.
+    """
+    if output is None:
+        return ""
+    if isinstance(output, bytes):
+        return output.decode("utf-8", errors="replace")
+    return output
+
+
+def run_agent(
+    spec: AgentSpec,
+    *,
+    task_dir: Path,
+    logs_dir: Path,
+    stderr_path: Path,
+    scenario_id: str,
+) -> tuple[int | None, str]:
+    """Execute one role's command for one task. -> (returncode, note).
+
+    A returncode of None means the command timed out. The note is empty on a
+    clean run and otherwise says what happened, in one clause, for the report.
+
+    The command's own stdout is captured into logs_dir as agent-stdout.jsonl, so
+    a runner that streams stream-json to stdout needs no wrapper; a runner that
+    writes its own transcript files into logs_dir works too, because verify.py
+    concatenates every *.jsonl and *.txt it finds there.
+
+    **stderr goes outside logs_dir on purpose.** verify.py globs *.txt in the
+    agent log directory, so a diagnostic written inside it would be read back as
+    transcript input -- and a warning line that happened to quote the reference
+    answer would satisfy an answer_contains assertion the agent never earned.
+
+    A timeout writes out whatever the command had already produced. A partial
+    transcript still scores, and killing the whole smoke run because one agent
+    hung would discard every other role's data on every remaining task, which is
+    the comparison the run exists to make.
+    """
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    stderr_path.parent.mkdir(parents=True, exist_ok=True)
+    argv = substitute(spec.command, task_dir=task_dir, logs_dir=logs_dir, scenario_id=scenario_id)
+    stdout_path = logs_dir / "agent-stdout.jsonl"
+    try:
+        completed = subprocess.run(
+            list(argv),
+            cwd=task_dir,
+            capture_output=True,
+            text=True,
+            timeout=spec.timeout_sec,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        # CPython quirk, not a text=True bug in this code: on a timeout with
+        # partial output, TimeoutExpired.stdout/.stderr carry raw bytes even
+        # though text=True was passed -- the newline/encoding translation that
+        # normally runs happens only on communicate()'s *successful* return, a
+        # path a timeout never reaches. Decode defensively rather than let a
+        # hung agent's partial transcript raise TypeError instead of scoring.
+        stdout_path.write_text(_decode(exc.stdout), encoding="utf-8")
+        stderr_path.write_text(_decode(exc.stderr), encoding="utf-8")
+        return None, f"agent timed out after {spec.timeout_sec} s"
+    stdout_path.write_text(completed.stdout, encoding="utf-8")
+    stderr_path.write_text(completed.stderr, encoding="utf-8")
+    if completed.returncode != 0:
+        return completed.returncode, f"agent exited {completed.returncode}"
+    return 0, ""
+
+
+def verify_package(
+    task_dir: Path,
+    *,
+    agent_logs: Path,
+    out_dir: Path,
+    stderr_path: Path,
+    timeout_sec: float = VERIFIER_TIMEOUT_SEC,
+) -> tuple[int | None, dict | None, str]:
+    """Score one task with the package's own verifier. -> (code, reward, note).
+
+    **The copied verify.py, not the library import.** Layer 3 asks whether the
+    emitted suite executes, so a verifier that emit mangled on the way into the
+    package has to fail here; importing the tested original would answer an
+    easier question and let a broken suite through the gate.
+
+    A reward of None means the task is not scoreable for this role, which the
+    report records as `scored: false`. It is **never** recorded as 0.0. The
+    verifier exits 2 and writes no reward.txt when it refuses a contract it
+    cannot read, because that is a bypassed authoring gate rather than a bad
+    agent run -- and scoring it zero would invert exactly that conclusion.
+    """
+    verify_py = task_dir / "tests" / "verify.py"
+    if not verify_py.is_file():
+        return None, None, "package has no tests/verify.py"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stderr_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        completed = subprocess.run(
+            verifier_argv(task_dir, agent_logs=agent_logs, out_dir=out_dir),
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+            env=scrubbed_env(),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None, None, f"verifier timed out after {timeout_sec} s"
+    stderr_path.write_text(completed.stderr, encoding="utf-8")
+
+    reward_path = out_dir / "reward.json"
+    if completed.returncode != 0 or not reward_path.is_file():
+        return completed.returncode, None, _refusal_note(out_dir, completed)
+    try:
+        reward = json.loads(reward_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return completed.returncode, None, f"verifier wrote an unreadable reward.json: {exc}"
+    if not isinstance(reward, dict):
+        return completed.returncode, None, "verifier wrote a reward.json that is not an object"
+    return completed.returncode, reward, ""
+
+
+def _refusal_note(out_dir: Path, completed: subprocess.CompletedProcess) -> str:
+    """Why the verifier produced no score, preferring its own stated reason.
+
+    verify.py writes reward-detail.json with an `error` key when it refuses, and
+    that message names the contract field that is wrong. Falling back to stderr
+    first would report a Python traceback where a one-line diagnosis exists.
+    """
+    detail = out_dir / "reward-detail.json"
+    if detail.is_file():
+        try:
+            payload = json.loads(detail.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            payload = None
+        if isinstance(payload, dict) and payload.get("error"):
+            return str(payload["error"])
+    tail = (completed.stderr or "").strip().splitlines()
+    if tail:
+        return f"verifier exited {completed.returncode}: {tail[-1][:200]}"
+    return f"verifier exited {completed.returncode} with no diagnostic"

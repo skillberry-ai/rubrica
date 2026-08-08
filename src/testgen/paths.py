@@ -148,6 +148,25 @@ class RunPaths:
     def task_dir(self, scenario_id: str) -> Path:
         return self.suite_dir / safe_segment(scenario_id)
 
+    @property
+    def measurement_dir(self) -> Path:
+        """Outputs of the measurement tools, which are not pipeline stages.
+
+        Kept out of the numbered prefixes on purpose: those are the stage
+        contract, and STAGES/STAGE_ARTIFACTS must not grow an entry for a tool
+        that no orchestrator dispatches.
+        """
+        return self.root / "measurement"
+
+    def smoke_dir(self, role: str, scenario_id: str) -> Path:
+        """Where one (role, task) execution's logs go.
+
+        The `agent/` and `verifier/` children below this mirror Harbor's
+        /logs/agent and /logs/verifier, so the verifier is handed the same paths
+        it is handed in the container.
+        """
+        return self.measurement_dir / "smoke" / safe_segment(role) / safe_segment(scenario_id)
+
     # -- listings --------------------------------------------------------
     def _instance_dir_names(self) -> list[str]:
         if not self.instances_dir.is_dir():

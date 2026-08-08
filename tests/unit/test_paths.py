@@ -73,6 +73,18 @@ def test_per_id_artifact_paths():
     assert rp.rationale("scn-001") == Path("/runs/r1/04-instances/scn-001/rationale.md")
     assert rp.verdict("scn-001") == Path("/runs/r1/05-verdicts/scn-001.json")
     assert rp.task_dir("scn-001") == Path("/runs/r1/06-suite/scn-001")
+    assert rp.measurement_dir == Path("/runs/r1/measurement")
+    assert rp.smoke_dir("under_test", "scn-001") == Path(
+        "/runs/r1/measurement/smoke/under_test/scn-001"
+    )
+
+
+def test_smoke_dir_refuses_an_unsafe_role_or_scenario_id():
+    rp = RunPaths(Path("/runs/r1"))
+    with pytest.raises(UnsafeSegment):
+        rp.smoke_dir("../../etc", "scn-001")
+    with pytest.raises(UnsafeSegment):
+        rp.smoke_dir("under_test", "../../etc/passwd")
 
 
 def test_per_id_paths_refuse_unsafe_ids():
