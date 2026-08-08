@@ -392,3 +392,33 @@ def test_compare_gold_exits_two_on_a_malformed_gold_file(tmp_path, capsys):
     gold = _write_gold(tmp_path, payload)
     assert main(["compare-gold", "--run", str(run.root), "--gold", str(gold)]) == 2
     assert "unusable gold" in capsys.readouterr().err
+
+
+def test_diff_runs_emits_json_on_stdout_for_two_identical_runs(tmp_path, capsys):
+    run_a = build_state(tmp_path / "a", "emit")
+    run_b = build_state(tmp_path / "b", "emit")
+    assert main(["diff-runs", "--a", str(run_a.root), "--b", str(run_b.root)]) == 0
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert report["comparable"] is True
+    assert captured.err == ""
+
+
+def test_diff_runs_warns_on_stderr_when_the_runs_read_different_inputs(tmp_path, capsys):
+    run_a = build_state(tmp_path / "a", "emit")
+    run_b = build_state(tmp_path / "b", "emit")
+    manifest = json.loads(run_b.manifest.read_text(encoding="utf-8"))
+    manifest["inputs"][0]["sha256"] = "f" * 64
+    write_json(run_b.manifest, manifest)
+
+    code = main(["diff-runs", "--a", str(run_a.root), "--b", str(run_b.root)])
+    captured = capsys.readouterr()
+    assert code == 0
+    report = json.loads(captured.out)
+    assert report["comparable"] is False
+    assert "different input" in captured.err
+
+
+def test_diff_runs_exits_two_on_a_nonexistent_b_directory(tmp_path):
+    run_a = build_state(tmp_path / "a", "emit")
+    assert main(["diff-runs", "--a", str(run_a.root), "--b", str(tmp_path / "absent")]) == 2

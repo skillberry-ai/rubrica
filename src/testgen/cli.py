@@ -48,6 +48,7 @@ from testgen.intake import intake
 from testgen.paths import STAGES, RunPaths
 from testgen.recall import compare_run, render
 from testgen.smoke import load_agents, preflight, smoke_run
+from testgen.stability import diff_runs
 from testgen.validate import UnknownStage, validate_stage
 
 CLEAN, FINDINGS, USAGE = 0, 1, 2
@@ -89,6 +90,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_gold.add_argument("--run", required=True)
     p_gold.add_argument("--gold", required=True, metavar="PATH")
+
+    p_diff = subparsers.add_parser("diff-runs", help="per-stage stability across two runs")
+    p_diff.add_argument("--a", required=True)
+    p_diff.add_argument("--b", required=True)
     return parser
 
 
@@ -196,6 +201,18 @@ def main(argv: list[str] | None = None) -> int:
                 return USAGE
             print(render(report))
             return _report(findings)
+
+        if args.command == "diff-runs":
+            report = diff_runs(_run_dir(args.a), _run_dir(args.b))
+            print(json.dumps(report, indent=2, sort_keys=True))
+            if not report["comparable"]:
+                # stderr, not a finding. Exit 1 means finding lines on stdout, and
+                # a JSON document mixed with them would break the orchestrator's
+                # line parser -- so incomparability is data in the JSON plus a
+                # warning a human sees.
+                for reason in report["incomparable_reasons"]:
+                    print(f"warning: {reason}", file=sys.stderr)
+            return CLEAN
     except (FileNotFoundError, ArtifactError, UnknownStage) as exc:
         # A run directory that cannot be read, an artifact that is absent or is
         # not JSON at all, an unknown stage name: the harness was pointed at
