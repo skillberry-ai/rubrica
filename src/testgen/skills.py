@@ -213,6 +213,29 @@ def load(path: Path | str) -> Skill:
     return Skill(name=path.parent.name, path=path, contract=contract, headings=headings, body=text)
 
 
+def _skill_dirs(root: Path) -> list[Path]:
+    """Every child of `root` that holds a SKILL_FILENAME, sorted by name.
+
+    discover() and check_all() both walk `root` this way, so the walk --
+    and the one failure mode it can have -- lives here once rather than
+    twice. `root.is_dir()` in each caller already proves `root` exists;
+    what can still raise here is `root.iterdir()` on a directory that
+    exists but cannot be read (permission denied), and, one level
+    narrower, `is_file()` on a *child* whose own permissions deny stat'ing
+    its contents: Path.is_file() only swallows ENOENT/ENOTDIR/EBADF/ELOOP
+    internally, not EACCES, confirmed by running it against a chmod(0o000)
+    directory rather than assumed from the docs. Either shape is a
+    filesystem permission problem on a prompt directory, not a missing
+    directory -- and cli.py's generic `except Exception` would otherwise
+    turn either into a fabricated exit-1 [internal] finding advising a
+    run-directory repair for a problem that has nothing to do with any run.
+    """
+    try:
+        return [child for child in sorted(root.iterdir()) if (child / SKILL_FILENAME).is_file()]
+    except OSError as exc:
+        raise UsageError(f"cannot read skills directory: {root} ({exc})") from exc
+
+
 def discover(root: Path | str | None = None) -> list[Skill]:
     """Every skill under `root` (default skills_dir()), sorted by name.
 
@@ -224,11 +247,7 @@ def discover(root: Path | str | None = None) -> list[Skill]:
     root = Path(root) if root is not None else skills_dir()
     if not root.is_dir():
         raise UsageError(f"skills directory does not exist: {root}")
-    return [
-        load(child / SKILL_FILENAME)
-        for child in sorted(root.iterdir())
-        if (child / SKILL_FILENAME).is_file()
-    ]
+    return [load(child / SKILL_FILENAME) for child in _skill_dirs(root)]
 
 
 def _is_subsequence(needles: tuple[str, ...], haystack: tuple[str, ...]) -> bool:
@@ -441,10 +460,8 @@ def check_all(root: Path | str | None = None) -> list[Finding]:
     found_names: set[str] = set()
     out: list[Finding] = []
 
-    for child in sorted(root.iterdir()):
+    for child in _skill_dirs(root):
         skill_path = child / SKILL_FILENAME
-        if not skill_path.is_file():
-            continue
         name = child.name
         if name not in expected:
             out.append(

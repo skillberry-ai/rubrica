@@ -13,11 +13,13 @@ the mutated key.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from testgen.cli import subcommand_names
+from testgen.errors import UsageError
 from testgen.paths import STAGES, RunPaths
 from testgen.skills import (
     ORCHESTRATOR,
@@ -25,6 +27,7 @@ from testgen.skills import (
     SKILL_FILENAME,
     check_all,
     check_contract,
+    discover,
     expected_skill_names,
     load,
 )
@@ -419,6 +422,77 @@ def test_check_all_reports_a_directory_that_is_not_a_known_skill(tmp_path):
     (tmp_path / "tg-extractt" / "SKILL.md").parent.mkdir()
     (tmp_path / "tg-extractt" / "SKILL.md").write_text("stray\n", encoding="utf-8")
     assert "tg-extractt" in messages(check_all(tmp_path))
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)"
+)
+def test_discover_on_an_unreadable_skills_directory_is_a_usage_error(tmp_path):
+    """root.is_dir() is true -- the directory exists -- but chmod(0o000) denies
+    the read+execute permission root.iterdir() needs to list it, so it raises a
+    bare PermissionError (an OSError), not the empty list a missing-or-empty
+    directory would give and not the UsageError the sibling check two lines up
+    already raises for a directory that does not exist at all. Left unwrapped,
+    this would reach cli.py's generic except Exception and become exit 1 with a
+    fabricated [internal] finding advising a stage repair for a filesystem
+    permission problem that has nothing to do with any run.
+    """
+    root = tmp_path / "skills"
+    root.mkdir()
+    write_skill(root, "tg-extract")
+    root.chmod(0o000)
+    try:
+        with pytest.raises(UsageError) as excinfo:
+            discover(root)
+    finally:
+        root.chmod(0o755)  # restore so tmp_path's own cleanup can remove it
+    assert str(root) in str(excinfo.value)
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)"
+)
+def test_check_all_on_an_unreadable_skills_directory_is_a_usage_error(tmp_path):
+    """The same permission-denied root as discover() above, through check_all()
+    instead: both functions share the walk (and now the mapping) in
+    skills._skill_dirs, so this pins that the sharing did not leave check_all()
+    with a stale, unwrapped iterdir() call of its own.
+    """
+    root = tmp_path / "skills"
+    root.mkdir()
+    write_skill(root, "tg-extract")
+    root.chmod(0o000)
+    try:
+        with pytest.raises(UsageError) as excinfo:
+            check_all(root)
+    finally:
+        root.chmod(0o755)
+    assert str(root) in str(excinfo.value)
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)"
+)
+def test_discover_on_a_skill_directory_that_denies_stat_is_a_usage_error(tmp_path):
+    """The narrower case: the *root* is readable, but a *child* skill directory
+    is not, so root.iterdir() itself succeeds and the failure is in
+    `(child / SKILL_FILENAME).is_file()` needing to stat inside a directory it
+    cannot enter. Confirmed by direct experiment, not assumed from the docs,
+    that Path.is_file() does not swallow this the way it swallows a missing
+    path: it only ignores ENOENT/ENOTDIR/EBADF/ELOOP internally, and
+    permission-denied is none of those, so it raises here exactly as
+    root.iterdir() does above, into the same except OSError in _skill_dirs.
+    """
+    root = tmp_path / "skills"
+    root.mkdir()
+    child = write_skill(root, "tg-extract").parent
+    child.chmod(0o000)
+    try:
+        with pytest.raises(UsageError) as excinfo:
+            discover(root)
+    finally:
+        child.chmod(0o755)
+    assert str(root) in str(excinfo.value)
 
 
 def test_the_RunPaths_names_the_real_skills_use_all_exist():
