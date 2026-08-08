@@ -25,6 +25,7 @@ Every task's requirements implicitly include this section. Values are verbatim.
   1. *Substring-of-message* — the assertion searches for a literal that some other finding's message also contains, so deleting the check leaves the test green.
   2. *Fixture-cannot-reach* — the fixture has one of everything, so it cannot distinguish "filtered correctly" from "never filtered at all". It has nothing left over for the check to have missed.
   3. *Holds-identically-before-and-after* (hash luck) — the expected answer coincides with the mechanism under test, so the test cannot detect its substitution.
+- **Every filesystem call in a module whose failures are all exit-2 must map `OSError` to `UsageError`, and the catch tuples across sibling handlers must match.** This build hit the shape three times: `decide` catching only `UsageError` while its sibling `record-stage` caught `(UsageError, OSError)`; `skills.discover`/`check_all` guarding a *nonexistent* directory but leaving `iterdir()` on an unreadable one unwrapped; and, before this plan, `smoke.load_agents`, whose docstring records the first occurrence. In every case the symptom is identical and is the worst one available: a filesystem or configuration problem that **no stage wrote and no repair prompt can fix** surfaces as exit 1 with a fabricated finding telling the orchestrator to spend its one bounded repair attempt on an artifact that is fine. When adding or reviewing a handler, diff its catch tuple against its siblings' — an asymmetry between two handlers in the same file is the tell.
 - **At every fix, ask what the same mistake is one scope narrower.** Added mid-build, after this plan hit it twice in its first two tasks. Task 1 closed "the contract block is found anywhere in the file" and the identical defect survived *inside* the Contract section. Task 2 closed "the declared value is the wrong container type" and the identical defect survived at the *element* type. Both narrower cases were reachable, and in both cases the fix's own new tests missed them — because a test written to cover the case you just understood does not reach the case one level in. This is not deletion-mutation and not the three shapes below; it is a question to ask out loud in every fix round, and the answer goes in the report even when it is "none."
 - **A verified claim beats a plausible one, and a rationale is a claim.** Also added mid-build: this plan asserted twice, in successive rounds, that a particular test was weak, and both rationales were false — each survived until someone ran a mutation. When a report says a test is weak, redundant, or load-bearing, that statement must come with the mutation that established it, not the reasoning that suggested it.
 - **A skill is text, so text-level tests must assert structure, not vibes.** A test on a `SKILL.md` must assert a *structural* property — a required heading is present, heading A precedes heading B, a declared set equals a set imported from code — never a bare free-text substring, unless the substring is a value imported from code and the test says so. A free-text substring assertion on prose is shape 1 by construction.
@@ -542,10 +543,17 @@ def discover(root: Path | str | None = None) -> list[Skill]:
     root = Path(root) if root is not None else skills_dir()
     if not root.is_dir():
         raise UsageError(f"skills directory does not exist: {root}")
+    # iterdir() on a directory that exists but cannot be read raises
+    # PermissionError -- an OSError, which would escape to cli.py's generic
+    # catch and become exit 1 with a finding advising a repair against a run
+    # directory, for a permission problem on a prompt directory no stage wrote.
+    # Every failure in this module is exit 2, so the mapping belongs here.
+    try:
+        children = sorted(root.iterdir())
+    except OSError as exc:
+        raise UsageError(f"cannot read skills directory {root}: {exc}") from exc
     return [
-        load(child / SKILL_FILENAME)
-        for child in sorted(root.iterdir())
-        if (child / SKILL_FILENAME).is_file()
+        load(child / SKILL_FILENAME) for child in children if (child / SKILL_FILENAME).is_file()
     ]
 ```
 
@@ -1352,7 +1360,8 @@ assuming.
 - The effort choices come from the manifest schema, read at parser-build time, so there is no second copy of the enum. `validate.manifest_stage_efforts()` returns `tuple(schema["properties"]["stages"]["additionalProperties"]["properties"]["effort"]["enum"])`.
 - `record-stage` writes through `artifacts.write_json`, so the write is atomic and the canonical form is preserved. A stage entry appended with a hand-rolled `json.dump` would reformat the whole manifest and `diff-runs` would report formatting as variance.
 - `record-stage` takes `--skill PATH` and hashes it with `skills.skill_sha256`. It must **not** take a `--skill-sha256` string: a caller that can pass the digest can pass the wrong digest, and the whole point is that the recorded hash is of the file that was actually used.
-- Both subcommands are exit 2 on a bad argument (a missing manifest, an unknown stage, a `--skill` that does not exist), because they are driven by the orchestrator's own arguments rather than by a stage's output. Both are exit 0 on success and print nothing except the path they wrote — matching `intake`, which prints the run root.
+- Both subcommands are exit 2 on a bad argument (a missing manifest, an unknown stage, a `--skill` that does not exist), because they are driven by the orchestrator's own arguments rather than by a stage's output. Both are exit 0 on success and print nothing except the path they wrote — matching `intake`, which prints the run root. **"Every failure is exit 2" means the catch tuples must match**: both handlers catch `(UsageError, OSError)`. A handler catching only `UsageError` lets a `decisions.md` that is a directory, or a read-only run directory, exit 1 with a fabricated finding about a repairable stage defect — a misconfigured harness masquerading as something worth the orchestrator's one repair attempt. `smoke.load_agents`' docstring records this same lesson; treat a narrower catch on either as a Critical.
+- **Reject an empty or whitespace-only `--model` in `record_stage`.** The manifest schema already requires `minLength: 1`, so accepting one means exit 0 now and an exit-1 schema finding against `manifest.json` three steps later — a bad orchestrator argument reported as a malformed artifact. Enforce it where the mistake is made. `effort` needs no equivalent because argparse `choices` already bounds it; confirm that rather than assuming it.
 - `decide`'s entry format is `- <YYYY-MM-DDTHH:MM:SSZ> <note>`, with the timestamp minted here. Reuse `intake`'s exact `strftime` format string so the two agree; if that means lifting it to a shared constant, lift it — do not write the format string twice.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1488,8 +1497,11 @@ def test_two_runs_recording_different_skills_are_not_comparable(tmp_path):
         assert main(["record-stage", "--run", str(run.root), "--stage", "extract",
                      "--model", "m", "--effort", "high", "--skill", str(skill)]) == 0
     assert stage_config(a) != stage_config(b)
-    ok, reasons = comparability(a, b)
-    assert not ok
+    # comparability returns list[str] -- the reasons, empty when comparable.
+    # Not an (ok, reasons) pair: read the signature rather than assuming, which
+    # is how this assertion was written wrong the first time.
+    reasons = comparability(a, b)
+    assert reasons
     assert any("skill_sha256" in reason for reason in reasons)
 
 
@@ -1575,20 +1587,33 @@ Expected: import error on `manifest_stage_efforts`, then exit-2 results from
 
 ```python
 @functools.cache
+def _stage_efforts_for(schema_root: Path) -> tuple[str, ...]:
+    schema = read_json(schema_root / ARTIFACT_SCHEMAS["manifest"])
+    stage = schema["properties"]["stages"]["additionalProperties"]
+    return tuple(stage["properties"]["effort"]["enum"])
+
+
 def manifest_stage_efforts() -> tuple[str, ...]:
     """The effort levels manifest.stages accepts, read out of the schema.
 
     `record-stage` uses this as its argparse choices, so the CLI cannot accept
     an effort the manifest schema will reject -- and there is no second copy of
-    the enum to keep in step. Cached because the CLI reads it at parser-build
-    time on every invocation.
+    the enum to keep in step.
+
+    The cache is keyed on the schema directory, exactly as _validator_for above
+    is and for the same reason: overriding TESTGEN_SCHEMA_DIR must not return a
+    value built from the old one. Keyed this way, a caller trying a candidate
+    schema gets the candidate's enum with no cache_clear() ceremony -- and a
+    test that needed teardown discipline to be meaningful is a test that was
+    documenting its own scaffolding rather than the code's guarantee.
     """
-    schema = read_json(schema_dir() / ARTIFACT_SCHEMAS["manifest"])
-    stage = schema["properties"]["stages"]["additionalProperties"]
-    return tuple(stage["properties"]["effort"]["enum"])
+    return _stage_efforts_for(schema_dir())
 ```
 
-Note `functools` is already imported in `validate.py`.
+Note `functools` is already imported in `validate.py`. **Follow `_validator_for`'s
+shape rather than inventing one** — it sits a few lines above, takes
+`schema_root` as a cache-key parameter, and its docstring already explains why.
+An unkeyed cache here would make the `TESTGEN_SCHEMA_DIR` override a lie.
 
 Add one test to `tests/unit/test_validate.py`:
 
@@ -1596,9 +1621,11 @@ Add one test to `tests/unit/test_validate.py`:
 def test_manifest_stage_efforts_tracks_a_schema_override(tmp_path, monkeypatch):
     """Reads the *active* schema directory, so TESTGEN_SCHEMA_DIR moves it.
 
-    Without this the caching could be hiding a read that happens once against
-    the shipped schema and never again -- which would make the "no second copy"
-    claim false in exactly the case a candidate schema is being tried.
+    No cache_clear() anywhere in this test, and that absence is the point: the
+    cache is keyed on the schema directory the way _validator_for's is, so the
+    override works on its own. A version of this test that needed teardown
+    discipline to pass would have been documenting its own scaffolding rather
+    than a guarantee the code makes to any caller.
     """
     from testgen.validate import ARTIFACT_SCHEMAS, manifest_stage_efforts, schema_dir
 
@@ -1608,18 +1635,23 @@ def test_manifest_stage_efforts_tracks_a_schema_override(tmp_path, monkeypatch):
     ]
     write_json(tmp_path / ARTIFACT_SCHEMAS["manifest"], original)
     monkeypatch.setenv("TESTGEN_SCHEMA_DIR", str(tmp_path))
-    manifest_stage_efforts.cache_clear()
-    try:
-        assert manifest_stage_efforts() == ("low", "ludicrous")
-    finally:
-        manifest_stage_efforts.cache_clear()
-```
+    assert manifest_stage_efforts() == ("low", "ludicrous")
 
-> **Implementer note.** That test is what tells you whether `@functools.cache`
-> is safe here. If the cache makes it fail in a way you cannot fix with
-> `cache_clear()`, **drop the cache** rather than dropping the test: reading a
-> small JSON file once per CLI invocation costs nothing, and a cache that makes
-> the schema override a lie is a real defect. Report which way you went.
+
+def test_the_shipped_efforts_are_still_read_after_an_override_is_removed(tmp_path, monkeypatch):
+    """The other half, which the override test cannot make on its own.
+
+    A keyed cache must return the *shipped* enum again once the override is
+    gone. Without this, an implementation that keyed correctly but leaked the
+    last-seen value would satisfy the test above and quietly pin every later
+    caller in the process to a candidate schema.
+    """
+    from testgen.validate import manifest_stage_efforts
+
+    monkeypatch.setenv("TESTGEN_SCHEMA_DIR", str(tmp_path))
+    monkeypatch.delenv("TESTGEN_SCHEMA_DIR")
+    assert manifest_stage_efforts() == ("low", "medium", "high", "xhigh", "max")
+```
 
 - [ ] **Step 4: Add the two subcommands**
 
@@ -1666,9 +1698,17 @@ In `main()`, inside the outer `try`:
 
         if args.command == "decide":
             run = _run_dir(args.run)
+            # (UsageError, OSError), matching record-stage above. Catching only
+            # UsageError makes a decisions.md that is a directory, or a
+            # read-only run directory, exit 1 with a fabricated finding about a
+            # repairable stage defect -- a misconfigured harness masquerading as
+            # something the orchestrator should spend its one repair attempt on.
+            # Both subcommands are driven by the orchestrator's own arguments,
+            # so every failure in either is exit 2. smoke.load_agents' docstring
+            # records this same lesson; this is the second time.
             try:
                 decide(run, args.note)
-            except UsageError as exc:
+            except (UsageError, OSError) as exc:
                 print(f"error: {exc}", file=sys.stderr)
                 return USAGE
             print(run.decisions)
