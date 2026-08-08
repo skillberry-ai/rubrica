@@ -312,7 +312,14 @@ def minimal_report(**over: Any) -> dict[str, Any]:
                     {
                         "role": "oracle",
                         "scored": True,
-                        "reward": 1.0,
+                        # 0.85, not 1.0: above ORACLE_FLOOR (0.80, so the verdict stays
+                        # healthy) but below PASS_THRESHOLD (0.999, so oracle_failures
+                        # counts it at the default threshold). That gap is what makes
+                        # refs.test_the_recomputation_uses_the_producers_own_functions
+                        # meaningful -- weak_baseline's 0.0 can never cross a positive
+                        # PASS_THRESHOLD, so oracle_failures is the only summary number
+                        # here that a lowered PASS_THRESHOLD can actually move.
+                        "reward": 0.85,
                         "completion": 1.0,
                         "assertions": 1.0,
                         "trajectory": 1.0,
@@ -323,10 +330,10 @@ def minimal_report(**over: Any) -> dict[str, Any]:
             }
         ],
         "summary": {
-            "mean_reward_by_role": {"weak_baseline": 0.0, "under_test": 0.8, "oracle": 1.0},
+            "mean_reward_by_role": {"weak_baseline": 0.0, "under_test": 0.8, "oracle": 0.85},
             "all_pass_tasks": 0,
             "all_fail_tasks": 0,
-            "oracle_failures": 0,
+            "oracle_failures": 1,
             "unscoreable": 0,
         },
         "verdict": "healthy",

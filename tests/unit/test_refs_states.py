@@ -99,6 +99,26 @@ def _smoke(run: RunPaths) -> None:
     write_json(run.report, minimal_report())
 
 
+def _measurement(run: RunPaths) -> None:
+    """The measurement tools' outputs, which are not stage artifacts.
+
+    They live under measurement/ rather than a numbered prefix, and no layer-2
+    check reads them. This state exists so that stays true: a checker that
+    started globbing the run directory rather than naming its artifacts would
+    find these and report them.
+    """
+    # Task 10 replaces this stub with recall.compare's real output. "format" is
+    # deliberate, not "schema_version": this file is written by this project's
+    # own code and validated by unit tests rather than a schema, and claiming a
+    # schema_version would assert a schema that does not exist.
+    write_json(
+        run.recall, {"format": "testgen-recall/1", "denominator": 0, "matched": [], "novel": []}
+    )
+    run.review_dir.mkdir(parents=True, exist_ok=True)
+    # Task 12 replaces this stub with the real review packet.
+    run.review_packet.write_text("# Review packet\n", encoding="utf-8")
+
+
 # The reopened cell, justified as an honest hole. `not_yet_attempted` is the
 # schema's vocabulary for "no accepted scenario exercises this"; the
 # justification names the rejection, which is the record §362's report is
@@ -166,6 +186,7 @@ STATES: list[tuple[str, Callable[[RunPaths], None] | None]] = [
     ("challenge", _challenge),
     ("emit", _emit),
     ("smoke", _smoke),
+    ("measurement", _measurement),
     ("post-rejection", _post_rejection),
 ]
 
@@ -207,6 +228,8 @@ def test_the_states_are_cumulative_so_the_last_one_is_a_complete_run(tmp_path):
     assert run.expected(SID).is_file()
     assert run.verdict(SID).is_file()
     assert run.report.is_file()
+    assert run.recall.is_file()
+    assert run.review_packet.is_file()
     # 06-suite/<sid> is deliberately *absent* in the last state: it rejects
     # scn-001, and emit prunes the package for a scenario that no longer
     # qualifies. test_the_emit_state_really_wrote_a_package below is what

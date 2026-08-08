@@ -1191,6 +1191,140 @@ def check_suite(run: RunPaths) -> list[Finding]:
     return out
 
 
+def check_report(run: RunPaths) -> list[Finding]:
+    """07-report.json against 06-suite/, and its own arithmetic against its results.
+
+    check_all had no report checker, so a report could list a scenario whose
+    package emit had pruned and `validate --stage smoke` stayed clean. That became
+    reachable when emit started pruning.
+
+    **Status is the distinguisher for the hard case.** A report naming a scenario
+    with no package is legitimate when the scenario is `rejected`: challenge marks
+    it rejected *after* smoke ran, emit prunes the package, and that record is
+    what the honest-hole report ("87%, 3 cells lost to rejected scenarios") is
+    built from. Reporting it would make check-refs permanently dirty in a state the
+    design spec prescribes, and the only way to clear it would be to delete the
+    evidence. An `active` scenario with no package, or an id absent from
+    02-scenarios.json, is the real defect: a report over a suite nobody emitted.
+
+    Every recomputed number comes from calling smoke's own functions. A second
+    implementation of the arithmetic here would agree today and drift the first
+    time a threshold moved -- the per-seam defect class that produced the previous
+    build's Critical.
+
+    `.get()` throughout: nothing orders `validate --stage smoke` before
+    check-refs, so an ungated report can legitimately arrive. Same exception
+    check_suite documents, same reason.
+    """
+    from testgen import smoke
+
+    report = _load(run.report)
+    if not isinstance(report, dict):
+        return []
+    out: list[Finding] = []
+
+    def report_finding(pointer: str, message: str) -> None:
+        out.append(Finding(run.report, "refs", pointer, message))
+
+    manifest = _load(run.manifest)
+    if isinstance(manifest, dict) and report.get("run_id") != manifest.get("run_id"):
+        report_finding(
+            "/run_id",
+            f"report is filed against run {report.get('run_id')!r} but this run is "
+            f"{manifest.get('run_id')!r}",
+        )
+
+    agents = report.get("agents") or []
+    roles = tuple(
+        role
+        for role in smoke.ROLES
+        if role in {agent.get("role") for agent in agents if isinstance(agent, dict)}
+    )
+    for role in smoke.REQUIRED_ROLES:
+        if role not in roles:
+            report_finding(
+                "/agents",
+                f"no {role!r} agent ran, so the suite cannot be judged: it is what detects "
+                + ("a trivial suite" if role == "weak_baseline" else "broken gold labels"),
+            )
+
+    scenarios_doc = _load(run.scenarios) or {"scenarios": []}
+    by_id = {s["id"]: s for s in scenarios_doc.get("scenarios", [])}
+    emitted = set(run.scenario_ids_with_tasks())
+
+    tasks = [task for task in report.get("tasks") or [] if isinstance(task, dict)]
+    named: list[str] = []
+    for i, task in enumerate(tasks):
+        sid = task.get("scenario_id")
+        named.append(sid)
+        scenario = by_id.get(sid)
+        if scenario is None:
+            report_finding(
+                f"/tasks/{i}/scenario_id",
+                f"the report ran {sid!r}, which no scenario in 02-scenarios.json proposes",
+            )
+        elif scenario.get("status") not in JUDGED_STATUSES:
+            report_finding(
+                f"/tasks/{i}/scenario_id",
+                f"the report ran {sid!r}, whose status is {scenario.get('status')!r}; only a "
+                "judged scenario (active, or rejected after the fact) should have been emitted",
+            )
+        elif sid not in emitted and scenario.get("status") != "rejected":
+            report_finding(
+                f"/tasks/{i}/scenario_id",
+                f"the report ran {sid!r} but it has no emitted package; a report over a suite "
+                "that was never emitted describes nothing",
+            )
+
+        declared = {r.get("role") for r in task.get("results") or [] if isinstance(r, dict)}
+        for role in roles:
+            if role not in declared:
+                report_finding(
+                    f"/tasks/{i}/results",
+                    f"{role} is declared in /agents but produced no result for {sid!r}, so its "
+                    "mean is taken over a different task set than the other roles",
+                )
+        expected_pass, expected_fail = smoke.task_flags(task, roles)
+        for key, value in (("all_pass", expected_pass), ("all_fail", expected_fail)):
+            if task.get(key) is not value:
+                report_finding(
+                    f"/tasks/{i}/{key}",
+                    f"declared {task.get(key)!r} but the results say {value!r}",
+                )
+
+    for sid in sorted(set(named)):
+        if named.count(sid) > 1:
+            report_finding(
+                "/tasks",
+                f"scenario {sid!r} appears more than once, which doubles its weight in every "
+                "mean the summary reports",
+            )
+    for sid in sorted(emitted - set(named)):
+        report_finding(
+            "/tasks",
+            f"the emitted package for {sid!r} was never run: the suite ships a task nothing "
+            "has executed",
+        )
+
+    expected_summary = smoke.summarize(tasks, roles)
+    declared_summary = report.get("summary") or {}
+    for key, value in expected_summary.items():
+        if declared_summary.get(key) != value:
+            report_finding(
+                f"/summary/{key}",
+                f"declared {declared_summary.get(key)!r} but the results give {value!r}",
+            )
+
+    expected_verdict = smoke.verdict_for(tasks, expected_summary, roles)
+    if report.get("verdict") != expected_verdict:
+        report_finding(
+            "/verdict",
+            f"declared {report.get('verdict')!r} but the results give {expected_verdict!r}; the "
+            "verdict is the number a human reads first",
+        )
+    return out
+
+
 def check_all(run: RunPaths) -> list[Finding]:
     """Every layer-2 check that the run directory currently has inputs for.
 
@@ -1213,4 +1347,5 @@ def check_all(run: RunPaths) -> list[Finding]:
     findings.extend(check_instances(run))
     findings.extend(check_verdicts(run))
     findings.extend(check_suite(run))
+    findings.extend(check_report(run))
     return findings

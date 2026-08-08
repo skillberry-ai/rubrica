@@ -182,3 +182,16 @@ def test_rerunning_smoke_overwrites_rather_than_accumulating(tmp_path):
     report, _ = smoke_run(run, _roster(tmp_path))
     assert len(report["tasks"]) == 1
     assert len(report["tasks"][0]["results"]) == len(ROLES)
+
+
+def test_a_real_smoke_run_leaves_layer_two_clean(tmp_path):
+    """The seam between the producer and the checker, proved rather than assumed.
+
+    Both sides recompute the summary with the same functions, so this can only
+    fail if smoke writes something summarize did not produce.
+    """
+    from testgen.refs import check_all
+
+    run = _run(tmp_path)
+    smoke_run(run, _roster(tmp_path))
+    assert check_all(run) == []

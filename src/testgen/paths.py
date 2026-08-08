@@ -158,6 +158,22 @@ class RunPaths:
         """
         return self.root / "measurement"
 
+    @property
+    def recall(self) -> Path:
+        return self.measurement_dir / "recall.json"
+
+    @property
+    def review_dir(self) -> Path:
+        return self.measurement_dir / "review"
+
+    @property
+    def review_packet(self) -> Path:
+        return self.review_dir / "packet.md"
+
+    @property
+    def review_sample(self) -> Path:
+        return self.review_dir / "sample.json"
+
     def smoke_dir(self, role: str, scenario_id: str) -> Path:
         """Where one (role, task) execution's logs go.
 
