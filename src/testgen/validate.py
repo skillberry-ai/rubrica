@@ -94,6 +94,22 @@ def schema_dir() -> Path:
 
 
 @functools.cache
+def manifest_stage_efforts() -> tuple[str, ...]:
+    """The effort levels manifest.stages accepts, read out of the schema.
+
+    `record-stage` uses this as its argparse choices, so the CLI cannot accept
+    an effort the manifest schema will reject -- and there is no second copy of
+    the enum to keep in step. Cached because the CLI reads it at parser-build
+    time on every invocation; a caller that overrides TESTGEN_SCHEMA_DIR mid
+    process (only tests do this) must call `.cache_clear()` itself, the same
+    contract functools.cache always has.
+    """
+    schema = read_json(schema_dir() / ARTIFACT_SCHEMAS["manifest"])
+    stage = schema["properties"]["stages"]["additionalProperties"]
+    return tuple(stage["properties"]["effort"]["enum"])
+
+
+@functools.cache
 def _validator_for(kind: str, schema_root: Path) -> Draft202012Validator:
     """Compiled validator, cached on (kind, schema_root).
 

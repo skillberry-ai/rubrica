@@ -45,12 +45,13 @@ from testgen.emit import emit_run
 from testgen.errors import UsageError
 from testgen.findings import Finding, format_findings
 from testgen.intake import intake
+from testgen.manifest import decide, record_stage
 from testgen.paths import STAGES, RunPaths
 from testgen.recall import compare_run, render
 from testgen.review import DEFAULT_SAMPLE_SIZE, sample_run
 from testgen.smoke import load_agents, preflight, smoke_run
 from testgen.stability import diff_runs
-from testgen.validate import UnknownStage, validate_stage
+from testgen.validate import UnknownStage, manifest_stage_efforts, validate_stage
 
 CLEAN, FINDINGS, USAGE = 0, 1, 2
 
@@ -72,6 +73,8 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("diff-runs", "per-stage stability across two runs"),
     ("sample-for-review", "write a stratified review packet for the emitted suite"),
     ("check-skills", "check every skill's contract against the code it names"),
+    ("record-stage", "record a stage's model, effort, and skill hash in the manifest"),
+    ("decide", "append one orchestrator decision to the run's decisions.md"),
 )
 
 
@@ -123,6 +126,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_skills = parsers["check-skills"]
     p_skills.add_argument("--skills-dir", default=None, metavar="PATH")
+
+    p_record = parsers["record-stage"]
+    p_record.add_argument("--run", required=True)
+    p_record.add_argument("--stage", required=True, choices=list(STAGES))
+    p_record.add_argument("--model", required=True)
+    p_record.add_argument("--effort", required=True, choices=list(manifest_stage_efforts()))
+    p_record.add_argument("--skill", required=True, metavar="PATH")
+
+    p_decide = parsers["decide"]
+    p_decide.add_argument("--run", required=True)
+    p_decide.add_argument("--note", required=True)
     return parser
 
 
@@ -290,6 +304,35 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"error: {exc}", file=sys.stderr)
                 return USAGE
             return _report(findings)
+
+        if args.command == "record-stage":
+            run = _run_dir(args.run)
+            # Its own UsageError catch: these arguments come from the
+            # orchestrator's own invocation, not from a stage's output, so a bad
+            # one is a misconfigured harness and no repair prompt helps.
+            try:
+                record_stage(
+                    run,
+                    stage=args.stage,
+                    model=args.model,
+                    effort=args.effort,
+                    skill=Path(args.skill),
+                )
+            except (UsageError, OSError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return USAGE
+            print(run.manifest)
+            return CLEAN
+
+        if args.command == "decide":
+            run = _run_dir(args.run)
+            try:
+                decide(run, args.note)
+            except UsageError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return USAGE
+            print(run.decisions)
+            return CLEAN
     except (FileNotFoundError, ArtifactError, UnknownStage) as exc:
         # A run directory that cannot be read, an artifact that is absent or is
         # not JSON at all, an unknown stage name: the harness was pointed at

@@ -528,3 +528,27 @@ def test_the_score_stage_reports_a_run_with_no_coverage_directory(tmp_path):
     findings = validate_stage(run, "score")
     assert len(findings) == 1
     assert "produced no coverage artifact" in findings[0].message
+
+
+def test_manifest_stage_efforts_tracks_a_schema_override(tmp_path, monkeypatch):
+    """Reads the *active* schema directory, so TESTGEN_SCHEMA_DIR moves it.
+
+    Without this the caching could be hiding a read that happens once against
+    the shipped schema and never again -- which would make the "no second copy"
+    claim false in exactly the case a candidate schema is being tried.
+    """
+    from testgen.artifacts import read_json
+    from testgen.validate import ARTIFACT_SCHEMAS, manifest_stage_efforts, schema_dir
+
+    original = read_json(schema_dir() / ARTIFACT_SCHEMAS["manifest"])
+    original["properties"]["stages"]["additionalProperties"]["properties"]["effort"]["enum"] = [
+        "low",
+        "ludicrous",
+    ]
+    write_json(tmp_path / ARTIFACT_SCHEMAS["manifest"], original)
+    monkeypatch.setenv("TESTGEN_SCHEMA_DIR", str(tmp_path))
+    manifest_stage_efforts.cache_clear()
+    try:
+        assert manifest_stage_efforts() == ("low", "ludicrous")
+    finally:
+        manifest_stage_efforts.cache_clear()

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from testgen.artifacts import sha256_of, write_json
 from testgen.errors import UsageError
+from testgen.manifest import utc_stamp
 from testgen.paths import RunPaths, is_safe_segment, safe_segment
 
 _SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".go", ".rs", ".java", ".rb"}
@@ -158,7 +159,7 @@ def intake(
         {
             "schema_version": "0.1",
             "run_id": run.root.name,
-            "created_utc": stamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "created_utc": utc_stamp(stamp),
             "target": {"name": target_name, "interface": target_interface},
             "inputs": entries,
             "stages": {},
