@@ -1,5 +1,5 @@
 from testgen.artifacts import write_json
-from testgen.validate import validate_artifact
+from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, validate_artifact
 from tests.builders import minimal_coverage, minimal_manifest, minimal_scenarios
 
 
@@ -193,3 +193,15 @@ def test_a_binding_with_an_unknown_key_is_rejected(tmp_path):
     path = tmp_path / "01-world-model.json"
     write_json(path, world)
     assert validate_artifact(path, "world-model") != []
+
+
+def test_the_config_schemas_belong_to_no_stage():
+    """A config kind in STAGE_ARTIFACTS would make validate --stage hunt for it.
+
+    agents.json and gold.json are handed to a subcommand by a person; they never
+    live in a run directory, and _artifact_paths has no branch for them -- so a
+    stage claiming to produce one would raise KeyError inside layer 1.
+    """
+    produced = {kind for kinds in STAGE_ARTIFACTS.values() for kind in kinds}
+    assert produced.isdisjoint({"agents", "gold"})
+    assert produced <= set(ARTIFACT_SCHEMAS)

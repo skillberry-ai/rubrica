@@ -18,21 +18,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from testgen.artifacts import sha256_of, write_json
+from testgen.errors import UsageError
 from testgen.paths import RunPaths, is_safe_segment, safe_segment
 
 _SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".go", ".rs", ".java", ".rb"}
 _DOC_SUFFIXES = {".md", ".rst", ".txt", ".adoc"}
-
-
-class UsageError(ValueError):
-    """Raised when intake was called with arguments it cannot act on.
-
-    Named rather than a bare ValueError so cli.py can map *these* to exit 2
-    without also mapping every ValueError raised anywhere downstream. A
-    coverage document with a non-numeric `pct` is a repairable score-stage
-    defect, and reporting it as a misconfigured harness told the orchestrator to
-    halt when one repair would have cleared it.
-    """
 
 
 def slug(value: str) -> str:

@@ -42,6 +42,10 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "verdict": "verdict-0.1.json",
     "suite-expected": "suite-expected-0.1.json",
     "report": "report-0.1.json",
+    # Config kinds. Human-authored inputs, not stage outputs, so they are
+    # deliberately absent from STAGE_ARTIFACTS: no stage produces them and
+    # `validate --stage X` must never look for them.
+    "agents": "agents-0.1.json",
 }
 
 # Which artifact kinds each stage must produce. Every stage now has a real

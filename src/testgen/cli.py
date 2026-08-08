@@ -42,8 +42,9 @@ from testgen import refs
 from testgen.artifacts import ArtifactError, read_json
 from testgen.dedupe import candidate_pairs
 from testgen.emit import emit_run
+from testgen.errors import UsageError
 from testgen.findings import Finding, format_findings
-from testgen.intake import UsageError, intake
+from testgen.intake import intake
 from testgen.paths import STAGES, RunPaths
 from testgen.validate import UnknownStage, validate_stage
 

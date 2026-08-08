@@ -141,7 +141,14 @@ def test_every_registered_artifact_kind_now_has_a_schema_file():
         assert (schema_dir() / filename).is_file(), kind
 
 
-@pytest.mark.parametrize("kind", sorted(ARTIFACT_SCHEMAS))
+# Config kinds (agents, gold, ...) are human-authored, never joined into a run
+# path, and carry no id-shaped field -- role is a closed enum, not a segment --
+# so there is nothing here for paths.safe_segment's \\A..\\Z convention to apply
+# to. They are exempt from the pattern-anchoring check below.
+_CONFIG_KINDS = {"agents", "gold"}
+
+
+@pytest.mark.parametrize("kind", sorted(set(ARTIFACT_SCHEMAS) - _CONFIG_KINDS))
 def test_no_schema_pattern_uses_a_caret_dollar_anchor(kind, tmp_path):
     """Python's re lets $ match before a trailing newline; \\Z does not.
 

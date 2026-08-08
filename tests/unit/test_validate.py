@@ -13,6 +13,7 @@ from testgen.validate import (
     validate_stage,
 )
 from tests.builders import (
+    minimal_agents,
     minimal_claims,
     minimal_coverage,
     minimal_expected,
@@ -80,6 +81,7 @@ MINIMAL_BUILDERS = {
     "verdict": minimal_verdict,
     "suite-expected": minimal_suite_expected,
     "report": minimal_report,
+    "agents": minimal_agents,
 }
 
 

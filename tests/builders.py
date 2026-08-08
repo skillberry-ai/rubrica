@@ -335,6 +335,34 @@ def minimal_report(**over: Any) -> dict[str, Any]:
     return payload
 
 
+def minimal_agents(**over: Any) -> dict[str, Any]:
+    # weak_baseline first (several tests key off index 0 of both the raw
+    # payload and the loaded, ROLES-sorted result), but oracle ahead of
+    # under_test -- so the overall order still differs from ROLES and
+    # load_agents' sort-into-ROLES-order is actually exercised rather than
+    # passing trivially because the roster already arrived in that order.
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "agents": [
+            {
+                "role": "weak_baseline",
+                "model": "claude-haiku-4-5-20251001",
+                "command": ["true"],
+                "notes": "no tools",
+            },
+            {
+                "role": "oracle",
+                "model": "claude-sonnet-5",
+                "command": ["true"],
+                "notes": "handed golden.json",
+            },
+            {"role": "under_test", "model": "claude-sonnet-5", "command": ["true"]},
+        ],
+    }
+    payload.update(over)
+    return payload
+
+
 def minimal_verdict(**over: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": "0.1",
