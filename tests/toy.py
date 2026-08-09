@@ -18,6 +18,7 @@ calls the API once, which is how an all-pass suite happens.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -1008,3 +1009,73 @@ def build_toy_run(runs_dir: Path, *, upto: str | None = None, **intake_kwargs: A
     for sid in SIDS:
         write_json(run.verdict(sid), toy_verdict(sid))
     return run
+
+
+# Scripted agents for the golden smoke run. Real subprocesses printing real
+# JSONL, never mocks: the properties that matter are all about the other end of
+# the pipe, and smoke's contract with an agent is a transcript on stdout.
+#
+# The oracle reads golden.json, which is what the design spec means by "an
+# oracle agent handed the reference answer". It is a test of the test suite: if
+# it does not pass nearly everything, the labels or the verifier are broken.
+ORACLE_SCRIPT = """\
+import json, pathlib
+golden = json.loads(pathlib.Path("golden.json").read_text())
+for call in golden["tool_calls"]:
+    print(json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": call["tool"], "input": call["args"]}]}}))
+print(json.dumps({"type": "result", "subtype": "success", "result": golden["answer"]}))
+"""
+
+# No tools, no answer. Scores 0 on the two positive-assertion tasks and 0.4 on
+# the two absence-shaped ones, because an exclusion satisfied by absence scores
+# a point by design -- which is exactly why each absence task also carries a
+# tool_called assertion this agent fails.
+WEAK_SCRIPT = """\
+import json
+print(json.dumps({"type": "result", "subtype": "success",
+                  "result": "I do not have enough information to say."}))
+"""
+
+# Makes every call and then paraphrases without the tokens the oracle asserts:
+# full trajectory credit, partial assertion credit. A middling agent rather
+# than a broken one, which is the spread that matters.
+UNDER_TEST_SCRIPT = """\
+import json, pathlib
+golden = json.loads(pathlib.Path("golden.json").read_text())
+for call in golden["tool_calls"]:
+    print(json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": call["tool"], "input": call["args"]}]}}))
+print(json.dumps({"type": "result", "subtype": "success",
+                  "result": "I looked at the queue and found the relevant ticket."}))
+"""
+
+_SCRIPTS = {
+    "weak_baseline": WEAK_SCRIPT,
+    "under_test": UNDER_TEST_SCRIPT,
+    "oracle": ORACLE_SCRIPT,
+}
+
+
+def toy_roster(tmp_path: Path) -> tuple[Any, ...]:
+    """AgentSpecs for the three roles, backed by scripts written under tmp_path.
+
+    sys.executable rather than a shebang: the interpreter running the tests is
+    the one that must run the scripts, and a shebang would depend on the
+    executable bit and on `python` resolving to 3.13 on PATH.
+    """
+    from testgen.smoke import AgentSpec
+
+    specs = []
+    for role, body in _SCRIPTS.items():
+        script = Path(tmp_path) / f"{role}.py"
+        script.write_text(body, encoding="utf-8")
+        specs.append(
+            AgentSpec(
+                role=role,
+                model=f"scripted-{role}",
+                command=(sys.executable, str(script)),
+                timeout_sec=60.0,
+            )
+        )
+    return tuple(specs)
