@@ -171,57 +171,58 @@ scenario.
    specific world. If you cannot state a fact this precise for a hole, that
    is refusal condition 4 in section 5, not a reason to write a vaguer one.
 
-   Uniqueness is not the only property the fact needs -- it also needs to be
-   *grounded*, and the fact's values split into two kinds that take opposite
-   rules. **Vocabulary the target owns** -- a queue name, a status value, a
-   capability or field name -- must be drawn from what the world model or
-   its cited claims actually declare, never invented to make the fact land.
-   An invented piece of vocabulary is the same failure as an invented
-   capability, one level down: it describes a world the target does not
-   have, `tg-instantiate` will build a seed containing that invented value
-   with no way to tell it apart from a real one, and `validate`/`check-refs`
-   cannot catch it either, because a capability's `params` are typed as open
-   strings with no enum to check a queue name or a status against.
-   **Values the fact legitimately prescribes** -- an id, a count, a specific
-   field's content -- are the opposite case: there is no seed yet at propose
-   time, `tg-instantiate` builds one *from* the fact you write, so naming a
-   concrete id or count is not invention, it is the mechanism by which the
-   fact becomes uniquely determined in the first place. `ticket_id: 4231` is
-   fine to write even though no claim mentions 4231 specifically -- the
-   target's ids are open, and picking one is an instruction to instantiate
-   about what to build, not a claim about what already exists.
+   Uniqueness is not the only thing to get right here, and an earlier
+   version of this section drew the next distinction in the wrong place.
+   The world model declares two different kinds of thing, and only one of
+   them is something you may not invent.
 
-   These two requirements are jointly binding, not a trade-off between them,
-   and both directions have already failed once in a real run. One round
-   named `queue: sales` -- vocabulary no claim declares (only `billing` and
-   `shipping` exist), an ungrounded fact. A later round, corrected past that
-   failure, produced "`find_tickets` is called with a queue and status
-   filter combination for which the seed contains zero tickets" -- no queue,
-   no status, no count, nothing concrete anywhere. That fact avoided
-   inventing vocabulary by never naming any value at all, and in doing so it
-   failed the uniqueness requirement stated above it just as completely as
-   "the query returns some rows" does: `tg-instantiate` reading it has near
-   total freedom to build any world that has some empty combination
-   somewhere, which is not the same as building the one world this scenario
-   means to test. Avoiding invention is not an excuse to avoid specifying.
-   A correct fact does both at once: "queue `billing` and status `open`
-   returns exactly one ticket, and that ticket's `ticket_id` is 4231" draws
-   `billing` and `open` from the world model and prescribes `4231` as an
-   instruction, in the same sentence.
+   **Ids that structure the world model** -- a capability id, an
+   outcome-class id, a goal id, an actor id, an entity or field *name* --
+   are real, checkable entries in the file you actually read. Every one you
+   write into a scenario must be one of them: naming a `capability_id` or
+   `outcome_class_id` the world model does not declare is the same failure
+   as inventing a capability, because it points `tg-instantiate` at
+   something that does not exist. That is refusal condition 2's territory
+   in section 5, and Invariant 1 checks it directly.
+
+   **Field values are not the same kind of thing, and must not be treated
+   as if they were.** What a queue is actually called, what a status value
+   actually is, an id, a count -- the world model records field *names* and
+   *types* (`entity.fields[].name`/`.type`) but never their value domains,
+   and you never read a claims file, so you have no honest way to know what
+   any particular value is for the real target. A concrete field value in a
+   `discriminating_fact` is therefore always a prescription to
+   `tg-instantiate` about what to build, never a claim about what the
+   target already has. `queue: "billing"` is exactly as legitimate to write
+   as `queue: "sales"` or `queue: "q-north"` -- none of the three is a claim
+   about the target, all three are equally valid instructions -- and this
+   is what makes uniqueness satisfiable at all: without naming some
+   concrete value, nothing you write can pin a seed down, because making
+   that value real is instantiate's job, not yours.
+
+   A real run already got this backwards, and the failure is worth reading
+   because it names the actual risk precisely: warned against naming a
+   field value it could not verify, one round produced "`find_tickets` is
+   called with a queue and status filter combination for which the seed
+   contains zero tickets, so the call returns an empty result set rather
+   than any match" -- no queue, no status, no count, nothing concrete
+   anywhere. That fact fails uniqueness exactly as "the query returns some
+   rows" does: `tg-instantiate` reading it has near-total freedom to build
+   any world with some empty combination somewhere, not the one specific
+   world this scenario means to test. The fix was never to avoid naming a
+   queue -- any concrete queue name would have done just as well -- the fix
+   was to name one specifically enough that only a single seed satisfies
+   the sentence.
 
    This bites hardest on absence and error cells, precisely the ones step 4
-   and step 5 just told you not to defer: the tempting way to manufacture an
-   absence is to name a piece of vocabulary that was never there in the
-   first place -- a queue, a status the claims never establish -- when the
-   claims may already give you a grounded way to produce that same empty or
-   error result (a real queue with no matching tickets, say, rather than a
-   queue that does not exist). Where the claims establish a mechanism that
-   produces the outcome class you are targeting, use that mechanism, and
-   still name the queue, the status, and whatever count or id makes the
-   result unique. Reach for an invented piece of vocabulary only when no
-   grounded one is available, and if that is the case, refusal condition 4
-   in section 5 is what to write instead of a fact you cannot actually
-   ground.
+   and step 5 just told you not to defer. An outcome class described as, say,
+   "no ticket matches the filters" is satisfied by a query against any
+   queue holding nothing that matches, so naming one specific queue and one
+   specific status for it is not a claim that queue is special in some way
+   you cannot verify -- it is exactly the same kind of prescription a
+   success-cell fact makes. Leaving it vague out of a misplaced worry about
+   "inventing" a queue name is the uniqueness failure above, not a caution
+   this stage owes anyone.
 
 7. **Set `hop_depth` honestly, and make it consistent with `capability_refs`.**
    `hop_depth` is the number of tool calls this scenario genuinely requires
