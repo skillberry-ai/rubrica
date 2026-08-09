@@ -107,6 +107,15 @@ _CLAIMS: dict[str, list[dict[str, Any]]] = {
             "high",
             "stated",
         ),
+        _claim(
+            "clm-api-006",
+            "outcome_class",
+            "get_ticket returns the ticket together with its comments, ordered by position",
+            "api-json",
+            "#/tools/0/returns/get_ticket",
+            "high",
+            "stated",
+        ),
     ],
     "notes-md": [
         _claim(
@@ -243,7 +252,7 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
                         "description": "no ticket has that id, which is an error",
                     },
                 ],
-                "claims": ["clm-api-002", "clm-notes-004"],
+                "claims": ["clm-api-002", "clm-notes-004", "clm-api-006"],
                 "confidence": "high",
             },
         ],
@@ -330,10 +339,13 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
                 ),
                 "resolution": "preferred_a",
                 "rationale": (
-                    "the notes describe the current contract and the trace is one captured "
-                    "call that predates it, so oc-missing is modelled as an error; recorded "
-                    "rather than dropped because a scenario built on the trace's behaviour "
-                    "would be labelled against a world the target no longer has"
+                    "clm-notes-004 is stated at high confidence directly from the operator "
+                    "notes; clm-trace-002 is only reverse_engineered at medium confidence from "
+                    "one captured call, which shows what the target did once but not what it is "
+                    "contracted to do. The stated, higher-confidence claim wins, so oc-missing "
+                    "is modelled as an error; recorded rather than dropped because a scenario "
+                    "built on the trace's behaviour would be labelled against a claim the "
+                    "evidence does not actually support"
                 ),
             }
         ],
