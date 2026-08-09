@@ -172,26 +172,56 @@ scenario.
    is refusal condition 4 in section 5, not a reason to write a vaguer one.
 
    Uniqueness is not the only property the fact needs -- it also needs to be
-   *grounded*. Every entity value the fact turns on -- a queue name, a
-   status, an id, a count, any field value -- has to be one the world model
-   or its cited claims actually give you a basis for, not a plausible-looking
-   value that happens to make the fact land. An invented value is the same
-   failure as an invented capability, one level down: it is a fact about a
-   world the target does not have, and `tg-instantiate` will build a seed
-   containing that invented value with no way to tell it apart from a real
-   one -- `validate` and `check-refs` cannot catch it either, because a
-   capability's `params` are typed as open strings with no enum to check a
-   queue name or a status against. This bites hardest on absence and error
-   cells, precisely the ones step 4 and step 5 just told you not to defer:
-   the tempting way to manufacture an absence is to name something that was
-   never there in the first place -- a queue, a status, an id the claims
-   never establish -- when the claims may already give you a grounded way to
-   produce that same empty or error result (a real queue with no matching
-   tickets, say, rather than a queue that does not exist). Where the claims
-   establish a mechanism that produces the outcome class you are targeting,
-   use that mechanism; reach for an invented value only when no grounded one
-   is available, and if that is the case, refusal condition 4 in section 5
-   is what to write instead of a fact you cannot actually ground.
+   *grounded*, and the fact's values split into two kinds that take opposite
+   rules. **Vocabulary the target owns** -- a queue name, a status value, a
+   capability or field name -- must be drawn from what the world model or
+   its cited claims actually declare, never invented to make the fact land.
+   An invented piece of vocabulary is the same failure as an invented
+   capability, one level down: it describes a world the target does not
+   have, `tg-instantiate` will build a seed containing that invented value
+   with no way to tell it apart from a real one, and `validate`/`check-refs`
+   cannot catch it either, because a capability's `params` are typed as open
+   strings with no enum to check a queue name or a status against.
+   **Values the fact legitimately prescribes** -- an id, a count, a specific
+   field's content -- are the opposite case: there is no seed yet at propose
+   time, `tg-instantiate` builds one *from* the fact you write, so naming a
+   concrete id or count is not invention, it is the mechanism by which the
+   fact becomes uniquely determined in the first place. `ticket_id: 4231` is
+   fine to write even though no claim mentions 4231 specifically -- the
+   target's ids are open, and picking one is an instruction to instantiate
+   about what to build, not a claim about what already exists.
+
+   These two requirements are jointly binding, not a trade-off between them,
+   and both directions have already failed once in a real run. One round
+   named `queue: sales` -- vocabulary no claim declares (only `billing` and
+   `shipping` exist), an ungrounded fact. A later round, corrected past that
+   failure, produced "`find_tickets` is called with a queue and status
+   filter combination for which the seed contains zero tickets" -- no queue,
+   no status, no count, nothing concrete anywhere. That fact avoided
+   inventing vocabulary by never naming any value at all, and in doing so it
+   failed the uniqueness requirement stated above it just as completely as
+   "the query returns some rows" does: `tg-instantiate` reading it has near
+   total freedom to build any world that has some empty combination
+   somewhere, which is not the same as building the one world this scenario
+   means to test. Avoiding invention is not an excuse to avoid specifying.
+   A correct fact does both at once: "queue `billing` and status `open`
+   returns exactly one ticket, and that ticket's `ticket_id` is 4231" draws
+   `billing` and `open` from the world model and prescribes `4231` as an
+   instruction, in the same sentence.
+
+   This bites hardest on absence and error cells, precisely the ones step 4
+   and step 5 just told you not to defer: the tempting way to manufacture an
+   absence is to name a piece of vocabulary that was never there in the
+   first place -- a queue, a status the claims never establish -- when the
+   claims may already give you a grounded way to produce that same empty or
+   error result (a real queue with no matching tickets, say, rather than a
+   queue that does not exist). Where the claims establish a mechanism that
+   produces the outcome class you are targeting, use that mechanism, and
+   still name the queue, the status, and whatever count or id makes the
+   result unique. Reach for an invented piece of vocabulary only when no
+   grounded one is available, and if that is the case, refusal condition 4
+   in section 5 is what to write instead of a fact you cannot actually
+   ground.
 
 7. **Set `hop_depth` honestly, and make it consistent with `capability_refs`.**
    `hop_depth` is the number of tool calls this scenario genuinely requires
