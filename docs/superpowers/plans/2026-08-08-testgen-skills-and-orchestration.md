@@ -4172,7 +4172,6 @@ perfectly valid status for a scenario to have.
 from __future__ import annotations
 
 from testgen.artifacts import read_json
-from testgen.refs import JUDGED_STATUSES, OPEN_STATUSES
 from testgen.skills import SECTIONS, load, skills_dir
 from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
 
@@ -4212,21 +4211,29 @@ def test_it_names_every_hole_reason_so_it_can_tell_closable_from_not():
 
 
 def test_it_states_that_it_writes_only_the_proposed_status():
-    """The boundary, checked against refs' own status sets rather than literals.
+    """The boundary, checked against the scenarios schema's own status enum.
 
-    Every status in OPEN_STATUSES | JUDGED_STATUSES other than `proposed` is a
-    transition score owns, and the skill must say so. This is deliberately a
-    membership check over an imported set: adding a status to refs.py without
-    revisiting this prompt should fail here.
+    The authority for which statuses exist is the schema, not refs.py's two
+    subsets. `OPEN_STATUSES | JUDGED_STATUSES` is {proposed, active, rejected}
+    and omits `duplicate` entirely -- no refs check needs to name it -- so a
+    test built on those sets passes against a skill whose prose never mentions
+    `duplicate`. That is the likeliest omission of the four, because
+    `duplicate` is set by score's dedupe ruling rather than by an obvious
+    judgement verb, and Method step 7 names it explicitly. Deriving from the
+    enum also gives the property the docstring used to claim falsely: a fifth
+    status added to the schema fails here.
     """
+    schema = read_json(schema_dir() / ARTIFACT_SCHEMAS["scenarios"])
+    enum = schema["$defs"]["scenario"]["properties"]["status"]["enum"]
+    assert "proposed" in enum, "the status this skill writes must exist"
     body = load(SKILL).body
     assert "proposed" in body
-    score_owned = (OPEN_STATUSES | JUDGED_STATUSES) - {"proposed"}
+    score_owned = [status for status in enum if status != "proposed"]
     assert score_owned, "the set this test is about must not be empty"
     # The skill must name each status it may not write, so a reader of the
     # prompt knows the boundary rather than inferring it.
-    for status in sorted(score_owned):
-        assert status in body, f"the skill never says it must not write {status!r}"
+    missing = [status for status in score_owned if status not in body]
+    assert not missing, f"the skill never says it must not write {missing}"
 
 
 def test_it_names_the_two_manifest_limits_it_must_respect():
