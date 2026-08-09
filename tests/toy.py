@@ -116,6 +116,35 @@ _CLAIMS: dict[str, list[dict[str, Any]]] = {
             "high",
             "stated",
         ),
+        _claim(
+            "clm-api-007",
+            "capability",
+            "find_tickets takes an optional queue filter",
+            "api-json",
+            "#/tools/0/input_schema/properties/queue",
+            "high",
+            "stated",
+            quote='"required": ["action"]',
+        ),
+        _claim(
+            "clm-api-008",
+            "capability",
+            "find_tickets takes an optional status filter",
+            "api-json",
+            "#/tools/0/input_schema/properties/status",
+            "high",
+            "stated",
+            quote='"required": ["action"]',
+        ),
+        _claim(
+            "clm-api-009",
+            "capability",
+            "get_ticket needs a ticket_id to identify which ticket to fetch",
+            "api-json",
+            "#/tools/0/input_schema/properties/ticket_id",
+            "medium",
+            "inferred",
+        ),
     ],
     "notes-md": [
         _claim(
@@ -173,6 +202,26 @@ _CLAIMS: dict[str, list[dict[str, Any]]] = {
             "high",
             "stated",
         ),
+        _claim(
+            "clm-notes-007",
+            "goal",
+            "locating the ticket that needs action takes one lookup",
+            "notes-md",
+            "#what-engineers-actually-ask",
+            "high",
+            "stated",
+            quote='"Which ticket in this queue still needs me?" — one lookup.',
+        ),
+        _claim(
+            "clm-notes-008",
+            "goal",
+            "explaining why a ticket is stuck takes finding the ticket, then reading its comments",
+            "notes-md",
+            "#what-engineers-actually-ask",
+            "high",
+            "stated",
+            quote="find the ticket, then read its comments, which is where the blocker is named.",
+        ),
     ],
     "trace-json": [
         _claim(
@@ -217,7 +266,7 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
                 "operation": "query_tickets.find_tickets",
                 "binding": {"tool": "query_tickets", "fixed_args": {"action": "find_tickets"}},
                 "params": [
-                    {"name": "queue", "type": "string", "required": True},
+                    {"name": "queue", "type": "string", "required": False},
                     {"name": "status", "type": "string", "required": False},
                 ],
                 "outcome_classes": [
@@ -232,7 +281,13 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
                         "description": "no ticket matches the filters",
                     },
                 ],
-                "claims": ["clm-api-001", "clm-api-005", "clm-trace-001"],
+                "claims": [
+                    "clm-api-001",
+                    "clm-api-005",
+                    "clm-trace-001",
+                    "clm-api-007",
+                    "clm-api-008",
+                ],
                 "confidence": "high",
             },
             {
@@ -252,7 +307,7 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
                         "description": "no ticket has that id, which is an error",
                     },
                 ],
-                "claims": ["clm-api-002", "clm-notes-004", "clm-api-006"],
+                "claims": ["clm-api-002", "clm-notes-004", "clm-api-006", "clm-api-009"],
                 "confidence": "high",
             },
         ],
@@ -318,14 +373,14 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
                     "Locate the ticket that needs action, or establish that it does not exist"
                 ),
                 "expected_hop_depths": [1],
-                "claims": ["clm-notes-002"],
+                "claims": ["clm-notes-002", "clm-notes-007"],
             },
             {
                 "id": "goal-explain",
                 "actor_id": "act-support",
                 "statement": "Explain why a ticket is stuck",
                 "expected_hop_depths": [2],
-                "claims": ["clm-notes-003"],
+                "claims": ["clm-notes-003", "clm-notes-008"],
             },
         ],
         "contradictions": [
