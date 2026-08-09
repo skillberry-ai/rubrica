@@ -131,6 +131,17 @@ scenario.
    `tg-instantiate` cannot honestly seed. Do not propose against a hole whose
    `reason` is any of those three.
 
+   Among the closable holes, an absence- or error-shaped outcome class
+   (`not_found`, `empty`, `error`, `underspecified`) is a cell in the
+   denominator exactly like `success` is -- not a lesser one, and not one to
+   leave for a later round. The denominator this stage works against is
+   capability x outcome class, so a round that closes every `success` cell
+   for every capability while every `not_found` or `error` cell on the same
+   capabilities sits at `not_yet_attempted` has not covered less of the
+   surface by accident -- it has quietly covered the same corner of it
+   repeatedly instead. Take every closable hole in front of you, not only the
+   ones that happen to be easiest to reach for first.
+
 5. **For each targeted hole, design a scenario a real actor would actually
    want.** Pick a `goal_id` and an `actor_id` from the world model's frozen
    lists -- never invent either -- and phrase `user_intent` the way that
@@ -139,6 +150,16 @@ scenario.
    outcome-class cells this scenario claims to exercise: no more cells than
    the scenario genuinely visits, and no fewer than the ones the hole you are
    targeting requires.
+
+   An absence- or error-shaped hole takes real, extra work to design a
+   believable `user_intent` for: you have to imagine an actor who wants the
+   thing that turns out not to be there, or who does something that turns
+   out to be invalid, which is a harder sentence to write honestly than "an
+   actor who wants the thing and gets it." That extra difficulty is exactly
+   the design work this step is asking for, on that hole's own terms as a
+   real open cell in this run's coverage report -- not a reason to defer the
+   hole, and not license to reach for an absence case because good test
+   suites in general are supposed to have some.
 
 6. **Declare the `discriminating_fact`.** State the single fact this
    scenario's test hinges on, phrased so specifically that `tg-instantiate`
@@ -155,10 +176,16 @@ scenario.
    to reach its `discriminating_fact` -- not a difficulty rating and not a
    round number picked for variety. A `hop_depth` of 2 backed by a single
    `capability_refs` entry needs an explanation the scenario itself makes
-   obvious (a lookup that must run twice to compare two results, say);
-   otherwise leave it inconsistent and `tg-challenge` will independently
-   measure the minimum number of calls a solution actually needs and flag
-   `difficulty_overstated` when your claim does not match. Set
+   obvious (a lookup that must run twice to compare two results, say). If you
+   cannot state that reason, the depth is not merely unexplained, it is
+   wrong -- lower it to the number of calls the scenario actually requires
+   before you write it down; an inflated depth left uncorrected on the theory
+   that a later stage will catch it is exactly the offloading this document
+   asks you not to do elsewhere. Getting this wrong has a real cost:
+   `tg-challenge` independently measures the minimum number of calls a
+   solution actually needs and flags `difficulty_overstated` when your claim
+   does not match, spending that stage's finding budget on a defect this
+   stage chose to create instead of catching before it shipped. Set
    `status: "proposed"` on every scenario you write, full stop -- never
    `active`, `duplicate`, or `rejected`. Those three are outcomes only
    `tg-score` can assign, after it has actually run its judgment over the
