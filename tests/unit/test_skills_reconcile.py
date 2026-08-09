@@ -8,6 +8,8 @@ target's real surface -- and every later percentage is measured against it.
 
 from __future__ import annotations
 
+import re
+
 from testgen.artifacts import read_json
 from testgen.skills import SECTIONS, load, skills_dir
 from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
@@ -86,10 +88,27 @@ def test_it_names_every_stage_a_gap_may_block():
 
 
 def test_it_states_that_the_denominator_is_computed_here_and_frozen():
-    """Structural: the Method section must contain the denominator's three
-    field names, which is the smallest check that the computation is specified
-    rather than gestured at.
+    """Structural: the prose must name the denominator's three field names,
+    which is the smallest check that the computation is specified rather than
+    gestured at.
+
+    `version` is matched on a word boundary, not as a bare substring, and that
+    detail is the whole test. As a substring it is satisfied by `schema_version`
+    and `denominator_version` elsewhere in the prose, so deleting the actual
+    `version: 1` statement from the denominator step left this test green --
+    mutation-confirmed. Scoping the search to the Method section does *not* fix
+    it either: `denominator_version` legitimately appears there too, in the
+    amendment-cost sentence. `\\b` works because underscore is a word character,
+    so neither compound matches, and there is exactly one standalone `version`.
+
+    `goals` and `capability_cells` stay bare substrings deliberately. `goals` is
+    recurring domain vocabulary throughout this document and a word-boundary
+    match would not make the check meaningfully stronger; `capability_cells`
+    occurs only in denominator contexts. Both are honestly weaker than the
+    `version` check, and this docstring is where that is recorded rather than
+    left for the next reader to discover by mutation.
     """
     body = load(SKILL).body
-    for field in ("capability_cells", "goals", "version"):
+    for field in ("capability_cells", "goals"):
         assert field in body, field
+    assert re.search(r"\bversion\b", body), "the prose never names the denominator's `version`"
