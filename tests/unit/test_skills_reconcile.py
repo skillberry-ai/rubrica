@@ -1,0 +1,95 @@
+"""tg-reconcile's contract and the enumerations its prompt must be complete over.
+
+The two set-completeness tests below are the ones that matter. This stage
+computes the coverage denominator, so a skill that names three of the five
+outcome-class kinds produces a denominator that is quietly smaller than the
+target's real surface -- and every later percentage is measured against it.
+"""
+
+from __future__ import annotations
+
+from testgen.artifacts import read_json
+from testgen.skills import SECTIONS, load, skills_dir
+from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
+
+SKILL = skills_dir() / "tg-reconcile" / "SKILL.md"
+
+
+def _world_schema():
+    return read_json(schema_dir() / ARTIFACT_SCHEMAS["world-model"])
+
+
+def test_the_contract_matches_the_stage_gate():
+    skill = load(SKILL)
+    assert skill.contract["stage"] == "reconcile"
+    assert set(skill.contract["schemas"]) == set(STAGE_ARTIFACTS["reconcile"])
+
+
+def test_it_reads_the_whole_claims_directory_because_it_is_the_barrier():
+    """The one stage that sees every artifact's conclusions. A contract that
+    declared a single claims file would make it a fan-out member and there
+    would be nothing left to merge.
+    """
+    assert "claims_dir" in load(SKILL).contract["reads"]
+
+
+def test_it_has_the_five_sections():
+    assert all(section in load(SKILL).headings for section in SECTIONS)
+
+
+def test_it_names_every_outcome_class_kind():
+    """The denominator is capability x outcome class. A skill that omits
+    `underspecified` produces a denominator missing that column for every
+    capability, and coverage is then measured against a surface smaller than
+    the target's.
+    """
+    enum = _world_schema()["$defs"]["capability"]["properties"]["outcome_classes"]["items"][
+        "properties"
+    ]["kind"]["enum"]
+    body = load(SKILL).body
+    missing = [kind for kind in enum if kind not in body]
+    assert not missing, f"the skill never mentions outcome class kind(s) {missing}"
+
+
+def test_it_names_every_contradiction_resolution_value():
+    """Including `unresolved`, which is the one a skill under pressure to be
+    helpful will omit -- and it is the only honest answer for a real
+    disagreement the inputs do not settle.
+    """
+    enum = _world_schema()["$defs"]["contradiction"]["properties"]["resolution"]["enum"]
+    body = load(SKILL).body
+    missing = [value for value in enum if value not in body]
+    assert not missing, f"the skill never mentions resolution(s) {missing}"
+
+
+def test_it_names_every_machine_invariant_form_the_code_implements():
+    """Imported from invariants.py, not from the schema and not from a literal:
+    the forms the code can evaluate are the forms a skill may write, and a
+    skill naming a fifth would produce an invariant refs reports as
+    unimplemented.
+    """
+    from testgen.invariants import _HANDLERS
+
+    body = load(SKILL).body
+    missing = [form for form in _HANDLERS if form not in body]
+    assert not missing, f"the skill never mentions machine form(s) {missing}"
+
+
+def test_it_names_every_stage_a_gap_may_block():
+    """A gap's `blocks` list is what makes the orchestrator halt. A skill that
+    names only `propose` cannot express a gap that blocks instantiate.
+    """
+    enum = _world_schema()["$defs"]["gap"]["properties"]["blocks"]["items"]["enum"]
+    body = load(SKILL).body
+    missing = [stage for stage in enum if stage not in body]
+    assert not missing, f"the skill never mentions blockable stage(s) {missing}"
+
+
+def test_it_states_that_the_denominator_is_computed_here_and_frozen():
+    """Structural: the Method section must contain the denominator's three
+    field names, which is the smallest check that the computation is specified
+    rather than gestured at.
+    """
+    body = load(SKILL).body
+    for field in ("capability_cells", "goals", "version"):
+        assert field in body, field
