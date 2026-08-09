@@ -178,11 +178,17 @@ not Minor, if it happens.
 
 ```bash
 uv run pytest --markers | grep live      # confirm the marker is registered
-uv run pytest -m live -q                 # default: skipped
-TESTGEN_LIVE=1 uv run pytest -m live -q  # opt in; empty or unset does not opt in
+uv run pytest -m live -q                 # today: deselected, exit 5 -- no test is
+                                          # live-marked yet (Task 14 adds the first).
+                                          # once one exists: skipped by default.
+TESTGEN_LIVE=1 uv run pytest -m live -q  # opt in. "", "0", "false", "no" (any
+                                          # case, surrounding whitespace ignored)
+                                          # do NOT opt in -- everything else does.
 ```
 
-`tests/unit/test_live_marker.py` proves both directions of the skip mechanically.
+`tests/unit/test_live_marker.py` proves both directions of the skip mechanically,
+including that those off-spellings stay off: a live test dispatches (and bills
+for) a model, so `TESTGEN_LIVE=0` must not be the thing that turns it on.
 The exercises above are run by hand, one skill at a time, following §§1–5 — they
 are not `-m live` pytest tests themselves, because a live exercise's pass
 criteria are read by a person (or the controller), not asserted by an

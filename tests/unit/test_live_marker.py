@@ -12,6 +12,8 @@ from __future__ import annotations
 import subprocess
 import sys
 
+import pytest
+
 
 def test_the_live_marker_is_registered():
     """An unregistered marker still applies but warns, and `--strict-markers`
@@ -75,6 +77,28 @@ def test_the_same_test_runs_with_the_opt_in(tmp_path):
     and a live suite nothing can ever run is ornamental.
     """
     out = _run_pytest(tmp_path, {"TESTGEN_LIVE": "1"})
+    assert "1 passed" in out, out
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "", "FALSE", " No "])
+def test_falsy_spellings_of_testgen_live_stay_off(tmp_path, value):
+    """os.environ.get(...) alone is truthy for any non-empty string, so a naive
+    check would make TESTGEN_LIVE=0 -- typed by someone who means "off" --
+    opt IN and dispatch (and bill for) exactly the model call they meant to
+    prevent. Every one of these spellings must still skip; case and
+    surrounding whitespace must not change the answer.
+    """
+    out = _run_pytest(tmp_path, {"TESTGEN_LIVE": value})
+    assert "1 skipped" in out, out
+    assert "1 passed" not in out, out
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes"])
+def test_other_truthy_spellings_opt_in_too(tmp_path, value):
+    """Not just "1" -- anything that is not a recognized off-spelling opts in,
+    so the common words people actually type ("true", "yes") must work too.
+    """
+    out = _run_pytest(tmp_path, {"TESTGEN_LIVE": value})
     assert "1 passed" in out, out
 
 

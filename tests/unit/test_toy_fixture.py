@@ -8,13 +8,18 @@ own gate first.
 
 from __future__ import annotations
 
+import pytest
+
+from testgen.artifacts import read_json
 from testgen.invariants import evaluate
 from testgen.validate import validate_artifact
 from tests.toy import (
+    ALL_SCENARIO_IDS,
     ARTIFACT_IDS,
     INPUT_FILES,
     SIDS,
     TOY_DIR,
+    build_toy_run,
     toy_claims,
     toy_coverage,
     toy_expected,
@@ -283,3 +288,78 @@ def test_the_open_scenario_count_stays_within_the_manifest_cap():
 
     live = [s for s in toy_scenarios()["scenarios"] if s["status"] in OPEN_STATUSES]
     assert len(live) == 4
+
+
+# -- build_toy_run(upto=...): the checkpoint mechanism every live exercise in
+# Tasks 7-13 depends on, per docs/running-a-stage-by-hand.md's table. Nothing
+# exercised it before this file: Task 4's report deferred a test to Task 5,
+# Task 5 never picked it up (its own toy_run fixture calls build_toy_run with
+# no upto at all), and Task 6's report only checked that the *code* existed --
+# never that a test of it did. These four close that gap.
+
+
+def test_upto_intake_writes_only_the_manifest_and_the_registered_inputs(tmp_path):
+    """The absence half is what shows the checkpoint actually stopped -- a test
+    that only asserted the manifest and inputs exist would also pass against a
+    build_toy_run that ignored `upto` and wrote everything.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    assert run.manifest.exists()
+    assert run.inputs_dir.exists()
+    assert len(list(run.inputs_dir.iterdir())) == len(ARTIFACT_IDS)
+    assert not run.claims_dir.exists()
+    assert not run.world_model.exists()
+    assert not run.scenarios.exists()
+    assert not run.coverage_dir.exists()
+    assert not run.instances_dir.exists()
+    assert not run.verdicts_dir.exists()
+
+
+def test_the_default_writes_every_artifact_through_challenge(tmp_path):
+    """upto=None (the default) writes through challenge -- verdicts included --
+    and no further: this fixture models nothing for emit or smoke, so a
+    06-suite/ appearing here would mean build_toy_run silently grew a stage it
+    does not implement.
+    """
+    run = build_toy_run(tmp_path / "runs")
+    assert run.manifest.exists()
+    for artifact_id in ARTIFACT_IDS:
+        assert run.claims(artifact_id).exists(), artifact_id
+    assert run.world_model.exists()
+    assert run.scenarios.exists()
+    assert run.coverage_round(1).exists()
+    assert run.coverage_latest.exists()
+    for sid in SIDS:
+        assert run.seed(sid).exists(), sid
+        assert run.expected(sid).exists(), sid
+        assert run.rationale(sid).exists(), sid
+        assert run.verdict(sid).exists(), sid
+    assert not run.suite_dir.exists(), "challenge is the last checkpoint this fixture models"
+
+
+def test_upto_propose_writes_every_scenario_proposed_with_no_duplicate_of(tmp_path):
+    """A run handed to the score stage with every scenario already `active` --
+    and the near-duplicate already folded -- cannot show whether score
+    promoted anything or ruled on the duplicate. Read back the artifact
+    build_toy_run actually wrote, rather than re-calling the private helper
+    that produced it: the point is to check the file on disk, not to check the
+    helper against itself.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    scenarios = read_json(run.scenarios)["scenarios"]
+    assert {s["id"] for s in scenarios} == set(ALL_SCENARIO_IDS)
+    for scenario in scenarios:
+        assert scenario["status"] == "proposed", scenario["id"]
+        assert "duplicate_of" not in scenario, scenario["id"]
+
+
+@pytest.mark.parametrize("bad_upto", ["bogus-stage", "emit"])
+def test_an_unknown_upto_raises_rather_than_silently_building_something_else(tmp_path, bad_upto):
+    """Gibberish is the easy case. The plausible mistake is passing a real
+    paths.STAGES entry this fixture does not model -- "emit" is a real stage
+    but build_toy_run stops at challenge, so silently accepting it (as either
+    "everything" or "nothing") would hand a later task's exercise a run one
+    stage off from what it asked for, with nothing to say so.
+    """
+    with pytest.raises(ValueError):
+        build_toy_run(tmp_path / "runs", upto=bad_upto)
