@@ -73,11 +73,37 @@ reports a finding against -- and check whether the skill's own report
 mentions running into the cap and stopping, versus proposing past it
 silently and leaving `check-refs` to be the one to notice.
 
+**4. Do the discriminating facts turn on values the claims support, or on
+values invented to make the fact land?** Uniqueness (property 2) and
+groundedness are different properties, and a fact can have the first
+without the second: "queue `sales` has zero matching tickets" pins down a
+seed as precisely as any fact in this file, but nothing in the claim set
+establishes a `sales` queue. `clm-notes-001` names exactly two queues,
+`billing` and `shipping`; a fact built around a third, invented one is
+grounded in nothing, and `tg-instantiate` will build a seed containing that
+invented queue with no way for anyone downstream to tell it apart from a
+real one -- `validate` and `check-refs` cannot catch this, because a
+capability's `params` are open strings with no enum to check a queue name
+against. For each `discriminating_fact` in the file, trace every entity
+value it names -- queue, status, id, count, any field value -- back to the
+world model or a cited claim, and flag any fact that depends on a value
+that trace does not reach. Also check, for every absence- or error-shaped
+fact, whether the claims already establish a grounded mechanism for
+producing that outcome class (a real queue with no matching tickets,
+`clm-trace-001`'s worked case) that the scenario passed over in favor of an
+invented value instead -- that is the sharper failure, because it shows the
+grounded route was available and unused, not merely unknown. A worked
+example a real run produced: `sc-0002`'s discriminating fact is "`find_tickets`
+with queue `sales` and status `open` returns zero tickets" -- `sales` is not
+one of the two queues any claim names, and `clm-trace-001` already
+establishes the grounded way to reach the same zero-result outcome on a
+queue that actually exists.
+
 ## Recording the result
 
-Record which of the three properties above held, in the exercise ledger,
+Record which of the four properties above held, in the exercise ledger,
 whether or not the mechanical pass criteria were met. A run that passes
 `validate`, `check-refs`, and the status check but only ever targets success
-cells, or writes facts that are not actually discriminating, is a failure
-this exercise exists to catch precisely because those mechanical gates
-cannot see it.
+cells, writes facts that are not actually discriminating, or grounds a fact
+in an invented value, is a failure this exercise exists to catch precisely
+because those mechanical gates cannot see it.

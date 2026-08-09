@@ -171,6 +171,28 @@ scenario.
    specific world. If you cannot state a fact this precise for a hole, that
    is refusal condition 4 in section 5, not a reason to write a vaguer one.
 
+   Uniqueness is not the only property the fact needs -- it also needs to be
+   *grounded*. Every entity value the fact turns on -- a queue name, a
+   status, an id, a count, any field value -- has to be one the world model
+   or its cited claims actually give you a basis for, not a plausible-looking
+   value that happens to make the fact land. An invented value is the same
+   failure as an invented capability, one level down: it is a fact about a
+   world the target does not have, and `tg-instantiate` will build a seed
+   containing that invented value with no way to tell it apart from a real
+   one -- `validate` and `check-refs` cannot catch it either, because a
+   capability's `params` are typed as open strings with no enum to check a
+   queue name or a status against. This bites hardest on absence and error
+   cells, precisely the ones step 4 and step 5 just told you not to defer:
+   the tempting way to manufacture an absence is to name something that was
+   never there in the first place -- a queue, a status, an id the claims
+   never establish -- when the claims may already give you a grounded way to
+   produce that same empty or error result (a real queue with no matching
+   tickets, say, rather than a queue that does not exist). Where the claims
+   establish a mechanism that produces the outcome class you are targeting,
+   use that mechanism; reach for an invented value only when no grounded one
+   is available, and if that is the case, refusal condition 4 in section 5
+   is what to write instead of a fact you cannot actually ground.
+
 7. **Set `hop_depth` honestly, and make it consistent with `capability_refs`.**
    `hop_depth` is the number of tool calls this scenario genuinely requires
    to reach its `discriminating_fact` -- not a difficulty rating and not a
