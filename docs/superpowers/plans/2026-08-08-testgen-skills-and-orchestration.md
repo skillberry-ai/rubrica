@@ -3783,6 +3783,22 @@ The implementer writes sections 1–5's prose from that list. A section that omi
 
 **Every skill task also carries these three requirements in every section 1:** it reads only the artifacts its contract's `reads` names; it receives no conversational context, so anything it needs must come from an artifact; and it must never read another scenario's slice (§5's fan-out isolation rule) where the stage is a fan-out.
 
+**And a fourth, added after Task 7's review, which every fan-out skill needs and none of the spec's wording covers: forbid the *knowledge* leak, not only the *file* leak.** The isolation rule as written in §5 bans reading a sibling's slice. It does not ban importing generic convention knowledge to reach the same place, and that route is reachable, invisible to every test, and produces the identical downstream harm. The worked case from Task 7: a subagent reading only `trace.json` writes *"`get_ticket` returned an empty object for an unrecognized id — unusual, since APIs typically error on an unknown resource id."* No sibling file was read. No error class was invented. But the claim has already resolved, on the strength of training-data convention, the exact disagreement the extract/reconcile split exists to surface as a recorded contradiction — and `tg-reconcile` now receives one pre-loaded claim instead of two independent ones.
+
+So every fan-out skill's section 1 states that a claim, a seed, or a verdict may rest only on what its own slice says — not on what similar systems usually do, not on what a convention would suggest, not on whether an observed behaviour seems surprising — and section 5 carries it as a refusal condition with an operational trigger, because an abstract rule is what a helpful model argues past. The trigger that works is a self-observation: **if you are about to call what you observed unusual, unexpected, atypical, or probably a bug, you are comparing it against knowledge your slice does not contain. Record the observation; drop the comparison.**
+
+This is **not** a ban on inference. `derivation: inferred` stays legitimate; the test is whether the reasoning stayed inside the slice. The rule constrains the *premises*, not the reasoning.
+
+**The principle generalizes; the trigger phrase must not be copied.** Task 7's implementer was asked whether its wording transfers, and its answer is the one to follow: the underlying rule is the same everywhere — ground the artifact only in what this subagent was actually given, and treat *"this feels right / normal / expected"* as the tell that something extrinsic got in — but each skill's *tell* is different, and a verbatim copy of `tg-extract`'s phrasing would name a symptom that stage does not have. So each fan-out skill states its own:
+
+| Skill | Its own tell |
+|---|---|
+| `tg-extract` | about to call an observation unusual, unexpected, atypical, or probably a bug — that is a comparison against knowledge the slice does not contain |
+| `tg-instantiate` (Task 11) | seed content reaching for *what a plausible or realistic test fixture looks like* instead of grounding strictly in the world model's declared fields and this scenario's own `capability_refs` |
+| `tg-challenge` (Task 12) | reasoning that *the intended answer is probably X, because that is the kind of fact a benchmark tests for*, rather than because tool calls against this seed actually produced X |
+
+The `tg-challenge` row is not an edge case — Task 7's implementer rates it that stage's **single most likely failure mode**, and it is precisely the anchoring the separate-subagent design with a restricted input slice exists to prevent. §6 already says an adversary that sees the oracle first confirms almost anything; this is the same failure without the oracle, reached by convention instead.
+
 **And every section 4 ends with the same self-check instruction:** run `testgen validate --stage <stage>` and, where the contract lists it, `testgen check-refs`, before reporting done — and if either reports a finding, repair the artifact rather than reporting success.
 
 ### The live exercise, run by the controller
