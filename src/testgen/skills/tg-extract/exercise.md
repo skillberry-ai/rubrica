@@ -34,17 +34,34 @@ Dispatch `tg-extract` three times, once per registered input artifact
 
 ## The property no automated test can check
 
-Does the subagent dispatched for `trace-json` record something
-`clm-trace-002`-shaped -- that calling `get_ticket` with an id no ticket has
-returned an empty object, read straight off the trace, `derivation:
-reverse_engineered` -- *without* also asserting the documented error
-behaviour ("`get_ticket` with an unknown id is an error, not an empty
-result") that lives in `notes.md`, an artifact this subagent never read?
+There are two versions of this, one blatant and one subtle. No test in
+`test_skills_extract.py` can catch either -- reading the actual claims text
+by hand is the only check for both.
 
-If the `trace-json` output imports that error-behaviour claim, the fan-out
-isolation is not holding in practice: information crossed from one
-subagent's context into another's that the contract's `reads` list was
-supposed to make impossible for it to see. If that happens, the fix is not
-a patch to this run -- it is the Inputs section of this skill needing to
-forbid reading past the two named artifacts more forcefully than it
-currently does.
+**The blatant version.** Does the subagent dispatched for `trace-json`
+record something `clm-trace-002`-shaped -- that calling `get_ticket` with an
+id no ticket has returned an empty object, read straight off the trace,
+`derivation: reverse_engineered` -- *without* also asserting the documented
+error behaviour ("`get_ticket` with an unknown id is an error, not an empty
+result") that lives in `notes.md`, an artifact this subagent never read? If
+the `trace-json` output imports that error-behaviour claim outright, the
+fan-out isolation is not holding: information crossed from one subagent's
+context into another's that the contract's `reads` list was supposed to make
+impossible for it to see.
+
+**The subtle version, and the more likely one.** Read every `trace-json`
+claim's `statement` for a word characterizing the observed response as
+`unusual`, `unexpected`, `atypical`, `surprising`, or as probably a bug --
+or any paraphrase of "APIs typically ...", "usually ...", "one would expect
+...". Treat the presence of any such characterization as a finding, *even
+when* no sibling file was read and no undocumented error class was
+invented outright. A claim can satisfy every mechanical rule in this
+skill -- read only its own file, invent no new error class -- and still
+smuggle in exactly the judgment `notes.md` states, just phrased as the
+subagent's own observation about what is normal rather than as a citation
+of the document that says so. That is the leak Refusal condition 5 in
+`SKILL.md` names, and this read is the only way to confirm the trigger
+actually fires rather than merely existing on the page. If characterizing
+language shows up in a `trace-json` claim, the fix is not a patch to this
+run -- it is Refusal condition 5 needing sharper trigger wording or a
+stronger worked example.

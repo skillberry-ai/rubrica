@@ -52,6 +52,22 @@ Locate your entry in `manifest.json`'s `inputs` array by matching
 `artifact_id` or `source_path` strings, which describe your input but are
 not it.
 
+Everything above is about which *files* you may read. There is a second,
+easier-to-miss boundary: what you may *know*. A claim may rest only on what
+this one artifact actually says -- not on what similar systems usually do,
+not on what a convention would suggest, not on whether an observed
+behaviour strikes you as surprising. Say `trace.json` shows a call to
+`get_ticket` with an id no other span establishes as valid, returning `{}`.
+The honest claim reports exactly that call and that response. A claim that
+adds "-- unusual, since APIs typically error on an unrecognized id" has read
+no sibling file and invented no undocumented error class, so it looks clean
+by every rule above it; but "unusual" is a premise this artifact never
+supplied, borrowed from a general convention about how APIs behave. In this
+toy world that convention happens to be exactly what `notes.md` documents,
+so the borrowed premise is a sibling-file leak wearing a disguise: the file
+boundary held and the knowledge boundary did not. Refusal condition 5 below
+gives the concrete trigger to catch yourself on.
+
 ## 2. Output
 
 One `claims-0.1.json`-shaped document: `schema_version: "0.1"`, your
@@ -190,3 +206,21 @@ loudly is the one that is actually correct.
   is a gap for `tg-reconcile` to surface and a hole for `tg-score` to
   count; recording your own guess in its place erases the gap and hands
   every downstream stage a fact that nobody ever actually stated.
+
+- **You are about to describe an observed behaviour as unusual, unexpected,
+  atypical, or as probably a bug.** Stop. Words like those are you comparing
+  what the artifact shows against a convention or expectation the artifact
+  itself never stated -- and that comparison is knowledge from outside it,
+  every bit as much a contamination risk as reading a sibling file, even
+  though no sibling file was touched. Record the observation alone, at
+  whatever `derivation` and `confidence` it honestly earns, and drop the
+  characterization. Concretely: if `trace.json` shows `get_ticket` called
+  with `ticket_id: 9999` returning `{}`, the honest claim is
+  `reverse_engineered`, `confidence: medium`, with a statement close to
+  "`get_ticket` returned an empty object for `ticket_id=9999`, an id no
+  other span establishes as valid" -- full stop. Appending "which is
+  unusual, since APIs typically error on an unrecognized id" is the same
+  observation with an unstated premise bolted on. Whether that premise is
+  true is `tg-reconcile`'s question, to be answered by comparing your claim
+  against whatever a sibling claims file independently says; it is not
+  yours to pre-answer by assuming the convention holds here.
