@@ -65,3 +65,58 @@ actually fires rather than merely existing on the page. If characterizing
 language shows up in a `trace-json` claim, the fix is not a patch to this
 run -- it is Refusal condition 5 needing sharper trigger wording or a
 stronger worked example.
+
+## Run record: round 1 of the live exercise
+
+Three fresh subagents, one per input artifact, each given only the run
+directory, the stage name, this skill's path, and its own `artifact_id` --
+nothing else, and no shared context between them.
+
+**The epistemic-isolation subtle check passed.** The `trace-json` subagent
+produced exactly the honest form for the `get_ticket(9999) -> {}` call:
+
+> "returned an empty object (`{}`), for a `ticket_id` value (9999) that no
+> other span in this trace establishes as valid."
+
+No `unusual`, no `typically errors`, no characterization anywhere across
+its eight claims. It went further, unprompted, on a related claim: "only
+two calls are observed, so this pattern is not confirmed beyond them." All
+eight claims came back `reverse_engineered` at medium or low confidence.
+This is the first positive behavioural evidence that Refusal condition 5's
+trigger actually does the work it was written for, not only that it reads
+plausibly.
+
+Both gates were clean: `testgen validate --stage extract` and `testgen
+check-refs` each exited 0, and claim ids stayed globally unique across the
+three subagents with no shared context between them, confirming the
+`clm-<artifact-id>-NNN` prefixing convention (Method step 6) holds without
+coordination.
+
+**A real miss, found by this round: the same proposition filed under two
+different `kind` values.** `api-json` correctly filed "`query_tickets`
+errors when called with action `get_ticket` and no ticket has the given
+id" as `outcome_class`. `notes-md` filed the identical fact as `invariant`,
+twice. Both claims files still validated and `check-refs` stayed clean --
+the schema cannot see a misclassification, only a missing required field
+-- and the loss was masked in this run only because `api-json` also states
+the fact correctly; take that redundancy away and the coverage denominator
+loses a column with nothing anywhere reporting it. `SKILL.md`'s Method
+step 3 now carries the disambiguation rule and worked pair this failure
+motivated.
+
+**Two judgement calls this round surfaced, deliberately not acted on:**
+
+- `notes-md` filed "ticketq fronts two support queues, named billing and
+  shipping" as `entity`. Arguably `billing`/`shipping` are values of
+  `Ticket.queue`, not an entity with fields of its own -- but this claim
+  does not feed the coverage denominator the way the invariant/
+  outcome_class pair does, and `tg-reconcile`, not `tg-extract`, is the
+  stage that decides whether a claim like this becomes a world-model
+  entity. Left unchanged rather than adding a second worked pair to
+  Method step 3 for a lower-stakes distinction that risks diluting the one
+  the coverage denominator actually depends on.
+- `notes-md` produced two `goal` claims and then two more restating them
+  as "in practice, a single lookup" / "in practice, a two-step workflow."
+  This reads as legitimate added granularity, not redundancy: the second
+  pair carries hop-depth information the first pair does not, and
+  `tg-propose` uses exactly that. Left unchanged.

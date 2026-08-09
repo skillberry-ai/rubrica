@@ -108,6 +108,25 @@ there -- an incomplete claim is a validation failure, not a smaller claim.
    (`#/tools/0/input_schema/properties/action`) for a JSON input, a heading
    anchor or a line reference for prose.
 
+   `invariant` and `outcome_class` are the pair most often swapped, and the
+   swap is invisible downstream: `tg-reconcile` builds its coverage
+   denominator -- every operation crossed with its outcome classes -- only
+   from `outcome_class` claims, so a genuine error behaviour filed as
+   `invariant` does not feed that enumeration, and a column of the test
+   matrix goes missing with no schema, no `check-refs`, and no validation
+   error ever naming it. Tell the two apart by what the statement is
+   *about*: a statement about what an operation returns or raises for some
+   class of input is an `outcome_class`; a statement about a data or state
+   rule the store maintains regardless of any call is an `invariant`. Two
+   statements from `notes.md`, three paragraphs apart, that must not land
+   the same way: "`comment_count` is always the number of comment records
+   attached to it" is an `invariant` -- a rule about stored data, true
+   whether or not anyone ever calls anything. "`get_ticket` with an id no
+   ticket has is an error, not an empty result" is an `outcome_class` --
+   what `get_ticket` does for the class of input "unknown id." If you catch
+   yourself about to write `invariant` for a sentence describing what an
+   operation *does*, that is the sign you have the pair backwards.
+
 4. **Set `derivation` honestly, one of three values.** `stated` -- the
    artifact says this in so many words. `inferred` -- you concluded it from
    what the artifact says, without the artifact stating it outright, and
