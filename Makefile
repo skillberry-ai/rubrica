@@ -1,4 +1,4 @@
-.PHONY: help setup test check lint format
+.PHONY: help setup test live check lint format
 
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -9,6 +9,9 @@ setup: ## Create the venv and install runtime + dev deps
 
 test: ## Run the test suite
 	uv run pytest -q
+
+live: ## Run the live stage exercises (dispatches a model; costs money)
+	TESTGEN_LIVE=1 uv run pytest -m live -q
 
 check: ## Lint and verify formatting, making no changes
 	uv run ruff check .
