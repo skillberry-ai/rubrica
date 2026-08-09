@@ -145,6 +145,39 @@ def test_the_spread_clears_both_thresholds_it_is_measured_against(toy_run, tmp_p
     assert means["weak_baseline"] < means["under_test"] <= means["oracle"]
 
 
+def test_each_package_carries_its_own_scenarios_oracle(toy_run):
+    """Each emitted package was compiled from *its own* scenario's oracle.
+
+    Necessary because no reward number can establish it: all three roles score
+    identically on the two absence-shaped tasks (0.4 / 1.0 / 1.0), so a
+    mislabeling between them moves nothing. And layer 2 only catches half of
+    it -- refs.check_instances compares expected.json's scenario_id against its
+    directory, so a *directory* swap is reported, but swapping which oracle
+    content attaches to which id, with the capability wiring and seed pointers
+    left correctly matched, passes check_all and every reward assertion in this
+    file. Verified by performing that swap.
+
+    Both sides derive from toy_expected(sid) rather than hardcoded strings, so
+    the check keeps working when the fixture's wording changes -- and so that
+    under a swap the fixture still returns the right content while the package
+    holds the wrong one, which is what makes the assertion fire.
+    """
+    from tests.toy import toy_expected
+
+    emit_run(toy_run)
+    for sid in SIDS:
+        contract = json.loads(
+            (toy_run.task_dir(sid) / "tests" / "expected.json").read_text(encoding="utf-8")
+        )
+        assert contract["scenario_id"] == sid
+        oracle = toy_expected(sid)
+        emitted = {(a.get("target"), a["value"]) for a in contract["assertions"]}
+        expected = {(a.get("target"), a["value"]) for a in oracle["assertions"]}
+        assert emitted == expected, f"{sid}'s package carries another scenario's assertions"
+        golden = json.loads((toy_run.task_dir(sid) / "golden.json").read_text(encoding="utf-8"))
+        assert golden["answer"] == oracle["answer_reference"]
+
+
 def test_the_weak_baseline_scores_only_on_the_absence_shaped_tasks(toy_run, tmp_path):
     """Pins the finding this fixture surfaced, so it cannot regress silently.
 
