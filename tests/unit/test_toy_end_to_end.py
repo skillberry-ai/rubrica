@@ -70,6 +70,18 @@ def test_layer_2_is_clean_over_the_whole_run(toy_run):
 
 
 def test_emit_produces_one_complete_package_per_scenario(toy_run):
+    """tests/verify.py and tests/test.sh are checked for byte-identity across
+    every package in this run, not just file presence. The design forbids a
+    per-task generated verifier -- every package must run the identical
+    scorer -- and `emit_run`'s copy call takes no per-scenario argument, so
+    there is no code path by which two packages in the same run could
+    legitimately differ here. test_emit_packages.py's `test_the_verifier_
+    and_entrypoint_are_copied_verbatim` already pins one package against
+    suite_template_dir(); this is the multi-package half of that claim, which
+    a single-scenario fixture cannot exercise.
+    """
+    from testgen.emit import suite_template_dir
+
     emitted, findings = emit_run(toy_run)
     assert (emitted, findings) == (sorted(SIDS), [])
     assert validate_stage(toy_run, "emit") == []
@@ -86,6 +98,10 @@ def test_emit_produces_one_complete_package_per_scenario(toy_run):
             "tests/test.sh",
         ):
             assert (toy_run.task_dir(sid) / name).is_file(), f"{sid}/{name}"
+        for name in ("verify.py", "test.sh"):
+            assert (toy_run.task_dir(sid) / "tests" / name).read_bytes() == (
+                suite_template_dir() / name
+            ).read_bytes(), f"{sid}'s {name} diverges from the shared template"
 
 
 def test_the_emitted_contract_never_carries_a_kind_outside_the_vocabulary(toy_run):
@@ -145,46 +161,85 @@ def test_the_spread_clears_both_thresholds_it_is_measured_against(toy_run, tmp_p
     assert means["weak_baseline"] < means["under_test"] <= means["oracle"]
 
 
-def test_each_package_carries_its_own_scenarios_oracle(toy_run):
-    """Each emitted package was compiled from *its own* scenario's oracle and
-    ships its own scenario's world.
+def test_each_package_carries_its_own_scenarios_everything(toy_run):
+    """Each emitted package was compiled entirely from *its own* scenario:
+    its own oracle, its own seed, its own metadata, its own question.
 
     Necessary because no reward number can establish it: all three roles score
     identically on the two absence-shaped tasks (0.4 / 1.0 / 1.0), so a
     mislabeling between them moves nothing. And layer 2 only catches part of
     it -- refs.check_instances compares expected.json's scenario_id against its
-    directory, so a *directory* swap is reported, but swapping which oracle
-    content, or which seed, attaches to which id, with the capability wiring
-    left correctly matched, passes check_all and every reward assertion in
-    this file. scn-empty and scn-missing both ground their answer_excludes
-    assertion at seed_pointer "/collections/tickets/2", which resolves to
-    nothing in either seed (each has exactly two tickets) -- so a seed swap
-    between the two changes no finding and no reward either. Verified by
-    performing both swaps.
+    directory, so a *directory* swap is reported, but swapping which oracle,
+    seed, or scenario metadata attaches to which id, with the capability
+    wiring left correctly matched, passes check_all and every reward
+    assertion in this file. scn-empty and scn-missing both ground their
+    answer_excludes assertion at seed_pointer "/collections/tickets/2",
+    which resolves to nothing in either seed (each has exactly two tickets)
+    -- so a seed swap between the two changes no finding and no reward
+    either. A metadata swap is the sharpest of the three: instruction.md is
+    the question the agent is actually asked, so a swap there means one
+    package poses the other's question while carrying its own seed and its
+    own oracle -- not a bookkeeping error, an unfair task, and check_all
+    stays silent through it too. Verified by performing all three swaps.
 
-    All three sides (assertions, golden answer, seed) derive from
-    toy_expected(sid)/toy_seed(sid) rather than hardcoded strings, so the
-    check keeps working when the fixture's wording or seed content changes --
-    and so that under a swap the fixture still returns the right content
-    while the package holds the wrong one, which is what makes the assertion
-    fire.
+    Every side derives from toy_expected(sid)/toy_seed(sid)/toy_scenarios()
+    rather than a hardcoded literal, so the check keeps working when the
+    fixture's wording, seed, or scenario metadata changes -- and so that
+    under a swap the fixture still returns the right content while the
+    package holds the wrong one, which is what makes the assertion fire.
+
+    Not pinned here: tests/verify.py and tests/test.sh. Both are copied from
+    suite_template_dir() with no scenario-specific argument in the call that
+    writes them, so there is no per-scenario value for a swap to attach to
+    the wrong id -- see test_emit_produces_one_complete_package_per_scenario
+    for the across-packages byte-identity check that property still
+    deserves.
     """
-    from tests.toy import toy_expected, toy_seed
+    import tomllib
+
+    from testgen.emit import bindings, call_spec
+    from tests.toy import toy_expected, toy_scenarios, toy_seed, toy_world_model
+
+    scenarios_by_id = {s["id"]: s for s in toy_scenarios()["scenarios"]}
+    bound = bindings(toy_world_model())
 
     emit_run(toy_run)
     for sid in SIDS:
+        scenario = scenarios_by_id[sid]
+        oracle = toy_expected(sid)
+
         contract = json.loads(
             (toy_run.task_dir(sid) / "tests" / "expected.json").read_text(encoding="utf-8")
         )
         assert contract["scenario_id"] == sid
-        oracle = toy_expected(sid)
         emitted = {(a.get("target"), a["value"]) for a in contract["assertions"]}
         expected = {(a.get("target"), a["value"]) for a in oracle["assertions"]}
         assert emitted == expected, f"{sid}'s package carries another scenario's assertions"
+
         golden = json.loads((toy_run.task_dir(sid) / "golden.json").read_text(encoding="utf-8"))
         assert golden["answer"] == oracle["answer_reference"]
+        expected_calls = [
+            call_spec(bound[op["capability_id"]], op.get("args", {}))
+            for op in oracle["trajectory"]["operations"]
+        ]
+        assert golden["tool_calls"] == expected_calls, (
+            f"{sid}'s package's golden calls belong to another scenario's trajectory"
+        )
+
         seed = json.loads((toy_run.task_dir(sid) / "seed.json").read_text(encoding="utf-8"))
         assert seed == toy_seed(sid), f"{sid}'s package ships another scenario's seed"
+
+        instruction = (toy_run.task_dir(sid) / "instruction.md").read_text(encoding="utf-8")
+        assert instruction.strip() == scenario["user_intent"].strip(), (
+            f"{sid}'s package asks another scenario's question"
+        )
+
+        with (toy_run.task_dir(sid) / "task.toml").open("rb") as handle:
+            task_toml = tomllib.load(handle)
+        assert task_toml["task"]["description"] == scenario["title"]
+        assert task_toml["metadata"]["goal_id"] == scenario["goal_id"]
+        assert task_toml["metadata"]["actor_id"] == scenario["actor_id"]
+        assert task_toml["metadata"]["hop_depth"] == scenario["hop_depth"]
 
 
 def test_the_weak_baseline_scores_only_on_the_absence_shaped_tasks(toy_run, tmp_path):

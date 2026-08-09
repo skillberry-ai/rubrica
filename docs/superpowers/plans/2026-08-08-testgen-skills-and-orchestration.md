@@ -3251,8 +3251,22 @@ def test_the_spread_clears_both_thresholds_it_is_measured_against(toy_run, tmp_p
     assert means["weak_baseline"] < means["under_test"] <= means["oracle"]
 
 
-def test_each_package_carries_its_own_scenarios_oracle(toy_run):
-    """Each emitted package was compiled from *its own* scenario's oracle.
+def test_each_package_carries_its_own_scenarios_artifacts(toy_run):
+    """Each emitted package was compiled from *its own* scenario, throughout.
+
+    Pins **every** scenario-specific artifact, not the oracle alone, and the
+    reason is that this hole was found three times in a row one field at a
+    time: the oracle content, then the seed, then `user_intent`. The last is
+    the worst -- `user_intent` becomes `instruction.md`, the question the agent
+    is actually asked, so a swap poses one scenario's question against
+    another's world and oracle. That is an unfair task, not a bookkeeping slip,
+    and `check_all` does not see it either.
+
+    Scenario-specific: `instruction.md`, `seed.json`, `golden.json`,
+    `tests/expected.json`, and `task.toml`'s metadata block.
+    Scenario-independent: `tests/verify.py` and `tests/test.sh`, which are the
+    same copied files in every package -- a per-task generated verifier is what
+    the design forbids, so that sameness is a property in its own right.
 
     Necessary because no reward number can establish it: all three roles score
     identically on the two absence-shaped tasks (0.4 / 1.0 / 1.0), so a
@@ -3268,22 +3282,35 @@ def test_each_package_carries_its_own_scenarios_oracle(toy_run):
     under a swap the fixture still returns the right content while the package
     holds the wrong one, which is what makes the assertion fire.
     """
-    from tests.toy import toy_expected
+    ...  # requirements below; do not transcribe a sample
 
-    emit_run(toy_run)
-    for sid in SIDS:
-        contract = json.loads(
-            (toy_run.task_dir(sid) / "tests" / "expected.json").read_text(encoding="utf-8")
-        )
-        assert contract["scenario_id"] == sid
-        oracle = toy_expected(sid)
-        emitted = {(a.get("target"), a["value"]) for a in contract["assertions"]}
-        expected = {(a.get("target"), a["value"]) for a in oracle["assertions"]}
-        assert emitted == expected, f"{sid}'s package carries another scenario's assertions"
-        golden = json.loads(
-            (toy_run.task_dir(sid) / "golden.json").read_text(encoding="utf-8")
-        )
-        assert golden["answer"] == oracle["answer_reference"]
+
+# REQUIREMENTS for the test above, given as requirements rather than as code
+# because this plan wrote its body wrong three times running -- once per field it
+# forgot to pin. A list of properties survives that; a code sample did not.
+#
+# For each sid in SIDS, assert the emitted package's scenario-specific artifacts
+# come from that scenario, with every expectation sourced from toy_scenarios()
+# or toy_expected(sid) and none hardcoded:
+#
+#   instruction.md        == the scenario's user_intent
+#   seed.json            == toy_seed(sid)
+#   golden.json          -> answer == answer_reference, and its tool_calls match
+#                           the oracle's trajectory operations
+#   tests/expected.json  -> scenario_id == sid, and the (target, value) set of
+#                           its assertions == the oracle's
+#   task.toml            -> the metadata block's goal_id, actor_id, hop_depth,
+#                           and the description derived from title
+#                           (read it with stdlib tomllib; emit writes tomli_w)
+#
+# Scenario-*independent*, and deliberately not pinned per sid: tests/verify.py
+# and tests/test.sh, which are the same copied files in every package. Their
+# sameness is its own property -- a per-task generated verifier is what the
+# design forbids -- so assert it once if nothing else does.
+#
+# VERIFY each pinned artifact with a cross-wiring mutation on emit's *writing*
+# path, never on the fixture source. Mutating _ORACLES or _SEEDS feeds both
+# sides of the assertion and is inert; that mistake was made twice here.
 
 
 def test_the_weak_baseline_scores_only_on_the_absence_shaped_tasks(toy_run, tmp_path):
