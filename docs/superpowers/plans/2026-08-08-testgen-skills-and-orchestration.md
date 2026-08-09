@@ -2131,21 +2131,44 @@ def test_the_machine_invariants_hold_over_every_seed():
             assert evaluate(machine, collections) == [], f"{sid}: {machine['form']}"
 
 
-def test_a_broken_seed_would_be_caught_by_those_invariants(tmp_path):
-    """The dual of the test above: it proves the invariants hold, not that they
-    can fail. Without this, an invariant over a collection no seed declares
-    would pass vacuously and the fixture would prove nothing.
+def test_every_machine_form_is_proven_capable_of_failing(tmp_path):
+    """The dual of the test above, and it must cover **every** form.
+
+    The test above proves the invariants hold; it does not prove they *can*
+    fail. An invariant whose `collection` is mistyped returns [] from
+    invariants._records() and reports nothing, so the holds-test passes
+    vacuously -- verified: changing the `unique` form's collection to
+    "tickets_typo" left all eighteen fixture tests green.
+
+    Structured as a corruption per form, keyed on the form name, so adding a
+    third `machine:` form without an inversion case is a visible KeyError
+    rather than silent non-coverage. A per-form list is what the first version
+    of this test lacked: it inverted only the `count` form, and the `unique`
+    form was asserted to hold while never being shown able to fail.
     """
     world = toy_world_model()
-    count_form = next(
-        inv["machine"]
+    machines = {
+        inv["machine"]["form"]: inv["machine"]
         for entity in world["entities"]
         for inv in entity.get("invariants", [])
-        if inv.get("machine", {}).get("form") == "count"
+        if "machine" in inv
+    }
+
+    def corrupt_count(collections):
+        collections["tickets"][0]["comment_count"] += 1
+
+    def corrupt_unique(collections):
+        collections["tickets"][1]["ticket_id"] = collections["tickets"][0]["ticket_id"]
+
+    corruptions = {"count": corrupt_count, "unique": corrupt_unique}
+    assert set(corruptions) == set(machines), (
+        "every machine form in the fixture needs a corruption proving it can fail"
     )
-    collections = toy_seed("scn-blocked")["collections"]
-    collections["tickets"][0]["comment_count"] += 1
-    assert evaluate(count_form, collections) != []
+    for form, machine in machines.items():
+        collections = toy_seed("scn-blocked")["collections"]
+        assert evaluate(machine, collections) == [], f"{form} must hold before corruption"
+        corruptions[form](collections)
+        assert evaluate(machine, collections) != [], f"{form} did not fire on a broken seed"
 
 
 def test_the_coverage_report_covers_every_cell_and_both_goals():
@@ -3035,16 +3058,31 @@ contradiction, and a distractor set in every seed.
 Assisted-By: Claude (Anthropic AI) <noreply@anthropic.com>"
 ```
 
-**Self-check before reporting DONE.** Two specific things to state in your
-report. First: `test_the_machine_invariants_hold_over_every_seed` is shape 2 on
-its own — an invariant over a collection no seed declares returns `[]` and the
-test passes vacuously — so say which test closes it and confirm you ran it
-inverted. Second: the `answer_excludes` pointers all resolve to a *missing
-array index*. Confirm by reading `refs._is_empty` and `refs.resolve_pointer`
-that this is the intended shape rather than an accident of how the pointer
-resolver reports failure, and if you conclude it is an accident, say so and
-stop — that would be a finding about the contract, not something to work around
-in the fixture.
+**Self-check before reporting DONE.** Three specific things to state in your
+report.
+
+First: `test_the_machine_invariants_hold_over_every_seed` is shape 2 on its own
+— an invariant over a collection no seed declares returns `[]` and the test
+passes vacuously — so say which test closes it, and confirm you ran the
+inversion **for every form, not just one.** The first version of this plan
+inverted only `count`, and mistyping the `unique` form's collection to
+`"tickets_typo"` left all eighteen fixture tests green. A holds-test plus a
+one-form inversion reads as coverage of both and is coverage of one.
+
+Second: **which keys of a `machine:` form fail loudly and which fail silently.**
+`collection` and `of` are validated by `refs.check_world_model` against the
+world model's declared collections, so a typo there is a layer-2 finding. The
+others — `field`, `local_key`, `foreign_key`, `order_by`, `within` — are not,
+and `invariants.py` reports a *violation* for a missing field rather than
+staying silent, which is loud. Work out which of these actually go quiet when
+wrong and report the list; the ones that go quiet are the ones a fixture test
+has to cover, because nothing else will.
+
+Third: the `answer_excludes` pointers all resolve to a *missing array index*.
+Confirm by reading `refs._is_empty` and `refs.resolve_pointer` that this is the
+intended shape rather than an accident of how the pointer resolver reports
+failure, and if you conclude it is an accident, say so and stop — that would be
+a finding about the contract, not something to work around in the fixture.
 
 ---
 
