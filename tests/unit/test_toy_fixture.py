@@ -133,18 +133,41 @@ def test_the_machine_invariants_hold_over_every_seed():
 def test_a_broken_seed_would_be_caught_by_those_invariants(tmp_path):
     """The dual of the test above: it proves the invariants hold, not that they
     can fail. Without this, an invariant over a collection no seed declares
-    would pass vacuously and the fixture would prove nothing.
+    would pass vacuously and the fixture would prove nothing -- and that
+    applies per form, not just once: a mistyped `collection` makes `_records`
+    return [] and every form report no violations regardless of what's
+    actually wrong, so each form the fixture uses needs its own corruption.
+
+    Breakers are keyed by form name and checked against the forms the world
+    model actually declares, rather than one assertion per form written out
+    by hand, so a third `machine:` form added later without a matching
+    breaker here fails the coverage assertion below instead of silently
+    shipping unverified.
     """
     world = toy_world_model()
-    count_form = next(
-        inv["machine"]
+    machines = {
+        inv["machine"]["form"]: inv["machine"]
         for entity in world["entities"]
         for inv in entity.get("invariants", [])
-        if inv.get("machine", {}).get("form") == "count"
+        if "machine" in inv
+    }
+
+    def break_count(collections):
+        collections["tickets"][0]["comment_count"] += 1
+
+    def break_unique(collections):
+        collections["tickets"][1]["ticket_id"] = collections["tickets"][0]["ticket_id"]
+
+    breakers = {"count": break_count, "unique": break_unique}
+    assert set(machines) == set(breakers), (
+        "every machine: form the fixture declares needs a corruption case here, "
+        "or that form's invariant could pass vacuously and no test would notice"
     )
-    collections = toy_seed("scn-blocked")["collections"]
-    collections["tickets"][0]["comment_count"] += 1
-    assert evaluate(count_form, collections) != []
+
+    for form, machine in machines.items():
+        collections = toy_seed("scn-blocked")["collections"]
+        breakers[form](collections)
+        assert evaluate(machine, collections) != [], form
 
 
 def test_the_coverage_report_covers_every_cell_and_both_goals():
