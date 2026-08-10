@@ -12,6 +12,10 @@
           "status": { "type": "string", "enum": ["open", "blocked", "closed"] },
           "ticket_id": { "type": "integer" }
         }
+      },
+      "returns": {
+        "find_tickets": "A list of tickets matching the queue and status filters.",
+        "get_ticket": "One ticket with its comments, ordered by position."
       }
     }
   ],
