@@ -50,9 +50,20 @@ entry in `02-scenarios.json`'s `scenarios` array by matching `id` against the
 `scenario_id` you were dispatched for. That entry -- its `goal_id`,
 `actor_id`, `user_intent`, `hop_depth`, `capability_refs`, and above all its
 `discriminating_fact` -- is your specification. Its `status` should be
-`active`; a scenario still `proposed` has not been ruled on by `tg-score`,
-and building an instance for one is a defect `refs.check_instances` reports
-by name, so stop and report that rather than instantiating it anyway.
+`active`; anything else means stop and report the dispatch rather than
+instantiating it anyway. Two of the other statuses are the ones
+`refs.check_instances` reports an instance for, and both can reach you
+through a dispatch mistake. `proposed` means `tg-score` has not ruled on the
+scenario at all. `duplicate` means it ruled the scenario *out* -- folded into
+another scenario that carries the same test, usually with the same or a
+near-identical `discriminating_fact`, which is exactly what makes it look
+instantiable when you read it, and makes it the likelier of the two to slip
+through. Neither is yours to build, and the fold in particular is not
+something to second-guess by building it anyway because the fact reads fine.
+(A `rejected` scenario is a third case the gate tolerates, because that is
+what a scenario `tg-challenge` threw out *after* it was instantiated looks
+like -- but it is still not one to build a fresh instance for, and being
+handed one is a dispatch mistake to report the same way.)
 
 You are dispatched with no memory of any conversation that came before you,
 and nothing you write here carries forward as memory either. Whatever you
@@ -189,11 +200,17 @@ artifacts that validate and mean nothing.
 
 1. **Restate the `discriminating_fact` as a decision problem.** Write down,
    for yourself, what the agent must actually determine, and what it could
-   plausibly get wrong. "Which job failed" is not yet a decision problem;
-   "the agent must apply two filters at once, and an agent applying either
-   one alone lands on a different record" is. This restatement is what the
-   next step is built from: the wrong answers you can name here are the
-   distractors you owe the seed.
+   plausibly get wrong. "Which deployment is unhealthy" is not yet a decision
+   problem; "the agent must compare a count against a stated threshold, and a
+   record sitting one below that threshold reads identically unless the number
+   is actually looked at" is. This restatement is what the next step is built
+   from: the wrong answers you can name here are the distractors you owe the
+   seed.
+
+   The example is deliberately not in the shape of your own scenario: it is
+   there to show what a decision problem looks like, not to hand you one.
+   Derive yours from your `discriminating_fact`, whatever shape that turns out
+   to have.
 
    If the fact admits no wrong answer -- if any world you can imagine makes it
    true -- stop here and report it. That is the first refusal condition in
@@ -319,13 +336,32 @@ artifacts that validate and mean nothing.
    to rule out, since the pointer alone cannot show a reader whether an
    absence was deliberate or a broken pointer.
 
-   Two constraints on which capability an assertion may name. Every
-   `tool_called`, and every `trajectory.operations[]` entry, must name a
+   Three rules constrain which capability you may name, in an assertion or in
+   a trajectory operation. **First:** every `tool_called`, and every
+   `trajectory.operations[]` entry, must name a
    capability the scenario declared in its own `capability_refs`: coverage
    credits the scenario for the cells it declared, so an instance exercising
    an undeclared capability makes coverage confidently wrong about what this
    suite tests. `tool_not_called` is exempt -- forbidding a call to a
    capability the scenario never claimed is exactly what that kind is for.
+
+   **Second:** read that exemption narrowly. It exempts `tool_not_called` from the
+   `capability_refs` rule and from nothing else: the capability it names must
+   still be one the **world model declares**, because the gate reports
+   `no such capability` for any trajectory-kind assertion, exclusions
+   included. So an exclusion may name a capability outside your scenario's
+   own cells, but never a plausible-sounding capability id you made up.
+
+   **Third**, and this is the one neither of your own two gates can see: every
+   capability you name must declare a `binding` in the world model, because
+   `emit` turns a
+   `capability_id` into a real tool call through `binding.tool` and
+   `binding.fixed_args`. A capability with no binding passes both
+   `validate --stage instantiate` and `check-refs` and then refuses to
+   package at `emit`, with "declares no binding, so it cannot be turned into
+   a tool call". If the capability your scenario needs has no binding, that
+   is a world-model defect to report, not something to work around by
+   naming a different capability that happens to have one.
 
    **An absence-shaped scenario must carry at least one assertion a refusal
    cannot satisfy.** This is not a style preference. The scorer awards a
@@ -376,7 +412,9 @@ artifacts that validate and mean nothing.
 
 6. Every `tool_called` assertion, and every `trajectory.operations[]` entry,
    names a capability the scenario declared in `capability_refs`.
-   `tool_not_called` is exempt.
+   `tool_not_called` is exempt from *that* rule only -- every capability you
+   name, exclusions included, must still be one the world model declares and
+   must declare a `binding` there.
 
 7. An absence-shaped scenario carries at least one assertion a refusal cannot
    satisfy: a `tool_called`, or a positive `answer_contains` on something the
@@ -387,11 +425,30 @@ artifacts that validate and mean nothing.
    checkable; a sentence naming the record and the value is.
 
 Before you report done, run `testgen validate --stage instantiate` and then
-`testgen check-refs`. Either one reporting a finding against what you just
-wrote is not a finding to pass along -- it is your own defect to fix. Repair
-the artifact and run both again; report success only once
-`testgen validate --stage instantiate` and `testgen check-refs` both exit
-clean.
+`testgen check-refs`. Either one reporting a finding against **the files you
+just wrote** is not a finding to pass along -- it is your own defect to fix.
+Repair your artifact and run both again.
+
+Read each finding's path before you act on it, because **both commands are
+run-global and you are one of several subagents running right now.**
+`validate --stage instantiate` schema-checks the `seed.json` and
+`expected.json` of *every* instance directory in the run, and `check-refs`
+walks every one of them too -- so either can hand you a sibling scenario's
+defect, or a sibling's half-written file caught mid-flight, in the same
+output as your own findings. A finding whose path names another scenario's
+directory under `04-instances/` is not yours. It is not a reason to wait for
+the siblings to settle, not a reason to re-run the gate hoping it clears,
+and above all not a reason to open or repair that directory -- doing that is
+the fan-out violation section 1 and the last refusal condition exist to
+prevent, and a non-clean exit code is not authorisation to cross the
+boundary.
+
+So the bar for reporting success is: no finding anywhere in either command's
+output names a path inside **your own** instance directory. If findings
+naming other scenarios' directories remain, you are still done -- say so in
+what you report, and name those paths, because the orchestrator is the one
+that can act on them and it is the only party entitled to look at all four
+slices at once.
 
 ## 5. Refusal conditions
 
