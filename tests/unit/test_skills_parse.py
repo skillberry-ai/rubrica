@@ -206,6 +206,14 @@ def test_expected_skill_names_are_derived_from_STAGES(tmp_path):
     assert "tg-intake" not in names and "tg-smoke" not in names
 
 
+def test_the_shipped_skills_are_exactly_the_ones_STAGES_demands():
+    """Deferred from Task 1 until the last skill landed. Red for eleven tasks
+    would have made the suite stop being a signal; red now means a skill is
+    genuinely missing.
+    """
+    assert sorted(s.name for s in discover()) == sorted(expected_skill_names())
+
+
 def test_skills_dir_resolves_beside_the_module_and_honours_the_override(tmp_path, monkeypatch):
     """Where an *installed* copy looks for its skills.
 

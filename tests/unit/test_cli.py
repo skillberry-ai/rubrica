@@ -637,11 +637,12 @@ def test_an_unreadable_config_file_is_a_usage_error_not_a_finding(tmp_path, caps
     assert "unusable" in captured.err
 
 
-# test_check_skills_is_clean_on_the_shipped_skills is deliberately not written
-# here: check_all reports every name expected_skill_names() returns that has
-# no skill yet, and until Task 13 ships the last of them that is every real
-# skill still missing. A suite red for eleven tasks stops being a signal.
-# Task 13 adds it once the roster is complete.
+def test_check_skills_is_clean_on_the_shipped_skills():
+    """The whole point of check-skills existing as a subcommand: the
+    orchestrator runs it before a run. This is also the test that fails the
+    moment a stage is added to paths.STAGES without a prompt.
+    """
+    assert main(["check-skills"]) == 0
 
 
 def test_check_skills_reports_findings_at_exit_1_with_lines_on_stdout(tmp_path, capsys):
