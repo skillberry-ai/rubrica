@@ -18,7 +18,7 @@ life exactly the same way: `status: "proposed"`, and nothing else.
 
 ```toml
 stage = "propose"
-reads = ["world_model", "scenarios", "coverage_latest"]
+reads = ["manifest", "world_model", "scenarios", "coverage_latest"]
 writes = ["scenarios"]
 schemas = ["scenarios"]
 invokes = ["validate"]
@@ -26,12 +26,16 @@ invokes = ["validate"]
 
 ## 1. Inputs
 
-You read exactly three things, matching the three names this skill's
-contract declares under `reads`: `01-world-model.json` (`world_model`), the
-existing `02-scenarios.json` (`scenarios`) if one already exists, and
-`03-coverage/latest.json` (`coverage_latest`) if it already exists. Nothing
-else on disk is yours to read -- not a claims file, not an instance
-directory, not a verdict. The world model is frozen input for you: its
+You read exactly four things, matching the four names this skill's contract
+declares under `reads`: `manifest.json` (`manifest`),
+`01-world-model.json` (`world_model`), the existing `02-scenarios.json`
+(`scenarios`) if one already exists, and `03-coverage/latest.json`
+(`coverage_latest`) if it already exists. Nothing else on disk is yours to
+read -- not a claims file, not an instance directory, not a verdict. The
+manifest is there for its `limits` alone -- `max_rounds` and
+`max_scenarios`, the two bounds Invariants 5 and 6 hold you to -- and for
+nothing else; it is this run's configuration, not evidence about the target.
+The world model is frozen input for you: its
 `goal_id`s, `actor_id`s, capabilities, and outcome classes are the entire
 universe a scenario may be built from, and its `denominator` is the only
 authority for how large that universe is.
@@ -57,9 +61,8 @@ You are dispatched with no memory of any conversation that came before you,
 and nothing you write here carries forward as memory either. Whatever you
 need to do this job -- which round this is, what a hole's `reason` means,
 what a `discriminating_fact` has to do -- has to be either in this document
-or in the three files you just read. If it is not in one of those four
-places, you do not have it, and inventing it is confabulation, not
-recollection.
+or in the files you just read. If it is not in one of those places, you do
+not have it, and inventing it is confabulation, not recollection.
 
 Everything above is about which *files* you may read. There is a second,
 easier-to-miss boundary: what you may *know*. A scenario may rest only on

@@ -14,10 +14,11 @@ this pair of scenarios the same test, and is this row of the denominator
 actually covered -- cannot be made from any single scenario's slice.
 
 Two things make this the stage to get right. You are the only stage that may
-change a scenario's `status`, so a promotion you skip is a test that never
-gets built and a fold you get wrong is either a lost cell or a wasted
-instantiate. And the numbers you write into `03-coverage/latest.json` are
-what every later claim about this suite is measured against: a percentage
+promote a scenario out of `proposed`, or fold one, so a promotion you skip is
+a test that never gets built and a fold you get wrong is either a lost cell
+or a wasted instantiate. And the numbers you write into
+`03-coverage/latest.json` are what every later claim about this suite is
+measured against: a percentage
 that disagrees with the matrix under it is not a cosmetic error, it is a run
 reporting coverage of a surface it never touched, with both gates green.
 
@@ -25,7 +26,7 @@ reporting coverage of a surface it never touched, with both gates green.
 
 ```toml
 stage = "score"
-reads = ["world_model", "scenarios"]
+reads = ["manifest", "world_model", "scenarios"]
 writes = ["scenarios", "coverage_round", "coverage_latest"]
 schemas = ["coverage"]
 invokes = ["dedupe-candidates", "validate", "check-refs"]
@@ -33,10 +34,11 @@ invokes = ["dedupe-candidates", "validate", "check-refs"]
 
 ## 1. Inputs
 
-You read exactly the two artifacts this skill's contract names under
-`reads`: `01-world-model.json` (`world_model`) and `02-scenarios.json`
-(`scenarios`). The world model is frozen input -- its `capabilities` with
-their `outcome_classes`, its `goals` with their `expected_hop_depths`, its
+You read exactly the three artifacts this skill's contract names under
+`reads`: `manifest.json` (`manifest`), `01-world-model.json` (`world_model`)
+and `02-scenarios.json` (`scenarios`). The world model is frozen input -- its
+`capabilities` with their `outcome_classes`, its `goals` with their
+`expected_hop_depths`, its
 `gaps`, and its `denominator` are the entire universe your matrices may
 describe, and you never amend any of it. The scenarios file is the run's
 whole scenario history, every round of it, and it is the one artifact you
@@ -60,16 +62,16 @@ reason to open a file your contract does not name. The same holds for
 instantiated yet in this round, and a verdict from an earlier run is not
 evidence about this one.
 
-One number comes from outside those two files, and it is the only one:
-`manifest.json`'s `limits.max_rounds`, which is this run's configuration
-rather than knowledge about the target. You need it for exactly two
-purposes -- the `halted_round_cap` verdict in Method step 9, and Invariant 8
--- and for nothing else. It is a bound, not a fact about the system under
-test, and it does not open the door to anything else on disk.
+The manifest is in your `reads` for one number: `limits.max_rounds`, which
+you need for exactly two purposes -- the `halted_round_cap` verdict in Method
+step 9, and Invariant 8 -- and for nothing else. It is this run's
+configuration, a bound on the loop rather than a fact about the system under
+test, so nothing you write may treat it as evidence about the target the way
+the world model is evidence about the target.
 
 You are dispatched with no memory of any conversation that came before you,
 and nothing you write here carries forward as memory either. Whatever you
-need has to be derivable from the two artifacts you read, from this
+need has to be derivable from the three artifacts you read, from this
 document, or from the command in Method step 1 -- and it is. In particular,
 **nobody tells you which round this is**: the round you are scoring is the
 highest `round` tag among the scenarios in `02-scenarios.json`, because
@@ -261,11 +263,13 @@ what you report back to the orchestrator, which records it in `decisions.md`.
    now and were *not* covered before this round -- that is, no live scenario
    from an earlier round credits them. `rounds_without_progress` is the
    number of consecutive most-recent rounds that added no new cell by that
-   same test; in round 1 it is 0, and `new_cells_this_round` is simply the
-   count of covered cells. These two numbers are what `halted_no_progress`
-   is computed from, so a `new_cells_this_round` inflated by counting cells
-   an earlier round already covered is how a loop that has stopped making
-   progress runs to the round cap anyway.
+   same test -- so in round 1 it is 0 if this round covered a cell and 1 if
+   it covered none, and `new_cells_this_round` in round 1 is simply the count
+   of covered capability cells, goal rows not being cells. These two numbers
+   are what `halted_no_progress` is computed from, so a
+   `new_cells_this_round` inflated by counting cells an earlier round already
+   covered is how a loop that has stopped making progress runs to the round
+   cap anyway.
 
 9. **Compute `verdict`.** It is *computed here* and *acted on by the
    orchestrator*: this stage does not decide to iterate, does not dispatch
@@ -288,12 +292,13 @@ what you report back to the orchestrator, which records it in `decisions.md`.
     `03-coverage/latest.json`.** Both, with identical content -- not the
     round file with a symlink, not a summary in one and the full report in
     the other. `validate --stage score` requires `latest.json` **by name**,
-    and `refs.check_limits` and `refs.check_coverage` both return no
-    findings at all when it is absent: a score stage that wrote the round
-    file and forgot the pointer used to pass both gates with every coverage
-    check silently bypassed. Write the round file for the history and
-    `latest.json` for every stage and gate that reads "the current
-    coverage", and keep them byte-identical.
+    and `refs.check_coverage` returns no findings at all when it is absent,
+    while `refs.check_limits` silently skips its coverage-round check (it
+    still reports every scenario-round and `max_scenarios` finding): a score
+    stage that wrote the round file and forgot the pointer used to pass both
+    gates with every coverage check bypassed. Write the round file for the
+    history and `latest.json` for every stage and gate that reads "the
+    current coverage", and keep them byte-identical.
 
 ## 4. Invariants
 
@@ -355,13 +360,14 @@ later judgment in this pipeline is measured against these numbers and none
 of them re-derives the denominator.
 
 - **A candidate pair is genuinely ambiguous -- arguably the same test,
-  arguably not.** Keep both `active`, and say why in the round file's hole
-  justifications or in what you report for the orchestrator's decision.
-  Folding a distinct test loses a cell for the whole run, and nothing
-  downstream will ever notice it is missing; keeping a duplicate costs one
-  wasted `tg-instantiate` fan-out that a later round can still fold. Prefer
-  the cheaper error, and record that you made the call deliberately rather
-  than leaving it to look like an oversight.
+  arguably not.** Keep both `active`, and say why in what you report for the
+  orchestrator's decision -- not in a hole, because keeping both makes the
+  shared cell covered, and step 7 and Invariant 6 both forbid a hole on a
+  covered row. Folding a distinct test loses a cell for the whole run, and
+  nothing downstream will ever notice it is missing; keeping a duplicate
+  costs one wasted `tg-instantiate` fan-out. Prefer the cheaper error, and
+  record that you made the call deliberately rather than leaving it to look
+  like an oversight.
 
 - **A cell cannot be covered because the world model has a gap.** Write the
   hole with `reason: "blocked_by_gap"` and the `gap_id` of the gap that

@@ -4119,11 +4119,13 @@ def test_it_states_that_the_denominator_is_computed_here_and_frozen():
 
 ```toml
 stage = "propose"
-reads = ["world_model", "scenarios", "coverage_latest"]
+reads = ["manifest", "world_model", "scenarios", "coverage_latest"]
 writes = ["scenarios"]
 schemas = ["scenarios"]
 invokes = ["validate"]
 ```
+
+**`manifest` was added to this block by a ruling during Task 10; do not "restore" it to the four-name form.** Invariants 5 and 6 require `manifest.limits.max_rounds` and `max_scenarios`, and this plan's own principle is that the contract block is the only place an artifact is named, so the prose can never drift from it — a skill whose invariants cite a file its `reads` withholds is exactly that drift. `tg-extract` and `tg-reconcile` both declare `manifest`, so the omission here was an oversight rather than a policy of treating it as ambient configuration.
 
 `scenarios` appears in both `reads` and `writes` because `02-scenarios.json` is **append-only across rounds** (§4): round 2 reads what round 1 proposed and adds to it. `coverage_latest` is read to find the holes to target and legitimately does not exist in round 1 — `reads` is a declaration of what a skill may open, not a list of files that must be present.
 
@@ -4267,11 +4269,13 @@ def test_it_names_the_discriminating_fact_field():
 
 ```toml
 stage = "score"
-reads = ["world_model", "scenarios"]
+reads = ["manifest", "world_model", "scenarios"]
 writes = ["scenarios", "coverage_round", "coverage_latest"]
 schemas = ["coverage"]
 invokes = ["dedupe-candidates", "validate", "check-refs"]
 ```
+
+**`manifest` was added to this block by a ruling during Task 10; do not "restore" it to the two-name form.** Method step 9's `halted_round_cap` and Invariant 8 both require `manifest.limits.max_rounds`, which the two-name form withheld — see the same note on Task 9's block for the reasoning, which applies identically here.
 
 **Method steps** (§5: dedupe folds into stage 3 because the candidate pairs are cheap to compute and the judgment is not):
 
