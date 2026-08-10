@@ -1,0 +1,146 @@
+"""tg-challenge's contract, and the ordering that makes it independent.
+
+The ordering test is the one that matters and it is genuinely structural: the
+Method section must mention expected.json strictly *after* it mentions
+answering from the seed. An adversary that reads the oracle first confirms
+almost anything, and no schema can catch that -- the artifact looks identical.
+"""
+
+from __future__ import annotations
+
+from testgen.artifacts import read_json
+from testgen.skills import SECTIONS, load, section_body, skills_dir
+from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
+
+SKILL = skills_dir() / "tg-challenge" / "SKILL.md"
+
+
+def paragraphs(text: str) -> list[str]:
+    """Blank-line-separated paragraphs.
+
+    Used where a property is really a *co-occurrence*: a rule and the names it
+    is about have to be stated together to be followed at all, and two mentions
+    in unrelated sections are what makes a whole-body check vacuous.
+    """
+    return [chunk for chunk in text.split("\n\n") if chunk.strip()]
+
+
+def _method_body() -> str:
+    """The Method section alone, so the ordering below is about that section.
+
+    Uses skills.section_body rather than splitting on "\\n## " by hand: that
+    naive split is not fence-aware, and this skill's Method section contains a
+    fenced block. A hand-rolled slice would cut at a `## ` line inside it and
+    the ordering assertion would then be about a fragment.
+    """
+    from testgen.skills import section_body
+
+    skill = load(SKILL)
+    assert SECTIONS[2] in skill.headings, "the Method section must exist"
+    return section_body(skill, SECTIONS[2])
+
+
+def test_the_contract_matches_the_stage_gate():
+    skill = load(SKILL)
+    assert skill.contract["stage"] == "challenge"
+    assert set(skill.contract["schemas"]) == set(STAGE_ARTIFACTS["challenge"])
+
+
+def test_it_has_the_five_sections():
+    assert all(section in load(SKILL).headings for section in SECTIONS)
+
+
+def test_the_method_mentions_the_seed_before_it_mentions_the_oracle():
+    """The independence, as a position comparison inside one section.
+
+    This is the only mechanical grip there is on the ordering: the verdict
+    artifact produced by an anchored adversary is byte-identical to one produced
+    by an independent adversary, so nothing downstream can tell them apart. The
+    live exercise is the real check; this stops the ordering being *removed*
+    from the prompt.
+    """
+    method = _method_body()
+    seed_at = method.find("seed.json")
+    oracle_at = method.find("expected.json")
+    assert seed_at >= 0, "the Method must name seed.json"
+    assert oracle_at >= 0, "the Method must name expected.json"
+    assert seed_at < oracle_at, "the Method must reach the seed before the oracle"
+
+
+def test_the_method_says_the_oracle_is_read_last():
+    method = _method_body().lower()
+    assert "last" in method or "only then" in method
+
+
+def test_it_names_every_verdict_value():
+    schema = read_json(schema_dir() / ARTIFACT_SCHEMAS["verdict"])
+    enum = schema["properties"]["verdict"]["enum"]
+    body = load(SKILL).body
+    missing = [verdict for verdict in enum if verdict not in body]
+    assert not missing, f"the skill never mentions verdict(s) {missing}"
+
+
+def test_it_names_every_flag_the_schema_allows():
+    """difficulty_overstated is the only one today, and it is required when the
+    adversary beats the claimed hop_depth -- refs.check_verdicts reports its
+    absence, so a skill that does not know it exists produces a finding on a
+    verdict that is otherwise correct.
+    """
+    schema = read_json(schema_dir() / ARTIFACT_SCHEMAS["verdict"])
+    enum = schema["properties"]["flags"]["items"]["enum"]
+    body = load(SKILL).body
+    missing = [flag for flag in enum if flag not in body]
+    assert not missing, f"the skill never mentions flag(s) {missing}"
+
+
+def test_it_names_the_three_boolean_judgments_and_the_call_count():
+    body = load(SKILL).body
+    for field in (
+        "uniquely_determined",
+        "derivable_without_guessing",
+        "minimum_tool_calls_found",
+        "alternative_answers",
+    ):
+        assert field in body, field
+
+
+def test_it_states_that_accept_is_incompatible_with_the_two_negatives():
+    """check_verdicts reports accept alongside either false. A skill that does
+    not know produces a self-contradictory verdict and spends the repair attempt.
+
+    **Strengthened from the plan's version, which its own implementer note
+    invited replacing.** The original was
+    `load(SKILL).body.count("uniquely_determined") >= 2` -- shape 1 with a
+    counter attached. It bounded nothing about the incompatibility: this skill
+    names `uniquely_determined` in section 2's field list, in Method step 2
+    where the judgment is made, and in the verdict-table prose, so deleting the
+    Invariants entry that states the incompatibility outright still left three
+    occurrences and the count passing.
+
+    Checked instead as a co-occurrence inside the Invariants section, because
+    the property is a *pairing of three names*: `accept` and both negatives
+    have to appear together for the rule to be readable at all, and the section
+    that owns a rule of this kind is the one the reader consults before filing
+    a verdict.
+    """
+    invariants = section_body(load(SKILL), SECTIONS[3])
+    owning = [
+        para
+        for para in paragraphs(invariants)
+        if "accept" in para
+        and "uniquely_determined" in para
+        and "derivable_without_guessing" in para
+    ]
+    assert owning, (
+        "no single Invariants paragraph states that accept is incompatible with both "
+        "uniquely_determined: false and derivable_without_guessing: false; check_verdicts "
+        "reports either combination, and a skill that does not know spends the repair attempt"
+    )
+
+
+def test_it_tells_the_adversary_to_report_the_oracle_wrong_when_it_is():
+    """Row 4 of the verdict table: the highest-value catch in the pipeline, and
+    the one a helpful model will not make unless told to.
+    """
+    body = load(SKILL).body.lower()
+    assert "disagree" in body
