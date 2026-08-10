@@ -5126,21 +5126,37 @@ invokes = ["emit", "validate", "check-refs"]
 
 **Test file** — `tests/unit/test_skills_emit.py`:
 
+**Two of the tests below replaced weaker versions during Task 13's fix rounds, and a third grew a `reads` pin; do not "restore" the whole-body substring forms, and note that this block is the *delivered* file, kept byte-for-byte in step with `tests/unit/test_skills_emit.py`.** The two originals were `"reproducib" in body` and `"prune" in body and "rejected" in body`. Both were measured satisfiable by content unrelated to the property they name: `"prune"` by the frontmatter `description:` line and `"rejected"` by an incidental mention of `check-refs`'s tolerance in Method step 3, and `"reproducib"` by Invariant 1's word *unreproducible* — a consequence of hand-editing a package, not a reason emit is code. Deleting every statement of either property left all five tests green. Each docstring below records its own measurement.
+
 ```python
 """tg-emit's contract: a thin entry point that writes nothing itself."""
 
 from __future__ import annotations
 
-from testgen.skills import SECTIONS, load, skills_dir
+import re
+
+from testgen.skills import SECTIONS, load, section_body, skills_dir
 from testgen.validate import STAGE_ARTIFACTS
 
 SKILL = skills_dir() / "tg-emit" / "SKILL.md"
 
 
 def test_the_contract_matches_the_stage_gate():
+    """The `reads` pin arrived with a Task 13 ruling: `scenarios` and `verdict`
+    were added because Method step 4 has to report *why* a package is absent,
+    and the two silent-prune reasons live only in those files -- `emit` skips a
+    non-`active` scenario and a `reject` verdict with no finding either time,
+    and no gate covers either (`refs.check_suite` reports a package that is
+    present for an unjudged scenario and nothing about one that is absent).
+
+    Set equality, not `<=`: `check_contract` only checks that each name is a
+    public `RunPaths` attribute, so a silent narrowing back to the two-name form
+    would pass every other check in the build.
+    """
     skill = load(SKILL)
     assert skill.contract["stage"] == "emit"
     assert set(skill.contract["schemas"]) == set(STAGE_ARTIFACTS["emit"])
+    assert set(skill.contract["reads"]) == {"scenarios", "verdict", "expected", "world_model"}
 
 
 def test_it_invokes_the_emit_subcommand_rather_than_describing_how_to_emit():
@@ -5155,14 +5171,48 @@ def test_it_has_the_five_sections():
 
 
 def test_it_states_why_emit_is_code_rather_than_a_prompt():
-    body = load(SKILL).body.lower()
-    assert "reproducib" in body
+    """Strengthened during Task 13's fix round, and this one the implementer had
+    wrongly judged sound. Measured: `"reproducib"` occurs exactly twice in the
+    delivered file, and one of them is Invariant 1's *unreproducible* -- a
+    consequence of hand-editing a package, not a reason emit is code. Deleting
+    the whole preamble paragraph that states the reason left all five tests
+    green on that one word. (The refusal conditions do not rescue it either:
+    they say "reproduce"/"reproduced", which the substring never matches.)
+
+    So the causal claim itself is what is asserted -- reproducibility named
+    alongside the prompt alternative, and the two-identical-runs argument that
+    makes it a reason rather than an adjective.
+    """
+    body = load(SKILL).body
+    assert re.search(r"reproducib.{0,200}prompt|prompt.{0,200}reproducib", body, re.I | re.S), (
+        "the reason emit is code rather than a prompt must be stated"
+    )
+    assert re.search(r"two runs.{0,120}identical", body, re.I | re.S), (
+        "the two-identical-runs argument is what makes reproducibility the reason"
+    )
 
 
 def test_it_states_that_a_pruned_package_is_information_not_an_error():
-    body = load(SKILL).body.lower()
-    assert "prune" in body
-    assert "rejected" in body
+    """Strengthened during Task 13's fix round, after the review refuted the
+    original as vacuous on both sides. `"prune" in body` was satisfied by the
+    frontmatter `description:` line, and `"rejected" in body` by an incidental
+    mention of `check-refs`'s tolerance inside Method step 3 -- so deleting
+    Method step 4 *and* refusal condition 2, every statement of the property,
+    left all five tests green.
+
+    Scoped to the Method section, where step 4 owns this, and requiring both
+    halves of the claim: that a prune is information rather than a defect, and
+    that a `rejected` scenario's package is supposed to be gone. A co-occurrence
+    of "prune" and "rejected" would not do -- step 3's tolerance paragraph
+    contains both within a few lines of each other, by itself.
+    """
+    method = section_body(load(SKILL), "3. Method")
+    assert re.search(r"information,? not an error", method, re.I), (
+        "step 4 must say a pruned package is information rather than an error"
+    )
+    assert re.search(r"rejected.{0,100}supposed.{0,4}to be pruned", method, re.I | re.S), (
+        "step 4 must say a rejected scenario's package is supposed to be pruned"
+    )
 ```
 
 ### 13b. `tg-orchestrate`
@@ -5226,6 +5276,8 @@ tg-emit → 06-suite/ ; testgen smoke → 07-report.json
 
 **Test file** — `tests/unit/test_skills_orchestrate.py`:
 
+**Seven of the tests below replaced weaker versions during Task 13's fix rounds, and one was added (the `reads` pin); do not "restore" the whole-body substring forms, and note that this block is the *delivered* file, kept byte-for-byte in step with `tests/unit/test_skills_orchestrate.py`.** Two more of the same class live in Task 13a's block, for nine in the task altogether. Each strengthened docstring records the measurement that condemned its predecessor. The pattern across all of them: `load()` sets `body` to the **entire file**, so a whole-body substring is satisfiable by the frontmatter `description:` line (which alone satisfied every predicate of the three-things test) or by the mandatory `## Contract` block (whose `invokes` list alone supplied both `record-stage` and `decide`, and the `smoke` half of the every-stage test). All nine stayed green under a deletion of the very prose their docstring names; what differed was the carrier -- the frontmatter line for two, the mandatory contract block for two, and ordinary prose elsewhere in the file for the rest. Two rounds were needed because a strengthening can also fail by **over-coupling**: the first replacement for the exit-code test anchored on the bold `| **0** |` table cell and broke on a prose rewrite that preserved the rule, and the first replacement for the human-gate test pinned three `Human gate N` labels while a file reducing all three gate steps to bare stubs still passed.
+
 ```python
 """tg-orchestrate's contract, and the control-flow rules it must state.
 
@@ -5238,11 +5290,51 @@ exercise is a whole-pipeline run.
 
 from __future__ import annotations
 
+import re
+
 from testgen.cli import subcommand_names
 from testgen.paths import STAGES
-from testgen.skills import CODE_ONLY_STAGES, ORCHESTRATOR, SECTIONS, load, skills_dir
+from testgen.skills import (
+    CODE_ONLY_STAGES,
+    ORCHESTRATOR,
+    SECTIONS,
+    load,
+    section_body,
+    skills_dir,
+)
 
 SKILL = skills_dir() / ORCHESTRATOR / "SKILL.md"
+METHOD = "3. Method"
+
+
+def method_body() -> str:
+    """The `## 3. Method` section only.
+
+    Six of the assertions below scope to this rather than to `skill.body`,
+    which `load()` sets to the *entire file* -- frontmatter and mandatory
+    contract block included. Measured during Task 13's fix round: the
+    frontmatter `description:` line alone satisfied the three-things test, and
+    the contract block's own `invokes` list alone satisfied two thirds of the
+    record-stage test. Section 3 is where the rules the docstrings name have to
+    live, so it is what they are asserted against.
+    """
+    return section_body(load(SKILL), METHOD)
+
+
+def gate_step(method: str, number: str) -> str:
+    """The text of one human-gate step: its label up to the next step marker.
+
+    Scoped to the step rather than to a fixed-width window after the label, so
+    the assertion below cannot be satisfied by an artifact named in the
+    *following* step -- which is what a lookahead window admits as soon as a
+    stubbed gate carries a line or two of filler prose.
+    """
+    hit = re.search(rf"Human gate {number}", method)
+    if hit is None:
+        return ""
+    rest = method[hit.end() :]
+    stop = re.search(r"\n\n\*\*[AB]\d", rest)
+    return rest[: stop.start()] if stop else rest
 
 
 def test_it_declares_no_stage_because_it_dispatches_them():
@@ -5253,6 +5345,28 @@ def test_it_declares_no_stage_because_it_dispatches_them():
 
 def test_it_writes_the_decisions_log():
     assert load(SKILL).contract["writes"] == ["decisions"]
+
+
+def test_it_declares_every_artifact_its_branches_read():
+    """Pinned by set equality under a Task 13 ruling: `verdict` was added to
+    `reads` because rule 8's three-way branch *is* the verdict value and no
+    gate surfaces it in time (`validate` only schema-checks those files,
+    `check-refs` never compares the value to anything, and `emit` reports a
+    `re-seed` only at stage 6 and a `reject` not at all).
+
+    Set equality rather than `<=`: `check_contract` only verifies each entry is
+    a public `RunPaths` attribute, so both dropping `verdict` again and quietly
+    widening this list to an artifact no requirement needs would otherwise pass
+    every check in the build. `report` is deliberately absent -- smoke's
+    non-healthy verdict arrives as an exit-1 finding, so the gate covers it.
+    """
+    assert set(load(SKILL).contract["reads"]) == {
+        "manifest",
+        "world_model",
+        "scenarios",
+        "coverage_latest",
+        "verdict",
+    }
 
 
 def test_it_has_the_five_sections():
@@ -5266,8 +5380,16 @@ def test_it_invokes_every_subcommand_the_loop_needs():
     ones the loop cannot work without.
     """
     invokes = set(load(SKILL).contract["invokes"])
-    required = {"check-skills", "validate", "check-refs", "record-stage", "decide",
-                "dedupe-candidates", "emit", "smoke"}
+    required = {
+        "check-skills",
+        "validate",
+        "check-refs",
+        "record-stage",
+        "decide",
+        "dedupe-candidates",
+        "emit",
+        "smoke",
+    }
     assert required <= invokes, f"missing: {sorted(required - invokes)}"
     assert invokes <= set(subcommand_names())
 
@@ -5276,67 +5398,165 @@ def test_it_names_every_stage_it_dispatches():
     """Derived from STAGES, so adding a stage fails here until the loop mentions
     it. The two code-only stages are named as well: intake mints the run and
     smoke scores it, and an orchestrator that does not know they exist skips them.
+
+    Strengthened during Task 13's fix round: scoped to the Method section,
+    because against the whole body the `smoke` half was satisfied by the
+    mandatory contract block's own `invokes` list -- deleting every prose
+    mention of smoke left it green. Same two-sides-from-one-source shape as the
+    record-stage test below. `intake` and the seven `tg-*` names did require
+    real prose even before the scoping.
     """
-    body = load(SKILL).body
+    method = method_body()
     for stage in STAGES:
         if stage in CODE_ONLY_STAGES:
-            assert stage in body, f"the loop never mentions the code stage {stage!r}"
+            assert stage in method, f"the loop never mentions the code stage {stage!r}"
         else:
-            assert f"tg-{stage}" in body, f"the loop never dispatches tg-{stage}"
+            assert f"tg-{stage}" in method, f"the loop never dispatches tg-{stage}"
 
 
 def test_it_states_all_three_exit_codes_and_what_each_means():
     """The branch. An orchestrator that treats 2 as repairable spends its one
     repair attempt on a misconfigured harness and then halts anyway, with the
     real cause buried.
+
+    Strengthened during Task 13's fix round. The original was
+    `all(c in body for c in "012")` plus `"exit" in body` and
+    `"misconfigur" in body`: measured, "0"/"1"/"2" occur 34/46/36 times in a
+    conforming file (section numbers, `0.1`, `02-scenarios.json`) and "exit" 21
+    times, so deleting the entire exit-code statement left all eleven tests
+    green on the surviving "misconfigured" in refusal condition 3.
+
+    Each code must now be named *as an exit code* beside its own meaning. The
+    first form shipped anchored on the bold `| **0** |` table cell, which bound
+    the property and then over-coupled to the markup: reformatting the table
+    into flowing prose -- an edit that fully preserves the rule -- broke a
+    still-conforming file. Measured in fix round 2, the `exits? N` anchor is
+    better on both axes at once: it cuts the Method-section search space from
+    26 and 18 bare digit occurrences for codes 1 and 2 down to 6 and 6, it goes
+    False for **all three** codes when A3 is deleted, and it stays True through
+    a prose rewrite of the same rule.
+
+    `stdout` rather than `findings` for exit 1, deliberately: the branch table's
+    own "exits 1 | Re-dispatch that stage once, findings appended" row would
+    otherwise satisfy this code on its own, and one leaking code in a
+    three-code assertion is one code with no gate on it.
     """
-    body = load(SKILL).body
-    for code in ("0", "1", "2"):
-        assert code in body
-    lowered = body.lower()
-    assert "exit" in lowered
-    assert "misconfigur" in lowered, "exit 2's meaning must be stated"
+    method = method_body()
+    for code, meaning in (("0", "clean"), ("1", "stdout"), ("2", "misconfigur")):
+        assert re.search(rf"exits?[- ]{code}\b.{{0,140}}{meaning}", method, re.I | re.S), (
+            f"exit {code}'s meaning is not stated in the Method section"
+        )
 
 
 def test_it_states_the_repair_is_bounded_to_one_attempt():
-    body = load(SKILL).body.lower()
-    assert "once" in body or "one repair" in body
-    assert "halt" in body
+    """Strengthened during Task 13's fix round. The original was
+    `("once" in body or "one repair" in body) and "halt" in body`: measured,
+    "once" occurs 13 times in unrelated prose ("get this right once", "two
+    members appending at once"), "halt" 43 times, and "one repair" is in the
+    frontmatter `description:` line -- so deleting the whole bounded-repair
+    rule left all eleven tests green.
+
+    What has to be stated is the bound itself: the *same* stage, re-dispatched
+    *once*, and no third attempt.
+    """
+    method = method_body()
+    assert re.search(r"(same stage|re-dispatch).{0,80}once", method, re.I | re.S), (
+        "the Method must say the same stage is re-dispatched once"
+    )
+    assert "third" in method.lower(), "the Method must rule out a third dispatch"
 
 
 def test_it_states_the_three_things_a_dispatch_receives():
     """The contract. An orchestrator that threads context through has removed
     the isolation the fan-out design was chosen for, and every artifact still
     validates.
+
+    Strengthened during Task 13's fix round, and this was the worst of the
+    seven: the original three substring checks were **all satisfied by the
+    frontmatter `description:` line alone**, because `load()` sets `body` to the
+    whole file. It constrained no prose at all, and deleting every statement of
+    the rule left all eleven tests green.
+
+    The three now have to be named together, in one Method passage, in order.
     """
-    body = load(SKILL).body.lower()
-    assert "run directory" in body
-    assert "stage name" in body or "its stage" in body
-    assert "skill" in body
+    assert re.search(r"run directory.{0,120}stage name.{0,120}skill", method_body(), re.I | re.S), (
+        "the Method must name the run directory, the stage name and the skill together"
+    )
 
 
 def test_it_names_the_three_human_gates_and_the_no_gate_flag():
-    body = load(SKILL).body
-    assert "--no-gate" in body
-    lowered = body.lower()
-    assert lowered.count("gate") >= 4, "three gates and the flag must each be described"
+    """Strengthened during Task 13's fix round. The original was
+    `"--no-gate" in body and body.lower().count("gate") >= 4`: measured,
+    "gate" occurs 69 times in a conforming file because it is this project's
+    word for validate and check-refs ("gate with", "the reachability gate",
+    "both gates"), and the frontmatter contributes two on its own. Deleting all
+    three human gates and A7 entirely left all eleven tests green on one
+    surviving `--no-gate` mention.
+
+    Strengthened again in fix round 2. The first version required only that
+    three distinct "Human gate N" labels exist, which is an improvement on a
+    "gate" count and still not the property: measured, a file reducing B5, B7
+    and B10 to bare `**B5. Human gate 1.**` stubs passed it, so zero gates
+    could be *described*. Each label must now sit in a step that names what is
+    reviewed there -- an artifact of the run.
+
+    What this does and does not bound, stated so the docstring does not outrun
+    the predicate: it requires each gate to name the artifact presented, and it
+    does **not** check that the step explains the judgment to be made there
+    (gate 1's "resolve contradictions, rule on gaps"). That much rests on spec
+    review and the live exercise. The artifact reference is scoped to the gate's
+    own step, so a stub cannot borrow the next step's.
+    """
+    method = method_body()
+    assert "--no-gate" in method
+    for number in ("1", "2", "3"):
+        step = gate_step(method, number)
+        assert step, f"human gate {number} is not identified in the Method section"
+        assert re.search(r"`[^`\n]+\.json`|verdicts", step), (
+            f"human gate {number} does not name what is reviewed there"
+        )
 
 
 def test_it_states_that_a_rejection_does_not_loop_back_to_propose():
     """Deferred on purpose: looping after instantiation makes run cost unbounded.
     An orchestrator that loops instead of reporting an honest hole turns a
     bounded run into an open-ended one.
+
+    Strengthened during Task 13's fix round. The original was
+    `"reject" in body and "hole" in body`: measured, "reject" occurs 27 times
+    and "hole" 18 in ordinary coverage vocabulary, the predicate never
+    mentioned `propose` at all, and deleting both the reject branch and the
+    whole no-loop-back rule left all eleven tests green.
+
+    The deferral and its consequence must be stated together: no return to
+    propose, and an honest hole instead.
     """
-    body = load(SKILL).body.lower()
-    assert "reject" in body
-    assert "hole" in body
+    assert re.search(
+        r"(does not|never).{0,60}(loop back|return).{0,40}propose.{0,300}hole",
+        method_body(),
+        re.I | re.S,
+    ), "the Method must say a rejection does not go back to propose, and leaves a hole"
 
 
 def test_it_records_each_stage_and_each_decision():
-    body = load(SKILL).body
-    assert "record-stage" in body
-    assert "skill_sha256" in body or "skill hash" in body.lower()
-    assert "decide" in body
+    """Strengthened during Task 13's fix round. Two of the original three
+    predicates were satisfied by the **mandatory contract block**: `invokes`
+    declares both `record-stage` and `decide`, and `check_contract` requires
+    that block to exist -- so deleting both steps entirely left all eleven
+    tests green on §2's lone `skill_sha256` mention. Two-sides-from-one-source
+    inside a single prompt, where one side is a structure the plan itself
+    mandates.
+
+    Both commands must now be *invoked* in the Method, with the flags a caller
+    actually needs, and the digest named where the recording step is. Note the
+    fix that made the third assertion satisfiable at all: `skill_sha256` was
+    moved into the `record-stage` step, rather than the predicate being scoped
+    around its absence.
+    """
+    method = method_body()
+    assert "record-stage --run" in method, "the Method must invoke record-stage"
+    assert "decide --run" in method, "the Method must invoke decide"
+    assert "skill_sha256" in method, "the recording step must name the digest it writes"
 ```
 
 ### 13c. The two deferred roster tests

@@ -40,6 +40,22 @@ def method_body() -> str:
     return section_body(load(SKILL), METHOD)
 
 
+def gate_step(method: str, number: str) -> str:
+    """The text of one human-gate step: its label up to the next step marker.
+
+    Scoped to the step rather than to a fixed-width window after the label, so
+    the assertion below cannot be satisfied by an artifact named in the
+    *following* step -- which is what a lookahead window admits as soon as a
+    stubbed gate carries a line or two of filler prose.
+    """
+    hit = re.search(rf"Human gate {number}", method)
+    if hit is None:
+        return ""
+    rest = method[hit.end() :]
+    stop = re.search(r"\n\n\*\*[AB]\d", rest)
+    return rest[: stop.start()] if stop else rest
+
+
 def test_it_declares_no_stage_because_it_dispatches_them():
     contract = load(SKILL).contract
     assert "stage" not in contract
@@ -129,15 +145,24 @@ def test_it_states_all_three_exit_codes_and_what_each_means():
     times, so deleting the entire exit-code statement left all eleven tests
     green on the surviving "misconfigured" in refusal condition 3.
 
-    Each code must now appear emphasised beside its own meaning, which resolves
-    to exactly one place in the file each. That couples the assertion to the
-    `| **0** | Clean. |` table form: a rewrite into flowing prose is free to
-    happen, but it has to bring this predicate with it rather than leave a
-    green test over a deleted rule.
+    Each code must now be named *as an exit code* beside its own meaning. The
+    first form shipped anchored on the bold `| **0** |` table cell, which bound
+    the property and then over-coupled to the markup: reformatting the table
+    into flowing prose -- an edit that fully preserves the rule -- broke a
+    still-conforming file. Measured in fix round 2, the `exits? N` anchor is
+    better on both axes at once: it cuts the Method-section search space from
+    26 and 18 bare digit occurrences for codes 1 and 2 down to 6 and 6, it goes
+    False for **all three** codes when A3 is deleted, and it stays True through
+    a prose rewrite of the same rule.
+
+    `stdout` rather than `findings` for exit 1, deliberately: the branch table's
+    own "exits 1 | Re-dispatch that stage once, findings appended" row would
+    otherwise satisfy this code on its own, and one leaking code in a
+    three-code assertion is one code with no gate on it.
     """
     method = method_body()
-    for code, meaning in (("0", "clean"), ("1", "findings"), ("2", "misconfigur")):
-        assert re.search(rf"\*\*{code}\*\*.{{0,140}}{meaning}", method, re.I | re.S), (
+    for code, meaning in (("0", "clean"), ("1", "stdout"), ("2", "misconfigur")):
+        assert re.search(rf"exits?[- ]{code}\b.{{0,140}}{meaning}", method, re.I | re.S), (
             f"exit {code}'s meaning is not stated in the Method section"
         )
 
@@ -187,12 +212,28 @@ def test_it_names_the_three_human_gates_and_the_no_gate_flag():
     three human gates and A7 entirely left all eleven tests green on one
     surviving `--no-gate` mention.
 
-    Three distinct gates must be identified as such, in the Method.
+    Strengthened again in fix round 2. The first version required only that
+    three distinct "Human gate N" labels exist, which is an improvement on a
+    "gate" count and still not the property: measured, a file reducing B5, B7
+    and B10 to bare `**B5. Human gate 1.**` stubs passed it, so zero gates
+    could be *described*. Each label must now sit in a step that names what is
+    reviewed there -- an artifact of the run.
+
+    What this does and does not bound, stated so the docstring does not outrun
+    the predicate: it requires each gate to name the artifact presented, and it
+    does **not** check that the step explains the judgment to be made there
+    (gate 1's "resolve contradictions, rule on gaps"). That much rests on spec
+    review and the live exercise. The artifact reference is scoped to the gate's
+    own step, so a stub cannot borrow the next step's.
     """
     method = method_body()
     assert "--no-gate" in method
-    numbered = set(re.findall(r"[Hh]uman gate ([123])", method))
-    assert numbered == {"1", "2", "3"}, f"gates identified in the Method: {sorted(numbered)}"
+    for number in ("1", "2", "3"):
+        step = gate_step(method, number)
+        assert step, f"human gate {number} is not identified in the Method section"
+        assert re.search(r"`[^`\n]+\.json`|verdicts", step), (
+            f"human gate {number} does not name what is reviewed there"
+        )
 
 
 def test_it_states_that_a_rejection_does_not_loop_back_to_propose():

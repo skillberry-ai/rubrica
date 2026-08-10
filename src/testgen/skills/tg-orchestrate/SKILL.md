@@ -251,9 +251,9 @@ to keep, and this is the table:
 
 | Exit | Meaning | What you do |
 |---|---|---|
-| **0** | Clean. | Continue. |
-| **1** | Findings, one per line on stdout. | A repairable stage defect. Spend the one repair attempt of A4 with those findings appended. |
-| **2** | A usage error, or a run directory or artifact that could not be read at all. | **Halt.** The harness is misconfigured; repeating the stage cannot help. |
+| **exit 0** | Clean. | Continue. |
+| **exit 1** | Findings, one per line on stdout. | A repairable stage defect. Spend the one repair attempt of A4 with those findings appended. |
+| **exit 2** | A usage error, or a run directory or artifact that could not be read at all. | **Halt.** The harness is misconfigured; repeating the stage cannot help. |
 
 Two directions of that rule matter equally. **A `2` is never a stage's fault
 and must never consume the repair attempt** -- a mistyped run directory, an
