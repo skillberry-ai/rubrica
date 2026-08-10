@@ -294,12 +294,15 @@ suite.)
 |---|---|
 | `0` | clean |
 | `1` | findings, one per line on stdout |
-| `2` | usage error, an unreadable run directory, or a malformed `--agents`/`--gold` config |
+| `2` | usage error, an unreadable run directory, a malformed `--agents`/`--gold` config, or a `SKILL.md` that cannot be parsed |
 
 `1` means a stage produced a bad artifact and is worth one repair attempt.
 `2` means the harness is misconfigured and repeating the stage cannot help —
 a human-authored config that fails its schema is exit 2 for the same reason:
-there is no stage to hand a repair prompt to.
+there is no stage to hand a repair prompt to. A `SKILL.md` is in that class too:
+no stage produces one, so no repair prompt fixes it. A `SKILL.md` that *parses*
+but declares something wrong is the opposite — an ordinary exit-1 finding from
+`check-skills`, because it names exactly what to edit.
 
 ## The two checks worth understanding
 

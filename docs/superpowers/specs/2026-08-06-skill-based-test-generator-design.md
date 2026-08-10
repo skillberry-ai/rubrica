@@ -385,8 +385,10 @@ to a stage — the difference between "the pipeline is nondeterministic" and
 02."
 
 **Run ids and timestamps are minted by intake (code), never by skills.** A skill
-that invents a timestamp makes two otherwise-identical artifacts diff. Both
-writers share one format string (`manifest.UTC_FORMAT`), for the same reason
+that invents a timestamp makes two otherwise-identical artifacts diff. Exactly two
+places in the codebase write one — `intake`, for `manifest.created_utc`, and
+`decide`, for each notebook line (`record-stage` writes no timestamp at all) — and
+both go through one format string, `manifest.UTC_FORMAT`, for the same reason
 `manifest.stored_as` exists: two spellings of a format is how a reader's parser
 comes to work on one file and not the other.
 
@@ -426,11 +428,13 @@ disagree). It also checks that the five sections are present, in order, and that
 section 5 is not empty — a skill with no stated refusal conditions confabulates
 rather than recording a gap. The roster of required skills is *derived* from
 `STAGES` rather than restated, so adding a stage demands a skill without anyone
-remembering to edit a constant. `tg-orchestrate` is the one special case, and in
-the strict direction: it must declare **no** `stage` and **no** `schemas`, because
-it is not one of `STAGES` and there is no artifact for `validate` to gate it on.
-Declaring one would be a finding — it would claim the orchestrator produces an
-artifact some stage's gate is answerable for.
+remembering to edit a constant. `tg-orchestrate` is the one special case: it is not
+one of `STAGES`, so there is no stage to declare and no artifact for `validate` to
+gate it on, and it declares neither. **Only the `stage` half of that is enforced** —
+a `stage` key on the orchestrator is reported as a finding, while a `schemas` key
+on it is not examined at all, because the guard around the schemas block excludes
+the orchestrator wholesale. The convention is therefore load-bearing on one key and
+honour-system on the other; §8 parks the gap.
 
 This is §10's silent-drift risk answered on the prompt side. A `SKILL.md` can
 name an artifact path that does not exist, a stage that was renamed, or a
@@ -493,8 +497,8 @@ each slice has its own file.
 
 **Before withholding an artifact from a skill, ask whether a deterministic gate
 already enforces the property that withholding it was meant to protect.** This
-build wrote four skills' contracts twice over that question, and the test settles
-it cleanly in both directions. `tg-score` and `tg-propose` both had prose citing
+build wrote five skills' contracts twice over that question, and the test settles
+it cleanly in both directions — five reads declared, two deliberately left out. `tg-score` and `tg-propose` both had prose citing
 `manifest.limits.max_rounds` while `manifest` was absent from `reads`; nothing
 else supplies that number, so the honest fix was to declare the read.
 `tg-challenge` had a refusal condition about a seed violating a world-model
@@ -502,9 +506,11 @@ invariant while `world_model` was absent; there `check-refs` already evaluates
 every entity's `machine:` invariant over the seed, so widening `reads` bought no
 coverage and only added anchoring surface to the one stage whose entire value is
 *not* being anchored — the requirement belongs to the gate, and the prose says so.
-The same test produced "declare" three more times for `tg-emit` and
-`tg-orchestrate` (a status, and a verdict value, that no gate surfaces in time to
-act on) and "do not declare" once. A contract that withholds a path its own prose
+The same test produced "declare" three more times — `tg-emit` needs a status and a
+verdict value, `tg-orchestrate` needs the verdict value, and no gate surfaces any
+of them in time to act on — and "do not declare" one further time, for
+`tg-orchestrate` and the smoke report, which `smoke` itself already turns into a
+finding the caller cannot miss. A contract that withholds a path its own prose
 depends on is worse than a wide one: the contract block is the only place a path is
 named, so the prose has nothing to be held to.
 
@@ -886,6 +892,7 @@ the shape was standing in for.
 
 | Parked | Why it matters |
 |---|---|
+| `check-skills` never examines the orchestrator's `schemas` | Measured, and it invalidated a claim an earlier draft of §5 made: injecting `stage = "extract"` into `tg-orchestrate/SKILL.md` exits 1 with a finding, while injecting `schemas = ["claims"]` exits **0** with none. `check_contract`'s guard reads `if skill.name != ORCHESTRATOR and stage in STAGES:` and wraps the whole schemas block, so the one skill that must declare no artifact kinds is the one skill whose declaration of them is unchecked. Harmless today — the shipped file declares none, and `validate` has no orchestrator stage to gate — but it is an unchecked contract element in the module whose entire job is checking contract elements, and the natural fix (check `schemas` is absent for `ORCHESTRATOR`, the way `stage` already is) is small. Left to the whole-branch review to triage; this task is documentation only. |
 | `--no-gate` is a prompt-level flag, not a CLI flag | §5's three human gates live in `tg-orchestrate`'s prose, and no code enforces them, so `--no-gate` is an argument to the *skill's invocation*. A prompt-level flag can be forgotten in a way a CLI flag cannot. Accepted as the right cost for this slice: enforcing the gates in code would mean the orchestrator stops being a skill, which is the thing being tested. |
 | The orchestrator has no lever for `effort` | It records `model` and `effort` per stage through `record-stage`, and its prose says where both come from — but the dispatch mechanism cannot *supply* an effort level. The one completed run recorded the most neutral characterization available and flagged the assumption rather than presenting it as fact. So every `effort` in a manifest today is a characterization, not a setting, and §4's comparability claim rests on `model` and `skill_sha256` doing the real work. |
 | The isolation rule is enforceable on artifacts inside a run and unenforceable on everything else a subagent can reach | Already named as this build's weakest link: an instantiate member that read a sibling's seed produces a byte-identical artifact to one that did not. This build widened the scope twice, both times measured. An extract member self-reported reading both sibling *input files* while checking locator conventions; a reconcile member volunteered that it had consulted a *different fixture* as a reference, outside its declared `reads`. Both outputs were correct and independently verified, so nothing was harmed — and no schema, no `check-refs` and no digest could have detected either. Both surfaced only because a subagent mentioned it in a report nobody obliged it to write. The exposure is therefore not "another scenario's slice" but anything on the filesystem, and the only instrument is a transcript audit at dispatch time. |
@@ -1030,6 +1037,19 @@ than reasoned to:
    checks, so this is deletion-specific vacuity, not blanket vacuity. Net real
    automated coverage for the one skill whose defects no gate can ever see was
    four checks out of eleven before the strengthening.
+   **On the other two shapes of item 4, for completeness.**
+   *Fixture-cannot-reach* recurred and is treated below, in the answer to this
+   section's transfer prediction. *Holds-identically-before-and-after* did **not**
+   recur in its literal form and has no prompt analogue: it was hash luck, and a
+   text predicate has no hash to be lucky about. Its generalization did recur, and
+   this build named it — **two-sides-from-one-source**: a test whose asserted side
+   and expected side derive from the same source, so no mutation of that source can
+   separate them. Seven instances, two of them *inside a single document*, where a
+   prompt's own mandated `## Contract` block satisfied a test about the prompt's
+   prose. The counter is the one this build made a standing constraint: when a test
+   derives both sides from one source, the mutation must sit on the path *between*
+   them — the copy, the compile step, the writer — never on the source. Before
+   writing "verify by mutating X", trace whether X reaches both sides.
 10. **"Strengthen the assertion" is not a safe default; strengthening is a
     two-axis measurement.** The mirror failure is just as real and appeared in the
     same task: one strengthened predicate anchored on `**bold**` table markers,
@@ -1059,7 +1079,11 @@ than reasoned to:
     took a happy-path capability fact with it, which no CI predicate could see and
     a live run exposed immediately — reconcile's loudest gap blocked all six
     downstream stages, where the four purpose-built gaps each blocked only two.
-    The contrast *is* the evidence. Then guarding it took two goes in two
+    The contrast *is* the evidence. It showed upstream too, which is the sharpest
+    measurement of the damage: against the over-subtracted file the two extracts
+    filed **zero** `outcome_class` claims between them, where against the repaired
+    one they file two. That recording was discarded and re-made; the numbers in §9
+    are the repaired fixture's. Then guarding it took two goes in two
     directions: a structural key-path guard caught key *deletion* and was
     values-blind, so blanking the same values to `""` left every test passing.
     Guarding one direction does not guard the other, and neither guard would have
@@ -1073,9 +1097,19 @@ than reasoned to:
     worked for the remaining nine tasks: a `DEFERRALS OWED` section at the top of
     the ledger, one line per open item naming the task that owes it, and every
     dispatch must carry the ones addressed to it *explicitly* rather than trusting
-    the implementer to read back. Everything in the parked table above arrived
-    through that section, which is the only reason this section could be written
-    from the ledger rather than reconstructed from memory.
+    the implementer to read back.
+    **Two mechanisms did this work, and a build that adopts only one will lose
+    half of it.** `DEFERRALS OWED` carries *obligations that cross tasks* — a
+    requirement one task defers and another must discharge — and it is where §4's
+    two limitations and item 11 above came from. The parked table came from a
+    different and equally necessary convention: a per-task
+    `minor (deferred) / parked, for the final whole-branch review to triage` line,
+    written at the moment a review's Minor was ruled not worth a fix round, which
+    is where all but a couple of its rows originate. An obligation needs an
+    addressee and a deadline; triaged residue needs neither, and putting it in the
+    section that has both would bury the items that are actually owed. Between
+    them, everything written back here came off the ledger rather than out of
+    memory.
 
 **Which of these survive when the producer is a prompt rather than code.**
 Plan 4 replaces most of this build's producers — the six stage skills and the
@@ -1094,8 +1128,10 @@ rates — because those numbers were counting something (lines, branches) that
 a skill's markdown does not have. The next build should expect to find these
 shapes again, not to find these counters again.
 
-**What actually happened, now that the build is done.** Three of the four
-predictions above held and one needs correcting.
+**What actually happened, now that the build is done.** Two of the four
+predictions above held and **two were wrong**. Both wrong ones are kept above as
+the record of what was predicted; what follows is what the build measured
+instead.
 
 *Deletion-mutation has no meaning for a prompt* — **wrong, and usefully so.**
 Deleting a numbered step, a table row or a whole section from a copy of a
@@ -1138,6 +1174,22 @@ the *content* of its filed notes, having considered and eliminated the first
 candidate with its reason, which an adversary that had already seen the oracle
 would have had no reason to write. And the two isolation self-reports in the parked
 table above, which are the only evidence that will ever exist for that rule.
+
+*What does not transfer is the confidence earned from this build's own numbers —
+pinned-check counts, mutation-kill rates* — **wrong, and wrong in the same way the
+deletion-mutation prediction was.** Items 9 and 10 above are made of exactly those
+counters, taken over a skill's markdown: a fully prose-stripped skeleton failing
+**6 of 11** checks is a mutation-kill rate, "**four** real checks out of eleven" is
+a pinned-check count, and the search-space measurements that rebalanced a fragile
+predicate (3/6/6 against 3/26/18 occurrences) are the same arithmetic one scope
+narrower. The prediction's error was assuming the countable population had to be
+lines or branches. It does not: a `SKILL.md` has numbered Method steps, invariants,
+refusal conditions and table rows, and its test file has assertions — all
+enumerable, all mutable one at a time, all divisible into a denominator. What
+genuinely does not transfer is a **coverage** claim over the artifact. There is no
+enumerable set of "everything this prose asks for" the way there is a set of every
+branch, so "11 checks, 4 of them real" is a statement about the checks and never
+about the prompt. Count the checks; do not infer the prompt is covered.
 
 One further counter this build needed and the prediction did not anticipate:
 **when two independent slices agree on a value, that is not yet a leak.** Three of
@@ -1199,15 +1251,20 @@ carries no claims file and no manifest for its references to resolve against.)
 
 **Both refusals fired, on real `tg-extract` output rather than hand-authored
 claims** — which matters because a hand-authored claim set can be built to make the
-refusal easy. On the gap fixture the two extracts filed **zero** `outcome_class`
-claims between them, so reconcile faced a schema requiring at least one outcome
-class per capability and a claim set supplying none: the sharpest possible version
-of the test, since any error class it produced would have had no claim to cite. It
-filed `success` plus `underspecified` throughout, invented no `error`, `not_found`
-or `empty` class anywhere, and recorded three gaps all blocking `propose`. That
-`underspecified` exists in the outcome-class enum precisely so a model has
-somewhere honest to put an outcome nobody documented, and a model reached for it
-unprompted, is the schema and the prompt agreeing. On the contradiction fixture it
+refusal easy. On the gap fixture the two extracts filed exactly **two**
+`outcome_class` claims between them, and both describe a happy-path return: the
+list `find_tickets` gives for matching filters, and the ticket-with-comments
+`get_ticket` gives back. Nothing in the claim set says what either call does in any
+other case, and both claims came from `api.json` — the other extract filed no
+outcome class at all. So
+reconcile met a schema requiring at least one outcome class per capability with
+material for the success class and nothing for any other — and it declined to
+invent one. Both capabilities came back `success` plus two `underspecified`, with
+no `error`, `not_found` or `empty` kind anywhere, plus three gaps, all three
+blocking `propose`. That `underspecified` exists in the outcome-class enum
+precisely so a model has somewhere honest to put an outcome nobody documented, and
+a model reached for it unprompted, is the schema and the prompt agreeing. On the
+contradiction fixture it
 recorded two contradictions — two entries because the schema is pairwise — both
 `resolution: "unresolved"`, and filed the unknown-id outcome as `underspecified`
 rather than `error`: it refused twice in two registers about the same fact. The
