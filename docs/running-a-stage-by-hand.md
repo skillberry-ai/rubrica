@@ -31,13 +31,14 @@ artifact will still validate — so this is a rule to follow, not something
 
 ## 2. The dispatch prompt
 
-Copy this verbatim, filling in the three placeholders and nothing else:
+Copy this verbatim, filling in the placeholders and nothing else:
 
 ```
 You are the <stage> stage of the testgen pipeline.
 
 Run directory: <absolute path>
 Your skill:    <absolute path to SKILL.md>
+Your <slice>:  <id>            # fan-out members only -- see below
 
 Read your skill and follow it exactly. Read only the artifacts your skill's
 Contract block lists under `reads`. Write only what it lists under `writes`.
@@ -47,6 +48,17 @@ contract does not name.
 When you are done, report only: the paths you wrote, and any refusal
 condition you hit.
 ```
+
+**The slice line is for the three fan-out stages, and it is an address rather
+than context.** A member of a fan-out has to be told which slice is its own or
+it cannot find its work at all: `tg-extract` needs `Your artifact_id:`, and
+`tg-instantiate` and `tg-challenge` each need `Your scenario_id:`. Omit the
+line entirely for `tg-reconcile`, `tg-score` and `tg-emit`, which are single
+dispatches over everything. Give the member its own id and nothing about any
+other slice — a sibling's id, or a hint about what a sibling found, is the
+context leak §1 forbids. `tg-orchestrate`'s own §3 A1 states the same rule from
+the dispatcher's side, and this line was missing from the template while all
+four fan-out exercises run so far had to add it by hand.
 
 ## 3. Building a toy run stopped before the stage under test
 

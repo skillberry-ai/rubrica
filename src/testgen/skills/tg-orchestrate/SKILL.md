@@ -27,7 +27,7 @@ not. The rules below are the whole of the enforcement.
 ## Contract
 
 ```toml
-reads = ["manifest", "world_model", "scenarios", "coverage_latest"]
+reads = ["manifest", "world_model", "scenarios", "coverage_latest", "verdict"]
 writes = ["decisions"]
 invokes = [
   "check-skills", "validate", "check-refs", "record-stage", "decide",
@@ -44,7 +44,7 @@ stage's gate is responsible for.
 
 ## 1. Inputs
 
-Four artifacts, and this is the widest `reads` list in the build. That is
+Five artifacts, and this is the widest `reads` list in the build. That is
 correct rather than a lapse: every other skill's narrow boundary buys the
 independence of a judgment about the target, and you make no such judgment.
 What you need is the state of the run, and no slice of it will do.
@@ -67,6 +67,14 @@ What you need is the state of the run, and no slice of it will do.
 - **`03-coverage/latest.json` (`coverage_latest`)** -- for `verdict`, the one
   value the round loop branches on, plus the covered/total numbers that go
   into each round's decision line.
+- **`05-verdicts/<scenario_id>.json` (`verdict`)** -- for each adversary's
+  `verdict` value, which is Method step B9's entire three-way branch, and for
+  the `alternative_answers` a `re-seed` re-dispatch carries. Nothing else
+  surfaces that value to you in time to act on it: `validate` only
+  schema-checks these files, `check-refs` reports contradictions *within* one
+  and never compares its value against anything, and `emit` reports a
+  `re-seed` instance at stage 6 -- long after the re-seed had to happen -- and
+  a `reject` not at all.
 
 **Your read licence is not a write licence, and the asymmetry is the point.**
 `writes` names exactly one thing: `decisions.md`, appended through
@@ -80,16 +88,14 @@ measurable dies with it. `manifest.stages` is the one further thing that
 changes on your behalf, and it changes through `testgen record-stage` -- code
 writing a digest and a timestamp-free record, never you writing JSON.
 
-**One thing you read that your contract does not name: the verdicts.** Method
-step B9 branches on each `05-verdicts/<scenario_id>.json`'s `verdict` value --
-`accept`, `re-seed`, `reject` -- and nothing else in this run surfaces it to
-you in time to act. `validate` only schema-checks those files; `check-refs`
-reports contradictions within one, never its value; `emit` does report a
-`re-seed` instance, but that arrives at stage 6, long after the re-seed had to
-happen. So you read them, and you read them for the branch and for the
-decision line, never as a second opinion on the adversary's judgment. It is
-stated here rather than left as a habit because an undeclared read is exactly
-what this pipeline's contracts exist to prevent.
+**The verdicts are declared, and what you may do with them is narrow.** You
+read each one for two things and no third: which branch of B9 to take, and what
+to put in the decision line. You are **not** a second opinion on the
+adversary's judgment. You do not decide a `reject` was harsh, you do not
+soften one into a `re-seed`, and you do not read the `notes` looking for a
+reason to disagree -- the whole point of dispatching an independent adversary
+is that its ruling is not yours to revise, and an orchestrator that revises it
+has removed the check while leaving every artifact valid.
 
 **What you never read**, no matter how convenient: `00-inputs/`, `01-claims/`,
 the instance directories' `seed.json`, `expected.json` and `rationale.md`, and
@@ -286,9 +292,20 @@ testgen record-stage --run <run> --stage <stage> \
   --skill src/testgen/skills/tg-<stage>/SKILL.md
 ```
 
+`--model` and `--effort` are **yours to know and nobody's to store**: no
+artifact in the run carries them, so they come from the dispatch that started
+you -- the model and effort you were told to run each stage at, or, absent an
+instruction, the model you actually dispatched and the effort you actually
+asked for. Record what you did, never a default you assumed; a manifest saying
+`high` for a stage run at `low` is worse than one saying nothing, because
+`diff-runs` will call two incomparable runs comparable on the strength of it.
+If you cannot say what model a stage ran at, that is a fact to report rather
+than a field to fill in.
+
 `--effort` is one of the values the manifest schema declares
 (`manifest_stage_efforts()` reads them out of it: `low`, `medium`, `high`,
-`xhigh`, `max`). This is section 4's reproducibility hook, and it is not
+`xhigh`, `max`). The command writes a `skill_sha256` for you, computed from the
+file `--skill` names. This is section 4's reproducibility hook, and it is not
 bookkeeping: two runs are comparable only if their model, effort and skill
 digest match per stage, and `stability.comparability` gates `diff-runs`'
 headline verdict on the two manifests' stage maps agreeing. **An unrecorded
@@ -322,8 +339,10 @@ coverage went from 40% to 71% between rounds and whose notebook says nothing
 about either round is a run nobody can read, including you an hour later.
 
 **A7. What a human gate is, and what `--no-gate` does.** The walk below places
-three of them, after B3, after the round loop, and after the verdicts. At each
-one, stop, present the artifact, and wait. Do not proceed on the assumption
+three of them: gate 1 at **B5**, after B3's reconcile and after B4's
+blocking-gap check; gate 2 at **B7**, after the round loop; and gate 3 at
+**B10**, after the verdicts. At each one, stop, present the artifact, and
+wait. Do not proceed on the assumption
 that the human would have approved -- that assumption is the gate's entire
 content, and skipping it while claiming to have gated is worse than not gating
 at all, because `decisions.md` then says a review happened.
@@ -486,11 +505,15 @@ Then read each verdict and act:
   `tg-score`, not an edit by you.** `tg-score` is the only stage that may
   change a scenario's `status` or write a coverage document, and its own
   invariants already cover re-scoring after a rejection arrives from
-  `tg-challenge`. Because `tg-score` does not read verdicts, the rejected
-  scenario ids and the judgments behind them (`uniquely_determined: false` →
-  ambiguous; `derivable_without_guessing: false` → not derivable; an oracle
-  the adversary believes is wrong → wrong label) go into that dispatch as the
-  defect notice A1's second exception permits.
+  `tg-challenge`. Because `tg-score` does not read verdicts, the notice A1's
+  second exception permits is how the rejection reaches it: append each
+  rejected `scenario_id` and, **quoted from its verdict file**, the
+  `uniquely_determined` and `derivable_without_guessing` values and the `notes`.
+  Quote those fields; do not translate them. `tg-score` has its own
+  `rejected_reason` enum and picking from it is its judgment, not yours -- a
+  notice reading "ambiguous" has already made that choice for it, which is the
+  conclusion-passing A1 forbids arriving in the one dispatch that most invites
+  it.
 
 **Doing nothing after a `reject` is silently green, and doing half of it is
 loudly red.** Worth knowing, because it tells you which half you are on your

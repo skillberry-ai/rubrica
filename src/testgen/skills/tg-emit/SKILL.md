@@ -29,7 +29,7 @@ already lost the property this stage was written in code to protect.
 
 ```toml
 stage = "emit"
-reads = ["expected", "world_model"]
+reads = ["scenarios", "verdict", "expected", "world_model"]
 writes = ["task_dir"]
 schemas = ["suite-expected"]
 invokes = ["emit", "validate", "check-refs"]
@@ -37,38 +37,50 @@ invokes = ["emit", "validate", "check-refs"]
 
 ## 1. Inputs
 
-The two names under `reads` are what the compilation is *about*:
-`01-world-model.json` (`world_model`), whose `capabilities[].binding` turns a
-capability id into the `{tool, args}` pair the verifier can score, and each
-accepted instance's `04-instances/<scenario_id>/expected.json` (`expected`),
-the oracle being translated. `writes` names `task_dir` --
-`06-suite/<scenario_id>/` -- because that is where this stage's output lands,
-even though the process that puts it there is `testgen emit` and not you.
+Four names under `reads`, in two pairs that do two different jobs.
 
-You read them to *understand and report* what emit did, never to decide
+**The pair the compilation is about.** `01-world-model.json` (`world_model`),
+whose `capabilities[].binding` turns a capability id into the `{tool, args}`
+pair the verifier can score, and each accepted instance's
+`04-instances/<scenario_id>/expected.json` (`expected`), the oracle being
+translated. These are what `testgen emit` consumes to build a package, so they
+are what a finding about a package will name.
+
+**The pair the *report* is about.** `02-scenarios.json` (`scenarios`) and
+`05-verdicts/<scenario_id>.json` (`verdict`). Method step 4 asks you to say why
+a package is absent, and two of the reasons appear nowhere in emit's own
+output: `emit` skips a scenario whose `status` is not `active` without printing
+a word, and skips an instance whose verdict is `reject` without printing a
+word. Those two facts live in these two files and nowhere else -- no gate
+reports either of them, because `refs.check_suite` reports a package that is
+*present* for a scenario nobody judged and says nothing at all about one that
+is absent. They are in your `reads` because a requirement of this skill needs
+them, which is the only reason anything is ever in a `reads` list.
+
+`writes` names `task_dir` -- `06-suite/<scenario_id>/` -- because that is where
+this stage's output lands, even though the process that puts it there is
+`testgen emit` and not you.
+
+You read all four to *understand and report* what emit did, never to decide
 anything. This stage has no judgment to make: every judgment that selects
 what ships was already made and recorded -- `tg-score` promoted the scenario
 to `active`, `tg-challenge` filed an `accept`, and `emit` reads both. You are
 not a second opinion on either.
 
-**Two boundaries, and this stage's are unusually loose. Say so rather than
-inferring a strictness that is not here.** Every fan-out skill in this
-pipeline holds a hard line at its `reads` list, because its value comes from
-judging one slice without seeing another's. You are not a fan-out member and
-you produce no judgment, so there is nothing here for a wider view to
-contaminate. What replaces that boundary is a narrower and stricter one: you
-may look, and you may not *write*.
+**So the boundary that matters here is not the one you are used to, and
+inferring the usual one would be wrong.** Every fan-out skill in this pipeline
+holds a hard line at its `reads` list because its value comes from judging one
+slice without seeing another's. You are not a fan-out member and you produce
+no judgment, so there is nothing here for a wider view to contaminate -- which
+is why this contract can name the scenario list and the verdicts without cost.
+What replaces that boundary is a narrower and stricter one, and it is the
+whole of this skill's discipline: **you may read, and you may not write.**
 
-Concretely, one thing you will need that `reads` does not name. Method step 4
-asks you to report why a package is absent, and two of the reasons are
-invisible in emit's own output: `emit` silently skips a scenario whose
-`status` is not `active`, and silently skips an instance whose verdict is
-anything other than `accept` or `re-seed`. Both reasons are facts recorded by
-an earlier stage, and you get them from `02-scenarios.json` and
-`05-verdicts/<scenario_id>.json` -- read for the report and for nothing else.
-That is the one place this skill looks past its contract, it is stated here
-so it is not a quiet habit, and it changes nothing about writing: those files
-are as unwritable to you as the packages are.
+Two specific forms of that, because reading these two files is exactly where
+the temptation arrives. A `status` you may read is not a `status` you may
+change -- that transition is `tg-score`'s alone. A `reject` you may read is
+not a verdict you may weigh: the adversary ruled, and your job is to report
+that the ruling is why a package is absent, never to decide it was harsh.
 
 You are dispatched with no memory of any conversation that came before you.
 Whatever you need is in this document, in the run directory, or in the output

@@ -5104,11 +5104,13 @@ Two skills in one task because neither is a judgment stage: `tg-emit` is a thin 
 
 ```toml
 stage = "emit"
-reads = ["expected", "world_model"]
+reads = ["scenarios", "verdict", "expected", "world_model"]
 writes = ["task_dir"]
 schemas = ["suite-expected"]
 invokes = ["emit", "validate", "check-refs"]
 ```
+
+**`scenarios` and `verdict` were added to this block by a ruling during Task 13; do not "restore" it to the two-name form.** The refusal condition below requires reporting *which scenario and its status* when a package was pruned, and the two silent-prune reasons live only in those two files: `emit.py:325` skips a scenario whose `status` is not `active` and `emit.py:351` skips an instance whose verdict is `reject`, **both with no finding**, and no gate covers either — `refs.check_suite` reports a package that is *present* for a non-judged scenario and says nothing about one that is absent, while `check_verdicts` never compares a verdict's value against a status. Verified per read during Task 13's review, under the same standard as Task 10's `manifest` ruling: declare the read when nothing else supplies it. Both `reads` lists are now pinned by set-equality assertions in their test files, so this cannot silently regress.
 
 **Why it is thin, and the skill must say so** (§7): emit is code because of the reproducibility criterion — if emit were a prompt, two runs with identical stage-4 and stage-5 artifacts could still produce different suites, and variance could no longer be attributed to a stage. This skill exists purely as the human-facing entry point. Its Method is four steps: run `testgen emit --run <run>`; read the paths it printed and the findings it reported; run `testgen validate --stage emit` and `testgen check-refs`; report what was emitted and what was pruned, **and why** — `emit` prunes a package for a scenario that no longer qualifies, and a pruned package is information, not an error.
 
@@ -5168,13 +5170,15 @@ def test_it_states_that_a_pruned_package_is_information_not_an_error():
 **Contract block, verbatim.** No `stage` and no `schemas` — it is not a stage, it dispatches them:
 
 ```toml
-reads = ["manifest", "world_model", "scenarios", "coverage_latest"]
+reads = ["manifest", "world_model", "scenarios", "coverage_latest", "verdict"]
 writes = ["decisions"]
 invokes = [
   "check-skills", "validate", "check-refs", "record-stage", "decide",
   "dedupe-candidates", "emit", "smoke",
 ]
 ```
+
+**`verdict` was added to this block by a ruling during Task 13; do not "restore" it to the four-name form.** Rule 8's entire three-way branch *is* the verdict value, and nothing else surfaces it in time: `validate` only schema-checks the verdict files, `check-refs` reports contradictions within one without ever comparing its value to anything, and `emit` reports a `re-seed` only at stage 6 — long after the re-seed had to happen — and a `reject` not at all. See the same note on Task 13a's block for the standard. The opposite ruling was made in the same task for `report` (`07-report.json`), which is genuinely gate-covered because `smoke.py:885-897` appends a `/verdict` finding for any non-`healthy` verdict, so the orchestrator learns it from the gate at exit 1 — the same test producing "declare" three times and "do not declare" once is the rule working, not thrashing.
 
 **Method — §5's loop, verbatim in structure:**
 
