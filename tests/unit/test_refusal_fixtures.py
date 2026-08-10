@@ -74,6 +74,37 @@ def test_the_contradiction_fixture_offers_no_way_to_prefer_one_side():
         assert hint not in notes, f"the notes hint at precedence with {hint!r}"
 
 
+def test_the_contradiction_fixture_s_api_carries_no_corroboration_for_either_side():
+    """`api.json` must stay a bystander to the notes/trace disagreement.
+
+    Demonstrated red by a reviewer: restoring the phrase this fixture removed
+    from the golden `api.json` -- "Errors if no ticket has that id." on
+    `returns.get_ticket` -- silently reconstructs the golden fixture's
+    two-independent-artifacts-vs-one-trace-span shape. Per `tg-reconcile`'s own
+    `SKILL.md` (S3 step 5), that shape is what makes `preferred_a` defensible;
+    nothing else in this file read `api.json`'s content for the contradiction
+    fixture, so that edit passed every other test here.
+
+    Checked on the parsed `returns.get_ticket` value rather than the whole file
+    or one exact phrase: narrow enough that an unrelated reformat (reindenting,
+    reordering keys, requoting) can't trip it, and that `returns.find_tickets`'s
+    legitimate "possibly empty" -- a different capability, not part of this
+    contradiction -- stays out of scope. Widened past the reviewer's one exact
+    phrase to a short vocabulary so a paraphrase of the same corroboration
+    (either side: restating the error, or independently asserting reads never
+    fail) is still caught.
+    """
+    api = json.loads((CONTRADICTION_DIR / "api.json").read_text(encoding="utf-8"))
+    returns = api.get("tools", [{}])[0].get("returns", {})
+    get_ticket_returns = str(returns.get("get_ticket", "")).lower()
+    for word in ("error", "not found", "not_found", "missing", "404", "never"):
+        assert word not in get_ticket_returns, (
+            f"api.json's returns.get_ticket carries {word!r}, which corroborates one "
+            "side of the notes/trace disagreement from a second independent artifact "
+            "and makes a resolution other than unresolved defensible again"
+        )
+
+
 def test_the_gap_fixture_has_no_trace_and_no_error_semantics():
     """A trace would leak the behaviour back in, and any mention of an error or
     an empty result would give a model something true to record instead of a gap.
