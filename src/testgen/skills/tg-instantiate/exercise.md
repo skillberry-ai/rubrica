@@ -133,3 +133,91 @@ to invent difficulty rather than transform an artifact, and it is the one
 property whose failure is completely invisible to every automated check this
 build has. A negative result there is exactly as valuable to record as a
 positive one, and more urgent.
+
+## Run record: round 1 of the live exercise
+
+Four fresh subagents dispatched concurrently, one per active scenario, each
+given only the run directory, the stage name, this skill's path and its own
+`scenario_id`. `scn-open-dup` was not dispatched. The run was built with
+`build_toy_run(runs_dir, upto="score")`; `04-instances/` was confirmed absent
+before dispatch.
+
+**All pass criteria met.** Four instance directories, each holding all three
+files including the schema-less `rationale.md`. `testgen validate --stage
+instantiate` 0 and `testgen check-refs` 0 after all four finished -- so
+reachability, seed conformance, and both `machine:` invariants hold on every
+seed.
+
+**Property 1 (distractors) -- PASS, and stronger than the criterion asks.**
+Record counts were 4, 3, 3 and 2, and in every case dropping one dimension of
+the `discriminating_fact` lands on a different answer:
+
+- `scn-open` (4 tickets): a status near-miss (billing/`closed`), a queue
+  near-miss (shipping/`open`), and a text trap -- a billing/`pending` ticket
+  summarised "Open question about refund timing", which a keyword search for
+  "open" returns. Querying either filter alone yields an ambiguous set.
+- `scn-blocked` (3 tickets, 5 comments): the two single-dimension near-misses,
+  plus the sibling shipping/`blocked` ticket whose comment opens with the same
+  "Blocked pending" phrase as the answer's -- and, the best distractor of the
+  run, a *within-record* ordering trap: comment 2 of the answer ticket mentions
+  legal review and explicitly disclaims being the holdup, so an agent that stops
+  at the first blocker-sounding comment instead of the last one answers wrong.
+  Nothing in the prompt asks for a within-record trap; step 2's "read only the
+  first comment" framing was enough to produce one.
+- `scn-empty` (3 tickets): a shipping ticket summarised "Shipment appears
+  blocked awaiting customs clearance" while its status is `open` -- the exact
+  trap for an agent that greps for the word instead of filtering the field.
+- `scn-missing` (2 tickets): ids 4108 and 4110, straddling the absent 4109, one
+  per queue. The thinnest set of the four by count, but the right shape for an
+  id-absence fact: the near-miss dimension is identity, and an off-by-one on
+  either side is the plausible wrong answer.
+
+**Property 2 (an absence oracle a refusal cannot satisfy) -- PASS on both
+cases.** `scn-missing` carries `tool_called` on `cap-get-ticket` alongside its
+two exclusions; `scn-empty` carries `tool_called` on `cap-find-tickets`
+alongside one. Neither is all-exclusions, so "I do not have enough information"
+scores no free points on either. Invariant 7 landed.
+
+**Property 3 (`comment_count` vs comment records) -- right the first time, all
+four.** No subagent needed a repair and `check-refs` had nothing to catch:
+`scn-blocked`'s three tickets read 3/1/1 against exactly that many comment
+records. `scn-open` went further and reported its reasoning explicitly --
+`comment_count: 0` on every ticket with an empty `comments` collection,
+satisfying `inv-comment-count` trivially -- which is the invariant being checked
+before writing rather than after being caught.
+
+**Property 4 (did the fan-out hold?) -- PASS, and it produced a false positive
+worth keeping.** Every `rationale.md` names only its own scenario id, and the
+four seeds chose fully independent ticket ids (5001-5004, 3101-3103,
+5201/5202/6100, 4108/4110) -- four separate worlds, which is the expected
+result.
+
+But three of the four seeds independently used the summary string "Package
+delayed at customs" for a shipping ticket. That trips this section's own
+heuristic ("seeds that agree suspiciously closely on ids and summaries are the
+thing to look at"), and it is **not** a leak. The proof is stronger than the
+heuristic: the phrase appears nowhere in the run outside `04-instances/` -- not
+in the world model or scenarios that all four legitimately read, and not in
+`00-inputs/` or `01-claims/` either, which would have been evidence of a
+forbidden read. The world model in fact carries no shipping prose at all. A
+leaked value must exist in the artifact it leaked from; a converged value
+exists nowhere upstream. Three instances of one base model, each asked for a
+shipping-queue ticket, reached for the same natural phrase.
+
+**Record this as the discriminator, because the heuristic alone would have
+produced an isolation finding against a stage that did nothing wrong** -- the
+same error class as holding a stage to knowledge its contract denies it. When
+two slices agree on a value, grep the readable artifacts *and* the forbidden
+ones before calling it contamination: absent from both means shared prior,
+present in a forbidden one means a real leak, and present in a readable one
+means it was never a leak at all.
+
+**The headline result, which this round got for free.** `scn-open` finished
+first and hit exactly the race the scoped self-check was rewritten for: its
+`validate --stage instantiate` returned two `missing artifact` findings for
+`scn-blocked/expected.json` and `scn-missing/expected.json`, siblings that had
+not written yet. It classified both as not naming its own instance directory,
+reported success, and neither blocked waiting for them nor opened the sibling
+directories. The concurrent-fan-out scoping is therefore confirmed
+behaviourally, by the first real run after it landed, rather than only by
+reading.
