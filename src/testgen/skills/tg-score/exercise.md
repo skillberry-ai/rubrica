@@ -132,3 +132,56 @@ Property 4 is the one this exercise exists for: it is the first place in the
 pipeline where a skill has to act on a deterministic command's output rather
 than substitute its own reading for it, and a negative result there is
 exactly as valuable to record as a positive one.
+
+## Run record: round 1 of the live exercise
+
+One fresh subagent, given only the run directory, the stage name and this
+skill's path -- nothing else. The run was built with
+`build_toy_run(runs_dir, upto="propose")`, so all five scenarios arrived
+`proposed` with no `duplicate_of`, and `dedupe-candidates` returned exactly the
+one `scn-open <-> scn-open-dup` pair with `identical_cells: true`.
+
+**Both gates clean.** `testgen validate --run <run> --stage score` and
+`testgen check-refs --run <run>` each exited 0. `03-coverage/round-1.json` and
+`03-coverage/latest.json` compared byte-identical with `cmp`. Every kept
+scenario was promoted to `active`.
+
+**Property 4 -- the dedupe judgment this exercise exists for -- passed, and
+none of its three failure modes fired.** The subagent ran
+`dedupe-candidates` rather than eyeballing the five-scenario list, folded
+`scn-open-dup` to `status: "duplicate"` with `duplicate_of: "scn-open"`, and
+left the survivor `active`. It did not keep both `active`, and it did not mark
+both `duplicate`.
+
+**Properties 1-3 passed:** the capability matrix carried all four
+capability x outcome-class cells and the goal matrix both rows (4/4 and 2/2,
+`pct` 1.0 for each, recomputed by `refs._check_matrix_arithmetic` via the clean
+`check-refs`); `holes: []` rather than a hole invented to look thorough; and
+the verdict was `converged`, entailed by a full matrix with no closable hole.
+
+**Behavioural confirmation of the goal-row membership rule**, which is the one
+requirement in this skill that the plan's brief did not contain. The folded
+`scn-open-dup` stayed in `capability_matrix`'s `cap-find-tickets/oc-found`
+cell -- correct, since that cell is covered by the still-live `scn-open` --
+while the `goal-locate` row listed only `scn-open`, `scn-empty` and
+`scn-missing`, with the duplicate excluded. So a dispatched model applied the
+live-scenarios-only rule to goal rows and the looser rule to capability cells,
+in the same document, from prose alone. That asymmetry is deliberate and this is
+the first evidence it survives contact with a model rather than only reading
+consistently on the page.
+
+**Two honest limits of this round, neither a defect.**
+
+1. Property 1 is only weakly discriminating in this fixture: every one of the
+   four cells happens to be claimed by some scenario, so a model that wrote
+   only the claimed cells would have produced the identical matrix. This round
+   cannot separate "enumerated the world model" from "enumerated the scenario
+   list". A fixture with an unclaimed cell is what would settle it, and the
+   `holes: []` result is what makes that gap invisible here -- full coverage is
+   exactly the state in which the completeness rule cannot be tested.
+2. A reader of `capability_matrix` alone sees a folded duplicate credited in a
+   cell's `scenario_ids`. It is what Method step 4 asks for and it is harmless
+   today -- `covered` is computed from the live claimants, and the task review
+   confirmed by grep that nothing outside `refs.py` reads `capability_matrix` --
+   but it is a shape worth knowing about before anything downstream starts
+   counting those ids.
