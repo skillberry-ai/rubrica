@@ -40,6 +40,18 @@ def _key_paths(obj, prefix: str = "") -> set[str]:
     return paths
 
 
+def _returns(fixture_dir) -> dict[str, str]:
+    """`tools[0].returns` from a fixture's api.json, lowercased for matching.
+
+    Missing keys come back absent rather than raising: the structural guard
+    below is what reports a deleted key, and a value predicate reporting
+    "the fact is gone" is the honest message for an absent key too.
+    """
+    api = json.loads((fixture_dir / "api.json").read_text(encoding="utf-8"))
+    returns = api.get("tools", [{}])[0].get("returns", {})
+    return {key: str(value).lower() for key, value in returns.items()}
+
+
 def test_the_contradiction_fixture_has_three_readable_inputs():
     # Filtered to files: once Task 14's controller step commits
     # recorded/01-world-model.json beside these three, iterdir() also yields
@@ -120,9 +132,7 @@ def test_the_contradiction_fixture_s_api_carries_no_corroboration_for_either_sid
     (either side: restating the error, or independently asserting reads never
     fail) is still caught.
     """
-    api = json.loads((CONTRADICTION_DIR / "api.json").read_text(encoding="utf-8"))
-    returns = api.get("tools", [{}])[0].get("returns", {})
-    get_ticket_returns = str(returns.get("get_ticket", "")).lower()
+    get_ticket_returns = _returns(CONTRADICTION_DIR).get("get_ticket", "")
     for word in ("error", "not found", "not_found", "missing", "404", "never"):
         assert word not in get_ticket_returns, (
             f"api.json's returns.get_ticket carries {word!r}, which corroborates one "
@@ -189,4 +199,55 @@ def test_the_fixture_s_api_loses_no_structure_relative_to_golden(fixture_dir):
     missing = _key_paths(golden) - _key_paths(fixture)
     assert not missing, (
         f"{fixture_dir.name}/api.json is missing structure golden/api.json has: {sorted(missing)}"
+    )
+
+
+@pytest.mark.parametrize("fixture_dir", [CONTRADICTION_DIR, GAP_DIR])
+def test_the_fixture_s_api_still_states_what_each_capability_returns(fixture_dir):
+    """The happy-path facts both negative fixtures must *keep*, asserted on values.
+
+    The structural guard above is values-blind by construction, and a reviewer
+    measured the consequence: setting `returns.find_tickets` and
+    `returns.get_ticket` to `""` in tests/fixtures/toy-gap/api.json -- keys
+    intact, values blanked -- left every test in this file passing. So the
+    *mechanism* of the round-2 defect (deleting the `returns` object) was
+    caught while the *property* it destroyed was not. Blanking does the same
+    damage: no claim anywhere states that `get_ticket` brings back the ticket's
+    comments, the "why is this ticket stuck" goal's second hop loses its only
+    support, and a reconcile run reports a capability gap blocking all six
+    downstream stages instead of the purpose-built outcome-semantics gaps.
+
+    Both facts are load-bearing in both recorded world models, which is how
+    they were chosen rather than guessed: each recording derives a `success`
+    outcome class verbatim from these two strings, and the contradiction
+    recording's `unresolved` rationale cites api.json as describing "only
+    get_ticket's success return" -- an api.json that describes nothing is a
+    different fixture asking a different question.
+
+    Deliberately one word each, not a sentence and not golden's sentence: the
+    fixtures differ from golden in wording by design (condition 3), and a
+    predicate anchored on phrasing breaks on a legitimate reword (condition 2
+    -- earlier in this task a bold-markdown-anchored predicate had to be
+    replaced for exactly that). "comment" survives "the requested ticket with
+    every comment on it, in position order"; "ticket" survives "each ticket in
+    the queue that matches". Plurality and the filter clause are intentionally
+    *not* pinned -- the demonstrated loss mode is blanking or replacement, and
+    pinning more vocabulary buys nothing against that while adding false-red
+    risk against rewording.
+    """
+    returns = _returns(fixture_dir)
+    assert "comment" in returns.get("get_ticket", ""), (
+        f"{fixture_dir.name}/api.json's returns.get_ticket no longer states that the "
+        "ticket's comments come back with it. That is the one claim this fixture makes "
+        "about comment retrieval, and without it the get_ticket capability has no "
+        "documented success outcome: a reconcile run reports a capability gap blocking "
+        "all six downstream stages, which is the round-2 defect reached through a value "
+        "instead of a deleted key"
+    )
+    assert "ticket" in returns.get("find_tickets", ""), (
+        f"{fixture_dir.name}/api.json's returns.find_tickets no longer states that "
+        "tickets are what a search brings back, so find_tickets has no documented "
+        "success outcome either and the find-an-actionable-ticket goal loses its "
+        "supporting claim -- an undocumented capability, not the outcome-semantics "
+        "question this fixture exists to ask"
     )
