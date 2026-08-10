@@ -1,0 +1,43 @@
+{
+  "tools": [
+    {
+      "name": "query_tickets",
+      "description": "Read-only access to the support ticket queues.",
+      "input_schema": {
+        "type": "object",
+        "required": ["action"],
+        "properties": {
+          "action": { "type": "string", "enum": ["find_tickets", "get_ticket"] },
+          "queue": { "type": "string", "enum": ["billing", "shipping"] },
+          "status": { "type": "string", "enum": ["open", "blocked", "closed"] },
+          "ticket_id": { "type": "integer" }
+        }
+      },
+      "returns": {
+        "find_tickets": "A list of tickets matching the queue and status filters, possibly empty.",
+        "get_ticket": "One ticket with its comments, ordered by position."
+      }
+    }
+  ],
+  "entities": {
+    "Ticket": {
+      "collection": "tickets",
+      "fields": {
+        "ticket_id": "integer",
+        "queue": "string",
+        "status": "string",
+        "summary": "string",
+        "comment_count": "integer"
+      }
+    },
+    "Comment": {
+      "collection": "comments",
+      "fields": {
+        "comment_id": "integer",
+        "ticket_id": "integer",
+        "position": "integer",
+        "body": "string"
+      }
+    }
+  }
+}

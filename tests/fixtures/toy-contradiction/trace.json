@@ -1,0 +1,15 @@
+{
+  "trace_id": "toy-0001",
+  "spans": [
+    {
+      "name": "query_tickets",
+      "input": { "action": "find_tickets", "queue": "shipping", "status": "open" },
+      "output": []
+    },
+    {
+      "name": "query_tickets",
+      "input": { "action": "get_ticket", "ticket_id": 9999 },
+      "output": {}
+    }
+  ]
+}

@@ -27,6 +27,8 @@ from testgen.intake import intake
 from testgen.paths import RunPaths
 
 TOY_DIR = Path(__file__).resolve().parent / "fixtures" / "toy"
+CONTRADICTION_DIR = Path(__file__).resolve().parent / "fixtures" / "toy-contradiction"
+GAP_DIR = Path(__file__).resolve().parent / "fixtures" / "toy-gap"
 
 # In the order intake registers them, which fixes the artifact ids below.
 INPUT_FILES: tuple[Path, ...] = (
