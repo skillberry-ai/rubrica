@@ -11,10 +11,31 @@ produce a suite worth running. Design:
 
 ## What is here so far
 
-The **contract spine**: the deterministic components every stage depends on.
-No skills and no LLM calls yet — those arrive in later plans. Also here: a
-**measurement layer** built on top of the spine — four tools that score,
-compare, and sample a suite once `emit` has produced one.
+Three layers, all of them present. The **contract spine**: the deterministic
+components every stage depends on. A **measurement layer** on top of it — four
+tools that score, compare, and sample a suite once `emit` has produced one. And
+the **eight skills** that carry the pipeline's judgment. The whole pipeline has
+run end to end with a model at every stage, from three input files to a scored
+suite whose tasks discriminate between agent roles.
+
+### The skills
+
+Seven stage skills plus the orchestrator, at
+`src/testgen/skills/tg-<name>/SKILL.md`. Each carries one judgment and reads
+only what its `## Contract` block declares.
+
+| Skill | The judgment it carries |
+|---|---|
+| `tg-extract` | Turns one input artifact into evidence-backed claims, in isolation from every sibling artifact — and grades each claim `stated` / `inferred` / `reverse_engineered` instead of flattening the difference |
+| `tg-reconcile` | Merges every extract's claims into one world model, *recording* contradictions and gaps rather than resolving them, and computes the coverage denominator once |
+| `tg-propose` | Appends scenarios targeting holes that proposing can actually close — never rewriting or renumbering what an earlier round proposed |
+| `tg-score` | Folds the scenario pairs that are one test, computes both coverage matrices, justifies every uncovered row with a hole, and computes the verdict the orchestrator acts on |
+| `tg-instantiate` | Designs the distractor set *first*, seeds a world respecting the model's invariants, then derives the oracle from that seed — never the reverse |
+| `tg-challenge` | Answers the question from the seed alone before the oracle is ever opened, hunts for a second world-consistent answer, and rules `accept` / `re-seed` / `reject` |
+| `tg-emit` | The thin human-facing entry point over `testgen emit`: runs it, gates what it produced, reports what was pruned. Writes nothing itself |
+| `tg-orchestrate` | Not a stage — it dispatches them: what runs next, whether an artifact is good enough to build on, the round loop, the three human gates, at most one repair attempt per failure |
+
+### The code
 
 | Component | Job |
 |---|---|
@@ -22,13 +43,15 @@ compare, and sample a suite once `emit` has produced one.
 | `artifacts.py` | Atomic, byte-stable canonical JSON I/O |
 | `validate.py` | Layer 1: JSON Schema validation per stage |
 | `invariants.py` | Evaluates world-model `machine:` invariants over a seed |
-| `refs.py` | Layer 2: cross-artifact references, seed conformance, the reachability gate, and — since this build — cross-checking `07-report.json` against `06-suite/` and the manifest |
+| `refs.py` | Layer 2: cross-artifact references, seed conformance, the reachability gate, and cross-checking `07-report.json` against `06-suite/` and the manifest |
 | `intake.py` | Stage 0: register + hash + classify inputs, mint the run |
 | `dedupe.py` | Candidate duplicate scenario pairs (proposes; never decides) |
 | `smoke.py` | `testgen smoke`: runs the emitted suite against three agent roles, scores with the package's own copied verifier, and gates on the verdict |
 | `recall.py` | `testgen compare-gold`: recall and novelty against hand-authored gold tasks |
 | `stability.py` | `testgen diff-runs`: per-stage Jaccard stability between two runs |
 | `review.py` | `testgen sample-for-review`: a stratified human-review packet |
+| `skills.py` | Parses each `SKILL.md`'s `## Contract` block, holds it to the code that owns each name (`testgen check-skills`), and hashes the file a stage was actually run with |
+| `manifest.py` | `testgen record-stage` and `testgen decide`: the two writers `manifest.stages` and `decisions.md` were declared without |
 | `metrics.py` | The one `jaccard` set-similarity function `recall.py` and `stability.py` both use |
 | `errors.py` | `UsageError`, the exception a malformed human-authored config raises so it maps to exit 2 |
 | `schema/` | One JSON Schema per artifact kind, plus `agents-0.1.json` and `gold-0.1.json` for the two human-authored config files, shipped as package data |
@@ -43,7 +66,43 @@ make test      # run the suite
 make check     # ruff lint + format check, no changes
 ```
 
+There is a fourth target, `make live`, and it is deliberately not part of
+`make test`: it runs the tests whose assertions need a model's output, behind
+the `live` pytest marker and the `TESTGEN_LIVE` opt-in (`tests/conftest.py`).
+As they stand today those tests assert against **committed recordings** of a live
+dispatch (`tests/fixtures/<name>/recorded/`), so running them costs nothing;
+producing or re-producing a recording is the part that dispatches a subagent and
+costs money. `make test` skips them with a reason naming the command that runs
+them, so they are never silently absent.
+
+## Running the pipeline
+
+The stages are prompts, so no command in this repository runs them.
+`tg-orchestrate` does: point an agent at
+[`src/testgen/skills/tg-orchestrate/SKILL.md`](src/testgen/skills/tg-orchestrate/SKILL.md)
+with a run directory, and it dispatches one subagent per stage, gates every
+artifact before the next stage sees it, holds the round loop and the three human
+gates, spends at most one repair attempt per failure, and records each stage and
+each branch.
+
+Every dispatch carries exactly three things — the run directory, the stage name,
+and the path to that stage's `SKILL.md` — plus, for the three fan-out stages, the
+id of its own slice, which is an address rather than context. Nothing else: no
+summary of what an earlier stage concluded, no excerpt of the world model. That
+is what makes the artifact contract real, and it is a rule to follow rather than
+something `validate` can catch — a dispatch that pastes in "helpful" context
+removes the fan-out isolation the design was chosen for, and the resulting
+artifact still validates.
+
+To run one stage by hand — the way every skill here was exercised —
+follow [`docs/running-a-stage-by-hand.md`](docs/running-a-stage-by-hand.md),
+which carries the dispatch prompt verbatim plus the per-stage setup and gate
+commands.
+
 ## Usage
+
+Commands below assume the venv is on your `PATH` (`make setup` creates it);
+otherwise prefix each with `uv run`.
 
 ```bash
 # Stage 0: register inputs and mint a run
@@ -64,7 +123,48 @@ testgen check-refs --run runs/run-20260806-123005
 
 # Feed candidate duplicate pairs to the scoring stage
 testgen dedupe-candidates --run runs/run-20260806-123005
+
+# Every skill's Contract block against the code that owns each name
+testgen check-skills
 ```
+
+### The two writers the orchestrator uses
+
+`manifest.stages` and `decisions.md` are declared by the design and had no
+writer until this build. These are the two subcommands that fill them, and
+`tg-orchestrate` is their only caller in a real run.
+
+```bash
+# What a stage was run with, merged into manifest.stages
+testgen record-stage --run runs/run-20260806-123005 \
+  --stage extract \
+  --model claude-opus-5 \
+  --effort medium \
+  --skill src/testgen/skills/tg-extract/SKILL.md
+# prints the manifest path, and adds:
+#   "extract": {"model": "claude-opus-5", "effort": "medium",
+#               "skill_sha256": "<sha256 of that SKILL.md>"}
+```
+
+The digest is computed here from `--skill` rather than accepted as a string: a
+caller that can pass a digest can pass the wrong one, and the hook is only worth
+having if the recorded hash is of the file the run actually used. It hashes the
+whole file, prose included — a changed Method section changes what the run did.
+So a `skill_sha256` that no longer matches the file on disk is the hook working,
+not a defect: the skill was edited after that stage ran.
+
+```bash
+# One line in the run's append-only notebook, timestamped by the code
+testgen decide --run runs/run-20260806-123005 \
+  --note "human gate 1: gap-bad-argument-behavior ruled non-blocking for propose as a whole"
+# prints the decisions.md path, and appends:
+#   - 2026-08-10T21:58:07Z human gate 1: gap-bad-argument-behavior ruled ...
+```
+
+A note that is empty, whitespace-only, or contains a newline is refused at exit
+2: a blank entry records that a decision was made and not what it was, and an
+embedded newline silently corrupts a format every reader parses one line per
+entry.
 
 ### Measurement
 

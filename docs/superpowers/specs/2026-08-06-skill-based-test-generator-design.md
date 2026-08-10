@@ -1,7 +1,9 @@
 # Skill-Based Test Generator — Design
 
 **Date:** 2026-08-06
-**Status:** Approved design, pending implementation plan
+**Status:** Approved design. Fully implemented as of the skills build — contract
+spine, measurement layer and all eight skills — and reconciled against what four
+builds measured. Not yet run on the real target; see §11.
 **Author:** Jonathan Bnayahu (with Claude)
 
 ## 1. What this is
@@ -210,6 +212,24 @@ fit. `check-refs` evaluates the `machine:` ones; `prose:` ones are skill
 self-checks. This is bounded on purpose: no general DSL. It covers the invariant
 class that demonstrably bites (see §6).
 
+**The world model has no representation for a field's value domain, and the
+consequence is architectural rather than cosmetic.** `capability.params` and
+`entity.fields` are both `additionalProperties: false` carrying only a name, a
+type, and — for params — whether it is required. No enum, no range, no examples. A
+prose `invariant` could smuggle a domain in, but nothing is designed to read one.
+So no stage downstream of 1b can ground a *value* in anything: a concrete value
+appearing in a scenario's `discriminating_fact`, or in a seed, is always a
+**prescription to `tg-instantiate`** and never an assertion about the target, and
+**every seed value is synthetic by construction.** That is what makes the
+discriminating fact's uniqueness requirement satisfiable at all — uniqueness is a
+property of the seeded world, which stage 4 builds, not of the target's real
+data, which nothing here has. It is written down because not knowing it cost this
+build two wrong fix rounds: a queue name in a proposed scenario was read as an
+unsupported claim about the target and driven as a finding through two rounds,
+when the world model contains no queue name at all, has nowhere to put one, and
+the only real defect was that the fact was *valueless* and therefore not unique.
+Prescribing any concrete value is an instruction to stage 4, not a claim.
+
 **Scenario** (`02-scenarios.json`):
 
 ```
@@ -311,10 +331,53 @@ repair prompt to.
    evidence the report needs. `proposed` and `duplicate` are still findings.
 3. **Smoke** — stage 7: does the emitted suite actually execute.
 
+**What layer 2 cannot check, stated here because two real defects lived under
+it.** Every world-model element cites the claims it rests on, and `check-refs`
+verifies that each of those citations *resolves* — never that the claim it
+resolves to *supports* the element. The golden fixture, which is the model answer
+a skill imitates, shipped two elements asserting more than their cited claims
+said: an outcome class describing a return value no claim mentioned, and a
+contradiction rationale resting on a fact no claim supplied. Both passed layer 2
+clean. A live `tg-reconcile` run reported the first as a gap — correctly, from the
+claim set it was given; the second was found by reading the fixture against its
+own claims while reviewing that same run. Neither was reachable any other way. No
+mechanical check is proposed for this, and the reason is not
+laziness — support is semantic. The clearest illustration is a third case from the
+same sweep, ruled *not* a defect: an entity's relation cardinality whose
+supporting claims do exist and are cited, from neighbouring nodes rather than
+from the entity itself. Reference locality, not invention. If "supported" meant
+"some claim somewhere in this file mentions it", that case would pass and so
+would the two real ones; if it meant "cited from the element that asserts it",
+the legitimate case would fail. There is no predicate in between that is not a
+reading of the prose. So this stays a human check, and §9's negative fixtures are
+how it is exercised.
+
 ### Reproducibility hooks
 
 `manifest.json` records, per stage: model, effort, and a content hash of the
 `SKILL.md` used. Two runs are comparable only if those match.
+
+**`testgen record-stage` is the writer, and until the skills build there was
+none.** That absence was not cosmetic. `stability.comparability` gates
+`diff-runs`' headline verdict on the two runs' stage maps agreeing, and it
+iterates the *union* of their keys — so with both maps always empty the loop body
+never ran and no reason was ever appended. Every pair of runs with matching
+inputs compared as comparable: a check passing because its input was absent.
+`record-stage` computes the digest from the `--skill` path it is handed rather
+than accepting a digest string, because the whole point of the hook is that the
+recorded hash is of the file the run actually used, and a caller that can pass a
+digest can pass the wrong one. It hashes the whole file, prose included, since a
+changed Method section changes what the run did. A consequence worth stating so
+it is not misread as a defect: a recorded `skill_sha256` that no longer matches
+the file on disk means the skill was edited *after* that stage ran. This build
+produced exactly that case by accident, and the hook was behaving correctly.
+
+**`decisions.md` has a writer for the same reason: `testgen decide`.** One
+timestamped line per orchestrator branch, appended. It refuses an empty or
+whitespace-only note — a blank entry records that a decision was made and not
+what it was, which is worse than no entry — and refuses a note containing a
+newline, because every reader of this file parses it one line per entry and an
+embedded newline silently corrupts the format for every line written after it.
 
 `bin/diff-runs A B` compares artifact by artifact, so variance can be attributed
 to a stage — the difference between "the pipeline is nondeterministic" and
@@ -322,19 +385,71 @@ to a stage — the difference between "the pipeline is nondeterministic" and
 02."
 
 **Run ids and timestamps are minted by intake (code), never by skills.** A skill
-that invents a timestamp makes two otherwise-identical artifacts diff.
+that invents a timestamp makes two otherwise-identical artifacts diff. Both
+writers share one format string (`manifest.UTC_FORMAT`), for the same reason
+`manifest.stored_as` exists: two spellings of a format is how a reader's parser
+comes to work on one file and not the other.
 
 ## 5. Skill anatomy and orchestration
 
 ```
-skills/tg-{orchestrate,extract,reconcile,propose,score,instantiate,challenge,emit}/SKILL.md
+src/testgen/skills/tg-{orchestrate,extract,reconcile,propose,score,instantiate,challenge,emit}/SKILL.md
+                            (package data, for the same reason the schemas are)
 src/testgen/schema/*.json   (package data: an installed copy can validate)
-bin/{intake,validate,check-refs,dedupe-candidates,emit,smoke,diff-runs,compare-gold,sample-for-review}
+bin/{intake,validate,check-refs,dedupe-candidates,emit,smoke,diff-runs,compare-gold,
+     sample-for-review,check-skills,record-stage,decide}
 ```
 
 Shipped as one console script with subcommands — `testgen intake`,
 `testgen validate`, … — rather than a `bin/` directory of separate files. The
 names and the responsibilities are as listed; only the packaging differs.
+
+**The skills ship as package data too**, under `src/testgen/skills/` rather than
+at the repository root, for the reason the schemas moved there: an installed
+non-editable copy that can validate and emit but cannot find its own skills is a
+copy that cannot run. `TESTGEN_SKILLS_DIR` overrides the location so a candidate
+skill set can be checked without reinstalling. The names and the
+responsibilities are unchanged from the list above.
+
+**Each skill carries a machine-readable `## Contract` block** alongside its five
+prose sections — a TOML table declaring `stage`, `reads`, `writes`, `schemas` and
+`invokes`, with every artifact named by its `paths.RunPaths` attribute and never
+as a literal path. `testgen check-skills` holds that declaration to the code that
+owns each name: `stage` against `paths.STAGES` *and* against the directory name,
+since the orchestrator dispatches a skill as `tg-<stage>` and validates its
+output as `<stage>`; every `reads`/`writes` entry against a public `RunPaths`
+attribute; `schemas` against `validate.STAGE_ARTIFACTS[stage]` by set equality in
+both directions, so an omitted kind and an invented one are separate findings;
+and every `invokes` entry against the CLI's own subparser roster (`cli.SUBCOMMANDS`,
+the same tuple `_build_parser` iterates, so the parser and the check cannot
+disagree). It also checks that the five sections are present, in order, and that
+section 5 is not empty — a skill with no stated refusal conditions confabulates
+rather than recording a gap. The roster of required skills is *derived* from
+`STAGES` rather than restated, so adding a stage demands a skill without anyone
+remembering to edit a constant. `tg-orchestrate` is the one special case, and in
+the strict direction: it must declare **no** `stage` and **no** `schemas`, because
+it is not one of `STAGES` and there is no artifact for `validate` to gate it on.
+Declaring one would be a finding — it would claim the orchestrator produces an
+artifact some stage's gate is answerable for.
+
+This is §10's silent-drift risk answered on the prompt side. A `SKILL.md` can
+name an artifact path that does not exist, a stage that was renamed, or a
+subcommand spelled with an underscore, and nothing downstream notices until a
+model has already been paid to follow it. A `SKILL.md` that cannot be *parsed*
+is exit 2, not a finding: it is human-authored, like the `--agents` roster, so no
+repair prompt fixes it. A contract that parses but declares something wrong is
+an ordinary exit-1 finding, because it names exactly what to edit.
+
+**Dispatch is by file path, not by harness skill discovery.** A dispatch names
+`src/testgen/skills/tg-<stage>/SKILL.md` outright rather than asking the agentic
+harness to resolve a skill by name. Three reasons, the last load-bearing: the
+skills live as package data inside the Python package, not in a harness's skills
+directory, so there is nothing there to discover; `check-skills` reads that same
+tree, so the file CI checks is the file that gets dispatched; and
+`manifest.stages[].skill_sha256` hashes the file at that path, which only means
+something if the run and the hash refer to the same bytes. A name resolved to
+whichever copy happens to be installed cannot be pinned that way, and the
+reproducibility criterion is exactly the claim that pinning supports.
 
 Dedupe folds into stage 3 rather than standing alone: recognizing that "find the
 oldest failing job on prod0" and "which prod0 job failed longest ago" are the
@@ -369,6 +484,29 @@ the world model and scenario S — not the other scenarios, not their seeds. Thi
 is what actually buys the cross-contamination protection that subagents were
 chosen for, and `check-refs` enforces part of it mechanically (a `seed_pointer`
 may only resolve within its own scenario's seed).
+
+One caveat the fan-out stages taught, because it changes what the rule can mean:
+`02-scenarios.json` physically contains every sibling scenario, so for
+`tg-instantiate` the file boundary cannot do the work and the rule has to be about
+what a member *uses*, not what it saw. The narrow rule is enforceable only where
+each slice has its own file.
+
+**Before withholding an artifact from a skill, ask whether a deterministic gate
+already enforces the property that withholding it was meant to protect.** This
+build wrote four skills' contracts twice over that question, and the test settles
+it cleanly in both directions. `tg-score` and `tg-propose` both had prose citing
+`manifest.limits.max_rounds` while `manifest` was absent from `reads`; nothing
+else supplies that number, so the honest fix was to declare the read.
+`tg-challenge` had a refusal condition about a seed violating a world-model
+invariant while `world_model` was absent; there `check-refs` already evaluates
+every entity's `machine:` invariant over the seed, so widening `reads` bought no
+coverage and only added anchoring surface to the one stage whose entire value is
+*not* being anchored — the requirement belongs to the gate, and the prose says so.
+The same test produced "declare" three more times for `tg-emit` and
+`tg-orchestrate` (a status, and a verdict value, that no gate surfaces in time to
+act on) and "do not declare" once. A contract that withholds a path its own prose
+depends on is worse than a wide one: the contract block is the only place a path is
+named, so the prose has nothing to be held to.
 
 ### Orchestrator loop
 
@@ -473,6 +611,18 @@ skill whose context already holds the answer — which is the concrete reason
 challenge is a separate subagent with a restricted input slice rather than a
 section appended to instantiate.
 
+**How the built skill carries an ordering no artifact can record.** `expected` is
+declared in `tg-challenge`'s `reads`, because step 4 has to open it; "deliberately
+not `expected.json`" is a statement about *when*, and a verdict written by an
+adversary that peeked is byte-identical to one written by an adversary that did
+not. So the skill makes the order readable: the four judgments of steps 1–3 are
+**pre-registered into `notes`** before step 4 runs, and step 4 may only *append*
+to them. That is the best answer a text-level stage can give to an unobservable
+property, and it is what made the live exercise decidable — the filed notes showed
+a first candidate considered and eliminated *with its reason*, which an adversary
+that had already read the oracle would have had no reason to write. The
+elimination is the derivation.
+
 | Adversary result | Verdict |
 |---|---|
 | Matches expected, unique, derivable | `accept` |
@@ -514,6 +664,36 @@ vocabulary is closed** — `answer_contains`, `answer_excludes`, `tool_called`,
 adding one is a human change to the verifier. Otherwise skills emit assertions
 nothing can evaluate, and the schema does not catch it because the *shape* is
 fine.
+
+### An exclusion satisfied by absence scores a point, so a refusal is not a zero
+
+`verify.score_assertions` takes one denominator over every assertion and awards a
+point for an `answer_excludes` whose target is absent from the answer, rather than
+merely withholding a penalty. That is the right shape and was chosen
+deliberately: it makes a fabrication trap a positively-scored item, and it is what
+lets a pure-absence scenario consist entirely of exclusions and score at all. But
+it has a consequence this build **measured** rather than predicted:
+**an absence-shaped scenario built only of exclusions is substantially passable by
+a refusal** — which removes exactly the weak-baseline signal §7 depends on, for
+precisely the `log-does-not-say` class of test that motivated absence scenarios in
+the first place.
+
+The numbers, from the golden fixture's four tasks scored by the real verifier. The
+weak baseline — no tools, answering "I don't have enough information" — scores
+**0.4 on each of the two absence-shaped tasks and 0.0 on the other two, for an
+overall mean of 0.2** against `WEAK_BASELINE_CEILING` of **0.30**. The 0.4 is
+`0.5 × 0.8 + 0.0 × 0.2`: half the assertions satisfied at the assertion weight,
+nothing at all on the trajectory. So the suite's verdict is `healthy` and nothing
+failed — and two of its four tasks were carrying a refusal to within 0.1 of the
+threshold that would have condemned the whole suite as trivial.
+
+`tg-instantiate` therefore carries the invariant that closes it: **an
+absence-shaped scenario must carry at least one assertion a refusal cannot
+satisfy** — a `tool_called`, or a positive `answer_contains` on something the seed
+does contain. The golden fixture pins the invariant at the fixture level, and pins
+the four per-task weak-baseline numbers *separately*, because an edit that dropped
+the `tool_called` from an absence scenario would move only the aggregate mean — a
+number no reader can attribute to a cause.
 
 ### Measurement harness
 
@@ -600,6 +780,17 @@ number is what it is:**
 - All three code gates real: `validate`, `check-refs`, `smoke`.
 - Measurement: `smoke` (with oracle + weak baseline) and `compare-gold`.
 
+**Status: every component this slice names now exists.** The contract spine, the
+measurement layer, and all eight skills are built; `testgen check-skills` exits 0
+against a complete roster; and the pipeline has run end to end with a model at
+every stage — halting on a blocking gap, taking a real human gate-1 ruling,
+resuming, and producing a suite whose scored spread was `healthy` with **no task
+passed by every role and none failed by every role**, which is the property a
+generated suite exists to have and the first one a degenerate suite loses.
+What it has *not* run on is aap2 — that end-to-end run was on §9's
+two-capability toy world, which is a test of the pipeline and not of the
+hypothesis. **The aap2 run is Plan 5**, and it is what §11 now points at.
+
 **Why not smaller.** The tempting cut is to drop `tg-challenge` and the
 reachability gate as polish for later. But a slice without them does not test the
 hypothesis — it tests whether an LLM can produce plausible-looking test files,
@@ -681,6 +872,33 @@ The whole-branch review and its single fix wave surfaced three additional findin
 | `cli.py`'s catch-all finding names the wrong run for `diff-runs` | The exception handler builds its finding against `args.run`, falling back to `args.a`. Since `diff-runs` is the only subcommand taking two run directories (`--a` and `--b`), a defect in run **b** surfaces as a malformed artifact in run **a** — which an orchestrator would attempt to repair. The finding line is still present and parseable, which is strictly better than the empty exit 1 it replaced, and nothing downstream reads the artifact field. The fix would require naming both roots or dropping the "this run" phrasing for `diff-runs`. |
 | `dedupe-candidates` maps a stage defect to exit 2 | It reads `02-scenarios.json` through a path whose narrow exception catch turns an unparseable file into exit 2 (`misconfigured harness`), while `validate`, `check-refs`, `emit`, `compare-gold` and `sample-for-review` all return exit 1 with a finding for the same file. This violates the module docstring: a repairable stage defect must never surface as a misconfigured harness, because the orchestrator halts instead of spending its one repair attempt. The line is untouched by this branch and represents a single-subcommand inconsistency in a class the branch otherwise closed. |
 
+### Parked from the skills build
+
+Fifteen tasks, their reviews and their fix rounds, plus a live exercise for each
+of Tasks 7–13 and the two recorded dispatches of Task 14.
+What those closed is written into the sections that own it — §4's two writers and
+the two limitations layer 2 and the world model each carry, §5's contract block
+and declaration test, §7's absence-scoring ruling, §9's three fixtures. What they
+did not close is below, each with the ruling that parked it. The pattern worth
+noticing: almost none of these are code defects. They are prompts that under- or
+over-state a rule, and mechanical checks that pin a shape instead of the property
+the shape was standing in for.
+
+| Parked | Why it matters |
+|---|---|
+| `--no-gate` is a prompt-level flag, not a CLI flag | §5's three human gates live in `tg-orchestrate`'s prose, and no code enforces them, so `--no-gate` is an argument to the *skill's invocation*. A prompt-level flag can be forgotten in a way a CLI flag cannot. Accepted as the right cost for this slice: enforcing the gates in code would mean the orchestrator stops being a skill, which is the thing being tested. |
+| The orchestrator has no lever for `effort` | It records `model` and `effort` per stage through `record-stage`, and its prose says where both come from — but the dispatch mechanism cannot *supply* an effort level. The one completed run recorded the most neutral characterization available and flagged the assumption rather than presenting it as fact. So every `effort` in a manifest today is a characterization, not a setting, and §4's comparability claim rests on `model` and `skill_sha256` doing the real work. |
+| The isolation rule is enforceable on artifacts inside a run and unenforceable on everything else a subagent can reach | Already named as this build's weakest link: an instantiate member that read a sibling's seed produces a byte-identical artifact to one that did not. This build widened the scope twice, both times measured. An extract member self-reported reading both sibling *input files* while checking locator conventions; a reconcile member volunteered that it had consulted a *different fixture* as a reference, outside its declared `reads`. Both outputs were correct and independently verified, so nothing was harmed — and no schema, no `check-refs` and no digest could have detected either. Both surfaced only because a subagent mentioned it in a report nobody obliged it to write. The exposure is therefore not "another scenario's slice" but anything on the filesystem, and the only instrument is a transcript audit at dispatch time. |
+| `tg-extract` speculates about the sibling it did not read | Three of five dispatches honoured the file boundary on reads and then volunteered a guess about the unread sibling's contents ("that lives only in `notes.md`", "presumably in the sibling `api.json`"). No file was opened and no claim was filed on any of it, so the rule held where it is enforceable. Parked as prompt hardening rather than dismissed, because a guess about an unread sibling in a *report* is one step from the same guess inside a *claim*, and a confabulated claim is byte-identical to an extracted one. |
+| `tg-reconcile`'s corroboration test never says what "independent" excludes | §1 asks whether "a second, independent claim" supports one side, and its only worked example contributes exactly one claim per artifact — so nothing in the text rules out counting two claims from the *same* document as independent corroboration, which would make a self-contradicting document look like two sources. Settled empirically rather than pre-emptively: the prose gap is real, and it did not mislead the model, which reasoned that the two claims "cancel out rather than one confidently corroborating the other" and named the pull it was resisting. Recorded as *sufficient for this model on this input* — weaker evidence than "the prompt says so", and it must not be filed as the latter. The one-line clarification is a hardening, not a fix. |
+| `invariants.py` reads a `join` invariant's `source_field` with a default rather than a sentinel | Production code, not a fixture defect. Every other key uses the MISSING sentinel; `source_field` uses `.get(default="")`, so a mistyped one silently compares against a join of empty strings and produces no direct diagnostic — it is caught only by a coincidental string mismatch. Latent today because the golden fixture uses no `join` invariant, and adding one purely to reach this would be YAGNI. |
+| `skills.py`'s contract-block regex backtracks quadratically on unclosed fences | Measured: 6s at 8000 unclosed fences against 0.37s at 2000. Not reachable — `SKILL.md` files are hand-authored and repo-shipped, eight of them at ~200 lines. The narrow fix does not help, because proving "exactly one `toml` block in this section" requires scanning to the end; the real fix is replacing the regex with the fence-aware line walk already in that module, which churns a parsing core two reviews validated. If `SKILL.md` ever becomes user-supplied, that walk is the named replacement. |
+| `check_contract`'s message for a non-string *element* of `invokes`/`reads`/`writes` | It reports "invokes `{'tool': 'validate'}`, which is not a testgen subcommand" rather than "must be a string". Deliberately not fixed, and the distinction from the case that *was* fixed is the exit-code contract: a bad `schemas` element used to **crash** into exit 1 with an internal message naming the wrong tool, while these all return a parseable exit-1 finding that renders the offending element, so a reader can see what to edit. Unifying all four keys behind one helper would remove the class and refactor a function three reviews validated, for Minor benefit. |
+| `dedupe-candidates` overstates what it excludes, in code and in prose | "Excludes pairs already settled in an earlier round" is not what the status filter does: a pair that an earlier round deliberately kept *both* active is re-raised every round. Inherited — `dedupe.py`'s own docstring makes the same overstatement — so the correction belongs on the code as well as on `tg-score`'s prose. |
+| Three prompt statements stronger or narrower than the rule they describe | `tg-score`'s survivor rule claims determinism that "pins its world down more tightly" cannot deliver, since that is a judgment; stability across two scorings comes only from the round tiebreak. `tg-instantiate`'s concurrency-scoped self-check sorts a gate finding into *yours* or *a sibling's* and is silent on a third case — a finding against a shared frozen input, which names neither instance directory — so nothing tells the member to forward it. And one `tg-challenge` test's name says "the three boolean judgments" where the schema has two booleans, an integer and an array. |
+| Two documentation-accuracy residues inside strengthened tests | `tg-orchestrate`'s exit-code predicate passes on the delivered file partly *because* the same fix round retitled a table cell (`\| **0** \|` → `\| **exit 0** \|`). The property still generalizes — it survives a full prose rewrite and goes red on deletion — but a fix that tightened its source document to satisfy its own new test is a shape that could hide a real circularity in a less careful instance, and the dependency is recorded only in a report. Separately, one strengthened predicate's docstring justifies itself with a hazard that measurement showed never occurs in this document. |
+| The negative fixtures' remaining unguarded surfaces | Four, each ruled rather than overlooked. The structural key-path guard keys on positional list indices, so inserting a tool ahead of the existing one would report 18 paths missing when nothing was lost (demonstrated). The gap fixture's `notes.md` goal prose stays unguarded, because no predicate catches its deletion without anchoring on a single incidental word — *and* that prose is byte-identical across all three fixtures including the golden one, so it is not a negative-fixture property at all; declining to write a test that would give false confidence was the right call. Several contradiction-fixture predicates key off exact substrings rather than the semantic property. And one live test iterates `capabilities`, so a re-recording with zero capabilities would pass it vacuously — closed operationally by checking the count by hand, still a hole for whoever re-records next. |
+
 ### Process changes for the next plan
 
 The first two come from the contract-spine build; the third is what the
@@ -714,7 +932,12 @@ unchanged below.
    CPython's mutated `.pyc` live, since `.pyc` validation checks source size and
    mtime-to-the-second only. Every mutation harness here must set
    `PYTHONDONTWRITEBYTECODE=1` or sweep `__pycache__` between mutate and
-   restore.)
+   restore. A second hazard of the same standing, from the skills build:
+   **restore with `cp` from a copy taken before the mutation, never with
+   `git checkout --`** — during a fix round the working tree always holds
+   uncommitted work, and `git checkout` reverts to the last *committed* state,
+   silently discarding the fix the mutation was verifying. It happened once and
+   was caught by luck.)
 
 A narrower lesson, confirmed for a third time and now emphatically: **when a
 plan supplies both the code and its tests, the tests cannot be trusted to
@@ -781,6 +1004,79 @@ The measurement build adds five more, each drawn from that ledger:
    lets the next build resolve the contradiction on the spot instead of
    stopping to ask.
 
+The skills build adds five, and the first four were measured in its ledger rather
+than reasoned to:
+
+9. **A prompt's whole text is the haystack, so a substring assertion is vacuous
+   by default — and the mandated structure is what satisfies it.** Nineteen
+   plan-supplied assertions across Tasks 8–14 were *measured* satisfiable by
+   content unrelated to the property their own docstring named; nine of the
+   nineteen were in one task. The shape that recurred is §8 item 4's
+   *substring-of-message*, transposed: `skills.load()` sets `body` to the entire
+   file, so the whole document is the message. Three carriers did the satisfying
+   over and over. **The mandated section headings**: `"refusal" in body.lower()`
+   is satisfied by the required `## 5. Refusal conditions` heading, which makes it
+   structurally vacuous for every conforming skill, forever. **The frontmatter
+   `description:` line**, which by design paraphrases the whole skill — in one case
+   it alone satisfied all three predicates of a test, so the test constrained no
+   prose whatever. **The plan-mandated `## Contract` block**, which satisfied two
+   of three predicates of a test about the subcommands the prose is supposed to
+   name — two-sides-from-one-source *inside a single file*, a shape that recurred
+   seven times and twice within one document. Digits are the same trap one level
+   down: `"0"`, `"1"`, `"2"` occur 34/46/36 times in a `SKILL.md` as section
+   numbers and version strings, so deleting the entire exit-code section left
+   eleven tests green. Calibration worth keeping, because it says the weakness is
+   targeted rather than total: a *fully* prose-stripped skeleton fails 6 of 11
+   checks, so this is deletion-specific vacuity, not blanket vacuity. Net real
+   automated coverage for the one skill whose defects no gate can ever see was
+   four checks out of eleven before the strengthening.
+10. **"Strengthen the assertion" is not a safe default; strengthening is a
+    two-axis measurement.** The mirror failure is just as real and appeared in the
+    same task: one strengthened predicate anchored on `**bold**` table markers,
+    so reformatting the table into prose broke a still-conforming file. Another
+    pinned three `Human gate N` *identifiers* where the concern had been that
+    gates could go *undescribed* — a real improvement, but not the one claimed,
+    and recorded as narrowed rather than closed. And a proposed strengthening was
+    caught going red on the conforming file before it shipped. So four directions,
+    not two: red on deletion, green on the delivered file, green on a paraphrase
+    or reformat of the same rule, and evaluated against the delivered file
+    *before* adoption. The rule that made this affordable at scale: strengthen
+    only what an implementer has **measured**, never what it suspects — the
+    measurement is what separates this from rewriting a plan's tests to taste.
+11. **Before raising a finding against a skill's output, check what the stage's
+    `reads` actually gives it.** A finding that requires knowledge outside the
+    contract is a finding against the *contract or the fixture*, never against
+    the prompt. This is here because it cost this build two wrong fix rounds and
+    a retraction: a value in a proposed scenario was faulted for being ungrounded,
+    reasoning from a claims file that `tg-propose` is forbidden to read. It was
+    the controller committing the exact isolation failure the design exists to
+    prevent, and one grep would have settled it before the first round instead of
+    after the third. A worked example that a prompt's own reader cannot follow is
+    the same error one step further along, and round 3 shipped one.
+12. **A fixture test that pins the presence of a defect does not pin the absence
+    of collateral damage.** The gap fixture was built by removing error semantics
+    and tested for exactly that. It over-removed: deleting a whole `returns` block
+    took a happy-path capability fact with it, which no CI predicate could see and
+    a live run exposed immediately — reconcile's loudest gap blocked all six
+    downstream stages, where the four purpose-built gaps each blocked only two.
+    The contrast *is* the evidence. Then guarding it took two goes in two
+    directions: a structural key-path guard caught key *deletion* and was
+    values-blind, so blanking the same values to `""` left every test passing.
+    Guarding one direction does not guard the other, and neither guard would have
+    existed without a live run to point at the damage.
+13. **A deferral that lives only in a report evaporates. Give the ledger a
+    standing section for them.** One requirement crossed three tasks in this
+    build, each with a locally reasonable story — deferred in writing by one
+    task's report, never picked up by the next, and answered by the third with a
+    narrower question than the one that had been asked. Nothing was lying; the
+    ledger simply had nowhere to carry an obligation. The fix is mechanical and
+    worked for the remaining nine tasks: a `DEFERRALS OWED` section at the top of
+    the ledger, one line per open item naming the task that owes it, and every
+    dispatch must carry the ones addressed to it *explicitly* rather than trusting
+    the implementer to read back. Everything in the parked table above arrived
+    through that section, which is the only reason this section could be written
+    from the ledger rather than reconstructed from memory.
+
 **Which of these survive when the producer is a prompt rather than code.**
 Plan 4 replaces most of this build's producers — the six stage skills and the
 orchestrator — with prompts, and not every counter above transfers unchanged.
@@ -798,6 +1094,63 @@ rates — because those numbers were counting something (lines, branches) that
 a skill's markdown does not have. The next build should expect to find these
 shapes again, not to find these counters again.
 
+**What actually happened, now that the build is done.** Three of the four
+predictions above held and one needs correcting.
+
+*Deletion-mutation has no meaning for a prompt* — **wrong, and usefully so.**
+Deleting a numbered step, a table row or a whole section from a copy of a
+`SKILL.md` and re-running the delivered test file against it turned out to be the
+build's single most productive instrument: it is what measured all nineteen
+vacuous assertions in item 9, and it is what let a fix round demonstrate a
+*latent* hazard rather than only the current state — deleting an ordering
+instruction from both places it appeared *and* quoting a fixture's own phrase into
+the section, which is the exact future edit that would have made the old test
+green forever. What has no meaning for a prompt is *coverage arithmetic* over
+mutations, not mutation itself.
+
+*Fixture reachability transfers and matters more* — **held, and §9's negative
+fixtures were where it bit**, exactly as predicted. The reviewer restored the one
+sentence whose removal creates the contradiction fixture's whole point, and all
+five of its CI tests still passed: nothing in them read that file's *content* at
+all, because the classifier only checks it is JSON with a `tools` key. So the
+fixture-cannot-reach shape the task existed to close was left open on one of three
+files, and closing it took four fix rounds. The shape also appeared somewhere the
+prediction did not look — inside a live *exercise* rather than a test. One skill's
+primary behavioural property could not be discriminated because all four coverage
+cells happened to be claimed: full coverage is precisely the state in which a
+completeness rule cannot be tested, and an unclaimed cell is what would settle it.
+
+*Run the experiment, not read the code* — **held most emphatically of all, and it
+is the finding this build would keep if it could keep only one.** Every defect
+that no gate and no test could see came from a live dispatch. The same proposition
+filed under two different `kind` values by two extract slices, silently costing the
+coverage denominator a column — both gates clean, found by reading output. A real
+reconcile *halting* the pipeline on a blocking gap on the first real run, which is
+§5's own stated test of whether gap detection works. A real reconcile over real
+extract output enumerating **six** capability cells where the hand-authored fixture
+had four and a written prediction had seven — a *larger* denominator, the opposite
+of the silent-column-loss failure the check was watching for, and a reminder that a
+calibration number reasoned from a prompt is not evidence. An orchestrator handed
+`--no-gate` still refusing to overrule a halt, because the flag skips human review
+and a blocking gap is not a human gate — a distinction that lives in one sentence
+of prose and had no other instrument. An adversary proving its own read order from
+the *content* of its filed notes, having considered and eliminated the first
+candidate with its reason, which an adversary that had already seen the oracle
+would have had no reason to write. And the two isolation self-reports in the parked
+table above, which are the only evidence that will ever exist for that rule.
+
+One further counter this build needed and the prediction did not anticipate:
+**when two independent slices agree on a value, that is not yet a leak.** Three of
+four instantiate members independently chose the same summary string, tripping a
+suspicious-agreement heuristic. The discriminator is stronger than the heuristic
+and is now written into that skill's exercise record: a leaked value must exist in
+the artifact it leaked from, and a converged value exists nowhere upstream. So
+grep the readable artifacts *and* the forbidden ones — absent from both means a
+shared model prior, present in a forbidden one means a real leak, present in a
+readable one means it was never a leak at all. Without it, the heuristic alone
+raises an isolation finding against a stage that did nothing wrong, which is item
+11's error in a different costume.
+
 ## 9. Testing the pipeline itself
 
 - **Code components** (`validate`, `check-refs`, `dedupe-candidates`, `emit`,
@@ -814,20 +1167,79 @@ shapes again, not to find these counters again.
 - **One golden end-to-end fixture:** a two-capability toy world small enough to
   review by hand, run in CI.
 
+### All three fixtures now exist, and both refusals have fired
+
+**The golden fixture** is `tests/fixtures/toy/{api.json,notes.md,trace.json}` —
+three real input files in three of the artifact classes §1 names: a tool
+specification, an operator's prose notes, and a captured trace. (Not source code,
+which §8 defers.) `tests/toy.py` builds every stage's artifact over them, up to
+and including a scored suite. It carries the two-stated-artifacts-against-one-trace-span shape, so
+its recorded contradiction is one where preferring a side is *defensible*.
+
+**The two negative fixtures** are `tests/fixtures/toy-contradiction/` and
+`tests/fixtures/toy-gap/`. The contradiction fixture carries all three files and is
+built so that *nothing* licenses preferring either side, which is what makes
+`unresolved` the only honest answer and distinguishes it from the golden world. The
+gap fixture deliberately carries **no `trace.json`**: a trace would leak the
+removed behaviour back in through the one artifact that observes it directly.
+
+**The recorded-output convention, and why a recording is committed.** A refusal
+needs a model's output to assert against, and pytest cannot dispatch a subagent. So
+the dispatch is run by hand per `docs/running-a-stage-by-hand.md` and the resulting
+world model is committed at `tests/fixtures/<name>/recorded/01-world-model.json`.
+The tests over it are behind the `live` marker. Committing the recording is the
+whole point: **a refusal observed once and never again is exactly the decorative
+refusal condition this section warns about**, and a committed recording turns it
+into a regression test. The cost is stated rather than hidden — a recording is
+evidence of what a skill did *at one commit*, so changing a skill obliges
+re-recording, and that re-recording is a reviewable diff rather than a silent
+drift. (`check-refs` pointed at a bare `recorded/` directory exits 1 with every
+claim reference unresolvable. That is expected, not a defect: a lone world model
+carries no claims file and no manifest for its references to resolve against.)
+
+**Both refusals fired, on real `tg-extract` output rather than hand-authored
+claims** — which matters because a hand-authored claim set can be built to make the
+refusal easy. On the gap fixture the two extracts filed **zero** `outcome_class`
+claims between them, so reconcile faced a schema requiring at least one outcome
+class per capability and a claim set supplying none: the sharpest possible version
+of the test, since any error class it produced would have had no claim to cite. It
+filed `success` plus `underspecified` throughout, invented no `error`, `not_found`
+or `empty` class anywhere, and recorded three gaps all blocking `propose`. That
+`underspecified` exists in the outcome-class enum precisely so a model has
+somewhere honest to put an outcome nobody documented, and a model reached for it
+unprompted, is the schema and the prompt agreeing. On the contradiction fixture it
+recorded two contradictions — two entries because the schema is pairwise — both
+`resolution: "unresolved"`, and filed the unknown-id outcome as `underspecified`
+rather than `error`: it refused twice in two registers about the same fact. The
+discrimination is per outcome class rather than per capability, and the proof is
+that the *other* capability in the same file did get a real `empty` class, because
+that fixture's `api.json` does still say "possibly empty".
+
 ## 10. Risks
 
 | Risk | Mitigation |
 |---|---|
 | Confabulation under under-specification — skills invent facts to be helpful. | Explicit refusal conditions in every skill; halt on blocking gap; negative fixtures that prove refusal fires. |
 | Correlated labeler/adversary blind spots. | Expert review sampled from high-confidence accepts. Not solvable within the pipeline. |
-| Silent schema drift between prompt stages. | Schema validation after every stage; referential-integrity linter; bounded single repair then halt. |
+| Silent schema drift between prompt stages. | Schema validation after every stage; referential-integrity linter; bounded single repair then halt. Plus `check-skills`, which catches the drift one step earlier — in the prompt's own `## Contract` block, before a model has been paid to follow it (§5). |
 | Trivial suite that all-passes. | Distractor design as an explicit numbered step; weak-baseline agent in smoke; per-task all-pass flags. |
 | Broken gold labels that all-fail. | Oracle agent in smoke; `tg-challenge` row 4; `grounded_in` reachability gate. |
 | Non-terminating enrichment loop. | Denominator frozen in 1b; round cap `K`; no-progress fixpoint guard; amendments require a recorded orchestrator decision. |
-| Nondeterminism swamping any measured improvement. | Manifest pins model/effort/skill hash; `diff-runs` attributes variance per stage; artifacts are pinnable so downstream stages can be re-run against a frozen predecessor. |
+| Nondeterminism swamping any measured improvement. | Manifest pins model/effort/skill hash, written by `record-stage`; `diff-runs` attributes variance per stage; artifacts are pinnable so downstream stages can be re-run against a frozen predecessor. One caveat measured in the skills build and parked in §8: the orchestrator has no lever for `effort`, so that field records a characterization rather than a setting and `model` + `skill_sha256` carry the pin. |
 | Scope creep on invariant expression. | `machine:` form limited to a handful of expression types; everything else is `prose:` and skill-self-checked. |
 
 ## 11. Next step
 
-Produce an implementation plan (via the `writing-plans` skill) covering the first
-slice in §8.
+**Run the slice.** Every component §8 names is built and the pipeline has run end
+to end with a model at every stage — on §9's toy world, which tests the pipeline
+rather than the hypothesis. What is left is the experiment itself: intake the real
+aap2 `api.json` + `schema.json` + a handful of traces, drive `tg-orchestrate`
+through `K=2` rounds with a cap of ~8 scenarios, and measure with `smoke` and
+`compare-gold` against the ~10 hand-authored bench tasks. Two things the toy run
+already tells the next plan to expect. First, a real `tg-reconcile` halts on a
+blocking gap, and on a real target it will halt more than once — so the plan needs
+a budget for gate-1 rulings and the missing inputs they ask for, not a single
+unattended pass. Second, an ungated run and a run resumed after a human ruling are
+different experiments, and only the first can carry the reproducibility claim
+`--no-gate` exists for; §8's deferral of `diff-runs` execution to a later slice is
+what makes that affordable, and it stays deferred.
