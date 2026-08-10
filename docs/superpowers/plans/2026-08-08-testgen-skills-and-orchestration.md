@@ -4804,6 +4804,59 @@ Row 4 is the highest-value catch in the pipeline: it is how a wrong gold label i
 
 **Test file** — `tests/unit/test_skills_challenge.py`:
 
+**The three tests whose docstrings below record a strengthening, and the
+`reads` pin in `test_the_contract_matches_the_stage_gate`, replaced weaker versions during
+Task 12; do not "restore" the whole-body substring forms.** The originals were
+`body.count("uniquely_determined") >= 2`, `"last" in method or "only then" in method`, and
+`"disagree" in body.lower()`; the contract test asserted only `stage` and `schemas`. Task 12's
+implementer flagged the first three as substring floors rather than patching them silently, and
+the reviewer then computed each against the delivered skill:
+
+- `count("uniquely_determined") >= 2` — the field is named five times in the delivered
+  `SKILL.md` (section 2's field list, section 2's conditional-fields bullet, Method step 2 where
+  the judgment is made, and twice in section 4). Deleting Invariant 3, the one sentence that
+  states the incompatibility with `accept`, left four occurrences and the test green. Now a
+  co-occurrence of `accept` + both negatives inside one `## 4. Invariants` paragraph.
+- `"last" or "only then"` over the whole Method section — `"last"` occurred nowhere in Method,
+  so the assertion rested entirely on `"only then"` in step 4's heading, and the `"last"` disjunct
+  is satisfiable by content unrelated to the ordering: this fixture's own `scn-blocked`
+  discriminating fact is *"only its last comment names the blocker"*, so a future edit quoting it
+  inside Method would keep the test green with the ordering sentence deleted — on the **only**
+  automated guard this skill has on its central property. Now a co-occurrence in the Method
+  paragraph that *first* names `expected.json`, which is the paragraph a model reading in order
+  acts on.
+- `"disagree" in body.lower()` — `"disagree"` occurs six times in the delivered skill and two
+  are unrelated to the property ("a denormalised count that disagrees with the records it counts";
+  a `scenario_id` that "disagrees with the name it is filed under"). So the section-5 condition
+  *and the brief-supplied verdict-table row 4 itself* could both be deleted with the test green,
+  on the row this plan calls the pipeline's highest-value catch. Now a co-occurrence of
+  `expected.json` + "oracle looks wrong" + "disagree" in one `## 5. Refusal conditions` paragraph.
+- The `reads` pin is new rather than strengthened, and it is load-bearing. `check_contract`
+  requires each `reads` entry to be a public `RunPaths` attribute but never checks *which*
+  entries, so `world_model` could be added to this adversary's context and every test in the file
+  would still pass — verified. The human partner ruled `world_model` **deliberately withheld**
+  (`refs._check_invariants` already evaluates every `machine:` invariant over every seed and the
+  orchestrator runs `check-refs`, so declaring it buys no coverage and adds anchoring surface to
+  the one stage whose entire value is not being anchored), which is the opposite of Task 10's
+  `manifest` ruling because nothing else supplied `max_rounds` there. The pin is what keeps a
+  later well-meaning edit from quietly widening the slice. **The general test, binding on Task
+  13: before declaring a withheld artifact, ask whether a deterministic gate already enforces the
+  property — if it does, the requirement belongs to the gate and the prose should say so.**
+
+Evidence recorded in Task 12's fix report: under four deletion mutations — Invariant 3 deleted;
+the preamble's ordering word dropped; the ordering deleted from *both* the preamble and step 4's
+heading with `scn-blocked`'s fact quoted into Method; and section 5's row-4 condition deleted
+together with verdict-table row 4 — every *original* predicate still returns `True` while exactly
+one strengthened test fails, and it is the named one. Adding `world_model` to `reads` leaves
+`check_contract` clean and the pre-fix contract-test body passing, and fails the pinned test.
+
+**One refusal condition was also retitled in fix round 1.** The table row above reads "The seed
+violates a world-model invariant", which over-promises relative to what a stage without
+`world_model` in `reads` can detect. The delivered skill states the trigger as **"The seed
+contradicts itself"** — a count disagreeing with the records it counts, an id used twice, a
+dangling reference — and says explicitly that enumerating the invariants is not this stage's job
+because `refs._check_invariants` already does it. Read the row above as shorthand for that.
+
 ```python
 """tg-challenge's contract, and the ordering that makes it independent.
 
@@ -4816,10 +4869,20 @@ almost anything, and no schema can catch that -- the artifact looks identical.
 from __future__ import annotations
 
 from testgen.artifacts import read_json
-from testgen.skills import SECTIONS, load, skills_dir
+from testgen.skills import SECTIONS, load, section_body, skills_dir
 from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
 
 SKILL = skills_dir() / "tg-challenge" / "SKILL.md"
+
+
+def paragraphs(text: str) -> list[str]:
+    """Blank-line-separated paragraphs.
+
+    Used where a property is really a *co-occurrence*: a rule and the names it
+    is about have to be stated together to be followed at all, and two mentions
+    in unrelated sections are what makes a whole-body check vacuous.
+    """
+    return [chunk for chunk in text.split("\n\n") if chunk.strip()]
 
 
 def _method_body() -> str:
@@ -4830,8 +4893,6 @@ def _method_body() -> str:
     fenced block. A hand-rolled slice would cut at a `## ` line inside it and
     the ordering assertion would then be about a fragment.
     """
-    from testgen.skills import section_body
-
     skill = load(SKILL)
     assert SECTIONS[2] in skill.headings, "the Method section must exist"
     return section_body(skill, SECTIONS[2])
@@ -4841,6 +4902,19 @@ def test_the_contract_matches_the_stage_gate():
     skill = load(SKILL)
     assert skill.contract["stage"] == "challenge"
     assert set(skill.contract["schemas"]) == set(STAGE_ARTIFACTS["challenge"])
+    # `reads` is pinned exactly, and this clause is load-bearing rather than
+    # decorative. check_contract only requires each entry to be a public
+    # RunPaths attribute, so `world_model` -- or any other artifact -- could be
+    # added to this adversary's context and every other test in this file would
+    # still pass. It was ruled deliberately withheld: refs._check_invariants
+    # already evaluates every `machine:` invariant over every seed and the
+    # orchestrator runs check-refs, so declaring the world model would buy no
+    # coverage and add anchoring surface to the one stage whose entire value is
+    # not being anchored. Widening this set is a plan-level decision.
+    assert set(skill.contract["reads"]) == {"scenarios", "seed", "expected"}, (
+        "tg-challenge reads exactly the scenario list, its own seed and its own oracle; "
+        "any further read widens the context of the stage that exists to be un-anchored"
+    )
 
 
 def test_it_has_the_five_sections():
@@ -4865,8 +4939,35 @@ def test_the_method_mentions_the_seed_before_it_mentions_the_oracle():
 
 
 def test_the_method_says_the_oracle_is_read_last():
-    method = _method_body().lower()
-    assert "last" in method or "only then" in method
+    """The ordering word has to sit in the paragraph that first names the oracle.
+
+    **Strengthened from the plan's version under a fix-round-1 ruling.** The
+    original was `"last" in method or "only then" in method` over the whole
+    Method section. Measured against the delivered skill and confirmed by the
+    reviewer: `"last"` occurred nowhere in Method, so the assertion rested
+    entirely on `"only then"` in step 4's heading -- and the `"last"` disjunct
+    is satisfiable by content that has nothing to do with the ordering. This
+    fixture's own `scn-blocked` discriminating fact is "only its *last* comment
+    names the blocker", so any future edit quoting it inside Method would
+    satisfy the test permanently with the ordering sentence deleted. This is
+    the only automated guard on this skill's central property, so a floor that
+    can be satisfied by an unrelated word is not good enough.
+
+    Checked as a co-occurrence in the Method paragraph that *first* names
+    `expected.json`, because that is the paragraph a reader meets before any
+    step tells them anything: whatever it says about the oracle is what a model
+    reading in order acts on.
+    """
+    first_oracle = next(
+        (para for para in paragraphs(_method_body()) if "expected.json" in para), None
+    )
+    assert first_oracle is not None, "the Method must name expected.json"
+    lowered = first_oracle.lower()
+    assert "last" in lowered or "only then" in lowered, (
+        "the first Method paragraph to name expected.json must say when it is read; naming "
+        "the oracle without the ordering is where an anchored adversary comes from:\n"
+        f"{first_oracle}"
+    )
 
 
 def test_it_names_every_verdict_value():
@@ -4892,29 +4993,82 @@ def test_it_names_every_flag_the_schema_allows():
 
 def test_it_names_the_three_boolean_judgments_and_the_call_count():
     body = load(SKILL).body
-    for field in ("uniquely_determined", "derivable_without_guessing",
-                  "minimum_tool_calls_found", "alternative_answers"):
+    for field in (
+        "uniquely_determined",
+        "derivable_without_guessing",
+        "minimum_tool_calls_found",
+        "alternative_answers",
+    ):
         assert field in body, field
 
 
 def test_it_states_that_accept_is_incompatible_with_the_two_negatives():
     """check_verdicts reports accept alongside either false. A skill that does
     not know produces a self-contradictory verdict and spends the repair attempt.
+
+    **Strengthened from the plan's version, which its own implementer note
+    invited replacing.** The original was
+    `load(SKILL).body.count("uniquely_determined") >= 2` -- shape 1 with a
+    counter attached. It bounded nothing about the incompatibility: this skill
+    names `uniquely_determined` in section 2's field list, in Method step 2
+    where the judgment is made, and in the verdict-table prose, so deleting the
+    Invariants entry that states the incompatibility outright still left three
+    occurrences and the count passing.
+
+    Checked instead as a co-occurrence inside the Invariants section, because
+    the property is a *pairing of three names*: `accept` and both negatives
+    have to appear together for the rule to be readable at all, and the section
+    that owns a rule of this kind is the one the reader consults before filing
+    a verdict.
     """
-    body = load(SKILL).body
-    assert "accept" in body
-    assert body.count("uniquely_determined") >= 2, (
-        "the field must be named where the judgment is made and where the "
-        "incompatibility with accept is stated"
+    invariants = section_body(load(SKILL), SECTIONS[3])
+    owning = [
+        para
+        for para in paragraphs(invariants)
+        if "accept" in para
+        and "uniquely_determined" in para
+        and "derivable_without_guessing" in para
+    ]
+    assert owning, (
+        "no single Invariants paragraph states that accept is incompatible with both "
+        "uniquely_determined: false and derivable_without_guessing: false; check_verdicts "
+        "reports either combination, and a skill that does not know spends the repair attempt"
     )
 
 
 def test_it_tells_the_adversary_to_report_the_oracle_wrong_when_it_is():
     """Row 4 of the verdict table: the highest-value catch in the pipeline, and
     the one a helpful model will not make unless told to.
+
+    **Strengthened from the plan's version under a fix-round-1 ruling.** The
+    original was `"disagree" in load(SKILL).body.lower()`. `"disagree"` occurs
+    six times in the delivered skill and two of them have nothing to do with
+    this property -- "a denormalised count that disagrees with the records it
+    counts" in Method step 3, and a `scenario_id` that "disagrees with the name
+    it is filed under" in Invariant 1. So both the section-5 condition *and*
+    the brief-supplied verdict-table row could be deleted with the test still
+    green, on the row the plan calls the pipeline's highest-value catch.
+
+    Checked as a co-occurrence in the section-5 paragraph that owns the
+    instruction: the trigger (a disagreement with `expected.json`) and the
+    required action (say in `notes` that the oracle looks wrong) are only
+    actionable stated together, and a helpful model needs the action spelled
+    out or it defers to the label.
     """
-    body = load(SKILL).body.lower()
-    assert "disagree" in body
+    owning = [
+        para
+        for para in paragraphs(section_body(load(SKILL), SECTIONS[4]))
+        if "expected.json" in para and "oracle looks wrong" in para.lower()
+    ]
+    assert owning, (
+        "no Refusal-conditions paragraph pairs a disagreement with expected.json with the "
+        "instruction to say in notes that the oracle looks wrong; a skill that leaves this "
+        "out deletes the pipeline's highest-value catch, and a helpful model defers"
+    )
+    assert any("disagree" in para.lower() for para in owning), (
+        "that paragraph must state the trigger as a disagreement, so the reader knows when "
+        "the instruction applies"
+    )
 ```
 
 > **Implementer note.** `test_it_states_that_accept_is_incompatible_with_the_two_negatives`

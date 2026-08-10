@@ -113,9 +113,10 @@ read its comments -- so a 2 is right and a 1 without the
 `difficulty_overstated` flag is a layer-2 finding on a verdict that is
 otherwise fine. `scn-missing` claims 1 and needs 1; a 2 there means the
 subagent did not actually work out the minimum, it estimated. Method step 1's
-second bullet asks for a lower bound justifiable in one clause, so check
-whether the justification is in `notes` at all: a bare integer with nothing
-behind it is the same result as an estimate.
+second bullet asks for a lower bound justifiable in one clause and Invariant 5
+requires that clause to be in the filed `notes`, so check whether the
+justification is there at all: a bare integer with nothing behind it is the
+same result as an estimate.
 
 Also worth recording, because the skill states it and nothing checks it: did
 any subagent raise its count to match the claim rather than reporting the
@@ -145,9 +146,12 @@ oracle's assertions or its `answer_reference` wording; notes with no
 alternative ruled out and no derivation stated, on a scenario where the seed
 plainly contains near-misses. The skill asks for a specific structure here --
 Method step 1 requires the `notes` text to be pre-registered before the oracle
-is opened, in four labelled lines, with step 4 allowed to *append* and never to
-revise -- so the presence or absence of those four elements is a direct read on
-whether that instruction landed.
+is opened, in four labelled lines, says those four lines *are* the `notes`
+field that gets filed, and lets step 4 only *append* to them; Invariant 5
+repeats that `notes` opens with all four. So this read is against the committed
+artifact rather than only the transcript: the presence or absence of the four
+elements, in that order, with the oracle comparison after them rather than
+woven through them, is a direct read on whether the instruction landed.
 
 Two supplementary reads while the transcripts are open, both on prose the
 skill asks for and no gate can see:

@@ -176,10 +176,10 @@ author of the test you were asked to attack.
 ## 3. Method
 
 Four steps. Steps 1 to 3 are done against `seed.json` and your entry in
-`02-scenarios.json`; `expected.json` stays closed until step 4, and the
-step numbers are not a suggested order but the whole content of this stage.
-Step 4 is where the comparison happens, and it is worth nothing at all
-unless steps 1 to 3 finished first.
+`02-scenarios.json`; `expected.json` is read **last**, at step 4, and stays
+closed until then. The step numbers are not a suggested order but the whole
+content of this stage: step 4 is where the comparison happens, and it is
+worth nothing at all unless steps 1 to 3 finished first.
 
 1. **Answer the question independently from the seed.** Your inputs at this
    step are `seed.json` and your scenario's `user_intent` -- and
@@ -199,10 +199,11 @@ unless steps 1 to 3 finished first.
    If the world gives you no answer at all, that is a real result, not a
    failure to try: carry it into step 3, which is where it belongs.
 
-   **Pre-register, and finish the pre-registration before step 4.** Steps 1
-   to 3 each contribute a line to it, so it is not complete until step 3 is;
-   what matters is that all four lines are already written out as prose, in
-   your own working reply, at the moment `expected.json` is opened:
+   **Pre-register, and finish the pre-registration before step 4.** Step 1
+   contributes the first two lines below, step 2 the third and step 3 the
+   fourth, so it is not complete until step 3 is; what matters is that all
+   four lines are already written out as prose, in your own working reply, at
+   the moment `expected.json` is opened:
 
    ```
    Answer reached from the seed alone: <what the world says, specifically>
@@ -211,11 +212,17 @@ unless steps 1 to 3 finished first.
    Derivable without guessing: <yes/no, and on which capability>
    ```
 
-   That text is your pre-registration. At step 4 you may **append** to it --
-   what the oracle said, whether it matched -- but you may never revise
-   what you already wrote. A `notes` field that reads as a summary of the
-   oracle rather than of an attempt is the anchoring failure, and prose is
-   the only place it ever shows.
+   **Those four lines are the `notes` field you file** -- not a scratch note
+   you write and then summarise. File them, all four, as the beginning of
+   `notes`, and let step 4 **append** the comparison to them: what
+   `answer_reference` said, and whether it matched what line 1 already
+   records. You may never revise a line you wrote before step 4. That is what
+   makes this stage's central property readable in the committed artifact
+   instead of only in a transcript: a `notes` field that opens with an answer,
+   a justified call count and a ruled-out alternative was written by an
+   adversary who had them before the oracle was open, and a `notes` field that
+   reads as a summary of the oracle was not. Prose is the only place that
+   difference ever shows.
 
 2. **Search for a second world-consistent answer.** Is the question
    ambiguous *given this world*? Take the `user_intent` as an agent would
@@ -248,21 +255,35 @@ unless steps 1 to 3 finished first.
 
 3. **Check derivability.** Can this question be answered from the available
    capabilities at all, or does it require knowledge the world does not
-   contain? There are two distinct ways it fails, and both land on
-   `derivable_without_guessing: false`:
+   contain? Two things land on `derivable_without_guessing: false`, and one
+   near-miss that looks like the second does not:
 
    - **The world does not contain the material.** The answer is not
      recoverable from these records by any route -- you would have to
      supply a fact from outside the seed to produce one.
-   - **The world contains it but nothing reaches it.** The value is in the
-     seed, but no capability your scenario's `capability_refs` declares can
-     surface it, so a solving agent would have to guess. `capability_refs`
-     is the set of calls this scenario claims a solution makes; you do not
-     read the world model, so that list is your universe of available
-     calls. If you found yourself needing a call outside it, that is itself
-     worth stating in `notes` -- either the scenario under-declared its
-     cells, which makes coverage wrong about what this suite tests, or the
-     test is not derivable as specified.
+   - **Nothing could reach it.** The value is in the seed, but there is no
+     call you can imagine against this world that surfaces it, so a solving
+     agent would have to guess at it.
+
+   **`derivable_without_guessing: false` is a claim about the world, not
+   about the scenario's paperwork, and the distinction decides a verdict.**
+   `capability_refs` is the set of calls *this scenario claims* a solution
+   makes; you do not read the world model, so you cannot tell whether a
+   capability missing from that list is missing from the world too. So if the
+   call you needed is not in `capability_refs` but is a call this world
+   plainly supports -- you can see the records it would return -- then
+   `derivable_without_guessing` is **`true`** and the verdict is
+   **`re-seed`**: name in `notes` the call you needed and the fact that the
+   scenario does not declare it. That is a real defect, because coverage
+   credits this scenario for the cells it declared and is therefore wrong
+   about what the suite tests, but it is not unfairness to the agent, and it
+   is not a claim you could support anyway from your slice.
+
+   Reserve `false`, and with it `reject`, for the first bullet and for the
+   second one read strictly: no call you can construct against these records
+   reaches the answer. That is a judgment the seed alone entitles you to
+   make, which is exactly why the severest verdict rests on it and not on a
+   missing declaration.
 
    Set `derivable_without_guessing`. If it is `false`, the verdict is
    `reject` and the first refusal condition applies: record the two
@@ -378,9 +399,15 @@ unless steps 1 to 3 finished first.
    `difficulty_overstated` flag is **required** -- layer 2 reports its
    absence, on any verdict.
 
-5. `notes` says what you actually did: the answer you reached, and what you
-   ruled out. Not a restatement of the verdict, and not a paraphrase of
-   `answer_reference`.
+5. `notes` says what you actually did, and it **opens with the four
+   pre-registered lines of Method step 1** -- the answer you reached, the
+   minimum call count with the clause that justifies it, the second answers
+   you ruled out and what rules them out, and the derivability judgment with
+   the call it rests on -- followed by whatever step 4 appended after the
+   oracle was open. Not a restatement of the verdict, and not a paraphrase of
+   `answer_reference`. All four lines have to be there: the call-count
+   justification and the derivability line are what make the field evidence
+   about an attempt rather than a description of a test.
 
 Before you report done, run `testgen validate --stage challenge`. If it
 reports anything wrong with the file you just wrote, that is not a finding
@@ -460,13 +487,19 @@ helpful-looking move is the wrong one and refusing is what actually helps.
   mechanism by which the ordering this stage rests on can ever be reported
   at all.
 
-- **The seed violates a world-model invariant.** Verdict `reject`. The label
-  is about a world the backend would recompute into a different one, so the
-  test breaks at run time rather than here. You cannot enumerate the
-  invariants -- the world model is not in your `reads` -- and you are not
-  the gate for them; `check-refs` evaluates them over every seed. What you
-  can do, since you are reading every record anyway, is notice a world that
-  contradicts itself, and that is what this condition asks of you.
+- **The seed contradicts itself.** Verdict `reject`. A denormalised count
+  that disagrees with the records it counts, an id used by two records where
+  it plainly identifies one, a reference to a record that is not there: the
+  label is about a world the backend would recompute into a different one, so
+  the test breaks at run time rather than here. Note what this condition is
+  and is not. It is **not** "check the world model's invariants" -- you
+  cannot enumerate them, the world model is not in your `reads`, and you are
+  not the gate for them: `refs._check_invariants` already evaluates every
+  `machine:` invariant over every seed, and the orchestrator runs it. What is
+  yours is the narrower thing you can do from inside your slice, since you
+  are reading every record anyway: notice a world whose own records disagree
+  with each other, which is what a violated invariant looks like when you
+  have both sides of the comparison in front of you and no list of the rules.
 
 - **You are about to let another scenario, or a convention, decide this
   verdict.** Stop. The triggers are concrete: you are calibrating this
