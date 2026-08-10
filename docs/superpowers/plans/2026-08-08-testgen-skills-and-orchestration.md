@@ -3862,17 +3862,27 @@ invokes = ["validate"]
 """tg-extract's contract and the structural properties its prompt must have.
 
 Structural, not free-text: an assertion that some sentence appears in the prose
-is shape 1 by construction, because another sentence may contain the same words.
-What is asserted here is either a declaration in the contract block or a set
-compared against a set imported from the code.
+is shape 1 by construction, because another sentence may contain the same
+words. What is asserted here is either a declaration in the contract block or
+a set compared against a set imported from the code.
 """
 
 from __future__ import annotations
 
-from testgen.skills import SECTIONS, load, skills_dir
+from testgen.skills import SECTIONS, load, section_body, skills_dir
 from testgen.validate import STAGE_ARTIFACTS
 
 SKILL = skills_dir() / "tg-extract" / "SKILL.md"
+
+
+def paragraphs(text: str) -> list[str]:
+    """Blank-line-separated paragraphs.
+
+    Used where a property is really a *co-occurrence*: a rule and the thing it
+    is about have to be stated together to be followable, and two mentions in
+    unrelated paragraphs are what makes a whole-body substring check vacuous.
+    """
+    return [chunk for chunk in text.split("\n\n") if chunk.strip()]
 
 
 def test_the_contract_is_exactly_what_the_stage_is_gated_on():
@@ -3889,7 +3899,51 @@ def test_it_declares_only_the_two_artifacts_a_fan_out_member_may_read():
     assert load(SKILL).contract["reads"] == ["manifest", "input_file"]
 
 
-def test_it_has_the_five_sections(): 
+def test_the_inputs_section_forbids_a_sibling_read_whatever_the_purpose():
+    """Added under a ruling from Task 13's whole-pipeline exercise.
+
+    The extract subagent dispatched for `notes-md` in that run self-reported
+    reading both sibling input files while checking locator-format
+    conventions. Its claims were clean and both gates passed; nothing in the
+    system could have seen it. The loophole is that the section's original
+    prohibition explained itself entirely in terms of content bleeding across
+    -- so a reader whose motive is *format* rather than content can conclude
+    the stated reason does not apply to them, which is the shape of failure
+    hardest to write against because the motive is genuinely helpful.
+
+    Scoped to section 1 with `section_body` and asserted as a co-occurrence
+    inside one paragraph, not as a substring of the whole file: `body`
+    includes every other section, and "locator" alone occurs twice in Method
+    step 3, which owns the format this paragraph points at -- so a whole-body
+    search for the word could not fail. Two assertions, because the fix has
+    two halves and either one alone leaves the gap open: the prohibition must
+    be purpose-independent, and the model must be told where the convention
+    legitimately comes from -- removing the motive, not only the permission.
+    """
+    paras = paragraphs(section_body(load(SKILL), SECTIONS[0]))
+
+    forbidding = [
+        para
+        for para in paras
+        if "locator" in para
+        and ("api.json" in para or "trace.json" in para or "sibling" in para)
+        and ("motive" in para or "why you opened" in para)
+    ]
+    assert forbidding, (
+        "no Inputs paragraph forbids opening a sibling input file for a non-content purpose "
+        "such as checking how a locator is formatted; a prohibition justified only by content "
+        "contamination reads as inapplicable to a subagent that wants the house format, and "
+        "that read is what Task 13's run actually produced"
+    )
+
+    assert any("evidence.locator" in para and "Method step 3" in para for para in paras), (
+        "no Inputs paragraph says where the locator convention does come from -- the claims "
+        "schema's evidence.locator field and this skill's Method step 3. Forbidding the "
+        "sibling read without naming the legitimate route leaves the motive intact"
+    )
+
+
+def test_it_has_the_five_sections():
     assert all(section in load(SKILL).headings for section in SECTIONS)
 
 
@@ -3938,6 +3992,10 @@ def test_the_refusal_section_names_a_response_for_an_unreadable_input():
 > is a weak test and its docstring says so. Keep it, and in your report name it
 > as the one test in this file whose failure mode is shape 1 — then say what the
 > live exercise checks that it cannot.
+
+**`test_the_inputs_section_forbids_a_sibling_read_whatever_the_purpose`, and the two section-1 paragraphs it pins, were added by a ruling during Task 13's whole-pipeline exercise; do not "simplify" either away.** In that chained run the extract subagent dispatched for `notes-md` opened *both* sibling input files — `api.json` and `trace.json` — to check how locators are formatted, and self-reported it. Its claims rested only on its own artifact, `validate` and `check-refs` both exited 0, and no gate could ever have seen the read: a claims file is byte-identical whether or not a sibling was opened, which is the whole reason the boundary is on file access. Per the adjudication table above, a read outside `reads` is Important, not Minor, and the section 1 wording as delivered by Task 7 is what needed sharpening — its prohibition justified itself *entirely* by content bleeding across, so a subagent whose motive is **format** rather than content can read the stated reason as not applying to it. That motive is genuinely helpful, which is exactly the shape this build has found hardest to write against. Section 1 therefore now (a) states the rule as purpose-independent — opening a sibling is forbidden whatever the reason, because the file boundary is the only one anyone can hold a subagent to and "I only looked at the shape" is unverifiable by any gate, schema or reader — and (b) names the legitimate route in the same breath, so the fix removes the *motive* and not only the permission: `evidence.locator` is constrained by the claims schema to a non-empty string, and **Method step 3 is where the locator form is actually stated**. Both halves are separately pinned by the test's two assertions, each verified to fail on deletion of its own paragraph.
+
+**No refusal condition was added for this, deliberately.** Section 5's opening paragraph frames every condition there as a case where *the correct output is not a claim*; a rule about which files may be opened has no claim-shaped output, so a sixth bullet would be the only member of that list the section's own framing does not describe. Round 1's epistemic-isolation trigger (condition 5) already passed live and is the section's positive behavioural evidence — the file rule belongs in Inputs, which is also where a subagent is standing when it needs it. Do not migrate it.
 
 **Live exercise** (`exercise.md` records this; the controller runs it):
 

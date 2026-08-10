@@ -38,6 +38,27 @@ prevent. If you find yourself wanting more context to disambiguate a
 statement, that want is itself information: record it as a gap in a claim's
 `statement`, do not resolve it by looking further than these two files.
 
+That prohibition is on *opening* a sibling file, and it does not depend on
+why you opened it. Harvesting its content is the obvious violation; the
+quieter one -- the one that has actually happened -- is opening `api.json`
+or `trace.json` to check how a locator is formatted, what heading style a
+neighbour used, or how another artifact is laid out, meaning to take nothing
+from it. There is no reading small enough to be allowed, because the file
+boundary is the only one anybody can hold you to. Unlike your own artifact,
+a sibling's content is not in your context until you open it; once it is, a
+claim of yours can rest on it without your ever deciding to let it, and "I
+only looked at the shape" is a distinction no gate, no schema and no reader
+of your output can check. So the rule is the file, not the motive.
+
+If it was the locator convention you wanted, you already have it. The claims
+schema constrains `evidence.locator` only to a non-empty string, so the
+house style is not hiding in a neighbour's file; Method step 3 below is
+where it is stated -- a JSON Pointer for a JSON input, a heading anchor or a
+line reference for prose. That is the whole convention, and a sibling could
+not add to it. The same holds for every other question of form: it is
+answered by the schema and by this document, or it is not answered, and a
+neighbour's file is not the tiebreaker.
+
 You are dispatched with no memory of any conversation that came before you,
 and nothing you write here carries forward as memory either. Whatever you
 need to do this job -- which artifact is yours, what "the target system"

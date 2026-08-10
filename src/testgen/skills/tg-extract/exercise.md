@@ -120,3 +120,46 @@ motivated.
   This reads as legitimate added granularity, not redundancy: the second
   pair carries hop-depth information the first pair does not, and
   `tg-propose` uses exactly that. Left unchanged.
+
+## Run record: round 2, from Task 13's whole-pipeline exercise
+
+Not a re-run of the exercise above. This round's evidence comes from the
+chained end-to-end run of the whole pipeline (Task 13), where `tg-extract`
+was dispatched as stage 1a rather than in isolation, so the finding is about
+the same skill seen from a different exercise.
+
+**The extract subagent dispatched for `notes-md` read both sibling input
+files.** It opened `api.json` and `trace.json` while checking locator-format
+conventions, then said so in its own report. Its claims content rested only
+on `notes-md.md` -- inspection of `01-claims/notes-md.json` showed no
+contamination -- and `testgen validate --stage extract` and `testgen
+check-refs` both exited 0, as they would have either way.
+
+**It surfaced only because the subagent volunteered it.** No gate can see a
+read: the claims file that results is byte-for-byte the same shape whether
+or not a sibling was opened, which is exactly why the fan-out puts the
+boundary on file access rather than on output inspection. Treat the absence
+of such a report in a future round as no evidence at all.
+
+**Human ruling: fix section 1.** Round 1's epistemic-isolation result (above)
+stands -- that trigger is doing its work -- and the isolation criterion of
+round 1 passed. What the section did not close is the specific route taken
+here: reading a sibling for a purpose other than harvesting content. The
+original prohibition justified itself entirely by content bleeding across,
+which a subagent whose motive is *format* can read as not applying to it,
+and that motive is genuinely helpful, which is the hardest shape to write
+against.
+
+`SKILL.md` section 1 now states the rule as purpose-independent -- opening a
+sibling file is forbidden whatever the reason, because the file boundary is
+the only one anyone can hold a subagent to and "I only looked at the shape"
+is unverifiable -- and names the legitimate route in the same breath, so the
+motive is removed rather than only the permission: `evidence.locator` is
+constrained by the claims schema to a non-empty string, and Method step 3 is
+where the form is actually stated. No refusal condition was added: section 5
+is framed around cases where the correct output is not a claim, and a
+file-access rule has no claim-shaped output, so a sixth bullet there would
+contradict the section's own opening paragraph.
+`test_the_inputs_section_forbids_a_sibling_read_whatever_the_purpose` in
+`tests/unit/test_skills_extract.py` pins both halves of the wording, scoped
+to section 1.
