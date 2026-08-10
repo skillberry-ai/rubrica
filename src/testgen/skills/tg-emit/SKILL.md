@@ -141,16 +141,20 @@ Four steps.
    (all eight files present) and addresses a scenario that was actually
    judged.
 
-   Unlike the fan-out stages, **you have no scoping problem here.** Six of
-   this pipeline's skills carry a paragraph telling their reader to ignore
-   findings against a sibling's artifact, because those stages run several
-   subagents at once against one run-global gate. Emit is a single dispatch
-   over the whole suite, nothing else is running, and both commands are
-   run-global by design: every finding either command returns is about this
-   run's state, and reporting it is your job. Note the direction of
-   ownership, though -- a `check-refs` finding here is usually *not* yours to
-   repair either, because the artifact it names is upstream. Report it; do
-   not edit it.
+   **You have no scoping problem here, and two sibling skills do**, so it is
+   worth saying why yours differs rather than leaving a reader to wonder.
+   `tg-instantiate` and `tg-challenge` each carry a paragraph telling their
+   reader to ignore findings against a sibling's artifact, because those two
+   run several subagents at once against a gate that is run-global. Emit is a
+   single dispatch over the whole suite and nothing else is running, so every
+   finding either command returns is about this run's state and reporting it
+   is your job.
+
+   The other four stages carry a different clause -- a finding against what
+   you just wrote is your own defect to fix -- and **that one does not apply
+   to you either**, for the opposite reason: you wrote nothing. A
+   `check-refs` finding here is usually not yours to repair, because the
+   artifact it names is upstream. Report it; do not edit it.
 
    One expected exception worth recognising rather than repairing: layer 2
    tolerates a package for a scenario marked `rejected`, because nothing
