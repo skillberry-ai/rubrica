@@ -10,8 +10,34 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from testgen.intake import classify
-from tests.toy import CONTRADICTION_DIR, GAP_DIR
+from tests.toy import CONTRADICTION_DIR, GAP_DIR, TOY_DIR
+
+
+def _key_paths(obj, prefix: str = "") -> set[str]:
+    """Every dict-key path reachable in `obj`, ignoring values entirely.
+
+    Descends into list elements that are themselves dicts or lists (so
+    `tools[0]/returns` is a path), but never into a leaf list's scalar
+    contents -- an `enum` or `required` array is a *value*, not a further
+    structural node, so its members are never turned into paths. That is what
+    keeps this indifferent to wording by construction: a reworded sentence, a
+    reordered enum, a requoted string all leave the key-path set unchanged,
+    because none of them touch a key.
+    """
+    paths: set[str] = set()
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            path = f"{prefix}/{key}"
+            paths.add(path)
+            paths |= _key_paths(value, path)
+    elif isinstance(obj, list):
+        for index, value in enumerate(obj):
+            if isinstance(value, dict | list):
+                paths |= _key_paths(value, f"{prefix}[{index}]")
+    return paths
 
 
 def test_the_contradiction_fixture_has_three_readable_inputs():
@@ -125,3 +151,42 @@ def test_the_gap_fixture_still_describes_the_two_capabilities():
     api = json.loads((GAP_DIR / "api.json").read_text(encoding="utf-8"))
     actions = api["tools"][0]["input_schema"]["properties"]["action"]["enum"]
     assert sorted(actions) == ["find_tickets", "get_ticket"]
+
+
+@pytest.mark.parametrize("fixture_dir", [CONTRADICTION_DIR, GAP_DIR])
+def test_the_fixture_s_api_loses_no_structure_relative_to_golden(fixture_dir):
+    """Both negative fixtures are golden-minus-prose in `api.json`: the intended
+    edits only ever remove or reword a *value* (an "Errors if..." clause, the
+    word "possibly empty"), never a key. This guards the other direction from
+    the fixture-content tests above: those check that removed semantics stay
+    removed; this checks that nothing *else* got removed along the way.
+
+    This is a regression test for a real defect, not a hypothetical one: an
+    earlier draft of tests/fixtures/toy-gap/api.json deleted the whole
+    `tools[0].returns` object instead of editing its two string values, which
+    silently destroyed the get_ticket-returns-comments capability fact and
+    produced a world-model gap that blocked all six pipeline stages instead of
+    the four purpose-built gaps blocking propose/score. That draft would have
+    passed every other test in this file, because none of them read
+    `api.json` structurally.
+
+    Every key path in golden's api.json is asserted, exactly once, to still be
+    present in the fixture's api.json -- comparing key paths only, never
+    values, so a reworded sentence or a reordered/requoted field is not a
+    structural change and does not trip this. Verified before writing this
+    test: golden's api.json has 37 such key paths, and both
+    toy-contradiction/api.json and toy-gap/api.json (as they stand after being
+    fixed for the defect above) match all 37 exactly -- zero missing, zero
+    extra. Verified red by temporarily deleting `tools[0].returns` from
+    tests/fixtures/toy-gap/api.json on disk and re-running: this test failed,
+    reporting exactly the three paths that object deletion removes
+    (`/tools[0]/returns`, `/tools[0]/returns/find_tickets`,
+    `/tools[0]/returns/get_ticket`); the file was then reverted and `git
+    status --porcelain` confirmed clean before this test was committed.
+    """
+    golden = json.loads((TOY_DIR / "api.json").read_text(encoding="utf-8"))
+    fixture = json.loads((fixture_dir / "api.json").read_text(encoding="utf-8"))
+    missing = _key_paths(golden) - _key_paths(fixture)
+    assert not missing, (
+        f"{fixture_dir.name}/api.json is missing structure golden/api.json has: {sorted(missing)}"
+    )
