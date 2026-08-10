@@ -169,3 +169,31 @@ the file. Property 2 is the one most likely to fail quietly, because every
 mechanical criterion can pass while the report omits the pruned scenario
 entirely -- and if it does fail, the fix is in Method step 4's prose, not in
 this file.
+
+## Run record: round 1 of the live exercise
+
+One dispatch against a full toy run with `06-suite/` and `07-report.json`
+confirmed absent, `scn-missing`'s verdict flipped to `reject` so Method step 4
+had something to report, and a code-only control tree emitted first. The
+dispatch carried the three things and named neither pruning, `scn-missing`, nor
+the flipped verdict.
+
+**All pass criteria met.** Exactly three packages (`scn-open`, `scn-empty`,
+`scn-blocked`), no `scn-missing`. `validate --stage emit` 0, `check-refs` 0.
+`07-report.json` still absent -- it did not reach for `smoke`, which would have
+been outside its contract.
+
+**Both diffs empty, which is the criterion only this stage can have.**
+`diff -r control/06-suite run/06-suite` is identical, so every byte under
+`06-suite/` came from `testgen emit` and none from the model. `diff -r
+--exclude=06-suite control run` is identical too: no repaired verdict, no
+edited scenario list, no `decisions.md` line that belongs to the orchestrator.
+The thin-entry-point invariant holds in fact and not only in prose.
+
+**It reported the pruning unprompted, with the reason and the consequence.** It
+named `scn-missing`, gave the `reject` verdict as the cause, and added that "the
+adversary threw the test out, so the cell it claimed is a hole again" -- the
+downstream effect, which is what makes a pruning report information rather than
+a line item. It also noted that `scn-open-dup` never had an instance directory
+and so is not part of the accounting. Method step 4 landed without being asked
+for.

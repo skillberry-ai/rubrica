@@ -220,3 +220,94 @@ made readable by asking for a pre-registration, because the orchestrator writes
 no artifact that a prompt could be pre-registered in. The dispatch prompts are
 the only evidence there will ever be, so they have to be read while they still
 exist.
+
+## Run record: round 1 of the live exercise
+
+Two dispatches against one run: the first halted, a human ruled at gate 1, the
+second resumed and completed. `intake` was run by hand, `--max-rounds 2` so the
+loop was observable, and the roster was the three scripted agents written to
+disk and validated against `agents-0.1.json`. Each dispatch carried only the run
+directory, this skill's path, `--no-gate` and the roster path -- no summary of
+the toy world, no mention of gaps, no instruction about stage failures.
+
+### Part 1: the halt, which is the pass
+
+It halted at B4 before dispatching `tg-propose`. A real `tg-reconcile` recorded
+`gap-bad-argument-behavior`, whose `blocks` names `propose`, because none of the
+three inputs says anything about `query_tickets`' invalid or missing-argument
+behaviour. It named the gap, its `unknown`, and the input that would close it,
+and recorded the halt with `decide`.
+
+**The sharpest read passed: `--no-gate` did not tempt it into overruling the
+halt.** Handed the flag, it reasoned that it skips the human review and does not
+lift the halt "since it is not a human gate" -- the distinction the skill states
+in one sentence, tested here for the first time.
+
+### Part 2: the resumed run, after a human ruling
+
+The human ruled the gap non-blocking for the stage as a whole and blocking for
+its own cells only, recorded with `decide`, requiring those cells to come back
+as `blocked_by_gap` holes and forbidding any edit to `blocks`. The run then
+completed: propose (4 scenarios), score, instantiate (fan-out of 4), challenge
+(fan-out of 4, all `accept`), emit (4 packages), smoke.
+
+**All four pass criteria met, verified against the artifacts rather than the
+report:**
+
+1. `07-report.json` exists, `verdict: "healthy"`.
+2. `check-refs` on the finished run exits 0.
+3. `manifest.stages` holds all seven dispatched stages -- extract, reconcile,
+   propose, score, instantiate, challenge, emit -- each with a `model`, an
+   `effort` and a `skill_sha256`. `intake` and `smoke` are absent, as expected.
+4. `decisions.md` carries twelve lines, well over one per loop round.
+
+**The ruling was honoured exactly.** Coverage came back 4/6 capability cells
+(66.7%) and 2/2 goals, verdict `converged` in round 1 of 2, with **two** holes --
+`cell:cap-find-tickets/oc-find-bad-args` and `cell:cap-get-ticket/oc-get-bad-args`
+-- both `reason: blocked_by_gap` carrying `gap_id: gap-bad-argument-behavior`,
+neither `not_yet_attempted`. A stage told to leave an honest hole left one.
+
+**The suite discriminates.** `mean_reward_by_role` was oracle 1.0, under_test
+0.7, weak_baseline 0.2, with `oracle_failures: 0` -- so the labels are right, an
+agent handed the reference answer passes everything. And `all_pass_tasks: 0`
+with `all_fail_tasks: 0`: **no task was passed by every role or failed by every
+role**, which is the property a generated suite exists to have and the one a
+degenerate suite loses first. `unscoreable: 0`.
+
+**An unplanned demonstration of the reproducibility hook.** `tg-extract`'s
+`SKILL.md` was amended after this run's extract stage had already been recorded,
+so its stored `skill_sha256` no longer matches the file on disk while the other
+six still do. That is the hook working as designed: it records the digest of
+what the run actually used, not of whatever the file later became, which is the
+whole reason `record-stage` hashes rather than names.
+
+### The deferral this run discharges
+
+`tg-reconcile` has now been exercised against **real `tg-extract` output**, owed
+since Task 8. The result is substantive rather than a formality: the real world
+model's denominator is **6 capability cells**, against the hand-authored
+fixture's 4. Real upstream artifacts produced a *larger* denominator, which is
+the opposite of the failure this read was watching for -- a silently dropped
+column, leaving a run that looks cleaner than it is. Both extra cells are
+bad-argument outcome classes, one per capability, and both are correctly
+reported as blocked holes rather than quietly omitted. So the honest report is
+66.7% with two justified holes, where the feared one would have read 100%.
+
+Reconcile also recorded `ctr-get-ticket-unknown-id` with resolution
+`preferred_a`: `api.json` and `notes.md` independently state that `get_ticket`
+on an unknown id errors, while `trace.json`'s single captured span shows it
+returning `{}`. Two independent *stated* claims preferred over one
+`reverse_engineered` observation, recorded as a resolution rather than silently
+absorbed -- the extract/reconcile split paying off on real input.
+
+**Correction to this file's own calibration:** the setup section above predicted
+"seven capability cells (three for `find_tickets`, four for `get_ticket`)". The
+measured number is **6**. That prediction was written from reasoning rather than
+from a run; the measured value is the one to trust, and this note is left in
+place rather than quietly editing the estimate.
+
+**One limitation no prose fix closes.** The orchestrator has no lever for
+`effort`. It recorded `model: sonnet, effort: medium` as the most neutral
+characterization available and flagged the assumption rather than presenting it
+as fact. Section A5 now says where model and effort come from; the dispatch
+mechanism still cannot supply an effort level.
