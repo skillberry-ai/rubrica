@@ -173,6 +173,64 @@ def test_two_runs_with_no_manifest_at_all_are_not_declared_comparable(tmp_path):
     assert comparability(a, b) != []
 
 
+def test_a_run_that_records_no_stages_is_not_comparable_with_one_that_does(tmp_path):
+    """One-sided: the reason names the side that recorded nothing, and only it.
+
+    Everything else about the pair agrees -- same inputs, same bytes -- so the
+    empty map is the only thing left to catch, and attributing it to the wrong
+    run is the failure mode `test_a_stage_recorded_in_only_one_run_is_reported`
+    exists for one level up.
+    """
+    a, b = _pair(tmp_path)
+    manifest = read_json(b.manifest)
+    manifest["stages"] = {}
+    write_json(b.manifest, manifest)
+    reasons = comparability(a, b)
+    assert [reason for reason in reasons if "records no stages" in reason] == [
+        "run b records no stages in manifest.json, so no model, effort or skill hash can be pinned"
+    ]
+    assert not any("run a records no stages" in reason for reason in reasons)
+
+
+def test_two_runs_that_both_record_no_stages_are_not_declared_comparable(tmp_path):
+    """The case the per-stage loop cannot catch, and the bug this closes.
+
+    `stages: {}` on both sides takes the loop over the union of stage names zero
+    times and appends no reason, so the pair came back `comparable: True` with an
+    empty reasons list -- absence read as agreement, the exact misreading the
+    unreadable-manifest check four lines above already exists to prevent. It is
+    not a hypothetical state either: every intake-only run has this manifest, as
+    does any run where the orchestrator never called `record-stage`.
+    """
+    a, b = _pair(tmp_path)
+    for run in (a, b):
+        manifest = read_json(run.manifest)
+        manifest["stages"] = {}
+        write_json(run.manifest, manifest)
+    reasons = comparability(a, b)
+    assert sorted(reason for reason in reasons if "records no stages" in reason) == [
+        "run a records no stages in manifest.json, so no model, effort or skill hash can be pinned",
+        "run b records no stages in manifest.json, so no model, effort or skill hash can be pinned",
+    ]
+    assert diff_runs(a, b)["comparable"] is False
+
+
+def test_a_stages_key_that_is_not_a_mapping_is_read_as_no_stages(tmp_path):
+    """A hand-edited `stages: []` must not become a TypeError at exit 1.
+
+    Indexing a list by stage name raises TypeError, which cli.py reports as a
+    malformed artifact -- true, but it routes a diff-runs reader to a repair
+    prompt. Read as absent, it lands on the empty-map reason instead, which is
+    both accurate and the answer that cannot be mistaken for agreement.
+    """
+    a, b = _pair(tmp_path)
+    manifest = read_json(b.manifest)
+    manifest["stages"] = []
+    write_json(b.manifest, manifest)
+    assert stage_config(b) == {}
+    assert any("run b records no stages" in reason for reason in comparability(a, b))
+
+
 # -- diff_runs ---------------------------------------------------------------
 
 

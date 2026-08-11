@@ -59,11 +59,20 @@ def input_digests(run: RunPaths) -> frozenset[tuple[str, str]]:
 
 
 def stage_config(run: RunPaths) -> dict[str, dict[str, Any]]:
-    """The manifest's per-stage model, effort and skill hash."""
+    """The manifest's per-stage model, effort and skill hash.
+
+    A `stages` key that is present but not a mapping is read as no stages at
+    all, rather than returned raw: `comparability` would index a list by stage
+    name and raise TypeError, which cli.py reports as a malformed artifact at
+    exit 1. Reading it as absent routes it through the empty-map check instead,
+    which makes the pair incomparable -- and absence never reading as agreement
+    is the whole point of that check.
+    """
     manifest = _load(run.manifest)
     if not isinstance(manifest, dict):
         return {}
-    return manifest.get("stages", {})
+    stages = manifest.get("stages", {})
+    return stages if isinstance(stages, dict) else {}
 
 
 def capability_ids(run: RunPaths) -> frozenset[str]:
@@ -102,9 +111,14 @@ def emitted_task_ids(run: RunPaths) -> frozenset[str]:
 def comparability(a: RunPaths, b: RunPaths) -> list[str]:
     """Why these two runs cannot be compared. Empty means they can.
 
-    An unreadable manifest is its own reason rather than an empty digest set:
-    jaccard(empty, empty) is 1.0, so two runs whose manifests could not be read
-    would otherwise be declared perfectly comparable *because* nothing was checked.
+    One principle, applied at three depths: **absence must not read as
+    agreement.** An unreadable manifest is its own reason rather than an empty
+    digest set, because jaccard(empty, empty) is 1.0, so two runs whose manifests
+    could not be read would otherwise be declared perfectly comparable *because*
+    nothing was checked. An empty `stages` map is its own reason for the same
+    reason one level in: the per-stage loop below takes zero iterations over it
+    and appends nothing. And a `stages` value that is not a mapping at all is
+    normalised to empty by stage_config so it reaches that check.
     """
     reasons: list[str] = []
     for run, label in ((a, "a"), (b, "b")):
@@ -129,6 +143,20 @@ def comparability(a: RunPaths, b: RunPaths) -> list[str]:
         )
 
     stages_a, stages_b = stage_config(a), stage_config(b)
+    # The same principle the manifest check above implements, one artifact
+    # deeper: absence must not read as agreement. An empty `stages` map takes
+    # the loop below zero times and appends no reason, so two runs that recorded
+    # nothing were declared perfectly comparable *because* nothing was checked
+    # -- exactly the reading jaccard(empty, empty) == 1.0 gets wrong. That is
+    # not a hypothetical state: it is every intake-only run, and any run where
+    # the orchestrator never called `record-stage`. Reported per side, because
+    # which side recorded nothing is the fact a reader needs.
+    for stages, label in ((stages_a, "a"), (stages_b, "b")):
+        if not stages:
+            reasons.append(
+                f"run {label} records no stages in manifest.json, so no model, effort or skill "
+                "hash can be pinned"
+            )
     for stage in sorted(set(stages_a) | set(stages_b)):
         if stage not in stages_a or stage not in stages_b:
             present = "a" if stage in stages_a else "b"

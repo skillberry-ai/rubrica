@@ -363,6 +363,16 @@ none.** That absence was not cosmetic. `stability.comparability` gates
 iterates the *union* of their keys — so with both maps always empty the loop body
 never ran and no reason was ever appended. Every pair of runs with matching
 inputs compared as comparable: a check passing because its input was absent.
+
+Adding the writer fixed the cause and not the check, and the check needed
+fixing too: an empty `stages` map is still reachable — it is *every* intake-only
+run, and any run where the orchestrator never called `record-stage` — and the
+loop still took it zero times. So `comparability` now names an empty stage map
+on either side as its own reason, per side, the same way it already named an
+unreadable manifest as its own reason rather than as an empty digest set. One
+principle at three depths: **absence must not read as agreement.** A `stages`
+value that is not a mapping at all is normalised to empty so it reaches that
+check instead of raising `TypeError` on a stage-name index.
 `record-stage` computes the digest from the `--skill` path it is handed rather
 than accepting a digest string, because the whole point of the hook is that the
 recorded hash is of the file the run actually used, and a caller that can pass a
