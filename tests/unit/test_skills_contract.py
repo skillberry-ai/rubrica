@@ -174,6 +174,38 @@ def test_the_orchestrator_may_not_declare_a_stage(tmp_path):
     assert [f.pointer for f in findings] == ["/stage"]
 
 
+@pytest.mark.parametrize("declared", [["claims"], "claims", []])
+def test_the_orchestrator_may_not_declare_schemas(tmp_path, declared):
+    """The mirror of the stage finding above, and it did not exist.
+
+    `if skill.name != ORCHESTRATOR and stage in STAGES:` wrapped the whole
+    schemas block, so tg-orchestrate declaring `schemas = ["claims"]` -- or the
+    non-list `schemas = "claims"` -- exited 0 with no finding, while the same file
+    declaring a `stage` was correctly reported. The `schemas` key belongs to a
+    stage's layer-1 gate; the orchestrator has no stage, so any value here is
+    meaningless, including the empty list. Three values because the old guard
+    skipped on the key's *owner*, not on its shape: no value of it could fire.
+    """
+    contract = dict(CONTRACTS[ORCHESTRATOR], schemas=declared)
+    findings = check_contract(load(write_skill(tmp_path, ORCHESTRATOR, contract)))
+    assert [f.pointer for f in findings] == ["/schemas"]
+    assert "must not declare schemas" in messages(findings)
+
+
+def test_a_stage_skill_still_gets_the_schemas_block_it_always_had(tmp_path):
+    """The other half of the split: the stage path is unchanged.
+
+    Restructuring the guard from one compound condition into two branches must
+    not cost the stage skills their omission and invention checks, which is the
+    only reason the compound condition looked safe to write in the first place.
+    """
+    contract = dict(CONTRACTS["tg-extract"], schemas=["coverage"])
+    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    messages_seen = messages(findings)
+    assert [f.pointer for f in findings] == ["/schemas", "/schemas"]
+    assert "is not gated on" in messages_seen and "omits artifact kind" in messages_seen
+
+
 def test_a_non_string_stage_is_reported(tmp_path):
     """`stage = ["extract"]` is a shape mistake (brackets typed where a bare
     string was meant), not a spelling one -- a distinct finding from "unknown

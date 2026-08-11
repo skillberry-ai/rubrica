@@ -341,7 +341,25 @@ def check_contract(skill: Skill) -> list[Finding]:
                     "by their RunPaths name, never as a literal path",
                 )
 
-    if skill.name != ORCHESTRATOR and stage in STAGES:
+    # Two branches, not one compound condition. `if skill.name != ORCHESTRATOR
+    # and stage in STAGES:` wrapped this whole block, so the orchestrator's
+    # `schemas` key was never examined at all: `schemas = ["claims"]` in
+    # tg-orchestrate/SKILL.md exited 0 with no finding, and so did the non-list
+    # `schemas = "claims"`, while the *same* file declaring a `stage` was
+    # correctly reported. The one skill that must declare no artifact kinds was
+    # the one skill whose declaration of them went unchecked, in the module
+    # whose entire job is checking declarations. Split so the orchestrator gets
+    # the mirror of the `stage` finding above and stage skills keep the block
+    # they always had -- STAGE_ARTIFACTS[stage] is still reached only under
+    # `stage in STAGES`.
+    if skill.name == ORCHESTRATOR:
+        if "schemas" in skill.contract:
+            report(
+                "/schemas",
+                f"{ORCHESTRATOR} is not a stage: it dispatches them and validates their "
+                "output through each stage's own skill, so it must not declare schemas",
+            )
+    elif stage in STAGES:
         schemas_value = skill.contract.get("schemas", [])
         if not isinstance(schemas_value, list):
             # Same shape-before-content ordering as reads/writes above: if

@@ -440,11 +440,14 @@ rather than recording a gap. The roster of required skills is *derived* from
 `STAGES` rather than restated, so adding a stage demands a skill without anyone
 remembering to edit a constant. `tg-orchestrate` is the one special case: it is not
 one of `STAGES`, so there is no stage to declare and no artifact for `validate` to
-gate it on, and it declares neither. **Only the `stage` half of that is enforced** —
-a `stage` key on the orchestrator is reported as a finding, while a `schemas` key
-on it is not examined at all, because the guard around the schemas block excludes
-the orchestrator wholesale. The convention is therefore load-bearing on one key and
-honour-system on the other; §8 parks the gap.
+gate it on, and it declares neither. **Both halves are enforced**, as two branches
+rather than one compound condition: a `stage` key on the orchestrator is a finding,
+and so is a `schemas` key, for any value including the empty list. It was written
+as `if skill.name != ORCHESTRATOR and stage in STAGES:` wrapping the whole schemas
+block, which meant the one skill that must declare no artifact kinds was the one
+skill whose declaration of them went unexamined — in the module whose entire job is
+examining declarations. The shape is worth naming: a guard that folds two
+unrelated conditions into one condition skips more than either one says.
 
 This is §10's silent-drift risk answered on the prompt side. A `SKILL.md` can
 name an artifact path that does not exist, a stage that was renamed, or a
@@ -902,7 +905,6 @@ the shape was standing in for.
 
 | Parked | Why it matters |
 |---|---|
-| `check-skills` never examines the orchestrator's `schemas` | Measured, and it invalidated a claim an earlier draft of §5 made: injecting `stage = "extract"` into `tg-orchestrate/SKILL.md` exits 1 with a finding, while injecting `schemas = ["claims"]` exits **0** with none. `check_contract`'s guard reads `if skill.name != ORCHESTRATOR and stage in STAGES:` and wraps the whole schemas block, so the one skill that must declare no artifact kinds is the one skill whose declaration of them is unchecked. Harmless today — the shipped file declares none, and `validate` has no orchestrator stage to gate — but it is an unchecked contract element in the module whose entire job is checking contract elements, and the natural fix (check `schemas` is absent for `ORCHESTRATOR`, the way `stage` already is) is small. Left to the whole-branch review to triage; this task is documentation only. |
 | `--no-gate` is a prompt-level flag, not a CLI flag | §5's three human gates live in `tg-orchestrate`'s prose, and no code enforces them, so `--no-gate` is an argument to the *skill's invocation*. A prompt-level flag can be forgotten in a way a CLI flag cannot. Accepted as the right cost for this slice: enforcing the gates in code would mean the orchestrator stops being a skill, which is the thing being tested. |
 | The orchestrator has no lever for `effort` | It records `model` and `effort` per stage through `record-stage`, and its prose says where both come from — but the dispatch mechanism cannot *supply* an effort level. The one completed run recorded the most neutral characterization available and flagged the assumption rather than presenting it as fact. So every `effort` in a manifest today is a characterization, not a setting, and §4's comparability claim rests on `model` and `skill_sha256` doing the real work. |
 | The isolation rule is enforceable on artifacts inside a run and unenforceable on everything else a subagent can reach | Already named as this build's weakest link: an instantiate member that read a sibling's seed produces a byte-identical artifact to one that did not. This build widened the scope twice, both times measured. An extract member self-reported reading both sibling *input files* while checking locator conventions; a reconcile member volunteered that it had consulted a *different fixture* as a reference, outside its declared `reads`. Both outputs were correct and independently verified, so nothing was harmed — and no schema, no `check-refs` and no digest could have detected either. Both surfaced only because a subagent mentioned it in a report nobody obliged it to write. The exposure is therefore not "another scenario's slice" but anything on the filesystem, and the only instrument is a transcript audit at dispatch time. |
