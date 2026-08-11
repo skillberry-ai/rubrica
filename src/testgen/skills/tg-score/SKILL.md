@@ -58,9 +58,22 @@ outcome class really means, to see whether a scenario's fact is supported --
 stop: either the world model already says it, or it does not say it and that
 absence is a `gaps` entry the world model records, and neither case is a
 reason to open a file your contract does not name. The same holds for
-`04-instances/`, `05-verdicts/`, and `07-report.json`: nothing has been
-instantiated yet in this round, and a verdict from an earlier run is not
-evidence about this one.
+`04-instances/`, `05-verdicts/`, and `07-report.json`: on an ordinary scoring
+dispatch nothing has been instantiated yet in this round, and a verdict from an
+earlier *run* is not evidence about this one.
+
+**There is one exception, and it is a whole kind of dispatch rather than an edge
+case.** You can be re-dispatched *after* `tg-challenge` has judged this round's
+instances, to record a rejection the adversary found and recompute coverage
+against it. When that happens the orchestrator appends to your prompt each
+rejected `scenario_id` together with that verdict's `uniquely_determined` and
+`derivable_without_guessing` values and its `notes`, quoted from the verdict file.
+That appended text **is** evidence about this run, and acting on it is the work
+of the dispatch -- Method step 3 says what to do with it. What does not change is
+your `reads`: you still never open `05-verdicts/`, because the quoted fields are
+what you were given and the rest of that file is not yours to read. If the notice
+names a rejection whose reason you cannot determine from the quoted fields, that
+is a gap in the notice to report back, not a licence to go reading.
 
 The manifest is in your `reads` for one number: `limits.max_rounds`, which
 you need for exactly two purposes -- the `halted_round_cap` verdict in Method
@@ -72,7 +85,12 @@ the world model is evidence about the target.
 You are dispatched with no memory of any conversation that came before you,
 and nothing you write here carries forward as memory either. Whatever you
 need has to be derivable from the three artifacts you read, from this
-document, or from the command in Method step 1 -- and it is. In particular,
+document, from the command in Method step 1, or from a notice the orchestrator
+appended to *this* dispatch -- those four and nothing else. On an ordinary
+scoring dispatch the first three are the whole of it. The fourth is there
+because of the one thing you may be asked to do that your artifacts genuinely
+cannot tell you: a `tg-challenge` rejection lives in a file you do not read, so
+it reaches you as appended text or it does not reach you at all. In particular,
 **nobody tells you which round this is**: the round you are scoring is the
 highest `round` tag among the scenarios in `02-scenarios.json`, because
 `tg-propose` tags every scenario it writes with the round that wrote it.
@@ -124,7 +142,10 @@ mark `duplicate`, and `rejected_reason` (one of `ambiguous`,
 mark `rejected`. Both are schema-required for their status, so a fold
 without a survivor named is a validation failure rather than a partial
 ruling. A scenario an earlier round already judged keeps the judgment it
-already has.
+already has -- **unless this dispatch carries a rejection notice naming it**,
+in which case changing that judgment is precisely what you are here to do. Read
+the rule as "do not re-open a ruling that nothing new bears on", never as
+"statuses are frozen after the round that set them".
 
 **One `coverage-0.1.json`-shaped document, written twice**: to
 `03-coverage/round-<N>.json` (`coverage_round`) and to
@@ -152,8 +173,19 @@ what you report back to the orchestrator, which records it in `decisions.md`.
    `identical_cells` evidence that raised it. That pairing is the cheap,
    deterministic half of dedupe; the expensive half is yours. A candidate is
    *a pair worth a judgment call, never a decision* -- the command has ruled
-   nothing, and it excludes pairs already settled in an earlier round so a
-   resolved fold is not reopened.
+   nothing. It excludes scenarios already marked `duplicate` or `rejected`, so a
+   fold that was *carried out* is not reopened.
+
+   **It does not exclude pairs you settled by keeping both.** The filter is on
+   status, and the first refusal condition in §5 tells you to keep both members
+   of a genuinely ambiguous pair `active` -- which leaves both open, so that pair
+   is raised again here in every later round. **A re-raise is not evidence the
+   pair was never judged.** If a pair looks familiar and you cannot tell from the
+   scenarios in front of you why it was left standing, keep both standing: the
+   deliberate non-fold is invisible in `02-scenarios.json` by construction, and
+   folding a distinct test because the command offered the pair a second time
+   deletes a cell for the whole run -- the error §5 ranks as strictly worse than
+   a wasted fan-out.
 
    Run it even when the scenario list is short enough to read at a glance. A
    stage that eyeballs a four-scenario list will eyeball a forty-scenario
@@ -189,6 +221,28 @@ what you report back to the orchestrator, which records it in `decisions.md`.
    ruling you never made. If you are turning a scenario down rather than
    keeping it, mark it `rejected` with a `rejected_reason`; do not leave a
    scenario `proposed` as a way of not deciding.
+
+   **If this dispatch carries a rejection notice from `tg-challenge`, the status
+   edit is step 3's work and there is no gate that will ask you for it.** For
+   each `scenario_id` in the notice, set `status: "rejected"` and choose the
+   `rejected_reason` yourself from the quoted evidence: `uniquely_determined:
+   false` is `ambiguous` (a second world-consistent answer exists), and
+   `derivable_without_guessing: false` is `not_derivable`. The `notes` can point
+   somewhere else instead -- an oracle that is simply wrong about its own seed is
+   `wrong_label` -- so read them rather than mapping the booleans mechanically.
+   The notice will not name the reason for you, and it must not: the enum is
+   yours, and a notice that had already picked from it would be the
+   conclusion-passing the orchestrator's own rules forbid.
+
+   Do this **before** you rebuild the matrices, because the recompute in steps 4
+   through 7 reads the statuses you just wrote and Invariant 5 depends on it.
+   Know which half of the job each gate covers, because they are asymmetric:
+   recompute without the status edit and every row the rejected scenario credits
+   keeps `covered: true` on the strength of a test that will never ship --
+   `emit` prunes the package silently, `check-refs` exits 0, and you will report
+   success. Do the status edit and skip the recompute and
+   `refs.check_coverage` names the row immediately. So the edit nothing checks is
+   the one to be deliberate about, and both halves belong to this one dispatch.
 
 4. **Build `capability_matrix`: one cell per capability x outcome-class pair
    in the world model.** **Every** pair, none omitted and none invented --

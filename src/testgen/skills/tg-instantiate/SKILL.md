@@ -68,9 +68,49 @@ handed one is a dispatch mistake to report the same way.)
 You are dispatched with no memory of any conversation that came before you,
 and nothing you write here carries forward as memory either. Whatever you
 need -- which scenario is yours, what a `discriminating_fact` obliges you to
-make true, what a distractor is -- has to be either in this document or in
-the two files you just read. If it is not in one of those places, you do not
-have it, and inventing it is confabulation, not recollection.
+make true, what a distractor is -- has to be either in this document, in the
+two files you just read, or in a notice the orchestrator appended to *this*
+dispatch (there is exactly one such notice, described next). If it is not in
+one of those places, you do not have it, and inventing it is confabulation,
+not recollection.
+
+**The one notice: a `re-seed` re-dispatch.** If `tg-challenge` judged your
+scenario `re-seed`, the orchestrator dispatches you again for that same
+scenario, once, with the adversary's **`alternative_answers`** from the verdict
+appended to your prompt. That appended text is legitimate input, and it is the
+only channel it could arrive on -- `05-verdicts/` is not in your `reads`, so a
+member that treats the appended list as something it was not supposed to see
+makes the re-dispatch a no-op. It does not widen your `reads` and it is not a
+conclusion to defer to: each entry is a **second answer the adversary found to
+be consistent with the seed you wrote**, which is a named, specific failure of
+the uniqueness requirement stated below.
+
+Act on it by changing the *world*, not the question. For each alternative, find
+what in the seed makes it answerable and remove that -- then check that the
+alternative is now plainly *wrong* rather than merely less attractive. A
+near-miss that is still a correct answer is the defect; a near-miss that is now
+incorrect is a distractor, which is what you wanted in the first place. What you
+may not do is narrow the scenario: the `discriminating_fact`, the
+`user_intent` and everything else in `02-scenarios.json` stay exactly as they
+are. `tg-propose` owns the scenario and `tg-score` owns its status, and
+rewriting the fact to dodge an alternative answers a different test than the one
+that was approved.
+
+**Overwrite all three files in place, at the paths you already wrote.**
+`seed.json`, `expected.json` and `rationale.md` under
+`04-instances/<scenario_id>/` are what `tg-emit` compiles and what the next
+`tg-challenge` reads, so a repair written anywhere else is a repair nothing
+sees: no variant filename, no second directory, and no copy kept of the seed you
+are replacing -- that history lives in the verdict and in version control, not
+in the instance directory. Rewrite `rationale.md` rather than appending to it,
+since it explains the world that now exists; it must name the alternative answer
+that was found and what in the new seed rules it out, because that sentence is
+the only place a reviewer can tell a closed ambiguity from a reworded one. Then
+run `validate --stage instantiate` and `check-refs` exactly as on a first pass.
+
+You get one re-seed. A second `re-seed` verdict sends the scenario down the
+rejection path instead, so a repair that adds a distractor without eliminating
+the alternative has spent the entire budget.
 
 **The fan-out boundary, and why the file boundary alone cannot hold it
 here.** In an earlier fan-out stage, isolation is mostly a matter of which
@@ -328,13 +368,23 @@ artifacts that validate and mean nothing.
    to be present, so that trades a satisfied exclusion for a seed-conformance
    finding. This is what
    makes a log-does-not-say test both expressible and verifiable, and it has
-   a consequence worth stating plainly: **an exclusion can never name a value
-   the seed contains.** Ruling out a distractor that *does* exist is not
-   expressible as an exclusion. Use `value_equals` on the right answer
-   instead -- it requires the delimited correct token, which a near-miss
-   fails -- and say in the assertion's `rationale` which near-miss you meant
-   to rule out, since the pointer alone cannot show a reader whether an
-   absence was deliberate or a broken pointer.
+   a consequence worth stating exactly, because the gate cannot state it for
+   you: **that rule is about the pointer, not about the string.** `check-refs`
+   resolves the `seed_pointer` and nothing else, so an exclusion whose *value*
+   does appear elsewhere in the seed still passes layer 2 as long as its
+   pointer resolves to nothing -- and in an absence-shaped scenario the excluded
+   string very often is somewhere in the seed, because every plausible near-miss
+   is in the seed by construction. Nothing mechanical will stop you, which is
+   exactly why this one is yours: excluding a near-miss that really exists marks
+   an agent wrong for an answer that is *correct and more informative* than the
+   reference -- "nothing in this queue is blocked; the one record here is X, and
+   it is open" -- and a test that punishes the better answer has measured
+   nothing. Exclude the fabrication the absence invites, not the neighbour the
+   seed legitimately holds. To rule out a near-miss that does exist, use
+   `value_equals` on the right answer instead -- it requires the delimited
+   correct token, which a near-miss fails -- and say in the assertion's
+   `rationale` which near-miss you meant to rule out, since the pointer alone
+   cannot show a reader whether an absence was deliberate or a broken pointer.
 
    Three rules constrain which capability you may name, in an assertion or in
    a trajectory operation. **First:** every `tool_called`, and every
