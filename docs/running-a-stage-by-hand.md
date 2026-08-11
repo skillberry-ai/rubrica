@@ -205,3 +205,97 @@ The exercises above are run by hand, one skill at a time, following §§1–5 �
 are not `-m live` pytest tests themselves, because a live exercise's pass
 criteria are read by a person (or the controller), not asserted by an
 `assert` statement.
+
+## 7. Dispatching into an isolated instance
+
+§§2–4 are the manual runbook and stay the reference. `scripts/dispatch-stage.sh`
+automates them, and adds the thing a hand dispatch cannot: it runs the stage in a
+Claude Code instance that shares nothing with the developer's own setup.
+
+```bash
+# the checkpoint is still the stage *before* the one under test -- §3's table
+RUN=$(PYTHONPATH=. uv run python /tmp/toy-run-to.py /tmp/rubrica-lab/runs intake)
+./scripts/dispatch-stage.sh extract "$RUN" api-json     # fan-out: own slice id
+./scripts/audit-reads.sh /tmp/rubrica-lab/transcripts/extract-api-json.jsonl
+
+# a barrier stage takes no slice id, and needs a run built one checkpoint later
+RUN=$(PYTHONPATH=. uv run python /tmp/toy-run-to.py /tmp/rubrica-lab/runs extract)
+./scripts/dispatch-stage.sh reconcile "$RUN"
+```
+
+`RUBRICA_MODEL`, `RUBRICA_EFFORT` and `RUBRICA_BUDGET` set the dispatch's model,
+effort and hard dollar ceiling (`sonnet`, `medium`, `2`); `RUBRICA_LAB` moves the
+scratch directory that holds the generated settings and the transcripts. The
+model and effort you used are what `record-stage --model/--effort` should then be
+given, per §4.
+
+This one *is* shipped, unlike §3's five-line toy-run builder, and the difference
+is worth stating because the reasoning there was that a mapping table is cheaper
+to retype than to maintain. This script is the opposite case: it is a hundred
+lines of exact flags, two of which are load-bearing in a way nobody would
+reconstruct from memory, and getting one wrong fails silently rather than loudly.
+
+**Why isolation is not tidiness.** The falsifiable claim in this project is that
+prompt-carried judgment survives a chain of artifact handoffs. A dispatch that
+also carries a global `CLAUDE.md`, whatever plugins and hooks the developer runs,
+and *this repository's* `CLAUDE.md`, `README.md` and design spec is measuring the
+skill plus a briefing — and the briefing is the answer key. `docs/` holds the
+spec; `tests/fixtures/toy/` is described elsewhere in this repository as the model
+answer a skill imitates. A stage that can read either is not being exercised.
+
+Three mechanisms do it, all per-session, none of which changes anything on disk
+outside the scratch directory:
+
+| Mechanism | What it removes |
+|---|---|
+| `CLAUDE_CONFIG_DIR` | own history, transcripts, plugin set |
+| `--safe-mode` | `CLAUDE.md`, plugins, hooks, custom agents and skills |
+| `--settings` with `permissions.deny` | `docs/`, `tests/`, `CLAUDE.md`, `README.md`, sibling skills |
+
+`--safe-mode` does not remove the *built-in* skills, so the script also passes
+`--disable-slash-commands`.
+
+**The two settings scopes are not interchangeable, and this was measured.** On
+Claude Code 2.1.227, a `sandbox` block in the file passed to `--settings`
+silently stops that same file's `permissions.deny` `Read` rules from being
+enforced: no warning, the reads simply succeed. Measured in both directions — the
+identical deny list with the sandbox key deleted blocks, and with it added back
+does not. So the script writes `permissions` into the `--settings` file and
+`sandbox` into the isolated user settings. The two layers also disagree about
+precedence, which is why the script builds two path lists from one intent:
+`permissions.deny` beats `permissions.allow` unconditionally, so the skills root
+cannot be denied wholesale with this stage's own directory re-allowed inside it,
+while `sandbox.filesystem` resolves overlaps by the more specific path.
+
+**The venv has to be on `PATH`.** Every skill's Invariants section tells the stage
+to run a bare `rubrica …`, and `README.md` says commands assume the venv is on
+`PATH`. Measured without it: the stage reaches for `uv run rubrica`, which wants a
+writable uv cache it does not have, and spends its entire budget thrashing on
+that instead of on its artifact. The script exports it.
+
+**What is enforced, and what only looks enforced.** The permissions layer is the
+one doing the work, and by documented design it covers the file tools and the
+file commands Claude Code parses out of a Bash line — *not* arbitrary
+subprocesses. A `python -c "open(…)"` is outside it. The `sandbox` block is meant
+to close exactly that gap at the OS level, and on the machine this was written on
+it did not engage: with `bubblewrap` 0.9.0 and `socat` installed and
+`bwrap --unshare-all` working standalone, a Python `open()` still read a
+`denyRead` path. `failIfUnavailable` is set so a silent fall-through becomes loud;
+`RUBRICA_NO_SANDBOX=1` drops the block. Until someone confirms that layer on the
+machine they are using, treat OS-level read isolation as absent and read the
+audit.
+
+Which is the point of `scripts/audit-reads.sh`. §5's last paragraph says an
+out-of-contract read shows up nowhere on disk, and §8 of the design spec records
+that both isolation violations ever observed here surfaced only because a
+subagent volunteered them in a report nobody obliged it to write. That is luck,
+not an instrument. The transcript is the instrument: the audit prints every file
+tool call and every Bash line, and those get read against the stage's Contract
+`reads`.
+
+**One thing this approach cannot do.** Subagents share their parent session's
+permission and sandbox configuration, so a single instance running
+`rb-orchestrate` cannot give each fan-out member a deny list naming only *that*
+member's slice. Per-member read isolation needs one process per member, which is
+what dispatching stage by stage with this script gives you. A whole-pipeline
+orchestrate exercise remains the looser measurement it always was.

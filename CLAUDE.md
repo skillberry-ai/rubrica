@@ -27,8 +27,11 @@ make lint      # ruff check --fix
 make format    # ruff format
 ```
 
-Baseline as of the skills build: **1126 passed, 4 skipped**; `make check` clean;
-`uv run rubrica check-skills` exits 0. Anything else means you broke something.
+Baseline: **1129 passed, 4 skipped**; `make check` clean; `uv run rubrica
+check-skills` exits 0. Anything else means you broke something. (It was 1126 as
+of the skills build; the three added since are `f3b9d30`'s, and this line went
+stale because it names a build rather than a commit — re-measure it here when you
+add tests.)
 
 Commands in `README.md` assume the venv is on `PATH`; otherwise prefix `uv run`.
 Four env overrides exist: `RUBRICA_SCHEMA_DIR` (`validate.py`),
