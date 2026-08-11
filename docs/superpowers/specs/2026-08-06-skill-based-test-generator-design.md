@@ -1175,10 +1175,14 @@ filed under two different `kind` values by two extract slices, silently costing 
 coverage denominator a column — both gates clean, found by reading output. A real
 reconcile *halting* the pipeline on a blocking gap on the first real run, which is
 §5's own stated test of whether gap detection works. A real reconcile over real
-extract output enumerating **six** capability cells where the hand-authored fixture
-had four and a written prediction had seven — a *larger* denominator, the opposite
-of the silent-column-loss failure the check was watching for, and a reminder that a
-calibration number reasoned from a prompt is not evidence. An orchestrator handed
+extract output enumerating **six** capability cells where the hand-authored world
+model had four — a *larger* denominator, the opposite of the silent-column-loss
+failure the check was watching for. And the number moves with the input rather
+than with the prompt: the same skill on the same target measured **seven** cells
+from hand-authored fixture claims and **six** from real extract claims. Two
+measurements of two inputs, not a prediction beaten by a measurement — which makes
+it stage-level variance driven by upstream claim quality, sitting in the one
+artifact that freezes the coverage denominator for the whole run. An orchestrator handed
 `--no-gate` still refusing to overrule a halt, because the flag skips human review
 and a blocking gap is not a human gate — a distinction that lives in one sentence
 of prose and had no other instrument. An adversary proving its own read order from

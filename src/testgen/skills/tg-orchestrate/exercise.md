@@ -300,11 +300,27 @@ returning `{}`. Two independent *stated* claims preferred over one
 `reverse_engineered` observation, recorded as a resolution rather than silently
 absorbed -- the extract/reconcile split paying off on real input.
 
-**Correction to this file's own calibration:** the setup section above predicted
-"seven capability cells (three for `find_tickets`, four for `get_ticket`)". The
-measured number is **6**. That prediction was written from reasoning rather than
-from a run; the measured value is the one to trust, and this note is left in
-place rather than quietly editing the estimate.
+**Both numbers are measurements, and the difference between them is the
+finding.** The setup section above cites "seven capability cells (three for
+`find_tickets`, four for `get_ticket`)" and attributes it, correctly, to Task
+8's fixture-based run -- a measured result of a real `tg-reconcile` dispatch over
+the hand-authored fixture claims, not a prediction. This run measured **6** over
+real `tg-extract` claims for the same target. So the two figures are two
+measurements of two different inputs: fixture claims give 7, real extract claims
+give 6, and the hand-authored world model those fixture claims came with said 4.
+
+That is **stage-level variance driven by upstream claim quality, in the one
+artifact that freezes the coverage denominator for the entire run** -- every
+later coverage percentage is a fraction of whichever number reconcile happened
+to write, so the same target can honestly report a different denominator
+depending only on how good its claims were.
+
+An earlier version of this note read the pair as a prediction beaten by a
+measurement, and called the seven a figure "written from reasoning rather than
+from a run". That was a controller error -- the seven is at progress.md's Task 8
+exercise entry as a measured enumeration -- and it is corrected here rather than
+quietly deleted, because of what the error cost: it took the more interesting of
+the two readings and discarded it.
 
 **One limitation no prose fix closes.** The orchestrator has no lever for
 `effort`. It recorded `model: sonnet, effort: medium` as the most neutral

@@ -114,3 +114,95 @@ cells, writes facts that are not actually discriminating, or avoids naming
 a concrete value out of an unfounded groundedness worry, is a failure this
 exercise exists to catch precisely because those mechanical gates cannot
 see it.
+
+## Run record: two rounds of the live exercise
+
+Transcribed from the exercise ledger, whose workspace is deleted when this branch
+finishes. Two dispatches, each against a run stopped after `reconcile`, each
+given only the run directory, the stage name and this skill's path. **Both gates
+clean on both rounds** (`testgen validate --stage propose` 0, `testgen check-refs`
+0), every scenario `proposed`, and both rounds under the cap.
+
+**Round 1, against the text as first delivered.** Four scenarios closing all four
+capability cells and both goal rows.
+
+- **Property 1 (absence-shaped cells) -- PASS, and it was the point of the
+  round.** This was the implementer's own least-confident prediction, and the
+  prose it needed had just landed: the absence-cell requirement was measured by
+  this file but never *asked for* by the `SKILL.md`, so it was written into Method
+  steps 4 and 5 first. The run then proposed against both absence-shaped cells
+  (`oc-none`, `oc-missing`) with genuinely believable intents, on the first
+  dispatch after the prose landed. Behavioural confirmation, not a reading.
+- **Property 3 (the cap) -- PASS.** Four against a `max_scenarios` of 8.
+- It also wrote `hop_depth: 2` with two `capability_refs` on the one multi-hop
+  scenario, which confirms the round-1 fix to Method step 7 behaved as intended:
+  an unexplainable depth is the scenario's own defect to fix before writing it
+  down, not a finding to offload onto `tg-challenge`.
+- No conflation appeared between §1's knowledge-leak tell ("do not reach for a
+  scenario because it is the kind of case tests usually have") and the new
+  absence-cell prose ("do not skip a cell because it is harder to design") --
+  which is the one question that resolution was written to answer, and the reason
+  an optional polish repeating §1's disclaimer in step 4 was declined.
+
+**Round 2, against the revised text.** Three scenarios, again closing all four
+cells and both goals. `scn-002` cited the world model's own recorded
+contradiction to defend its error semantics -- "the operator notes' contracted
+behavior, which this world model prefers over the single captured trace." That is
+the extract/reconcile split paying off two stages downstream, unprompted: a
+recorded contradiction being *used* as evidence rather than being invisible.
+
+**Property 4's failure, which is real and is what property 4 above now says.**
+`scn-003`'s fact in full: *"find_tickets is called with a queue and status filter
+combination for which the seed contains zero tickets, so the call returns an empty
+result set rather than any match."* No queue, no status, no count. `scn-001` did
+the same in miniature -- "filtering by a queue and status combination matches
+exactly one ticket", where an earlier run had said "queue `billing` and status
+`open` returns exactly one ticket, and that ticket's `ticket_id` is 4231". A
+`tg-instantiate` reading either has near-total freedom to build any world with
+some empty combination somewhere, rather than the one world the scenario means to
+test.
+
+### The controller error this exercise produced, retracted after three fix rounds
+
+The most instructive thing in this record, and it is a failure of the *controller*
+reading the run, not of the run:
+
+Round 1's `sc-0002` wrote the discriminating fact "`find_tickets` with queue
+`sales` and status `open` returns zero tickets." I raised it as Important -- the
+fact turns on a `sales` queue no claim establishes, where `clm-notes-001` names
+only `billing` and `shipping`, and `clm-trace-001` already supplied a *grounded*
+mechanism for the identical empty-result outcome on a queue that exists. Two fix
+rounds were driven off that finding, adding a groundedness requirement to Method
+step 6. **It was wrong, and it was retracted at round 4.** Three checks, all run
+only after round 3 had landed:
+
+1. The world model contains no queue name at all -- grep count zero.
+2. The world-model schema has nowhere to record a field's value domain, so there
+   is no artifact in which a queue name *could* be established for this stage.
+3. `oc-none`'s own description is "no ticket matches the filters", which a queue
+   holding no tickets satisfies literally.
+
+**Root cause: I reasoned from `clm-notes-001`, a claims-file statement
+`tg-propose` is forbidden to read.** I held the stage to knowledge its own
+contract denies it -- the controller's version of the isolation failure this
+whole design exists to prevent. One `grep` over the stage's declared `reads`
+would have settled it before the first round instead of after the third.
+
+Round 3 compounded it. The corrected worked example I had written into the prompt
+-- "queue `billing` and status `open`" -- is unachievable from this stage's
+epistemic position for exactly the same reason: naming `billing` is inventing it
+as much as naming `sales`, since `tg-propose` never reads the file that says which
+queue names are real. I put an example in a prompt that the prompt's own reader
+cannot follow.
+
+What survived the retraction is the half that was always independently true:
+`scn-003`'s valueless fact fails **uniqueness**, a requirement this skill carried
+before any of it, and fails it fixably -- prescribing a concrete value is an
+instruction to `tg-instantiate`, never a claim about the target. Every seed value
+is synthetic by construction, which is why property 4 above is uniqueness-only
+and says not to resurrect the groundedness half.
+
+**The generalizable rule, which became binding on the tasks that followed:**
+before raising a finding against a skill's output, check what the stage's `reads`
+actually gives it. A finding that requires knowledge outside the contract is a
+finding against the *contract or the fixture*, never against the prompt.

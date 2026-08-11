@@ -99,3 +99,79 @@ handoff to a dispatched model -- the hypothesis the whole project exists to
 test -- so a negative result here is exactly as valuable to record as a
 positive one, and belongs in this file (or a `## Run record` section appended
 below it) rather than only in a review ledger elsewhere.
+
+## Run record: round 1 of the live exercise
+
+Transcribed from the exercise ledger, which is where this result lived until
+now -- the section above requires it to live *here*, and the ledger's workspace
+is deleted when this branch finishes.
+
+One dispatch against a run stopped after `extract`, on the hand-authored fixture
+claims: one subagent, the run directory, the stage name and this skill's path,
+with no `artifact_id` restriction because reading every claims file is the point
+of this stage. **Both gates clean** -- `testgen validate --run <run> --stage
+reconcile` 0 and `testgen check-refs --run <run>` 0.
+
+**The headline result is a success, and it is §5's own stated test of gap
+detection: a real reconcile HALTS the pipeline on the toy world.** It recorded
+three gaps, all blocking `propose` -- no capability retrieves Comment content,
+and neither capability has any claim describing bad- or missing-argument
+behaviour. §5 says "halting on a blocking gap is the payoff for first-class
+gaps... if this never fires on a real run, gap detection is not working." It
+fired on the first real run. The consequence for the chained whole-pipeline
+exercise was recorded at the same time: that run will halt at reconcile, and
+that is correct behaviour to record rather than a blocker to work around.
+
+**Property 1 (did it record the contradiction?) -- PASS.** It left
+`ctr-get-ticket-unknown-id` `unresolved`, with the reasoning that there is only
+one claim per side and nothing else in the claim set breaks the tie. Correct for
+the claim set it was given, and exactly what this skill asks for: the
+disagreement is recorded rather than settled by whichever artifact was read last.
+
+**Property 2 (more than the success outcome class?) -- PASS, and it moved the
+number the other way.** It enumerated **7 capability cells** -- three outcome
+classes for `find_tickets`, four for `get_ticket` -- against the hand-authored
+fixture's 4. The opposite of the shrinking failure this property was written to
+catch: a real run *expanded* the denominator. Read that figure next to
+`tg-orchestrate/exercise.md`'s run record, where the same skill on the same
+target measured **6** from real `tg-extract` claims: 7 from fixture claims and 6
+from real ones are two measurements of two inputs, which makes the denominator
+this stage freezes sensitive to upstream claim quality.
+
+**One tension inside that pass, recorded because the ledger does not resolve it.**
+The run's stated reason was "only one claim per side", while property 4 above --
+and the fixture note at the end of this record -- say the error behaviour is
+stated by *two* independent claims files against one trace span. So either the
+run counted the corroboration differently than the fixture's author does, or it
+miscounted, and nothing measured that round tells them apart. Its `unresolved`
+answer is defensible on the second reading and questionable on the first: with
+one side corroborated, `preferred_a` with the corroboration cited is what
+property 4 asks for. Worth re-measuring on a fixture where nothing licenses
+either side, which is a different question from the one this round answered.
+
+**Two defects in the golden fixture, both surfaced by this run, both confirmed by
+reading `tests/toy.py`.** Neither is a defect in the skill:
+
+1. The fixture world model's contradiction rationale cites "the trace is one
+   captured call that PREDATES it" -- a fact no claim in the set supplies. That
+   is precisely the extrinsic-knowledge leak §5 forbids, sitting in the golden
+   fixture as the model answer. `check_world_model` cannot see it: it verifies
+   that `claim_a` and `claim_b` resolve, never that the rationale rests on the
+   claim set. The defensible in-set tie-breaker is the derivation/confidence
+   asymmetry (`stated`/high against `reverse_engineered`/medium).
+2. `oc-detail`'s description says "the ticket and its comments, ordered by
+   position", but no claim states that any capability returns comments -- the
+   claims carry a Comment entity and a `comment_count` invariant and nothing
+   more. So the hand-authored world model asserts capability behaviour its own
+   claim set does not support, and the live reconcile correctly reported that as
+   a gap. `api.json` the *file* does state it, so the fixture's *claims* are
+   impoverished relative to the input they were supposedly extracted from.
+
+**A fixture note that weakens what property 4 can measure here.** The toy world's
+contradiction is stronger than the exercise's own setup describes: `api.json`
+*and* `notes.md` both state the error behaviour and only `trace.json` disagrees,
+so reconcile sees one side corroborated -- which is what makes `preferred_a`
+genuinely defensible on this input, and it is also why this run's `unresolved`
+answer is not the same question. A contradiction where nothing licenses
+preferring either side needs its own fixture; that is what the negative fixtures
+added later exist for.
