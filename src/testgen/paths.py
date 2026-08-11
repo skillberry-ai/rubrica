@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from testgen.errors import UsageError
+
 # Stage names in pipeline order. The validate and check-refs CLIs accept
 # these, and the orchestrator names the stage it is dispatching with them.
 STAGES = (
@@ -28,6 +30,51 @@ _SAFE_SEGMENT = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 class UnsafeSegment(ValueError):
     """Raised when an id from an artifact would escape the run directory."""
+
+
+def list_dir(directory: Path) -> list[Path]:
+    """Every entry directly inside `directory`, sorted; `[]` if it does not exist.
+
+    The one place this package lists a run directory, because listing has a
+    failure mode every caller was getting wrong in one of two ways.
+
+    `Path.glob` *swallows* EACCES and yields nothing, so an unreadable
+    `01-claims/` made `validate --stage extract` report "stage 'extract'
+    produced no claims artifact" and made `check-refs` report four "no such
+    claim" findings against a world model that was perfectly correct -- checks
+    announcing absence, and in the refs case naming the wrong artifact
+    entirely, because their input could not be read rather than was not there.
+    `Path.iterdir` and `Path.is_dir` do the opposite and raise PermissionError
+    (`is_dir` only swallows ENOENT/ENOTDIR/EBADF/ELOOP), which is not in
+    cli.py's narrow catch tuple, so it reached the catch-all and dressed a
+    filesystem problem as a repairable stage defect at exit 1.
+
+    Neither is right: an unreadable run directory is the harness pointed at
+    something it cannot read, which is exit 2. Raising the UsageError that maps
+    there is what skills._skill_dirs already does for the same shape on the
+    prompt directory. `is_dir()` on `directory` itself is inside the try for
+    the same reason the comprehension is: it stats the path, so it raises when
+    the *parent* is the unreadable one.
+    """
+    try:
+        if not directory.is_dir():
+            return []
+        return sorted(directory.iterdir())
+    except OSError as exc:
+        raise UsageError(f"cannot read run directory: {directory} ({exc})") from exc
+
+
+def list_json(directory: Path) -> list[Path]:
+    """Every `*.json` file directly inside `directory`, sorted.
+
+    The replacement for `sorted(directory.glob("*.json"))` at every call site
+    that was reading a run's claims, coverage rounds or verdicts -- see
+    list_dir for why the glob was the wrong tool.
+    """
+    try:
+        return sorted(p for p in list_dir(directory) if p.suffix == ".json" and p.is_file())
+    except OSError as exc:
+        raise UsageError(f"cannot read run directory: {directory} ({exc})") from exc
 
 
 def is_safe_segment(value: str) -> bool:
@@ -196,9 +243,14 @@ class RunPaths:
 
     # -- listings --------------------------------------------------------
     def _instance_dir_names(self) -> list[str]:
-        if not self.instances_dir.is_dir():
-            return []
-        return sorted(p.name for p in self.instances_dir.iterdir() if p.is_dir())
+        try:
+            return sorted(p.name for p in list_dir(self.instances_dir) if p.is_dir())
+        except OSError as exc:
+            # list_dir already converts the failure of listing the directory
+            # itself. This catch is for the narrower shape: a directory that can
+            # be listed but not stat'ed through (mode 0o444), where iterdir
+            # succeeds and `p.is_dir()` on a *child* is what raises.
+            raise UsageError(f"cannot read run directory: {self.instances_dir} ({exc})") from exc
 
     def scenario_ids_with_instances(self) -> list[str]:
         """Scenario ids that have an instance directory, sorted.
@@ -230,11 +282,14 @@ class RunPaths:
         unsafe name here means someone edited the run directory by hand, and
         skipping it is the honest response.
         """
-        if not self.suite_dir.is_dir():
-            return []
-        return sorted(
-            p.name for p in self.suite_dir.iterdir() if p.is_dir() and is_safe_segment(p.name)
-        )
+        try:
+            return sorted(
+                p.name for p in list_dir(self.suite_dir) if p.is_dir() and is_safe_segment(p.name)
+            )
+        except OSError as exc:
+            # Same narrow shape _instance_dir_names catches: a listable but not
+            # traversable directory, where `p.is_dir()` on a child is the raise.
+            raise UsageError(f"cannot read run directory: {self.suite_dir} ({exc})") from exc
 
     def unsafe_instance_dir_names(self) -> list[str]:
         """Instance directory names that are not safe path segments, sorted.

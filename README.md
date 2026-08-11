@@ -294,7 +294,7 @@ suite.)
 |---|---|
 | `0` | clean |
 | `1` | findings, one per line on stdout |
-| `2` | usage error, an unreadable run directory, a malformed `--agents`/`--gold` config, or a `SKILL.md` that cannot be parsed |
+| `2` | usage error, a run directory that cannot be read (absent *or* unreadable), a schema set the CLI cannot load, a malformed `--agents`/`--gold` config, or a `SKILL.md` that cannot be parsed |
 
 `1` means a stage produced a bad artifact and is worth one repair attempt.
 `2` means the harness is misconfigured and repeating the stage cannot help —
@@ -303,6 +303,36 @@ there is no stage to hand a repair prompt to. A `SKILL.md` is in that class too:
 no stage produces one, so no repair prompt fixes it. A `SKILL.md` that *parses*
 but declares something wrong is the opposite — an ordinary exit-1 finding from
 `check-skills`, because it names exactly what to edit.
+
+Two invariants follow, and both are enforced in tests over *every* subcommand:
+
+- **A stage defect never surfaces as `2`.** The exception catch names
+  `UsageError` and `OSError`, never a bare `ValueError` — a coverage document
+  with `pct: "half"` is a repairable score-stage defect, not a broken harness.
+- **A `1` never has an empty stdout.** An orchestrator that branches on `1` and
+  finds nothing to read retries blind. An unexpected exception becomes an
+  `[internal]` finding line on stdout with its traceback on stderr.
+
+The mirror of the first invariant is the one this project kept rediscovering:
+**a filesystem problem never surfaces as `1`.** `chmod 000` on a run's
+`04-instances/` used to produce an exit-1 finding telling the orchestrator to
+repair an artifact that was perfectly fine, and an unreadable `01-claims/` used
+to report `stage 'extract' produced no claims artifact` — because `Path.glob`
+swallows `EACCES` and yields nothing, so the check announced *absence* when its
+input was merely unreadable. Every run-directory listing goes through
+`paths.list_dir`/`list_json`, which raise `UsageError`, and `OSError` maps to
+exit 2 for the stats no listing helper covers.
+
+Reading a schema is in the same class. `record-stage`'s `--effort` choices come
+from `manifest-0.1.json`, so *building the parser* touches the disk on every
+invocation — a typo'd `TESTGEN_SCHEMA_DIR` or a non-editable install missing its
+package data is exit 2 for every subcommand, `intake` included.
+
+`intake` refuses an empty `--target-name`/`--target-interface` and a
+`--max-rounds`/`--max-scenarios` below 1 at exit 2 rather than minting the run:
+`manifest-0.1.json` rejects all four, so the run it used to mint at exit 0
+failed `validate --stage intake` on the spot — and since `intake` is code rather
+than a skill, no repair prompt could ever have cleared that finding.
 
 ## The two checks worth understanding
 

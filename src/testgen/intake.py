@@ -116,6 +116,26 @@ def intake(
     """
     if not inputs:
         raise UsageError("intake needs at least one input artifact")
+    # Refused here rather than left for the manifest schema, exactly as
+    # manifest.record_stage refuses a blank --model and an unknown --effort. All
+    # four of these come from the person or orchestrator invoking intake, and
+    # all four have a constraint in manifest-0.1.json: minLength 1 on both
+    # target strings, minimum 1 on both limits. Minting the run anyway exited 0
+    # and printed a run directory, and the defect surfaced steps later as three
+    # findings against manifest.json -- an artifact no repair prompt can ever
+    # fix, because intake is code and no skill wrote it. Stricter than the
+    # schema on the strings, for record_stage's reason: "   " satisfies
+    # minLength: 1 but names no target anyone could act on.
+    for label, value in (("--target-name", target_name), ("--target-interface", target_interface)):
+        if not isinstance(value, str) or not value.strip():
+            raise UsageError(f"intake needs a non-empty {label}, got {value!r}")
+    for label, value in (("--max-rounds", max_rounds), ("--max-scenarios", max_scenarios)):
+        # isinstance-checked because intake is a library function too: argparse's
+        # type=int protects the CLI, but a direct caller passing 2.5 or "2" would
+        # otherwise write a manifest the schema rejects for its *type* rather
+        # than its value, which is the same class of defect one step further out.
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise UsageError(f"intake needs {label} to be an integer >= 1, got {value!r}")
     inputs = [Path(p) for p in inputs]
     for path in inputs:
         if not path.is_file():

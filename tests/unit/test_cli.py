@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 
+import testgen.validate
 from testgen.artifacts import read_json, write_json
-from testgen.cli import main
+from testgen.cli import main, subcommand_names
 from testgen.paths import RunPaths
 from tests.builders import (
     minimal_claims,
@@ -266,6 +267,44 @@ def test_intake_with_a_missing_input_is_a_usage_error(tmp_path):
         ]
     )
     assert code == 2
+
+
+@pytest.mark.parametrize(
+    "flag,value",
+    [
+        ("--target-name", ""),
+        ("--target-interface", "   "),
+        ("--max-rounds", "0"),
+        ("--max-scenarios", "0"),
+    ],
+)
+def test_intake_refuses_to_mint_a_run_the_intake_gate_would_fail(tmp_path, capsys, flag, value):
+    """Exit 2 and an empty runs directory, where it used to be exit 0 and a run.
+
+    Each of these violates manifest-0.1.json (minLength 1 on the target strings,
+    minimum 1 on the limits), so the run intake minted failed `validate --stage
+    intake` immediately -- a finding against an artifact intake wrote itself, so
+    no repair prompt could ever clear it. Checked at the CLI as well as in
+    intake() because this is the surface a person actually mistypes.
+    """
+    source = tmp_path / "api.json"
+    source.write_text('{"tools": []}', encoding="utf-8")
+    arguments = {
+        "--input": str(source),
+        "--runs-dir": str(tmp_path / "runs"),
+        "--target-name": "aap2",
+        "--target-interface": "mcp",
+        flag: value,
+    }
+    argv = ["intake"]
+    for name, argument in arguments.items():
+        argv += [name, argument]
+    code = main(argv)
+    captured = capsys.readouterr()
+    assert code == 2, captured.out
+    assert captured.out.strip() == "", "a refused intake must not print a run directory"
+    assert captured.err.startswith("error: ")
+    assert not (tmp_path / "runs").exists(), "a refused intake must mint nothing"
 
 
 def test_intake_defaults_the_first_slice_limits(tmp_path, capsys):
@@ -635,6 +674,96 @@ def test_an_unreadable_config_file_is_a_usage_error_not_a_finding(tmp_path, caps
     assert code == 2, captured.out
     assert captured.out.strip() == "", "a misconfigured harness must not print findings"
     assert "unusable" in captured.err
+
+
+# -- an unreadable run directory is a filesystem problem, not a stage defect -
+
+
+# (directory attribute on RunPaths, argv for a subcommand that lists it).
+_UNREADABLE_LISTINGS = {
+    "instances-validate": ("instances_dir", ["validate", "--stage", "instantiate"]),
+    "instances-emit": ("instances_dir", ["emit"]),
+    "instances-check-refs": ("instances_dir", ["check-refs"]),
+    "claims-validate": ("claims_dir", ["validate", "--stage", "extract"]),
+    "claims-check-refs": ("claims_dir", ["check-refs"]),
+    "coverage-validate": ("coverage_dir", ["validate", "--stage", "score"]),
+    "verdicts-validate": ("verdicts_dir", ["validate", "--stage", "challenge"]),
+    "suite-validate": ("suite_dir", ["validate", "--stage", "emit"]),
+    "root-validate": ("root", ["validate", "--stage", "intake"]),
+    "root-check-refs": ("root", ["check-refs"]),
+}
+
+
+@pytest.mark.parametrize("mode", [0o000, 0o444])
+@pytest.mark.parametrize("case", sorted(_UNREADABLE_LISTINGS))
+def test_an_unreadable_run_directory_is_exit_2_not_a_finding(tmp_path, capsys, case, mode):
+    """The last member of a family: a filesystem problem dressed as a stage defect.
+
+    Two shapes, one cause. `Path.iterdir` and `Path.is_dir`/`is_file` raise
+    PermissionError, which was not in cli.py's catch tuple, so `chmod 000` on
+    04-instances produced an exit-1 `[internal]` finding advising a repair of an
+    artifact that was fine. `Path.glob` does the opposite and *swallows* EACCES,
+    so an unreadable 01-claims made `validate --stage extract` announce "produced
+    no claims artifact" and made `check-refs` report "no such claim" against a
+    correct world model -- a check reporting absence, and naming the wrong
+    artifact, because its input was unreadable rather than missing.
+
+    Both modes are exercised because they are different code paths: 0o000 fails
+    the listing itself, while 0o444 lists fine and fails on stat'ing a child.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    attribute, command = _UNREADABLE_LISTINGS[case]
+    run = build_state(tmp_path / "run", "emit")
+    target = getattr(run, attribute)
+    target.chmod(mode)
+    try:
+        code = main([command[0], "--run", str(run.root), *command[1:]])
+    finally:
+        target.chmod(0o755)
+    captured = capsys.readouterr()
+    assert code == 2, captured.out
+    assert captured.out.strip() == "", "a filesystem problem must not print a finding line"
+    assert captured.err.startswith("error: ")
+
+
+# -- the parser itself reads the schema, and that read can fail --------------
+
+
+@pytest.mark.parametrize("command", sorted(subcommand_names()))
+@pytest.mark.parametrize("breakage", ["missing-dir", "moved-enum"])
+def test_an_unbuildable_parser_is_exit_2_on_every_subcommand(
+    tmp_path, capsys, monkeypatch, command, breakage
+):
+    """A schema the parser cannot read is a misconfigured harness, not a finding.
+
+    _build_parser reads the manifest schema for record-stage's --effort choices,
+    which happens on *every* invocation and before argv is parsed. The call sat
+    outside main's try blocks, so an ArtifactError (schema directory absent) or a
+    KeyError (the effort enum moved) escaped main entirely: exit 1 with zero
+    stdout lines -- both halves of the exit-code contract broken at once -- and
+    main not returning an int at all. Parametrized over every subcommand because
+    the failure precedes dispatch: intake, which has its own catch and never
+    reaches the shared one, was affected too.
+    """
+    if breakage == "missing-dir":
+        monkeypatch.setenv("TESTGEN_SCHEMA_DIR", str(tmp_path / "definitely-not-here"))
+    else:
+        schema_dir = tmp_path / "schema"
+        schema_dir.mkdir()
+        schema = read_json(Path(testgen.validate.__file__).parent / "schema" / "manifest-0.1.json")
+        del schema["properties"]["stages"]["additionalProperties"]["properties"]["effort"]
+        write_json(schema_dir / "manifest-0.1.json", schema)
+        monkeypatch.setenv("TESTGEN_SCHEMA_DIR", str(schema_dir))
+
+    run = build_state(tmp_path / "run", "emit")
+    argv = _argv_for(command, run, tmp_path) if command in _EXPLODE_TARGETS else [command]
+    code = main(argv)
+    captured = capsys.readouterr()
+    assert isinstance(code, int), "main must return an int, never raise"
+    assert code == 2, captured.out
+    assert captured.out.strip() == "", "a misconfigured harness must not print a finding line"
+    assert captured.err.startswith("error: ")
 
 
 def test_check_skills_is_clean_on_the_shipped_skills():

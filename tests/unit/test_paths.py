@@ -1,8 +1,18 @@
+import os
 from pathlib import Path
 
 import pytest
 
-from testgen.paths import STAGES, RunPaths, UnsafeSegment, is_safe_segment, safe_segment
+from testgen.errors import UsageError
+from testgen.paths import (
+    STAGES,
+    RunPaths,
+    UnsafeSegment,
+    is_safe_segment,
+    list_dir,
+    list_json,
+    safe_segment,
+)
 
 # Directory names a confused stage could plausibly write that are not usable
 # scenario ids. All of these can really exist on disk -- a literal ".." cannot,
@@ -176,3 +186,75 @@ def test_is_safe_segment_agrees_with_safe_segment():
         assert not is_safe_segment(bad)
         with pytest.raises(UnsafeSegment):
             safe_segment(bad)
+
+
+# -- listing a run directory ---------------------------------------------------
+
+
+def test_list_dir_and_list_json_are_empty_for_a_directory_that_does_not_exist(tmp_path):
+    """Absence is not an error: a stage that has not run yet has no directory."""
+    assert list_dir(tmp_path / "nope") == []
+    assert list_json(tmp_path / "nope") == []
+
+
+def test_list_json_returns_only_json_files_sorted(tmp_path):
+    for name in ("b.json", "a.json", "notes.md"):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    (tmp_path / "subdir.json").mkdir()
+    assert list_json(tmp_path) == [tmp_path / "a.json", tmp_path / "b.json"]
+    assert (tmp_path / "subdir.json") in list_dir(tmp_path), "list_dir does not filter"
+
+
+@pytest.mark.parametrize("mode", [0o000, 0o444])
+def test_listing_an_unreadable_directory_raises_a_usage_error(tmp_path, mode):
+    """Not `[]`, and not a bare PermissionError.
+
+    `Path.glob` swallows EACCES and yields nothing, which made every caller
+    report the artifacts as absent rather than as unreadable. `iterdir` raises
+    PermissionError, which cli.py's catch tuple did not cover, so it became an
+    exit-1 finding about a run that was fine. Both become the UsageError cli.py
+    maps to exit 2 -- the same conversion skills._skill_dirs does for the prompt
+    directory.
+
+    The two modes are two different code paths, and only list_json is affected by
+    both. At 0o000 the listing itself fails. At 0o444 the listing succeeds and
+    stat'ing a child is what fails -- so list_dir, which stats nothing, correctly
+    still answers, and every caller that goes on to stat wraps its own loop.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    (tmp_path / "a.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "child").mkdir()
+    tmp_path.chmod(mode)
+    try:
+        with pytest.raises(UsageError, match="cannot read run directory"):
+            list_json(tmp_path)
+        if mode == 0o000:
+            with pytest.raises(UsageError, match="cannot read run directory"):
+                list_dir(tmp_path)
+        else:
+            assert [p.name for p in list_dir(tmp_path)] == ["a.json", "child"]
+    finally:
+        tmp_path.chmod(0o755)
+
+
+@pytest.mark.parametrize("mode", [0o000, 0o444])
+def test_the_listing_methods_raise_a_usage_error_on_an_unreadable_directory(tmp_path, mode):
+    """The two RunPaths listings validate and emit iterate, same ruling."""
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = RunPaths(tmp_path)
+    for directory in (run.instances_dir, run.suite_dir):
+        (directory / "scn-001").mkdir(parents=True)
+        directory.chmod(mode)
+    try:
+        for call in (
+            run.scenario_ids_with_instances,
+            run.unsafe_instance_dir_names,
+            run.scenario_ids_with_tasks,
+        ):
+            with pytest.raises(UsageError, match="cannot read run directory"):
+                call()
+    finally:
+        for directory in (run.instances_dir, run.suite_dir):
+            directory.chmod(0o755)

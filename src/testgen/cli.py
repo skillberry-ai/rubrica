@@ -18,7 +18,17 @@ argument checks but swallowed every `ValueError` raised anywhere downstream --
 a coverage document with `pct: "half"` was reported as a misconfigured harness
 when it is a repairable score-stage defect, and `UnsafeSegment` (a `ValueError`
 subclass) could become a 2 from any call site that had not been individually
-hardened. intake raises `UsageError` for its own usage problems instead.
+hardened. intake raises `UsageError` for its own usage problems instead, and
+that named subclass -- not `ValueError` -- is what the catch names.
+
+**And the mirror of it: a filesystem problem must never surface as 1.** The
+same catch names `OSError`, not just its `FileNotFoundError` subclass. A run
+directory that cannot be *read* is the harness pointed at something it cannot
+work with, exactly like one that does not exist; reporting it as a stage defect
+sent the orchestrator to spend its one repair attempt re-running a stage whose
+output was fine. Malformed content still reaches the handler at the bottom and
+still exits 1: content errors are `ArtifactError`, `KeyError`, `UnsafeSegment`,
+never `OSError`.
 
 **A 1 must never mean "no information".** An unexpected exception from a
 checking layer is a layer-1 precondition violation (refs.py and emit.py both
@@ -27,6 +37,18 @@ defect, so it exits 1 -- but an exception printed nowhere left stdout empty, and
 an orchestrator branching on 1 then retried blind with no findings to act on. It
 is turned into a finding-shaped line instead. The traceback goes to stderr,
 where a human can read it and a machine parsing stdout is unaffected.
+
+**Both invariants also have to hold before any subcommand runs.** Building the
+parser is not free: `record-stage`'s `--effort` choices are read out of the
+active manifest schema so the CLI cannot accept an effort the schema rejects.
+That read happens for *every* invocation, `intake` included, and it happens
+before argv has even been parsed -- so a typo'd `TESTGEN_SCHEMA_DIR`, a
+non-editable install missing its package data, or a schema edit that moves
+`properties.stages.additionalProperties.properties.effort.enum` used to let an
+`ArtifactError` or a `KeyError` escape `main` entirely: exit 1, empty stdout,
+and `main` not returning an int at all. Nothing about parser construction reads
+a run artifact, so no failure of it can be a stage defect: it is exit 2 on the
+same stderr channel as every other usage error.
 """
 
 from __future__ import annotations
@@ -167,7 +189,25 @@ def _report(findings) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _build_parser()
+    # Inside a try, because _build_parser reads the active manifest schema off
+    # disk for record-stage's --effort choices. The catch is wider than the one
+    # around the subcommand bodies below on purpose, and it is still narrow in
+    # the way that matters: no run artifact is read here, so nothing this can
+    # catch is a repairable stage defect. ArtifactError is the schema file
+    # missing or not being JSON; KeyError and TypeError are a schema whose
+    # effort enum has moved or is no longer a list of strings; OSError is the
+    # file being unreadable rather than absent.
+    try:
+        parser = _build_parser()
+    except (ArtifactError, OSError, KeyError, TypeError) as exc:
+        print(
+            f"error: cannot build the command-line parser: {type(exc).__name__}: {exc}. "
+            "record-stage's --effort choices are read from the manifest schema, so every "
+            "subcommand needs it; check TESTGEN_SCHEMA_DIR and that the package's schema/ "
+            "data is installed",
+            file=sys.stderr,
+        )
+        return USAGE
     # parse_known_args rather than parse_args so an unknown subcommand becomes
     # our exit code 2 instead of argparse's SystemExit(2) escaping the caller.
     try:
@@ -233,10 +273,12 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "smoke":
             run = _run_dir(args.run)
-            # An inner catch, because UsageError is a ValueError and the outer
-            # narrow catch deliberately does not include ValueError -- without
-            # this a typo'd roster path would reach `except Exception` and be
-            # reported as a malformed artifact at exit 1.
+            # An inner catch so the failure is handled next to the call that
+            # can produce it. The shared catch below now also maps UsageError to
+            # exit 2, so this is a localisation rather than the only thing
+            # standing between a typo'd roster path and a fabricated exit-1
+            # finding -- which is what it was when that catch excluded every
+            # ValueError, UsageError included.
             try:
                 specs = preflight(load_agents(Path(args.agents)))
             except UsageError as exc:
@@ -267,10 +309,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "sample-for-review":
             run = _run_dir(args.run)
-            # UsageError is a ValueError, which the outer catch deliberately
-            # excludes -- without this, --size 0 would reach `except Exception`
-            # and be reported as a malformed artifact at exit 1. Same shape as
-            # smoke's inner catch above.
+            # Same shape as smoke's inner catch above, and the same reason:
+            # --size 0 is a usage error, handled beside the call that raises it.
+            # The shared catch below is the backstop.
             try:
                 sampled, findings = sample_run(run, args.size)
             except UsageError as exc:
@@ -294,10 +335,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "check-skills":
             # Its own UsageError catch, for the same reason smoke and
-            # sample-for-review have one: UsageError is a ValueError and the
-            # outer narrow catch deliberately excludes ValueError. A SKILL.md
-            # that cannot be parsed at all is human-authored and unrepairable
-            # by re-prompting, so it is exit 2.
+            # sample-for-review have one. A SKILL.md that cannot be parsed at
+            # all is human-authored and unrepairable by re-prompting, so it is
+            # exit 2 -- and unlike the other two, this one is not about a run
+            # directory at all, so keeping it local is what documents that.
             try:
                 findings = skills.check_all(args.skills_dir)
             except UsageError as exc:
@@ -343,10 +384,26 @@ def main(argv: list[str] | None = None) -> int:
                 return USAGE
             print(run.decisions)
             return CLEAN
-    except (FileNotFoundError, ArtifactError, UnknownStage) as exc:
+    except (OSError, UsageError, ArtifactError, UnknownStage) as exc:
         # A run directory that cannot be read, an artifact that is absent or is
         # not JSON at all, an unknown stage name: the harness was pointed at
         # something it cannot work with, and repeating the stage cannot help.
+        #
+        # OSError rather than just its FileNotFoundError subclass, and UsageError
+        # alongside it, close the last member of a family this build kept
+        # rediscovering: a *filesystem* problem on the run directory reported as
+        # a repairable stage defect. `chmod 000` on 04-instances raised
+        # PermissionError out of paths.scenario_ids_with_instances and became an
+        # exit-1 [internal] finding telling the orchestrator to repair an
+        # artifact that was fine. paths.list_dir now converts the listing shapes
+        # into UsageError with the directory named (following skills._skill_dirs),
+        # and OSError here is the backstop for the rest: `run.manifest.is_file()`
+        # on a run root with mode 000 raises PermissionError from a plain stat,
+        # and there are dozens of such stats no per-call-site wrapper would ever
+        # cover. Nothing about this widens the 1-vs-2 line in the wrong
+        # direction: a stage defect is malformed *content* -- ArtifactError,
+        # KeyError, UnsafeSegment -- and reaches the handler below. An OSError is
+        # the filesystem refusing, which no repair prompt can fix.
         print(f"error: {exc}", file=sys.stderr)
         return USAGE
     except Exception as exc:

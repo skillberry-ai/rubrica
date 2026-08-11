@@ -28,7 +28,7 @@ from jsonschema import Draft202012Validator
 
 from testgen.artifacts import ArtifactError, read_json
 from testgen.findings import Finding
-from testgen.paths import STAGES, RunPaths
+from testgen.paths import STAGES, RunPaths, list_json
 
 # Artifact kind -> schema filename.
 ARTIFACT_SCHEMAS: dict[str, str] = {
@@ -167,7 +167,7 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
     if kind == "scenarios":
         return [run.scenarios] if run.scenarios.is_file() else []
     if kind == "claims":
-        return sorted(run.claims_dir.glob("*.json")) if run.claims_dir.is_dir() else []
+        return list_json(run.claims_dir)
     if kind == "coverage":
         # latest.json is a singleton artifact that happens to live in a
         # directory of round files, so it is required the way manifest.json and
@@ -177,14 +177,14 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         # is absent, a score stage that wrote the round file and forgot the
         # pointer passed *both* gates with every coverage check bypassed.
         # Returning the absent path makes validate_artifact report it by name.
-        if not run.coverage_dir.is_dir():
+        rounds = list_json(run.coverage_dir)
+        if not rounds and not run.coverage_dir.is_dir():
             return []
-        rounds = sorted(run.coverage_dir.glob("*.json"))
         if run.coverage_latest.is_file():
             return rounds
         return [run.coverage_latest, *rounds]
     if kind == "verdict":
-        return sorted(run.verdicts_dir.glob("*.json")) if run.verdicts_dir.is_dir() else []
+        return list_json(run.verdicts_dir)
     if kind == "seed":
         return [run.seed(sid) for sid in run.scenario_ids_with_instances()]
     if kind == "expected":

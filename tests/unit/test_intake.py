@@ -296,3 +296,72 @@ def test_intake_refuses_to_overwrite_an_existing_run(tmp_path):
     intake(**kwargs)
     with pytest.raises(FileExistsError):
         intake(**kwargs)
+
+
+# -- intake must never mint a run its own schema rejects ----------------------
+
+_BAD_ARGUMENTS = {
+    "empty-name": {"target_name": ""},
+    "blank-name": {"target_name": "   "},
+    "empty-interface": {"target_interface": ""},
+    "blank-interface": {"target_interface": "\t\n"},
+    "zero-rounds": {"max_rounds": 0},
+    "negative-rounds": {"max_rounds": -1},
+    "zero-scenarios": {"max_scenarios": 0},
+    "negative-scenarios": {"max_scenarios": -3},
+    "float-rounds": {"max_rounds": 2.5},
+    "string-scenarios": {"max_scenarios": "8"},
+}
+
+
+@pytest.mark.parametrize("case", sorted(_BAD_ARGUMENTS))
+def test_intake_refuses_arguments_the_manifest_schema_would_reject(tmp_path, case):
+    """The defect intake could mint at exit 0 and no repair prompt could ever clear.
+
+    manifest-0.1.json puts minLength 1 on both target strings and minimum 1 on
+    both limits, so these arguments produced a run directory, a printed path and
+    exit 0 -- then three exit-1 schema findings against manifest.json the next
+    time anyone ran `validate --stage intake`. intake is code: no skill wrote
+    that manifest, so the repair loop the finding routes to has nothing to
+    re-dispatch. Refused at the call, like manifest.record_stage refuses a blank
+    --model, and nothing is written.
+    """
+    kwargs = dict(
+        inputs=[_write(tmp_path / "src", "api.json", {"tools": []})],
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=NOW,
+    )
+    kwargs.update(_BAD_ARGUMENTS[case])
+    with pytest.raises(ValueError):
+        intake(**kwargs)
+    assert not (tmp_path / "runs").exists(), "a refused intake must mint nothing"
+
+
+@pytest.mark.parametrize("case", sorted(_BAD_ARGUMENTS))
+def test_whatever_intake_does_mint_validates_as_the_intake_stage(tmp_path, case):
+    """The property behind the test above, stated over the same arguments.
+
+    Rather than pinning the four guards one at a time, this asserts the invariant
+    they exist for: intake either refuses, or mints a manifest that clears layer 1
+    on the spot. A future argument that slips past the guards fails here even if
+    nobody thought to add a case for it.
+    """
+    kwargs = dict(
+        inputs=[_write(tmp_path / "src", "api.json", {"tools": []})],
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=NOW,
+    )
+    kwargs.update(_BAD_ARGUMENTS[case])
+    try:
+        run = intake(**kwargs)
+    except ValueError:
+        return
+    assert validate_artifact(run.manifest, "manifest") == []

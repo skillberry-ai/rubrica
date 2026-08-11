@@ -30,7 +30,7 @@ from testgen.artifacts import ArtifactError, read_json, sha256_of
 from testgen.findings import Finding
 from testgen.invariants import InvariantForm
 from testgen.invariants import evaluate as evaluate_invariant
-from testgen.paths import RunPaths, is_safe_segment
+from testgen.paths import RunPaths, is_safe_segment, list_json
 from testgen.suite.verify import DATA_KINDS, TRAJECTORY_KINDS
 
 _CELL_RE = re.compile(r"\Acell:([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
@@ -98,15 +98,12 @@ def _readable_targets(run: RunPaths) -> list[Path]:
     missing here is one whose truncation still misdirects the repair.
     """
     targets = [run.manifest]
-    if run.claims_dir.is_dir():
-        targets += sorted(run.claims_dir.glob("*.json"))
+    targets += list_json(run.claims_dir)
     targets += [run.world_model, run.scenarios]
-    if run.coverage_dir.is_dir():
-        targets += sorted(run.coverage_dir.glob("*.json"))
+    targets += list_json(run.coverage_dir)
     for sid in run.scenario_ids_with_instances():
         targets += [run.seed(sid), run.expected(sid)]
-    if run.verdicts_dir.is_dir():
-        targets += sorted(run.verdicts_dir.glob("*.json"))
+    targets += list_json(run.verdicts_dir)
     for sid in run.scenario_ids_with_tasks():
         task = run.task_dir(sid)
         targets += [
@@ -144,9 +141,7 @@ def _claim_index(run: RunPaths) -> dict[str, list[Path]]:
     hide it. check_manifest reports any id with more than one entry.
     """
     index: dict[str, list[Path]] = {}
-    if not run.claims_dir.is_dir():
-        return index
-    for path in sorted(run.claims_dir.glob("*.json")):
+    for path in list_json(run.claims_dir):
         payload = _load(path)
         if not isinstance(payload, dict):
             continue
@@ -231,10 +226,7 @@ def check_manifest(run: RunPaths) -> list[Finding]:
                 )
             )
 
-    if not run.claims_dir.is_dir():
-        return out
-
-    for path in sorted(run.claims_dir.glob("*.json")):
+    for path in list_json(run.claims_dir):
         payload = _load(path)
         if not isinstance(payload, dict):
             continue
@@ -1110,7 +1102,7 @@ def check_verdicts(run: RunPaths) -> list[Finding]:
 
     if run.verdicts_dir.is_dir():
         known = set(instantiated)
-        for path in sorted(run.verdicts_dir.glob("*.json")):
+        for path in list_json(run.verdicts_dir):
             if path.stem not in known:
                 out.append(
                     Finding(path, "refs", "", f"verdict for {path.stem}, which has no instance")
