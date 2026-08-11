@@ -99,7 +99,7 @@ The sweep touches **89 files**: roughly 478 occurrences of `testgen` and 360 of
 Most of it is mechanical. The parts that are not are enumerated in §5, and they
 are the reason this is a reviewed change rather than one `sed` invocation.
 
-## 5. The four places a blind replacement does damage
+## 5. The five places a blind replacement does damage
 
 1. **`skills.py` hardcodes the prefix in three places** — `ORCHESTRATOR` at
    `:41`, the expected-name tuple at `:157`, and the per-skill name check at
@@ -123,6 +123,15 @@ are the reason this is a reviewed change rather than one `sed` invocation.
 4. **`suite/test.sh` is copied verbatim into every package** — its header
    comments at `:2` and `:10` name the tool, so its bytes ship. Editing it
    changes every emitted package's contents.
+
+5. **A guard is written in terms of the old package name.**
+   `tests/unit/test_verify_reward.py:736-738` walks `verify.py`'s AST and asserts
+   no import name starts with `"testgen"` — this is what keeps the verifier
+   stdlib-only so it can run inside a bare container. Rename the package and
+   leave the string, and the guard tests for a prefix that no longer exists: it
+   passes unconditionally, forever, while appearing to hold. This is the
+   substring-of-message weakness the repository already warns about, aimed at
+   itself, and it is the single most dangerous line in the sweep.
 
 ## 6. The wire-format break, and why it is accepted
 
@@ -169,6 +178,12 @@ would make the record describe a past that did not happen.
 - `README.md`, `CLAUDE.md`, `docs/running-a-stage-by-hand.md` — rewritten. These
   are living documents; the last is a procedure that would otherwise instruct a
   reader to run commands that no longer exist.
+- `src/*/skills/*/exercise.md` — **commands rewritten, measured results
+  untouched.** These ship beside the skill they describe and tell a reader how to
+  reproduce a dispatch, so leaving the old command name would make them
+  unrunnable. But an exercise record states what happened, and a rename changes
+  no measurement: every number, verdict and quoted model output stays exactly as
+  recorded. Only the invocation lines move.
 
 ## 8. Verification gate
 
