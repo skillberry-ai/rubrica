@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+#
+# Dispatch one stage into a Claude Code instance that shares nothing with the
+# developer's own setup.
+#
+# docs/running-a-stage-by-hand.md is the runbook this automates; §7 there covers
+# why an isolated instance is worth the trouble and what is and is not enforced.
+# The short version: this project's falsifiable claim is that the *prompt*
+# carries the judgment across artifact handoffs. A dispatch that also carries a
+# global CLAUDE.md, whatever plugins and hooks the developer runs, and this
+# repository's own CLAUDE.md and design spec is not measuring the skill -- it is
+# measuring the skill plus a briefing, and the briefing is the answer key.
+#
+# Usage:
+#   scripts/dispatch-stage.sh <stage> <run-dir> [slice-id]
+#
+#   scripts/dispatch-stage.sh extract   "$RUN" api-json
+#   scripts/dispatch-stage.sh reconcile "$RUN"
+#
+# Environment:
+#   RUBRICA_LAB          scratch dir for settings and transcripts
+#                        (default ${TMPDIR:-/tmp}/rubrica-lab)
+#   RUBRICA_MODEL        model for the dispatch (default sonnet)
+#   RUBRICA_EFFORT       effort for the dispatch (default medium)
+#   RUBRICA_BUDGET       hard dollar ceiling for the dispatch (default 2)
+#   RUBRICA_NO_SANDBOX   set to 1 to omit the sandbox block entirely
+set -euo pipefail
+
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+LAB=${RUBRICA_LAB:-${TMPDIR:-/tmp}/rubrica-lab}
+
+for tool in claude jq; do
+  command -v "$tool" >/dev/null || { echo "$tool is required and not on PATH" >&2; exit 2; }
+done
+
+STAGE=${1:-}
+RUN_ARG=${2:-}
+SLICE=${3:-}
+if [ -z "$STAGE" ] || [ -z "$RUN_ARG" ]; then
+  echo "usage: $0 <stage> <run-dir> [slice-id]" >&2
+  exit 2
+fi
+RUN=$(cd "$RUN_ARG" 2>/dev/null && pwd) || { echo "no such run directory: $RUN_ARG" >&2; exit 2; }
+
+SKILL_DIR="$REPO/src/rubrica/skills/rb-$STAGE"
+SKILL="$SKILL_DIR/SKILL.md"
+if [ ! -f "$SKILL" ]; then
+  echo "no skill for stage '$STAGE'. Stages with a skill:" >&2
+  for d in "$REPO"/src/rubrica/skills/rb-*; do
+    name=$(basename "$d")
+    [ "$name" = "rb-orchestrate" ] && continue   # the eighth skill is not a stage
+    echo "  ${name#rb-}" >&2
+  done
+  exit 2
+fi
+
+# The slice id is an address, not context: a fan-out member cannot find its own
+# work without it. Give it its own id and nothing about any sibling.
+SLICE_LINE=""
+if [ -n "$SLICE" ]; then
+  case "$STAGE" in
+    extract)               SLICE_LINE="Your artifact_id:  $SLICE" ;;
+    instantiate|challenge) SLICE_LINE="Your scenario_id:  $SLICE" ;;
+    *) echo "$STAGE is a single dispatch over everything; it takes no slice id" >&2; exit 2 ;;
+  esac
+fi
+
+mkdir -p "$LAB/transcripts"
+export CLAUDE_CONFIG_DIR="$LAB/cc-config"
+mkdir -p "$CLAUDE_CONFIG_DIR"
+
+# Auth. An isolated CLAUDE_CONFIG_DIR means the developer's OAuth session is not
+# in scope, so the dispatch needs credentials from the environment. If they are
+# already exported, they are used as-is; otherwise they are read out of the real
+# user settings at launch rather than copied into a second file, so a token does
+# not end up sitting in the scratch dir.
+USER_SETTINGS="$HOME/.claude/settings.json"
+if [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -f "$USER_SETTINGS" ]; then
+  for var in ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY; do
+    val=$(jq -r --arg v "$var" '.env[$v] // empty' "$USER_SETTINGS")
+    [ -n "$val" ] && export "$var=$val"
+  done
+fi
+if [ -z "${ANTHROPIC_AUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+  echo "warning: no ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY in the environment" >&2
+  echo "         or in $USER_SETTINGS -- the dispatch will probably fail to authenticate." >&2
+fi
+
+# Every skill's Invariants section tells the stage to run bare `rubrica ...`, and
+# README.md says commands assume the venv is on PATH. Put it there. Measured
+# without this: the stage reaches for `uv run rubrica`, which wants a writable uv
+# cache it does not have, and spends its whole budget thrashing on that instead
+# of on the artifact.
+[ -x "$REPO/.venv/bin/rubrica" ] || {
+  echo "warning: $REPO/.venv/bin/rubrica not found -- run 'make setup' first," >&2
+  echo "         or the stage cannot run its own gate." >&2
+}
+export PATH="$REPO/.venv/bin:$PATH"
+
+# ---------------------------------------------------------------------------
+# Two enforcement layers, deliberately in two different settings scopes.
+#
+# MEASURED, both directions, on Claude Code 2.1.227: a `sandbox` block in the
+# file passed to --settings silently stops that same file's permissions.deny
+# Read rules from being enforced -- no warning, the reads just succeed. The same
+# deny list with the sandbox key deleted blocks; with it added back, it does not.
+# So sandbox goes in the isolated user scope and permissions go in --settings.
+#
+# What each layer covers:
+#   permissions.deny Read(...)   the Read/Grep/Glob tools, and the file commands
+#                                Claude Code parses out of a Bash line
+#   sandbox.filesystem.denyRead  OS-level, via bubblewrap, so a Python script
+#                                that opens the file itself is stopped too
+#
+# The sandbox layer is the unverified one. On the machine this was built on it
+# did not engage even with bubblewrap and socat installed and working: a
+# `python -c "open(...)"` read a denyRead path successfully. failIfUnavailable
+# is set so a silent fall-through becomes loud rather than being mistaken for
+# enforcement. Set RUBRICA_NO_SANDBOX=1 to drop the block if it gets in the way,
+# and read the read audit rather than trusting either layer.
+# ---------------------------------------------------------------------------
+
+if [ "${RUBRICA_NO_SANDBOX:-0}" = "1" ]; then
+  echo '{}' > "$CLAUDE_CONFIG_DIR/settings.json"
+else
+  jq -n --arg repo "$REPO" --arg run "$RUN" --arg skilldir "$SKILL_DIR" \
+    '{sandbox: {
+        enabled: true,
+        autoAllowBashIfSandboxed: true,
+        failIfUnavailable: true,
+        filesystem: {
+          allowRead: [$repo, $run, $skilldir],
+          denyRead: [$repo + "/docs", $repo + "/tests", $repo + "/src/rubrica/skills"],
+          allowWrite: [$run]
+        },
+        network: { allowedDomains: [] }
+      }}' > "$CLAUDE_CONFIG_DIR/settings.json"
+fi
+
+# The answer key: the design spec under docs/, the golden fixture under tests/
+# that a skill is supposed to imitate, this repository's own CLAUDE.md and
+# README.md, and every sibling skill.
+#
+# permissions.deny beats permissions.allow unconditionally, so the skills root
+# cannot be denied wholesale and this stage's own directory re-allowed inside it
+# -- the siblings get enumerated one at a time. sandbox.filesystem uses the
+# opposite rule (more specific path wins), which is why the two lists above and
+# below are built differently from the same intent.
+DENY=("$REPO/docs" "$REPO/tests" "$REPO/CLAUDE.md" "$REPO/README.md")
+for d in "$REPO"/src/rubrica/skills/rb-*; do
+  [ "$d" = "$SKILL_DIR" ] || DENY+=("$d")
+done
+
+# A "//abs" rule is "/" prepended to a path that already starts with "/".
+SETTINGS_FILE="$LAB/settings-$STAGE${SLICE:+-$SLICE}.json"
+jq -n --arg repo "$REPO" --arg run "$RUN" --arg skilldir "$SKILL_DIR" \
+  --argjson deny "$(printf '%s\n' "${DENY[@]}" \
+      | jq -R '"Read(/" + . + ")", "Read(/" + . + "/**)"' | jq -s .)" \
+  '{permissions: {
+      deny: $deny,
+      allow: ["Read(/" + $skilldir + "/**)", "Read(/" + $run + "/**)",
+              "Edit(/" + $run + "/**)", "Write",
+              "Bash(rubrica *)", "Bash(" + $repo + "/.venv/bin/rubrica *)"]
+    }}' > "$SETTINGS_FILE"
+
+# The dispatch prompt, verbatim from docs/running-a-stage-by-hand.md §2. Nothing
+# else may be added to it: not a summary of what an earlier stage concluded, not
+# an excerpt of the world model, and not a correction for something a skill got
+# wrong. A skill defect belongs in the skill.
+PROMPT="You are the $STAGE stage of the rubrica pipeline.
+
+Run directory: $RUN
+Your skill:    $SKILL
+$SLICE_LINE
+
+Read your skill and follow it exactly. Read only the artifacts your skill's
+Contract block lists under \`reads\`. Write only what it lists under \`writes\`.
+Do not read this pipeline's other stages, other scenarios, or any file the
+contract does not name.
+
+When you are done, report only: the paths you wrote, and any refusal
+condition you hit."
+
+TRANSCRIPT="$LAB/transcripts/$STAGE${SLICE:+-$SLICE}.jsonl"
+
+# cwd is the run directory, not the repository. manifest.inputs[].source_path is
+# a repo-relative path, so a run-dir cwd means it cannot resolve back to the
+# original fixture file even by accident.
+cd "$RUN"
+claude -p "$PROMPT" \
+  --safe-mode \
+  --settings "$SETTINGS_FILE" \
+  --strict-mcp-config \
+  --disable-slash-commands \
+  --add-dir "$SKILL_DIR" \
+  --add-dir "$REPO" \
+  --output-format stream-json --verbose \
+  --model "${RUBRICA_MODEL:-sonnet}" \
+  --effort "${RUBRICA_EFFORT:-medium}" \
+  --max-budget-usd "${RUBRICA_BUDGET:-2}" \
+  < /dev/null | tee "$TRANSCRIPT"
+
+cat <<EOF
+
+transcript  $TRANSCRIPT
+gates       rubrica validate --stage $STAGE --run "$RUN"
+            rubrica check-refs --run "$RUN"
+read audit  $REPO/scripts/audit-reads.sh "$TRANSCRIPT"
+
+The read audit is not optional housekeeping. A fan-out member that read a
+sibling's slice produces a byte-identical artifact to one that did not, so no
+schema, no check-refs and no digest can see the difference -- the transcript is
+the only instrument there is.
+EOF
