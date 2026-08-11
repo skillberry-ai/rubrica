@@ -251,12 +251,15 @@ artifact, which is `rb-extract`'s shape, not yours.
    ids. A contradiction that names a claim nobody extracted is not a
    recorded disagreement, it is a reference to nothing.
 
-Before you report done, run `rubrica validate --stage reconcile` and then
-`rubrica check-refs`. Either one reporting anything wrong with the world
-model you just wrote is not a finding to pass along -- it is your own
-defect to fix. Repair the artifact and run both again; report success only
-once `rubrica validate --stage reconcile` and `rubrica check-refs` both
-exit clean.
+Before you report done, run `rubrica validate --stage reconcile --run <run>`
+and then `rubrica check-refs --run <run>`, where `<run>` is the run directory
+you were dispatched with. `--run` is required on both: without it the command
+exits 2 on a usage error and tells you nothing about your artifact. Either one
+reporting anything wrong with the world model you just wrote is not a finding
+to pass along -- it is your own defect to fix. Repair the artifact and run
+both again; report success only once
+`rubrica validate --stage reconcile --run <run>` and
+`rubrica check-refs --run <run>` both exit clean.
 
 ## 5. Refusal conditions
 

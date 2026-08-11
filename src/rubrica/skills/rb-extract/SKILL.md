@@ -200,11 +200,13 @@ there -- an incomplete claim is a validation failure, not a smaller claim.
    yours says. You must not know that, and a claim of yours must never read
    as though you did.
 
-Before you report done, run `rubrica validate --stage extract`. If it
-reports anything wrong with the file you just wrote, that is not a finding
-to pass along -- it is your own defect to fix. Repair the artifact and
-validate again; report success only once `rubrica validate --stage extract`
-exits clean.
+Before you report done, run `rubrica validate --stage extract --run <run>`,
+where `<run>` is the run directory you were dispatched with. `--run` is
+required: without it the command exits 2 on a usage error and tells you
+nothing about your artifact. If it reports anything wrong with the file you
+just wrote, that is not a finding to pass along -- it is your own defect to
+fix. Repair the artifact and validate again; report success only once
+`rubrica validate --stage extract --run <run>` exits clean.
 
 ## 5. Refusal conditions
 

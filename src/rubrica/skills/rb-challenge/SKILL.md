@@ -409,10 +409,12 @@ worth nothing at all unless steps 1 to 3 finished first.
    justification and the derivability line are what make the field evidence
    about an attempt rather than a description of a test.
 
-Before you report done, run `rubrica validate --stage challenge`. If it
-reports anything wrong with the file you just wrote, that is not a finding
-to pass along -- it is your own defect to fix. Repair the verdict and run it
-again.
+Before you report done, run `rubrica validate --stage challenge --run <run>`,
+where `<run>` is the run directory you were dispatched with. `--run` is
+required: without it the command exits 2 on a usage error and tells you
+nothing about your artifact. If it reports anything wrong with the file you
+just wrote, that is not a finding to pass along -- it is your own defect to
+fix. Repair the verdict and run it again.
 
 Read each finding's path before you act on it, because **that command is
 run-global and you are one of several subagents running right now.**

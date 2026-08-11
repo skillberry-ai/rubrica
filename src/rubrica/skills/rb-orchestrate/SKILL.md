@@ -145,7 +145,11 @@ failed, the answer is the halt in refusal condition 2, not the artifact.
 ## 3. Method
 
 The whole run, in one block. `→` reads "then", and every `rubrica` command
-shown is one you actually run:
+shown is one you actually run. Every subcommand below except `check-skills`
+takes `--run <run>`, naming the run directory you were dispatched with, and it
+is required -- the block omits it only to stay readable, and a subcommand run
+without it exits 2 on a usage error, which is an exit code you would otherwise
+have to read as a misconfigured run:
 
 ```
 rubrica check-skills                          # before anything: a bad skill is not a stage defect
@@ -230,8 +234,9 @@ a conclusion:
 If what you are about to append is not a finding, a verdict field quoted from
 the file that holds it, or a named artifact defect, it does not go in the prompt.
 
-**A2. Gate before you build on it.** Run `rubrica validate --stage <stage>`
-after every stage, and `rubrica check-refs` where the walk says so. Never
+**A2. Gate before you build on it.** Run
+`rubrica validate --stage <stage> --run <run>` after every stage, and
+`rubrica check-refs --run <run>` where the walk says so. Never
 dispatch stage N+1 against an ungated stage N: layer 1 is what stops a
 malformed document being indexed directly by a later layer, and both
 `refs.py` and `emit.py` document that precondition -- violate it and you get an
@@ -378,14 +383,15 @@ absent or unreadable, that is exit 2 territory -- report it and stop; there is
 no run here to drive.
 
 **B2. Fan out `rb-extract`, one member per registered input artifact**, each
-given its own `artifact_id`. Then `rubrica validate --stage extract` once,
-after all members are done. `record-stage --stage extract` with the skill you
-dispatched.
+given its own `artifact_id`. Then `rubrica validate --stage extract --run <run>`
+once, after all members are done. `record-stage --stage extract --run <run>`
+with the skill you dispatched.
 
 **B3. `rb-reconcile`, a single dispatch.** It is a barrier: it needs every
 claims file in one context, because contradiction detection is exactly the
 cross-artifact work no fan-out member can do. Gate with
-`rubrica validate --stage reconcile`, then `rubrica check-refs`.
+`rubrica validate --stage reconcile --run <run>`, then
+`rubrica check-refs --run <run>`.
 
 **B4. Halt on a blocking gap.** Read the world model's `gaps`. Each one
 carries `blocks`, an array of stage names drawn from `propose`, `score`,
@@ -646,8 +652,9 @@ points at:
 10. **No human gate was passed without either a human or `--no-gate`.**
 
 Before you report a run *completed*, confirm the two things that are yours
-rather than any stage's: run `rubrica check-refs` once more against the finished
-run and confirm it exits 0, and read `manifest.stages` back to confirm it holds
+rather than any stage's: run `rubrica check-refs --run <run>` once more against
+the finished run and confirm it exits 0, and read `manifest.stages` back to
+confirm it holds
 an entry for every stage you dispatched. Unlike a stage, you have no artifact of
 your own for a gate to check, so those two checks plus the trail in
 `decisions.md` are the only evidence that what you did is what you say you did.

@@ -147,11 +147,13 @@ Four steps.
    instance with no verdict, an instance still marked `re-seed`. Read each
    one for which artifact it names, because that is who has to change.
 
-3. **Run `rubrica validate --stage emit`, then `rubrica check-refs`.** In
-   that order: layer 1 schema-checks every emitted `tests/expected.json`
-   against `suite-expected`, and layer 2 then checks each package is complete
-   (all eight files present) and addresses a scenario that was actually
-   judged.
+3. **Run `rubrica validate --stage emit --run <run>`, then
+   `rubrica check-refs --run <run>`.** In that order: layer 1 schema-checks
+   every emitted `tests/expected.json` against `suite-expected`, and layer 2
+   then checks each package is complete (all eight files present) and
+   addresses a scenario that was actually judged. `--run` is required on both,
+   exactly as it is on the `rubrica emit --run <run>` of step 1: without it
+   the command exits 2 on a usage error and tells you nothing about the suite.
 
    **You have no scoping problem here, and two sibling skills do**, so it is
    worth saying why yours differs rather than leaving a reader to wonder.
@@ -227,15 +229,15 @@ Four steps.
    reviewing the suite instead of reporting it -- that review is
    `sample-for-review`'s and `smoke`'s, and neither is yours to run.
 
-Before you report done, run `rubrica validate --stage emit` and then
-`rubrica check-refs`. Unlike every judgment stage in this pipeline, a finding
-from either one is usually **not** your defect to fix, because you wrote
-nothing: it belongs to the stage that produced the artifact the finding
-names. What *is* yours is to run both, read them, and report them without
-smoothing anything over. Report success only when `rubrica emit`,
-`rubrica validate --stage emit` and `rubrica check-refs` all exited 0; on any
-other combination, report the exit codes and the findings and let the
-orchestrator decide.
+Before you report done, run `rubrica validate --stage emit --run <run>` and
+then `rubrica check-refs --run <run>`. Unlike every judgment stage in this
+pipeline, a finding from either one is usually **not** your defect to fix,
+because you wrote nothing: it belongs to the stage that produced the artifact
+the finding names. What *is* yours is to run both, read them, and report them
+without smoothing anything over. Report success only when
+`rubrica emit --run <run>`, `rubrica validate --stage emit --run <run>` and
+`rubrica check-refs --run <run>` all exited 0; on any other combination,
+report the exit codes and the findings and let the orchestrator decide.
 
 ## 5. Refusal conditions
 
@@ -275,10 +277,10 @@ own artifacts again.
   `validate --stage <stage>`.** That is layer 1 having been skipped, not a
   defect in the suite: emit indexes schema-required keys directly and one of
   the artifacts it read is malformed in a way `validate` must reject first.
-  Run `rubrica validate --stage instantiate` and `rubrica validate --stage
-  challenge`, report what they name, and leave the repair to the stage that
-  owns the artifact. Emitting again against the same malformed input produces
-  the same finding.
+  Run `rubrica validate --stage instantiate --run <run>` and
+  `rubrica validate --stage challenge --run <run>`, report what they name, and
+  leave the repair to the stage that owns the artifact. Emitting again against
+  the same malformed input produces the same finding.
 
 - **You are about to edit, create, or delete a file under `06-suite/`.**
   Stop, whatever the reason -- a missing verifier, a package for a scenario

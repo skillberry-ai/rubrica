@@ -291,11 +291,13 @@ scenario.
 7. Every scenario you write carries `status: "proposed"` -- never `active`,
    `duplicate`, or `rejected`. Those three belong to `rb-score` alone.
 
-Before you report done, run `rubrica validate --stage propose`. If it
-reports anything wrong with the file you just wrote, that is not a finding
-to pass along -- it is your own defect to fix. Repair the artifact and
-validate again; report success only once `rubrica validate --stage propose`
-exits clean.
+Before you report done, run `rubrica validate --stage propose --run <run>`,
+where `<run>` is the run directory you were dispatched with. `--run` is
+required: without it the command exits 2 on a usage error and tells you
+nothing about your artifact. If it reports anything wrong with the file you
+just wrote, that is not a finding to pass along -- it is your own defect to
+fix. Repair the artifact and validate again; report success only once
+`rubrica validate --stage propose --run <run>` exits clean.
 
 ## 5. Refusal conditions
 

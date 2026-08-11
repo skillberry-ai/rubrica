@@ -511,10 +511,13 @@ artifacts that validate and mean nothing.
    specific enough to be wrong. "The correct ticket is identified" is not
    checkable; a sentence naming the record and the value is.
 
-Before you report done, run `rubrica validate --stage instantiate` and then
-`rubrica check-refs`. Either one reporting a finding against **the files you
-just wrote** is not a finding to pass along -- it is your own defect to fix.
-Repair your artifact and run both again.
+Before you report done, run `rubrica validate --stage instantiate --run <run>`
+and then `rubrica check-refs --run <run>`, where `<run>` is the run directory
+you were dispatched with. `--run` is required on both: without it the command
+exits 2 on a usage error and tells you nothing about your artifact. Either one
+reporting a finding against **the files you just wrote** is not a finding to
+pass along -- it is your own defect to fix. Repair your artifact and run both
+again.
 
 Read each finding's path before you act on it, because **both commands are
 run-global and you are one of several subagents running right now.**
