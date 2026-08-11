@@ -776,16 +776,33 @@ def toy_seed(scenario_id: str, **over: Any) -> dict[str, Any]:
     return payload
 
 
-# **The `answer_excludes` grounding rule.** `refs._check_reachability` requires
-# an `answer_excludes` pointer to resolve to *nothing*: the seed must not
-# contain what the assertion says it lacks. So an exclusion can never name a
-# value that is present -- excluding a distractor that exists is not
-# expressible this way, and is expressed instead by `value_equals`, which
-# requires the answer to carry the right token. The exclusions below therefore
-# ground in the *absence of a further record*, which is exactly the
-# log-does-not-say shape section 4 says this field exists for. Each
+# **The `answer_excludes` grounding rule, as the gate actually states it.**
+# `refs._check_reachability` requires an `answer_excludes` *pointer* to resolve
+# to nothing or to something empty. That is a rule about the pointer, and only
+# about the pointer. The excluded *string* may perfectly well appear elsewhere in
+# the same seed -- and in an absence-shaped scenario it usually must, because
+# every plausible near-miss is in the seed by construction, which is the only
+# reason the test discriminates at all. Both exclusions below are exactly that
+# shape: each names a summary that another ticket in its own seed carries, while
+# its pointer addresses a record index the seed does not fill. Layer 2 is
+# correctly silent on both, because both pointers resolve to nothing.
+#
+# So the exclusions ground in the *absence of a further record*, which is exactly
+# the log-does-not-say shape section 4 says this field exists for, and each
 # `rationale` says so in words, because a reviewer reading the packet has to be
 # able to tell a deliberate absence from a broken pointer.
+#
+# **A known defect in these two model answers, recorded here rather than fixed.**
+# Because the excluded string is present in the seed, an agent that answers
+# correctly *and more informatively* trips the exclusion: "nothing in shipping is
+# blocked; the one shipping ticket, 'Label printer offline in DC2', is open" is a
+# better answer than the reference and scores 0.5 instead of 1.0. Nothing
+# mechanical catches that -- the pointer resolves to nothing, so the reachability
+# gate is satisfied -- which makes it a judgment the author owes, and
+# `tg-instantiate`'s Method says so in those terms. Re-deriving these labels
+# belongs with a deliberate re-record rather than an edit here: the reward each
+# exclusion feeds is pinned in three separate places, so changing the value alone
+# would move numbers other tests assert.
 _ORACLES: dict[str, dict[str, Any]] = {
     "scn-open": {
         "answer_reference": "Ticket 4102 is the one open billing ticket.",
