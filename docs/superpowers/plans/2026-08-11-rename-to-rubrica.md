@@ -80,8 +80,8 @@ out = []
 for i in (0, 1):
     d = pathlib.Path(tempfile.mkdtemp())
     run = build_toy_run(d, upto="challenge")
-    subprocess.run([sys.executable, "-m", "testgen.cli", "emit", "--run", str(run)], check=True)
-    out.append(run / "06-suite")
+    subprocess.run([sys.executable, "-m", "testgen.cli", "emit", "--run", str(run.root)], check=True)
+    out.append(run.suite_dir)
 cmp = filecmp.dircmp(*out)
 print("differing:", cmp.diff_files, "left_only:", cmp.left_only, "right_only:", cmp.right_only)
 PY
@@ -757,8 +757,8 @@ out = []
 for i in (0, 1):
     d = pathlib.Path(tempfile.mkdtemp())
     run = build_toy_run(d, upto="challenge")
-    subprocess.run([sys.executable, "-m", "rubrica.cli", "emit", "--run", str(run)], check=True)
-    out.append(run / "06-suite")
+    subprocess.run([sys.executable, "-m", "rubrica.cli", "emit", "--run", str(run.root)], check=True)
+    out.append(run.suite_dir)
 cmp = filecmp.dircmp(*out)
 print("differing:", cmp.diff_files, "left_only:", cmp.left_only, "right_only:", cmp.right_only)
 PY
@@ -774,8 +774,8 @@ sys.path.insert(0, "tests")
 from toy import build_toy_run
 d = pathlib.Path(tempfile.mkdtemp())
 run = build_toy_run(d, upto="challenge")
-subprocess.run([sys.executable, "-m", "rubrica.cli", "emit", "--run", str(run)], check=True)
-for p in sorted((run / "06-suite").rglob("task.toml"))[:1]:
+subprocess.run([sys.executable, "-m", "rubrica.cli", "emit", "--run", str(run.root)], check=True)
+for p in sorted(run.suite_dir.rglob("task.toml"))[:1]:
     print(p.read_text()[:400])
 PY
 ```
