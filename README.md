@@ -64,9 +64,12 @@ Requires Python 3.13+ and [`uv`](https://docs.astral.sh/uv/).
 make setup     # create the venv, install runtime + dev deps
 make test      # run the suite
 make check     # ruff lint + format check, no changes
+make lint      # ruff check --fix
+make format    # ruff format
+make help      # every target, with its one-line description
 ```
 
-There is a fourth target, `make live`, and it is deliberately not part of
+There is one more target, `make live`, and it is deliberately not part of
 `make test`: it runs the tests whose assertions need a model's output, behind
 the `live` pytest marker and the `RUBRICA_LIVE` opt-in (`tests/conftest.py`).
 As they stand today those tests assert against **committed recordings** of a live
@@ -98,6 +101,17 @@ To run one stage by hand — the way every skill here was exercised —
 follow [`docs/running-a-stage-by-hand.md`](docs/running-a-stage-by-hand.md),
 which carries the dispatch prompt verbatim plus the per-stage setup and gate
 commands.
+
+`scripts/dispatch-stage.sh` automates that runbook and adds the one thing a hand
+dispatch cannot: it runs the stage in a Claude Code instance carrying none of the
+developer's own configuration, and none of *this* repository's either. That
+matters because `docs/` holds the design spec and `tests/fixtures/toy/` is the
+model answer a skill imitates — a stage that can read them is being measured
+against the answer key. `scripts/audit-reads.sh` then prints every file the
+dispatch actually opened, which is the only way an out-of-contract read is ever
+visible: it leaves nothing on disk, because a fan-out member that read a
+sibling's slice writes a byte-identical artifact to one that did not. §7 of the
+runbook covers what each layer does and does not enforce.
 
 ## Usage
 
@@ -304,7 +318,7 @@ no stage produces one, so no repair prompt fixes it. A `SKILL.md` that *parses*
 but declares something wrong is the opposite — an ordinary exit-1 finding from
 `check-skills`, because it names exactly what to edit.
 
-Two invariants follow, and both are enforced in tests over *every* subcommand:
+Two invariants follow, and both are enforced in parametrized tests:
 
 - **A stage defect never surfaces as `2`.** The exception catch names
   `UsageError` and `OSError`, never a bare `ValueError` — a coverage document
@@ -312,6 +326,16 @@ Two invariants follow, and both are enforced in tests over *every* subcommand:
 - **A `1` never has an empty stdout.** An orchestrator that branches on `1` and
   finds nothing to read retries blind. An unexpected exception becomes an
   `[internal]` finding line on stdout with its traceback on stderr.
+
+The two are parametrized over different sets, and the difference is worth knowing
+before trusting either. `test_an_unbuildable_parser_is_exit_2_on_every_subcommand`
+runs over `cli.subcommand_names()` — genuinely every subcommand, because the
+manifest schema is read while the parser is *built*, ahead of argv.
+`test_every_subcommand_turns_an_unexpected_exception_into_a_finding` runs over the
+eight that route through the shared catch-all; `intake` is excluded by design
+(its own block catches first, because it reads paths a person supplied rather
+than artifacts a stage wrote), and `check-skills`, `record-stage` and `decide`
+are covered by their own targeted tests instead.
 
 The mirror of the first invariant is the one this project kept rediscovering:
 **a filesystem problem never surfaces as `1`.** `chmod 000` on a run's
