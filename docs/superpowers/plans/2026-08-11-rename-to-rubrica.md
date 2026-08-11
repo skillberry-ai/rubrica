@@ -708,15 +708,32 @@ Nothing new is renamed here. This task exists because a rename's characteristic 
 
 ```bash
 grep -rn "testgen\|test-generator\|TESTGEN_\|\btg-" \
-  --exclude-dir=.git --exclude-dir=.venv --exclude-dir=__pycache__ . \
-  | grep -v "^./docs/superpowers/plans/2026-08-0" \
-  | grep -v "^./docs/superpowers/specs/2026-08-06" \
-  | grep -v "^./docs/superpowers/specs/2026-08-11" \
-  | grep -v "^./docs/superpowers/plans/2026-08-11"
+  --exclude-dir=.git --exclude-dir=.venv --exclude-dir=__pycache__ \
+  --exclude-dir='*.egg-info' --exclude-dir=.superpowers . \
+  | grep -v "^./docs/superpowers/" \
+  | grep -v "^./tests/fixtures/[a-z-]*/recorded/" \
+  | grep -v "^./tests/unit/test_refusals_live.py"
 ```
 Expected: **no output.** Every line is a residual. Fix each, then re-run until clean.
 
-The two 2026-08-11 files are excluded because this plan and its spec legitimately discuss the old names.
+`docs/superpowers/` is excluded wholesale: the dated records stay verbatim by
+§7, and this plan and its spec legitimately discuss the old names.
+
+**The last two exclusions are not conveniences — they are the evidence rule.**
+`tests/fixtures/*/recorded/01-world-model.json` is committed live model output
+from dispatches that really did happen under the old skill names, and
+`test_refusals_live.py` quotes that output verbatim by design. Rewriting either
+would fabricate a recording. So instead of excluding them silently, assert that
+they still carry the old spelling — a sweep that "cleaned" them is the failure
+this check exists to catch:
+
+```bash
+grep -c "tg-propose" tests/fixtures/toy-gap/recorded/01-world-model.json \
+  tests/fixtures/toy-contradiction/recorded/01-world-model.json \
+  tests/unit/test_refusals_live.py
+```
+Expected: a non-zero count for all three. A zero anywhere means someone
+rewrote a recording, and the fix is `git checkout` of that file, not a re-record.
 
 - [ ] **Step 2: Confirm the git history followed the move**
 

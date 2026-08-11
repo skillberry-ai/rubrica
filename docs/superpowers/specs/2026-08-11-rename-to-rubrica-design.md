@@ -228,3 +228,17 @@ Left for a human, with steps to be listed at hand-off:
   digests — `skill_sha256` lives only in a run's uncommitted `manifest.json` —
   and renaming an invoked subcommand changes no skill's judgment, so the
   recordings still attest to what they claim. No paid re-dispatch is needed.
+
+  **Ruling, added 2026-08-11 during implementation.** Those recordings turn out
+  to name the old skills *inside the recorded model output itself* — the
+  `why_it_matters` fields say "tg-propose cannot design…". They keep that
+  spelling. A recording states what a model actually produced on a particular
+  day, and on that day the skill was called `tg-propose`; rewriting the text to
+  match today's directory names would be fabricating evidence, which this
+  repository treats as its worst failure mode. The test that quotes those fields
+  verbatim keeps the old spelling for the same reason, with a comment saying so.
+  The eight `SKILL.md` digests did change, which under a literal reading of
+  "changing a skill obliges re-recording" makes both recordings formally stale —
+  but the obligation exists because a changed skill may no longer produce the
+  recorded output, and a renamed subcommand changes no judgment. Paying for a
+  re-dispatch here would buy a differently-worded artifact, not a truer one.
