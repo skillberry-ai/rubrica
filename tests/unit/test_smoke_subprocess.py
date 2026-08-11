@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from testgen.emit import emit_run
-from testgen.smoke import AgentSpec, run_agent, scrubbed_env, verify_package
+from rubrica.emit import emit_run
+from rubrica.smoke import AgentSpec, run_agent, scrubbed_env, verify_package
 from tests.unit.test_refs_states import build_state
 
 SID = "scn-001"
@@ -240,14 +240,14 @@ def test_the_transcript_globs_are_exactly_what_the_verifier_reads(tmp_path):
 
     The same discipline as test_the_verifier_is_invoked_the_way_test_sh_invokes_it:
     the clear in run_agent is only correct if it covers every pattern the verifier
-    reads back, and verify.py is stdlib-only and imports nothing from testgen, so
+    reads back, and verify.py is stdlib-only and imports nothing from rubrica, so
     it cannot share the constant. Asserted behaviourally rather than by parsing
     verify.py's source: a file per candidate extension with a unique marker, and
     the set of markers that come back must be exactly the set _TRANSCRIPT_GLOBS
     claims. A verifier that grew a third pattern fails here.
     """
-    from testgen.smoke import _TRANSCRIPT_GLOBS
-    from testgen.suite import verify
+    from rubrica.smoke import _TRANSCRIPT_GLOBS
+    from rubrica.suite import verify
 
     logs = tmp_path / "agent-logs"
     logs.mkdir()
@@ -371,7 +371,7 @@ def test_a_toolless_run_scores_zero(tmp_path):
 def test_the_verifier_that_runs_is_the_copied_one(tmp_path):
     """Layer 3's actual question.
 
-    Importing testgen.suite.verify would answer whether the *tested* verifier
+    Importing rubrica.suite.verify would answer whether the *tested* verifier
     works. Mangling the copy has to be visible, or emit could ship a broken
     verifier into every package and the smoke gate would pass.
     """
@@ -548,13 +548,13 @@ def test_verify_package_refuses_out_dir_equal_to_agent_logs(tmp_path):
 def test_a_verifier_that_imports_testgen_fails_as_it_would_in_the_container(tmp_path):
     """The scrub is what makes the stdlib-only constraint enforced by something.
 
-    Under the dev interpreter testgen is importable, so without -S and a cleared
-    PYTHONPATH a verifier that quietly grew a testgen import would pass here and
+    Under the dev interpreter rubrica is importable, so without -S and a cleared
+    PYTHONPATH a verifier that quietly grew a rubrica import would pass here and
     fail in a bare ubi9 image -- discovered on the platform, not in CI.
     """
     run = _emitted(tmp_path)
     verify_py = run.task_dir(SID) / "tests" / "verify.py"
-    verify_py.write_text("import testgen\n" + verify_py.read_text(), encoding="utf-8")
+    verify_py.write_text("import rubrica\n" + verify_py.read_text(), encoding="utf-8")
     _, reward, _ = _score(run, COMPETENT, tmp_path, "good3.py")
     assert reward is None
 
@@ -727,7 +727,7 @@ def test_a_verifier_that_writes_a_non_object_reward_is_unscoreable(tmp_path):
 
 def test_the_verifier_is_invoked_the_way_test_sh_invokes_it(tmp_path):
     """Same three arguments, so a package that scores here scores on the platform."""
-    from testgen.smoke import verifier_argv
+    from rubrica.smoke import verifier_argv
 
     run = _emitted(tmp_path)
     argv = verifier_argv(run.task_dir(SID), agent_logs=Path("/logs/agent"), out_dir=Path("/logs/v"))

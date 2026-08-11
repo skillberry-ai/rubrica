@@ -26,12 +26,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from testgen.artifacts import ArtifactError, read_json, sha256_of
-from testgen.findings import Finding
-from testgen.invariants import InvariantForm
-from testgen.invariants import evaluate as evaluate_invariant
-from testgen.paths import RunPaths, is_safe_segment, list_json
-from testgen.suite.verify import DATA_KINDS, TRAJECTORY_KINDS
+from rubrica.artifacts import ArtifactError, read_json, sha256_of
+from rubrica.findings import Finding
+from rubrica.invariants import InvariantForm
+from rubrica.invariants import evaluate as evaluate_invariant
+from rubrica.paths import RunPaths, is_safe_segment, list_json
+from rubrica.suite.verify import DATA_KINDS, TRAJECTORY_KINDS
 
 _CELL_RE = re.compile(r"\Acell:([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
 _GOAL_RE = re.compile(r"\Agoal:([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
@@ -1238,7 +1238,7 @@ def check_report(run: RunPaths) -> list[Finding]:
     present report that is not even an object gets one whole-document finding
     instead of being silently waved through the way an absent one is.
     """
-    from testgen import smoke
+    from rubrica import smoke
 
     report = _load(run.report)
     if report is None:

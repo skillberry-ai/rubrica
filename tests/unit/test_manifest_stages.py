@@ -12,14 +12,14 @@ import re
 
 import pytest
 
-from testgen.artifacts import read_json, write_json
-from testgen.cli import main
-from testgen.errors import UsageError
-from testgen.manifest import record_stage
-from testgen.paths import RunPaths
-from testgen.skills import skill_sha256
-from testgen.stability import comparability, stage_config
-from testgen.validate import manifest_stage_efforts, validate_artifact
+from rubrica.artifacts import read_json, write_json
+from rubrica.cli import main
+from rubrica.errors import UsageError
+from rubrica.manifest import record_stage
+from rubrica.paths import RunPaths
+from rubrica.skills import skill_sha256
+from rubrica.stability import comparability, stage_config
+from rubrica.validate import manifest_stage_efforts, validate_artifact
 from tests.builders import minimal_manifest
 
 

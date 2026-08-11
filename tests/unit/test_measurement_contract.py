@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import pytest
 
-from testgen.artifacts import read_json, write_json
-from testgen.recall import compare_run
-from testgen.review import sample_run
-from testgen.stability import diff_runs
+from rubrica.artifacts import read_json, write_json
+from rubrica.recall import compare_run
+from rubrica.review import sample_run
+from rubrica.stability import diff_runs
 from tests.builders import minimal_gold
 from tests.unit.test_refs_states import build_state
 
@@ -49,9 +49,9 @@ def _stability_document(tmp_path):
 
 
 _WRITERS = {
-    "recall": (_recall_document, "testgen-recall/1"),
-    "review": (_review_document, "testgen-review/1"),
-    "stability": (_stability_document, "testgen-stability/1"),
+    "recall": (_recall_document, "rubrica-recall/1"),
+    "review": (_review_document, "rubrica-review/1"),
+    "stability": (_stability_document, "rubrica-stability/1"),
 }
 
 

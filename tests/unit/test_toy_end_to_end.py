@@ -15,10 +15,10 @@ import json
 
 import pytest
 
-from testgen.emit import emit_run
-from testgen.refs import check_all
-from testgen.smoke import ORACLE_FLOOR, WEAK_BASELINE_CEILING, smoke_run
-from testgen.validate import validate_stage
+from rubrica.emit import emit_run
+from rubrica.refs import check_all
+from rubrica.smoke import ORACLE_FLOOR, WEAK_BASELINE_CEILING, smoke_run
+from rubrica.validate import validate_stage
 from tests.toy import ARTIFACT_IDS, SIDS, build_toy_run, toy_roster
 
 # Stages with a real artifact to gate at the point the fixture reaches. emit and
@@ -80,7 +80,7 @@ def test_emit_produces_one_complete_package_per_scenario(toy_run):
     suite_template_dir(); this is the multi-package half of that claim, which
     a single-scenario fixture cannot exercise.
     """
-    from testgen.emit import suite_template_dir
+    from rubrica.emit import suite_template_dir
 
     emitted, findings = emit_run(toy_run)
     assert (emitted, findings) == (sorted(SIDS), [])
@@ -109,7 +109,7 @@ def test_the_emitted_contract_never_carries_a_kind_outside_the_vocabulary(toy_ru
     A kind the verifier does not implement scores as failed, silently, and the
     schema does not catch it because the *shape* is fine.
     """
-    from testgen.suite.verify import ASSERTION_KINDS
+    from rubrica.suite.verify import ASSERTION_KINDS
 
     emit_run(toy_run)
     for sid in SIDS:
@@ -197,7 +197,7 @@ def test_each_package_carries_its_own_scenarios_everything(toy_run):
     """
     import tomllib
 
-    from testgen.emit import bindings, call_spec
+    from rubrica.emit import bindings, call_spec
     from tests.toy import toy_expected, toy_scenarios, toy_seed, toy_world_model
 
     scenarios_by_id = {s["id"]: s for s in toy_scenarios()["scenarios"]}
@@ -274,7 +274,7 @@ def test_every_absence_shaped_scenario_carries_an_assertion_a_refusal_fails(toy_
     by an agent that answers nothing, which removes exactly the signal the weak
     baseline exists to provide.
     """
-    from testgen.suite.verify import DATA_KINDS, TRAJECTORY_KINDS
+    from rubrica.suite.verify import DATA_KINDS, TRAJECTORY_KINDS
     from tests.toy import toy_expected
 
     for sid in SIDS:

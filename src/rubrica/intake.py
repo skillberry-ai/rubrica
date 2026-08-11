@@ -17,10 +17,10 @@ import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
-from testgen.artifacts import sha256_of, write_json
-from testgen.errors import UsageError
-from testgen.manifest import utc_stamp
-from testgen.paths import RunPaths, is_safe_segment, safe_segment
+from rubrica.artifacts import sha256_of, write_json
+from rubrica.errors import UsageError
+from rubrica.manifest import utc_stamp
+from rubrica.paths import RunPaths, is_safe_segment, safe_segment
 
 _SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".go", ".rs", ".java", ".rb"}
 _DOC_SUFFIXES = {".md", ".rst", ".txt", ".adoc"}

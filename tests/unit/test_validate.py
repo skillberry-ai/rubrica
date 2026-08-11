@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from testgen.artifacts import write_json
-from testgen.paths import RunPaths
-from testgen.validate import (
+from rubrica.artifacts import write_json
+from rubrica.paths import RunPaths
+from rubrica.validate import (
     ARTIFACT_SCHEMAS,
     STAGE_ARTIFACTS,
     UnknownStage,
@@ -29,7 +29,7 @@ from tests.builders import (
 
 
 def test_every_stage_has_an_artifact_mapping():
-    from testgen.paths import STAGES
+    from rubrica.paths import STAGES
 
     assert set(STAGE_ARTIFACTS) == set(STAGES)
 
@@ -56,9 +56,9 @@ def test_the_schemas_live_inside_the_package_so_a_wheel_can_validate():
     install make setup performs; in a wheel it resolved to a nonexistent
     path, so an installed copy silently could not validate anything.
     """
-    import testgen
+    import rubrica
 
-    package_root = Path(testgen.__file__).resolve().parent
+    package_root = Path(rubrica.__file__).resolve().parent
     assert schema_dir() == package_root / "schema"
     assert schema_dir().is_dir()
 
@@ -313,8 +313,8 @@ def test_validate_stage_does_not_raise_on_an_unsafe_instance_directory(tmp_path)
 
 def test_the_emit_stage_reports_a_run_that_produced_no_package(tmp_path):
     """Exit 0 here would tell the orchestrator an empty suite was a success."""
-    from testgen.paths import RunPaths
-    from testgen.validate import validate_stage
+    from rubrica.paths import RunPaths
+    from rubrica.validate import validate_stage
 
     run = RunPaths(tmp_path)
     run.root.mkdir(parents=True, exist_ok=True)
@@ -324,8 +324,8 @@ def test_the_emit_stage_reports_a_run_that_produced_no_package(tmp_path):
 
 
 def test_the_smoke_stage_reports_a_run_with_no_report(tmp_path):
-    from testgen.paths import RunPaths
-    from testgen.validate import validate_stage
+    from rubrica.paths import RunPaths
+    from rubrica.validate import validate_stage
 
     run = RunPaths(tmp_path)
     run.root.mkdir(parents=True, exist_ok=True)
@@ -335,8 +335,8 @@ def test_the_smoke_stage_reports_a_run_with_no_report(tmp_path):
 
 
 def test_an_emitted_contract_validates(tmp_path):
-    from testgen.artifacts import write_json
-    from testgen.validate import validate_artifact
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
     from tests.builders import minimal_suite_expected
 
     path = tmp_path / "expected.json"
@@ -345,8 +345,8 @@ def test_an_emitted_contract_validates(tmp_path):
 
 
 def test_a_contract_with_the_wrong_contract_string_is_rejected(tmp_path):
-    from testgen.artifacts import write_json
-    from testgen.validate import validate_artifact
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
     from tests.builders import minimal_suite_expected
 
     path = tmp_path / "expected.json"
@@ -356,8 +356,8 @@ def test_a_contract_with_the_wrong_contract_string_is_rejected(tmp_path):
 
 def test_a_data_assertion_carrying_a_tool_is_rejected(tmp_path):
     """The two assertion shapes must stay distinguishable in the emitted file."""
-    from testgen.artifacts import write_json
-    from testgen.validate import validate_artifact
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
     from tests.builders import minimal_suite_expected
 
     payload = minimal_suite_expected()
@@ -368,8 +368,8 @@ def test_a_data_assertion_carrying_a_tool_is_rejected(tmp_path):
 
 
 def test_a_trajectory_assertion_without_a_tool_is_rejected(tmp_path):
-    from testgen.artifacts import write_json
-    from testgen.validate import validate_artifact
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
     from tests.builders import minimal_suite_expected
 
     payload = minimal_suite_expected()
@@ -388,8 +388,8 @@ def test_weights_other_than_verifys_defaults_are_rejected(tmp_path):
     constraint -- catching the defect at validate time instead of at score
     time.
     """
-    from testgen.artifacts import write_json
-    from testgen.validate import validate_artifact
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
     from tests.builders import minimal_suite_expected
 
     payload = minimal_suite_expected()
@@ -400,8 +400,8 @@ def test_weights_other_than_verifys_defaults_are_rejected(tmp_path):
 
 
 def test_a_minimal_report_validates(tmp_path):
-    from testgen.artifacts import write_json
-    from testgen.validate import validate_artifact
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
     from tests.builders import minimal_report
 
     path = tmp_path / "07-report.json"
@@ -411,8 +411,8 @@ def test_a_minimal_report_validates(tmp_path):
 
 def test_an_unscored_result_need_not_carry_a_reward(tmp_path):
     """Unscoreable is not zero: verify.py refuses rather than reporting 0.0."""
-    from testgen.artifacts import write_json
-    from testgen.validate import validate_artifact
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
     from tests.builders import minimal_report
 
     payload = minimal_report()
@@ -423,8 +423,8 @@ def test_an_unscored_result_need_not_carry_a_reward(tmp_path):
 
 
 def test_a_scored_result_must_carry_a_reward(tmp_path):
-    from testgen.artifacts import write_json
-    from testgen.validate import validate_artifact
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
     from tests.builders import minimal_report
 
     payload = minimal_report()
@@ -440,9 +440,9 @@ def test_a_report_over_no_tasks_is_rejected(tmp_path):
     tasks: [] with verdict: "healthy" validated clean and `validate --stage
     smoke` reported success -- a green smoke gate over a suite nobody ran.
     """
-    from testgen.artifacts import write_json
-    from testgen.paths import RunPaths
-    from testgen.validate import validate_artifact, validate_stage
+    from rubrica.artifacts import write_json
+    from rubrica.paths import RunPaths
+    from rubrica.validate import validate_artifact, validate_stage
     from tests.builders import minimal_report
 
     payload = minimal_report(
@@ -473,9 +473,9 @@ def test_the_score_stage_reports_a_coverage_directory_with_no_latest(tmp_path):
     round file and forgot the pointer passed both gates with every coverage
     check skipped.
     """
-    from testgen.artifacts import write_json
-    from testgen.paths import RunPaths
-    from testgen.validate import validate_stage
+    from rubrica.artifacts import write_json
+    from rubrica.paths import RunPaths
+    from rubrica.validate import validate_stage
     from tests.builders import minimal_coverage
 
     run = RunPaths(tmp_path)
@@ -491,9 +491,9 @@ def test_the_score_stage_reports_a_coverage_directory_with_no_latest(tmp_path):
 
 def test_the_score_stage_still_validates_the_round_files(tmp_path):
     """Requiring latest.json must not stop the round files being checked."""
-    from testgen.artifacts import write_json
-    from testgen.paths import RunPaths
-    from testgen.validate import validate_stage
+    from rubrica.artifacts import write_json
+    from rubrica.paths import RunPaths
+    from rubrica.validate import validate_stage
     from tests.builders import minimal_coverage
 
     run = RunPaths(tmp_path)
@@ -507,9 +507,9 @@ def test_the_score_stage_still_validates_the_round_files(tmp_path):
 
 
 def test_the_score_stage_is_clean_with_latest_and_its_rounds(tmp_path):
-    from testgen.artifacts import write_json
-    from testgen.paths import RunPaths
-    from testgen.validate import validate_stage
+    from rubrica.artifacts import write_json
+    from rubrica.paths import RunPaths
+    from rubrica.validate import validate_stage
     from tests.builders import minimal_coverage
 
     run = RunPaths(tmp_path)
@@ -520,8 +520,8 @@ def test_the_score_stage_is_clean_with_latest_and_its_rounds(tmp_path):
 
 def test_the_score_stage_reports_a_run_with_no_coverage_directory(tmp_path):
     """No 03-coverage/ at all is still "produced no coverage artifact"."""
-    from testgen.paths import RunPaths
-    from testgen.validate import validate_stage
+    from rubrica.paths import RunPaths
+    from rubrica.validate import validate_stage
 
     run = RunPaths(tmp_path)
     run.root.mkdir(parents=True, exist_ok=True)
@@ -545,8 +545,8 @@ def test_manifest_stage_efforts_tracks_a_schema_override(tmp_path, monkeypatch):
     was cached on zero arguments back then, and it is gone now that the public
     function is not the cached one.
     """
-    from testgen.artifacts import read_json
-    from testgen.validate import ARTIFACT_SCHEMAS, manifest_stage_efforts, schema_dir
+    from rubrica.artifacts import read_json
+    from rubrica.validate import ARTIFACT_SCHEMAS, manifest_stage_efforts, schema_dir
 
     original = read_json(schema_dir() / ARTIFACT_SCHEMAS["manifest"])
     original["properties"]["stages"]["additionalProperties"]["properties"]["effort"]["enum"] = [

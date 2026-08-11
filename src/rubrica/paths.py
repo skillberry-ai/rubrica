@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from testgen.errors import UsageError
+from rubrica.errors import UsageError
 
 # Stage names in pipeline order. The validate and check-refs CLIs accept
 # these, and the orchestrator names the stage it is dispatching with them.

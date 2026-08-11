@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import re
 
-from testgen.artifacts import read_json
-from testgen.skills import SECTIONS, load, skills_dir
-from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
+from rubrica.artifacts import read_json
+from rubrica.skills import SECTIONS, load, skills_dir
+from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
 
 SKILL = skills_dir() / "tg-reconcile" / "SKILL.md"
 
@@ -70,7 +70,7 @@ def test_it_names_every_machine_invariant_form_the_code_implements():
     skill naming a fifth would produce an invariant refs reports as
     unimplemented.
     """
-    from testgen.invariants import _HANDLERS
+    from rubrica.invariants import _HANDLERS
 
     body = load(SKILL).body
     missing = [form for form in _HANDLERS if form not in body]

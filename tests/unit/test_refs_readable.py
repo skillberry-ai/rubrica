@@ -9,8 +9,8 @@ repair prompt rewrote an artifact that was fine.
 
 from __future__ import annotations
 
-from testgen.paths import RunPaths
-from testgen.refs import check_all, check_readable
+from rubrica.paths import RunPaths
+from rubrica.refs import check_all, check_readable
 from tests.unit.test_refs_states import build_state
 
 

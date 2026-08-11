@@ -60,24 +60,24 @@ import sys
 import traceback
 from pathlib import Path
 
-from testgen import refs, skills
-from testgen.artifacts import ArtifactError, read_json
-from testgen.dedupe import candidate_pairs
-from testgen.emit import emit_run
-from testgen.errors import UsageError
-from testgen.findings import Finding, format_findings
-from testgen.intake import intake
-from testgen.manifest import decide, record_stage
-from testgen.paths import STAGES, RunPaths
-from testgen.recall import compare_run, render
-from testgen.review import DEFAULT_SAMPLE_SIZE, sample_run
-from testgen.smoke import load_agents, preflight, smoke_run
-from testgen.stability import diff_runs
-from testgen.validate import UnknownStage, manifest_stage_efforts, validate_stage
+from rubrica import refs, skills
+from rubrica.artifacts import ArtifactError, read_json
+from rubrica.dedupe import candidate_pairs
+from rubrica.emit import emit_run
+from rubrica.errors import UsageError
+from rubrica.findings import Finding, format_findings
+from rubrica.intake import intake
+from rubrica.manifest import decide, record_stage
+from rubrica.paths import STAGES, RunPaths
+from rubrica.recall import compare_run, render
+from rubrica.review import DEFAULT_SAMPLE_SIZE, sample_run
+from rubrica.smoke import load_agents, preflight, smoke_run
+from rubrica.stability import diff_runs
+from rubrica.validate import UnknownStage, manifest_stage_efforts, validate_stage
 
 CLEAN, FINDINGS, USAGE = 0, 1, 2
 
-# Every `testgen` subcommand, as (name, help). The one declared source both
+# Every `rubrica` subcommand, as (name, help). The one declared source both
 # _build_parser and subcommand_names() read: _build_parser iterates this to
 # create each subparser (then adds that subcommand's own arguments to the
 # result), and subcommand_names() just reads off the names. A hand-kept
@@ -101,7 +101,7 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="testgen", description=__doc__)
+    parser = argparse.ArgumentParser(prog="rubrica", description=__doc__)
     subparsers = parser.add_subparsers(dest="command")
     # One add_parser call per declared name, so SUBCOMMANDS is the roster and
     # this loop cannot omit or misspell one. Each subcommand's own arguments
@@ -163,10 +163,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def subcommand_names() -> tuple[str, ...]:
-    """Every `testgen` subcommand, as argparse accepts it.
+    """Every `rubrica` subcommand, as argparse accepts it.
 
     skills.check_contract validates each skill's `invokes` list against this,
-    so a SKILL.md telling a model to run `testgen check_refs` fails in CI
+    so a SKILL.md telling a model to run `rubrica check_refs` fails in CI
     rather than at run time. Reads SUBCOMMANDS -- the same tuple _build_parser
     iterates over -- rather than a second list, so the parser and this check
     cannot disagree.
@@ -426,7 +426,7 @@ def main(argv: list[str] | None = None) -> int:
                     "internal",
                     "",
                     f"{args.command} raised {type(exc).__name__}: {exc}. An artifact in this run "
-                    "is malformed in a way layer 1 must reject first; run `testgen validate "
+                    "is malformed in a way layer 1 must reject first; run `rubrica validate "
                     "--stage <stage>` for the stages this run has reached and repair the "
                     "artifact it names",
                 )

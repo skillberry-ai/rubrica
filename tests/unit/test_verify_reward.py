@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from testgen.suite.verify import (
+from rubrica.suite.verify import (
     CONTRACT,
     _contract_problems,
     compute_reward,
@@ -724,24 +724,24 @@ def test_main_reads_both_jsonl_and_txt_logs(tmp_path):
 # -- the container constraint ----------------------------------------------
 
 
-def test_verify_py_never_imports_testgen():
+def test_verify_py_never_imports_rubrica():
     """It executes in a bare ubi9 container where the package does not exist."""
-    source = Path("src/testgen/suite/verify.py").read_text(encoding="utf-8")
+    source = Path("src/rubrica/suite/verify.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     offenders = [
         node
         for node in ast.walk(tree)
         if (
             isinstance(node, ast.Import)
-            and any(alias.name.startswith("testgen") for alias in node.names)
+            and any(alias.name.startswith("rubrica") for alias in node.names)
         )
-        or (isinstance(node, ast.ImportFrom) and (node.module or "").startswith("testgen"))
+        or (isinstance(node, ast.ImportFrom) and (node.module or "").startswith("rubrica"))
     ]
     assert offenders == []
 
 
 def test_test_sh_invokes_the_verifier_and_propagates_its_exit_code():
-    script = Path("src/testgen/suite/test.sh").read_text(encoding="utf-8")
+    script = Path("src/rubrica/suite/test.sh").read_text(encoding="utf-8")
     assert "/tests/verify.py" in script
     assert "/logs/verifier" in script
     assert "exit $?" in script

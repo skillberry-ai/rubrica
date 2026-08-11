@@ -26,9 +26,9 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-from testgen.artifacts import ArtifactError, read_json
-from testgen.findings import Finding
-from testgen.paths import STAGES, RunPaths, list_json
+from rubrica.artifacts import ArtifactError, read_json
+from rubrica.findings import Finding
+from rubrica.paths import STAGES, RunPaths, list_json
 
 # Artifact kind -> schema filename.
 ARTIFACT_SCHEMAS: dict[str, str] = {

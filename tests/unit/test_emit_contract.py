@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from testgen.emit import bindings, call_spec, to_contract
-from testgen.suite.verify import CONTRACT
+from rubrica.emit import bindings, call_spec, to_contract
+from rubrica.suite.verify import CONTRACT
 from tests.builders import minimal_expected, minimal_scenarios, minimal_world_model
 
 

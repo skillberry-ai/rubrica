@@ -32,12 +32,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from testgen.artifacts import ArtifactError, read_json, write_json
-from testgen.emit import AGENT_TIMEOUT_SEC, VERIFIER_TIMEOUT_SEC
-from testgen.errors import UsageError
-from testgen.findings import Finding, format_findings
-from testgen.paths import RunPaths
-from testgen.validate import validate_artifact
+from rubrica.artifacts import ArtifactError, read_json, write_json
+from rubrica.emit import AGENT_TIMEOUT_SEC, VERIFIER_TIMEOUT_SEC
+from rubrica.errors import UsageError
+from rubrica.findings import Finding, format_findings
+from rubrica.paths import RunPaths
+from rubrica.validate import validate_artifact
 
 # Pipeline order, and the order the report lists agents in.
 ROLES = ("weak_baseline", "under_test", "oracle")
@@ -189,10 +189,10 @@ def scrubbed_env() -> dict[str, str]:
     """The environment an emitted verifier runs in.
 
     PYTHONPATH is emptied and PATH is minimal so that an emitted verifier which
-    quietly grew a third-party or testgen import fails here rather than on the
+    quietly grew a third-party or rubrica import fails here rather than on the
     platform. The interpreter is additionally invoked with -S (see
     verifier_argv), which is what actually removes site-packages: under the dev
-    interpreter testgen is installed editable, so clearing PYTHONPATH alone
+    interpreter rubrica is installed editable, so clearing PYTHONPATH alone
     leaves it importable and the stdlib-only constraint enforced by nothing.
 
     PYTHONDONTWRITEBYTECODE keeps __pycache__ out of the emitted package, which
@@ -245,7 +245,7 @@ def verifier_argv(task_dir: Path, *, agent_logs: Path, out_dir: Path) -> list[st
 # Defined here and pinned against verify.py's behaviour by
 # test_the_transcript_globs_are_exactly_what_the_verifier_reads: if the verifier
 # ever reads a third pattern, the clear would miss it and that test fails.
-# verify.py is stdlib-only and imports nothing from testgen, so it cannot import
+# verify.py is stdlib-only and imports nothing from rubrica, so it cannot import
 # this constant; the test is what keeps the two ends of the seam honest.
 _TRANSCRIPT_GLOBS = ("*.jsonl", "*.txt")
 

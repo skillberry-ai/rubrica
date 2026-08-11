@@ -8,8 +8,8 @@ a set compared against a set imported from the code.
 
 from __future__ import annotations
 
-from testgen.skills import SECTIONS, load, section_body, skills_dir
-from testgen.validate import STAGE_ARTIFACTS
+from rubrica.skills import SECTIONS, load, section_body, skills_dir
+from rubrica.validate import STAGE_ARTIFACTS
 
 SKILL = skills_dir() / "tg-extract" / "SKILL.md"
 
@@ -91,8 +91,8 @@ def test_the_derivation_values_it_names_are_the_schema_s_enum():
     unwritten, and derivation is what makes gap reporting honest. Compared
     against the schema rather than a literal list.
     """
-    from testgen.artifacts import read_json
-    from testgen.validate import ARTIFACT_SCHEMAS, schema_dir
+    from rubrica.artifacts import read_json
+    from rubrica.validate import ARTIFACT_SCHEMAS, schema_dir
 
     schema = read_json(schema_dir() / ARTIFACT_SCHEMAS["claims"])
     enum = schema["$defs"]["claim"]["properties"]["derivation"]["enum"]
@@ -102,8 +102,8 @@ def test_the_derivation_values_it_names_are_the_schema_s_enum():
 
 
 def test_the_claim_kinds_it_names_are_the_schema_s_enum():
-    from testgen.artifacts import read_json
-    from testgen.validate import ARTIFACT_SCHEMAS, schema_dir
+    from rubrica.artifacts import read_json
+    from rubrica.validate import ARTIFACT_SCHEMAS, schema_dir
 
     schema = read_json(schema_dir() / ARTIFACT_SCHEMAS["claims"])
     enum = schema["$defs"]["claim"]["properties"]["kind"]["enum"]

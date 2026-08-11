@@ -7,7 +7,7 @@
 # platform as a missing reward rather than as a real zero.
 #
 # emit copies this file verbatim into every package; the tracked original is
-# src/testgen/suite/test.sh.
+# src/rubrica/suite/test.sh.
 set -o pipefail
 mkdir -p /logs/verifier
 python3 /tests/verify.py \

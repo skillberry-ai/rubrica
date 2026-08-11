@@ -2,9 +2,9 @@
 """Generic verifier for a rubrica-emitted task (contract "rubrica/v1").
 
 Stdlib-only: this runs inside the task container, a bare ubi9 image with no
-third-party packages and no network. It must never import testgen.
+third-party packages and no network. It must never import rubrica.
 
-This file is the SOLE implementation of testgen's scoring semantics, and it is
+This file is the SOLE implementation of rubrica's scoring semantics, and it is
 hand-written rather than generated per task on purpose. A generated verifier is
 untrustworthy code sitting directly in the scoring path -- the one place a bug
 silently inflates every score. Keeping it fixed is also what forces the
@@ -12,7 +12,7 @@ assertion vocabulary closed: no skill can invent a kind, because adding one is a
 human edit to this file.
 
 emit copies this file verbatim into every package. The tracked original at
-src/testgen/suite/verify.py is what the tests exercise, so the tested file and
+src/rubrica/suite/verify.py is what the tests exercise, so the tested file and
 the executed file cannot differ.
 """
 

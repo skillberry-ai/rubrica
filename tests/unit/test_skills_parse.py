@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from testgen.errors import UsageError
-from testgen.paths import STAGES
-from testgen.skills import (
+from rubrica.errors import UsageError
+from rubrica.paths import STAGES
+from rubrica.skills import (
     CODE_ONLY_STAGES,
     CONTRACT_HEADING,
     ORCHESTRATOR,
@@ -223,7 +223,7 @@ def test_skills_dir_resolves_beside_the_module_and_honours_the_override(tmp_path
     and is kept anyway, because the thing being pinned is a packaging decision
     that no other test can fail on.
     """
-    from testgen import skills as skills_module
+    from rubrica import skills as skills_module
 
     assert skills_dir() == Path(skills_module.__file__).resolve().parent / "skills"
     monkeypatch.setenv("TESTGEN_SKILLS_DIR", str(tmp_path))

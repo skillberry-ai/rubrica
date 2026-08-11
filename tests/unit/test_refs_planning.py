@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from testgen.artifacts import write_json
-from testgen.paths import RunPaths
-from testgen.refs import (
+from rubrica.artifacts import write_json
+from rubrica.paths import RunPaths
+from rubrica.refs import (
     cell_ref,
     check_all,
     check_coverage,

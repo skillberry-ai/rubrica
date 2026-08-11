@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import re
 
-from testgen.cli import subcommand_names
-from testgen.paths import STAGES
-from testgen.skills import (
+from rubrica.cli import subcommand_names
+from rubrica.paths import STAGES
+from rubrica.skills import (
     CODE_ONLY_STAGES,
     ORCHESTRATOR,
     SECTIONS,

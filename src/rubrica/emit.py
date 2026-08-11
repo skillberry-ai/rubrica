@@ -30,10 +30,10 @@ from typing import Any
 
 import tomli_w
 
-from testgen.artifacts import ArtifactError, read_json, write_json
-from testgen.findings import Finding
-from testgen.paths import RunPaths
-from testgen.suite.verify import CONTRACT, DATA_KINDS, DEFAULT_WEIGHTS, TRAJECTORY_KINDS
+from rubrica.artifacts import ArtifactError, read_json, write_json
+from rubrica.findings import Finding
+from rubrica.paths import RunPaths
+from rubrica.suite.verify import CONTRACT, DATA_KINDS, DEFAULT_WEIGHTS, TRAJECTORY_KINDS
 
 # Harbor task metadata. Pinned rather than discovered: a suite emitted against
 # one Harbor task schema and scored against another is a silent mismatch.

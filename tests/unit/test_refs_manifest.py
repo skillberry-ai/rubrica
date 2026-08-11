@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from testgen.artifacts import write_json
-from testgen.paths import RunPaths
-from testgen.refs import check_manifest
+from rubrica.artifacts import write_json
+from rubrica.paths import RunPaths
+from rubrica.refs import check_manifest
 from tests.builders import minimal_claims, minimal_manifest
 
 

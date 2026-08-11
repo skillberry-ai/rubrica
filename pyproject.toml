@@ -1,5 +1,5 @@
 [project]
-name = "test-generator"
+name = "rubrica"
 version = "0.1.0"
 description = "Skill-based test suite generator for agentic systems"
 requires-python = ">=3.13"
@@ -12,7 +12,7 @@ dependencies = [
 dev = ["pytest>=8.3", "ruff>=0.8"]
 
 [project.scripts]
-testgen = "testgen.cli:main"
+rubrica = "rubrica.cli:main"
 
 [build-system]
 requires = ["setuptools>=75"]
@@ -26,7 +26,7 @@ where = ["src"]
 # pipeline's producers, and for the same reason: an installed copy that can
 # validate and emit but cannot find its own skills is a copy that cannot run.
 [tool.setuptools.package-data]
-testgen = ["schema/*.json", "suite/*.py", "suite/*.sh", "skills/*/SKILL.md"]
+rubrica = ["schema/*.json", "suite/*.py", "suite/*.sh", "skills/*/SKILL.md"]
 
 [tool.ruff]
 line-length = 100

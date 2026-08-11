@@ -18,10 +18,10 @@ from pathlib import Path
 
 import pytest
 
-from testgen.cli import subcommand_names
-from testgen.errors import UsageError
-from testgen.paths import STAGES, RunPaths
-from testgen.skills import (
+from rubrica.cli import subcommand_names
+from rubrica.errors import UsageError
+from rubrica.paths import STAGES, RunPaths
+from rubrica.skills import (
     ORCHESTRATOR,
     SECTIONS,
     SKILL_FILENAME,
@@ -31,7 +31,7 @@ from testgen.skills import (
     expected_skill_names,
     load,
 )
-from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS
+from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS
 
 CONTRACTS: dict[str, dict[str, object]] = {
     "tg-extract": {

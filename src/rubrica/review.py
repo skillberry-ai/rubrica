@@ -18,10 +18,10 @@ import hashlib
 import json
 from typing import Any
 
-from testgen.artifacts import ArtifactError, read_json, sha256_of, write_json
-from testgen.errors import UsageError
-from testgen.findings import Finding
-from testgen.paths import RunPaths
+from rubrica.artifacts import ArtifactError, read_json, sha256_of, write_json
+from rubrica.errors import UsageError
+from rubrica.findings import Finding
+from rubrica.paths import RunPaths
 
 # Fixed, so review is a trend line rather than a fresh opinion each time.
 RUBRIC = ("fair", "unambiguous", "correctly_labeled", "non_trivial")
@@ -269,7 +269,7 @@ def sample_run(run: RunPaths, size: int = DEFAULT_SAMPLE_SIZE) -> tuple[list[dic
     write_json(
         run.review_sample,
         {
-            "format": "testgen-review/1",
+            "format": "rubrica-review/1",
             "run_id": run_id,
             "size_requested": size,
             "sampled": sampled,

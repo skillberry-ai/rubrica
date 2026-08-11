@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import tomllib
 
-from testgen.artifacts import write_json
-from testgen.emit import emit_run, suite_template_dir
-from testgen.paths import RunPaths
+from rubrica.artifacts import write_json
+from rubrica.emit import emit_run, suite_template_dir
+from rubrica.paths import RunPaths
 from tests.builders import (
     minimal_expected,
     minimal_manifest,
@@ -109,7 +109,7 @@ def test_the_provenance_records_the_discriminating_fact_and_the_adversarys_findi
 
 
 def test_the_emitted_contract_validates_against_verify_pys_expectations(tmp_path):
-    from testgen.suite.verify import CONTRACT, compute_reward
+    from rubrica.suite.verify import CONTRACT, compute_reward
 
     run = _run(tmp_path)
     emit_run(run)
@@ -419,7 +419,7 @@ def test_a_real_emitted_contract_passes_the_layer_1_gate_emit_is_judged_by(tmp_p
     emit is deterministic, the orchestrator's one repair attempt reproduces the
     failure byte-for-byte and hard-stops.
     """
-    from testgen.validate import validate_artifact
+    from rubrica.validate import validate_artifact
 
     run = _run(tmp_path)
     assert emit_run(run) == ([SID], [])
@@ -438,8 +438,8 @@ def test_the_suite_expected_schema_pins_the_weights_verify_py_actually_uses():
     """
     import json as _json
 
-    from testgen.suite.verify import DEFAULT_WEIGHTS
-    from testgen.validate import ARTIFACT_SCHEMAS, schema_dir
+    from rubrica.suite.verify import DEFAULT_WEIGHTS
+    from rubrica.validate import ARTIFACT_SCHEMAS, schema_dir
 
     schema = _json.loads(
         (schema_dir() / ARTIFACT_SCHEMAS["suite-expected"]).read_text(encoding="utf-8")

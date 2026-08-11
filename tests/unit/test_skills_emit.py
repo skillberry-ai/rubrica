@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 
-from testgen.skills import SECTIONS, load, section_body, skills_dir
-from testgen.validate import STAGE_ARTIFACTS
+from rubrica.skills import SECTIONS, load, section_body, skills_dir
+from rubrica.validate import STAGE_ARTIFACTS
 
 SKILL = skills_dir() / "tg-emit" / "SKILL.md"
 

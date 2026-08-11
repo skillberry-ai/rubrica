@@ -16,10 +16,10 @@ import sys
 
 import pytest
 
-from testgen.artifacts import ArtifactError, read_json, write_json
-from testgen.errors import UsageError
-from testgen.paths import RunPaths
-from testgen.review import (
+from rubrica.artifacts import ArtifactError, read_json, write_json
+from rubrica.errors import UsageError
+from rubrica.paths import RunPaths
+from rubrica.review import (
     DEFAULT_SAMPLE_SIZE,
     RUBRIC,
     candidates,
@@ -146,7 +146,7 @@ def test_the_sample_is_stable_across_process_hash_salts():
     and hash() (salted per process) would not.
     """
     script = (
-        "from testgen.review import stratified\n"
+        "from rubrica.review import stratified\n"
         "entries = [\n"
         "    {'scenario_id': f'scn-{i:03d}', 'band': 'high', 'hop_depth': (i % 3) + 1}\n"
         "    for i in range(20)\n"
@@ -207,7 +207,7 @@ def test_the_packet_carries_the_seed_digest_and_not_the_seed(tmp_path):
     whole simulated backend pasted inline buries the four questions they are there
     to answer.
     """
-    from testgen.artifacts import sha256_of
+    from rubrica.artifacts import sha256_of
 
     run = build_state(tmp_path, "emit")
     text = packet(run, candidates(run))

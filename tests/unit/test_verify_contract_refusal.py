@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from testgen.suite.verify import main, parse_transcript, read_contract
+from rubrica.suite.verify import main, parse_transcript, read_contract
 from tests.builders import minimal_suite_expected
 
 

@@ -8,9 +8,9 @@ almost anything, and no schema can catch that -- the artifact looks identical.
 
 from __future__ import annotations
 
-from testgen.artifacts import read_json
-from testgen.skills import SECTIONS, load, section_body, skills_dir
-from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
+from rubrica.artifacts import read_json
+from rubrica.skills import SECTIONS, load, section_body, skills_dir
+from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
 
 SKILL = skills_dir() / "tg-challenge" / "SKILL.md"
 

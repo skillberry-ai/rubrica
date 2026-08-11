@@ -1,8 +1,8 @@
 import pytest
 
-from testgen.artifacts import write_json
-from testgen.paths import RunPaths
-from testgen.refs import UNSET, check_all, check_instances, check_verdicts, resolve_pointer
+from rubrica.artifacts import write_json
+from rubrica.paths import RunPaths
+from rubrica.refs import UNSET, check_all, check_instances, check_verdicts, resolve_pointer
 from tests.builders import (
     minimal_claims,
     minimal_expected,

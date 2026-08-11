@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from testgen.findings import Finding, format_findings
+from rubrica.findings import Finding, format_findings
 
 
 def test_str_includes_layer_path_and_pointer():

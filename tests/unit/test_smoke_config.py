@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from testgen.errors import UsageError
-from testgen.smoke import REQUIRED_ROLES, ROLES, AgentSpec, load_agents, preflight, substitute
+from rubrica.errors import UsageError
+from rubrica.smoke import REQUIRED_ROLES, ROLES, AgentSpec, load_agents, preflight, substitute
 from tests.builders import minimal_agents
 
 
@@ -42,7 +42,7 @@ def test_the_agent_timeout_defaults_to_the_one_the_package_declares(tmp_path):
     does not time out on the platform, or the reverse -- the same suite scoring
     two ways depending on who ran it.
     """
-    from testgen.emit import AGENT_TIMEOUT_SEC
+    from rubrica.emit import AGENT_TIMEOUT_SEC
 
     assert load_agents(_roster(tmp_path))[0].timeout_sec == AGENT_TIMEOUT_SEC
 
@@ -197,8 +197,8 @@ def test_preflight_refuses_a_placeholder_in_the_executable_and_says_why():
 
 def test_the_schema_states_the_same_restriction_preflight_enforces():
     """One rule, and the roster author reads the schema, not preflight's docstring."""
-    from testgen.artifacts import read_json
-    from testgen.validate import schema_dir
+    from rubrica.artifacts import read_json
+    from rubrica.validate import schema_dir
 
     description = read_json(schema_dir() / "agents-0.1.json")["properties"]["agents"]["items"][
         "properties"

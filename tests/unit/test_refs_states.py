@@ -30,12 +30,12 @@ from pathlib import Path
 
 import pytest
 
-from testgen.artifacts import read_json, write_json
-from testgen.emit import emit_run
-from testgen.paths import RunPaths
-from testgen.recall import compare_run
-from testgen.refs import check_all
-from testgen.review import sample_run
+from rubrica.artifacts import read_json, write_json
+from rubrica.emit import emit_run
+from rubrica.paths import RunPaths
+from rubrica.recall import compare_run
+from rubrica.refs import check_all
+from rubrica.review import sample_run
 from tests.builders import (
     MINIMAL_INPUT_BYTES,
     MINIMAL_INPUT_NAME,

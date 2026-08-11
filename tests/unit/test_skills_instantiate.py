@@ -7,9 +7,9 @@ layer 2 will report *after* a fan-out has been paid for.
 
 from __future__ import annotations
 
-from testgen.skills import SECTIONS, load, section_body, skills_dir
-from testgen.suite.verify import ASSERTION_KINDS, DATA_KINDS, TRAJECTORY_KINDS
-from testgen.validate import STAGE_ARTIFACTS
+from rubrica.skills import SECTIONS, load, section_body, skills_dir
+from rubrica.suite.verify import ASSERTION_KINDS, DATA_KINDS, TRAJECTORY_KINDS
+from rubrica.validate import STAGE_ARTIFACTS
 
 SKILL = skills_dir() / "tg-instantiate" / "SKILL.md"
 

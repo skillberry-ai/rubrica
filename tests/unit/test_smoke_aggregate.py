@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from testgen.smoke import (
+from rubrica.smoke import (
     FAIL_CEILING,
     ORACLE_FLOOR,
     PASS_THRESHOLD,

@@ -8,9 +8,9 @@ perfectly valid status for a scenario to have.
 
 from __future__ import annotations
 
-from testgen.artifacts import read_json
-from testgen.skills import SECTIONS, load, skills_dir
-from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
+from rubrica.artifacts import read_json
+from rubrica.skills import SECTIONS, load, skills_dir
+from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
 
 SKILL = skills_dir() / "tg-propose" / "SKILL.md"
 

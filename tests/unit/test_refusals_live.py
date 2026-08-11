@@ -19,7 +19,7 @@ import json
 
 import pytest
 
-from testgen.artifacts import read_json
+from rubrica.artifacts import read_json
 from tests.toy import CONTRADICTION_DIR, GAP_DIR
 
 pytestmark = pytest.mark.live

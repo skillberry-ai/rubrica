@@ -8,10 +8,10 @@ uncovered cell it will mislabel as closable.
 
 from __future__ import annotations
 
-from testgen.artifacts import read_json
-from testgen.cli import subcommand_names
-from testgen.skills import SECTIONS, load, section_body, skills_dir
-from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
+from rubrica.artifacts import read_json
+from rubrica.cli import subcommand_names
+from rubrica.skills import SECTIONS, load, section_body, skills_dir
+from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
 
 SKILL = skills_dir() / "tg-score" / "SKILL.md"
 
@@ -123,7 +123,7 @@ def test_it_states_the_status_values_it_may_set():
     """score owns every transition out of `proposed`. The three it may write are
     checked against refs' sets rather than a literal list.
     """
-    from testgen.refs import JUDGED_STATUSES
+    from rubrica.refs import JUDGED_STATUSES
 
     body = load(SKILL).body
     assert "duplicate" in body and "duplicate_of" in body

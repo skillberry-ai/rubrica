@@ -22,9 +22,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from testgen.artifacts import write_json
-from testgen.intake import intake
-from testgen.paths import RunPaths
+from rubrica.artifacts import write_json
+from rubrica.intake import intake
+from rubrica.paths import RunPaths
 
 TOY_DIR = Path(__file__).resolve().parent / "fixtures" / "toy"
 CONTRADICTION_DIR = Path(__file__).resolve().parent / "fixtures" / "toy-contradiction"
@@ -1150,7 +1150,7 @@ def toy_roster(tmp_path: Path) -> tuple[Any, ...]:
     the one that must run the scripts, and a shebang would depend on the
     executable bit and on `python` resolving to 3.13 on PATH.
     """
-    from testgen.smoke import AgentSpec
+    from rubrica.smoke import AgentSpec
 
     specs = []
     for role, body in _SCRIPTS.items():

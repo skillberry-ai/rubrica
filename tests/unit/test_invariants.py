@@ -1,6 +1,6 @@
 import pytest
 
-from testgen.invariants import InvariantForm, evaluate
+from rubrica.invariants import InvariantForm, evaluate
 
 JOBS = {
     "jobs": [

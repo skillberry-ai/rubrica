@@ -23,10 +23,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from testgen.artifacts import sha256_of
-from testgen.errors import UsageError
-from testgen.findings import Finding
-from testgen.paths import STAGES, RunPaths
+from rubrica.artifacts import sha256_of
+from rubrica.errors import UsageError
+from rubrica.findings import Finding
+from rubrica.paths import STAGES, RunPaths
 
 SKILL_FILENAME = "SKILL.md"
 
@@ -272,8 +272,8 @@ def check_contract(skill: Skill) -> list[Finding]:
     # Imported here rather than at module scope: cli imports skills for the
     # check-skills subcommand, so a top-level import of cli from skills would
     # be circular. Same pattern refs.check_report uses for smoke.
-    from testgen.cli import subcommand_names
-    from testgen.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS
+    from rubrica.cli import subcommand_names
+    from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS
 
     out: list[Finding] = []
 
@@ -428,7 +428,7 @@ def check_contract(skill: Skill) -> list[Finding]:
             if name not in known:
                 report(
                     f"/invokes/{i}",
-                    f"invokes {name!r}, which is not a testgen subcommand; the subcommands "
+                    f"invokes {name!r}, which is not a rubrica subcommand; the subcommands "
                     f"are: {', '.join(known)}",
                 )
 

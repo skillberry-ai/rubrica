@@ -17,12 +17,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from testgen.artifacts import ArtifactError, read_json, write_json
-from testgen.errors import UsageError
-from testgen.findings import Finding, format_findings
-from testgen.metrics import jaccard
-from testgen.paths import RunPaths
-from testgen.validate import validate_artifact
+from rubrica.artifacts import ArtifactError, read_json, write_json
+from rubrica.errors import UsageError
+from rubrica.findings import Finding, format_findings
+from rubrica.metrics import jaccard
+from rubrica.paths import RunPaths
+from rubrica.validate import validate_artifact
 
 # Cell-overlap at or above this proposes a pair, once the goals already match.
 # Half, because a generated scenario that reaches an authored task's goal through
@@ -235,7 +235,7 @@ def compare(run: RunPaths, gold: dict[str, Any]) -> dict[str, Any]:
     # because this project's own code writes it and unit tests gate it
     # instead. Claiming a schema_version would say otherwise.
     header = {
-        "format": "testgen-recall/1",
+        "format": "rubrica-recall/1",
         # Which run this number is about. 07-report.json and review/sample.json
         # both carry it, and a recall.json copied out of its directory was the
         # one measurement output that could not say what it measured.

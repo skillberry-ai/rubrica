@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from testgen.errors import UsageError
-from testgen.paths import (
+from rubrica.errors import UsageError
+from rubrica.paths import (
     STAGES,
     RunPaths,
     UnsafeSegment,

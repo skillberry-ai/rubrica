@@ -1,4 +1,4 @@
-from testgen.dedupe import Candidate, candidate_pairs
+from rubrica.dedupe import Candidate, candidate_pairs
 
 
 def _scn(sid, goal, cells, status="active"):

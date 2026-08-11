@@ -11,11 +11,11 @@ import json
 
 import pytest
 
-from testgen.artifacts import write_json
-from testgen.emit import emit_run
-from testgen.errors import UsageError
-from testgen.paths import RunPaths
-from testgen.recall import (
+from rubrica.artifacts import write_json
+from rubrica.emit import emit_run
+from rubrica.errors import UsageError
+from rubrica.paths import RunPaths
+from rubrica.recall import (
     MATCH_JACCARD_FLOOR,
     NOVELTY_KINDS,
     assign_matches,
@@ -97,7 +97,7 @@ def test_only_emitted_scenarios_count_as_generated(tmp_path):
 
 
 def test_a_package_whose_scenario_vanished_is_skipped(tmp_path):
-    from testgen.artifacts import write_json
+    from rubrica.artifacts import write_json
 
     run = build_state(tmp_path, "emit")
     write_json(run.scenarios, minimal_scenarios(scenarios=[]))
@@ -344,7 +344,7 @@ def test_the_recall_report_says_which_run_it_measured(tmp_path):
     recall.json was the one measurement output that could not say what it was
     about once it left its directory.
     """
-    from testgen.artifacts import read_json
+    from rubrica.artifacts import read_json
 
     run = build_state(tmp_path, "emit")
     report, _ = compare_run(run, _gold_file(tmp_path))

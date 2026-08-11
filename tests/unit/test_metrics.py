@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from testgen.metrics import jaccard
+from rubrica.metrics import jaccard
 
 
 def test_identical_sets_score_one():

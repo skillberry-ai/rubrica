@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from testgen.artifacts import read_json, write_json
-from testgen.refs import check_all, check_report
+from rubrica.artifacts import read_json, write_json
+from rubrica.refs import check_all, check_report
 from tests.builders import minimal_scenarios
 from tests.unit.test_refs_states import build_state
 
@@ -275,7 +275,7 @@ def test_the_recomputation_uses_the_producers_own_functions(tmp_path):
     drift the first time a threshold moved. This asserts the checker is reading
     the same constants the writer used.
     """
-    from testgen import smoke
+    from rubrica import smoke
 
     run = _smoked(tmp_path)
     original = smoke.PASS_THRESHOLD

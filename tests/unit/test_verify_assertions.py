@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from testgen.suite.verify import (
+from rubrica.suite.verify import (
     call_matches,
     parse_transcript,
     score_assertions,

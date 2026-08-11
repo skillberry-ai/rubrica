@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from testgen.artifacts import write_json
-from testgen.validate import ARTIFACT_SCHEMAS, CONFIG_KINDS, schema_dir, validate_artifact
+from rubrica.artifacts import write_json
+from rubrica.validate import ARTIFACT_SCHEMAS, CONFIG_KINDS, schema_dir, validate_artifact
 from tests.builders import (
     minimal_expected,
     minimal_manifest,
@@ -135,7 +135,7 @@ def test_every_registered_artifact_kind_now_has_a_schema_file():
     Task 3 could only assert this for the two schemas it created. With Tasks 4
     and 5 landed, the registry and the schema directory must agree completely.
     """
-    from testgen.validate import ARTIFACT_SCHEMAS, schema_dir
+    from rubrica.validate import ARTIFACT_SCHEMAS, schema_dir
 
     for kind, filename in ARTIFACT_SCHEMAS.items():
         assert (schema_dir() / filename).is_file(), kind

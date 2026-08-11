@@ -14,9 +14,9 @@ import sys
 
 import pytest
 
-from testgen.artifacts import read_json
-from testgen.smoke import ROLES, AgentSpec, smoke_run
-from testgen.validate import validate_stage
+from rubrica.artifacts import read_json
+from rubrica.smoke import ROLES, AgentSpec, smoke_run
+from rubrica.validate import validate_stage
 from tests.unit.test_refs_states import build_state
 from tests.unit.test_smoke_subprocess import COMPETENT, TOOLLESS
 
@@ -309,7 +309,7 @@ def test_a_real_smoke_run_leaves_layer_two_clean(tmp_path):
     Both sides recompute the summary with the same functions, so this can only
     fail if smoke writes something summarize did not produce.
     """
-    from testgen.refs import check_all
+    from rubrica.refs import check_all
 
     run = _run(tmp_path)
     smoke_run(run, _roster(tmp_path))

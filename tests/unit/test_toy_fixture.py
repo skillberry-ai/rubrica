@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from testgen.artifacts import read_json
-from testgen.invariants import evaluate
-from testgen.validate import validate_artifact
+from rubrica.artifacts import read_json
+from rubrica.invariants import evaluate
+from rubrica.validate import validate_artifact
 from tests.toy import (
     ALL_SCENARIO_IDS,
     ARTIFACT_IDS,
@@ -31,7 +31,7 @@ from tests.toy import (
 
 
 def test_the_three_input_files_exist_and_are_distinct_kinds():
-    from testgen.intake import classify
+    from rubrica.intake import classify
 
     assert all(p.parent == TOY_DIR for p in INPUT_FILES)
     assert sorted(p.name for p in INPUT_FILES) == ["api.json", "notes.md", "trace.json"]
@@ -44,7 +44,7 @@ def test_the_three_input_files_exist_and_are_distinct_kinds():
 
 
 def test_every_toy_artifact_validates_against_its_schema(tmp_path):
-    from testgen.artifacts import write_json
+    from rubrica.artifacts import write_json
 
     def valid(payload, kind):
         path = tmp_path / f"{kind}.json"
@@ -190,7 +190,7 @@ def test_the_expected_oracles_use_the_two_vocabulary_kinds_nothing_else_does():
     than another minimal_expected(): two of the five kinds in the closed
     vocabulary had no fixture exercising them end to end.
     """
-    from testgen.suite.verify import ASSERTION_KINDS
+    from rubrica.suite.verify import ASSERTION_KINDS
 
     used = {assertion["kind"] for sid in SIDS for assertion in toy_expected(sid)["assertions"]}
     assert {"value_equals", "answer_excludes"} <= used
@@ -240,7 +240,7 @@ def test_the_duplicate_pair_is_a_dedupe_candidate_before_score_rules_on_it():
 
     Measured, not predicted: exactly one pair, with identical_cells True.
     """
-    from testgen.dedupe import candidate_pairs
+    from rubrica.dedupe import candidate_pairs
 
     pre_score = []
     for scenario in toy_scenarios()["scenarios"]:
@@ -261,7 +261,7 @@ def test_the_resolved_pair_is_no_longer_a_candidate():
     that a candidate can be found, not that resolving it stops the loop
     rediscovering it.
     """
-    from testgen.dedupe import candidate_pairs
+    from rubrica.dedupe import candidate_pairs
 
     assert candidate_pairs(toy_scenarios()["scenarios"]) == []
 
@@ -284,7 +284,7 @@ def test_the_open_scenario_count_stays_within_the_manifest_cap():
     must not consume cap. build_toy_run passes max_scenarios=8 and there are
     four live scenarios; this pins that the duplicate is genuinely free.
     """
-    from testgen.refs import OPEN_STATUSES
+    from rubrica.refs import OPEN_STATUSES
 
     live = [s for s in toy_scenarios()["scenarios"] if s["status"] in OPEN_STATUSES]
     assert len(live) == 4

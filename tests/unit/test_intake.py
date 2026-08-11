@@ -4,9 +4,9 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from testgen.artifacts import read_json, sha256_of
-from testgen.intake import classify, intake, slug
-from testgen.validate import validate_artifact
+from rubrica.artifacts import read_json, sha256_of
+from rubrica.intake import classify, intake, slug
+from rubrica.validate import validate_artifact
 
 NOW = datetime(2026, 8, 6, 12, 30, 5, tzinfo=UTC)
 
@@ -29,7 +29,7 @@ def _write(tmp_path, name, payload):
     ],
 )
 def test_slug_produces_safe_path_segments(raw, expected):
-    from testgen.paths import safe_segment
+    from rubrica.paths import safe_segment
 
     result = slug(raw)
     assert result == expected

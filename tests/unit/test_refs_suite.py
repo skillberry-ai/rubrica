@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from testgen.artifacts import write_json
-from testgen.emit import emit_run
-from testgen.paths import RunPaths
-from testgen.refs import check_suite
+from rubrica.artifacts import write_json
+from rubrica.emit import emit_run
+from rubrica.paths import RunPaths
+from rubrica.refs import check_suite
 from tests.builders import (
     minimal_expected,
     minimal_manifest,
@@ -66,7 +66,7 @@ def test_each_missing_package_file_is_reported(tmp_path):
 def test_a_contract_naming_the_wrong_scenario_is_reported(tmp_path):
     run = _emitted_run(tmp_path)
     path = run.task_dir(SID) / "tests" / "expected.json"
-    from testgen.artifacts import read_json
+    from rubrica.artifacts import read_json
 
     write_json(path, read_json(path) | {"scenario_id": "scn-999"})
     findings = check_suite(run)

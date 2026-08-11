@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import hashlib
 
-from testgen.artifacts import write_json
-from testgen.paths import RunPaths
-from testgen.refs import check_all, check_inputs
+from rubrica.artifacts import write_json
+from rubrica.paths import RunPaths
+from rubrica.refs import check_all, check_inputs
 from tests.builders import MINIMAL_INPUT_BYTES, MINIMAL_INPUT_NAME, minimal_manifest
 
 

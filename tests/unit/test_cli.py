@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-import testgen.validate
-from testgen.artifacts import read_json, write_json
-from testgen.cli import main, subcommand_names
-from testgen.paths import RunPaths
+import rubrica.validate
+from rubrica.artifacts import read_json, write_json
+from rubrica.cli import main, subcommand_names
+from rubrica.paths import RunPaths
 from tests.builders import (
     minimal_claims,
     minimal_gold,
@@ -42,7 +42,7 @@ def test_top_level_help_exits_clean(capsys):
     error; the orchestrator branches on the difference.
     """
     assert main(["--help"]) == 0
-    assert "usage: testgen" in capsys.readouterr().out
+    assert "usage: rubrica" in capsys.readouterr().out
 
 
 def test_subcommand_help_exits_clean(capsys):
@@ -185,8 +185,8 @@ def test_an_escaping_unsafe_segment_exits_one_not_two(tmp_path, capsys, monkeypa
     a future unhardened call site would raise it: exit 1 with a line, not the
     exit 2 that tells the orchestrator the harness is broken.
     """
-    from testgen import refs
-    from testgen.paths import UnsafeSegment
+    from rubrica import refs
+    from rubrica.paths import UnsafeSegment
 
     run = _seeded_run(tmp_path)
 
@@ -308,7 +308,7 @@ def test_intake_refuses_to_mint_a_run_the_intake_gate_would_fail(tmp_path, capsy
 
 
 def test_intake_defaults_the_first_slice_limits(tmp_path, capsys):
-    from testgen.artifacts import read_json
+    from rubrica.artifacts import read_json
 
     source = tmp_path / "api.json"
     source.write_text('{"tools": []}', encoding="utf-8")
@@ -540,14 +540,14 @@ def _argv_for(command, run, tmp_path):
 # The call each subcommand makes after its arguments are resolved, as
 # (module path, attribute), so a test can force an exception out of it.
 _EXPLODE_TARGETS = {
-    "validate": ("testgen.cli", "validate_stage"),
-    "check-refs": ("testgen.refs", "check_all"),
-    "dedupe-candidates": ("testgen.cli", "candidate_pairs"),
-    "emit": ("testgen.cli", "emit_run"),
-    "smoke": ("testgen.cli", "smoke_run"),
-    "compare-gold": ("testgen.cli", "compare_run"),
-    "sample-for-review": ("testgen.cli", "sample_run"),
-    "diff-runs": ("testgen.cli", "diff_runs"),
+    "validate": ("rubrica.cli", "validate_stage"),
+    "check-refs": ("rubrica.refs", "check_all"),
+    "dedupe-candidates": ("rubrica.cli", "candidate_pairs"),
+    "emit": ("rubrica.cli", "emit_run"),
+    "smoke": ("rubrica.cli", "smoke_run"),
+    "compare-gold": ("rubrica.cli", "compare_run"),
+    "sample-for-review": ("rubrica.cli", "sample_run"),
+    "diff-runs": ("rubrica.cli", "diff_runs"),
 }
 
 
@@ -751,7 +751,7 @@ def test_an_unbuildable_parser_is_exit_2_on_every_subcommand(
     else:
         schema_dir = tmp_path / "schema"
         schema_dir.mkdir()
-        schema = read_json(Path(testgen.validate.__file__).parent / "schema" / "manifest-0.1.json")
+        schema = read_json(Path(rubrica.validate.__file__).parent / "schema" / "manifest-0.1.json")
         del schema["properties"]["stages"]["additionalProperties"]["properties"]["effort"]
         write_json(schema_dir / "manifest-0.1.json", schema)
         monkeypatch.setenv("TESTGEN_SCHEMA_DIR", str(schema_dir))

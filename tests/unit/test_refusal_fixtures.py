@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from testgen.intake import classify
+from rubrica.intake import classify
 from tests.toy import CONTRADICTION_DIR, GAP_DIR, TOY_DIR
 
 

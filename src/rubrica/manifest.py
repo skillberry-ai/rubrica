@@ -16,11 +16,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from testgen.artifacts import append_decision, read_json, write_json
-from testgen.errors import UsageError
-from testgen.paths import STAGES, RunPaths
-from testgen.skills import skill_sha256
-from testgen.validate import manifest_stage_efforts
+from rubrica.artifacts import append_decision, read_json, write_json
+from rubrica.errors import UsageError
+from rubrica.paths import STAGES, RunPaths
+from rubrica.skills import skill_sha256
+from rubrica.validate import manifest_stage_efforts
 
 # The one spelling of the artifact timestamp format. intake writes
 # manifest.created_utc with it and decide stamps each notebook line with it;

@@ -26,10 +26,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from testgen.artifacts import ArtifactError, read_json
-from testgen.metrics import jaccard
-from testgen.paths import RunPaths
-from testgen.refs import OPEN_STATUSES
+from rubrica.artifacts import ArtifactError, read_json
+from rubrica.metrics import jaccard
+from rubrica.paths import RunPaths
+from rubrica.refs import OPEN_STATUSES
 
 _STAGE_FIELDS = ("model", "effort", "skill_sha256")
 
@@ -195,7 +195,7 @@ def diff_runs(a: RunPaths, b: RunPaths) -> dict[str, Any]:
     """
     reasons = comparability(a, b)
     return {
-        "format": "testgen-stability/1",
+        "format": "rubrica-stability/1",
         "a": str(a.root),
         "b": str(b.root),
         "comparable": not reasons,

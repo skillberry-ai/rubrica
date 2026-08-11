@@ -8,8 +8,8 @@ its set sizes and its difference attached.
 
 from __future__ import annotations
 
-from testgen.artifacts import read_json, write_json
-from testgen.stability import (
+from rubrica.artifacts import read_json, write_json
+from rubrica.stability import (
     capability_ids,
     comparability,
     diff_runs,
@@ -60,7 +60,7 @@ def test_an_absent_artifact_gives_an_empty_set_rather_than_raising(tmp_path):
     Comparing a complete run against one that stopped after propose is exactly the
     comparison that localizes where it stopped being reproducible.
     """
-    from testgen.paths import RunPaths
+    from rubrica.paths import RunPaths
 
     run = RunPaths(tmp_path / "nothing")
     run.root.mkdir(parents=True)
@@ -165,7 +165,7 @@ def test_two_runs_with_no_manifest_at_all_are_not_declared_comparable(tmp_path):
     yield identical -- empty -- digest sets and identical -- empty -- stage
     configs, so only a check for manifest readability itself catches this one.
     """
-    from testgen.paths import RunPaths
+    from rubrica.paths import RunPaths
 
     a, b = RunPaths(tmp_path / "a"), RunPaths(tmp_path / "b")
     a.root.mkdir(parents=True)
@@ -251,7 +251,7 @@ def test_every_number_arrives_with_its_set_sizes(tmp_path):
     Only the sizes make that visible, which is why the metric's own docstring
     requires every caller to report them.
     """
-    from testgen.paths import RunPaths
+    from rubrica.paths import RunPaths
 
     a, b = RunPaths(tmp_path / "x"), RunPaths(tmp_path / "y")
     a.root.mkdir(parents=True)

@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from testgen.artifacts import ArtifactError, append_decision, read_json, write_json
+from rubrica.artifacts import ArtifactError, append_decision, read_json, write_json
 
 
 def test_round_trip(tmp_path):

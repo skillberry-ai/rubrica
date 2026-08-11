@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from itertools import combinations
 from typing import Any
 
-from testgen.refs import OPEN_STATUSES, cell_ref
+from rubrica.refs import OPEN_STATUSES, cell_ref
 
 
 @dataclass(frozen=True)

@@ -1,5 +1,5 @@
-from testgen.artifacts import write_json
-from testgen.validate import ARTIFACT_SCHEMAS, CONFIG_KINDS, STAGE_ARTIFACTS, validate_artifact
+from rubrica.artifacts import write_json
+from rubrica.validate import ARTIFACT_SCHEMAS, CONFIG_KINDS, STAGE_ARTIFACTS, validate_artifact
 from tests.builders import minimal_coverage, minimal_manifest, minimal_scenarios
 
 
@@ -141,8 +141,8 @@ def test_manifest_stage_entry_needs_the_full_comparability_triple(tmp_path):
 
 
 def test_a_capability_may_declare_a_tool_binding(tmp_path):
-    from testgen.artifacts import write_json
-    from testgen.validate import validate_artifact
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
     from tests.builders import minimal_world_model
 
     path = tmp_path / "01-world-model.json"
@@ -156,8 +156,8 @@ def test_a_capability_may_declare_a_tool_binding(tmp_path):
 
 def test_a_capability_without_a_binding_still_validates(tmp_path):
     """Optional, so no artifact that validated before this change stops validating."""
-    from testgen.artifacts import write_json
-    from testgen.validate import validate_artifact
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
     from tests.builders import minimal_world_model
 
     world = minimal_world_model()
@@ -168,8 +168,8 @@ def test_a_capability_without_a_binding_still_validates(tmp_path):
 
 
 def test_a_binding_missing_its_tool_is_rejected(tmp_path):
-    from testgen.artifacts import write_json
-    from testgen.validate import validate_artifact
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
     from tests.builders import minimal_world_model
 
     world = minimal_world_model()
@@ -180,8 +180,8 @@ def test_a_binding_missing_its_tool_is_rejected(tmp_path):
 
 
 def test_a_binding_with_an_unknown_key_is_rejected(tmp_path):
-    from testgen.artifacts import write_json
-    from testgen.validate import validate_artifact
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
     from tests.builders import minimal_world_model
 
     world = minimal_world_model()
