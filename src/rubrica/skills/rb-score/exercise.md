@@ -1,4 +1,4 @@
-# tg-score -- live exercise
+# rb-score -- live exercise
 
 `tests/unit/test_skills_score.py` and `skills.check_contract` can confirm
 this skill's *shape*: the contract, the five sections, and that its prose
@@ -20,7 +20,7 @@ promotion and the fold real work rather than something the fixture already
 did (`tests/unit/test_toy_fixture.py::test_upto_propose_writes_every_scenario_proposed_with_no_duplicate_of`
 pins that). `01-world-model.json` is on disk; `03-coverage/` is empty.
 
-One dispatch, not a fan-out: `tg-score` is the barrier, so there is exactly
+One dispatch, not a fan-out: `rb-score` is the barrier, so there is exactly
 one subagent, given the run directory, the stage name, and this skill's path
 -- no round number, no coverage report, and no memory of the propose stage
 that just ran.
@@ -35,8 +35,8 @@ expecting hop depth 1, `goal-explain` expecting hop depth 2), no gaps,
 
 - `03-coverage/round-1.json` and `03-coverage/latest.json` both exist and are
   byte-identical.
-- `testgen validate --stage score` exits 0.
-- `testgen check-refs` exits 0.
+- `rubrica validate --stage score` exits 0.
+- `rubrica check-refs` exits 0.
 - Every scenario it kept is now `active` -- none left `proposed`. A leftover
   `proposed` scenario is not a smaller ruling, it is a test that will never
   be instantiated, and no gate reports it until something tries to
@@ -90,7 +90,7 @@ the subagent needed to say beyond that belongs in what it reports to the
 orchestrator for `decisions.md`, not in a field the schema does not have.
 
 **4. The dedupe judgment, which is the point of this exercise.** In the
-pre-score state `testgen dedupe-candidates` returns exactly one pair --
+pre-score state `rubrica dedupe-candidates` returns exactly one pair --
 `scn-open` and `scn-open-dup`, with `identical_cells: true` and
 `shared_cells: ["cell:cap-find-tickets/oc-found"]`, verified by running it.
 The two really are one test behind different wording: same `goal_id`, the
@@ -99,7 +99,7 @@ fold one of them -- `status: "duplicate"` with `duplicate_of` naming the
 survivor -- and leave the survivor `active`. Three failure modes, in
 descending order of seriousness:
 
-- **Both kept `active`.** The loop then pays for two `tg-instantiate`
+- **Both kept `active`.** The loop then pays for two `rb-instantiate`
   fan-outs for one test, and the matrix implies two tests cover a cell that
   has one. Nothing in either gate reports it: two live scenarios crediting
   one cell is a perfectly valid document.
@@ -141,8 +141,8 @@ skill's path -- nothing else. The run was built with
 `proposed` with no `duplicate_of`, and `dedupe-candidates` returned exactly the
 one `scn-open <-> scn-open-dup` pair with `identical_cells: true`.
 
-**Both gates clean.** `testgen validate --run <run> --stage score` and
-`testgen check-refs --run <run>` each exited 0. `03-coverage/round-1.json` and
+**Both gates clean.** `rubrica validate --run <run> --stage score` and
+`rubrica check-refs --run <run>` each exited 0. `03-coverage/round-1.json` and
 `03-coverage/latest.json` compared byte-identical with `cmp`. Every kept
 scenario was promoted to `active`.
 

@@ -1,4 +1,4 @@
-"""tg-reconcile's contract and the enumerations its prompt must be complete over.
+"""rb-reconcile's contract and the enumerations its prompt must be complete over.
 
 The two set-completeness tests below are the ones that matter. This stage
 computes the coverage denominator, so a skill that names three of the five
@@ -14,7 +14,7 @@ from rubrica.artifacts import read_json
 from rubrica.skills import SECTIONS, load, skills_dir
 from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
 
-SKILL = skills_dir() / "tg-reconcile" / "SKILL.md"
+SKILL = skills_dir() / "rb-reconcile" / "SKILL.md"
 
 
 def _world_schema():

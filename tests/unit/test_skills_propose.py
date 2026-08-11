@@ -1,4 +1,4 @@
-"""tg-propose's contract, and the two status boundaries it must not cross.
+"""rb-propose's contract, and the two status boundaries it must not cross.
 
 The status boundary is the one that matters here: propose writes `proposed`,
 and score owns every other transition. A skill that writes `active` closes the
@@ -12,7 +12,7 @@ from rubrica.artifacts import read_json
 from rubrica.skills import SECTIONS, load, skills_dir
 from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
 
-SKILL = skills_dir() / "tg-propose" / "SKILL.md"
+SKILL = skills_dir() / "rb-propose" / "SKILL.md"
 
 
 def test_the_contract_matches_the_stage_gate():

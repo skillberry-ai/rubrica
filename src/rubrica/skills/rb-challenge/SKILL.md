@@ -1,17 +1,17 @@
 ---
-name: tg-challenge
+name: rb-challenge
 description: Attack one instantiated scenario as an adversary -- answer its question from the seed alone before the oracle is ever opened, hunt for a second world-consistent answer, check the question is derivable at all, and only then compare against the label and record a verdict the orchestrator can act on.
 ---
 
-# tg-challenge
+# rb-challenge
 
-You are one member of `tg-challenge`'s fan-out: the orchestrator dispatches
+You are one member of `rb-challenge`'s fan-out: the orchestrator dispatches
 you once per instantiated scenario, and you were dispatched to judge exactly
 one of them -- the one whose `scenario_id` you were told. Sibling subagents
 are doing the same thing, right now, for other instances, and none of you
 will ever see another's verdict.
 
-`tg-instantiate` co-designed a seed world and the oracle that reads out of
+`rb-instantiate` co-designed a seed world and the oracle that reads out of
 it. That co-design is the reason this stage exists as a separate subagent
 rather than a second pass by the stage that built the instance: an author
 checking their own world checks it against the answer they already have, and
@@ -72,7 +72,7 @@ answer is wanted, and do not skim it and tell yourself you did not read it.
 
 **Nothing else on disk is yours to read**, and one of the forbidden files is
 sitting inside your own instance directory. `rationale.md` is not in your
-`reads`: it is `tg-instantiate`'s prose explaining which near-misses it put
+`reads`: it is `rb-instantiate`'s prose explaining which near-misses it put
 in the world and why the test is fair, which is exactly the answer to Method
 step 2 handed to you by the party whose work you are checking. Reading it
 would make step 2 a reading-comprehension exercise instead of a search.
@@ -169,7 +169,7 @@ own goes in `notes`, which is the only free-text field in the document.
 **You never touch the instance.** You do not edit `seed.json`, you do not
 edit `expected.json`, you do not add a distractor, and you do not fix the
 oracle. `re-seed` is a *request* the orchestrator acts on by re-dispatching
-`tg-instantiate`; repairing the world yourself would destroy the only
+`rb-instantiate`; repairing the world yourself would destroy the only
 independent reading anyone will ever get of it, and would make you the
 author of the test you were asked to attack.
 
@@ -241,7 +241,7 @@ worth nothing at all unless steps 1 to 3 finished first.
    answer, and a near-miss that fails the question on a dimension the intent
    names is a distractor doing its job -- finding one is evidence the
    instance is *good*. Reporting ambiguity that is not there costs the run
-   a `tg-instantiate` re-dispatch and weakens a test that was already
+   a `rb-instantiate` re-dispatch and weakens a test that was already
    discriminating, so a false positive here is a real cost, not a safe
    default. But when the second reading genuinely holds, say so: resolving
    it in the label's favour is the one move this stage exists to refuse.
@@ -358,7 +358,7 @@ worth nothing at all unless steps 1 to 3 finished first.
 
    **A `reject` is honoured, not absorbed, and that is a reason to write one
    when it is true rather than a reason to hesitate.** A rejected scenario
-   stops being a test that ships, so `tg-score` recomputes the coverage row
+   stops being a test that ships, so `rb-score` recomputes the coverage row
    it was credited for as a hole again and the run reports what it actually
    covers. The cost of the rejection is one honest hole in a coverage report;
    the cost of the `accept` you wrote instead is a suite that claims to test
@@ -409,7 +409,7 @@ worth nothing at all unless steps 1 to 3 finished first.
    justification and the derivability line are what make the field evidence
    about an attempt rather than a description of a test.
 
-Before you report done, run `testgen validate --stage challenge`. If it
+Before you report done, run `rubrica validate --stage challenge`. If it
 reports anything wrong with the file you just wrote, that is not a finding
 to pass along -- it is your own defect to fix. Repair the verdict and run it
 again.
@@ -432,7 +432,7 @@ scenarios' verdicts remain, you are still done -- say so in what you report,
 and name those paths, because the orchestrator is the one that can act on
 them and it is the only party entitled to look at every slice at once.
 
-Do **not** run `testgen check-refs`. `refs.check_verdicts` is the layer-2
+Do **not** run `rubrica check-refs`. `refs.check_verdicts` is the layer-2
 gate on your artifact, and running it yourself here would mislead you rather
 than help you: it reports every instantiated scenario that has no verdict as
 soon as `05-verdicts/` exists at all, and during a fan-out that is most of

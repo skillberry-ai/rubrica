@@ -1,18 +1,18 @@
 ---
-name: tg-instantiate
+name: rb-instantiate
 description: Build one scenario's seed world -- distractors first, so no agent can pass it by reading back the only matching record -- then derive that world's oracle from the seed rather than the other way round, and record which near-misses exist so a reviewer can judge the test's fairness.
 ---
 
-# tg-instantiate
+# rb-instantiate
 
-You are one member of `tg-instantiate`'s fan-out: the orchestrator dispatches
+You are one member of `rb-instantiate`'s fan-out: the orchestrator dispatches
 you once per active scenario, and you were dispatched to build exactly one of
 them -- the one whose `scenario_id` you were told -- into a seed world, an
 oracle, and a note explaining why the test is fair. Sibling subagents are
 doing the same thing, right now, for other scenarios, and none of you will
 ever see another's output.
 
-This stage and `tg-challenge` are the two that decide whether the suite is
+This stage and `rb-challenge` are the two that decide whether the suite is
 worth running; everything before them is bookkeeping by comparison. The
 reason sits in the seed you are about to write. A world containing exactly
 one record that matches the question makes the task passable by any agent
@@ -53,7 +53,7 @@ entry in `02-scenarios.json`'s `scenarios` array by matching `id` against the
 `active`; anything else means stop and report the dispatch rather than
 instantiating it anyway. Two of the other statuses are the ones
 `refs.check_instances` reports an instance for, and both can reach you
-through a dispatch mistake. `proposed` means `tg-score` has not ruled on the
+through a dispatch mistake. `proposed` means `rb-score` has not ruled on the
 scenario at all. `duplicate` means it ruled the scenario *out* -- folded into
 another scenario that carries the same test, usually with the same or a
 near-identical `discriminating_fact`, which is exactly what makes it look
@@ -61,7 +61,7 @@ instantiable when you read it, and makes it the likelier of the two to slip
 through. Neither is yours to build, and the fold in particular is not
 something to second-guess by building it anyway because the fact reads fine.
 (A `rejected` scenario is a third case the gate tolerates, because that is
-what a scenario `tg-challenge` threw out *after* it was instantiated looks
+what a scenario `rb-challenge` threw out *after* it was instantiated looks
 like -- but it is still not one to build a fresh instance for, and being
 handed one is a dispatch mistake to report the same way.)
 
@@ -79,7 +79,7 @@ re-dispatch appends the adversary's reading of the instance you wrote. Read
 whatever is there; nothing obliges the orchestrator to send exactly one thing,
 and nothing licenses you to act on a notice that did not arrive.
 
-**A `re-seed` re-dispatch.** If `tg-challenge` judged your scenario `re-seed`,
+**A `re-seed` re-dispatch.** If `rb-challenge` judged your scenario `re-seed`,
 the orchestrator dispatches you again for that same scenario, once, with the
 verdict's **`alternative_answers` and its `notes`** quoted into your prompt. That
 appended text is legitimate input, and it is the only channel it could arrive on
@@ -91,7 +91,7 @@ widen your `reads` and it is not a conclusion to defer to.
 defects.** `alternative_answers` is populated when the adversary found a
 **second answer consistent with the seed you wrote** -- a named, specific
 failure of the uniqueness requirement stated below. It arrives *empty* for the
-other cases `tg-challenge` re-seeds on, where the defect is not ambiguity at
+other cases `rb-challenge` re-seeds on, where the defect is not ambiguity at
 all: a call it needed that your scenario never declared, an oracle it believes is
 wrong, or its own self-reported anchoring. In those the `notes` carry the entire
 reason, and the reason is what you act on.
@@ -108,8 +108,8 @@ re-attacking rather than one to leave unchanged.
 
 What you may not do, in either shape, is narrow the scenario: the
 `discriminating_fact`, the `user_intent` and everything else in
-`02-scenarios.json` stay exactly as they are. `tg-propose` owns the scenario and
-`tg-score` owns its status, and rewriting the fact to dodge an alternative
+`02-scenarios.json` stay exactly as they are. `rb-propose` owns the scenario and
+`rb-score` owns its status, and rewriting the fact to dodge an alternative
 answers a different test than the one that was approved. And if the notice
 carries neither an alternative nor a reason you can act on, report that the
 notice is empty -- do **not** invent an alternative answer to have something to
@@ -118,8 +118,8 @@ that looks official.
 
 **Overwrite all three files in place, at the paths you already wrote.**
 `seed.json`, `expected.json` and `rationale.md` under
-`04-instances/<scenario_id>/` are what `tg-emit` compiles and what the next
-`tg-challenge` reads, so a repair written anywhere else is a repair nothing
+`04-instances/<scenario_id>/` are what `rb-emit` compiles and what the next
+`rb-challenge` reads, so a repair written anywhere else is a repair nothing
 sees: no variant filename, no second directory, and no copy kept of the seed you
 are replacing -- that history lives in the verdict and in version control, not
 in the instance directory.
@@ -374,7 +374,7 @@ artifacts that validate and mean nothing.
    The vocabulary is **closed** -- these five kinds and no others:
    `answer_contains`, `answer_excludes`, `value_equals`, `tool_called`,
    `tool_not_called`. A skill cannot invent a kind. Adding one is a human
-   change to the verifier, `src/testgen/suite/verify.py`; an invented kind
+   change to the verifier, `src/rubrica/suite/verify.py`; an invented kind
    scores as failed and neither schema catches it, because the *shape* of the
    assertion is perfectly fine.
 
@@ -511,8 +511,8 @@ artifacts that validate and mean nothing.
    specific enough to be wrong. "The correct ticket is identified" is not
    checkable; a sentence naming the record and the value is.
 
-Before you report done, run `testgen validate --stage instantiate` and then
-`testgen check-refs`. Either one reporting a finding against **the files you
+Before you report done, run `rubrica validate --stage instantiate` and then
+`rubrica check-refs`. Either one reporting a finding against **the files you
 just wrote** is not a finding to pass along -- it is your own defect to fix.
 Repair your artifact and run both again.
 
@@ -553,13 +553,13 @@ label costs the whole suite its credibility.
 - **The `discriminating_fact` cannot be made *uniquely* determined in any
   seed you can build.** Do not write a seed. Report it: the scenario needs
   re-proposing. A world in which the fact is ambiguous produces a label
-  `tg-challenge` will reject anyway, and it will reject it after the fan-out
+  `rb-challenge` will reject anyway, and it will reject it after the fan-out
   has been paid for, so the honest stop is here.
 
 - **A world-model invariant makes the seed you need impossible.** Do not
   violate the invariant to get the seed you want. Report the conflict:
-  either the invariant is wrong, which is a `tg-reconcile` defect, or the
-  scenario is, which is a `tg-propose` defect, and both are above your pay
+  either the invariant is wrong, which is a `rb-reconcile` defect, or the
+  scenario is, which is a `rb-propose` defect, and both are above your pay
   grade. Silently violating it is the worst available option, because a
   simulation backend recomputes the field and the label breaks at run time
   rather than here.

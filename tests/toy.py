@@ -532,7 +532,7 @@ def toy_scenarios(**over: Any) -> dict[str, Any]:
 
 
 def _scenarios_before_score() -> dict[str, Any]:
-    """02-scenarios.json as tg-propose would have left it: every scenario
+    """02-scenarios.json as rb-propose would have left it: every scenario
     `proposed`, none marked `duplicate_of` yet.
 
     Used only by build_toy_run(upto="propose"). A run handed to the score stage
@@ -799,7 +799,7 @@ def toy_seed(scenario_id: str, **over: Any) -> dict[str, Any]:
 # better answer than the reference and scores 0.5 instead of 1.0. Nothing
 # mechanical catches that -- the pointer resolves to nothing, so the reachability
 # gate is satisfied -- which makes it a judgment the author owes, and
-# `tg-instantiate`'s Method says so in those terms. Re-deriving these labels
+# `rb-instantiate`'s Method says so in those terms. Re-deriving these labels
 # belongs with a deliberate re-record rather than an edit here: the reward each
 # exclusion feeds is pinned in three separate places, so changing the value alone
 # would move numbers other tests assert.
@@ -1029,7 +1029,7 @@ def build_toy_run(runs_dir: Path, *, upto: str | None = None, **intake_kwargs: A
 
     `upto` stops the run after one named stage, so a later task can hand a
     skill a run populated up to but not past the stage under test: handing
-    tg-reconcile a run that already contains 01-world-model.json tests
+    rb-reconcile a run that already contains 01-world-model.json tests
     nothing. `upto=None` (the default) writes everything this fixture knows how
     to write, through challenge.
 

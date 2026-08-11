@@ -1,4 +1,4 @@
-# tg-reconcile -- live exercise
+# rb-reconcile -- live exercise
 
 `tests/unit/test_skills_reconcile.py` and `skills.check_contract` can confirm
 this skill's *shape*: the contract, the five sections, and that its prose at
@@ -18,17 +18,17 @@ upto="extract")`. This leaves `00-inputs/` and a complete `01-claims/`
 (`api-json.json`, `notes-md.json`, `trace-json.json`) on disk, with nothing
 under `01-world-model.json` yet.
 
-One dispatch, not a fan-out: unlike `tg-extract`, `tg-reconcile` is the
+One dispatch, not a fan-out: unlike `rb-extract`, `rb-reconcile` is the
 barrier, so there is exactly one subagent, given the run directory, the stage
-name, and this skill's path -- and, unlike `tg-extract`'s dispatch, no single
+name, and this skill's path -- and, unlike `rb-extract`'s dispatch, no single
 `artifact_id` to restrict it to, because reading every claims file is the
 whole point of this stage.
 
 ## Pass criteria
 
 - `01-world-model.json` exists and is schema-valid.
-- `testgen validate --stage reconcile` exits 0.
-- `testgen check-refs` exits 0.
+- `rubrica validate --stage reconcile` exits 0.
+- `rubrica check-refs` exits 0.
 
 Then read the world model by hand against the questions below. A run that
 clears the three mechanical checks above and fails any of these has not
@@ -70,7 +70,7 @@ comment-count rule and the ticket-id-uniqueness rule explicitly -- both
 forms (`count` and `unique`). A world model that files either as `prose:`
 has left the reachability gate with nothing mechanical to check for that
 invariant, and a seed that silently violates it will not be caught before
-`tg-challenge`, if it is caught at all.
+`rb-challenge`, if it is caught at all.
 
 **4. Does the contradiction's `rationale` name what in the claim set actually
 licenses its resolution, or does it read like an appeal to convention?** Two
@@ -109,8 +109,8 @@ is deleted when this branch finishes.
 One dispatch against a run stopped after `extract`, on the hand-authored fixture
 claims: one subagent, the run directory, the stage name and this skill's path,
 with no `artifact_id` restriction because reading every claims file is the point
-of this stage. **Both gates clean** -- `testgen validate --run <run> --stage
-reconcile` 0 and `testgen check-refs --run <run>` 0.
+of this stage. **Both gates clean** -- `rubrica validate --run <run> --stage
+reconcile` 0 and `rubrica check-refs --run <run>` 0.
 
 **The headline result is a success, and it is §5's own stated test of gap
 detection: a real reconcile HALTS the pipeline on the toy world.** It recorded
@@ -133,8 +133,8 @@ number the other way.** It enumerated **7 capability cells** -- three outcome
 classes for `find_tickets`, four for `get_ticket` -- against the hand-authored
 fixture's 4. The opposite of the shrinking failure this property was written to
 catch: a real run *expanded* the denominator. Read that figure next to
-`tg-orchestrate/exercise.md`'s run record, where the same skill on the same
-target measured **6** from real `tg-extract` claims: 7 from fixture claims and 6
+`rb-orchestrate/exercise.md`'s run record, where the same skill on the same
+target measured **6** from real `rb-extract` claims: 7 from fixture claims and 6
 from real ones are two measurements of two inputs, which makes the denominator
 this stage freezes sensitive to upstream claim quality.
 

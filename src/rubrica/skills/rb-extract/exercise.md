@@ -1,4 +1,4 @@
-# tg-extract -- live exercise
+# rb-extract -- live exercise
 
 `tests/unit/test_skills_extract.py` and `skills.check_contract` can confirm
 this skill's *shape*. Neither can confirm that a model actually dispatched
@@ -14,7 +14,7 @@ Build a toy run stopped after `intake`:
 build_toy_run(runs_dir, upto="intake")
 ```
 
-Dispatch `tg-extract` three times, once per registered input artifact
+Dispatch `rb-extract` three times, once per registered input artifact
 (`api-json`, `notes-md`, `trace-json`), each dispatch told only the one
 `artifact_id` it is responsible for -- never the other two.
 
@@ -28,8 +28,8 @@ Dispatch `tg-extract` three times, once per registered input artifact
   mirrors the input's own suffix would write `notes-md.md.json` or
   `notes-md.md` instead, either of which `refs.check_manifest` reports as a
   filename that disagrees with its own declared `artifact_id`.
-- `testgen validate --stage extract` exits 0.
-- `testgen check-refs` exits 0.
+- `rubrica validate --stage extract` exits 0.
+- `rubrica check-refs` exits 0.
 - No claim id appears in two files.
 
 ## The property no automated test can check
@@ -86,7 +86,7 @@ This is the first positive behavioural evidence that Refusal condition 5's
 trigger actually does the work it was written for, not only that it reads
 plausibly.
 
-Both gates were clean: `testgen validate --stage extract` and `testgen
+Both gates were clean: `rubrica validate --stage extract` and `rubrica
 check-refs` each exited 0, and claim ids stayed globally unique across the
 three subagents with no shared context between them, confirming the
 `clm-<artifact-id>-NNN` prefixing convention (Method step 6) holds without
@@ -110,7 +110,7 @@ motivated.
   shipping" as `entity`. Arguably `billing`/`shipping` are values of
   `Ticket.queue`, not an entity with fields of its own -- but this claim
   does not feed the coverage denominator the way the invariant/
-  outcome_class pair does, and `tg-reconcile`, not `tg-extract`, is the
+  outcome_class pair does, and `rb-reconcile`, not `rb-extract`, is the
   stage that decides whether a claim like this becomes a world-model
   entity. Left unchanged rather than adding a second worked pair to
   Method step 3 for a lower-stakes distinction that risks diluting the one
@@ -119,12 +119,12 @@ motivated.
   as "in practice, a single lookup" / "in practice, a two-step workflow."
   This reads as legitimate added granularity, not redundancy: the second
   pair carries hop-depth information the first pair does not, and
-  `tg-propose` uses exactly that. Left unchanged.
+  `rb-propose` uses exactly that. Left unchanged.
 
 ## Run record: round 2, from Task 13's whole-pipeline exercise
 
 Not a re-run of the exercise above. This round's evidence comes from the
-chained end-to-end run of the whole pipeline (Task 13), where `tg-extract`
+chained end-to-end run of the whole pipeline (Task 13), where `rb-extract`
 was dispatched as stage 1a rather than in isolation, so the finding is about
 the same skill seen from a different exercise.
 
@@ -132,7 +132,7 @@ the same skill seen from a different exercise.
 files.** It opened `api.json` and `trace.json` while checking locator-format
 conventions, then said so in its own report. Its claims content rested only
 on `notes-md.md` -- inspection of `01-claims/notes-md.json` showed no
-contamination -- and `testgen validate --stage extract` and `testgen
+contamination -- and `rubrica validate --stage extract` and `rubrica
 check-refs` both exited 0, as they would have either way.
 
 **It surfaced only because the subagent volunteered it.** No gate can see a

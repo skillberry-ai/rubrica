@@ -1,14 +1,14 @@
 ---
-name: tg-emit
-description: Compile the accepted instances into Harbor task packages by running `testgen emit`, gate the result, and report what was emitted and what was pruned -- a thin human-facing entry point over code that writes nothing itself.
+name: rb-emit
+description: Compile the accepted instances into Harbor task packages by running `rubrica emit`, gate the result, and report what was emitted and what was pruned -- a thin human-facing entry point over code that writes nothing itself.
 ---
 
-# tg-emit
+# rb-emit
 
 You are stage 6, and you are the thinnest skill in this pipeline. Every other
 stage asks you for a judgment; this one asks you for four commands and an
 honest report. **You do not write any file in the run directory.**
-`testgen emit` writes the suite; you run it, gate what it produced, and say
+`rubrica emit` writes the suite; you run it, gate what it produced, and say
 what happened.
 
 That is not modesty about the stage's importance -- 06-suite/ is the thing
@@ -43,7 +43,7 @@ Four names under `reads`, in two pairs that do two different jobs.
 whose `capabilities[].binding` turns a capability id into the `{tool, args}`
 pair the verifier can score, and each accepted instance's
 `04-instances/<scenario_id>/expected.json` (`expected`), the oracle being
-translated. These are what `testgen emit` consumes to build a package, so they
+translated. These are what `rubrica emit` consumes to build a package, so they
 are what a finding about a package will name.
 
 **The pair the *report* is about.** `02-scenarios.json` (`scenarios`) and
@@ -59,12 +59,12 @@ them, which is the only reason anything is ever in a `reads` list.
 
 `writes` names `task_dir` -- `06-suite/<scenario_id>/` -- because that is where
 this stage's output lands, even though the process that puts it there is
-`testgen emit` and not you.
+`rubrica emit` and not you.
 
 You read all four to *understand and report* what emit did, never to decide
 anything. This stage has no judgment to make: every judgment that selects
-what ships was already made and recorded -- `tg-score` promoted the scenario
-to `active`, `tg-challenge` filed an `accept`, and `emit` reads both. You are
+what ships was already made and recorded -- `rb-score` promoted the scenario
+to `active`, `rb-challenge` filed an `accept`, and `emit` reads both. You are
 not a second opinion on either.
 
 **So the boundary that matters here is not the one you are used to, and
@@ -78,7 +78,7 @@ whole of this skill's discipline: **you may read, and you may not write.**
 
 Two specific forms of that, because reading these two files is exactly where
 the temptation arrives. A `status` you may read is not a `status` you may
-change -- that transition is `tg-score`'s alone. A `reject` you may read is
+change -- that transition is `rb-score`'s alone. A `reject` you may read is
 not a verdict you may weigh: the adversary ruled, and your job is to report
 that the ruling is why a package is absent, never to decide it was harsh.
 
@@ -91,7 +91,7 @@ wrote and the run directory holds the state that decided the rest.
 ## 2. Output
 
 **Nothing, in the run directory.** Every file under `06-suite/` is written by
-`testgen emit`, which lays out one directory per emitted scenario holding
+`rubrica emit`, which lays out one directory per emitted scenario holding
 `task.toml`, `instruction.md`, `seed.json`, `golden.json`, `provenance.md`,
 and `tests/` with `expected.json`, `verify.py` and `test.sh`. Your contract's
 `schemas` names `suite-expected`, the schema for `tests/expected.json`: that
@@ -101,24 +101,24 @@ contract. It is a gate you run, not a document you author.
 What you produce is a **report**, addressed to the orchestrator, and it has
 four parts:
 
-1. **What was emitted** -- the task directory paths `testgen emit` printed,
+1. **What was emitted** -- the task directory paths `rubrica emit` printed,
    one per package.
 2. **What emit reported** -- every finding line, verbatim, or that there were
    none.
 3. **What was pruned, and why** -- one line per instance directory that has no
    package, naming the scenario and the reason (Method step 4).
-4. **What the two gates said** -- the exit code of `testgen validate --stage
-   emit` and of `testgen check-refs`, and any finding either one named.
+4. **What the two gates said** -- the exit code of `rubrica validate --stage
+   emit` and of `rubrica check-refs`, and any finding either one named.
 
 None of that is a file. `decisions.md` is the orchestrator's to append to via
-`testgen decide`, not yours, and a report you deliver as prose is exactly
+`rubrica decide`, not yours, and a report you deliver as prose is exactly
 what this stage is for.
 
 ## 3. Method
 
 Four steps.
 
-1. **Run `testgen emit --run <run>`.**
+1. **Run `rubrica emit --run <run>`.**
 
    That is the whole of the compilation. Do not build a package by hand, do
    not "fix up" one emit wrote, and do not write the missing package for an
@@ -147,7 +147,7 @@ Four steps.
    instance with no verdict, an instance still marked `re-seed`. Read each
    one for which artifact it names, because that is who has to change.
 
-3. **Run `testgen validate --stage emit`, then `testgen check-refs`.** In
+3. **Run `rubrica validate --stage emit`, then `rubrica check-refs`.** In
    that order: layer 1 schema-checks every emitted `tests/expected.json`
    against `suite-expected`, and layer 2 then checks each package is complete
    (all eight files present) and addresses a scenario that was actually
@@ -155,7 +155,7 @@ Four steps.
 
    **You have no scoping problem here, and two sibling skills do**, so it is
    worth saying why yours differs rather than leaving a reader to wonder.
-   `tg-instantiate` and `tg-challenge` each carry a paragraph telling their
+   `rb-instantiate` and `rb-challenge` each carry a paragraph telling their
    reader to ignore findings against a sibling's artifact, because those two
    run several subagents at once against a gate that is run-global. Emit is a
    single dispatch over the whole suite and nothing else is running, so every
@@ -190,7 +190,7 @@ Four steps.
    | The scenario's `status` is not `active` -- `duplicate`, `rejected`, or still `proposed` | `02-scenarios.json` | No. A `rejected` scenario's package is *supposed* to be pruned, and a `duplicate` never had a test of its own. |
    | Its verdict is `reject` | `05-verdicts/<sid>.json` | No, and it is the most informative line in your report: the adversary threw the test out, so the cell it claimed is a hole again. |
    | Its verdict is `re-seed` | emit's own finding | Yes -- the adversary asked for one re-instantiation and it has not happened. Report the finding; the orchestrator owns the re-dispatch. |
-   | It has no verdict at all | emit's own finding | Yes. `tg-challenge` has not judged it. |
+   | It has no verdict at all | emit's own finding | Yes. `rb-challenge` has not judged it. |
    | Its oracle or seed is missing or unparseable, or a capability it needs has no binding | emit's own finding | Yes, and the finding names the file. |
 
    A pruned package is **information, not an error**, and the first two rows
@@ -204,7 +204,7 @@ Four steps.
 ## 4. Invariants
 
 1. **You write nothing.** Every artifact under `06-suite/` came from
-   `testgen emit`. If a package's content is wrong, the artifact it was
+   `rubrica emit`. If a package's content is wrong, the artifact it was
    compiled from is wrong; fixing the package leaves the artifact wrong and
    the suite unreproducible.
 
@@ -227,13 +227,13 @@ Four steps.
    reviewing the suite instead of reporting it -- that review is
    `sample-for-review`'s and `smoke`'s, and neither is yours to run.
 
-Before you report done, run `testgen validate --stage emit` and then
-`testgen check-refs`. Unlike every judgment stage in this pipeline, a finding
+Before you report done, run `rubrica validate --stage emit` and then
+`rubrica check-refs`. Unlike every judgment stage in this pipeline, a finding
 from either one is usually **not** your defect to fix, because you wrote
 nothing: it belongs to the stage that produced the artifact the finding
 names. What *is* yours is to run both, read them, and report them without
-smoothing anything over. Report success only when `testgen emit`,
-`testgen validate --stage emit` and `testgen check-refs` all exited 0; on any
+smoothing anything over. Report success only when `rubrica emit`,
+`rubrica validate --stage emit` and `rubrica check-refs` all exited 0; on any
 other combination, report the exit codes and the findings and let the
 orchestrator decide.
 
@@ -249,7 +249,7 @@ undetectable afterwards: a hand-finished package validates exactly like a
 compiled one, and the run that shipped it can never be reproduced from its
 own artifacts again.
 
-- **`testgen emit` reports findings.** Report them verbatim and stop. Do not
+- **`rubrica emit` reports findings.** Report them verbatim and stop. Do not
   repair a package by hand: the finding names an *upstream* artifact -- an
   oracle, a verdict, a capability's binding in the world model -- and editing
   the package leaves that artifact wrong while making the suite disagree with
@@ -265,7 +265,7 @@ own artifacts again.
   of four packages emitted" and not a fourth package written to make the
   count look right.
 
-- **`testgen emit` exits 2.** Report it as a harness problem. Exit 2 means
+- **`rubrica emit` exits 2.** Report it as a harness problem. Exit 2 means
   the run directory or an artifact could not be read at all -- a mistyped
   path, an unreadable file -- so no repair prompt fixes it and re-running the
   stage cannot help. Do not retry it hoping for a different answer and do not
@@ -275,7 +275,7 @@ own artifacts again.
   `validate --stage <stage>`.** That is layer 1 having been skipped, not a
   defect in the suite: emit indexes schema-required keys directly and one of
   the artifacts it read is malformed in a way `validate` must reject first.
-  Run `testgen validate --stage instantiate` and `testgen validate --stage
+  Run `rubrica validate --stage instantiate` and `rubrica validate --stage
   challenge`, report what they name, and leave the repair to the stage that
   owns the artifact. Emitting again against the same malformed input produces
   the same finding.

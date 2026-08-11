@@ -1,4 +1,4 @@
-"""tg-score's contract, and the vocabularies it must be complete over.
+"""rb-score's contract, and the vocabularies it must be complete over.
 
 This stage writes the numbers every later judgment is measured against, so the
 completeness checks here are about vocabulary coverage: a verdict it cannot
@@ -13,7 +13,7 @@ from rubrica.cli import subcommand_names
 from rubrica.skills import SECTIONS, load, section_body, skills_dir
 from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
 
-SKILL = skills_dir() / "tg-score" / "SKILL.md"
+SKILL = skills_dir() / "rb-score" / "SKILL.md"
 
 METHOD, INVARIANTS = SECTIONS[2], SECTIONS[3]
 
@@ -79,7 +79,7 @@ def test_it_names_every_coverage_verdict():
 
 
 def test_it_enumerates_every_hole_reason_in_one_place():
-    """Choosing a reason is a judgment `tg-propose` then reads as a worklist, so
+    """Choosing a reason is a judgment `rb-propose` then reads as a worklist, so
     the four values have to be presented *together* with what each one means.
 
     **Strengthened: the whole-body version was vacuous.** Deleting Method step

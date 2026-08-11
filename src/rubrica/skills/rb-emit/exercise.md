@@ -1,4 +1,4 @@
-# tg-emit -- live exercise
+# rb-emit -- live exercise
 
 `tests/unit/test_skills_emit.py` and `skills.check_contract` confirm this
 skill's shape: the contract matches the stage gate, `emit` is in `invokes`
@@ -48,9 +48,9 @@ run.verdict("scn-missing").write_text(json.dumps(verdict, indent=2, sort_keys=Tr
 `scn-missing` is the right one to flip: it is the absence-shaped scenario, its
 claimed `hop_depth` is 1 and its verdict's `minimum_tool_calls_found` is 1, so
 nothing else in the run has to move to keep both gates clean. Measured on this
-fixture: after the flip, `testgen emit` exits 0 having written three packages
-(`scn-open`, `scn-empty`, `scn-blocked`), `testgen validate --stage emit`
-exits 0, and `testgen check-refs` exits 0. The fifth scenario,
+fixture: after the flip, `rubrica emit` exits 0 having written three packages
+(`scn-open`, `scn-empty`, `scn-blocked`), `rubrica validate --stage emit`
+exits 0, and `rubrica check-refs` exits 0. The fifth scenario,
 `scn-open-dup`, is `duplicate` and was never instantiated, so it has no
 instance directory and is not part of the accounting.
 
@@ -58,7 +58,7 @@ instance directory and is not part of the accounting.
 
 ```bash
 cp -r "$RUN" "$CONTROL"
-uv run testgen emit --run "$CONTROL"    # code only, no model involved
+uv run rubrica emit --run "$CONTROL"    # code only, no model involved
 ```
 
 The control's `06-suite/` is now exactly what code produces from this run
@@ -77,7 +77,7 @@ supply, and the exercise then measures the dispatch.
 
 - `06-suite/` holds exactly three packages: `scn-open`, `scn-empty`,
   `scn-blocked`. No `scn-missing`.
-- `testgen validate --stage emit` exits 0 and `testgen check-refs` exits 0.
+- `rubrica validate --stage emit` exits 0 and `rubrica check-refs` exits 0.
 - **`diff -r "$CONTROL/06-suite" "$RUN/06-suite"` is empty.** This is the
   criterion that matters most, and it is the one only this stage can have.
 - **`diff -r --exclude=06-suite "$CONTROL" "$RUN"` is empty too**, which says
@@ -87,7 +87,7 @@ supply, and the exercise then measures the dispatch.
 
 Note what the pass criteria deliberately do not include: `07-report.json`.
 That is `smoke`'s, dispatched by the orchestrator after this stage, and a
-`tg-emit` that produced one has run a command outside its contract.
+`rb-emit` that produced one has run a command outside its contract.
 
 ## The properties to look for, and record all of them whatever the outcome
 
@@ -142,7 +142,7 @@ The state above exercises the clean path. The branch the prose spends most of
 its refusal conditions on is exit 1, and it takes one more fixture edit to
 reach: set `scn-missing`'s verdict to `re-seed` instead of `reject` (with
 `uniquely_determined: false` and one `alternative_answers` entry, which the
-schema requires). Measured: `testgen emit` then writes the same three
+schema requires). Measured: `rubrica emit` then writes the same three
 packages, prints one finding naming
 `05-verdicts/scn-missing.json#/verdict` -- "instance scn-missing is marked
 re-seed; the adversary asked for one re-instantiation and it has not
@@ -152,8 +152,8 @@ What to read: did it report the finding **verbatim**, attribute it to the
 verdict file rather than to the suite, and refuse to act on it? The trap here
 is specific and it is not hand-writing a package: a helpful model can read
 that finding as an instruction to re-instantiate `scn-missing` itself. It is
-not. The re-dispatch is the orchestrator's, `tg-instantiate` owns the seed,
-and a `tg-emit` that re-seeds an instance has taken over two stages it was
+not. The re-dispatch is the orchestrator's, `rb-instantiate` owns the seed,
+and a `rb-emit` that re-seeds an instance has taken over two stages it was
 not dispatched for. Record which way it went, and whether it distinguished
 "partial suite with a named defect" from "failed stage" -- three packages
 were still written, and a report that says the emit failed is wrong about
@@ -185,7 +185,7 @@ been outside its contract.
 
 **Both diffs empty, which is the criterion only this stage can have.**
 `diff -r control/06-suite run/06-suite` is identical, so every byte under
-`06-suite/` came from `testgen emit` and none from the model. `diff -r
+`06-suite/` came from `rubrica emit` and none from the model. `diff -r
 --exclude=06-suite control run` is identical too: no repaired verdict, no
 edited scenario list, no `decisions.md` line that belongs to the orchestrator.
 The thin-entry-point invariant holds in fact and not only in prose.

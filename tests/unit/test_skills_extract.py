@@ -1,4 +1,4 @@
-"""tg-extract's contract and the structural properties its prompt must have.
+"""rb-extract's contract and the structural properties its prompt must have.
 
 Structural, not free-text: an assertion that some sentence appears in the prose
 is shape 1 by construction, because another sentence may contain the same
@@ -11,7 +11,7 @@ from __future__ import annotations
 from rubrica.skills import SECTIONS, load, section_body, skills_dir
 from rubrica.validate import STAGE_ARTIFACTS
 
-SKILL = skills_dir() / "tg-extract" / "SKILL.md"
+SKILL = skills_dir() / "rb-extract" / "SKILL.md"
 
 
 def paragraphs(text: str) -> list[str]:

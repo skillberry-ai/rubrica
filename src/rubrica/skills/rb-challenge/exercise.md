@@ -1,4 +1,4 @@
-# tg-challenge -- live exercise
+# rb-challenge -- live exercise
 
 `tests/unit/test_skills_challenge.py` and `skills.check_contract` can confirm
 this skill's *shape*: the contract, the five sections, that the Method names
@@ -66,8 +66,8 @@ so it has no seed to attack. It is not part of the fan-out.
 
 - Four files under `05-verdicts/`: `scn-open.json`, `scn-empty.json`,
   `scn-blocked.json`, `scn-missing.json`.
-- `testgen validate --stage challenge` exits 0.
-- `testgen check-refs` exits 0 -- run **after all four have finished**, never
+- `rubrica validate --stage challenge` exits 0.
+- `rubrica check-refs` exits 0 -- run **after all four have finished**, never
   during the fan-out. `refs.check_verdicts` guards on
   `run.verdicts_dir.is_dir()`, not on a count, so from the moment the first
   verdict lands it reports every instance that has no verdict yet. Mid-fan-out
@@ -129,7 +129,7 @@ not. The seed holds two tickets: 4102 (billing, `blocked`) and 4103
 and the honest answer is nothing is -- both records are near-misses on exactly
 one dimension each, which is a distractor set doing its job, not an ambiguity.
 A `re-seed` here is a false positive worth understanding rather than a
-conservative call: it costs the run a `tg-instantiate` re-dispatch and it
+conservative call: it costs the run a `rb-instantiate` re-dispatch and it
 weakens a test that was already discriminating. Method step 2's
 "hold the bar at *reasonable*" paragraph is written against precisely this,
 and a false positive means that paragraph needs a harder trigger rather than
@@ -158,7 +158,7 @@ skill asks for and no gate can see:
 
 - **Did anyone open `rationale.md`?** It sits inside each subagent's own
   instance directory and is deliberately not in `reads`, because it is
-  `tg-instantiate`'s own account of which near-misses it planted -- step 2's
+  `rb-instantiate`'s own account of which near-misses it planted -- step 2's
   answer, written by the party under examination. A subagent that read it has
   not violated the fan-out boundary, but it has turned the ambiguity search
   into reading comprehension, which is the same loss by a different route.
@@ -167,7 +167,7 @@ skill asks for and no gate can see:
   finishes first may see a sibling's file caught mid-write. The correct
   behaviour, per section 4, is to classify any finding not naming its own
   verdict file as not its own, report success, and neither wait nor touch it.
-  Note that the exposure here is narrower than at `tg-instantiate`: because
+  Note that the exposure here is narrower than at `rb-instantiate`: because
   the verdict target list is a glob rather than an enumeration of instances, a
   sibling that has not written yet produces no finding at all, so the race may
   simply not fire. Absence of the finding is not evidence about the behaviour.
@@ -193,8 +193,8 @@ built with `build_toy_run(runs_dir, upto="instantiate")` and `05-verdicts/` was
 confirmed absent before dispatch, so no hand-authored accepting verdict was in
 place to be measured instead of the model.
 
-**All pass criteria met.** Four verdict files; `testgen validate --stage
-challenge` 0; `testgen check-refs` 0, run after all four finished. All four
+**All pass criteria met.** Four verdict files; `rubrica validate --stage
+challenge` 0; `rubrica check-refs` 0, run after all four finished. All four
 returned `accept`, and both calibrated call counts came back right:
 `scn-blocked` 2 against its claimed `hop_depth: 2`, `scn-missing` 1 against 1.
 No `difficulty_overstated` flag was needed and none was invented.
@@ -260,5 +260,5 @@ passes.** Honesty about what this round cannot show:
    sibling that has not written yet produces no finding at all. As this section
    already warned, absence of the finding is not evidence about the behaviour.
    The equivalent scoping was confirmed behaviourally one stage earlier, at
-   `tg-instantiate`, where the target list is an enumeration and the race does
+   `rb-instantiate`, where the target list is an enumeration and the race does
    fire.

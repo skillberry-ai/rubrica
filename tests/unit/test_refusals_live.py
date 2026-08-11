@@ -75,7 +75,7 @@ def test_a_self_contradictory_input_pair_produces_an_unresolved_contradiction():
     """
     world = _recorded(CONTRADICTION_DIR)
     contradictions = world.get("contradictions", [])
-    assert contradictions, "tg-reconcile recorded no contradiction for a contradictory pair"
+    assert contradictions, "rb-reconcile recorded no contradiction for a contradictory pair"
     resolutions = {entry["resolution"] for entry in contradictions}
     assert "unresolved" in resolutions, (
         f"the contradiction was resolved as {sorted(resolutions)}, but nothing in the "
@@ -121,6 +121,14 @@ def test_a_gap_about_malformed_calls_alone_does_not_satisfy_that_test():
     is `gap-invalid-argument-behavior` as it appears verbatim in *both*
     recordings, and the point is that on its own it must not count: it is a real
     gap about a real unknown, and it is not the subtraction this fixture makes.
+
+    **`why_it_matters` keeps the pre-Rubrica `tg-propose` spelling on purpose.**
+    It is quoted model output, and the recordings it quotes were produced before
+    the skills were renamed to `rb-*`; the Rubrica rename changed no measurement,
+    so it did not rewrite them either. Updating this string to `rb-propose`
+    without re-recording would make "verbatim" false. Nothing here reads the
+    field -- `_propose_blocking_subjects` reads `subject` and `blocks` -- so the
+    spelling costs the assertion nothing and buys it fidelity to the evidence.
     """
     world = {
         "gaps": [

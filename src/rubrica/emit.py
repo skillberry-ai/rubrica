@@ -7,7 +7,7 @@ second emitter, not re-running the pipeline.
 It is code rather than a skill because of the reproducibility criterion: if emit
 were a prompt, two runs with identical stage-4 and stage-5 artifacts could still
 produce different suites, and variance could no longer be attributed to a stage.
-A thin tg-emit skill exists purely as the human-facing entry point.
+A thin rb-emit skill exists purely as the human-facing entry point.
 
 **Precondition: layer 1 must have run first.** Exactly as in refs.py, and for
 the same reason: this module holds the most direct key indexing in the project

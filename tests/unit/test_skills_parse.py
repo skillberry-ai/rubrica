@@ -68,10 +68,10 @@ def write_skill(root, name, contract=CONTRACT, headings=SECTIONS, extra=""):
 
 
 def test_load_returns_the_contract_and_the_headings_in_order(tmp_path):
-    path = write_skill(tmp_path, "tg-extract")
+    path = write_skill(tmp_path, "rb-extract")
     skill = load(path)
     assert isinstance(skill, Skill)
-    assert skill.name == "tg-extract"
+    assert skill.name == "rb-extract"
     assert skill.path == path
     assert skill.contract == {
         "stage": "extract",
@@ -81,7 +81,7 @@ def test_load_returns_the_contract_and_the_headings_in_order(tmp_path):
         "invokes": ["validate"],
     }
     # "Contract" first, then the five sections, in document order. The tuple
-    # order is load-bearing: tg-challenge's ordering test reads it.
+    # order is load-bearing: rb-challenge's ordering test reads it.
     assert skill.headings == ("Contract", *SECTIONS)
 
 
@@ -90,7 +90,7 @@ def test_the_headings_tuple_preserves_document_order_not_sorted_order(tmp_path):
     close to sorted order and a set() would satisfy the test above.
     """
     reversed_sections = tuple(reversed(SECTIONS))
-    path = write_skill(tmp_path, "tg-extract", headings=reversed_sections)
+    path = write_skill(tmp_path, "rb-extract", headings=reversed_sections)
     assert load(path).headings == ("Contract", *reversed_sections)
 
 
@@ -106,15 +106,15 @@ def test_skill_sha256_is_the_digest_of_the_whole_file(tmp_path):
     one would be subsumed -- there is no mutation that passes this assertion
     and fails a "does editing the prose change the hash" one.
     """
-    path = write_skill(tmp_path, "tg-extract")
+    path = write_skill(tmp_path, "rb-extract")
     assert skill_sha256(path) == hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def test_discover_finds_every_skill_directory_sorted(tmp_path):
-    write_skill(tmp_path, "tg-reconcile")
-    write_skill(tmp_path, "tg-extract")
+    write_skill(tmp_path, "rb-reconcile")
+    write_skill(tmp_path, "rb-extract")
     (tmp_path / "not-a-skill").mkdir()
-    assert [s.name for s in discover(tmp_path)] == ["tg-extract", "tg-reconcile"]
+    assert [s.name for s in discover(tmp_path)] == ["rb-extract", "rb-reconcile"]
 
 
 def test_a_directory_without_a_skill_file_is_not_discovered(tmp_path):
@@ -122,9 +122,9 @@ def test_a_directory_without_a_skill_file_is_not_discovered(tmp_path):
     *missing* skill by name (Task 2), which is a better message than a parse
     failure on a directory nobody claimed was a skill.
     """
-    write_skill(tmp_path, "tg-extract")
-    (tmp_path / "tg-propose").mkdir()
-    assert [s.name for s in discover(tmp_path)] == ["tg-extract"]
+    write_skill(tmp_path, "rb-extract")
+    (tmp_path / "rb-propose").mkdir()
+    assert [s.name for s in discover(tmp_path)] == ["rb-extract"]
 
 
 def test_discover_on_a_missing_directory_is_a_usage_error(tmp_path):
@@ -134,7 +134,7 @@ def test_discover_on_a_missing_directory_is_a_usage_error(tmp_path):
 
 def test_a_missing_skill_file_is_a_usage_error(tmp_path):
     with pytest.raises(UsageError):
-        load(tmp_path / "tg-extract" / SKILL_FILENAME)
+        load(tmp_path / "rb-extract" / SKILL_FILENAME)
 
 
 def test_invalid_utf8_bytes_are_a_usage_error(tmp_path):
@@ -148,22 +148,22 @@ def test_invalid_utf8_bytes_are_a_usage_error(tmp_path):
     orchestrator to spend its one bounded repair attempt re-running a stage
     when the actual problem is a mis-encoded prompt file that no stage wrote.
     """
-    directory = tmp_path / "tg-extract"
+    directory = tmp_path / "rb-extract"
     directory.mkdir()
     path = directory / SKILL_FILENAME
-    path.write_bytes(b"\xff\xfe# tg-extract\n")
+    path.write_bytes(b"\xff\xfe# rb-extract\n")
     with pytest.raises(UsageError):
         load(path)
 
 
 def test_a_skill_with_no_contract_block_is_a_usage_error(tmp_path):
-    path = write_skill(tmp_path, "tg-extract", contract="Just prose, no block.")
+    path = write_skill(tmp_path, "rb-extract", contract="Just prose, no block.")
     with pytest.raises(UsageError):
         load(path)
 
 
 def test_a_contract_block_that_is_not_toml_is_a_usage_error(tmp_path):
-    path = write_skill(tmp_path, "tg-extract", contract="```toml\nstage = [unclosed\n```\n")
+    path = write_skill(tmp_path, "rb-extract", contract="```toml\nstage = [unclosed\n```\n")
     with pytest.raises(UsageError):
         load(path)
 
@@ -174,7 +174,7 @@ def test_a_non_toml_fenced_block_is_not_mistaken_for_the_contract(tmp_path):
     """
     path = write_skill(
         tmp_path,
-        "tg-extract",
+        "rb-extract",
         contract='```json\n{"stage": "wrong"}\n```\n\n' + CONTRACT,
     )
     assert load(path).contract["stage"] == "extract"
@@ -188,7 +188,7 @@ def test_two_toml_blocks_in_the_contract_section_is_a_usage_error(tmp_path):
     reader's favour by guessing which block was meant.
     """
     decoy = '```toml\nstage = "wrong"\n```\n\n'
-    path = write_skill(tmp_path, "tg-extract", contract=decoy + CONTRACT)
+    path = write_skill(tmp_path, "rb-extract", contract=decoy + CONTRACT)
     with pytest.raises(UsageError) as excinfo:
         load(path)
     assert "2 ```toml blocks" in str(excinfo.value)
@@ -202,8 +202,8 @@ def test_expected_skill_names_are_derived_from_STAGES(tmp_path):
     """
     names = expected_skill_names()
     assert names[-1] == ORCHESTRATOR
-    assert set(names[:-1]) == {f"tg-{s}" for s in STAGES if s not in CODE_ONLY_STAGES}
-    assert "tg-intake" not in names and "tg-smoke" not in names
+    assert set(names[:-1]) == {f"rb-{s}" for s in STAGES if s not in CODE_ONLY_STAGES}
+    assert "rb-intake" not in names and "rb-smoke" not in names
 
 
 def test_the_shipped_skills_are_exactly_the_ones_STAGES_demands():
@@ -238,16 +238,16 @@ def test_a_fenced_block_inside_a_section_does_not_inflate_headings(tmp_path):
     not silently inflate and reorder the `headings` tuple that Task 12's
     ordering checks depend on.
     """
-    directory = tmp_path / "tg-extract"
+    directory = tmp_path / "rb-extract"
     directory.mkdir()
     text = "\n".join(
         [
             "---",
-            "name: tg-extract",
+            "name: rb-extract",
             "description: A skill, for testing.",
             "---",
             "",
-            "# tg-extract",
+            "# rb-extract",
             "",
             "## Contract",
             "",
@@ -282,16 +282,16 @@ def test_an_impostor_toml_fence_before_contract_is_ignored(tmp_path):
     nothing downstream would notice unless the search is scoped to the
     section.
     """
-    directory = tmp_path / "tg-extract"
+    directory = tmp_path / "rb-extract"
     directory.mkdir()
     text = "\n".join(
         [
             "---",
-            "name: tg-extract",
+            "name: rb-extract",
             "description: A skill, for testing.",
             "---",
             "",
-            "# tg-extract",
+            "# rb-extract",
             "",
             "Purpose paragraph with an example that gives plausible values",
             "for every key a real contract would need:",
@@ -319,16 +319,16 @@ def test_no_contract_heading_at_all_is_a_usage_error_naming_the_file(tmp_path):
     missing `## Contract` heading -- that is a malformed file, the same class
     as a missing block, and the error names the file so a human can find it.
     """
-    directory = tmp_path / "tg-extract"
+    directory = tmp_path / "rb-extract"
     directory.mkdir()
     text = "\n".join(
         [
             "---",
-            "name: tg-extract",
+            "name: rb-extract",
             "description: A skill, for testing.",
             "---",
             "",
-            "# tg-extract",
+            "# rb-extract",
             "",
             "## 3. Method",
             "",
@@ -352,7 +352,7 @@ def test_section_body_at_eof_returns_the_last_sections_text_not_empty(tmp_path):
     refusal section as empty, and Task 2's emptiness check would then fire on
     every correct skill.
     """
-    path = write_skill(tmp_path, "tg-extract")
+    path = write_skill(tmp_path, "rb-extract")
     skill = load(path)
     body = section_body(skill, SECTIONS[-1])
     assert body.strip() != ""

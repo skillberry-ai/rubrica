@@ -37,8 +37,15 @@ SKILL_FILENAME = "SKILL.md"
 # skill without anyone remembering to edit a constant.
 CODE_ONLY_STAGES: frozenset[str] = frozenset({"intake", "smoke"})
 
+# One home for the skill-directory prefix. It appeared in three places
+# before the Rubrica rename -- ORCHESTRATOR, expected_skill_names, and the
+# directory/stage agreement check -- and a rename that updates two of three
+# leaves check_contract rejecting every correctly named skill. Same reasoning
+# as CODE_ONLY_STAGES above: derive, do not restate.
+SKILL_PREFIX = "rb-"
+
 # Not a stage: it dispatches them. It has no `stage` key and no `schemas`.
-ORCHESTRATOR = "tg-orchestrate"
+ORCHESTRATOR = f"{SKILL_PREFIX}orchestrate"
 
 # The uniform five-section skill shape (design spec section 5), in order.
 # Section 5 is the one that matters most: skills default to helpfulness, and
@@ -154,7 +161,7 @@ def skills_dir() -> Path:
 
 def expected_skill_names() -> tuple[str, ...]:
     """Every skill this build must ship, derived from STAGES."""
-    return tuple(f"tg-{stage}" for stage in STAGES if stage not in CODE_ONLY_STAGES) + (
+    return tuple(f"{SKILL_PREFIX}{stage}" for stage in STAGES if stage not in CODE_ONLY_STAGES) + (
         ORCHESTRATOR,
     )
 
@@ -241,7 +248,7 @@ def discover(root: Path | str | None = None) -> list[Skill]:
 
     A subdirectory with no SKILL.md is skipped rather than reported: the
     missing skill is named by check_contract, which knows which names are
-    required, and "tg-propose has no SKILL.md" is a better message than a
+    required, and "rb-propose has no SKILL.md" is a better message than a
     parse failure on a directory nobody claimed was a skill.
     """
     root = Path(root) if root is not None else skills_dir()
@@ -303,7 +310,7 @@ def check_contract(skill: Skill) -> list[Finding]:
             )
     elif stage not in STAGES:
         report("/stage", f"declares stage {stage!r}, which is not one of: {', '.join(STAGES)}")
-    elif skill.name != f"tg-{stage}":
+    elif skill.name != f"{SKILL_PREFIX}{stage}":
         report(
             "/stage",
             f"lives in {skill.name}/ but declares stage {stage!r}; the orchestrator "
@@ -344,7 +351,7 @@ def check_contract(skill: Skill) -> list[Finding]:
     # Two branches, not one compound condition. `if skill.name != ORCHESTRATOR
     # and stage in STAGES:` wrapped this whole block, so the orchestrator's
     # `schemas` key was never examined at all: `schemas = ["claims"]` in
-    # tg-orchestrate/SKILL.md exited 0 with no finding, and so did the non-list
+    # rb-orchestrate/SKILL.md exited 0 with no finding, and so did the non-list
     # `schemas = "claims"`, while the *same* file declaring a `stage` was
     # correctly reported. The one skill that must declare no artifact kinds was
     # the one skill whose declaration of them went unchecked, in the module

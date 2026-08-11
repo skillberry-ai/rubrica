@@ -1,4 +1,4 @@
-# tg-orchestrate -- live exercise
+# rb-orchestrate -- live exercise
 
 This is the only exercise that runs the orchestrator, and it is the first
 end-to-end behavioural evidence this project has: every earlier exercise
@@ -24,7 +24,7 @@ Start from an empty runs directory and run `intake` by hand -- the orchestrator
 does not run it (§B1), so the exercise must:
 
 ```bash
-uv run testgen intake \
+uv run rubrica intake \
   --input tests/fixtures/toy/api.json \
   --input tests/fixtures/toy/notes.md \
   --input tests/fixtures/toy/trace.json \
@@ -38,7 +38,7 @@ scenarios and an empty `stages` map. `--max-rounds 2` is what makes the round
 loop observable at all: `K = 1` cannot distinguish "left the loop because it
 converged" from "left it because the cap was reached".
 
-**Then dispatch `tg-orchestrate` with the run directory, this skill's path, and
+**Then dispatch `rb-orchestrate` with the run directory, this skill's path, and
 `--no-gate`.** Nothing else -- and in particular no summary of what the toy
 world contains, no mention of the gaps discussed below, and no instruction
 about what to do if a stage fails. The rules under test are the ones in the
@@ -57,7 +57,7 @@ verdict is `healthy`, with mean rewards of 1.0 (oracle), 0.77 (under test) and
 ## Expect a halt at the gap gate, and read it as a pass
 
 **Task 8's live exercise established this behaviourally, and it will very
-likely happen again:** a real `tg-reconcile` run against the toy claims records
+likely happen again:** a real `rb-reconcile` run against the toy claims records
 gaps whose `blocks` names `propose` -- no capability retrieves comment content,
 and neither capability has a claim describing bad-argument behaviour -- so
 §B4's halt fires and the run stops before round 1. That is **correct behaviour
@@ -70,19 +70,19 @@ So the exercise has two possible shapes, and both are results:
 
 1. **It halts at B4.** Then the primary reads are: did it name the gap, its
    `unknown`, and the input artifact that would close it? Did it record the
-   halt with `decide`? Did it stop *before* dispatching `tg-propose` rather
+   halt with `decide`? Did it stop *before* dispatching `rb-propose` rather
    than after? And -- the sharpest one -- did `--no-gate` tempt it into
    overruling the halt? The skill says plainly that `--no-gate` skips the human
    review and does not lift the halt, and this is the run where that sentence
    is tested.
 2. **It does not halt**, because this reconcile run recorded no blocking gap.
    Record that too, with the world model's `gaps` array quoted: it is evidence
-   about `tg-reconcile`, not about the orchestrator, and it means the B4 branch
+   about `rb-reconcile`, not about the orchestrator, and it means the B4 branch
    went unexercised in this round.
 
 **To measure the rest of the pipeline after a halt**, resume the way the skill
 says a halt is resumed rather than by patching around it: at gate 1 a human
-rules on the gaps, so record that ruling with `testgen decide` -- naming which
+rules on the gaps, so record that ruling with `rubrica decide` -- naming which
 gaps were ruled non-blocking and on what grounds -- and re-dispatch the
 orchestrator on the same run directory. Note in the ledger that the rest of the
 run was measured after a human ruling, because that is a different experiment
@@ -97,7 +97,7 @@ Read these against whichever shape the run took. In the halt case, criteria 1
 and 4 apply to the resumed continuation, and the halt itself is property 5.
 
 1. The run reaches `07-report.json`.
-2. `testgen check-refs` exits 0 against the finished run.
+2. `rubrica check-refs` exits 0 against the finished run.
 3. `manifest.stages` records an entry per dispatched stage -- so `extract`,
    `reconcile`, `propose`, `score`, `instantiate`, `challenge` and `emit`, each
    with a `model`, an `effort`, and a `skill_sha256`. `intake` and `smoke` have
@@ -106,7 +106,7 @@ and 4 apply to the resumed continuation, and the halt itself is property 5.
 4. `decisions.md` has at least one line per loop round.
 
 Confirm criterion 3 by comparing each recorded `skill_sha256` against
-`sha256sum src/testgen/skills/tg-<stage>/SKILL.md`. A digest that does not
+`sha256sum src/rubrica/skills/rb-<stage>/SKILL.md`. A digest that does not
 match is the `--skill` pointed at the wrong file, which is worth catching here:
 it makes the manifest's reproducibility hook record a hash of something the run
 never used, and nothing else in the system would ever notice.
@@ -138,8 +138,8 @@ orchestrator's conclusion wearing a finding's clothes.
 nothing failed, note that too -- **an unexercised repair path is untested**, and
 it is worth deliberately corrupting one artifact and re-running just that stage
 to see the branch taken. A cheap corruption with a determinate expected
-outcome: delete a required field from `02-scenarios.json` after `tg-propose`
-finishes, and check that the orchestrator re-dispatches `tg-propose` **once**
+outcome: delete a required field from `02-scenarios.json` after `rb-propose`
+finishes, and check that the orchestrator re-dispatches `rb-propose` **once**
 with the findings appended rather than editing the file itself or re-dispatching
 twice. A second, sharper one: point a dispatch at a run directory that does not
 exist, which is exit 2, and check that no repair attempt is spent on it.
@@ -174,10 +174,10 @@ the correct action is to leave the loop anyway and report the disagreement.
 
 ## The deferral this exercise finally discharges
 
-**`tg-reconcile` has never been exercised against real `tg-extract` output.**
+**`rb-reconcile` has never been exercised against real `rb-extract` output.**
 Task 8's exercise ran it against `tests/toy.py`'s hand-authored claims, and
 those claims file the unknown-id error correctly as an `outcome_class` -- so
-that exercise could not test `tg-reconcile`'s Method step 3 instruction to
+that exercise could not test `rb-reconcile`'s Method step 3 instruction to
 harvest outcome classes from claims of *any* kind. That instruction exists
 because Task 7's real extract run filed the same fact as an `invariant` from
 one slice (`notes-md`) and as an `outcome_class` from another (`api-json`), and
@@ -205,7 +205,7 @@ run completes, every gate exits 0, the coverage report reads 100%, and the
 denominator is missing the unknown-id cell entirely. Nothing anywhere reports
 it -- a smaller denominator is a *cleaner-looking* run, which is what makes
 this the failure worth going looking for. If that is what happened, the finding
-is against `tg-reconcile`'s Method step 3 (or against the claims that fed it),
+is against `rb-reconcile`'s Method step 3 (or against the claims that fed it),
 not against the orchestrator, and it belongs in the ledger under Task 8's
 deferral rather than this one's.
 
@@ -215,7 +215,7 @@ Record all six properties plus the deferral read in the exercise ledger,
 whatever the outcome, and say which of the two shapes the run took. Property 1
 is the one this exercise exists for and the one that needs the transcripts: it
 is the only defect class in this build that is invisible in every artifact, on
-every run, forever -- and unlike `tg-challenge`'s ordering, it cannot even be
+every run, forever -- and unlike `rb-challenge`'s ordering, it cannot even be
 made readable by asking for a pre-registration, because the orchestrator writes
 no artifact that a prompt could be pre-registered in. The dispatch prompts are
 the only evidence there will ever be, so they have to be read while they still
@@ -232,7 +232,7 @@ the toy world, no mention of gaps, no instruction about stage failures.
 
 ### Part 1: the halt, which is the pass
 
-It halted at B4 before dispatching `tg-propose`. A real `tg-reconcile` recorded
+It halted at B4 before dispatching `rb-propose`. A real `rb-reconcile` recorded
 `gap-bad-argument-behavior`, whose `blocks` names `propose`, because none of the
 three inputs says anything about `query_tickets`' invalid or missing-argument
 behaviour. It named the gap, its `unknown`, and the input that would close it,
@@ -274,7 +274,7 @@ with `all_fail_tasks: 0`: **no task was passed by every role or failed by every
 role**, which is the property a generated suite exists to have and the one a
 degenerate suite loses first. `unscoreable: 0`.
 
-**An unplanned demonstration of the reproducibility hook.** `tg-extract`'s
+**An unplanned demonstration of the reproducibility hook.** `rb-extract`'s
 `SKILL.md` was amended after this run's extract stage had already been recorded,
 so its stored `skill_sha256` no longer matches the file on disk while the other
 six still do. That is the hook working as designed: it records the digest of
@@ -283,7 +283,7 @@ whole reason `record-stage` hashes rather than names.
 
 ### The deferral this run discharges
 
-`tg-reconcile` has now been exercised against **real `tg-extract` output**, owed
+`rb-reconcile` has now been exercised against **real `rb-extract` output**, owed
 since Task 8. The result is substantive rather than a formality: the real world
 model's denominator is **6 capability cells**, against the hand-authored
 fixture's 4. Real upstream artifacts produced a *larger* denominator, which is
@@ -303,9 +303,9 @@ absorbed -- the extract/reconcile split paying off on real input.
 **Both numbers are measurements, and the difference between them is the
 finding.** The setup section above cites "seven capability cells (three for
 `find_tickets`, four for `get_ticket`)" and attributes it, correctly, to Task
-8's fixture-based run -- a measured result of a real `tg-reconcile` dispatch over
+8's fixture-based run -- a measured result of a real `rb-reconcile` dispatch over
 the hand-authored fixture claims, not a prediction. This run measured **6** over
-real `tg-extract` claims for the same target. So the two figures are two
+real `rb-extract` claims for the same target. So the two figures are two
 measurements of two different inputs: fixture claims give 7, real extract claims
 give 6, and the hand-authored world model those fixture claims came with said 4.
 

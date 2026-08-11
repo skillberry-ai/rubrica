@@ -1,4 +1,4 @@
-"""tg-orchestrate's contract, and the control-flow rules it must state.
+"""rb-orchestrate's contract, and the control-flow rules it must state.
 
 The orchestrator is the one skill whose defects are silent in a *successful*
 run: an orchestrator that passes extra context into a dispatch, or retries three
@@ -122,7 +122,7 @@ def test_it_names_every_stage_it_dispatches():
     because against the whole body the `smoke` half was satisfied by the
     mandatory contract block's own `invokes` list -- deleting every prose
     mention of smoke left it green. Same two-sides-from-one-source shape as the
-    record-stage test below. `intake` and the seven `tg-*` names did require
+    record-stage test below. `intake` and the seven `rb-*` names did require
     real prose even before the scoping.
     """
     method = method_body()
@@ -130,7 +130,7 @@ def test_it_names_every_stage_it_dispatches():
         if stage in CODE_ONLY_STAGES:
             assert stage in method, f"the loop never mentions the code stage {stage!r}"
         else:
-            assert f"tg-{stage}" in method, f"the loop never dispatches tg-{stage}"
+            assert f"rb-{stage}" in method, f"the loop never dispatches rb-{stage}"
 
 
 def test_it_states_all_three_exit_codes_and_what_each_means():

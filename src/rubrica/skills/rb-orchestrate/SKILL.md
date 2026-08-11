@@ -1,9 +1,9 @@
 ---
-name: tg-orchestrate
-description: Drive one whole testgen run -- dispatch each stage with nothing but its run directory, stage name and skill, gate every artifact before the next stage sees it, hold the round loop and the three human gates, spend at most one repair attempt per failure, and record every stage and every branch.
+name: rb-orchestrate
+description: Drive one whole rubrica run -- dispatch each stage with nothing but its run directory, stage name and skill, gate every artifact before the next stage sees it, hold the round loop and the three human gates, spend at most one repair attempt per failure, and record every stage and every branch.
 ---
 
-# tg-orchestrate
+# rb-orchestrate
 
 You are not a stage. You dispatch them, and you are the only party in this
 system with a run-global view: every other skill sees one slice and judges it,
@@ -51,8 +51,8 @@ What you need is the state of the run, and no slice of it will do.
 
 - **`manifest.json` (`manifest`)** -- `limits.max_rounds`, which is the `K`
   the round loop below is bounded by, and `limits.max_scenarios`, the bound
-  `tg-propose` is held to. Its `inputs` array is the roster of the
-  `tg-extract` fan-out: one member per registered `artifact_id`. Its `stages`
+  `rb-propose` is held to. Its `inputs` array is the roster of the
+  `rb-extract` fan-out: one member per registered `artifact_id`. Its `stages`
   map is what `record-stage` fills in, and reading it back tells you which
   stages this run has already recorded.
 - **`01-world-model.json` (`world_model`)** -- for its `gaps`. Each gap's
@@ -62,7 +62,7 @@ What you need is the state of the run, and no slice of it will do.
   `blocks`.** `check-refs` never looks at it. If you do not halt on a
   blocking gap, nothing else will.
 - **`02-scenarios.json` (`scenarios`)** -- for `status`, which decides who is
-  in the `tg-instantiate` fan-out (`active`, and only `active`), and for the
+  in the `rb-instantiate` fan-out (`active`, and only `active`), and for the
   ids you name when a fan-out member has to be told which slice is its own.
 - **`03-coverage/latest.json` (`coverage_latest`)** -- for `verdict`, the one
   value the round loop branches on, plus the covered/total numbers that go
@@ -78,14 +78,14 @@ What you need is the state of the run, and no slice of it will do.
 
 **Your read licence is not a write licence, and the asymmetry is the point.**
 `writes` names exactly one thing: `decisions.md`, appended through
-`testgen decide`. You never edit an artifact a stage owns -- not the world
+`rubrica decide`. You never edit an artifact a stage owns -- not the world
 model, not a scenario's `status`, not a coverage document, not a seed, not a
 verdict, and not a package under `06-suite/`. Every one of those has an owning
 stage, and the reason to re-dispatch that stage instead of editing its output
 by hand is not etiquette: an artifact you edited is an artifact no run can
 reproduce, and the stage-level attribution that makes this whole pipeline
 measurable dies with it. `manifest.stages` is the one further thing that
-changes on your behalf, and it changes through `testgen record-stage` -- code
+changes on your behalf, and it changes through `rubrica record-stage` -- code
 writing a digest and a timestamp-free record, never you writing JSON.
 
 **The verdicts are declared, and what you may do with them is narrow.** You
@@ -116,7 +116,7 @@ prompt is the defect.
 **`decisions.md` (`decisions`)**, one line per branch, appended only through:
 
 ```bash
-testgen decide --run <run> --note "<one line>"
+rubrica decide --run <run> --note "<one line>"
 ```
 
 Never hand-written, never reordered, never a line you delete. The note must be
@@ -126,7 +126,7 @@ entry per line and a split entry corrupts every reader after it -- and the
 timestamp makes two otherwise-identical runs diff, which is the whole reason
 that stamp lives in code.
 
-**`manifest.stages`**, through `testgen record-stage`, one entry per stage you
+**`manifest.stages`**, through `rubrica record-stage`, one entry per stage you
 dispatched, carrying its `model`, its `effort`, and the `skill_sha256` of the
 skill file that stage actually ran.
 
@@ -144,38 +144,38 @@ failed, the answer is the halt in refusal condition 2, not the artifact.
 
 ## 3. Method
 
-The whole run, in one block. `→` reads "then", and every `testgen` command
+The whole run, in one block. `→` reads "then", and every `rubrica` command
 shown is one you actually run:
 
 ```
-testgen check-skills                          # before anything: a bad skill is not a stage defect
-verify manifest.json                          # `testgen intake` is the operator's, never yours
-fan out tg-extract, one per input artifact   → validate --stage extract
-tg-reconcile                                 → validate --stage reconcile → check-refs
+rubrica check-skills                          # before anything: a bad skill is not a stage defect
+verify manifest.json                          # `rubrica intake` is the operator's, never yours
+fan out rb-extract, one per input artifact   → validate --stage extract
+rb-reconcile                                 → validate --stage reconcile → check-refs
 if any gap blocks a stage still to come      → HALT, report the gap, request the missing artifact
                                              → HUMAN GATE 1: the world model
 loop (round = 1..K):                           # K = manifest.limits.max_rounds
-    tg-propose, one dispatch for this round  → validate --stage propose
-    tg-score                                 → validate --stage score → check-refs
-    testgen decide --note "round N: <verdict>, <covered>/<total> cells"
+    rb-propose, one dispatch for this round  → validate --stage propose
+    rb-score                                 → validate --stage score → check-refs
+    rubrica decide --note "round N: <verdict>, <covered>/<total> cells"
     on latest.json verdict: continue → round++ | converged | halted_* → leave the loop
                                              → HUMAN GATE 2: scenarios and coverage (the cost gate)
-fan out tg-instantiate per active scenario   → validate --stage instantiate → check-refs   ← reachability gate
-fan out tg-challenge per instantiated one    → validate --stage challenge → check-refs (after all members finish)
-    re-seed → re-dispatch tg-instantiate ONCE, the adversary's alternatives appended
-    reject  → re-dispatch tg-score: mark rejected in 02, recompute coverage
+fan out rb-instantiate per active scenario   → validate --stage instantiate → check-refs   ← reachability gate
+fan out rb-challenge per instantiated one    → validate --stage challenge → check-refs (after all members finish)
+    re-seed → re-dispatch rb-instantiate ONCE, the adversary's alternatives appended
+    reject  → re-dispatch rb-score: mark rejected in 02, recompute coverage
                                              → HUMAN GATE 3: rejects and re-seeds
-tg-emit                                      → 06-suite/, via the testgen emit it runs
-testgen smoke --agents <roster>              → 07-report.json
+rb-emit                                      → 06-suite/, via the rubrica emit it runs
+rubrica smoke --agents <roster>              → 07-report.json
 ```
 
 Two readings of that block to correct before you start, because both are
 natural and both are wrong.
 
-**`tg-propose` is one dispatch per round, not a fan-out.** The design spec
-writes this line as "fan-out tg-propose per hole cluster", and that names the
+**`rb-propose` is one dispatch per round, not a fan-out.** The design spec
+writes this line as "fan-out rb-propose per hole cluster", and that names the
 *work* a round does -- a round targets the cluster of closable holes -- not a
-set of concurrent subagents. It cannot be a fan-out: `tg-propose` declares
+set of concurrent subagents. It cannot be a fan-out: `rb-propose` declares
 `scenarios` under both `reads` and `writes` because `02-scenarios.json` is one
 append-only document, and two members appending to it at once would each read
 the same file and write over the other's scenarios, with no gate anywhere able
@@ -185,7 +185,7 @@ targets.
 **`dedupe-candidates` is not something you pipe into a dispatch.** It is in
 your `invokes` because the spec's loop places it before scoring and because
 running it yourself is how you read a round's candidate pairs when a fold
-looks wrong. But `tg-score` runs it as its own Method step 1, from inside its
+looks wrong. But `rb-score` runs it as its own Method step 1, from inside its
 own dispatch -- and handing it the JSON output instead would be the context
 leak of step A1, dressed as efficiency.
 
@@ -210,8 +210,8 @@ that pastes the world model into an instantiate dispatch has silently removed
 the fan-out isolation this design was chosen for.
 
 **A fan-out member gets one further thing, and it is an address, not
-context:** the `artifact_id` (for `tg-extract`) or `scenario_id` (for
-`tg-instantiate` and `tg-challenge`) naming which slice is its own. Without it
+context:** the `artifact_id` (for `rb-extract`) or `scenario_id` (for
+`rb-instantiate` and `rb-challenge`) naming which slice is its own. Without it
 a member cannot find its work at all. Give it that id and nothing about any
 other slice.
 
@@ -220,9 +220,9 @@ machine-quotable text naming a defect in a named artifact -- never a summary of
 a conclusion:
 
 1. The bounded repair of A4 appends the gate's **findings, verbatim**.
-2. A `re-seed` re-dispatch of `tg-instantiate` appends the adversary's
+2. A `re-seed` re-dispatch of `rb-instantiate` appends the adversary's
    **`alternative_answers` and its `notes`** from the verdict, and the
-   re-dispatch of `tg-score` after a rejection appends the **rejected scenario
+   re-dispatch of `rb-score` after a rejection appends the **rejected scenario
    ids and the verdict judgments behind them** (see step B9, and note that
    neither of those stages can read verdicts, so the notice is the only way the
    adversary's reading reaches the stage that has to act on it).
@@ -230,8 +230,8 @@ a conclusion:
 If what you are about to append is not a finding, a verdict field quoted from
 the file that holds it, or a named artifact defect, it does not go in the prompt.
 
-**A2. Gate before you build on it.** Run `testgen validate --stage <stage>`
-after every stage, and `testgen check-refs` where the walk says so. Never
+**A2. Gate before you build on it.** Run `rubrica validate --stage <stage>`
+after every stage, and `rubrica check-refs` where the walk says so. Never
 dispatch stage N+1 against an ungated stage N: layer 1 is what stops a
 malformed document being indexed directly by a later layer, and both
 `refs.py` and `emit.py` document that precondition -- violate it and you get an
@@ -281,15 +281,15 @@ being a measurement of anything.
 Scope the repair the way the findings scope themselves. In a fan-out,
 re-dispatch only the members whose own artifacts the findings name -- one
 member's defect is not a reason to re-run the four that were clean. The budget
-is one attempt per dispatch, not one per run: a repair spent on `tg-propose`
-in round 1 does not deny `tg-score` its own attempt in round 3.
+is one attempt per dispatch, not one per run: a repair spent on `rb-propose`
+in round 1 does not deny `rb-score` its own attempt in round 3.
 
 **A5. `record-stage` after every stage you dispatched.**
 
 ```bash
-testgen record-stage --run <run> --stage <stage> \
+rubrica record-stage --run <run> --stage <stage> \
   --model <model> --effort <effort> \
-  --skill src/testgen/skills/tg-<stage>/SKILL.md
+  --skill src/rubrica/skills/rb-<stage>/SKILL.md
 ```
 
 `--model` and `--effort` are **yours to know and nobody's to store**: no
@@ -320,9 +320,9 @@ survived, and its skill is what should be on file.
 
 Two stages are code and have no skill to hash: `intake`, which mints the run
 id and the timestamps no skill may invent, and `smoke`, which executes the
-suite. There is no `tg-intake` and no `tg-smoke`, so nothing is recorded for
+suite. There is no `rb-intake` and no `rb-smoke`, so nothing is recorded for
 them, and that absence is the design rather than a stage you forgot. `emit`
-*does* have a skill -- you dispatch `tg-emit` -- so it is recorded like any
+*does* have a skill -- you dispatch `rb-emit` -- so it is recorded like any
 other.
 
 **A6. `decide` at every branch.** Every loop round's verdict, every
@@ -330,7 +330,7 @@ denominator amendment, every repair you spend, every halt, every gate you
 stopped at or skipped, every re-seed and every rejection. One line each:
 
 ```bash
-testgen decide --run <run> --note "round 2: continue, 5/7 cells covered"
+rubrica decide --run <run> --note "round 2: continue, 5/7 cells covered"
 ```
 
 `decisions.md` is the run's append-only lab notebook, and it is the only
@@ -360,7 +360,7 @@ an exit 2.
 
 ### B. The walk
 
-**B0. `testgen check-skills`, before anything else.** A skill whose contract
+**B0. `rubrica check-skills`, before anything else.** A skill whose contract
 is wrong will write an artifact in the wrong place, name a subcommand that
 does not exist, or declare a stage it is not -- and none of that is a stage
 defect any repair prompt can fix. Findings here mean halt before dispatching
@@ -372,20 +372,20 @@ command, run before you were dispatched, and it is absent from your `invokes`
 for a reason worth knowing: it mints the run id and `created_utc`, and a run
 whose identity a prompt invented is a run two otherwise-identical pipelines
 would diff on. So read `manifest.json` and check what you have been handed:
-the `inputs` array (each entry is one member of the `tg-extract` fan-out),
+the `inputs` array (each entry is one member of the `rb-extract` fan-out),
 `limits.max_rounds` (your `K`), and `limits.max_scenarios`. If the manifest is
 absent or unreadable, that is exit 2 territory -- report it and stop; there is
 no run here to drive.
 
-**B2. Fan out `tg-extract`, one member per registered input artifact**, each
-given its own `artifact_id`. Then `testgen validate --stage extract` once,
+**B2. Fan out `rb-extract`, one member per registered input artifact**, each
+given its own `artifact_id`. Then `rubrica validate --stage extract` once,
 after all members are done. `record-stage --stage extract` with the skill you
 dispatched.
 
-**B3. `tg-reconcile`, a single dispatch.** It is a barrier: it needs every
+**B3. `rb-reconcile`, a single dispatch.** It is a barrier: it needs every
 claims file in one context, because contradiction detection is exactly the
 cross-artifact work no fan-out member can do. Gate with
-`testgen validate --stage reconcile`, then `testgen check-refs`.
+`rubrica validate --stage reconcile`, then `rubrica check-refs`.
 
 **B4. Halt on a blocking gap.** Read the world model's `gaps`. Each one
 carries `blocks`, an array of stage names drawn from `propose`, `score`,
@@ -397,7 +397,7 @@ answer to "what do you need?". Record the halt with `decide`.
 
 Halting here is the payoff for making gaps first-class, and the alternative is
 the failure this whole design is built against: a pipeline that runs on,
-invents the missing error semantics somewhere in `tg-propose`, and ships a
+invents the missing error semantics somewhere in `rb-propose`, and ships a
 suite testing behaviour nobody ever specified, with every gate green. **If a
 blocking gap never actually stops a real run, gap detection in this pipeline
 is not working** -- so a halt at this step is a success of the design, not a
@@ -412,7 +412,7 @@ What resumes such a run: a new input artifact, registered by the operator
 through a fresh `intake`, or that human's ruling that the gap does not block
 after all -- recorded with `decide` in the words they gave you, and, if the
 world model itself has to change, carried out by a re-dispatch of
-`tg-reconcile`, which owns that file. What does not resume it: you editing
+`rb-reconcile`, which owns that file. What does not resume it: you editing
 `blocks`, you deciding the gap is probably fine, or `--no-gate`. **`--no-gate`
 skips the human review; it does not overrule a blocking gap** -- with no human
 in the run there is nobody to make the ruling that lifting the halt requires,
@@ -428,11 +428,11 @@ read carefully. A7 above says what stopping at a gate means and what
 
 **B6. The round loop, `round = 1..K` where `K = manifest.limits.max_rounds`.**
 
-1. **`tg-propose`, one dispatch for this round.** Gate with
+1. **`rb-propose`, one dispatch for this round.** Gate with
    `validate --stage propose`. In round 1 there is no coverage document and
-   that is normal -- `tg-propose` treats every cell and goal as an open hole.
-2. **`tg-score`, a single dispatch** -- the second barrier, for the same
-   reason `tg-reconcile` is the first. Gate with `validate --stage score`,
+   that is normal -- `rb-propose` treats every cell and goal as an open hole.
+2. **`rb-score`, a single dispatch** -- the second barrier, for the same
+   reason `rb-reconcile` is the first. Gate with `validate --stage score`,
    then `check-refs`.
 3. **Record the round's decision, before you branch on it:**
    `decide --note "round N: <verdict>, <covered>/<total> cells"`. Do it in
@@ -455,12 +455,12 @@ read carefully. A7 above says what stopping at a gate means and what
    you report rather than repair (B11).
 
 **Rule for the denominator, which applies throughout this loop: it can move,
-but never silently.** If `tg-propose` or `tg-score` reports that the world
+but never silently.** If `rb-propose` or `rb-score` reports that the world
 model's goals or capabilities are missing something a scenario needs, that is
 an amendment *request*, and it costs: an explicit decision from you, recorded
-in `decisions.md`; a re-dispatch of `tg-reconcile`, the only stage that may
+in `decisions.md`; a re-dispatch of `rb-reconcile`, the only stage that may
 write the world model, which bumps `denominator.version`; and a re-score
-against the new version, since `tg-score`'s coverage document must carry a
+against the new version, since `rb-score`'s coverage document must carry a
 `denominator_version` equal to the world model's. Never a silent edit, and
 never a later stage inventing a goal for itself -- a denominator any stage can
 grow after the fact is not a denominator, it is a number that stage can
@@ -471,7 +471,7 @@ inflate its own coverage against.
 because the per-scenario fan-outs below are where a run starts spending real
 money, and reviewing a scenario list is cheap by comparison.
 
-**B8. Fan out `tg-instantiate`, one member per `active` scenario**, each given
+**B8. Fan out `rb-instantiate`, one member per `active` scenario**, each given
 its own `scenario_id`. `active` and only `active`: a `proposed` scenario has
 not been ruled on, a `duplicate` was folded into another, and a `rejected` one
 is not a test -- instantiating any of them is a defect `check-refs` reports.
@@ -480,7 +480,7 @@ reachability gate**: it is where every oracle's `grounded_in.seed_pointer` is
 resolved against its own scenario's seed, and it is the last chance to catch a
 label that points at nothing before the suite is compiled.
 
-**B9. Fan out `tg-challenge`, one member per instantiated scenario**, each
+**B9. Fan out `rb-challenge`, one member per instantiated scenario**, each
 given its own `scenario_id`. Gate with `validate --stage challenge`, then
 `check-refs` **only after every member has finished** -- `refs.check_verdicts`
 reports every instance without a verdict from the moment `05-verdicts/`
@@ -489,35 +489,35 @@ exists, so mid-fan-out most of them are missing by construction.
 Then read each verdict and act:
 
 - **`accept`** -- nothing to do.
-- **`re-seed`** -- re-dispatch `tg-instantiate` for that scenario **once**,
+- **`re-seed`** -- re-dispatch `rb-instantiate` for that scenario **once**,
   with the adversary's `alternative_answers` **and its `notes`** appended --
   both quoted from the verdict file, never paraphrased -- then re-dispatch
-  `tg-challenge` for it. Both fields, because three of the cases `tg-challenge`
+  `rb-challenge` for it. Both fields, because three of the cases `rb-challenge`
   prescribes `re-seed` for produce no alternative answer at all: a call the
   adversary needed that the scenario never declared, an oracle it believes is
   wrong, and its own self-reported anchoring. In those, `alternative_answers`
   arrives empty and the `notes` are the entire reason for the re-seed, so
   appending only the alternatives hands the stage a repair dispatch with nothing
-  in it. `tg-instantiate` is written to act on either shape and says what it owes
+  in it. `rb-instantiate` is written to act on either shape and says what it owes
   you for each. Once is the budget: nothing in the verdict tells the
   adversary whether it is on the first pass or the second, so tracking it is
   yours. If the second verdict is still `re-seed`, stop re-seeding and treat
   it as a rejection below -- `emit` refuses to compile a `re-seed` instance and
   reports a finding no further re-seed can clear, so carrying one to stage 6
   buys nothing. Taking the rejection path does clear it: `emit` checks a
-  scenario's status before it ever reads the verdict, so once `tg-score` has
+  scenario's status before it ever reads the verdict, so once `rb-score` has
   marked the scenario `rejected`, the instance is skipped rather than
   reported.
 - **`reject`** -- the scenario must end up `rejected` in `02-scenarios.json`
   with the coverage recomputed against it, and **that is a re-dispatch of
-  `tg-score`, not an edit by you.** `tg-score` is the only stage that may
+  `rb-score`, not an edit by you.** `rb-score` is the only stage that may
   change a scenario's `status` or write a coverage document, and its own
   invariants already cover re-scoring after a rejection arrives from
-  `tg-challenge`. Because `tg-score` does not read verdicts, the notice A1's
+  `rb-challenge`. Because `rb-score` does not read verdicts, the notice A1's
   second exception permits is how the rejection reaches it: append each
   rejected `scenario_id` and, **quoted from its verdict file**, the
   `uniquely_determined` and `derivable_without_guessing` values and the `notes`.
-  Quote those fields; do not translate them. `tg-score` has its own
+  Quote those fields; do not translate them. `rb-score` has its own
   `rejected_reason` enum and picking from it is its judgment, not yours -- a
   notice reading "ambiguous" has already made that choice for it, which is the
   conclusion-passing A1 forbids arriving in the one dispatch that most invites
@@ -533,10 +533,10 @@ re-score and `refs.check_coverage` names the row immediately ("every scenario
 crediting it is rejected or a duplicate ... the score stage must recompute
 coverage and justify the row as a hole"). So the status edit is the half no
 gate will ever ask you for, and the recompute is the half that will not let you
-forget -- which is why both belong in one `tg-score` re-dispatch rather than in
+forget -- which is why both belong in one `rb-score` re-dispatch rather than in
 two steps you might leave half-done.
 
-**A rejection does not loop back to `tg-propose`.** Not once, not for a cell
+**A rejection does not loop back to `rb-propose`.** Not once, not for a cell
 that matters. The cell the rejected scenario claimed becomes an honest **hole**
 in the coverage report, and the run reports it as one. This is deferred on
 purpose rather than forgotten: looping after instantiation makes run cost
@@ -551,10 +551,10 @@ Mostly informational -- by this point the expensive decisions are made -- but
 it is where a pattern of rejections gets noticed by somebody who can act on
 it.
 
-**B11. `tg-emit`, then `smoke`.** Dispatch `tg-emit` like any other stage: it
-runs `testgen emit`, writes nothing itself, and reports what was emitted and
+**B11. `rb-emit`, then `smoke`.** Dispatch `rb-emit` like any other stage: it
+runs `rubrica emit`, writes nothing itself, and reports what was emitted and
 what was pruned. Gate with `validate --stage emit` and `check-refs`, and
-`record-stage --stage emit`. Yes, `tg-emit` runs both of those itself, and you
+`record-stage --stage emit`. Yes, `rb-emit` runs both of those itself, and you
 run them again anyway: a stage's account of its own gate is a report, not
 evidence, and this is the last artifact before the suite ships. (`emit` is in your own `invokes` because a
 re-emit after an upstream repair is yours to run; the first emit of a run goes
@@ -563,7 +563,7 @@ through the skill.)
 Then:
 
 ```bash
-testgen smoke --run <run> --agents <roster>
+rubrica smoke --run <run> --agents <roster>
 ```
 
 The roster is the operator's file, like the inputs: if none was supplied, ask
@@ -601,13 +601,13 @@ points at:
 | Any subcommand exits 2 | Halt; no repair attempt spent | A3, refusal 3 |
 | `check-skills` reports findings | Halt before dispatching anything | B0, refusal 1 |
 | A gap blocks a stage still to come | Halt; name the gap and the input that closes it | B4, refusal 4 |
-| Coverage verdict `continue` | `round++`, dispatch `tg-propose` again -- unless the round was `K` | B6.4 |
+| Coverage verdict `continue` | `round++`, dispatch `rb-propose` again -- unless the round was `K` | B6.4 |
 | Coverage verdict `converged` | Leave the loop; go to gate 2 | B6.4 |
 | Coverage verdict `halted_no_progress` or `halted_round_cap` | Leave the loop; go to gate 2. The run continues | B6.4 |
-| A stage requests a denominator amendment | Decide, re-dispatch `tg-reconcile`, re-score | B6 |
-| Verdict `re-seed`, first time | Re-dispatch `tg-instantiate` once, alternatives appended, then re-challenge | B9 |
+| A stage requests a denominator amendment | Decide, re-dispatch `rb-reconcile`, re-score | B6 |
+| Verdict `re-seed`, first time | Re-dispatch `rb-instantiate` once, alternatives appended, then re-challenge | B9 |
 | Verdict `re-seed`, second time | Treat as a rejection | B9 |
-| Verdict `reject` | Re-dispatch `tg-score` to mark it and recompute; do not return to `tg-propose` | B9 |
+| Verdict `reject` | Re-dispatch `rb-score` to mark it and recompute; do not return to `rb-propose` | B9 |
 | A human gate reached, no `--no-gate` | Stop and present the artifact | A7, refusal 5 |
 | `smoke` verdict is not `healthy` | Report it as a suite defect; do not repair it here | B11, refusal 6 |
 
@@ -628,7 +628,7 @@ points at:
    model, its effort, and the `skill_sha256` of the file it ran. `intake` and
    `smoke` have no skill and are not recorded.
 
-5. **Every branch is in `decisions.md`**, appended through `testgen decide`,
+5. **Every branch is in `decisions.md`**, appended through `rubrica decide`,
    one line each, with the timestamp minted by `decide`.
 
 6. **You wrote nothing but `decisions.md`.** Every other change to the run
@@ -646,7 +646,7 @@ points at:
 10. **No human gate was passed without either a human or `--no-gate`.**
 
 Before you report a run *completed*, confirm the two things that are yours
-rather than any stage's: run `testgen check-refs` once more against the finished
+rather than any stage's: run `rubrica check-refs` once more against the finished
 run and confirm it exits 0, and read `manifest.stages` back to confirm it holds
 an entry for every stage you dispatched. Unlike a stage, you have no artifact of
 your own for a gate to check, so those two checks plus the trail in
@@ -711,9 +711,9 @@ exactly like the run you wanted.
 - **You are tempted to pass an earlier stage's conclusion into a later
   dispatch to save it re-reading.** Do not. That is the whole contract. The
   concrete triggers, all of which feel like efficiency: pasting the world
-  model's gaps into a propose dispatch; telling `tg-instantiate` what the
-  scenario is "really getting at"; telling `tg-challenge` which scenarios the
-  other adversaries accepted; reminding `tg-score` which pair you thought was
+  model's gaps into a propose dispatch; telling `rb-instantiate` what the
+  scenario is "really getting at"; telling `rb-challenge` which scenarios the
+  other adversaries accepted; reminding `rb-score` which pair you thought was
   a duplicate; summarising round 1 for round 2's proposer. Every one of them
   produces an artifact that validates, and every one of them deletes the
   independence that artifact was supposed to demonstrate.
@@ -722,7 +722,7 @@ exactly like the run you wanted.
   `status`, a coverage number, a gap's `blocks`, a verdict, a seed, a package
   under `06-suite/` -- each has an owning stage, and the repair is always a
   re-dispatch of that stage, never a keystroke of yours. This is the same
-  refusal `tg-emit` carries about the suite, one level up, and it has the same
+  refusal `rb-emit` carries about the suite, one level up, and it has the same
   reason: an artifact you edited by hand belongs to no stage, so nothing about
   it can be attributed, reproduced, or compared against another run -- and
   attribution is the only reason this pipeline is built in stages at all.

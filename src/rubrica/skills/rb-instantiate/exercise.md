@@ -1,4 +1,4 @@
-# tg-instantiate -- live exercise
+# rb-instantiate -- live exercise
 
 `tests/unit/test_skills_instantiate.py` and `skills.check_contract` can
 confirm this skill's *shape*: the contract, the five sections, and that its
@@ -49,8 +49,8 @@ instantiated. It is not part of the fan-out.
   scenario, each holding `seed.json`, `expected.json` and `rationale.md`.
   The third file is the one to check for explicitly: no schema gates it, so a
   subagent that skipped it fails no automated check.
-- `testgen validate --stage instantiate` exits 0.
-- `testgen check-refs` exits 0. That single exit code carries three separate
+- `rubrica validate --stage instantiate` exits 0.
+- `rubrica check-refs` exits 0. That single exit code carries three separate
   results: the reachability gate passed (every data assertion's
   `seed_pointer` resolves in its own seed, and every exclusion's resolves to
   nothing), seed conformance passed (declared collections, declared fields,
@@ -143,8 +143,8 @@ given only the run directory, the stage name, this skill's path and its own
 before dispatch.
 
 **All pass criteria met.** Four instance directories, each holding all three
-files including the schema-less `rationale.md`. `testgen validate --stage
-instantiate` 0 and `testgen check-refs` 0 after all four finished -- so
+files including the schema-less `rationale.md`. `rubrica validate --stage
+instantiate` 0 and `rubrica check-refs` 0 after all four finished -- so
 reachability, seed conformance, and both `machine:` invariants hold on every
 seed.
 

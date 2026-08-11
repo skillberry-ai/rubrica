@@ -1,4 +1,4 @@
-"""tg-emit's contract: a thin entry point that writes nothing itself."""
+"""rb-emit's contract: a thin entry point that writes nothing itself."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import re
 from rubrica.skills import SECTIONS, load, section_body, skills_dir
 from rubrica.validate import STAGE_ARTIFACTS
 
-SKILL = skills_dir() / "tg-emit" / "SKILL.md"
+SKILL = skills_dir() / "rb-emit" / "SKILL.md"
 
 
 def test_the_contract_matches_the_stage_gate():

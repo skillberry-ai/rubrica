@@ -31,7 +31,7 @@ def _run(tmp_path, stages=None):
     return run
 
 
-def _skill(tmp_path, text="# tg-extract\n"):
+def _skill(tmp_path, text="# rb-extract\n"):
     path = tmp_path / "SKILL.md"
     path.write_text(text, encoding="utf-8")
     return path
@@ -89,7 +89,7 @@ def test_the_recorded_digest_is_of_the_file_that_was_passed(tmp_path):
     ]
     assert main(argv) == 0
     before = read_json(run.manifest)["stages"]["extract"]["skill_sha256"]
-    skill.write_text("# tg-extract\n\nA changed Method section.\n", encoding="utf-8")
+    skill.write_text("# rb-extract\n\nA changed Method section.\n", encoding="utf-8")
     assert main(argv) == 0
     assert read_json(run.manifest)["stages"]["extract"]["skill_sha256"] != before
 

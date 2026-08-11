@@ -1,4 +1,4 @@
-"""tg-challenge's contract, and the ordering that makes it independent.
+"""rb-challenge's contract, and the ordering that makes it independent.
 
 The ordering test is the one that matters and it is genuinely structural: the
 Method section must mention expected.json strictly *after* it mentions
@@ -12,7 +12,7 @@ from rubrica.artifacts import read_json
 from rubrica.skills import SECTIONS, load, section_body, skills_dir
 from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
 
-SKILL = skills_dir() / "tg-challenge" / "SKILL.md"
+SKILL = skills_dir() / "rb-challenge" / "SKILL.md"
 
 
 def paragraphs(text: str) -> list[str]:
@@ -52,7 +52,7 @@ def test_the_contract_matches_the_stage_gate():
     # coverage and add anchoring surface to the one stage whose entire value is
     # not being anchored. Widening this set is a plan-level decision.
     assert set(skill.contract["reads"]) == {"scenarios", "seed", "expected"}, (
-        "tg-challenge reads exactly the scenario list, its own seed and its own oracle; "
+        "rb-challenge reads exactly the scenario list, its own seed and its own oracle; "
         "any further read widens the context of the stage that exists to be un-anchored"
     )
 

@@ -249,7 +249,7 @@ def test_the_weak_baseline_scores_only_on_the_absence_shaped_tasks(toy_run, tmp_
     by design -- so a refusing agent collects every answer_excludes assertion
     for free. The two absence-shaped scenarios are therefore partly passable by
     saying nothing, and what keeps them honest is the tool_called assertion each
-    also carries. That is why tg-instantiate's invariants require one.
+    also carries. That is why rb-instantiate's invariants require one.
 
     Without this test, an edit that dropped the tool_called assertion from an
     absence scenario would raise the weak baseline toward its ceiling and only
@@ -268,7 +268,7 @@ def test_the_weak_baseline_scores_only_on_the_absence_shaped_tasks(toy_run, tmp_
 
 
 def test_every_absence_shaped_scenario_carries_an_assertion_a_refusal_fails(toy_run):
-    """The fixture-level statement of the invariant tg-instantiate must enforce.
+    """The fixture-level statement of the invariant rb-instantiate must enforce.
 
     A scenario whose assertions are *all* exclusions is substantially passable
     by an agent that answers nothing, which removes exactly the signal the weak

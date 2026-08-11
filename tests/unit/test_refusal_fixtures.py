@@ -118,7 +118,7 @@ def test_the_contradiction_fixture_s_api_carries_no_corroboration_for_either_sid
     Demonstrated red by a reviewer: restoring the phrase this fixture removed
     from the golden `api.json` -- "Errors if no ticket has that id." on
     `returns.get_ticket` -- silently reconstructs the golden fixture's
-    two-independent-artifacts-vs-one-trace-span shape. Per `tg-reconcile`'s own
+    two-independent-artifacts-vs-one-trace-span shape. Per `rb-reconcile`'s own
     `SKILL.md` (S3 step 5), that shape is what makes `preferred_a` defensible;
     nothing else in this file read `api.json`'s content for the contradiction
     fixture, so that edit passed every other test here.

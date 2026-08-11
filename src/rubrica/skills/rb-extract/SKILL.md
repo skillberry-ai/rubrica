@@ -1,11 +1,11 @@
 ---
-name: tg-extract
+name: rb-extract
 description: Turn one input artifact into a claims document -- atomic, evidence-backed statements about the target system, extracted in isolation from every sibling artifact.
 ---
 
-# tg-extract
+# rb-extract
 
-You are one member of `tg-extract`'s fan-out: the orchestrator dispatches you
+You are one member of `rb-extract`'s fan-out: the orchestrator dispatches you
 once per registered input artifact, and you were dispatched to turn exactly
 one of them -- the one whose `artifact_id` you were told -- into a claims
 document. A sibling subagent is doing the same thing, right now, for a
@@ -130,7 +130,7 @@ there -- an incomplete claim is a validation failure, not a smaller claim.
    anchor or a line reference for prose.
 
    `invariant` and `outcome_class` are the pair most often swapped, and the
-   swap is invisible downstream: `tg-reconcile` builds its coverage
+   swap is invisible downstream: `rb-reconcile` builds its coverage
    denominator -- every operation crossed with its outcome classes -- only
    from `outcome_class` claims, so a genuine error behaviour filed as
    `invariant` does not feed that enumeration, and a column of the test
@@ -156,7 +156,7 @@ there -- an incomplete claim is a validation failure, not a smaller claim.
    than off any description of intended behaviour. These three words are
    not interchangeable and not a formality: "the spec states this" and "I
    guessed from one trace" must never collapse into a claim that looks the
-   same downstream. This is what makes gap reporting at `tg-reconcile`
+   same downstream. This is what makes gap reporting at `rb-reconcile`
    honest -- it can only weigh a claim by where it actually came from if
    you recorded that truthfully. If you are unsure which of the three
    applies, that uncertainty belongs in `confidence`, not in quietly
@@ -200,10 +200,10 @@ there -- an incomplete claim is a validation failure, not a smaller claim.
    yours says. You must not know that, and a claim of yours must never read
    as though you did.
 
-Before you report done, run `testgen validate --stage extract`. If it
+Before you report done, run `rubrica validate --stage extract`. If it
 reports anything wrong with the file you just wrote, that is not a finding
 to pass along -- it is your own defect to fix. Repair the artifact and
-validate again; report success only once `testgen validate --stage extract`
+validate again; report success only once `rubrica validate --stage extract`
 exits clean.
 
 ## 5. Refusal conditions
@@ -211,8 +211,8 @@ exits clean.
 Every condition below is one where the correct output is not a claim -- it
 is a statement that you could not honestly produce one, or that you produced
 one carrying an explicit caveat. Writing that statement is success, not
-failure: a refusal recorded here becomes a gap `tg-reconcile` can reason
-about and a hole `tg-score` can count against the denominator. An invented
+failure: a refusal recorded here becomes a gap `rb-reconcile` can reason
+about and a hole `rb-score` can count against the denominator. An invented
 answer in its place is not a rescue, it is exactly the confabulation this
 stage exists to prevent. You default to being helpful; every trigger below
 is a case where the helpful-looking move is the wrong one, and refusing
@@ -233,7 +233,7 @@ loudly is the one that is actually correct.
 - **The artifact contradicts itself.** Record both sides as separate
   claims, each with `confidence: low`. Do not pick the side that sounds
   more authoritative, average them into one hedged claim, or otherwise
-  reconcile them -- that reconciliation is `tg-reconcile`'s job, one stage
+  reconcile them -- that reconciliation is `rb-reconcile`'s job, one stage
   downstream. Doing it here is how a contradiction stops being a recorded
   fact and becomes something silently smoothed over before anyone else gets
   to see it.
@@ -243,7 +243,7 @@ loudly is the one that is actually correct.
   returns a list of tickets but never says what happens when the queue
   name is wrong, do not write a claim about what probably happens on a bad
   queue name -- record only what is actually there. A missing error class
-  is a gap for `tg-reconcile` to surface and a hole for `tg-score` to
+  is a gap for `rb-reconcile` to surface and a hole for `rb-score` to
   count; recording your own guess in its place erases the gap and hands
   every downstream stage a fact that nobody ever actually stated.
 
@@ -261,6 +261,6 @@ loudly is the one that is actually correct.
   other span establishes as valid" -- full stop. Appending "which is
   unusual, since APIs typically error on an unrecognized id" is the same
   observation with an unstated premise bolted on. Whether that premise is
-  true is `tg-reconcile`'s question, to be answered by comparing your claim
+  true is `rb-reconcile`'s question, to be answered by comparing your claim
   against whatever a sibling claims file independently says; it is not
   yours to pre-answer by assuming the convention holds here.

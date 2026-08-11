@@ -1,4 +1,4 @@
-"""tg-instantiate's contract, and the rules its prompt must state completely.
+"""rb-instantiate's contract, and the rules its prompt must state completely.
 
 The vocabulary and grounding checks are the important ones. This stage writes
 the artifact that reaches the scorer, and every rule it does not know is a rule
@@ -11,7 +11,7 @@ from rubrica.skills import SECTIONS, load, section_body, skills_dir
 from rubrica.suite.verify import ASSERTION_KINDS, DATA_KINDS, TRAJECTORY_KINDS
 from rubrica.validate import STAGE_ARTIFACTS
 
-SKILL = skills_dir() / "tg-instantiate" / "SKILL.md"
+SKILL = skills_dir() / "rb-instantiate" / "SKILL.md"
 
 # The section that owns the rules this file checks. Four tests below scope to
 # it rather than to the whole file: `load(...).body` is the entire document,

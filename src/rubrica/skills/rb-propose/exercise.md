@@ -1,4 +1,4 @@
-# tg-propose -- live exercise
+# rb-propose -- live exercise
 
 `tests/unit/test_skills_propose.py` and `skills.check_contract` can confirm
 this skill's *shape*: the contract, the five sections, and that its prose
@@ -25,8 +25,8 @@ memory of any other stage's run.
 ## Pass criteria
 
 - `02-scenarios.json` exists and is schema-valid.
-- `testgen validate --stage propose` exits 0.
-- `testgen check-refs` exits 0.
+- `rubrica validate --stage propose` exits 0.
+- `rubrica check-refs` exits 0.
 - Every scenario in the file has `status: "proposed"`. A single `active`,
   `duplicate`, or `rejected` scenario is a boundary crossed that no schema
   or `check-refs` check flags on its own -- `active` is a perfectly valid
@@ -57,7 +57,7 @@ classes never appear in any of them.
 they restatements of the `user_intent`?** A fact like "the customer's query
 returns the ticket they were looking for" is not a discriminating fact --
 it is the `user_intent` with the subject and verb rearranged, and it does
-not pin down any specific seed world for `tg-instantiate` to build. A real
+not pin down any specific seed world for `rb-instantiate` to build. A real
 discriminating fact names a specific value or count that only one seed can
 satisfy -- "queue `billing` has exactly one open ticket, and its `status`
 is `escalated`," say. Read every `discriminating_fact` next to its own
@@ -81,9 +81,9 @@ or a cited claim, on the theory that a field value like a queue name had to
 trace to something the claims establish. That theory was wrong for this
 stage -- the world model this fixture builds contains no queue name at all,
 the schema has nowhere to record a field's value domain even if it did, and
-`tg-propose` never reads a claims file in the first place, so there was
+`rb-propose` never reads a claims file in the first place, so there was
 never anything for a queue name to be checked against. A concrete field
-value in a `discriminating_fact` is a prescription to `tg-instantiate`
+value in a `discriminating_fact` is a prescription to `rb-instantiate`
 about what to build, not a claim about what the target already has, and
 picking one is exactly what makes a fact discriminating. Property 4 is
 uniqueness-only from here on; do not resurrect the groundedness half.
@@ -95,7 +95,7 @@ that names no concrete value at all, out of an unnecessary worry about
 which the seed contains zero tickets, so the call returns an empty result
 set rather than any match."* No queue, no status, no count, nothing
 concrete anywhere. That is "the query returns some rows" (property 2's own
-anti-example) with the polarity flipped: `tg-instantiate` reading it has
+anti-example) with the polarity flipped: `rb-instantiate` reading it has
 near-total freedom to build any world with some empty combination
 somewhere, not the one specific world the scenario means to test. A correct
 version would have named any concrete queue and status -- `billing`,
@@ -120,7 +120,7 @@ see it.
 Transcribed from the exercise ledger, whose workspace is deleted when this branch
 finishes. Two dispatches, each against a run stopped after `reconcile`, each
 given only the run directory, the stage name and this skill's path. **Both gates
-clean on both rounds** (`testgen validate --stage propose` 0, `testgen check-refs`
+clean on both rounds** (`rubrica validate --stage propose` 0, `rubrica check-refs`
 0), every scenario `proposed`, and both rounds under the cap.
 
 **Round 1, against the text as first delivered.** Four scenarios closing all four
@@ -137,7 +137,7 @@ capability cells and both goal rows.
 - It also wrote `hop_depth: 2` with two `capability_refs` on the one multi-hop
   scenario, which confirms the round-1 fix to Method step 7 behaved as intended:
   an unexplainable depth is the scenario's own defect to fix before writing it
-  down, not a finding to offload onto `tg-challenge`.
+  down, not a finding to offload onto `rb-challenge`.
 - No conflation appeared between §1's knowledge-leak tell ("do not reach for a
   scenario because it is the kind of case tests usually have") and the new
   absence-cell prose ("do not skip a cell because it is harder to design") --
@@ -158,7 +158,7 @@ result set rather than any match."* No queue, no status, no count. `scn-001` did
 the same in miniature -- "filtering by a queue and status combination matches
 exactly one ticket", where an earlier run had said "queue `billing` and status
 `open` returns exactly one ticket, and that ticket's `ticket_id` is 4231". A
-`tg-instantiate` reading either has near-total freedom to build any world with
+`rb-instantiate` reading either has near-total freedom to build any world with
 some empty combination somewhere, rather than the one world the scenario means to
 test.
 
@@ -183,7 +183,7 @@ only after round 3 had landed:
    holding no tickets satisfies literally.
 
 **Root cause: I reasoned from `clm-notes-001`, a claims-file statement
-`tg-propose` is forbidden to read.** I held the stage to knowledge its own
+`rb-propose` is forbidden to read.** I held the stage to knowledge its own
 contract denies it -- the controller's version of the isolation failure this
 whole design exists to prevent. One `grep` over the stage's declared `reads`
 would have settled it before the first round instead of after the third.
@@ -191,14 +191,14 @@ would have settled it before the first round instead of after the third.
 Round 3 compounded it. The corrected worked example I had written into the prompt
 -- "queue `billing` and status `open`" -- is unachievable from this stage's
 epistemic position for exactly the same reason: naming `billing` is inventing it
-as much as naming `sales`, since `tg-propose` never reads the file that says which
+as much as naming `sales`, since `rb-propose` never reads the file that says which
 queue names are real. I put an example in a prompt that the prompt's own reader
 cannot follow.
 
 What survived the retraction is the half that was always independently true:
 `scn-003`'s valueless fact fails **uniqueness**, a requirement this skill carried
 before any of it, and fails it fixably -- prescribing a concrete value is an
-instruction to `tg-instantiate`, never a claim about the target. Every seed value
+instruction to `rb-instantiate`, never a claim about the target. Every seed value
 is synthetic by construction, which is why property 4 above is uniqueness-only
 and says not to resurrect the groundedness half.
 

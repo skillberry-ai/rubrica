@@ -1,12 +1,12 @@
 ---
-name: tg-reconcile
-description: Merge every tg-extract subagent's claims into one reconciled world model -- recording contradictions and gaps rather than resolving them, and computing the frozen coverage denominator exactly once.
+name: rb-reconcile
+description: Merge every rb-extract subagent's claims into one reconciled world model -- recording contradictions and gaps rather than resolving them, and computing the frozen coverage denominator exactly once.
 ---
 
-# tg-reconcile
+# rb-reconcile
 
-You are dispatched once, after every `tg-extract` subagent has finished and
-before `tg-propose` begins. There is no fan-out here and no sibling running
+You are dispatched once, after every `rb-extract` subagent has finished and
+before `rb-propose` begins. There is no fan-out here and no sibling running
 next to you: you are the one stage that reads every claims file the previous
 stage produced, which is what makes you the barrier the design calls for.
 Extract was split into a fan-out precisely so that no claim would be
@@ -32,7 +32,7 @@ invokes = ["validate", "check-refs"]
 You read exactly the two things this skill's contract names under `reads`:
 `manifest.json`, and every file under `01-claims/` (`claims_dir`) -- not one
 of them, all of them. That second half is the whole reason this stage
-exists: `tg-extract`'s fan-out members were forbidden from seeing each
+exists: `rb-extract`'s fan-out members were forbidden from seeing each
 other's output, and you are the first and only place in the pipeline where
 every one of their conclusions is visible in the same context at once.
 Nothing else on disk is yours to read. There is no `02-scenarios.json` yet,
@@ -46,7 +46,7 @@ to do this job has to be in the manifest, in the claims, or in this
 document.
 
 Being the barrier means you legitimately see more than any single
-`tg-extract` subagent did, and that is not a leak -- it is the design.
+`rb-extract` subagent did, and that is not a leak -- it is the design.
 Merging claim sets is inherently cross-artifact work; a stage forbidden from
 seeing every claim could not merge them at all. The boundary that still
 holds here is not about which *files* you may open -- you may open all of
@@ -83,7 +83,7 @@ element with an empty or missing `claims` array is not one `check-refs` can
 trace back to any evidence, and `refs.check_world_model` reports every
 `claims[]` entry that fails to resolve to a real claim id. There is exactly
 one world model per run -- you are not asked to produce one per input
-artifact, which is `tg-extract`'s shape, not yours.
+artifact, which is `rb-extract`'s shape, not yours.
 
 ## 3. Method
 
@@ -116,7 +116,7 @@ artifact, which is `tg-extract`'s shape, not yours.
    you read (`underspecified`, not silence).
 
    Do not expect this information to arrive labelled `kind: outcome_class`.
-   A real run of `tg-extract` filed "`get_ticket` errors when called with an
+   A real run of `rb-extract` filed "`get_ticket` errors when called with an
    id no ticket has" correctly as `outcome_class` from one input artifact,
    and filed the identical fact as `invariant`, twice, from another --
    because a claim about what an operation *returns for a class of input*
@@ -130,7 +130,7 @@ artifact, which is `tg-extract`'s shape, not yours.
    two conflicting `kind` labels for the same underlying fact are themselves
    worth folding into one outcome class citing both claims, not two outcome
    classes or a contradiction -- they agree on the fact and disagree only on
-   a bookkeeping label that is `tg-extract`'s mistake to have made, not a
+   a bookkeeping label that is `rb-extract`'s mistake to have made, not a
    real disagreement about the target.
 
 4. **Give each capability a `binding`: the tool name a transcript will show,
@@ -176,7 +176,7 @@ artifact, which is `tg-extract`'s shape, not yours.
 
 7. **Enumerate goals from the actors' perspective, each with the
    `expected_hop_depths` it supports.** This goal list is frozen the moment
-   you write it: `tg-propose` designs scenarios against exactly this list
+   you write it: `rb-propose` designs scenarios against exactly this list
    and may only *request* an amendment, which costs an explicit orchestrator
    decision and a `denominator_version` bump, never a silent addition by a
    later stage. A denominator that a later, more permissive stage could also
@@ -203,7 +203,7 @@ artifact, which is `tg-extract`'s shape, not yours.
    size of a related collection (`count`), a field that must equal an
    ordered join of a related collection's values (`join`), or a field that
    must be unique, optionally within a group (`unique`). This is not a
-   cosmetic choice: `tg-instantiate` seeds a world respecting these
+   cosmetic choice: `rb-instantiate` seeds a world respecting these
    invariants, and a seed that violates a `machine:` one is not merely an
    unrealistic detail -- the simulation recomputes that field, so the
    authored content silently changes underneath the label and the gold
@@ -211,7 +211,7 @@ artifact, which is `tg-extract`'s shape, not yours.
    invariant filed as `prose:` when it fits a form is the safer-looking
    mistake that is actually costly: it leaves the reachability gate with
    nothing mechanical to check, so a seed can violate the rule and nothing
-   before `tg-challenge`, if anything, will ever notice. Getting the
+   before `rb-challenge`, if anything, will ever notice. Getting the
    reverse wrong -- writing `machine:` for something you only inferred --
    is worse: a wrong `machine:` invariant fails every seed that is actually
    correct, because `check-refs` evaluates it as ground truth. Promote to
@@ -251,11 +251,11 @@ artifact, which is `tg-extract`'s shape, not yours.
    ids. A contradiction that names a claim nobody extracted is not a
    recorded disagreement, it is a reference to nothing.
 
-Before you report done, run `testgen validate --stage reconcile` and then
-`testgen check-refs`. Either one reporting anything wrong with the world
+Before you report done, run `rubrica validate --stage reconcile` and then
+`rubrica check-refs`. Either one reporting anything wrong with the world
 model you just wrote is not a finding to pass along -- it is your own
 defect to fix. Repair the artifact and run both again; report success only
-once `testgen validate --stage reconcile` and `testgen check-refs` both
+once `rubrica validate --stage reconcile` and `rubrica check-refs` both
 exit clean.
 
 ## 5. Refusal conditions
@@ -280,7 +280,7 @@ mess honestly is what is actually correct.
 
 - **A capability's error or empty behaviour is described nowhere.** Record
   a gap, not an invented outcome class. If the missing semantics would stop
-  `tg-propose` from designing a meaningful scenario against that capability,
+  `rb-propose` from designing a meaningful scenario against that capability,
   the gap's `blocks` list must include `propose` -- that is what turns a
   silent hole into a halt the orchestrator actually has to act on.
 

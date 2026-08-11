@@ -34,7 +34,7 @@ from rubrica.skills import (
 from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS
 
 CONTRACTS: dict[str, dict[str, object]] = {
-    "tg-extract": {
+    "rb-extract": {
         "stage": "extract",
         "reads": ["manifest", "input_file"],
         "writes": ["claims"],
@@ -127,7 +127,7 @@ def messages(findings) -> str:
 
 def test_a_valid_contract_produces_no_findings(tmp_path):
     """The baseline every mutation below is measured against."""
-    assert check_contract(load(write_skill(tmp_path, "tg-extract"))) == []
+    assert check_contract(load(write_skill(tmp_path, "rb-extract"))) == []
 
 
 def test_the_orchestrator_contract_is_valid_without_a_stage(tmp_path):
@@ -135,9 +135,9 @@ def test_the_orchestrator_contract_is_valid_without_a_stage(tmp_path):
 
 
 def test_an_unknown_stage_is_reported(tmp_path):
-    """tg-bogus/ declaring stage="bogus": the directory name agrees with the
-    stage (f"tg-{stage}" == "tg-bogus"), so the stage-mismatch arm cannot fire
-    as a substitute the way it does for stage="extraction" in a tg-extract/
+    """rb-bogus/ declaring stage="bogus": the directory name agrees with the
+    stage (f"rb-{stage}" == "rb-bogus"), so the stage-mismatch arm cannot fire
+    as a substitute the way it does for stage="extraction" in a rb-extract/
     directory (that fixture's mismatch arm also names "extraction" in its
     message, so a pointer-and-substring check alone cannot tell which arm
     produced the finding). Asserting the count is what makes a disabled
@@ -146,26 +146,26 @@ def test_an_unknown_stage_is_reported(tmp_path):
     so the count drops from 1 to 0 rather than staying at 1 via a different
     message.
     """
-    contract = dict(CONTRACTS["tg-extract"], stage="bogus")
-    findings = check_contract(load(write_skill(tmp_path, "tg-bogus", contract)))
+    contract = dict(CONTRACTS["rb-extract"], stage="bogus")
+    findings = check_contract(load(write_skill(tmp_path, "rb-bogus", contract)))
     assert len(findings) == 1
     assert [f.pointer for f in findings] == ["/stage"]
     assert "bogus" in messages(findings)
 
 
 def test_a_stage_that_disagrees_with_the_directory_name_is_reported(tmp_path):
-    """A SKILL.md in tg-propose/ declaring stage="score" would be dispatched for
+    """A SKILL.md in rb-propose/ declaring stage="score" would be dispatched for
     propose and validated as score -- the two halves of one run disagreeing about
     which stage just ran. "score" is a real member of STAGES, so the
     unknown-stage arm cannot be the one that fires here -- only the mismatch arm
     can, which is the fixture this test needs to isolate that arm from the one
     above.
     """
-    contract = dict(CONTRACTS["tg-extract"], stage="score", schemas=["coverage"])
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    contract = dict(CONTRACTS["rb-extract"], stage="score", schemas=["coverage"])
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", contract)))
     assert len(findings) == 1
     assert "/stage" in [f.pointer for f in findings]
-    assert "tg-extract" in messages(findings) and "score" in messages(findings)
+    assert "rb-extract" in messages(findings) and "score" in messages(findings)
 
 
 def test_the_orchestrator_may_not_declare_a_stage(tmp_path):
@@ -179,7 +179,7 @@ def test_the_orchestrator_may_not_declare_schemas(tmp_path, declared):
     """The mirror of the stage finding above, and it did not exist.
 
     `if skill.name != ORCHESTRATOR and stage in STAGES:` wrapped the whole
-    schemas block, so tg-orchestrate declaring `schemas = ["claims"]` -- or the
+    schemas block, so rb-orchestrate declaring `schemas = ["claims"]` -- or the
     non-list `schemas = "claims"` -- exited 0 with no finding, while the same file
     declaring a `stage` was correctly reported. The `schemas` key belongs to a
     stage's layer-1 gate; the orchestrator has no stage, so any value here is
@@ -199,8 +199,8 @@ def test_a_stage_skill_still_gets_the_schemas_block_it_always_had(tmp_path):
     not cost the stage skills their omission and invention checks, which is the
     only reason the compound condition looked safe to write in the first place.
     """
-    contract = dict(CONTRACTS["tg-extract"], schemas=["coverage"])
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    contract = dict(CONTRACTS["rb-extract"], schemas=["coverage"])
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", contract)))
     messages_seen = messages(findings)
     assert [f.pointer for f in findings] == ["/schemas", "/schemas"]
     assert "is not gated on" in messages_seen and "omits artifact kind" in messages_seen
@@ -212,8 +212,8 @@ def test_a_non_string_stage_is_reported(tmp_path):
     stage" so the message says "must be a string" rather than the misleading
     "which is not one of: ...".
     """
-    contract = dict(CONTRACTS["tg-extract"], stage=["extract"])
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    contract = dict(CONTRACTS["rb-extract"], stage=["extract"])
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", contract)))
     assert len(findings) == 1
     assert [f.pointer for f in findings] == ["/stage"]
     assert "must be a string" in messages(findings)
@@ -224,9 +224,9 @@ def test_a_path_that_is_not_a_RunPaths_attribute_is_reported(tmp_path, key):
     """The schema kind is `world-model`; the RunPaths attribute is `world_model`.
     A skill that declares the former names nothing the code can resolve.
     """
-    contract = dict(CONTRACTS["tg-extract"])
+    contract = dict(CONTRACTS["rb-extract"])
     contract[key] = ["world-model"]
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", contract)))
     assert [f.pointer for f in findings] == [f"/{key}/0"]
     assert "world-model" in messages(findings)
 
@@ -237,9 +237,9 @@ def test_a_private_RunPaths_attribute_is_reported(tmp_path, key):
     would accept it -- but it is a private helper, not part of the layout API
     a skill declares artifacts through.
     """
-    contract = dict(CONTRACTS["tg-extract"])
+    contract = dict(CONTRACTS["rb-extract"])
     contract[key] = ["_instance_dir_names"]
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", contract)))
     assert [f.pointer for f in findings] == [f"/{key}/0"]
     assert "_instance_dir_names" in messages(findings)
 
@@ -249,9 +249,9 @@ def test_every_declared_name_is_checked_not_only_the_first(tmp_path, key):
     """Otherwise a loop that returns on its first finding would pass the test
     above while leaving every later entry unchecked.
     """
-    contract = dict(CONTRACTS["tg-extract"])
+    contract = dict(CONTRACTS["rb-extract"])
     contract[key] = ["manifest", "world-model", "nope"]
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", contract)))
     assert [f.pointer for f in findings] == [f"/{key}/1", f"/{key}/2"]
 
 
@@ -265,9 +265,9 @@ def test_a_non_list_reads_or_writes_is_reported_once_not_as_a_cascade(tmp_path, 
     finding per character of the string (which iterating "manifest" directly
     would produce).
     """
-    contract = dict(CONTRACTS["tg-extract"])
+    contract = dict(CONTRACTS["rb-extract"])
     contract[key] = "manifest"
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", contract)))
     assert [f.pointer for f in findings] == [f"/{key}"]
     assert "manifest" in messages(findings) and "list" in messages(findings)
 
@@ -284,14 +284,14 @@ def test_an_omitted_artifact_kind_is_reported(tmp_path):
         "schemas": ["seed"],
         "invokes": ["validate"],
     }
-    findings = check_contract(load(write_skill(tmp_path, "tg-instantiate", contract)))
+    findings = check_contract(load(write_skill(tmp_path, "rb-instantiate", contract)))
     assert [f.pointer for f in findings] == ["/schemas"]
     assert "expected" in messages(findings)
 
 
 def test_an_invented_artifact_kind_is_reported(tmp_path):
-    contract = dict(CONTRACTS["tg-extract"], schemas=["claims", "report"])
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    contract = dict(CONTRACTS["rb-extract"], schemas=["claims", "report"])
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", contract)))
     assert [f.pointer for f in findings] == ["/schemas"]
     assert "report" in messages(findings)
 
@@ -300,8 +300,8 @@ def test_an_omission_and_an_invention_are_reported_separately(tmp_path):
     """Two messages, not one: "omits X" and "declares Y" tell the editor which
     direction is wrong, and a single symmetric-difference message does not.
     """
-    contract = dict(CONTRACTS["tg-extract"], schemas=["report"])
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    contract = dict(CONTRACTS["rb-extract"], schemas=["report"])
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", contract)))
     assert len(findings) == 2
     assert {"claims", "report"} <= set(messages(findings).replace("'", " ").split())
 
@@ -313,8 +313,8 @@ def test_a_non_list_schemas_is_reported_once_not_alongside_the_omission_check(tm
     two messages that contradict each other about what is wrong. This must be
     exactly one finding.
     """
-    contract = dict(CONTRACTS["tg-extract"], schemas="claims")
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    contract = dict(CONTRACTS["rb-extract"], schemas="claims")
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", contract)))
     assert [f.pointer for f in findings] == ["/schemas"]
     assert "claims" in messages(findings) and "list" in messages(findings)
 
@@ -333,7 +333,7 @@ def test_a_schemas_array_of_tables_is_reported_not_a_crash(tmp_path):
         'invokes = ["validate"]'
     )
     findings = check_contract(
-        load(write_skill_with_raw_contract(tmp_path, "tg-extract", toml_body))
+        load(write_skill_with_raw_contract(tmp_path, "rb-extract", toml_body))
     )
     assert [f.pointer for f in findings] == ["/schemas"]
     assert "claims" in messages(findings) and "dict" in messages(findings)
@@ -355,7 +355,7 @@ def test_a_schemas_nested_array_is_reported_not_a_crash(tmp_path):
         'invokes = ["validate"]'
     )
     findings = check_contract(
-        load(write_skill_with_raw_contract(tmp_path, "tg-extract", toml_body))
+        load(write_skill_with_raw_contract(tmp_path, "rb-extract", toml_body))
     )
     assert [f.pointer for f in findings] == ["/schemas"]
     assert "must be a string" in messages(findings)
@@ -365,8 +365,8 @@ def test_an_unknown_subcommand_is_reported(tmp_path):
     """`check_refs` with an underscore is the plausible typo: it is how the
     Python function is spelled and it is not what argparse accepts.
     """
-    contract = dict(CONTRACTS["tg-extract"], invokes=["validate", "check_refs"])
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    contract = dict(CONTRACTS["rb-extract"], invokes=["validate", "check_refs"])
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", contract)))
     assert [f.pointer for f in findings] == ["/invokes/1"]
     assert "check_refs" in messages(findings)
 
@@ -375,30 +375,30 @@ def test_every_real_subcommand_is_accepted(tmp_path):
     """Pins the check against the CLI rather than a hand-kept list: if a
     subcommand is added and subcommand_names() does not see it, this fails.
     """
-    contract = dict(CONTRACTS["tg-extract"], invokes=list(subcommand_names()))
-    assert check_contract(load(write_skill(tmp_path, "tg-extract", contract))) == []
+    contract = dict(CONTRACTS["rb-extract"], invokes=list(subcommand_names()))
+    assert check_contract(load(write_skill(tmp_path, "rb-extract", contract))) == []
 
 
 def test_a_non_list_invokes_is_reported(tmp_path):
     """`invokes = "validate"` (bare string) must be reported by shape, not
     silently treated as declaring nothing.
     """
-    contract = dict(CONTRACTS["tg-extract"], invokes="validate")
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", contract)))
+    contract = dict(CONTRACTS["rb-extract"], invokes="validate")
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", contract)))
     assert [f.pointer for f in findings] == ["/invokes"]
     assert "validate" in messages(findings) and "list" in messages(findings)
 
 
 def test_a_missing_section_is_reported(tmp_path):
     without_refusals = SECTIONS[:-1]
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", headings=without_refusals)))
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", headings=without_refusals)))
     assert SECTIONS[-1] in messages(findings)
 
 
 def test_sections_out_of_order_are_reported(tmp_path):
     """Method before Inputs reads as a skill that acts before it reads."""
     scrambled = (SECTIONS[2], SECTIONS[0], SECTIONS[1], SECTIONS[3], SECTIONS[4])
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", headings=scrambled)))
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", headings=scrambled)))
     assert findings, "an out-of-order section list must be reported"
 
 
@@ -412,14 +412,14 @@ def test_extra_headings_between_the_sections_are_allowed(tmp_path):
         SECTIONS[3],
         SECTIONS[4],
     )
-    assert check_contract(load(write_skill(tmp_path, "tg-extract", headings=with_extras))) == []
+    assert check_contract(load(write_skill(tmp_path, "rb-extract", headings=with_extras))) == []
 
 
 def test_an_empty_refusal_section_is_reported(tmp_path):
     """Section 5 is the most important prompt-level decision in the system. A
     heading with nothing under it is how that decision silently is not made.
     """
-    findings = check_contract(load(write_skill(tmp_path, "tg-extract", refusals="")))
+    findings = check_contract(load(write_skill(tmp_path, "rb-extract", refusals="")))
     assert findings, "an empty refusal-conditions section must be reported"
     assert SECTIONS[-1] in messages(findings)
 
@@ -430,17 +430,17 @@ def test_a_refusal_section_at_end_of_file_is_read_correctly(tmp_path):
     following heading would find every refusal section empty -- and the test
     above would pass for the wrong reason.
     """
-    assert check_contract(load(write_skill(tmp_path, "tg-extract"))) == []
-    path = write_skill(tmp_path, "tg-extract")
+    assert check_contract(load(write_skill(tmp_path, "rb-extract"))) == []
+    path = write_skill(tmp_path, "rb-extract")
     assert path.read_text(encoding="utf-8").rstrip().endswith("Refuse.")
 
 
 def test_check_all_reports_a_skill_STAGES_demands_but_the_directory_lacks(tmp_path):
-    write_skill(tmp_path, "tg-extract")
+    write_skill(tmp_path, "rb-extract")
     findings = check_all(tmp_path)
     missing = messages(findings)
     for name in expected_skill_names():
-        if name != "tg-extract":
+        if name != "rb-extract":
             assert name in missing, f"{name} must be reported missing"
 
 
@@ -450,10 +450,10 @@ def test_check_all_reports_a_directory_that_is_not_a_known_skill(tmp_path):
         if contract is None:
             continue
         write_skill(tmp_path, name)
-    write_skill(tmp_path, "tg-extract")
-    (tmp_path / "tg-extractt" / "SKILL.md").parent.mkdir()
-    (tmp_path / "tg-extractt" / "SKILL.md").write_text("stray\n", encoding="utf-8")
-    assert "tg-extractt" in messages(check_all(tmp_path))
+    write_skill(tmp_path, "rb-extract")
+    (tmp_path / "rb-extractt" / "SKILL.md").parent.mkdir()
+    (tmp_path / "rb-extractt" / "SKILL.md").write_text("stray\n", encoding="utf-8")
+    assert "rb-extractt" in messages(check_all(tmp_path))
 
 
 @pytest.mark.skipif(
@@ -471,7 +471,7 @@ def test_discover_on_an_unreadable_skills_directory_is_a_usage_error(tmp_path):
     """
     root = tmp_path / "skills"
     root.mkdir()
-    write_skill(root, "tg-extract")
+    write_skill(root, "rb-extract")
     root.chmod(0o000)
     try:
         with pytest.raises(UsageError) as excinfo:
@@ -492,7 +492,7 @@ def test_check_all_on_an_unreadable_skills_directory_is_a_usage_error(tmp_path):
     """
     root = tmp_path / "skills"
     root.mkdir()
-    write_skill(root, "tg-extract")
+    write_skill(root, "rb-extract")
     root.chmod(0o000)
     try:
         with pytest.raises(UsageError) as excinfo:
@@ -517,7 +517,7 @@ def test_discover_on_a_skill_directory_that_denies_stat_is_a_usage_error(tmp_pat
     """
     root = tmp_path / "skills"
     root.mkdir()
-    child = write_skill(root, "tg-extract").parent
+    child = write_skill(root, "rb-extract").parent
     child.chmod(0o000)
     try:
         with pytest.raises(UsageError) as excinfo:

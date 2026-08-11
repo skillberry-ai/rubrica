@@ -1,14 +1,14 @@
 ---
-name: tg-score
+name: rb-score
 description: Judge this round's scenarios -- folding the pairs that are one test, promoting the rest -- then compute the coverage matrices against the frozen denominator, justify every uncovered row with a hole, and report the verdict the orchestrator acts on.
 ---
 
-# tg-score
+# rb-score
 
-You are dispatched once per round, after `tg-propose` has appended this
+You are dispatched once per round, after `rb-propose` has appended this
 round's scenarios and before the orchestrator decides whether to run another
 round. You are the second of this pipeline's two barrier stages: like
-`tg-reconcile` you run alone, with every scenario in the run visible in one
+`rb-reconcile` you run alone, with every scenario in the run visible in one
 context at once, because the two judgments this stage exists to make -- is
 this pair of scenarios the same test, and is this row of the denominator
 actually covered -- cannot be made from any single scenario's slice.
@@ -51,7 +51,7 @@ two scenarios are the same test is inherently cross-scenario work, and a
 stage restricted to one slice could not do it at all. **That licence stops
 at the scenarios.** It does not extend to `01-claims/`: the claims files are
 not in your `reads`, and being a barrier does not make them yours the way it
-makes them `tg-reconcile`'s. Reconciliation is the one stage that reads
+makes them `rb-reconcile`'s. Reconciliation is the one stage that reads
 claims, and everything that survived it is in the world model in front of
 you. If you find yourself wanting to consult a claim -- to check what an
 outcome class really means, to see whether a scenario's fact is supported --
@@ -63,7 +63,7 @@ dispatch nothing has been instantiated yet in this round, and a verdict from an
 earlier *run* is not evidence about this one.
 
 **There is one exception, and it is a whole kind of dispatch rather than an edge
-case.** You can be re-dispatched *after* `tg-challenge` has judged this round's
+case.** You can be re-dispatched *after* `rb-challenge` has judged this round's
 instances, to record a rejection the adversary found and recompute coverage
 against it. When that happens the orchestrator appends to your prompt each
 rejected `scenario_id` together with that verdict's `uniquely_determined` and
@@ -89,11 +89,11 @@ document, from the command in Method step 1, or from a notice the orchestrator
 appended to *this* dispatch -- those four and nothing else. On an ordinary
 scoring dispatch the first three are the whole of it. The fourth is there
 because of the one thing you may be asked to do that your artifacts genuinely
-cannot tell you: a `tg-challenge` rejection lives in a file you do not read, so
+cannot tell you: a `rb-challenge` rejection lives in a file you do not read, so
 it reaches you as appended text or it does not reach you at all. In particular,
 **nobody tells you which round this is**: the round you are scoring is the
 highest `round` tag among the scenarios in `02-scenarios.json`, because
-`tg-propose` tags every scenario it writes with the round that wrote it.
+`rb-propose` tags every scenario it writes with the round that wrote it.
 Every quantity in `progress` is derivable the same way, from those round
 tags, which is why you never need to read back a coverage document from an
 earlier round -- Method step 8 spells out the derivation. Deriving it beats
@@ -119,12 +119,12 @@ and `capability.params` carry a name and a type and nothing else, no enum
 and no examples. So when a `discriminating_fact` names a concrete value --
 a queue called `billing`, a ticket id, a count -- there is nothing anywhere
 in your inputs to check that value against, by construction. A concrete
-value there is a prescription to `tg-instantiate` about what to build, not a
+value there is a prescription to `rb-instantiate` about what to build, not a
 claim about what the target already has. Do not fold, reject, or reopen a
 scenario because a value in its fact looks invented, and do not treat two
 scenarios as distinct merely because they picked different concrete values
 for the same cell: decide on what the test asks the agent to determine. No
-stage downstream of `tg-reconcile` can ground a value, and pretending
+stage downstream of `rb-reconcile` can ground a value, and pretending
 otherwise would have you making rulings on evidence you do not have.
 
 ## 2. Output
@@ -134,7 +134,7 @@ Two things, in three files.
 **The updated `02-scenarios.json` (`scenarios`).** The same document you
 read, with the same `schema_version`, the same `denominator_version`, and
 the same scenarios in the same order. You never add a scenario -- creation
-is `tg-propose`'s and only `tg-propose`'s -- and you never remove or
+is `rb-propose`'s and only `rb-propose`'s -- and you never remove or
 renumber one. The only fields that may differ from what you read are
 `status` and the fields a status requires: `duplicate_of` on a scenario you
 mark `duplicate`, and `rejected_reason` (one of `ambiguous`,
@@ -167,7 +167,7 @@ what you report back to the orchestrator, which records it in `decisions.md`.
 
 ## 3. Method
 
-1. **Run `testgen dedupe-candidates --run <run>` and read the JSON it
+1. **Run `rubrica dedupe-candidates --run <run>` and read the JSON it
    prints.** Each entry is a pair of scenarios that share a `goal_id` and
    claim at least one coverage cell in common, with the `shared_cells` and
    `identical_cells` evidence that raised it. That pairing is the cheap,
@@ -222,7 +222,7 @@ what you report back to the orchestrator, which records it in `decisions.md`.
    keeping it, mark it `rejected` with a `rejected_reason`; do not leave a
    scenario `proposed` as a way of not deciding.
 
-   **If this dispatch carries a rejection notice from `tg-challenge`, the status
+   **If this dispatch carries a rejection notice from `rb-challenge`, the status
    edit is step 3's work and there is no gate that will ask you for it.** For
    each `scenario_id` in the notice, set `status: "rejected"` and choose the
    `rejected_reason` yourself from the quoted evidence: `uniquely_determined:
@@ -291,7 +291,7 @@ what you report back to the orchestrator, which records it in `decisions.md`.
    `goal:<goal_id>`), a `reason`, and a `justification` a reader can act on.
 
    The `reason` vocabulary is four values, and choosing among them is a real
-   judgment because `tg-propose` reads it as a worklist:
+   judgment because `rb-propose` reads it as a worklist:
 
    - `not_yet_attempted` -- nobody has proposed against this row yet, and a
      later round can close it. This is the only reason that tells the next
@@ -327,7 +327,7 @@ what you report back to the orchestrator, which records it in `decisions.md`.
 
 9. **Compute `verdict`.** It is *computed here* and *acted on by the
    orchestrator*: this stage does not decide to iterate, does not dispatch
-   another `tg-propose`, and does not stop the run. It writes the state of
+   another `rb-propose`, and does not stop the run. It writes the state of
    the loop and hands it over. The four values, in the order you test them,
    so that the same state always produces the same verdict:
 
@@ -372,7 +372,7 @@ what you report back to the orchestrator, which records it in `decisions.md`.
    `proposed` or `active`. A rejection reopens the row, so a row whose every
    credit is `rejected` or `duplicate` must be recomputed as uncovered and
    justified as a hole -- including when the rejection came from
-   `tg-challenge` after this round and you are re-scoring because of it.
+   `rb-challenge` after this round and you are re-scoring because of it.
    Leaving the old `covered: true` in place is coverage that is confidently
    wrong with both gates green, which is why `refs.check_coverage` reports
    it by name.
@@ -395,11 +395,11 @@ what you report back to the orchestrator, which records it in `decisions.md`.
 10. `03-coverage/latest.json` and `03-coverage/round-<N>.json` have
     identical content.
 
-Before you report done, run `testgen validate --stage score` and then
-`testgen check-refs`. Either one reporting a finding against what you just
+Before you report done, run `rubrica validate --stage score` and then
+`rubrica check-refs`. Either one reporting a finding against what you just
 wrote is not a finding to pass along -- it is your own defect to fix. Repair
 the artifact and run both again; report success only once
-`testgen validate --stage score` and `testgen check-refs` both exit clean.
+`rubrica validate --stage score` and `rubrica check-refs` both exit clean.
 
 ## 5. Refusal conditions
 
@@ -419,15 +419,15 @@ of them re-derives the denominator.
   shared cell covered, and step 7 and Invariant 6 both forbid a hole on a
   covered row. Folding a distinct test loses a cell for the whole run, and
   nothing downstream will ever notice it is missing; keeping a duplicate
-  costs one wasted `tg-instantiate` fan-out. Prefer the cheaper error, and
+  costs one wasted `rb-instantiate` fan-out. Prefer the cheaper error, and
   record that you made the call deliberately rather than leaving it to look
   like an oversight.
 
 - **A cell cannot be covered because the world model has a gap.** Write the
   hole with `reason: "blocked_by_gap"` and the `gap_id` of the gap that
   blocks it. Never `not_yet_attempted` for such a cell: that reason says
-  another round could close it, and no round can -- `tg-propose` reading it
-  will spend a round designing a scenario that `tg-instantiate` cannot
+  another round could close it, and no round can -- `rb-propose` reading it
+  will spend a round designing a scenario that `rb-instantiate` cannot
   honestly seed, and the run will burn its cap without closing anything.
 
 - **The scenario list claims a cell the world model does not have.** Do not

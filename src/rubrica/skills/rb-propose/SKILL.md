@@ -1,16 +1,16 @@
 ---
-name: tg-propose
+name: rb-propose
 description: Read the reconciled world model and the latest coverage report, then append scenarios that target real, closable holes in the coverage denominator -- never rewriting or renumbering what an earlier round already proposed.
 ---
 
-# tg-propose
+# rb-propose
 
-You are dispatched once per round, after `tg-reconcile` has produced a world
-model (round 1) or after `tg-score` has produced a coverage report against
+You are dispatched once per round, after `rb-reconcile` has produced a world
+model (round 1) or after `rb-score` has produced a coverage report against
 the scenarios already on file (round 2 and later). Your job is narrow: find
 the holes in that coverage report that proposing a scenario can actually
 close, and write one new scenario per hole you target. You are not the stage
-that judges a scenario's fate -- that is `tg-score`, one stage downstream of
+that judges a scenario's fate -- that is `rb-score`, one stage downstream of
 you both in round order and in authority. Every scenario you write starts its
 life exactly the same way: `status: "proposed"`, and nothing else.
 
@@ -54,7 +54,7 @@ id already in that file -- including any `duplicate` or `rejected` one --
 stays exactly as written. You add to the file; you do not rewrite it, you do
 not renumber it, and you do not touch any field of a scenario you did not
 just create. In particular, an existing scenario's `status` is never yours
-to change: that transition belongs entirely to `tg-score`, described in
+to change: that transition belongs entirely to `rb-score`, described in
 Method step 7 and Invariant 7 below.
 
 You are dispatched with no memory of any conversation that came before you,
@@ -118,7 +118,7 @@ scenario.
    rewrite or renumber.** Every scenario already in `02-scenarios.json` keeps
    its id, its round, its provenance, and its `status` exactly as written.
    An existing scenario's `status` is not yours to change under any
-   circumstance: `tg-score` owns that transition, and changing it here would
+   circumstance: `rb-score` owns that transition, and changing it here would
    be you exercising a judgment that is not delegated to this stage.
 
 4. **Pick the holes you will target.** A hole's `reason` is one of exactly
@@ -131,7 +131,7 @@ scenario.
    all, and `blocked_by_gap` means the world model itself does not yet have
    enough information to support a scenario there -- some earlier stage's
    gap has to be resolved first, and proposing anyway produces a scenario
-   `tg-instantiate` cannot honestly seed. Do not propose against a hole whose
+   `rb-instantiate` cannot honestly seed. Do not propose against a hole whose
    `reason` is any of those three.
 
    Among the closable holes, an absence- or error-shaped outcome class
@@ -165,7 +165,7 @@ scenario.
    suites in general are supposed to have some.
 
 6. **Declare the `discriminating_fact`.** State the single fact this
-   scenario's test hinges on, phrased so specifically that `tg-instantiate`
+   scenario's test hinges on, phrased so specifically that `rb-instantiate`
    can build a seed world in which that fact is *uniquely* determined -- not
    one of several worlds that would each make the scenario pass. "The query
    returns some rows" is not discriminating: it is true of almost any seed.
@@ -184,7 +184,7 @@ scenario.
    are real, checkable entries in the file you actually read. Every one you
    write into a scenario must be one of them: naming a `capability_id` or
    `outcome_class_id` the world model does not declare is the same failure
-   as inventing a capability, because it points `tg-instantiate` at
+   as inventing a capability, because it points `rb-instantiate` at
    something that does not exist. That is refusal condition 2's territory
    in section 5, and Invariant 1 checks it directly.
 
@@ -195,7 +195,7 @@ scenario.
    and you never read a claims file, so you have no honest way to know what
    any particular value is for the real target. A concrete field value in a
    `discriminating_fact` is therefore always a prescription to
-   `tg-instantiate` about what to build, never a claim about what the
+   `rb-instantiate` about what to build, never a claim about what the
    target already has. `queue: "billing"` is exactly as legitimate to write
    as `queue: "sales"` or `queue: "q-north"` -- none of the three is a claim
    about the target, all three are equally valid instructions -- and this
@@ -210,7 +210,7 @@ scenario.
    contains zero tickets, so the call returns an empty result set rather
    than any match" -- no queue, no status, no count, nothing concrete
    anywhere. That fact fails uniqueness exactly as "the query returns some
-   rows" does: `tg-instantiate` reading it has near-total freedom to build
+   rows" does: `rb-instantiate` reading it has near-total freedom to build
    any world with some empty combination somewhere, not the one specific
    world this scenario means to test. The fix was never to avoid naming a
    queue -- any concrete queue name would have done just as well -- the fix
@@ -238,13 +238,13 @@ scenario.
    before you write it down; an inflated depth left uncorrected on the theory
    that a later stage will catch it is exactly the offloading this document
    asks you not to do elsewhere. Getting this wrong has a real cost:
-   `tg-challenge` independently measures the minimum number of calls a
+   `rb-challenge` independently measures the minimum number of calls a
    solution actually needs and flags `difficulty_overstated` when your claim
    does not match, spending that stage's finding budget on a defect this
    stage chose to create instead of catching before it shipped. Set
    `status: "proposed"` on every scenario you write, full stop -- never
    `active`, `duplicate`, or `rejected`. Those three are outcomes only
-   `tg-score` can assign, after it has actually run its judgment over the
+   `rb-score` can assign, after it has actually run its judgment over the
    scenario: `active` means score has accepted it, `duplicate` means score's
    dedupe ruling matched it against an existing scenario, and `rejected`
    means score turned it down for a stated reason. None of those three
@@ -289,12 +289,12 @@ scenario.
    `duplicate` and `rejected` scenarios never count against this cap.
 
 7. Every scenario you write carries `status: "proposed"` -- never `active`,
-   `duplicate`, or `rejected`. Those three belong to `tg-score` alone.
+   `duplicate`, or `rejected`. Those three belong to `rb-score` alone.
 
-Before you report done, run `testgen validate --stage propose`. If it
+Before you report done, run `rubrica validate --stage propose`. If it
 reports anything wrong with the file you just wrote, that is not a finding
 to pass along -- it is your own defect to fix. Repair the artifact and
-validate again; report success only once `testgen validate --stage propose`
+validate again; report success only once `rubrica validate --stage propose`
 exits clean.
 
 ## 5. Refusal conditions
@@ -303,13 +303,13 @@ Every condition below is one where the correct output is not a scenario --
 it is a statement that proposing one would be dishonest, plus, where you
 can, a report of what is actually blocking progress. Writing that statement
 is success, not failure: a hole left open with a clear reason is something
-`tg-score` and the orchestrator can act on, and a scenario forced into
+`rb-score` and the orchestrator can act on, and a scenario forced into
 existence to avoid an empty round is not a smaller version of doing this job
 right, it is the confabulation this stage exists to prevent.
 
 - **A hole's `reason` is `blocked_by_gap`.** Do not propose against it. Say
   which gap is blocking it (its `gap_id`, and in your own words what it
-  is missing), and stop there. Proposing anyway hands `tg-instantiate` a
+  is missing), and stop there. Proposing anyway hands `rb-instantiate` a
   scenario it cannot honestly seed, because the missing knowledge the gap
   names is exactly what a seed would need to be built around.
 
@@ -333,7 +333,7 @@ right, it is the confabulation this stage exists to prevent.
 
 - **You cannot state a `discriminating_fact` that is uniquely determined.**
   Do not propose the scenario with a vaguer fact instead. A scenario whose
-  fact does not pin down a specific world is one `tg-instantiate` builds
+  fact does not pin down a specific world is one `rb-instantiate` builds
   arbitrarily, and the resulting expected answer is a label nobody can
   actually defend, because a different, equally valid seed would have
   produced a different answer to the same scenario.
