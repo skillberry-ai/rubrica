@@ -1,5 +1,11 @@
 # Skill-Based Test Generator — Design
 
+> **Renamed 2026-08-11.** This record describes the project when it was called
+> `test-generator`, with a `testgen` CLI and `tg-*` skills. It is left as
+> written: a record of what was decided on 2026-08-06 should not describe a past
+> that did not happen. For the current names see
+> [`2026-08-11-rename-to-rubrica-design.md`](2026-08-11-rename-to-rubrica-design.md).
+
 **Date:** 2026-08-06
 **Status:** Approved design. Fully implemented as of the skills build — contract
 spine, measurement layer and all eight skills — and reconciled against what four

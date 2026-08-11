@@ -1,4 +1,4 @@
-# test-generator
+# Rubrica
 
 Builds agent test suites for a target system out of artifacts that describe it
 (specs, captured trajectories, source), by chaining AI skills over a
@@ -16,23 +16,23 @@ long, current, and most "bugs you just found" are in it with a ruling.
 
 ## Setup and commands
 
-Python 3.13+, `uv`. Console script `testgen` (`testgen.cli:main`).
+Python 3.13+, `uv`. Console script `rubrica` (`rubrica.cli:main`).
 
 ```
 make setup     # uv venv --python 3.13; uv pip install -e '.[dev]'
 make test      # uv run pytest -q
 make check     # ruff check + ruff format --check, no changes
-make live      # TESTGEN_LIVE=1 pytest -m live  (see "Live tests" below)
+make live      # RUBRICA_LIVE=1 pytest -m live  (see "Live tests" below)
 make lint      # ruff check --fix
 make format    # ruff format
 ```
 
 Baseline as of the skills build: **1126 passed, 4 skipped**; `make check` clean;
-`uv run testgen check-skills` exits 0. Anything else means you broke something.
+`uv run rubrica check-skills` exits 0. Anything else means you broke something.
 
 Commands in `README.md` assume the venv is on `PATH`; otherwise prefix `uv run`.
-Two env overrides exist and are used by tests: `TESTGEN_SCHEMA_DIR`
-(`validate.py`) and `TESTGEN_SKILLS_DIR` (`skills.py`) — prefer them over
+Two env overrides exist and are used by tests: `RUBRICA_SCHEMA_DIR`
+(`validate.py`) and `RUBRICA_SKILLS_DIR` (`skills.py`) — prefer them over
 editing repo files when probing behaviour.
 
 ## The one architectural rule
@@ -57,20 +57,20 @@ finding's clothes.
 | Dir | Stage | Runs as | Gate |
 |---|---|---|---|
 | `00` | intake | code | validate |
-| `01a` | extract | `tg-extract` — fan-out, one per input | validate |
-| `01b` | reconcile | `tg-reconcile` — barrier | validate · check-refs · **human gate 1** |
-| `02` | propose | `tg-propose` | validate |
-| `03` | score | `tg-score` — barrier | validate · check-refs · **human gate 2** |
-| `04` | instantiate | `tg-instantiate` — fan-out, one per active scenario | validate · check-refs |
-| `05` | challenge | `tg-challenge` — fan-out, one per instance | validate · **human gate 3** |
-| `06` | emit | `tg-emit` — thin wrapper over `testgen emit` | validate · check-refs |
+| `01a` | extract | `rb-extract` — fan-out, one per input | validate |
+| `01b` | reconcile | `rb-reconcile` — barrier | validate · check-refs · **human gate 1** |
+| `02` | propose | `rb-propose` | validate |
+| `03` | score | `rb-score` — barrier | validate · check-refs · **human gate 2** |
+| `04` | instantiate | `rb-instantiate` — fan-out, one per active scenario | validate · check-refs |
+| `05` | challenge | `rb-challenge` — fan-out, one per instance | validate · **human gate 3** |
+| `06` | emit | `rb-emit` — thin wrapper over `rubrica emit` | validate · check-refs |
 | `07` | smoke | code | validate · check-refs |
 
 Stages 02 and 03 are a loop bounded by `max_rounds`. Score *computes* the
 coverage verdict (`continue` / `converged` / `halted_no_progress` /
 `halted_round_cap`); only the orchestrator acts on it.
 
-`tg-orchestrate` is the eighth skill and **is not a stage**: it declares no
+`rb-orchestrate` is the eighth skill and **is not a stage**: it declares no
 `stage` and no `schemas`. It dispatches the seven, holds the gates, and writes
 `decisions.md`.
 
@@ -99,15 +99,15 @@ A third rule learned the hard way: a `1` must name the *right* artifact.
 `no such claim` findings against a correct world model.
 
 When you touch `cli.py`, `validate.py`, `refs.py` or `paths.py`, test the
-unreadable-input paths (`chmod 000`, `chmod 0444`, a bad `TESTGEN_SCHEMA_DIR`),
+unreadable-input paths (`chmod 000`, `chmod 0444`, a bad `RUBRICA_SCHEMA_DIR`),
 not just the happy path.
 
 ## Two check layers
 
-- **Layer 1** — `testgen validate --stage X`: JSON Schema, one per artifact
-  kind. Schemas in `src/testgen/schema/*.json`, shipped as package data.
+- **Layer 1** — `rubrica validate --stage X`: JSON Schema, one per artifact
+  kind. Schemas in `src/rubrica/schema/*.json`, shipped as package data.
   `validate.STAGE_ARTIFACTS` maps stage → artifact kinds.
-- **Layer 2** — `testgen check-refs`: cross-artifact references, seed
+- **Layer 2** — `rubrica check-refs`: cross-artifact references, seed
   conformance, reachability, invariant evaluation.
 
 **Layer 2 checks that an element *references* a resolvable claim, never that the
@@ -116,7 +116,7 @@ it. Two real defects lived under that hole in the golden fixture itself.
 
 ## The skill contract
 
-Every `src/testgen/skills/tg-*/SKILL.md` carries a `## Contract` block (TOML,
+Every `src/rubrica/skills/rb-*/SKILL.md` carries a `## Contract` block (TOML,
 exactly one fence) with `stage`, `reads`, `writes`, `schemas`, `invokes`, and
 these five mandatory sections in order (`skills.SECTIONS`):
 
@@ -124,10 +124,14 @@ these five mandatory sections in order (`skills.SECTIONS`):
 1. Inputs   2. Output   3. Method   4. Invariants   5. Refusal conditions
 ```
 
-`testgen check-skills` holds each contract to `paths.RunPaths` attribute names,
+`rubrica check-skills` holds each contract to `paths.RunPaths` attribute names,
 `validate.STAGE_ARTIFACTS`, and `cli.SUBCOMMANDS`. It validates the *names*,
 never whether the set is *right* — a `reads` list can be complete, over-broad,
 or missing something the prose needs, and only reading catches that.
+
+The `rb-` prefix itself lives in `skills.SKILL_PREFIX` — one home, because it
+was three before the rename and a partial update makes `check-skills` reject
+every correctly named skill.
 
 Section 5 is described in the spec as the most important prompt-level decision
 in the design. Treat a refusal condition as decorative if its trigger has no
@@ -167,7 +171,7 @@ presence anywhere in the file.
 
 **Measure every predicate in both directions before committing it.** Delete or
 blank the prose it claims to check, in a `/tmp` copy under
-`TESTGEN_SKILLS_DIR`, and confirm it goes red; then reword that prose
+`RUBRICA_SKILLS_DIR`, and confirm it goes red; then reword that prose
 meaning-preservingly and confirm it stays green. A predicate nobody has watched
 fail is not yet a guard — and the mirror failure is equally real here, where a
 phrase pin broke on an innocuous reformat.
@@ -208,9 +212,9 @@ prompt. That is what the live exercises are for.
 
 ## Live tests and exercises
 
-`make live` runs the `live`-marked tests, gated by `TESTGEN_LIVE`
+`make live` runs the `live`-marked tests, gated by `RUBRICA_LIVE`
 (`tests/conftest.py`, which treats `0`/`false`/`no`/empty as off so
-`TESTGEN_LIVE=0` cannot opt you in). They assert against committed recordings,
+`RUBRICA_LIVE=0` cannot opt you in). They assert against committed recordings,
 so running them is free; *producing* a recording dispatches a model and costs
 money. They are not part of `make test`, and the skip message names the command
 that runs them.
@@ -256,7 +260,7 @@ that most often look like new bugs:
 2. **The world model has no representation for a field's value domain.**
    `capability.params` and `entity.fields` carry only name/type(/required), with
    `additionalProperties: false`. So a concrete value anywhere downstream of
-   reconcile is a *prescription* to `tg-instantiate`, never an assertion about
+   reconcile is a *prescription* to `rb-instantiate`, never an assertion about
    the target — every seed value is synthetic by construction. Do not raise
    findings that require a stage to ground a value against claims; no artifact
    carries the domains.

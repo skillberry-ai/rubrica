@@ -34,7 +34,7 @@ artifact will still validate — so this is a rule to follow, not something
 Copy this verbatim, filling in the placeholders and nothing else:
 
 ```
-You are the <stage> stage of the testgen pipeline.
+You are the <stage> stage of the rubrica pipeline.
 
 Run directory: <absolute path>
 Your skill:    <absolute path to SKILL.md>
@@ -51,12 +51,12 @@ condition you hit.
 
 **The slice line is for the three fan-out stages, and it is an address rather
 than context.** A member of a fan-out has to be told which slice is its own or
-it cannot find its work at all: `tg-extract` needs `Your artifact_id:`, and
-`tg-instantiate` and `tg-challenge` each need `Your scenario_id:`. Omit the
-line entirely for `tg-reconcile`, `tg-score` and `tg-emit`, which are single
+it cannot find its work at all: `rb-extract` needs `Your artifact_id:`, and
+`rb-instantiate` and `rb-challenge` each need `Your scenario_id:`. Omit the
+line entirely for `rb-reconcile`, `rb-score` and `rb-emit`, which are single
 dispatches over everything. Give the member its own id and nothing about any
 other slice — a sibling's id, or a hint about what a sibling found, is the
-context leak §1 forbids. `tg-orchestrate`'s own §3 A1 states the same rule from
+context leak §1 forbids. `rb-orchestrate`'s own §3 A1 states the same rule from
 the dispatcher's side, and this line was missing from the template while all
 four fan-out exercises run so far had to add it by hand.
 
@@ -64,28 +64,28 @@ four fan-out exercises run so far had to add it by hand.
 
 `tests/toy.py`'s `build_toy_run(runs_dir, upto=...)` mints a run with real
 `intake` and then writes every hand-authored artifact up to and including the
-named checkpoint — never past it. Handing `tg-reconcile` a run that already
+named checkpoint — never past it. Handing `rb-reconcile` a run that already
 contains `01-world-model.json` would test nothing, so the checkpoint you build
 to is always the stage *before* the one you are exercising:
 
 | Stage under test | `upto=` (the checkpoint just before it) | What the dispatched skill should write |
 |---|---|---|
-| `tg-extract`     | `"intake"`      | `01-claims/<artifact-id>.json` for the one input artifact you pointed it at |
-| `tg-reconcile`   | `"extract"`     | `01-world-model.json` |
-| `tg-propose`     | `"reconcile"`   | `02-scenarios.json` (a new round) |
-| `tg-score`       | `"propose"`     | `03-coverage/round-N.json` and `latest.json` |
-| `tg-instantiate` | `"score"`       | `04-instances/<sid>/{seed.json,expected.json,rationale.md}` |
-| `tg-challenge`   | `"instantiate"` | `05-verdicts/<sid>.json` |
-| `tg-emit`        | `"challenge"` (the default — see below) | `06-suite/` (via `testgen emit`, which the skill invokes; the skill itself writes nothing) |
+| `rb-extract`     | `"intake"`      | `01-claims/<artifact-id>.json` for the one input artifact you pointed it at |
+| `rb-reconcile`   | `"extract"`     | `01-world-model.json` |
+| `rb-propose`     | `"reconcile"`   | `02-scenarios.json` (a new round) |
+| `rb-score`       | `"propose"`     | `03-coverage/round-N.json` and `latest.json` |
+| `rb-instantiate` | `"score"`       | `04-instances/<sid>/{seed.json,expected.json,rationale.md}` |
+| `rb-challenge`   | `"instantiate"` | `05-verdicts/<sid>.json` |
+| `rb-emit`        | `"challenge"` (the default — see below) | `06-suite/` (via `rubrica emit`, which the skill invokes; the skill itself writes nothing) |
 
-`tg-orchestrate` is not in this table: it is not a stage, it dispatches them.
+`rb-orchestrate` is not in this table: it is not a stage, it dispatches them.
 Its live exercise is a whole-pipeline run starting from an `upto="intake"`
 run, not a single-stage check against one checkpoint — see Task 13's
 `exercise.md` for its pass criteria.
 
 `upto=None` (the default, i.e. omitting the keyword) writes everything the
 fixture knows how to write, through `challenge` — exactly the checkpoint
-`tg-emit` needs, since `build_toy_run`'s `_UPTO_STAGES` stops there (the
+`rb-emit` needs, since `build_toy_run`'s `_UPTO_STAGES` stops there (the
 fixture writes nothing for `emit` or `smoke`: no suite package, no report). An
 `upto` value outside `_UPTO_STAGES` — including a real `paths.STAGES` entry
 this fixture does not model, such as `"emit"` — raises `ValueError` rather
@@ -125,16 +125,16 @@ from §3) for the stage you dispatched:
 RUN=<the run directory from step 3>
 STAGE=<stage>  # e.g. extract, reconcile, propose, score, instantiate, challenge, emit
 
-uv run testgen validate --run "$RUN" --stage "$STAGE"   # expect 0
-uv run testgen check-refs --run "$RUN"                  # expect 0
-uv run testgen record-stage --run "$RUN" --stage "$STAGE" \
+uv run rubrica validate --run "$RUN" --stage "$STAGE"   # expect 0
+uv run rubrica check-refs --run "$RUN"                  # expect 0
+uv run rubrica record-stage --run "$RUN" --stage "$STAGE" \
   --model <model> --effort <effort> \
-  --skill src/testgen/skills/tg-"$STAGE"/SKILL.md
+  --skill src/rubrica/skills/rb-"$STAGE"/SKILL.md
 ```
 
 `--effort` is one of the values `manifest_stage_efforts()` reads out of the
 manifest schema (currently `low`, `medium`, `high`, `xhigh`, `max`) — run
-`uv run python -c "from testgen.validate import manifest_stage_efforts as f; print(f())"`
+`uv run python -c "from rubrica.validate import manifest_stage_efforts as f; print(f())"`
 if that enum ever moves and this line goes stale.
 
 Both `validate` and `check-refs` will fail on the *unwritten* checkpoint you
@@ -144,13 +144,13 @@ artifact.
 
 `record-stage --skill` needs a real file to hash and hard-fails
 (`UsageError: skill file does not exist`) if it is not there. Every
-`src/testgen/skills/tg-<stage>/SKILL.md` above exists starting with the task
+`src/rubrica/skills/rb-<stage>/SKILL.md` above exists starting with the task
 that writes it (Tasks 7–13); until then, this command's shape can be proven
 against any throwaway file:
 
 ```bash
 printf '## Contract\n\n```toml\nstage = "extract"\n```\n' > /tmp/throwaway-SKILL.md
-uv run testgen record-stage --run "$RUN" --stage extract \
+uv run rubrica record-stage --run "$RUN" --stage extract \
   --model claude-test --effort low --skill /tmp/throwaway-SKILL.md
 ```
 
@@ -193,14 +193,14 @@ uv run pytest --markers | grep live      # confirm the marker is registered
 uv run pytest -m live -q                 # today: deselected, exit 5 -- no test is
                                           # live-marked yet (Task 14 adds the first).
                                           # once one exists: skipped by default.
-TESTGEN_LIVE=1 uv run pytest -m live -q  # opt in. "", "0", "false", "no" (any
+RUBRICA_LIVE=1 uv run pytest -m live -q  # opt in. "", "0", "false", "no" (any
                                           # case, surrounding whitespace ignored)
                                           # do NOT opt in -- everything else does.
 ```
 
 `tests/unit/test_live_marker.py` proves both directions of the skip mechanically,
 including that those off-spellings stay off: a live test dispatches (and bills
-for) a model, so `TESTGEN_LIVE=0` must not be the thing that turns it on.
+for) a model, so `RUBRICA_LIVE=0` must not be the thing that turns it on.
 The exercises above are run by hand, one skill at a time, following §§1–5 — they
 are not `-m live` pytest tests themselves, because a live exercise's pass
 criteria are read by a person (or the controller), not asserted by an
