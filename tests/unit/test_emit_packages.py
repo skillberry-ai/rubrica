@@ -74,6 +74,21 @@ def test_the_seed_is_copied_verbatim(tmp_path):
     assert (run.task_dir(SID) / "seed.json").read_text() == run.seed(SID).read_text()
 
 
+def test_the_suite_directory_env_override_wins(monkeypatch, tmp_path):
+    """RUBRICA_SUITE_DIR must actually redirect suite_template_dir(), the same
+    way test_validate.py pins RUBRICA_SCHEMA_DIR against schema_dir() and
+    test_skills_parse.py pins RUBRICA_SKILLS_DIR against skills_dir().
+
+    Before this test, mutating the env-var literal in emit.py had zero test
+    references catching it: the final Rubrica-rename review flagged that a
+    misspelling of RUBRICA_SUITE_DIR during the rename would have left all
+    1126 tests passing. CLAUDE.md discloses the gap rather than hiding it,
+    but the fix is to close it, not just to disclose it.
+    """
+    monkeypatch.setenv("RUBRICA_SUITE_DIR", str(tmp_path))
+    assert suite_template_dir() == tmp_path
+
+
 def test_the_verifier_and_entrypoint_are_copied_verbatim(tmp_path):
     """The tested file and the executed file must not differ."""
     run = _run(tmp_path)
