@@ -27,7 +27,7 @@ def _package(tmp_path, contract_text):
 
 
 def test_a_truncated_contract_is_refused_rather_than_crashing(tmp_path):
-    argv, out = _package(tmp_path, '{"contract": "testgen/v1", "assert')
+    argv, out = _package(tmp_path, '{"contract": "rubrica/v1", "assert')
     assert main(argv) == 2
     assert not (out / "reward.txt").exists(), "a refusal must not look like a real zero"
     detail = json.loads((out / "reward-detail.json").read_text())
@@ -57,10 +57,10 @@ def test_a_well_formed_contract_still_scores(tmp_path):
 
 def test_read_contract_returns_the_document_when_it_is_fine(tmp_path):
     path = tmp_path / "c.json"
-    path.write_text('{"contract": "testgen/v1"}', encoding="utf-8")
+    path.write_text('{"contract": "rubrica/v1"}', encoding="utf-8")
     contract, problems = read_contract(path)
     assert problems == []
-    assert contract == {"contract": "testgen/v1"}
+    assert contract == {"contract": "rubrica/v1"}
 
 
 # -- a non-string result ------------------------------------------------------

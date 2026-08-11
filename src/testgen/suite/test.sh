@@ -1,5 +1,5 @@
 #!/bin/bash
-# Harbor verifier entrypoint for a testgen-emitted task.
+# Harbor verifier entrypoint for a rubrica-emitted task.
 #
 # Harbor's contract is a bare float in /logs/verifier/reward.txt; reward.json
 # and reward-detail.json are written alongside for humans. verify.py writes no

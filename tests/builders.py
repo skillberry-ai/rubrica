@@ -247,7 +247,7 @@ def minimal_expected(**over: Any) -> dict[str, Any]:
 
 def minimal_suite_expected(**over: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "contract": "testgen/v1",
+        "contract": "rubrica/v1",
         "scenario_id": "scn-001",
         "completion": {"status": "ok", "nonempty_answer": True},
         "assertions": [

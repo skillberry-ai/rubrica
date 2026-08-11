@@ -7,7 +7,7 @@
   "required": ["contract", "scenario_id", "completion", "assertions", "trajectory", "weights"],
   "additionalProperties": false,
   "properties": {
-    "contract": { "const": "testgen/v1" },
+    "contract": { "const": "rubrica/v1" },
     "scenario_id": { "$ref": "#/$defs/id" },
     "completion": {
       "type": "object",

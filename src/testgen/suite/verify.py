@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generic verifier for a testgen-emitted task (contract "testgen/v1").
+"""Generic verifier for a rubrica-emitted task (contract "rubrica/v1").
 
 Stdlib-only: this runs inside the task container, a bare ubi9 image with no
 third-party packages and no network. It must never import testgen.
@@ -22,7 +22,7 @@ import math
 import sys
 from pathlib import Path
 
-CONTRACT = "testgen/v1"
+CONTRACT = "rubrica/v1"
 
 # The answer carries the discriminating fact, so it carries most of the weight.
 # A trajectory is largely obvious once the task is understood, and weighting it
