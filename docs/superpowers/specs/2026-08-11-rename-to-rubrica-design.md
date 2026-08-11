@@ -236,7 +236,13 @@ Left for a human, with steps to be listed at hand-off:
   day, and on that day the skill was called `tg-propose`; rewriting the text to
   match today's directory names would be fabricating evidence, which this
   repository treats as its worst failure mode. The test that quotes those fields
-  verbatim keeps the old spelling for the same reason, with a comment saying so.
+  keeps the old spelling for the same reason, with a comment saying so. Note
+  precisely what that test quotes, since the first draft of this ruling
+  overstated it: the sentence in `test_refusals_live.py` is an *abridged*
+  quotation of the recorded output, not a byte-exact one — what is verbatim is
+  the gap id `gap-invalid-argument-behavior`. The retention argument does not
+  need byte-exactness and is stronger without it: editing an abridged quotation
+  still attributes words to the model that it did not produce.
   The eight `SKILL.md` digests did change, which under a literal reading of
   "changing a skill obliges re-recording" makes both recordings formally stale —
   but the obligation exists because a changed skill may no longer produce the
