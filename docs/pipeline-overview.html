@@ -1,4 +1,4 @@
-<title>Test Generator — how it works</title>
+<title>Rubrica — how it works</title>
 
 <style>
   :root {
@@ -320,13 +320,13 @@
 
   <dl class="facts">
     <dt>Layer 1</dt>
-    <dd><code>testgen validate --stage X</code> — JSON Schema, one schema per artifact kind. Is this file shaped correctly?</dd>
+    <dd><code>rubrica validate --stage X</code> — JSON Schema, one schema per artifact kind. Is this file shaped correctly?</dd>
     <dt>Layer 2</dt>
-    <dd><code>testgen check-refs</code> — cross-artifact references, seed conformance, and the reachability gate. Do the files agree with each other?</dd>
+    <dd><code>rubrica check-refs</code> — cross-artifact references, seed conformance, and the reachability gate. Do the files agree with each other?</dd>
     <dt>Exit codes</dt>
     <dd><code>0</code> clean · <code>1</code> findings, one per line on stdout · <code>2</code> usage error or an unreadable run. The split matters: a <code>1</code> is a repairable stage defect worth one retry, a <code>2</code> means the harness is misconfigured and retrying cannot help.</dd>
     <dt>Skill contract</dt>
-    <dd>Every <code>SKILL.md</code> declares its <code>stage</code>, <code>reads</code>, <code>writes</code>, <code>schemas</code> and <code>invokes</code> in a machine-readable block. <code>testgen check-skills</code> verifies each name against the code that owns it — so a prompt naming a path or a stage that does not exist fails in CI, not at run time.</dd>
+    <dd>Every <code>SKILL.md</code> declares its <code>stage</code>, <code>reads</code>, <code>writes</code>, <code>schemas</code> and <code>invokes</code> in a machine-readable block. <code>rubrica check-skills</code> verifies each name against the code that owns it — so a prompt naming a path or a stage that does not exist fails in CI, not at run time.</dd>
   </dl>
 </section>
 
@@ -358,7 +358,7 @@
       <tr>
         <td class="dir">01a</td>
         <td class="stage">extract</td>
-        <td><span class="runner">tg-extract</span><br><span class="chip fanout">fan-out · 1 per input</span></td>
+        <td><span class="runner">rb-extract</span><br><span class="chip fanout">fan-out · 1 per input</span></td>
         <td>the manifest, and its own one file under <code>00-inputs/</code> — never a sibling's</td>
         <td class="paths"><span>01-claims/&lt;artifact-id&gt;.json</span></td>
         <td>validate</td>
@@ -366,7 +366,7 @@
       <tr>
         <td class="dir">01b</td>
         <td class="stage">reconcile</td>
-        <td><span class="runner">tg-reconcile</span><br><span class="chip barrier">barrier</span></td>
+        <td><span class="runner">rb-reconcile</span><br><span class="chip barrier">barrier</span></td>
         <td>the manifest and every claims file</td>
         <td class="paths"><span>01-world-model.json</span></td>
         <td>validate · check-refs<br><span class="chip barrier">human gate 1</span></td>
@@ -374,7 +374,7 @@
       <tr>
         <td class="dir">02</td>
         <td class="stage">propose</td>
-        <td><span class="runner">tg-propose</span></td>
+        <td><span class="runner">rb-propose</span></td>
         <td class="paths"><span>manifest.json</span><span>01-world-model.json</span><span>02-scenarios.json</span><span>03-coverage/latest.json</span></td>
         <td class="paths"><span>02-scenarios.json</span><span><i>appends this round</i></span></td>
         <td>validate</td>
@@ -382,7 +382,7 @@
       <tr>
         <td class="dir">03</td>
         <td class="stage">score</td>
-        <td><span class="runner">tg-score</span><br><span class="chip barrier">barrier</span></td>
+        <td><span class="runner">rb-score</span><br><span class="chip barrier">barrier</span></td>
         <td class="paths"><span>manifest.json</span><span>01-world-model.json</span><span>02-scenarios.json</span></td>
         <td class="paths"><span>03-coverage/round-N.json</span><span>03-coverage/latest.json</span><span>02-scenarios.json <i>(statuses)</i></span></td>
         <td>validate · check-refs<br><span class="chip barrier">human gate 2</span></td>
@@ -390,7 +390,7 @@
       <tr>
         <td class="dir">04</td>
         <td class="stage">instantiate</td>
-        <td><span class="runner">tg-instantiate</span><br><span class="chip fanout">fan-out · 1 per scenario</span></td>
+        <td><span class="runner">rb-instantiate</span><br><span class="chip fanout">fan-out · 1 per scenario</span></td>
         <td class="paths"><span>01-world-model.json</span><span>02-scenarios.json</span></td>
         <td class="paths"><span>04-instances/&lt;sid&gt;/seed.json</span><span>04-instances/&lt;sid&gt;/expected.json</span><span>04-instances/&lt;sid&gt;/rationale.md</span></td>
         <td>validate · check-refs</td>
@@ -398,7 +398,7 @@
       <tr>
         <td class="dir">05</td>
         <td class="stage">challenge</td>
-        <td><span class="runner">tg-challenge</span><br><span class="chip fanout">fan-out · 1 per instance</span></td>
+        <td><span class="runner">rb-challenge</span><br><span class="chip fanout">fan-out · 1 per instance</span></td>
         <td>the scenario and the seed — then <code>expected.json</code> <strong>last</strong>, so the adversary cannot anchor on the answer</td>
         <td class="paths"><span>05-verdicts/&lt;sid&gt;.json</span></td>
         <td>validate<br><span class="chip barrier">human gate 3</span></td>
@@ -406,7 +406,7 @@
       <tr>
         <td class="dir">06</td>
         <td class="stage">emit</td>
-        <td><span class="runner">tg-emit</span><br><span class="chip code">wraps code</span></td>
+        <td><span class="runner">rb-emit</span><br><span class="chip code">wraps code</span></td>
         <td class="paths"><span>02-scenarios.json</span><span>05-verdicts/</span><span>04-instances/*/expected.json</span><span>01-world-model.json</span></td>
         <td class="paths"><span>06-suite/&lt;sid&gt;/ <i>task packages</i></span></td>
         <td>validate · check-refs</td>
@@ -435,7 +435,7 @@
       <li><strong>After the coverage loop</strong> — review the scenario list and coverage report <em>before</em> paying for per-scenario fan-out. This is the cost gate.</li>
       <li><strong>After challenge</strong> — skim rejects and re-seeds. Mostly informational.</li>
     </ul>
-    <p style="margin:0.9rem 0 0; font-size:0.9rem">All three are skippable with <code>--no-gate</code>, and have to be: five identical pipelines cannot be run if a human intervenes in each. Note that <code>--no-gate</code> is an argument to the <em>orchestrator skill's invocation</em>, not a <code>testgen</code> flag — the gates live in the prompt and no code enforces them. A prompt-level flag can be forgotten in a way a CLI flag cannot; that is a known cost, accepted because enforcing the gates in code would mean the orchestrator stops being a skill, which is the thing being tested.</p>
+    <p style="margin:0.9rem 0 0; font-size:0.9rem">All three are skippable with <code>--no-gate</code>, and have to be: five identical pipelines cannot be run if a human intervenes in each. Note that <code>--no-gate</code> is an argument to the <em>orchestrator skill's invocation</em>, not a <code>rubrica</code> flag — the gates live in the prompt and no code enforces them. A prompt-level flag can be forgotten in a way a CLI flag cannot; that is a known cost, accepted because enforcing the gates in code would mean the orchestrator stops being a skill, which is the thing being tested.</p>
   </div>
 </section>
 
@@ -450,42 +450,42 @@
     </thead>
     <tbody>
       <tr>
-        <td class="paths">tg-extract</td>
+        <td class="paths">rb-extract</td>
         <td>Turns one input artifact into atomic, evidence-backed claims. Every claim carries a locator and an honest <code>derivation</code> — <em>stated</em>, <em>inferred</em>, or <em>reverse_engineered</em> — so "the spec says this" and "I guessed from one trace" never look alike downstream.</td>
         <td><span class="chip done">built</span></td>
       </tr>
       <tr>
-        <td class="paths">tg-reconcile</td>
+        <td class="paths">rb-reconcile</td>
         <td>Merges every extractor's claims into one world model, <em>recording</em> contradictions and gaps rather than resolving them, and freezes the coverage denominator exactly once.</td>
         <td><span class="chip done">built</span></td>
       </tr>
       <tr>
-        <td class="paths">tg-propose</td>
+        <td class="paths">rb-propose</td>
         <td>Reads the world model and the latest coverage report, then appends scenarios targeting real, closable holes — never rewriting or renumbering what an earlier round proposed.</td>
         <td><span class="chip done">built</span></td>
       </tr>
       <tr>
-        <td class="paths">tg-score</td>
+        <td class="paths">rb-score</td>
         <td>Folds the scenario pairs that are one test, promotes the rest, computes both coverage matrices against the frozen denominator, justifies every uncovered row with a hole, and computes the verdict.</td>
         <td><span class="chip done">built</span></td>
       </tr>
       <tr>
-        <td class="paths">tg-instantiate</td>
+        <td class="paths">rb-instantiate</td>
         <td>Builds one scenario's seed world — <strong>distractors first</strong>, so no agent can pass by reading back the only matching record — then derives the oracle from that seed rather than the other way round, and records which near-misses exist so a reviewer can judge fairness.</td>
         <td><span class="chip done">built</span></td>
       </tr>
       <tr>
-        <td class="paths">tg-challenge</td>
+        <td class="paths">rb-challenge</td>
         <td>The adversary. Verifies one instance is a fair, discriminating test, reading the oracle <em>last</em> — an adversary who sees the answer first confirms almost anything.</td>
         <td><span class="chip done">built</span></td>
       </tr>
       <tr>
-        <td class="paths">tg-emit</td>
-        <td>A deliberately thin entry point over <code>testgen emit</code>; it writes nothing itself. Emit is code, not a prompt, because two runs with identical stage-4 and stage-5 artifacts must produce identical suites — otherwise variance can no longer be attributed to a stage.</td>
+        <td class="paths">rb-emit</td>
+        <td>A deliberately thin entry point over <code>rubrica emit</code>; it writes nothing itself. Emit is code, not a prompt, because two runs with identical stage-4 and stage-5 artifacts must produce identical suites — otherwise variance can no longer be attributed to a stage.</td>
         <td><span class="chip done">built</span></td>
       </tr>
       <tr>
-        <td class="paths">tg-orchestrate</td>
+        <td class="paths">rb-orchestrate</td>
         <td>The loop itself: dispatch each stage, validate, allow one bounded repair, hold the human gates, record each stage's model and skill hash, and append every decision to the run's lab notebook. Not a stage — it declares no <code>stage</code> and no <code>schemas</code>.</td>
         <td><span class="chip done">built</span></td>
       </tr>
@@ -593,7 +593,7 @@
   </div>
 
   <div class="prose" style="margin-top:1.5rem">
-    <p>1,126 tests passing, 4 live tests passing against committed recordings, <code>ruff</code> clean, <code>testgen check-skills</code> clean.</p>
+    <p>1,126 tests passing, 4 live tests passing against committed recordings, <code>ruff</code> clean, <code>rubrica check-skills</code> clean.</p>
     <p>Each skill also has one <strong>live exercise</strong>: a fresh subagent, given only the three permitted things, run against the toy world, with the result recorded beside the skill in <code>exercise.md</code>. That is deliberate — reading a prompt tells you what it asked for, not what a model did with it, so a prompt's failure mode is only visible in an execution trace.</p>
   </div>
 </section>
@@ -606,7 +606,7 @@
     <dt>Isolation is only half enforceable</dt>
     <dd>The rule holds on artifacts inside a run and is unenforceable on everything else a subagent can reach. A member that read a sibling's seed produces a byte-identical artifact to one that did not. Two violations were observed during the build; both surfaced <em>only</em> because a subagent volunteered it in a report nobody obliged it to write. No schema, no <code>check-refs</code> and no digest could have caught either. This is the weakest link and the first thing a later slice should harden.</dd>
     <dt>No value domains</dt>
-    <dd>The world model has no representation for a field's value domain, so every seed value is synthetic by construction — a concrete value anywhere downstream of reconcile is a <em>prescription</em> to <code>tg-instantiate</code> rather than an assertion about the target.</dd>
+    <dd>The world model has no representation for a field's value domain, so every seed value is synthetic by construction — a concrete value anywhere downstream of reconcile is a <em>prescription</em> to <code>rb-instantiate</code> rather than an assertion about the target.</dd>
     <dt>Reference, not support</dt>
     <dd>Layer 2 checks that a world-model element <em>references</em> a resolvable claim, never that the claim <em>supports</em> it. Support is semantic. Two real defects lived under that hole in the golden fixture itself.</dd>
     <dt>Seed conformance is one-directional</dt>

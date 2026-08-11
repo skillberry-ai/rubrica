@@ -1,4 +1,4 @@
-# How the test generator works
+# How Rubrica works
 
 > **For team review.** All eight skills now exist and the pipeline has run end to
 > end with a model at every stage — against the two-capability toy world, not yet
@@ -26,10 +26,10 @@ you can open, schema-check, and diff between runs.
 
 | | |
 |---|---|
-| **Layer 1** | `testgen validate --stage X` — JSON Schema, one per artifact kind. *Is this file shaped correctly?* |
-| **Layer 2** | `testgen check-refs` — cross-artifact references, seed conformance, reachability. *Do the files agree with each other?* |
+| **Layer 1** | `rubrica validate --stage X` — JSON Schema, one per artifact kind. *Is this file shaped correctly?* |
+| **Layer 2** | `rubrica check-refs` — cross-artifact references, seed conformance, reachability. *Do the files agree with each other?* |
 | **Exit codes** | `0` clean · `1` findings, one per line on stdout · `2` usage error or unreadable run. The split matters: a `1` is a repairable stage defect worth one retry, a `2` means the harness is misconfigured and retrying cannot help. |
-| **Skill contract** | Every `SKILL.md` declares its `stage`, `reads`, `writes`, `schemas` and `invokes` in a machine-readable block. `testgen check-skills` verifies each name against the code that owns it — so a prompt naming a path or stage that does not exist fails in CI, not at run time. |
+| **Skill contract** | Every `SKILL.md` declares its `stage`, `reads`, `writes`, `schemas` and `invokes` in a machine-readable block. `rubrica check-skills` verifies each name against the code that owns it — so a prompt naming a path or stage that does not exist fails in CI, not at run time. |
 
 ## The pipeline
 
@@ -39,13 +39,13 @@ contract, not a diagram convention.
 | Dir | Stage | Runs as | Reads | Writes | Gate |
 |---|---|---|---|---|---|
 | `00` | intake | code | the input files you name, plus target name, interface, limits | `manifest.json`, `00-inputs/<stored_as>` | validate |
-| `01a` | extract | `tg-extract` — **fan-out**, one per input | the manifest, and its own one file under `00-inputs/` — never a sibling's | `01-claims/<artifact-id>.json` | validate |
-| `01b` | reconcile | `tg-reconcile` — **barrier** | the manifest and every claims file | `01-world-model.json` | validate · check-refs · **human gate 1** |
-| `02` | propose | `tg-propose` | `manifest.json`, `01-world-model.json`, `02-scenarios.json`, `03-coverage/latest.json` | `02-scenarios.json` (appends this round) | validate |
-| `03` | score | `tg-score` — **barrier** | `manifest.json`, `01-world-model.json`, `02-scenarios.json` | `03-coverage/round-N.json`, `03-coverage/latest.json`, `02-scenarios.json` (statuses) | validate · check-refs · **human gate 2** |
-| `04` | instantiate | `tg-instantiate` — **fan-out**, one per active scenario | `01-world-model.json`, `02-scenarios.json` | `04-instances/<sid>/{seed.json,expected.json,rationale.md}` | validate · check-refs |
-| `05` | challenge | `tg-challenge` — **fan-out**, one per instance | the scenario and the seed — then `expected.json` **last** | `05-verdicts/<sid>.json` | validate · **human gate 3** |
-| `06` | emit | `tg-emit` — wraps code | `02-scenarios.json`, `05-verdicts/`, `04-instances/*/expected.json`, `01-world-model.json` | `06-suite/<sid>/` task packages | validate · check-refs |
+| `01a` | extract | `rb-extract` — **fan-out**, one per input | the manifest, and its own one file under `00-inputs/` — never a sibling's | `01-claims/<artifact-id>.json` | validate |
+| `01b` | reconcile | `rb-reconcile` — **barrier** | the manifest and every claims file | `01-world-model.json` | validate · check-refs · **human gate 1** |
+| `02` | propose | `rb-propose` | `manifest.json`, `01-world-model.json`, `02-scenarios.json`, `03-coverage/latest.json` | `02-scenarios.json` (appends this round) | validate |
+| `03` | score | `rb-score` — **barrier** | `manifest.json`, `01-world-model.json`, `02-scenarios.json` | `03-coverage/round-N.json`, `03-coverage/latest.json`, `02-scenarios.json` (statuses) | validate · check-refs · **human gate 2** |
+| `04` | instantiate | `rb-instantiate` — **fan-out**, one per active scenario | `01-world-model.json`, `02-scenarios.json` | `04-instances/<sid>/{seed.json,expected.json,rationale.md}` | validate · check-refs |
+| `05` | challenge | `rb-challenge` — **fan-out**, one per instance | the scenario and the seed — then `expected.json` **last** | `05-verdicts/<sid>.json` | validate · **human gate 3** |
+| `06` | emit | `rb-emit` — wraps code | `02-scenarios.json`, `05-verdicts/`, `04-instances/*/expected.json`, `01-world-model.json` | `06-suite/<sid>/` task packages | validate · check-refs |
 | `07` | smoke | code | the emitted suite and the agent roster | `07-report.json` | validate · check-refs |
 
 **Stages 02 and 03 are a loop.** Propose targets the holes the coverage report
@@ -72,7 +72,7 @@ silently resolves.
 
 All three are skippable with `--no-gate`, and have to be: five identical
 pipelines cannot be run if a human intervenes in each. Note that `--no-gate` is
-an argument to the *orchestrator skill's invocation*, not a `testgen` flag — the
+an argument to the *orchestrator skill's invocation*, not a `rubrica` flag — the
 gates live in the prompt and no code enforces them. A prompt-level flag can be
 forgotten in a way a CLI flag cannot; that is a known cost, accepted because
 enforcing the gates in code would mean the orchestrator stops being a skill,
@@ -86,14 +86,14 @@ artifacts.
 
 | Skill | Job |
 |---|---|
-| `tg-extract` | Turns one input artifact into atomic, evidence-backed claims. Every claim carries a locator and an honest `derivation` — *stated*, *inferred*, or *reverse_engineered* — so "the spec says this" and "I guessed from one trace" never look alike downstream. |
-| `tg-reconcile` | Merges every extractor's claims into one world model, *recording* contradictions and gaps rather than resolving them, and freezes the coverage denominator exactly once. |
-| `tg-propose` | Reads the world model and latest coverage report, then appends scenarios targeting real, closable holes — never rewriting or renumbering what an earlier round proposed. |
-| `tg-score` | Folds the scenario pairs that are one test, promotes the rest, computes both coverage matrices against the frozen denominator, justifies every uncovered row with a hole, and computes the verdict. |
-| `tg-instantiate` | Builds one scenario's seed world — **distractors first**, so no agent can pass by reading back the only matching record — then derives the oracle from that seed rather than the other way round, and records which near-misses exist so a reviewer can judge fairness. |
-| `tg-challenge` | The adversary. Verifies one instance is a fair, discriminating test, reading the oracle *last* — an adversary who sees the answer first confirms almost anything. |
-| `tg-emit` | A deliberately thin entry point over `testgen emit`; writes nothing itself. Emit is code, not a prompt, because two runs with identical stage-4 and stage-5 artifacts must produce identical suites — otherwise variance can no longer be attributed to a stage. |
-| `tg-orchestrate` | The loop itself: dispatch each stage, validate, allow one bounded repair, hold the human gates, record each stage's model and skill hash, append every decision to the run's lab notebook. Not a stage — it declares no `stage` and no `schemas`. |
+| `rb-extract` | Turns one input artifact into atomic, evidence-backed claims. Every claim carries a locator and an honest `derivation` — *stated*, *inferred*, or *reverse_engineered* — so "the spec says this" and "I guessed from one trace" never look alike downstream. |
+| `rb-reconcile` | Merges every extractor's claims into one world model, *recording* contradictions and gaps rather than resolving them, and freezes the coverage denominator exactly once. |
+| `rb-propose` | Reads the world model and latest coverage report, then appends scenarios targeting real, closable holes — never rewriting or renumbering what an earlier round proposed. |
+| `rb-score` | Folds the scenario pairs that are one test, promotes the rest, computes both coverage matrices against the frozen denominator, justifies every uncovered row with a hole, and computes the verdict. |
+| `rb-instantiate` | Builds one scenario's seed world — **distractors first**, so no agent can pass by reading back the only matching record — then derives the oracle from that seed rather than the other way round, and records which near-misses exist so a reviewer can judge fairness. |
+| `rb-challenge` | The adversary. Verifies one instance is a fair, discriminating test, reading the oracle *last* — an adversary who sees the answer first confirms almost anything. |
+| `rb-emit` | A deliberately thin entry point over `rubrica emit`; writes nothing itself. Emit is code, not a prompt, because two runs with identical stage-4 and stage-5 artifacts must produce identical suites — otherwise variance can no longer be attributed to a stage. |
+| `rb-orchestrate` | The loop itself: dispatch each stage, validate, allow one bounded repair, hold the human gates, record each stage's model and skill hash, append every decision to the run's lab notebook. Not a stage — it declares no `stage` and no `schemas`. |
 
 ## What a real run produced
 
@@ -213,7 +213,7 @@ subcommands — the exit codes above are the contract the orchestrator branches 
 | Run-to-run variance measured with `diff-runs` | separate plan |
 
 1126 tests passing, 4 live tests passing against committed recordings, `ruff`
-clean, `testgen check-skills` clean.
+clean, `rubrica check-skills` clean.
 
 Each skill also has one **live exercise**: a fresh subagent, given only the three
 permitted things, run against the toy world, with the result recorded beside the
@@ -236,7 +236,7 @@ use for planning. The full list, with the reasoning that parked each item, is in
   later slice should harden.
 - **The world model has no representation for a field's value domain.** So every
   seed value is synthetic by construction, and a concrete value anywhere
-  downstream of reconcile is a *prescription* to `tg-instantiate` rather than an
+  downstream of reconcile is a *prescription* to `rb-instantiate` rather than an
   assertion about the target.
 - **Layer 2 checks that an element *references* a resolvable claim, never that
   the claim *supports* it.** Support is semantic. Two real defects lived under

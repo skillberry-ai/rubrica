@@ -31,9 +31,11 @@ Baseline as of the skills build: **1126 passed, 4 skipped**; `make check` clean;
 `uv run rubrica check-skills` exits 0. Anything else means you broke something.
 
 Commands in `README.md` assume the venv is on `PATH`; otherwise prefix `uv run`.
-Two env overrides exist and are used by tests: `RUBRICA_SCHEMA_DIR`
-(`validate.py`) and `RUBRICA_SKILLS_DIR` (`skills.py`) — prefer them over
-editing repo files when probing behaviour.
+Four env overrides exist: `RUBRICA_SCHEMA_DIR` (`validate.py`),
+`RUBRICA_SKILLS_DIR` (`skills.py`), `RUBRICA_SUITE_DIR` (`emit.py`), and
+`RUBRICA_LIVE` (`tests/conftest.py`). Three are exercised by tests —
+`RUBRICA_SUITE_DIR` currently has no test referencing it — but all four are
+fair game: prefer them over editing repo files when probing behaviour.
 
 ## The one architectural rule
 
