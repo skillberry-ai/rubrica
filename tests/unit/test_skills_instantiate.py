@@ -110,10 +110,42 @@ def test_it_states_that_an_exclusion_must_resolve_to_nothing():
     """The inverted check. A skill that grounds answer_excludes the way it
     grounds answer_contains produces an assertion the reachability gate rejects
     with "the seed does contain what the assertion claims it lacks".
+
+    **Strengthened: the whole-body version was vacuous in both clauses.**
+    `"answer_excludes" in body` holds from section 2's assertion-kind list and
+    from the kind-family rules, and `"resolve" in body.lower()` holds from the
+    positive grounding rule one paragraph earlier -- so deleting the entire
+    Method inversion paragraph *and* rewriting Invariant 5 left all eleven tests
+    in this file green, with the only statement of the inversion gone.
+
+    Checked in the two places that own it, because they are different
+    obligations: the Method paragraph tells the author what to ground the
+    exclusion *in*, and the invariant is the checkable claim the author verifies
+    before reporting done. A document with one and not the other is a document
+    where the rule is either unexplained or unchecked, so both are asserted, and
+    each is a co-occurrence rather than a mention.
     """
-    body = load(SKILL).body
-    assert "answer_excludes" in body
-    assert "resolve" in body.lower()
+    owning = [
+        para
+        for para in paragraphs(method_body())
+        if "answer_excludes" in para and "nothing" in para.lower()
+    ]
+    assert owning, (
+        "no Method paragraph states that an answer_excludes pointer must resolve to nothing"
+    )
+    assert any("resolve" in para.lower() for para in owning), (
+        "that paragraph must say the *pointer* is what resolves to nothing -- the rule is "
+        "about the pointer, never about the excluded string"
+    )
+    invariants = [
+        para
+        for para in paragraphs(section_body(load(SKILL), SECTIONS[3]))
+        if "answer_excludes" in para and "resolve" in para.lower() and "nothing" in para.lower()
+    ]
+    assert invariants, (
+        "the Invariants section states no checkable form of the exclusion rule, so nothing "
+        "obliges the author to verify it before reporting done"
+    )
 
 
 def test_it_requires_an_absence_scenario_to_carry_a_non_exclusion_assertion():

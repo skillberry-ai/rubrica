@@ -131,15 +131,23 @@ def test_it_names_every_flag_the_schema_allows():
     assert not missing, f"the skill never mentions flag(s) {missing}"
 
 
-def test_it_names_the_three_boolean_judgments_and_the_call_count():
+def test_it_names_the_four_judgment_fields_the_verdict_carries():
+    """Renamed: the old name said "the three boolean judgments and the call
+    count", and the four fields are two booleans, an integer and an array --
+    `alternative_answers` has never been a boolean and `minimum_tool_calls_found`
+    is the count the old name already accounted for separately, so the name
+    described a five-field verdict that does not exist.
+
+    Derived from the schema rather than listed, so the name cannot drift from the
+    fields again: every property of `verdict-0.1.json` that carries a *judgment*
+    (as opposed to identity or the rendered verdict itself) must be named.
+    """
+    schema = read_json(schema_dir() / ARTIFACT_SCHEMAS["verdict"])
+    identity = {"schema_version", "scenario_id", "verdict", "flags", "notes"}
+    judgments = sorted(set(schema["properties"]) - identity)
     body = load(SKILL).body
-    for field in (
-        "uniquely_determined",
-        "derivable_without_guessing",
-        "minimum_tool_calls_found",
-        "alternative_answers",
-    ):
-        assert field in body, field
+    missing = [field for field in judgments if field not in body]
+    assert not missing, f"the skill never mentions judgment field(s) {missing}"
 
 
 def test_it_states_that_accept_is_incompatible_with_the_two_negatives():

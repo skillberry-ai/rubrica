@@ -113,15 +113,44 @@ def test_the_claim_kinds_it_names_are_the_schema_s_enum():
 
 
 def test_the_refusal_section_names_a_response_for_an_unreadable_input():
-    """One of the four refusal conditions, checked structurally: the section
-    must be long enough to carry four distinct triggers. A length floor is a
-    weak check and is here only to catch a section reduced to one line -- the
-    live exercise is what tests whether the conditions actually fire.
-    """
-    from testgen.skills import SECTIONS as S
+    """One of the refusal conditions, and the only one with a prescribed *output*.
 
+    **The body now checks what the name says.** It used to assert only that
+    section 5 is last and has at least four lines, so replacing all four
+    conditions with "Write whatever seems most helpful" left every test in this
+    file green -- a length floor over a section whose emptiness `check_contract`
+    already reports, and a name promising a content check that nothing performed.
+
+    Making the body match the name rather than the reverse, because this
+    condition is the one that can be checked for content without pinning a
+    phrase: an unreadable input has a *specific* prescribed response -- a claims
+    file with an empty `claims` array -- and a stage that instead guesses from
+    the filename or the manifest `kind` writes confabulated claims that are
+    byte-indistinguishable from extracted ones. Renaming the test would have left
+    that unguarded and added nothing. The structural checks are kept: they cost
+    nothing and the ordering one is real.
+    """
     skill = load(SKILL)
-    index = skill.headings.index(S[-1])
+    refusals = SECTIONS[-1]
+    index = skill.headings.index(refusals)
     assert index == len(skill.headings) - 1, "refusal conditions must be the last section"
-    body = skill.body.split(f"## {S[-1]}", 1)[1]
+    body = section_body(skill, refusals)
     assert len(body.strip().splitlines()) >= 4, "four refusal conditions are required"
+
+    owning = [
+        para
+        for para in paragraphs(body)
+        if ("unreadable" in para.lower() or "cannot be read" in para.lower()) and "claims" in para
+    ]
+    assert owning, (
+        "no refusal condition says what to do with an input that cannot be read, so the "
+        "stage's only guidance is to be helpful"
+    )
+    assert any("empty" in para.lower() for para in owning), (
+        "that condition must prescribe the output -- a claims file with an empty claims "
+        "array -- not merely acknowledge the situation"
+    )
+    assert any("guess" in para.lower() or "do not" in para.lower() for para in owning), (
+        "and it must forbid the tempting alternative: reconstructing the content from the "
+        "filename, the manifest kind, or a sibling artifact"
+    )
