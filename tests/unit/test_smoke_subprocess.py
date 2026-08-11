@@ -545,7 +545,7 @@ def test_verify_package_refuses_out_dir_equal_to_agent_logs(tmp_path):
         )
 
 
-def test_a_verifier_that_imports_testgen_fails_as_it_would_in_the_container(tmp_path):
+def test_a_verifier_that_imports_rubrica_fails_as_it_would_in_the_container(tmp_path):
     """The scrub is what makes the stdlib-only constraint enforced by something.
 
     Under the dev interpreter rubrica is importable, so without -S and a cleared
