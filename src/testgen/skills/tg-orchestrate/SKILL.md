@@ -221,14 +221,14 @@ a conclusion:
 
 1. The bounded repair of A4 appends the gate's **findings, verbatim**.
 2. A `re-seed` re-dispatch of `tg-instantiate` appends the adversary's
-   **`alternative_answers`** from the verdict, and the re-dispatch of
-   `tg-score` after a rejection appends the **rejected scenario ids and the
-   verdict judgments behind them** (see step B9, and note that `tg-score`
-   cannot read verdicts, so this notice is the only way the rejection reaches
-   the stage that owns the status).
+   **`alternative_answers` and its `notes`** from the verdict, and the
+   re-dispatch of `tg-score` after a rejection appends the **rejected scenario
+   ids and the verdict judgments behind them** (see step B9, and note that
+   neither of those stages can read verdicts, so the notice is the only way the
+   adversary's reading reaches the stage that has to act on it).
 
-If what you are about to append is not a finding, an `alternative_answers`
-entry, or a named artifact defect, it does not go in the prompt.
+If what you are about to append is not a finding, a verdict field quoted from
+the file that holds it, or a named artifact defect, it does not go in the prompt.
 
 **A2. Gate before you build on it.** Run `testgen validate --stage <stage>`
 after every stage, and `testgen check-refs` where the walk says so. Never
@@ -490,8 +490,16 @@ Then read each verdict and act:
 
 - **`accept`** -- nothing to do.
 - **`re-seed`** -- re-dispatch `tg-instantiate` for that scenario **once**,
-  with the adversary's `alternative_answers` appended, then re-dispatch
-  `tg-challenge` for it. Once is the budget: nothing in the verdict tells the
+  with the adversary's `alternative_answers` **and its `notes`** appended --
+  both quoted from the verdict file, never paraphrased -- then re-dispatch
+  `tg-challenge` for it. Both fields, because three of the cases `tg-challenge`
+  prescribes `re-seed` for produce no alternative answer at all: a call the
+  adversary needed that the scenario never declared, an oracle it believes is
+  wrong, and its own self-reported anchoring. In those, `alternative_answers`
+  arrives empty and the `notes` are the entire reason for the re-seed, so
+  appending only the alternatives hands the stage a repair dispatch with nothing
+  in it. `tg-instantiate` is written to act on either shape and says what it owes
+  you for each. Once is the budget: nothing in the verdict tells the
   adversary whether it is on the first pass or the second, so tracking it is
   yours. If the second verdict is still `re-seed`, stop re-seeding and treat
   it as a rejection below -- `emit` refuses to compile a `re-seed` instance and

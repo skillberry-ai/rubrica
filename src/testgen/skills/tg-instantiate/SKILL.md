@@ -70,31 +70,51 @@ and nothing you write here carries forward as memory either. Whatever you
 need -- which scenario is yours, what a `discriminating_fact` obliges you to
 make true, what a distractor is -- has to be either in this document, in the
 two files you just read, or in a notice the orchestrator appended to *this*
-dispatch (there is exactly one such notice, described next). If it is not in
-one of those places, you do not have it, and inventing it is confabulation,
-not recollection.
+dispatch. If it is not in one of those places, you do not have it, and inventing
+it is confabulation, not recollection.
 
-**The one notice: a `re-seed` re-dispatch.** If `tg-challenge` judged your
-scenario `re-seed`, the orchestrator dispatches you again for that same
-scenario, once, with the adversary's **`alternative_answers`** from the verdict
-appended to your prompt. That appended text is legitimate input, and it is the
-only channel it could arrive on -- `05-verdicts/` is not in your `reads`, so a
-member that treats the appended list as something it was not supposed to see
-makes the re-dispatch a no-op. It does not widen your `reads` and it is not a
-conclusion to defer to: each entry is a **second answer the adversary found to
-be consistent with the seed you wrote**, which is a named, specific failure of
-the uniqueness requirement stated below.
+More than one kind of notice can arrive, and they are not alternatives to each
+other: a bounded repair appends the gate's findings verbatim, and a `re-seed`
+re-dispatch appends the adversary's reading of the instance you wrote. Read
+whatever is there; nothing obliges the orchestrator to send exactly one thing,
+and nothing licenses you to act on a notice that did not arrive.
 
-Act on it by changing the *world*, not the question. For each alternative, find
-what in the seed makes it answerable and remove that -- then check that the
-alternative is now plainly *wrong* rather than merely less attractive. A
+**A `re-seed` re-dispatch.** If `tg-challenge` judged your scenario `re-seed`,
+the orchestrator dispatches you again for that same scenario, once, with the
+verdict's **`alternative_answers` and its `notes`** quoted into your prompt. That
+appended text is legitimate input, and it is the only channel it could arrive on
+-- `05-verdicts/` is not in your `reads`, so a member that treats the notice as
+something it was not supposed to see makes the re-dispatch a no-op. It does not
+widen your `reads` and it is not a conclusion to defer to.
+
+**Read which of the two shapes you were handed, because they are different
+defects.** `alternative_answers` is populated when the adversary found a
+**second answer consistent with the seed you wrote** -- a named, specific
+failure of the uniqueness requirement stated below. It arrives *empty* for the
+other cases `tg-challenge` re-seeds on, where the defect is not ambiguity at
+all: a call it needed that your scenario never declared, an oracle it believes is
+wrong, or its own self-reported anchoring. In those the `notes` carry the entire
+reason, and the reason is what you act on.
+
+Either way, act by changing the *world*, not the question. Given an alternative
+answer, find what in the seed makes it answerable and remove that -- then check
+that the alternative is now plainly *wrong* rather than merely less attractive. A
 near-miss that is still a correct answer is the defect; a near-miss that is now
-incorrect is a distractor, which is what you wanted in the first place. What you
-may not do is narrow the scenario: the `discriminating_fact`, the
-`user_intent` and everything else in `02-scenarios.json` stay exactly as they
-are. `tg-propose` owns the scenario and `tg-score` owns its status, and
-rewriting the fact to dodge an alternative answers a different test than the one
-that was approved.
+incorrect is a distractor, which is what you wanted in the first place. Given a
+reason instead, fix the thing the reason names: an oracle the adversary derived
+differently from the same seed is an `expected.json` to re-derive from the seed
+rather than defend, and an anchored reading is a world that has to be worth
+re-attacking rather than one to leave unchanged.
+
+What you may not do, in either shape, is narrow the scenario: the
+`discriminating_fact`, the `user_intent` and everything else in
+`02-scenarios.json` stay exactly as they are. `tg-propose` owns the scenario and
+`tg-score` owns its status, and rewriting the fact to dodge an alternative
+answers a different test than the one that was approved. And if the notice
+carries neither an alternative nor a reason you can act on, report that the
+notice is empty -- do **not** invent an alternative answer to have something to
+remove, which is the confabulation this section forbids, arriving through a door
+that looks official.
 
 **Overwrite all three files in place, at the paths you already wrote.**
 `seed.json`, `expected.json` and `rationale.md` under
@@ -102,15 +122,32 @@ that was approved.
 `tg-challenge` reads, so a repair written anywhere else is a repair nothing
 sees: no variant filename, no second directory, and no copy kept of the seed you
 are replacing -- that history lives in the verdict and in version control, not
-in the instance directory. Rewrite `rationale.md` rather than appending to it,
-since it explains the world that now exists; it must name the alternative answer
-that was found and what in the new seed rules it out, because that sentence is
-the only place a reviewer can tell a closed ambiguity from a reworded one. Then
-run `validate --stage instantiate` and `check-refs` exactly as on a first pass.
+in the instance directory.
+
+Rewrite `rationale.md` rather than appending to it, since it explains the world
+that now exists -- and what it owes follows the shape of the notice, because a
+rationale can only be held to what the notice actually carried:
+
+- **Given an alternative answer**, name that answer and say what in the rebuilt
+  seed makes it wrong now. That sentence is the only place a reviewer can tell a
+  closed ambiguity from a reworded one.
+- **Given only a reason**, name that reason and say what you changed in response
+  to it. A reviewer's question is the same one either way -- *was the thing the
+  adversary objected to actually fixed?* -- and for a missing capability
+  reference, a disputed oracle or a contaminated reading, the reason and the
+  change are what answer it.
+
+Neither branch is the weaker one, and neither is satisfied by recording that a
+re-seed happened. What is forbidden is borrowing the other branch's obligation:
+do not name an alternative answer the notice did not contain.
+
+Then run `validate --stage instantiate` and `check-refs` exactly as on a first
+pass.
 
 You get one re-seed. A second `re-seed` verdict sends the scenario down the
 rejection path instead, so a repair that adds a distractor without eliminating
-the alternative has spent the entire budget.
+the alternative -- or that leaves the reason the notice named unaddressed -- has
+spent the entire budget.
 
 **The fan-out boundary, and why the file boundary alone cannot hold it
 here.** In an earlier fan-out stage, isolation is mostly a matter of which
