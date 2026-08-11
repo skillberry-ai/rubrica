@@ -81,6 +81,9 @@ project for its adjacency to Harbor would misdescribe an architecture in which
 | Live-test gate | `TESTGEN_LIVE` | `RUBRICA_LIVE` |
 | Scoring contract | `testgen/v1` | `rubrica/v1` |
 | Suite name | `testgen` | `rubrica` |
+| Measurement format id (recall) | `testgen-recall/1` | `rubrica-recall/1` |
+| Measurement format id (review) | `testgen-review/1` | `rubrica-review/1` |
+| Measurement format id (stability) | `testgen-stability/1` | `rubrica-stability/1` |
 
 The `rb-` prefix mirrors the two-character shape of `tg-`, so the many
 documentation tables that list skill names keep their column widths.
@@ -153,6 +156,14 @@ emitted suite must be re-emitted, and newly emitted tasks carry new Harbor
 identities (`rubrica/scn-empty`, not `testgen/scn-empty`), so historical results
 will not line up with new ones by task name.
 
+A third kind of identifier also carries the name but does *not* reach an
+emitted package, so it does not disturb the "two identifiers" claim that opens
+this section: `recall.py:238`, `stability.py:198` and `review.py:272` each
+write a `format` field — `testgen-{recall,review,stability}/1` → `rubrica-*`
+(§3) — into files under `measurement/`, this project's own on-disk record of a
+run, never into `task.toml` or anything Harbor sees. These three are a
+separate, sibling case, pinned by `tests/unit/test_measurement_contract.py:52-54`.
+
 Freezing `testgen/v1` as a legacy wire id was considered and rejected: it would
 leave the old name permanently visible in the artifacts the project exists to
 produce, in exchange for compatibility with suites that, at 0.1.0, may not exist
@@ -179,10 +190,13 @@ would make the record describe a past that did not happen.
   are living documents; the last is a procedure that would otherwise instruct a
   reader to run commands that no longer exist.
 - `src/*/skills/*/exercise.md` — **commands rewritten, measured results
-  untouched.** These ship beside the skill they describe and tell a reader how to
-  reproduce a dispatch, so leaving the old command name would make them
-  unrunnable. But an exercise record states what happened, and a rename changes
-  no measurement: every number, verdict and quoted model output stays exactly as
+  untouched.** These live beside the skill they describe *in the repository*,
+  but do not ship: `pyproject.toml`'s package-data lists `skills/*/SKILL.md`
+  only, so no wheel contains an `exercise.md`. That does not change the
+  argument here — a repo reader following an exercise record to reproduce a
+  dispatch needs a command that still exists, whether or not a wheel ever sees
+  the file. An exercise record states what happened, and a rename changes no
+  measurement: every number, verdict and quoted model output stays exactly as
   recorded. Only the invocation lines move.
 
 ## 8. Verification gate
@@ -218,10 +232,14 @@ Left for a human, with steps to be listed at hand-off:
 
 - No back-compatibility aliases or shims (§3).
 - No rewriting of dated design records (§7).
-- No change to any stage's prompt, judgment, schema, gate or exit-code
-  behaviour. A rename that alters what a stage decides would make the pipeline's
-  falsifiable question harder to answer, which is the one thing this repository
-  asks changes not to do.
+- No change to any stage's judgment, schema, gate behaviour or exit code. Every
+  `SKILL.md` prompt *did* change — the CLI name a model is instructed to run
+  moved, roughly 55 occurrences across the eight files, and all eight digests
+  changed as a direct result (the ruling below concedes this) — but only in
+  that one respect: the command a stage names, never what it decides, checks,
+  or is graded on. A rename that altered what a stage decides would make the
+  pipeline's falsifiable question harder to answer, which is the one thing
+  this repository asks changes not to do.
 - No re-recording of `tests/fixtures/*/recorded/01-world-model.json`. The rule
   that changing a skill obliges re-recording exists because a changed skill may
   no longer produce the recorded output. Here the recordings carry no skill
