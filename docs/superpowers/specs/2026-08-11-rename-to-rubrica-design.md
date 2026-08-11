@@ -234,7 +234,8 @@ Left for a human, with steps to be listed at hand-off:
 - No rewriting of dated design records (§7).
 - No change to any stage's judgment, schema, gate behaviour or exit code. Every
   `SKILL.md` prompt *did* change — the CLI name a model is instructed to run
-  moved, roughly 55 occurrences across the eight files, and all eight digests
+  moved — 64 occurrences across the eight files, counted at the commit before
+  the skill rename rather than estimated — and all eight digests
   changed as a direct result (the ruling below concedes this) — but only in
   that one respect: the command a stage names, never what it decides, checks,
   or is graded on. A rename that altered what a stage decides would make the
