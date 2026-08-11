@@ -1,0 +1,625 @@
+<title>Test Generator — how it works</title>
+
+<style>
+  :root {
+    /* Light palette — complete. Neutrals carry a faint cyan bias so they read
+       as chosen against the teal accent rather than as default grey. */
+    --paper:    #f1f4f3;
+    --surface:  #e7ecea;
+    --edge:     #cfd8d6;
+    --ink:      #0d2124;
+    --ink-soft: #33474a;
+    --muted:    #5c6d6e;
+    --accent:   #0c6a68;
+    --accent-soft: #d8e6e4;
+    --gate:     #8c4f0d;
+    --gate-soft:#f0e2d2;
+    --done:     #2c6a45;
+    --wip:      #8c4f0d;
+    --pending:  #6d7a79;
+
+    --serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:    #0a1719;
+      --surface:  #122528;
+      --edge:     #24403f;
+      --ink:      #dee7e5;
+      --ink-soft: #b3c4c2;
+      --muted:    #8ba09e;
+      --accent:   #4fb3ac;
+      --accent-soft: #16302f;
+      --gate:     #d99a53;
+      --gate-soft:#2c2117;
+      --done:     #6fbf8e;
+      --wip:      #d99a53;
+      --pending:  #8ba09e;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:    #0a1719;
+    --surface:  #122528;
+    --edge:     #24403f;
+    --ink:      #dee7e5;
+    --ink-soft: #b3c4c2;
+    --muted:    #8ba09e;
+    --accent:   #4fb3ac;
+    --accent-soft: #16302f;
+    --gate:     #d99a53;
+    --gate-soft:#2c2117;
+    --done:     #6fbf8e;
+    --wip:      #d99a53;
+    --pending:  #8ba09e;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0 clamp(1rem, 4vw, 3rem) 6rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 60rem; margin: 0 auto; }
+  .prose { max-width: 34rem; }
+
+  /* ---- masthead ---- */
+
+  header.masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+    padding: clamp(2.5rem, 7vw, 4.5rem) 0 2rem;
+    border-bottom: 1px solid var(--edge);
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+
+  h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(2rem, 5.5vw, 3.1rem);
+    line-height: 1.08;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    margin: 0;
+  }
+
+  .standfirst {
+    font-family: var(--serif);
+    font-size: clamp(1.05rem, 2.2vw, 1.25rem);
+    line-height: 1.5;
+    color: var(--ink-soft);
+    max-width: 38rem;
+    margin: 0;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.4rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  /* ---- sections ---- */
+
+  section { padding-top: 3.25rem; }
+
+  h2 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(1.35rem, 3vw, 1.7rem);
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: 0 0 0.35rem;
+  }
+
+  h3 {
+    font-family: var(--sans);
+    font-weight: 650;
+    font-size: 0.95rem;
+    letter-spacing: 0.01em;
+    margin: 2rem 0 0.5rem;
+  }
+
+  .lede { color: var(--ink-soft); margin: 0 0 1.5rem; }
+
+  p { margin: 0 0 1rem; }
+  .prose p:last-child { margin-bottom: 0; }
+
+  code, kbd {
+    font-family: var(--mono);
+    font-size: 0.845em;
+    background: var(--surface);
+    border: 1px solid var(--edge);
+    border-radius: 3px;
+    padding: 0.08em 0.32em;
+    white-space: nowrap;
+  }
+
+  strong { font-weight: 650; }
+
+  /* ---- tables ---- */
+
+  .scroller {
+    overflow-x: auto;
+    border: 1px solid var(--edge);
+    border-radius: 4px;
+    background: var(--surface);
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.83rem;
+    line-height: 1.45;
+  }
+
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 0.6rem 0.8rem;
+    border-bottom: 1px solid var(--edge);
+  }
+
+  thead th {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    background: var(--paper);
+    white-space: nowrap;
+  }
+
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:nth-child(even) { background: color-mix(in srgb, var(--paper) 45%, transparent); }
+
+  td.dir {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+
+  td.stage { white-space: nowrap; font-weight: 650; }
+
+  td.paths { font-family: var(--mono); font-size: 0.76rem; }
+  td.paths span { display: block; white-space: nowrap; }
+
+  .runner { font-family: var(--mono); font-size: 0.76rem; white-space: nowrap; }
+
+  /* ---- chips ---- */
+
+  .chip {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.63rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.12em 0.42em;
+    border-radius: 2px;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+  }
+  .chip.fanout  { color: var(--accent); }
+  .chip.barrier { color: var(--gate); }
+  .chip.code    { color: var(--muted); }
+  .chip.done    { color: var(--done); }
+  .chip.wip     { color: var(--wip); }
+  .chip.todo    { color: var(--pending); }
+
+  /* ---- callout ---- */
+
+  .callout {
+    border-left: 2px solid var(--gate);
+    background: var(--gate-soft);
+    padding: 1rem 1.2rem;
+    border-radius: 0 4px 4px 0;
+    margin: 1.5rem 0 0;
+  }
+  .callout h3 { margin-top: 0; }
+  .callout ul { margin: 0; padding-left: 1.1rem; }
+  .callout li { margin-bottom: 0.4rem; }
+  .callout li:last-child { margin-bottom: 0; }
+
+  /* ---- tree ---- */
+
+  pre.tree {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    line-height: 1.65;
+    background: var(--surface);
+    border: 1px solid var(--edge);
+    border-radius: 4px;
+    padding: 1.1rem 1.2rem;
+    overflow-x: auto;
+    margin: 0;
+    color: var(--ink-soft);
+  }
+  pre.tree b { color: var(--ink); font-weight: 600; }
+  pre.tree i { color: var(--muted); font-style: normal; }
+
+  /* ---- key/value facts ---- */
+
+  dl.facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.5rem 1.2rem;
+    margin: 1.25rem 0 0;
+    font-size: 0.9rem;
+  }
+  dl.facts dt {
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: var(--accent);
+    padding-top: 0.15em;
+    white-space: nowrap;
+  }
+  dl.facts dd { margin: 0; color: var(--ink-soft); }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--edge);
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+
+  @media (max-width: 640px) {
+    dl.facts { grid-template-columns: 1fr; gap: 0.15rem 0; }
+    dl.facts dd { margin-bottom: 0.6rem; }
+  }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Internal · for team review</p>
+  <h1>How the test&nbsp;generator works</h1>
+  <p class="standfirst">It builds a test suite for an agentic system out of whatever artifacts describe that system — specs, captured trajectories, source — by running a chain of AI skills over a schema-validated contract on disk.</p>
+  <p class="meta">
+    <span>9 stages</span>
+    <span>8 skills</span>
+    <span>2 check layers</span>
+    <span>1 artifact contract</span>
+  </p>
+  <p class="standfirst" style="font-size:1rem; margin-top:1.1rem">All eight skills now exist and the pipeline has run end to end with a model at every stage — against the two-capability toy world, not yet against a real target. Numbers below are measured from that run unless labelled otherwise.</p>
+</header>
+
+<section>
+  <h2>The idea in one read</h2>
+  <div class="prose">
+    <p>This is an <strong>experiment</strong>, and it has a single question: does prompt-carried judgment survive a chain of artifact handoffs well enough to produce a suite worth running?</p>
+    <p>Everything follows from one design choice — <strong>artifacts on disk are the only channel between stages.</strong> A stage is dispatched with exactly three things: the run directory, its stage name, and its skill file. No conversational context is threaded through. If a stage needs a fact, it reads it from an artifact, or it does not have it.</p>
+    <p>That constraint is what makes the pipeline inspectable. Every handoff is a file you can open, schema-check, and diff between runs.</p>
+  </div>
+
+  <dl class="facts">
+    <dt>Layer 1</dt>
+    <dd><code>testgen validate --stage X</code> — JSON Schema, one schema per artifact kind. Is this file shaped correctly?</dd>
+    <dt>Layer 2</dt>
+    <dd><code>testgen check-refs</code> — cross-artifact references, seed conformance, and the reachability gate. Do the files agree with each other?</dd>
+    <dt>Exit codes</dt>
+    <dd><code>0</code> clean · <code>1</code> findings, one per line on stdout · <code>2</code> usage error or an unreadable run. The split matters: a <code>1</code> is a repairable stage defect worth one retry, a <code>2</code> means the harness is misconfigured and retrying cannot help.</dd>
+    <dt>Skill contract</dt>
+    <dd>Every <code>SKILL.md</code> declares its <code>stage</code>, <code>reads</code>, <code>writes</code>, <code>schemas</code> and <code>invokes</code> in a machine-readable block. <code>testgen check-skills</code> verifies each name against the code that owns it — so a prompt naming a path or a stage that does not exist fails in CI, not at run time.</dd>
+  </dl>
+</section>
+
+<section>
+  <h2>The pipeline</h2>
+  <p class="lede">Stage numbers are the real on-disk directory numbers — the ordering is the contract, not a diagram convention.</p>
+
+  <div class="scroller">
+  <table>
+    <thead>
+      <tr>
+        <th>Dir</th>
+        <th>Stage</th>
+        <th>Runs as</th>
+        <th>Reads</th>
+        <th>Writes</th>
+        <th>Gate</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="dir">00</td>
+        <td class="stage">intake</td>
+        <td><span class="chip code">code</span></td>
+        <td>the input files you name, plus target name, interface and limits</td>
+        <td class="paths"><span>manifest.json</span><span>00-inputs/&lt;stored_as&gt;</span></td>
+        <td>validate</td>
+      </tr>
+      <tr>
+        <td class="dir">01a</td>
+        <td class="stage">extract</td>
+        <td><span class="runner">tg-extract</span><br><span class="chip fanout">fan-out · 1 per input</span></td>
+        <td>the manifest, and its own one file under <code>00-inputs/</code> — never a sibling's</td>
+        <td class="paths"><span>01-claims/&lt;artifact-id&gt;.json</span></td>
+        <td>validate</td>
+      </tr>
+      <tr>
+        <td class="dir">01b</td>
+        <td class="stage">reconcile</td>
+        <td><span class="runner">tg-reconcile</span><br><span class="chip barrier">barrier</span></td>
+        <td>the manifest and every claims file</td>
+        <td class="paths"><span>01-world-model.json</span></td>
+        <td>validate · check-refs<br><span class="chip barrier">human gate 1</span></td>
+      </tr>
+      <tr>
+        <td class="dir">02</td>
+        <td class="stage">propose</td>
+        <td><span class="runner">tg-propose</span></td>
+        <td class="paths"><span>manifest.json</span><span>01-world-model.json</span><span>02-scenarios.json</span><span>03-coverage/latest.json</span></td>
+        <td class="paths"><span>02-scenarios.json</span><span><i>appends this round</i></span></td>
+        <td>validate</td>
+      </tr>
+      <tr>
+        <td class="dir">03</td>
+        <td class="stage">score</td>
+        <td><span class="runner">tg-score</span><br><span class="chip barrier">barrier</span></td>
+        <td class="paths"><span>manifest.json</span><span>01-world-model.json</span><span>02-scenarios.json</span></td>
+        <td class="paths"><span>03-coverage/round-N.json</span><span>03-coverage/latest.json</span><span>02-scenarios.json <i>(statuses)</i></span></td>
+        <td>validate · check-refs<br><span class="chip barrier">human gate 2</span></td>
+      </tr>
+      <tr>
+        <td class="dir">04</td>
+        <td class="stage">instantiate</td>
+        <td><span class="runner">tg-instantiate</span><br><span class="chip fanout">fan-out · 1 per scenario</span></td>
+        <td class="paths"><span>01-world-model.json</span><span>02-scenarios.json</span></td>
+        <td class="paths"><span>04-instances/&lt;sid&gt;/seed.json</span><span>04-instances/&lt;sid&gt;/expected.json</span><span>04-instances/&lt;sid&gt;/rationale.md</span></td>
+        <td>validate · check-refs</td>
+      </tr>
+      <tr>
+        <td class="dir">05</td>
+        <td class="stage">challenge</td>
+        <td><span class="runner">tg-challenge</span><br><span class="chip fanout">fan-out · 1 per instance</span></td>
+        <td>the scenario and the seed — then <code>expected.json</code> <strong>last</strong>, so the adversary cannot anchor on the answer</td>
+        <td class="paths"><span>05-verdicts/&lt;sid&gt;.json</span></td>
+        <td>validate<br><span class="chip barrier">human gate 3</span></td>
+      </tr>
+      <tr>
+        <td class="dir">06</td>
+        <td class="stage">emit</td>
+        <td><span class="runner">tg-emit</span><br><span class="chip code">wraps code</span></td>
+        <td class="paths"><span>02-scenarios.json</span><span>05-verdicts/</span><span>04-instances/*/expected.json</span><span>01-world-model.json</span></td>
+        <td class="paths"><span>06-suite/&lt;sid&gt;/ <i>task packages</i></span></td>
+        <td>validate · check-refs</td>
+      </tr>
+      <tr>
+        <td class="dir">07</td>
+        <td class="stage">smoke</td>
+        <td><span class="chip code">code</span></td>
+        <td>the emitted suite and the agent roster</td>
+        <td class="paths"><span>07-report.json</span></td>
+        <td>validate · check-refs</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="prose" style="margin-top:1.5rem">
+    <p><strong>Stages 02 and 03 are a loop.</strong> Propose targets the holes the coverage report names; score recomputes coverage and returns a verdict — <code>continue</code>, <code>converged</code>, <code>halted_no_progress</code>, or <code>halted_round_cap</code>. Score <em>computes</em> that verdict; only the orchestrator acts on it. The loop is bounded by <code>max_rounds</code> in the manifest.</p>
+    <p><strong>Fan-out means isolation, not just parallelism.</strong> An extract subagent sees one input file, so it cannot smuggle a sibling's conclusion into its claims. An instantiate subagent builds one seed world without knowing what the other tests cover. That isolation is the point: it is what makes a contradiction between two inputs something the pipeline <em>records</em> rather than something a single reader silently resolves.</p>
+  </div>
+
+  <div class="callout">
+    <h3>Three human gates</h3>
+    <ul>
+      <li><strong>After reconcile</strong> — confirm the world model, resolve contradictions, rule on gaps. Highest leverage in the pipeline: every downstream stage inherits these errors, and it is the one artifact small enough to read carefully.</li>
+      <li><strong>After the coverage loop</strong> — review the scenario list and coverage report <em>before</em> paying for per-scenario fan-out. This is the cost gate.</li>
+      <li><strong>After challenge</strong> — skim rejects and re-seeds. Mostly informational.</li>
+    </ul>
+    <p style="margin:0.9rem 0 0; font-size:0.9rem">All three are skippable with <code>--no-gate</code>, and have to be: five identical pipelines cannot be run if a human intervenes in each. Note that <code>--no-gate</code> is an argument to the <em>orchestrator skill's invocation</em>, not a <code>testgen</code> flag — the gates live in the prompt and no code enforces them. A prompt-level flag can be forgotten in a way a CLI flag cannot; that is a known cost, accepted because enforcing the gates in code would mean the orchestrator stops being a skill, which is the thing being tested.</p>
+  </div>
+</section>
+
+<section>
+  <h2>What each skill contributes</h2>
+  <p class="lede">A skill is a prompt file, not code. The judgment lives in the prose; the contract block above it is what keeps that prose from drifting away from the artifacts.</p>
+
+  <div class="scroller">
+  <table>
+    <thead>
+      <tr><th>Skill</th><th>Job</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="paths">tg-extract</td>
+        <td>Turns one input artifact into atomic, evidence-backed claims. Every claim carries a locator and an honest <code>derivation</code> — <em>stated</em>, <em>inferred</em>, or <em>reverse_engineered</em> — so "the spec says this" and "I guessed from one trace" never look alike downstream.</td>
+        <td><span class="chip done">built</span></td>
+      </tr>
+      <tr>
+        <td class="paths">tg-reconcile</td>
+        <td>Merges every extractor's claims into one world model, <em>recording</em> contradictions and gaps rather than resolving them, and freezes the coverage denominator exactly once.</td>
+        <td><span class="chip done">built</span></td>
+      </tr>
+      <tr>
+        <td class="paths">tg-propose</td>
+        <td>Reads the world model and the latest coverage report, then appends scenarios targeting real, closable holes — never rewriting or renumbering what an earlier round proposed.</td>
+        <td><span class="chip done">built</span></td>
+      </tr>
+      <tr>
+        <td class="paths">tg-score</td>
+        <td>Folds the scenario pairs that are one test, promotes the rest, computes both coverage matrices against the frozen denominator, justifies every uncovered row with a hole, and computes the verdict.</td>
+        <td><span class="chip done">built</span></td>
+      </tr>
+      <tr>
+        <td class="paths">tg-instantiate</td>
+        <td>Builds one scenario's seed world — <strong>distractors first</strong>, so no agent can pass by reading back the only matching record — then derives the oracle from that seed rather than the other way round, and records which near-misses exist so a reviewer can judge fairness.</td>
+        <td><span class="chip done">built</span></td>
+      </tr>
+      <tr>
+        <td class="paths">tg-challenge</td>
+        <td>The adversary. Verifies one instance is a fair, discriminating test, reading the oracle <em>last</em> — an adversary who sees the answer first confirms almost anything.</td>
+        <td><span class="chip done">built</span></td>
+      </tr>
+      <tr>
+        <td class="paths">tg-emit</td>
+        <td>A deliberately thin entry point over <code>testgen emit</code>; it writes nothing itself. Emit is code, not a prompt, because two runs with identical stage-4 and stage-5 artifacts must produce identical suites — otherwise variance can no longer be attributed to a stage.</td>
+        <td><span class="chip done">built</span></td>
+      </tr>
+      <tr>
+        <td class="paths">tg-orchestrate</td>
+        <td>The loop itself: dispatch each stage, validate, allow one bounded repair, hold the human gates, record each stage's model and skill hash, and append every decision to the run's lab notebook. Not a stage — it declares no <code>stage</code> and no <code>schemas</code>.</td>
+        <td><span class="chip done">built</span></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>What a real run produced</h2>
+  <p class="lede">One whole-pipeline run: three input files in, a scored suite out, a model at every stage, no human intervention except the one gate ruling below.</p>
+
+  <div class="prose">
+    <p><strong>The number that matters most: <code>all_pass_tasks: 0</code> and <code>all_fail_tasks: 0</code>.</strong> No task was passed by every agent role or failed by every role. Mean reward by role came out <strong>1.0 oracle · 0.7 under&#8209;test · 0.2 weak baseline</strong>, with <code>oracle_failures: 0</code> and <code>unscoreable: 0</code>. An agent handed the reference answer passes everything, and a deliberately weak agent does not — which is the property a generated suite exists to have, and the first one a degenerate suite loses.</p>
+    <p><strong>It halted at the gap gate on its own, before proposing anything.</strong> Reconcile recorded a gap whose <code>blocks</code> named <code>propose</code> — none of the three inputs says anything about invalid-argument behaviour — and the orchestrator stopped rather than working around it. Handed <code>--no-gate</code>, it reasoned that the flag skips the human review and does not lift a halt. The design's own statement of the test is that if a blocking gap never stops a real run, gap detection is not working.</p>
+    <p><strong>A human ruled the gap non-blocking for its own cells only, and the ruling was honoured exactly.</strong> Coverage came back <strong>4 of 6 capability cells</strong> and 2 of 2 goals, <code>converged</code> in round 1 of 2, with both bad-argument cells returned as <code>blocked_by_gap</code> holes carrying the gap id — not <code>not_yet_attempted</code>, which would have implied another round could close them. The world model was never edited.</p>
+    <p><strong>Real inputs produced a <em>larger</em> denominator than the hand-authored fixture</strong> — 6 capability cells against the fixture's 4 — which is the opposite of the failure that read was watching for. The feared outcome was a run reporting 100% because a column was silently dropped; the actual outcome is an honest 66.7% with two justified holes.</p>
+  </div>
+
+  <div class="callout">
+    <h3>Both refusal conditions fire</h3>
+    <p style="margin:0 0 0.9rem; font-size:0.9rem">Two negative fixtures check that the skills decline rather than guess. Both were exercised against real extract output rather than hand-authored claims.</p>
+    <ul>
+      <li><strong>A world with all error semantics removed</strong> — the two extracts filed no outcome-class claims between them, so reconcile faced a schema requiring at least one outcome class per capability and claims supplying none. It filed <code>success</code> plus <code>underspecified</code> throughout — <strong>not one invented <code>error</code>, <code>not_found</code> or <code>empty</code> class</strong> — and recorded three gaps, all blocking <code>propose</code>.</li>
+      <li><strong>A self-contradictory input pair</strong> — two contradictions, both <code>resolution: "unresolved"</code>, with the unknown-id outcome filed as <code>underspecified</code> rather than <code>error</code>. It declined the reading that would have let two claims from one self-contradicting document outvote a third, and named the pull it was resisting.</li>
+    </ul>
+    <p style="margin:0.9rem 0 0; font-size:0.9rem">Both recorded outputs are committed under <code>tests/fixtures/&lt;name&gt;/recorded/</code>, so a refusal observed once becomes a regression test. Changing a skill obliges re-recording — and that re-record is a reviewable diff rather than silent drift.</p>
+  </div>
+</section>
+
+<section>
+  <h2>A run on disk</h2>
+  <p class="lede">One directory per run. This is the whole state of the system — there is nowhere else state hides.</p>
+
+  <pre class="tree">runs/run-20260810-051723/
+├── <b>manifest.json</b>            <i>inputs, hashes, limits, per-stage model + skill hash</i>
+├── <b>decisions.md</b>             <i>append-only lab notebook</i>
+├── 00-inputs/               <i>byte copies of every registered input</i>
+├── 01-claims/
+│   ├── api-json.json        <i>one file per input artifact</i>
+│   ├── notes-md.json
+│   └── trace-json.json
+├── <b>01-world-model.json</b>      <i>capabilities, entities, goals, invariants,</i>
+│                            <i>contradictions, gaps, frozen denominator</i>
+├── <b>02-scenarios.json</b>        <i>every round's scenarios, with status</i>
+├── 03-coverage/
+│   ├── round-1.json
+│   └── latest.json          <i>the pointer the next round reads</i>
+├── 04-instances/&lt;scenario-id&gt;/
+│   ├── seed.json            <i>the world, distractors included</i>
+│   ├── expected.json        <i>the oracle, derived from that seed</i>
+│   └── rationale.md         <i>which near-misses exist, and why</i>
+├── 05-verdicts/&lt;scenario-id&gt;.json
+├── 06-suite/&lt;scenario-id&gt;/    <i>the emitted task package</i>
+├── <b>07-report.json</b>
+└── measurement/             <i>recall, stability, review sampling</i></pre>
+</section>
+
+<section>
+  <h2>The deterministic surface</h2>
+  <p class="lede">Everything a skill is not trusted to do itself. One console script, twelve subcommands — the exit codes above are the contract the orchestrator branches on.</p>
+
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Command</th><th>Job</th></tr></thead>
+    <tbody>
+      <tr><td class="paths">intake</td><td>register and hash inputs, mint the run</td></tr>
+      <tr><td class="paths">validate</td><td>schema-validate one stage's output</td></tr>
+      <tr><td class="paths">check-refs</td><td>cross-artifact and reachability checks</td></tr>
+      <tr><td class="paths">check-skills</td><td>check every skill's contract against the code it names</td></tr>
+      <tr><td class="paths">dedupe-candidates</td><td>propose candidate duplicate scenario pairs — proposes, never decides</td></tr>
+      <tr><td class="paths">record-stage</td><td>record a stage's model, effort and skill hash in the manifest</td></tr>
+      <tr><td class="paths">decide</td><td>append one orchestrator decision to the run's notebook</td></tr>
+      <tr><td class="paths">emit</td><td>compile accepted instances into task packages</td></tr>
+      <tr><td class="paths">smoke</td><td>run the emitted suite against the agent roster</td></tr>
+      <tr><td class="paths">compare-gold</td><td>recall and novelty against hand-authored bench tasks</td></tr>
+      <tr><td class="paths">diff-runs</td><td>per-stage stability across two runs</td></tr>
+      <tr><td class="paths">sample-for-review</td><td>write a stratified human-review packet</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Where the build is</h2>
+  <div class="prose">
+    <p>The deterministic spine and the measurement layer are done and were built in earlier plans. The current plan adds the skills, the orchestrator, and the mechanical grip that keeps a prompt from naming an artifact that does not exist.</p>
+  </div>
+
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Piece</th><th>State</th></tr></thead>
+    <tbody>
+      <tr><td>Contract spine — paths, schemas, both check layers, intake, emit, smoke</td><td><span class="chip done">done</span></td></tr>
+      <tr><td>Measurement — recall vs. gold, run-to-run stability, review sampling</td><td><span class="chip done">done</span></td></tr>
+      <tr><td>Skill contract parser and <code>check-skills</code></td><td><span class="chip done">done</span></td></tr>
+      <tr><td>Two-capability toy world, run end to end in CI with no model at all</td><td><span class="chip done">done</span></td></tr>
+      <tr><td>All eight skills — extract, reconcile, propose, score, instantiate, challenge, emit, orchestrate</td><td><span class="chip done">done</span></td></tr>
+      <tr><td>Refusal fixtures — a contradictory world and a gapped one, with recorded outcomes</td><td><span class="chip done">done</span></td></tr>
+      <tr><td>Whole pipeline run end to end with a model at every stage</td><td><span class="chip done">done · toy world</span></td></tr>
+      <tr><td>First run against a real target</td><td><span class="chip todo">separate plan</span></td></tr>
+      <tr><td>Run-to-run variance measured with <code>diff-runs</code></td><td><span class="chip todo">separate plan</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="prose" style="margin-top:1.5rem">
+    <p>1,126 tests passing, 4 live tests passing against committed recordings, <code>ruff</code> clean, <code>testgen check-skills</code> clean.</p>
+    <p>Each skill also has one <strong>live exercise</strong>: a fresh subagent, given only the three permitted things, run against the toy world, with the result recorded beside the skill in <code>exercise.md</code>. That is deliberate — reading a prompt tells you what it asked for, not what a model did with it, so a prompt's failure mode is only visible in an execution trace.</p>
+  </div>
+</section>
+
+<section>
+  <h2>What we know does not work yet</h2>
+  <p class="lede">Stated plainly, because a design document that lists only what works is not much use for planning. The full list, with the reasoning that parked each item, is in §8 of the design spec.</p>
+
+  <dl class="facts">
+    <dt>Isolation is only half enforceable</dt>
+    <dd>The rule holds on artifacts inside a run and is unenforceable on everything else a subagent can reach. A member that read a sibling's seed produces a byte-identical artifact to one that did not. Two violations were observed during the build; both surfaced <em>only</em> because a subagent volunteered it in a report nobody obliged it to write. No schema, no <code>check-refs</code> and no digest could have caught either. This is the weakest link and the first thing a later slice should harden.</dd>
+    <dt>No value domains</dt>
+    <dd>The world model has no representation for a field's value domain, so every seed value is synthetic by construction — a concrete value anywhere downstream of reconcile is a <em>prescription</em> to <code>tg-instantiate</code> rather than an assertion about the target.</dd>
+    <dt>Reference, not support</dt>
+    <dd>Layer 2 checks that a world-model element <em>references</em> a resolvable claim, never that the claim <em>supports</em> it. Support is semantic. Two real defects lived under that hole in the golden fixture itself.</dd>
+    <dt>Seed conformance is one-directional</dt>
+    <dd>A seed can drop a declared collection, or declare all of them empty, and pass both check layers with zero findings. Whether <em>partial</em> seeds are legal is an open design question.</dd>
+    <dt>No <code>effort</code> lever</dt>
+    <dd>The orchestrator records the field, but the dispatch mechanism cannot supply the value — so every <code>effort</code> in a manifest today is a characterization rather than a setting, and <code>model</code> plus <code>skill_sha256</code> carry the reproducibility claim.</dd>
+    <dt>One exercise is one sample</dt>
+    <dd>A prompt that works once may not work twice, and nothing has yet measured variance. <code>diff-runs</code> exists for exactly that.</dd>
+  </dl>
+</section>
+
+<footer>
+  Generated from the code and design spec on <code>main</code> · 1,126 tests passing · all eight skills built, pipeline run end to end against the toy world
+</footer>
+
+</div>
