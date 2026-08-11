@@ -123,12 +123,19 @@ def test_a_gap_about_malformed_calls_alone_does_not_satisfy_that_test():
     gap about a real unknown, and it is not the subtraction this fixture makes.
 
     **`why_it_matters` keeps the pre-Rubrica `tg-propose` spelling on purpose.**
-    It is quoted model output, and the recordings it quotes were produced before
-    the skills were renamed to `rb-*`; the Rubrica rename changed no measurement,
-    so it did not rewrite them either. Updating this string to `rb-propose`
-    without re-recording would make "verbatim" false. Nothing here reads the
-    field -- `_propose_blocking_subjects` reads `subject` and `blocks` -- so the
-    spelling costs the assertion nothing and buys it fidelity to the evidence.
+    It is an *abridged* quotation of recorded model output, not a byte-exact one:
+    measured, its first 128 of 132 characters are word-for-word identical in both
+    recordings, which then continue "actually does when an argument violates the
+    schema, ..." where this copy stops short at "does". So it is a shortened
+    rendering of a real sentence a model wrote, and the recordings it draws on
+    were produced before the skills were renamed to `rb-*`. Rewriting the prefix
+    to `rb-propose` would put a spelling in the model's mouth that it never
+    produced -- and the Rubrica rename did not re-record anything, because a
+    rename changes no measurement. Note the "verbatim" claim above attaches to
+    the gap *id*, which does appear byte-for-byte in both recordings; it was
+    never a claim about this field. Nothing here reads the field anyway --
+    `_propose_blocking_subjects` reads `subject` and `blocks` -- so the spelling
+    costs the assertion nothing and buys it fidelity to the evidence.
     """
     world = {
         "gaps": [
