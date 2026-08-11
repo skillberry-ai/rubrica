@@ -747,14 +747,14 @@ def test_an_unbuildable_parser_is_exit_2_on_every_subcommand(
     reaches the shared one, was affected too.
     """
     if breakage == "missing-dir":
-        monkeypatch.setenv("TESTGEN_SCHEMA_DIR", str(tmp_path / "definitely-not-here"))
+        monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path / "definitely-not-here"))
     else:
         schema_dir = tmp_path / "schema"
         schema_dir.mkdir()
         schema = read_json(Path(rubrica.validate.__file__).parent / "schema" / "manifest-0.1.json")
         del schema["properties"]["stages"]["additionalProperties"]["properties"]["effort"]
         write_json(schema_dir / "manifest-0.1.json", schema)
-        monkeypatch.setenv("TESTGEN_SCHEMA_DIR", str(schema_dir))
+        monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(schema_dir))
 
     run = build_state(tmp_path / "run", "emit")
     argv = _argv_for(command, run, tmp_path) if command in _EXPLODE_TARGETS else [command]

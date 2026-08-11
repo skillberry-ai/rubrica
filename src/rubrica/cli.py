@@ -42,7 +42,7 @@ where a human can read it and a machine parsing stdout is unaffected.
 parser is not free: `record-stage`'s `--effort` choices are read out of the
 active manifest schema so the CLI cannot accept an effort the schema rejects.
 That read happens for *every* invocation, `intake` included, and it happens
-before argv has even been parsed -- so a typo'd `TESTGEN_SCHEMA_DIR`, a
+before argv has even been parsed -- so a typo'd `RUBRICA_SCHEMA_DIR`, a
 non-editable install missing its package data, or a schema edit that moves
 `properties.stages.additionalProperties.properties.effort.enum` used to let an
 `ArtifactError` or a `KeyError` escape `main` entirely: exit 1, empty stdout,
@@ -203,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"error: cannot build the command-line parser: {type(exc).__name__}: {exc}. "
             "record-stage's --effort choices are read from the manifest schema, so every "
-            "subcommand needs it; check TESTGEN_SCHEMA_DIR and that the package's schema/ "
+            "subcommand needs it; check RUBRICA_SCHEMA_DIR and that the package's schema/ "
             "data is installed",
             file=sys.stderr,
         )

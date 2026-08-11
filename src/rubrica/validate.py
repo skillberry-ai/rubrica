@@ -84,10 +84,10 @@ def schema_dir() -> Path:
     repository root, so an installed (non-editable) copy can validate. Walking
     up to the repo root only ever worked for an editable install.
 
-    Overridable via TESTGEN_SCHEMA_DIR so a caller can validate against a
+    Overridable via RUBRICA_SCHEMA_DIR so a caller can validate against a
     candidate schema set without reinstalling the package.
     """
-    override = os.environ.get("TESTGEN_SCHEMA_DIR")
+    override = os.environ.get("RUBRICA_SCHEMA_DIR")
     if override:
         return Path(override)
     return Path(__file__).resolve().parent / "schema"
@@ -100,7 +100,7 @@ def _manifest_stage_efforts(schema_root: Path) -> tuple[str, ...]:
     Same reason _validator_for below takes schema_root as a cache key rather
     than reading schema_dir() inside: a plain zero-argument @functools.cache
     would return the first schema it ever saw for the life of the process, so
-    a test overriding TESTGEN_SCHEMA_DIR after some earlier call (parser
+    a test overriding RUBRICA_SCHEMA_DIR after some earlier call (parser
     construction happens on every CLI invocation, so there always is an
     earlier call) would silently get the old effort list back -- correct only
     as long as every caller remembered to `.cache_clear()` first. Keying on
@@ -118,7 +118,7 @@ def manifest_stage_efforts() -> tuple[str, ...]:
     an effort the manifest schema will reject -- and there is no second copy of
     the enum to keep in step. Reads the *active* schema_dir() on every call
     (cheap: a small JSON file, cached per root by _manifest_stage_efforts), so
-    a TESTGEN_SCHEMA_DIR override takes effect immediately with no cache to
+    a RUBRICA_SCHEMA_DIR override takes effect immediately with no cache to
     clear.
     """
     return _manifest_stage_efforts(schema_dir())
@@ -129,7 +129,7 @@ def _validator_for(kind: str, schema_root: Path) -> Draft202012Validator:
     """Compiled validator, cached on (kind, schema_root).
 
     schema_root is part of the key rather than read inside, so overriding
-    TESTGEN_SCHEMA_DIR does not return a validator built from the old one.
+    RUBRICA_SCHEMA_DIR does not return a validator built from the old one.
     """
     try:
         filename = ARTIFACT_SCHEMAS[kind]

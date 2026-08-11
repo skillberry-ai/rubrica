@@ -226,7 +226,7 @@ def test_skills_dir_resolves_beside_the_module_and_honours_the_override(tmp_path
     from rubrica import skills as skills_module
 
     assert skills_dir() == Path(skills_module.__file__).resolve().parent / "skills"
-    monkeypatch.setenv("TESTGEN_SKILLS_DIR", str(tmp_path))
+    monkeypatch.setenv("RUBRICA_SKILLS_DIR", str(tmp_path))
     assert skills_dir() == tmp_path
 
 

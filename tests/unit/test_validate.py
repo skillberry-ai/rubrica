@@ -64,7 +64,7 @@ def test_the_schemas_live_inside_the_package_so_a_wheel_can_validate():
 
 
 def test_the_schema_directory_env_override_wins(monkeypatch, tmp_path):
-    monkeypatch.setenv("TESTGEN_SCHEMA_DIR", str(tmp_path))
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path))
     assert schema_dir() == tmp_path
 
 
@@ -531,7 +531,7 @@ def test_the_score_stage_reports_a_run_with_no_coverage_directory(tmp_path):
 
 
 def test_manifest_stage_efforts_tracks_a_schema_override(tmp_path, monkeypatch):
-    """Reads the *active* schema directory, so TESTGEN_SCHEMA_DIR moves it.
+    """Reads the *active* schema directory, so RUBRICA_SCHEMA_DIR moves it.
 
     Without this the caching could be hiding a read that happens once against
     the shipped schema and never again -- which would make the "no second copy"
@@ -554,5 +554,5 @@ def test_manifest_stage_efforts_tracks_a_schema_override(tmp_path, monkeypatch):
         "ludicrous",
     ]
     write_json(tmp_path / ARTIFACT_SCHEMAS["manifest"], original)
-    monkeypatch.setenv("TESTGEN_SCHEMA_DIR", str(tmp_path))
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path))
     assert manifest_stage_efforts() == ("low", "ludicrous")

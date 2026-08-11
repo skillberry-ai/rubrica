@@ -143,10 +143,10 @@ def skills_dir() -> Path:
 
     Package data beside this module rather than at the repository root, so an
     installed (non-editable) copy can find its own skills -- the same reason
-    the schemas moved. Overridable via TESTGEN_SKILLS_DIR so a candidate skill
+    the schemas moved. Overridable via RUBRICA_SKILLS_DIR so a candidate skill
     set can be checked without reinstalling.
     """
-    override = os.environ.get("TESTGEN_SKILLS_DIR")
+    override = os.environ.get("RUBRICA_SKILLS_DIR")
     if override:
         return Path(override)
     return Path(__file__).resolve().parent / "skills"

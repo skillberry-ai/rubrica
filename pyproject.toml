@@ -43,5 +43,5 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "live: dispatches a model; skipped unless TESTGEN_LIVE is set (see tests/conftest.py)",
+    "live: dispatches a model; skipped unless RUBRICA_LIVE is set (see tests/conftest.py)",
 ]

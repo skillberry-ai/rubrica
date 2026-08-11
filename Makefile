@@ -11,7 +11,7 @@ test: ## Run the test suite
 	uv run pytest -q
 
 live: ## Run the live stage exercises (dispatches a model; costs money)
-	TESTGEN_LIVE=1 uv run pytest -m live -q
+	RUBRICA_LIVE=1 uv run pytest -m live -q
 
 check: ## Lint and verify formatting, making no changes
 	uv run ruff check .

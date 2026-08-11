@@ -48,10 +48,10 @@ def suite_template_dir() -> Path:
     """Directory holding verify.py and test.sh.
 
     Mirrors validate.schema_dir(): package data beside the module so an
-    installed copy can emit, overridable via TESTGEN_SUITE_DIR so a candidate
+    installed copy can emit, overridable via RUBRICA_SUITE_DIR so a candidate
     verifier can be emitted without reinstalling.
     """
-    override = os.environ.get("TESTGEN_SUITE_DIR")
+    override = os.environ.get("RUBRICA_SUITE_DIR")
     if override:
         return Path(override)
     return Path(__file__).resolve().parent / "suite"
