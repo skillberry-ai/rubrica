@@ -166,7 +166,13 @@ def test_it_requires_every_prose_heading_to_be_cited_or_explained():
     Universal quantification works when the set is small, closed and already
     written down. "Every statement in a document" is unbounded; "every `##`
     heading" is not.
+
+    Whitespace-normalised before matching: measured that rewrapping the
+    paragraph at width 60, changing no words, split "every `##` heading"
+    across a line boundary and flipped this test red -- collapsing runs of
+    whitespace to single spaces tests the words, not where an editor happened
+    to wrap the line.
     """
-    method = section_body(load(SKILL), "3. Method").lower()
+    method = " ".join(section_body(load(SKILL), "3. Method").lower().split())
     assert "every `##` heading" in method
     assert "carries nothing about the target" in method

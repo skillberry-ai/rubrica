@@ -124,7 +124,13 @@ def test_it_requires_an_entity_for_a_capabilitys_described_response_shape():
     Scoped to Method and asserting co-occurrence, because the words "entity" and
     "capability" appear throughout this file and a presence check anywhere in
     `body` would pass with this rule deleted.
+
+    Whitespace-normalised before matching: measured that a pure rewrap of the
+    paragraph at width 60, changing no words, split "becomes an entity" across
+    a line boundary and flipped this test red -- collapsing runs of whitespace
+    to single spaces tests the words, not where an editor happened to wrap the
+    line.
     """
-    method = section_body(load(SKILL), "3. Method").lower()
+    method = " ".join(section_body(load(SKILL), "3. Method").lower().split())
     assert "for every capability you declare" in method
     assert "becomes an entity" in method
