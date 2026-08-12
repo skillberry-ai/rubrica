@@ -280,7 +280,7 @@ def _quietly(path):
     finding to report, and duplicating it here would double-count one defect."""
     try:
         return read_json(path)
-    except Exception:  # noqa: BLE001 -- see docstring: not this module's finding
+    except Exception:  # deliberate: an unreadable artifact is check_readable's finding
         return None
 ```
 
