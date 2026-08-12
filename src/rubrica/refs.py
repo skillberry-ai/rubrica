@@ -32,6 +32,7 @@ from rubrica.invariants import InvariantForm
 from rubrica.invariants import evaluate as evaluate_invariant
 from rubrica.paths import RunPaths, is_safe_segment, list_json
 from rubrica.suite.verify import DATA_KINDS, TRAJECTORY_KINDS
+from rubrica.utilisation import claim_utilisation
 
 _CELL_RE = re.compile(r"\Acell:([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
 _GOAL_RE = re.compile(r"\Agoal:([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
@@ -480,6 +481,36 @@ def check_world_model(run: RunPaths) -> list[Finding]:
             f"declared goals={denominator.get('goals')} but the world model declares "
             f"{actual_goals}",
         )
+    return out
+
+
+def check_claim_utilisation(run: RunPaths) -> list[Finding]:
+    """An input whose claims the world model cites *none* of.
+
+    The mirror of check_world_model's claim check, which reports a world model
+    citing an id that does not exist; this reports a claims file no world model
+    cites. Same pair, opposite directions -- the shape the spec's parked table
+    already has four rows of.
+
+    Zero, not a percentage. Measured on run-20260812-130056: 130 of 287 claims
+    were uncited and almost all of those drops were correct, so a threshold would
+    have failed a run whose rb-reconcile was behaving. Zero is indefensible under
+    every reading -- a human registered that input through intake, so either
+    rb-extract produced nothing usable from it or rb-reconcile ignored a whole
+    artifact.
+    """
+    out: list[Finding] = []
+    for entry in claim_utilisation(run)["artifacts"]:
+        if entry["total"] and entry["cited"] == 0:
+            out.append(
+                Finding(
+                    run.world_model,
+                    "refs",
+                    "/",
+                    f"no world-model element cites any claim from "
+                    f"{entry['artifact_id']} ({entry['total']} claims)",
+                )
+            )
     return out
 
 
@@ -1390,6 +1421,7 @@ def check_all(run: RunPaths) -> list[Finding]:
     findings.extend(check_inputs(run))
     findings.extend(check_limits(run))
     findings.extend(check_world_model(run))
+    findings.extend(check_claim_utilisation(run))
     findings.extend(check_scenarios(run))
     findings.extend(check_coverage(run))
     findings.extend(check_instances(run))

@@ -73,6 +73,7 @@ from rubrica.recall import compare_run, render
 from rubrica.review import DEFAULT_SAMPLE_SIZE, sample_run
 from rubrica.smoke import load_agents, preflight, smoke_run
 from rubrica.stability import diff_runs
+from rubrica.utilisation import claim_utilisation
 from rubrica.validate import UnknownStage, manifest_stage_efforts, validate_stage
 
 CLEAN, FINDINGS, USAGE = 0, 1, 2
@@ -97,6 +98,7 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("check-skills", "check every skill's contract against the code it names"),
     ("record-stage", "record a stage's model, effort, and skill hash in the manifest"),
     ("decide", "append one orchestrator decision to the run's decisions.md"),
+    ("claim-utilisation", "per-artifact share of claims the world model cites"),
 )
 
 
@@ -159,6 +161,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_decide = parsers["decide"]
     p_decide.add_argument("--run", required=True)
     p_decide.add_argument("--note", required=True)
+
+    p_utilisation = parsers["claim-utilisation"]
+    p_utilisation.add_argument("--run", required=True)
     return parser
 
 
@@ -320,6 +325,13 @@ def main(argv: list[str] | None = None) -> int:
             if sampled:
                 print(run.review_packet)
             return _report(findings)
+
+        if args.command == "claim-utilisation":
+            # A report, not a gate: always CLEAN on a readable run. The finding
+            # half lives in check-refs, so this command never returns 1 and an
+            # orchestrator reading its exit code cannot mistake data for a defect.
+            print(json.dumps(claim_utilisation(_run_dir(args.run)), indent=2, sort_keys=True))
+            return CLEAN
 
         if args.command == "diff-runs":
             report = diff_runs(_run_dir(args.a), _run_dir(args.b))

@@ -27,7 +27,7 @@ make lint      # ruff check --fix
 make format    # ruff format
 ```
 
-Baseline: **1139 passed, 4 skipped**; `make check` clean; `uv run rubrica
+Baseline: **1146 passed, 4 skipped**; `make check` clean; `uv run rubrica
 check-skills` exits 0. Anything else means you broke something. (It was 1126 as
 of the skills build; the three added since are `f3b9d30`'s, and this line went
 stale because it names a build rather than a commit. It was 1129 as of
@@ -36,7 +36,11 @@ the reservation-service trajectory fixture (Task 3 of the
 2026-08-12-reservation-service-trajectory-run). It was 1137 as of `373130b`;
 the two added since are `test_trajectory_fixtures.py`'s trace-count and
 prompt-order guards, closing findings 3 and 4 of the whole-branch review that
-examined that fixture — re-measure it here when you add tests.)
+examined that fixture. It was 1139 as of `a31c4d0`; the seven added since are
+`test_utilisation.py`'s five, plus two `test_cli.py` grows for free whenever
+`cli.SUBCOMMANDS` gains an entry — its `parametrize("command",
+sorted(subcommand_names()))` × `parametrize("breakage", ...)` picked up
+`claim-utilisation` automatically — re-measure it here when you add tests.)
 
 Commands in `README.md` assume the venv is on `PATH`; otherwise prefix `uv run`.
 Four env overrides exist: `RUBRICA_SCHEMA_DIR` (`validate.py`),
@@ -148,20 +152,23 @@ in the design. Treat a refusal condition as decorative if its trigger has no
 stated action, its action is one a model cannot take, or its condition is one a
 model cannot detect from what it can read.
 
-## Twelve deterministic subcommands
+## Thirteen deterministic subcommands
 
 Everything a prompt is not trusted to do:
 
 `intake` · `validate` · `check-refs` · `check-skills` · `dedupe-candidates` ·
 `record-stage` · `decide` · `emit` · `smoke` · `compare-gold` · `diff-runs` ·
-`sample-for-review`
+`sample-for-review` · `claim-utilisation`
 
 `emit` is code, not a prompt, because two runs with identical stage-4 and
 stage-5 artifacts must produce byte-identical suites — otherwise variance can no
 longer be attributed to a stage. `dedupe-candidates` proposes pairs and never
 decides. `record-stage` hashes the skill file the run actually used, so a digest
 that no longer matches the file on disk means the file changed after the run —
-that is the hook working, not a defect.
+that is the hook working, not a defect. `claim-utilisation` is a report, not a
+gate — it always exits clean on a readable run and surfaces each input's
+cited/total claim count for a human to read at gate 1; the zero-utilisation
+finding it shares its arithmetic with lives in `check-refs`, never here.
 
 ## Testing prompts: the traps that actually recur here
 
