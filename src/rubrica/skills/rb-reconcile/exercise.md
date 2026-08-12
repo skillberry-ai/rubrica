@@ -244,3 +244,51 @@ schema file, and two `rubrica validate`/`check-refs` invocations. The schema
 read is the same one noted as expected in round 1's context; no sibling run, no
 `docs/`, `tests/`, or other skill was read. `permission_denials` was empty and
 no tool call returned an error. Nothing out-of-contract.
+
+## Observation: a self-describing-absent outcome class, from the toy-contradiction re-record
+
+Not from the round-2 dispatch above -- from the same task's re-record of
+`tests/fixtures/toy-contradiction/recorded/01-world-model.json`, also live
+`rb-reconcile` output, also worth recording here rather than only in a review
+thread. `cap-find-tickets` now carries:
+
+```
+id: oc-find-error   kind: error
+description: query_tickets never errors on a read: every call, including
+  find_tickets, returns a value and nothing about a lookup raises partway
+  through -- so there is no error path for find_tickets to enumerate.
+```
+
+An outcome class filed under `kind: error` whose own `description` states that
+no error path exists. `git show 399dba5:tests/fixtures/toy-contradiction/recorded/01-world-model.json`
+-- the recording this task replaced -- has no `error`-kind outcome class under
+`find_tickets` at all, only `success`, `empty`, and `underspecified`. So this
+is new in this re-record, not a carry-over from the previous one.
+
+**Declining to attribute a cause, deliberately, the same way the denominator
+and gap-count deltas above are recorded as observed rather than diagnosed.**
+Two candidates, named without choosing between them:
+
+1. Ordinary model variance on a second live dispatch against the same claim
+   set -- the same kind of run-to-run difference the denominator and gap
+   counts above already show, with no reason to expect outcome-class kinds to
+   be exempt from it.
+2. Method step 3's instruction to "enumerate its outcome classes: `success`,
+   `empty`, `not_found`, `error`, `underspecified`" naming `error` as one of a
+   fixed list to check off per capability, which can create pressure to fill
+   that slot even when the claim set states the opposite -- in which case this
+   is not model variance but a **quantifier-satisfaction artefact**: the same
+   shape of failure this plan's own fix quantified capability enumeration to
+   *solve* (Task 2's Method step 3/step 4 changes), now possibly showing up one
+   level down, on the outcome-class enumeration the same paragraph names. That
+   would make this directly relevant to the technique this plan applied, not
+   an unrelated defect.
+
+No test or gate covers this. `test_the_gap_fixture_did_not_acquire_invented_outcome_classes`
+in `tests/unit/test_refusals_live.py` only reads `GAP_DIR`
+(`tests/fixtures/toy-gap/`); the contradiction fixture's outcome classes are
+unguarded. This file records the observation; it does not fix the recording
+(editing committed live output would fabricate evidence) and does not widen
+that test (a new guard needs its own design, and end-of-change-pressure
+predicates are exactly what this repo's §8 warns become the next vacuous
+ones).
