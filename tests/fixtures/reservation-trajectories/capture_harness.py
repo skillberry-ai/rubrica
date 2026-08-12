@@ -136,6 +136,31 @@ PROMPTS: list[tuple[str, str]] = [
 ]
 
 
+def _content_text(content) -> str:
+    """A ToolMessage's content as text, whichever shape LangChain used.
+
+    Measured on the first live capture: content arrives either as a plain str or
+    as a list of content blocks. Dropping the list shape lost a real
+    observation -- search_restaurants had returned rest_001, the id-extraction
+    heuristic never saw it, and two dependent prompts cascaded to
+    `skipped-unobserved`. Joining the text blocks is what makes an observation
+    the harness already captured readable.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    return str(content)
+
+
 def tool_outputs(result: dict) -> list[tuple[str, str]]:
     """(tool_name, raw content) for every ToolMessage in a graph result.
 
@@ -146,7 +171,7 @@ def tool_outputs(result: dict) -> list[tuple[str, str]]:
     out = []
     for m in result.get("messages", []):
         if type(m).__name__ == "ToolMessage":
-            out.append((getattr(m, "name", ""), m.content))
+            out.append((getattr(m, "name", ""), _content_text(m.content)))
     return out
 
 
@@ -217,12 +242,12 @@ def capture_trajectories(out_path: Path) -> dict:
             for name, content in calls:
                 try:
                     payload = json.loads(content)
-                # TypeError alongside JSONDecodeError: measured on the first live run --
-                # a ToolMessage.content can arrive as a list of content blocks rather
-                # than a str, which json.loads rejects with TypeError, not
-                # JSONDecodeError. This only widens what the id-extraction heuristic
-                # below treats as "not parseable"; it has no effect on the captured
-                # trace itself, which mlflow already logged independently.
+                # TypeError alongside JSONDecodeError: content is text by the time it
+                # reaches here (_content_text normalises the list-of-blocks shape), but
+                # json.loads still raises TypeError rather than JSONDecodeError for a
+                # small set of non-str/bytes inputs, so both are caught defensively. This
+                # is a guard for genuinely non-JSON content, not the list-content case --
+                # that observation is no longer discarded here.
                 except (json.JSONDecodeError, TypeError):
                     continue
                 if name == "search_restaurants" and isinstance(payload, list) and payload:
