@@ -30,6 +30,11 @@ TOY_DIR = Path(__file__).resolve().parent / "fixtures" / "toy"
 CONTRADICTION_DIR = Path(__file__).resolve().parent / "fixtures" / "toy-contradiction"
 GAP_DIR = Path(__file__).resolve().parent / "fixtures" / "toy-gap"
 
+# The trajectory run's captured fixture (design spec 2026-08-12). Not a toy
+# world and not built by build_toy_run -- it is committed live capture, so it
+# sits beside the other fixture dirs for path resolution only.
+TRAJECTORIES_DIR = Path(__file__).resolve().parent / "fixtures" / "reservation-trajectories"
+
 # In the order intake registers them, which fixes the artifact ids below.
 INPUT_FILES: tuple[Path, ...] = (
     TOY_DIR / "api.json",
