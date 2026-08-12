@@ -1,0 +1,318 @@
+{
+  "tools": [
+    {
+      "name": "search_restaurants",
+      "description": "Search for restaurants matching the given criteria.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "City name to search in (e.g., \"Boston\", \"New York\")"
+          },
+          "cuisine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional cuisine type filter (e.g., \"Italian\", \"Japanese\", \"Mexican\")"
+          },
+          "date_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional ISO 8601 datetime for availability-aware search"
+          },
+          "party_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional number of guests for filtering"
+          },
+          "price_tier": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional price tier 1-4 (1=$, 2=$$, 3=$$$, 4=$$$$)"
+          },
+          "distance_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional maximum distance from city center in kilometers"
+          }
+        },
+        "required": [
+          "city"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "check_availability",
+      "description": "Check availability for a specific restaurant on a given date.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "restaurant_id": {
+            "type": "string",
+            "description": "Unique restaurant identifier (e.g., \"rest_001\")"
+          },
+          "date_time": {
+            "type": "string",
+            "description": "ISO 8601 datetime for the date to check (e.g., \"2025-03-15T18:00:00\")"
+          },
+          "party_size": {
+            "type": "integer",
+            "description": "Number of guests in the party"
+          }
+        },
+        "required": [
+          "restaurant_id",
+          "date_time",
+          "party_size"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "place_reservation",
+      "description": "Place a reservation at a restaurant.\n\nThis operation is idempotent - submitting the same reservation details multiple times\nwill return the same confirmation without creating duplicates.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "restaurant_id": {
+            "type": "string",
+            "description": "Unique restaurant identifier (e.g., \"rest_001\")"
+          },
+          "date_time": {
+            "type": "string",
+            "description": "ISO 8601 datetime for the reservation (e.g., \"2025-03-15T19:00:00\")"
+          },
+          "party_size": {
+            "type": "integer",
+            "description": "Number of guests"
+          },
+          "name": {
+            "type": "string",
+            "description": "Guest's full name"
+          },
+          "phone": {
+            "type": "string",
+            "description": "Guest's contact phone number (e.g., \"+1-555-123-4567\")"
+          },
+          "email": {
+            "type": "string",
+            "description": "Guest's email address"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional special requests or dietary restrictions"
+          }
+        },
+        "required": [
+          "restaurant_id",
+          "date_time",
+          "party_size",
+          "name",
+          "phone",
+          "email"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "cancel_reservation",
+      "description": "Cancel an existing reservation.\n\nThis is a destructive operation that removes the reservation from the system.\nHowever, it is idempotent - cancelling the same reservation multiple times\nwill return an appropriate error message.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "reservation_id": {
+            "type": "string",
+            "description": "Unique reservation identifier (e.g., \"reservation_abc123\")"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional reason for cancellation"
+          }
+        },
+        "required": [
+          "reservation_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "list_reservations",
+      "description": "List all reservations for a user.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "description": "User identifier - can be email address or phone number"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      }
+    }
+  ]
+}
