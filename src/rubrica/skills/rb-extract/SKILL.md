@@ -177,6 +177,14 @@ there -- an incomplete claim is a validation failure, not a smaller claim.
    provenance -- would then resolve ambiguously between two different
    claims.
 
+**Cover the whole artifact.** For a prose artifact, every `##` heading must be
+cited by at least one claim's `evidence.locator`, or your report must say why
+that section carries nothing about the target. Headings are a small, closed set
+the artifact itself writes down, which is what makes this checkable where "every
+statement" is not: a real dispatch that had been told "every statement it makes
+about the target" filed a claim for a licence line and skipped a whole section of
+usage examples -- the five requests a user actually makes of this target.
+
 ## 4. Invariants
 
 1. Your `artifact_id` equals the filename stem of the file you write

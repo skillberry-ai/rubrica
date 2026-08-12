@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 
 from rubrica.artifacts import read_json
-from rubrica.skills import SECTIONS, load, skills_dir
+from rubrica.skills import SECTIONS, load, section_body, skills_dir
 from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
 
 SKILL = skills_dir() / "rb-reconcile" / "SKILL.md"
@@ -112,3 +112,19 @@ def test_it_states_that_the_denominator_is_computed_here_and_frozen():
     for field in ("capability_cells", "goals"):
         assert field in body, field
     assert re.search(r"\bversion\b", body), "the prose never names the denominator's `version`"
+
+
+def test_it_requires_an_entity_for_a_capabilitys_described_response_shape():
+    """Task 6 of the trajectory run dropped a claim that named all six fields of
+    cancel_reservation's success payload -- confidence high, a JSON Pointer into
+    an observed span, the refund_policy string quoted -- and produced four
+    entities, none of them a cancellation receipt. Nothing in the prompt was
+    violated: Method step 2 said "group claims", an unquantified verb.
+
+    Scoped to Method and asserting co-occurrence, because the words "entity" and
+    "capability" appear throughout this file and a presence check anywhere in
+    `body` would pass with this rule deleted.
+    """
+    method = section_body(load(SKILL), "3. Method").lower()
+    assert "for every capability you declare" in method
+    assert "becomes an entity" in method

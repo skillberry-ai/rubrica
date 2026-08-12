@@ -133,7 +133,21 @@ artifact, which is `rb-extract`'s shape, not yours.
    a bookkeeping label that is `rb-extract`'s mistake to have made, not a
    real disagreement about the target.
 
-4. **Give each capability a `binding`: the tool name a transcript will show,
+4. **For every capability you declare, if any claim describes the shape of
+   what that capability returns, that shape becomes an entity.** A capability
+   whose success payload a claim spells out field by field, with no entity
+   modelling it, is a response nothing downstream can assert against -- and no
+   gate reports it, because `refs.check_world_model` only checks that the
+   claims you *did* cite resolve.
+
+   Quantified over the capabilities you have just declared, deliberately, and
+   not over claims. Measured: step 3's "for every capability" produced every
+   outcome-class cell a real run needed, while an unquantified instruction to
+   "group claims" dropped 45% of them. A stage can check itself against five
+   capabilities it just wrote down; it cannot check itself against every
+   statement in a document.
+
+5. **Give each capability a `binding`: the tool name a transcript will show,
    plus the `fixed_args` that distinguish it from a sibling capability
    sharing the same tool.** `emit` reports a finding for an accepted
    scenario whose capability has no `binding`, which costs a shipped test,
@@ -141,7 +155,7 @@ artifact, which is `rb-extract`'s shape, not yours.
    it is how a later stage will ever recognize that this capability is the
    one a trace or a live call actually invoked.
 
-5. **Record every contradiction you find, rather than resolving it
+6. **Record every contradiction you find, rather than resolving it
    silently.** Give it a `nature` describing the disagreement, pick one of
    the four `resolution` values -- `unresolved`, `preferred_a`,
    `preferred_b`, `both_possible` -- and write a `rationale` that states
@@ -162,7 +176,7 @@ artifact, which is `rb-extract`'s shape, not yours.
    -- one claim each, nothing else in the set breaking the tie -- and the
    only honest `resolution` left is `unresolved`.
 
-6. **Record every gap: knowledge about the target that no input contains
+7. **Record every gap: knowledge about the target that no input contains
    and that reasoning cannot supply.** Give it a `subject`, what is
    `unknown`, `why_it_matters`, and a `blocks` list naming every stage among
    `propose`, `score`, `instantiate`, `challenge`, `emit`, and `smoke` that
@@ -174,7 +188,7 @@ artifact, which is `rb-extract`'s shape, not yours.
    doing its job -- so name `blocks` honestly rather than narrowly, and
    never leave it empty just to avoid triggering a halt.
 
-7. **Enumerate goals from the actors' perspective, each with the
+8. **Enumerate goals from the actors' perspective, each with the
    `expected_hop_depths` it supports.** This goal list is frozen the moment
    you write it: `rb-propose` designs scenarios against exactly this list
    and may only *request* an amendment, which costs an explicit orchestrator
@@ -186,15 +200,15 @@ artifact, which is `rb-extract`'s shape, not yours.
    because writing too few here is a request-and-wait later, not a quiet
    fix.
 
-8. **Compute the `denominator` once: `version: 1`, `capability_cells`, and
+9. **Compute the `denominator` once: `version: 1`, `capability_cells`, and
    `goals`.** `capability_cells` is the total count of capability x
    outcome-class pairs across every capability you wrote in step 3;
-   `goals` is the count of goals you wrote in step 7. `refs.check_world_model`
+   `goals` is the count of goals you wrote in step 8. `refs.check_world_model`
    recomputes both from the world model you wrote and reports a mismatch,
    so these two numbers are a checkable claim about your own output, not a
    summary you are trusted to get right unverified.
 
-9. **Add `machine:` invariants where an entity invariant fits one of the
+10. **Add `machine:` invariants where an entity invariant fits one of the
    four implemented forms -- `compare`, `count`, `join`, `unique` -- and
    `prose:` where it does not.** An invariant schema-validates with exactly
    one of the two, never both. Reach for `machine:` whenever the statement

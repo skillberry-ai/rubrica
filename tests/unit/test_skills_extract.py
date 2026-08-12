@@ -154,3 +154,19 @@ def test_the_refusal_section_names_a_response_for_an_unreadable_input():
         "and it must forbid the tempting alternative: reconstructing the content from the "
         "filename, the manifest kind, or a sibling artifact"
     )
+
+
+def test_it_requires_every_prose_heading_to_be_cited_or_explained():
+    """rb-extract already said "every statement it makes about the target" and
+    still skipped an entire section: the claims from agent-notes-md carry
+    locators L51...L55 then jump to L84, and L57-L80 is the whole Usage Examples
+    section -- five canonical user asks plus res_12345 -- while the Apache licence
+    at L187 got a claim.
+
+    Universal quantification works when the set is small, closed and already
+    written down. "Every statement in a document" is unbounded; "every `##`
+    heading" is not.
+    """
+    method = section_body(load(SKILL), "3. Method").lower()
+    assert "every `##` heading" in method
+    assert "carries nothing about the target" in method
