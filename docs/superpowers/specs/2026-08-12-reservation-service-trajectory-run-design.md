@@ -216,8 +216,10 @@ planning, tool calls, final answer — without a server to stand up.
 Flow:
 
 1. Start the MCP server locally on `:8000` (`fastmcp` + `pydantic` only).
-2. Capture `/tools/list` in the same session that serves the trajectories, so
-   the interface artifact and the observations describe one process.
+2. Capture `/tools/list` from the same server build that serves the
+   trajectories. It need not be the same *process*: `list_tools()` reads the
+   registered tool definitions and never touches `MockProvider`, so it cannot
+   perturb the `_reservation_counter` ordering that §11 depends on.
 3. Point `LLM_API_BASE` / `LLM_API_KEY` / `LLM_MODEL` at the litellm proxy with
    `Azure/gpt-4.1`. The agent already reads all three and builds a `ChatOpenAI`,
    so no code change is needed. Verified today: tool calls pass through the proxy
@@ -281,8 +283,21 @@ MLflow's trace JSON is `{"info": {...}, "data": {"spans": [...]}}`.
 MLflow-native output would classify as `other`.
 
 Rather than reshape MLflow's document — which would put the harness in the data
-path — the harness **copies `info.request_id` to a top-level `trace_id`**. It is
+path — the harness **copies `info.trace_id` to a top-level `trace_id`**. It is
 additive, lossless, one line, and it makes `classify` return `trace`.
+
+The mirror is not optional here, because the file is a JSON *array* of traces
+and `classify`'s list branch inspects `payload[0]` for `spans` or `trace_id`. A
+raw MLflow trace has neither at that level — they are at `info.trace_id` and
+`data.spans` — so without the mirror the array classifies as `other`.
+
+Three MLflow 3.15.1 behaviours were measured today and are load-bearing for the
+harness. The field is `info.trace_id`; MLflow 3 renamed it from `request_id`, so
+older examples are wrong. The filesystem tracking backend is in **maintenance
+mode** and makes `get_trace()` return `None` with only a warning, so the harness
+must set a `sqlite:///` tracking URI. And trace logging is **async**, so
+`get_trace(trace_id, flush=True)` is required — without `flush=True` the call
+returns `None` for a trace that was just written.
 
 `other` would in fact be tolerable, since classification is documented as a
 heuristic that seeds the extract stage's expectations and that the skill is free
