@@ -82,7 +82,36 @@ def test_trajectories_classify_as_a_trace():
     assert classify(TRAJECTORIES) == "trace"
 
 
+def _error_payloads(obj) -> list[dict]:
+    """Every `{"error": ...}` object reachable in a trace, JSON-in-string included.
+
+    A tool error comes back as `json.dumps({"error": str(e)})` -- a JSON *string*
+    that MLflow then stores inside a span attribute, so the payload is
+    double-encoded and has to be parsed rather than matched. Measured: with the
+    three traces carrying genuine tool errors excluded, `"error" in
+    json.dumps(trace)` still returns True, because every tool's description says
+    it "will return an appropriate error message". Matching the substring tests
+    the schema's prose, not the observation.
+    """
+    found: list[dict] = []
+    if isinstance(obj, dict):
+        if "error" in obj:
+            found.append(obj)
+        for value in obj.values():
+            found += _error_payloads(value)
+    elif isinstance(obj, list):
+        for value in obj:
+            found += _error_payloads(value)
+    elif isinstance(obj, str):
+        try:
+            parsed = json.loads(obj)
+        except (json.JSONDecodeError, TypeError):
+            return found
+        found += _error_payloads(parsed)
+    return found
+
+
 def test_at_least_one_trace_observed_an_error_response(traces):
     """Four of the control run's five gaps are error-path questions. A fixture
     with no observed error cannot close any of them."""
-    assert any("error" in json.dumps(trace) for trace in traces)
+    assert any(_error_payloads(trace) for trace in traces)
