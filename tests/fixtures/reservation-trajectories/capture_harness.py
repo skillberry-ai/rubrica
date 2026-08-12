@@ -37,6 +37,7 @@ SERVER_PORT = 8765
 
 TOOL_DIR = Path("/home/bnayahu/work/rossoctl/examples/mcp/reservation_tool")
 AGENT_SRC = Path("/home/bnayahu/work/rossoctl/examples/a2a/reservation_service/src")
+MODEL = "Azure/gpt-4.1"
 
 
 def capture_tools_list(out_path: Path) -> int:
@@ -99,6 +100,165 @@ def start_server() -> subprocess.Popen:
     raise RuntimeError(f"MCP server did not open {SERVER_HOST}:{SERVER_PORT} within 30s")
 
 
+# Ten prompts. Five happy paths, five aimed at the output questions the control
+# run could not answer. Prompts 7 and 8 name an obviously-invalid id explicitly,
+# because a model told only "a restaurant that does not exist" will search first
+# and never drive the error path.
+#
+# {restaurant_id} and {reservation_id} are filled from an OBSERVED span output,
+# never authored -- see substitute() below.
+PROMPTS: list[tuple[str, str]] = [
+    ("p01-search", "Find Italian restaurants in Boston"),
+    (
+        "p02-search-then-check",
+        "Find Italian restaurants in Boston, then check availability at the first "
+        "one for 4 people on 2025-03-15 at 7:00 PM",
+    ),
+    (
+        "p03-place",
+        "Book a table at restaurant {restaurant_id} for 2025-03-15T19:00:00, party "
+        "of 4. Name: Jane Smith, Phone: +1-555-987-6543, Email: jane@example.com",
+    ),
+    ("p04-list", "List all reservations for jane@example.com"),
+    ("p05-cancel", "Cancel reservation {reservation_id} because plans changed"),
+    ("p06-search-empty", "Find Ethiopian restaurants in Fargo"),
+    (
+        "p07-check-unknown",
+        "Check availability at restaurant rest_999 for 2 people on 2025-03-15 at 8:00 PM",
+    ),
+    (
+        "p08-place-unknown",
+        "Book a table at restaurant rest_999 for 2025-03-15T20:00:00, party of 2. "
+        "Name: Test User, Phone: +1-555-000-0000, Email: test@example.com",
+    ),
+    ("p09-list-empty", "List all reservations for nobody@example.com"),
+    ("p10-cancel-unknown", "Cancel reservation reservation_deadbeef1234 because it does not exist"),
+]
+
+
+def tool_outputs(result: dict) -> list[tuple[str, str]]:
+    """(tool_name, raw content) for every ToolMessage in a graph result.
+
+    Matched on class name rather than isinstance to avoid importing
+    langchain_core.messages at module scope, which would make the tools-list
+    subcommand require the agent's dependency set for no reason.
+    """
+    out = []
+    for m in result.get("messages", []):
+        if type(m).__name__ == "ToolMessage":
+            out.append((getattr(m, "name", ""), m.content))
+    return out
+
+
+def substitute(text: str, observed: dict[str, str]) -> str | None:
+    """Fill {restaurant_id}/{reservation_id} from observed spans, or refuse.
+
+    Returns None when a needed value was never observed. That is deliberate: the
+    alternative is inventing an id, which would make this harness the oracle for
+    the very system the experiment withholds. A skipped prompt is recorded as a
+    skip; it is never replaced by a plausible-looking guess.
+    """
+    needed = [k for k in ("restaurant_id", "reservation_id") if "{" + k + "}" in text]
+    for key in needed:
+        if not observed.get(key):
+            return None
+    return text.format(**{k: observed[k] for k in needed})
+
+
+def capture_trajectories(out_path: Path) -> dict:
+    """Drive the ten prompts through the real graph, returning a run summary.
+
+    Drives `graph.ainvoke` directly instead of the A2A HTTP layer. graph.py is
+    cleanly separable -- get_mcpclient() and get_graph() are module-level and
+    agent.py only wraps them -- so this is a genuine full agent turn (LLM
+    planning, tool calls, final answer) with no server to stand up.
+    """
+    import asyncio
+
+    import mlflow
+    from langchain_core.messages import HumanMessage
+
+    # Measured on MLflow 3.15.1: the filesystem tracking backend is in
+    # maintenance mode and makes get_trace() return None with only a warning, so
+    # a sqlite URI is mandatory rather than tidy.
+    db = Path("/tmp/rubrica-lab/capture/mlflow.db").resolve()
+    db.parent.mkdir(parents=True, exist_ok=True)
+    mlflow.set_tracking_uri(f"sqlite:///{db}")
+    mlflow.set_experiment("reservation-service-trajectories")
+    mlflow.langchain.autolog()
+
+    os.environ["MCP_URL"] = f"http://{SERVER_HOST}:{SERVER_PORT}/mcp"
+    os.environ["MCP_TRANSPORT"] = CLIENT_TRANSPORT
+    os.environ["LLM_API_BASE"] = os.environ["OPENAI_API_BASE"].rstrip("/") + "/v1"
+    os.environ["LLM_API_KEY"] = os.environ["OPENAI_API_KEY"]
+    os.environ["LLM_MODEL"] = MODEL
+
+    sys.path.insert(0, str(AGENT_SRC))
+    from reservation_service.graph import get_graph, get_mcpclient
+
+    traces: list[dict] = []
+    summary = {"model": MODEL, "prompts": []}
+    observed: dict[str, str] = {}
+
+    async def _run():
+        graph = await get_graph(get_mcpclient())
+        for pid, template in PROMPTS:
+            text = substitute(template, observed)
+            if text is None:
+                summary["prompts"].append({"id": pid, "status": "skipped-unobserved"})
+                continue
+            try:
+                result = await graph.ainvoke({"messages": [HumanMessage(content=text)]})
+            except Exception as exc:  # a failed turn is data, not a crash
+                summary["prompts"].append({"id": pid, "status": "error", "detail": str(exc)[:300]})
+                continue
+
+            calls = tool_outputs(result)
+            for name, content in calls:
+                try:
+                    payload = json.loads(content)
+                # TypeError alongside JSONDecodeError: measured on the first live run --
+                # a ToolMessage.content can arrive as a list of content blocks rather
+                # than a str, which json.loads rejects with TypeError, not
+                # JSONDecodeError. This only widens what the id-extraction heuristic
+                # below treats as "not parseable"; it has no effect on the captured
+                # trace itself, which mlflow already logged independently.
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if name == "search_restaurants" and isinstance(payload, list) and payload:
+                    observed.setdefault("restaurant_id", payload[0].get("id", ""))
+                if name == "place_reservation" and isinstance(payload, dict) and payload.get("id"):
+                    observed.setdefault("reservation_id", payload["id"])
+
+            tid = mlflow.get_last_active_trace_id()
+            # flush=True is mandatory: trace logging is async, and without it
+            # get_trace returns None for a trace written moments earlier.
+            trace = mlflow.get_trace(tid, flush=True) if tid else None
+            if trace is None:
+                summary["prompts"].append({"id": pid, "status": "no-trace", "text": text})
+                continue
+            d = trace.to_dict()
+            # Additive mirror. classify() inspects payload[0] for `spans` or
+            # `trace_id`; a raw MLflow trace has neither at that level (they are
+            # info.trace_id and data.spans), so without this the array
+            # classifies as `other`. MLflow 3 renamed request_id -> trace_id.
+            d["trace_id"] = d["info"]["trace_id"]
+            traces.append(d)
+            summary["prompts"].append(
+                {
+                    "id": pid,
+                    "status": "captured",
+                    "text": text,
+                    "tools_called": [n for n, _ in calls],
+                }
+            )
+
+    asyncio.run(_run())
+    out_path.write_text(json.dumps(traces, indent=2) + "\n", encoding="utf-8")
+    summary["traces_written"] = len(traces)
+    return summary
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -113,7 +273,14 @@ def main() -> int:
         print(f"wrote {args.out} with {n} tools")
         return 0
     if args.command == "trajectories":
-        raise SystemExit("trajectories: implemented in Task 2")
+        proc = start_server()
+        try:
+            summary = capture_trajectories(Path(args.out))
+        finally:
+            proc.terminate()
+            proc.wait(timeout=10)
+        print(json.dumps(summary, indent=2))
+        return 0
     return 2
 
 
