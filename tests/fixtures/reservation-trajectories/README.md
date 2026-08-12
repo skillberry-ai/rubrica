@@ -99,3 +99,29 @@ result of the model's own choice, not a parser artifact.
 Captured in one pass. No prompt was re-run to obtain a better trace. A prompt
 that failed to drive its intended path is recorded as such, and the gap it was
 aimed at stays open.
+
+## Staging for intake
+
+`trajectories.json` is the authentic capture and stays whole here. Intake,
+however, registers **one file per trace**, split from this array in array order
+and named from `capture_harness.py`'s own `PROMPTS` ids
+(`trajectory-p01-search.json` … `trajectory-p10-cancel-unknown.json`). Each split
+file is a complete MLflow trace verbatim, keeping the top-level `trace_id`
+mirror, so `intake.classify` returns `trace` for each. The mapping was verified
+by content before staging — every trace's `info.request_preview` was checked
+against the prompt it is named for, rather than trusted by position.
+
+The reason is a measurement: the combined array is **~228k tokens**, larger than
+a 200k context window, so no single `rb-extract` member could read it. Almost all
+of that is MLflow redundancy — `spanInputs`/`spanOutputs` repeat the entire
+message history at every step, and `mlflow.chat.tools` repeats the tool schema in
+all 100 spans, which is `tools-list.json` duplicated a hundred times.
+
+Stripping those attributes was considered and **rejected**. It would have cut the
+file by roughly 90% and kept a single input, but it would have put the author
+inside the data path, and "deduplicating" is one short step from curating. A
+mechanical split loses nothing and keeps this file the record.
+
+One consequence worth stating: ten trace files mean ten `rb-extract` members, each
+seeing exactly one run and none seeing a sibling. That is a stronger fan-out
+isolation test than one member reading all ten would have been.
