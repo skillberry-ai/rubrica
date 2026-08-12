@@ -40,7 +40,15 @@ examined that fixture. It was 1139 as of `a31c4d0`; the seven added since are
 `test_utilisation.py`'s five, plus two `test_cli.py` grows for free whenever
 `cli.SUBCOMMANDS` gains an entry — its `parametrize("command",
 sorted(subcommand_names()))` × `parametrize("breakage", ...)` picked up
-`claim-utilisation` automatically — re-measure it here when you add tests.)
+`claim-utilisation` automatically. It was 1146 as of `c6a1020`; the two added
+since are `e20726c`'s new phrase-pin assertions in `test_skills_extract.py`
+and `test_skills_reconcile.py`, unchanged in count by `399dba5`'s
+whitespace-normalisation fix to those same two. It was 1148 as of `399dba5`;
+the two removed since are Task 3's deletion of
+`test_the_recorded_world_model_keeps_its_pre_rubrica_spelling` (one
+parametrized test, two ids), retired per spec §6's ruling that this file's
+re-recording obligation wins its documented contradiction with that test —
+re-measure it here when you add tests.)
 
 Commands in `README.md` assume the venv is on `PATH`; otherwise prefix `uv run`.
 Four env overrides exist: `RUBRICA_SCHEMA_DIR` (`validate.py`),

@@ -175,3 +175,72 @@ genuinely defensible on this input, and it is also why this run's `unresolved`
 answer is not the same question. A contradiction where nothing licenses
 preferring either side needs its own fixture; that is what the negative fixtures
 added later exist for.
+
+## Run record: round 2, re-record after the entity-modelling change
+
+Task 2 of the claim-utilisation-and-observable-judgment plan added Method step
+4: for every declared capability, if any claim spells out the shape of what
+that capability returns, that shape becomes an entity -- because
+`refs.check_world_model` only checks that cited claims resolve, never that a
+described response shape got modelled. This round re-records the exercise
+against the changed prompt.
+
+Setup per this file's own instructions: a fresh toy run stopped after
+`extract` (`build_toy_run(runs_dir, upto="extract")`), one dispatch, no
+`artifact_id` restriction. Dispatched via `scripts/dispatch-stage.sh`,
+isolated instance, model `sonnet`, effort `medium` (harness defaults; neither
+`RUBRICA_MODEL` nor `RUBRICA_EFFORT` was set). 11 turns, `total_cost_usd`
+`0.5544891` from the transcript's `result` event.
+
+**Both gates clean:** `rubrica validate --stage reconcile` and `rubrica
+check-refs`, run directly against the written `01-world-model.json`, each
+exited 0.
+
+**The new Method step fired.** The world model now declares **`ent-comment`**
+alongside `ent-ticket` -- a second entity that round 1's recording (above)
+does not have. `ent-comment` carries `comment_id`/`ticket_id`/`position`/`body`
+fields and cites `clm-api-004`, the claim describing what `get_ticket`'s
+success response contains. This is exactly the gap round 1 flagged as a golden-
+fixture defect ("`oc-detail` describes returning comments but no entity models
+them") -- on a live claim set that actually states the shape, the changed
+prompt modelled it instead of leaving it implicit.
+
+**`ent-ticket` carries both required `machine:` invariant forms** (property 3):
+`inv-ticket-comment_count` (`form: count`, tying `tickets.comment_count` to the
+`comments` collection via `ticket_id`) and `inv-ticket-id-unique` (`form:
+unique` on `tickets.ticket_id`). Both filed as `machine`, not `prose`.
+
+**Property 1 (contradiction recorded) -- PASS.** `ctr-get_ticket-unknown-id`
+stayed `unresolved`, `claim_a: clm-notes-004`, `claim_b: clm-trace-002`,
+rationale: "Only one claim supports each side... nothing here breaks the tie,
+so the honest resolution is unresolved rather than a preference for either."
+This reads the corroboration the same way round 1's tension (above) worried
+about -- one claim per side, not two -- so `unresolved` is what property 4
+grounded-in-the-claim-set actually asks for on this reading, and the rationale
+names the claim ids rather than appealing to convention.
+
+**Property 2 (denominator) -- 6 capability cells**, down from round 1's 7 on
+the same fixture claims (three outcome classes for `find_tickets`, three for
+`get_ticket`) -- a different split than round 1's 3+4, not a like-for-like
+regression; nothing here isolates whether the new entity-modelling step (which
+does not touch outcome-class enumeration) or ordinary model variance moved
+that number, and this file will not overclaim which.
+
+**Two gaps, both blocking `propose`:** `gap-find_tickets-bad-filter` ("find_tickets
+behaviour on an invalid filter value") and `gap-get_ticket-missing-id`
+("get_ticket behaviour on a missing or malformed ticket_id"). One fewer than
+round 1's three -- again recorded as observed, not diagnosed, since this round
+did not isolate the cause.
+
+**Read audit (`scripts/audit-reads.sh`, cross-checked against raw `.input.command`
+because the script's `sort -u` on multi-line bash strings visually interleaves
+them with unrelated SKILL.md content read out by a `Read` call earlier in the
+same transcript -- a display artifact of the audit script, not a violation),
+against the contract's `reads = ["manifest", "claims_dir"]`:** `Read` calls were
+`SKILL.md`, `src/rubrica/schema/world-model-0.1.json`, and the run's three
+`01-claims/*.json` files; the only `Write` was `01-world-model.json`. All four
+`Bash` lines were `cat manifest.json`/`ls 01-claims/`, one `find` locating the
+schema file, and two `rubrica validate`/`check-refs` invocations. The schema
+read is the same one noted as expected in round 1's context; no sibling run, no
+`docs/`, `tests/`, or other skill was read. `permission_denials` was empty and
+no tool call returned an error. Nothing out-of-contract.

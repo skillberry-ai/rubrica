@@ -1,18 +1,19 @@
 {
   "schema_version": "0.1",
   "target": {
-    "name": "ticketq-contra",
+    "name": "ticketq",
     "interface": "mcp"
   },
   "capabilities": [
     {
       "id": "cap-find-tickets",
-      "operation": "find_tickets",
+      "operation": "query_tickets.find_tickets",
       "binding": {
         "tool": "query_tickets",
         "fixed_args": { "action": "find_tickets" }
       },
       "params": [
+        { "name": "action", "type": "string", "required": true },
         { "name": "queue", "type": "string", "required": false },
         { "name": "status", "type": "string", "required": false }
       ],
@@ -20,40 +21,40 @@
         {
           "id": "oc-find-success",
           "kind": "success",
-          "description": "Returns a list of tickets matching the given queue and/or status filters."
+          "description": "Returns a list of tickets matching the given queue and status filters."
         },
         {
           "id": "oc-find-empty",
           "kind": "empty",
-          "description": "Returns an empty list when no ticket matches the given filters; directly observed for queue=shipping, status=open."
+          "description": "Returns an empty array when no ticket matches the filters; observed directly in a trace call (queue=shipping, status=open) that returned []."
         },
         {
-          "id": "oc-find-bad-arg",
+          "id": "oc-find-error",
+          "kind": "error",
+          "description": "query_tickets never errors on a read: every call, including find_tickets, returns a value and nothing about a lookup raises partway through -- so there is no error path for find_tickets to enumerate."
+        },
+        {
+          "id": "oc-find-notfound-distinction",
           "kind": "underspecified",
-          "description": "No claim describes what happens when find_tickets is called with an out-of-enum queue/status value, or when action is omitted; the schema states the constraint but nothing states what enforcement looks like."
+          "description": "No claim addresses whether find_tickets can ever signal a distinct 'not found' outcome apart from returning an empty array. Because it is a filtered list read rather than a lookup of one target, and its queue/status parameters are restricted to a closed enum, nothing in the claim set says whether some filter state could produce a distinct not-found signal instead of an empty list."
         }
       ],
       "claims": [
-        "clm-api-json-001",
-        "clm-api-json-002",
-        "clm-api-json-003",
-        "clm-api-json-004",
-        "clm-api-json-005",
-        "clm-api-json-007",
-        "clm-api-json-008",
-        "clm-trace-json-001",
-        "clm-trace-json-002"
+        "clm-api-json-001", "clm-api-json-002", "clm-api-json-003",
+        "clm-api-json-004", "clm-api-json-005", "clm-api-json-007",
+        "clm-trace-json-001", "clm-trace-json-002", "clm-notes-md-008"
       ],
       "confidence": "high"
     },
     {
       "id": "cap-get-ticket",
-      "operation": "get_ticket",
+      "operation": "query_tickets.get_ticket",
       "binding": {
         "tool": "query_tickets",
         "fixed_args": { "action": "get_ticket" }
       },
       "params": [
+        { "name": "action", "type": "string", "required": true },
         { "name": "ticket_id", "type": "integer", "required": true }
       ],
       "outcome_classes": [
@@ -63,25 +64,26 @@
           "description": "Returns one ticket together with its comments, ordered by position."
         },
         {
-          "id": "oc-get-unknown-id",
+          "id": "oc-get-empty-comments",
           "kind": "underspecified",
-          "description": "Behavior for a ticket_id no ticket has is contested by the claims themselves: notes.md states in one place that this is an error, and states elsewhere in the same document that the store never errors on a read (get_ticket included); the one captured trace call for an id not otherwise established as valid returned a normal, non-error empty object. See contra-get-ticket-error-vs-no-error and contra-get-ticket-error-vs-trace; not filed as error or not_found because that would silently pick a side the claims do not settle."
+          "description": "No claim states what get_ticket returns for a ticket that exists but has zero comments. The Ticket/Comment entity claims permit comment_count to be 0, but nothing says whether the response shape differs (e.g. an empty comments array) in that case."
         },
         {
-          "id": "oc-get-bad-arg",
+          "id": "oc-get-notfound-dispute",
           "kind": "underspecified",
-          "description": "No claim describes what happens when get_ticket is called without ticket_id, or with a ticket_id of the wrong type; the schema only marks ticket_id as not globally required, not what a missing value does for this specific action."
+          "description": "The claim set disagrees on what happens when get_ticket is called with an id no ticket has. notes.md's clm-notes-md-007 states this is an error, while notes.md's own clm-notes-md-008 states query_tickets never errors on a read and that nothing about a lookup raises partway through, and an independent trace (clm-trace-json-003) shows one captured get_ticket call with an unknown id returning an empty object rather than raising. Which behavior actually occurs is unresolved -- see the recorded contradictions."
+        },
+        {
+          "id": "oc-get-badarg",
+          "kind": "underspecified",
+          "description": "No claim addresses what happens when get_ticket is called with a missing or non-integer ticket_id, as opposed to a well-formed integer id that has no ticket. clm-api-json-002 only requires 'action', and clm-api-json-006 only states ticket_id's type, without describing invocation-time validation behavior."
         }
       ],
       "claims": [
-        "clm-api-json-002",
-        "clm-api-json-003",
-        "clm-api-json-006",
-        "clm-api-json-009",
-        "clm-trace-json-003",
-        "clm-trace-json-004",
-        "clm-notes-md-006",
-        "clm-notes-md-007"
+        "clm-api-json-001", "clm-api-json-002", "clm-api-json-003",
+        "clm-api-json-006", "clm-api-json-008",
+        "clm-trace-json-001", "clm-trace-json-003",
+        "clm-notes-md-007", "clm-notes-md-008"
       ],
       "confidence": "medium"
     }
@@ -104,7 +106,7 @@
       "invariants": [
         {
           "id": "inv-ticket-comment-count",
-          "statement": "comment_count on a ticket is always the number of Comment records that reference it via ticket_id; the field is recomputed on read, so a stored value that disagrees with the actual comment records is overwritten.",
+          "statement": "comment_count on a ticket is always the number of comment records attached to it; the field is recomputed on read, so a stored value that disagrees is overwritten.",
           "machine": {
             "form": "count",
             "collection": "tickets",
@@ -116,7 +118,7 @@
         },
         {
           "id": "inv-ticket-id-unique",
-          "statement": "ticket_id is unique across every queue.",
+          "statement": "ticket_id is unique across every queue, not merely unique within a single queue.",
           "machine": {
             "form": "unique",
             "collection": "tickets",
@@ -124,19 +126,19 @@
           }
         },
         {
-          "id": "inv-ticket-queue-status-domain",
-          "statement": "queue is always one of billing or shipping, and status is always one of open, blocked, or closed. Inferred: no claim states this as an entity-level data rule directly -- it is assembled from the tool schema's enum constraints on the queue and status parameters, together with notes.md naming billing and shipping as the two queues ticketq fronts. Recorded as prose rather than machine because enum-membership is not one of the four implemented machine forms.",
-          "prose": "queue in {billing, shipping}; status in {open, blocked, closed}, inferred from the tool's parameter enums and notes.md's queue list rather than stated as a data invariant outright."
+          "id": "inv-ticket-queue-enum",
+          "statement": "Inferred: queue is constrained to \"billing\" or \"shipping\", combining query_tickets' queue parameter enum (clm-api-json-004) with notes.md's statement that ticketq fronts exactly those two support queues (clm-notes-md-001). This is a value-membership constraint, not one of the four machine forms, so it is recorded as prose.",
+          "prose": "queue in {\"billing\", \"shipping\"}."
+        },
+        {
+          "id": "inv-ticket-status-enum",
+          "statement": "Inferred: status is constrained to \"open\", \"blocked\", or \"closed\", per query_tickets' status parameter enum (clm-api-json-005). No claim states this as a stored-data rule directly, only as the parameter's accepted values, so it is recorded as prose rather than promoted to machine.",
+          "prose": "status in {\"open\", \"blocked\", \"closed\"}."
         }
       ],
       "claims": [
-        "clm-api-json-010",
-        "clm-api-json-004",
-        "clm-api-json-005",
-        "clm-notes-md-001",
-        "clm-notes-md-002",
-        "clm-notes-md-004",
-        "clm-notes-md-005"
+        "clm-api-json-004", "clm-api-json-005", "clm-api-json-009",
+        "clm-notes-md-001", "clm-notes-md-005", "clm-notes-md-006"
       ]
     },
     {
@@ -152,80 +154,80 @@
       "relations": [
         { "name": "ticket", "target_entity_id": "ent-ticket", "cardinality": "one" }
       ],
+      "invariants": [],
       "claims": [
-        "clm-api-json-011",
-        "clm-api-json-012"
+        "clm-api-json-008", "clm-api-json-010", "clm-api-json-011"
       ]
     }
   ],
   "actors": [
     {
-      "id": "actor-support-engineer",
+      "id": "act-support-engineer",
       "name": "Support engineer",
-      "claims": [
-        "clm-notes-md-003"
-      ]
+      "claims": ["clm-notes-md-002"]
     }
   ],
   "goals": [
     {
-      "id": "goal-find-actionable-ticket",
-      "actor_id": "actor-support-engineer",
-      "statement": "Find which ticket in a given queue still needs the engineer's action.",
+      "id": "goal-find-ticket-to-act-on",
+      "actor_id": "act-support-engineer",
+      "statement": "Find the ticket in a queue that still needs the engineer's attention, via a single lookup.",
       "expected_hop_depths": [1],
-      "claims": [
-        "clm-notes-md-008"
-      ]
+      "claims": ["clm-notes-md-003", "clm-notes-md-009"]
     },
     {
-      "id": "goal-find-why-stuck",
-      "actor_id": "actor-support-engineer",
-      "statement": "Find why a specific ticket is stuck, by locating the ticket and reading its comments for the blocker.",
-      "expected_hop_depths": [1, 2],
-      "claims": [
-        "clm-notes-md-009",
-        "clm-api-json-009"
-      ]
+      "id": "goal-explain-ticket-stuck",
+      "actor_id": "act-support-engineer",
+      "statement": "Explain why a ticket is stuck: find the ticket, then read its comments to find where the blocker is named.",
+      "expected_hop_depths": [2],
+      "claims": ["clm-notes-md-004", "clm-notes-md-010"]
     }
   ],
   "contradictions": [
     {
-      "id": "contra-get-ticket-error-vs-no-error",
-      "claim_a": "clm-notes-md-006",
-      "claim_b": "clm-notes-md-007",
-      "nature": "notes.md states, in one place, that get_ticket called with an id no ticket has is an error, not an empty result; a few lines later in the same document it states that the store never errors on any read and that get_ticket is itself a read. Both describe the same operation's behavior for the same input class and cannot both hold as written.",
+      "id": "ctr-notfound-error-vs-empty",
+      "claim_a": "clm-notes-md-007",
+      "claim_b": "clm-trace-json-003",
+      "nature": "clm-notes-md-007 states that calling get_ticket with an id no ticket has is an error; clm-trace-json-003 is an independent, captured call to get_ticket with an unknown id (9999) that returned an empty object rather than raising.",
       "resolution": "unresolved",
-      "rationale": "Both statements are 'stated', not inferred, and both come from the same document, so neither corroborates the other -- notes.md does not give one confident answer here, it gives two that cancel out. No independent artifact settles it either: api.json's claims describe only get_ticket's success return (clm-api-json-009) and say nothing about behavior for an unknown id, so the two-independent-artifacts pattern that would justify a preferred_a/preferred_b resolution does not apply to this claim set the way it might look like it should from the surface wording. The remaining piece of evidence is trace-json's single captured call (see contra-get-ticket-error-vs-trace), which is not strong enough on its own to break this tie. Picking a side here would be resolving a document's self-contradiction with nothing in the claims to justify the choice."
+      "rationale": "Exactly one claim states the error behavior and exactly one independent artifact shows the empty-object behavior; nothing else in the claim set breaks the tie between a stated design rule and a single captured example. This is the shape the toy fixture's own guidance warns about: with corroboration removed on both sides, one claim each, the only honest resolution is unresolved -- not a guess about which is more typical of an API like this."
+
     },
     {
-      "id": "contra-get-ticket-error-vs-trace",
-      "claim_a": "clm-notes-md-006",
-      "claim_b": "clm-trace-json-004",
-      "nature": "notes.md states get_ticket on an unknown id is an error. The one captured trace span for get_ticket (ticket_id=9999) shows an ordinary, non-error return of an empty object rather than an error.",
+      "id": "ctr-notesmd-internal-conflict",
+      "claim_a": "clm-notes-md-007",
+      "claim_b": "clm-notes-md-008",
+      "nature": "Within notes.md itself, clm-notes-md-007 states get_ticket on an unknown id is an error, while clm-notes-md-008 states query_tickets never errors on a read and that nothing about a lookup raises partway through -- a general statement that, read plainly, would cover get_ticket on an unknown id and directly contradicts clm-notes-md-007.",
       "resolution": "unresolved",
-      "rationale": "A single reverse_engineered trace span is on its own weaker than a stated document claim, and clm-trace-json-004 itself notes that no other span in this trace establishes 9999 as an id no ticket actually has -- so the empty object is not confidently a not-found response at all, it might be something else. Nothing else in the claim set corroborates the trace's reading over the document's or vice versa, and notes.md cannot lend its own weight to either side of this comparison because it already contradicts itself on this exact question (clm-notes-md-007). unresolved is the only reading that does not invent a preference the claims do not support."
+      "rationale": "Both statements come from the same document; the claim set gives no way to tell which the author intended as authoritative for the not-found case specifically. clm-trace-json-003's observed empty-object return is consistent with clm-notes-md-008's general reading, but a single captured trace call is not independent, tie-breaking corroboration for treating 008 as authoritative over 007 -- doing so would rest on '008 is the general rule plus one matching example, so it must be right,' which is the same convention-standing-in-for-evidence reasoning this stage is supposed to refuse rather than reach for."
     }
   ],
   "gaps": [
     {
-      "id": "gap-get-ticket-unknown-id-contract",
-      "subject": "get_ticket's behavior when called with a ticket_id no ticket has",
-      "unknown": "Whether the call raises an error (as notes.md states in one place) or returns a normal, non-error value such as an empty object (as notes.md states elsewhere in the same document, and as the one captured trace span shows) for an id with no matching ticket.",
-      "why_it_matters": "tg-propose cannot design a not-found scenario for get_ticket, and tg-challenge cannot grade a transcript's behavior against such a call, without knowing which of these two contradictory contracts actually holds. Inventing an answer here -- for instance because APIs conventionally error on bad ids -- would let a guess the claims do not support flow into every scenario and grading decision built on it.",
-      "blocks": ["propose", "challenge"],
-      "suggested_input": "A live call to get_ticket with a ticket_id confirmed absent from the store, or a spec excerpt that states the not-found contract without contradicting itself elsewhere, would settle which side is correct."
+      "id": "gap-get-ticket-empty-comments",
+      "subject": "get_ticket's response shape for a ticket with zero comments",
+      "unknown": "Whether or how the get_ticket response differs (e.g. an empty comments array vs. some other shape) when a ticket exists but has no attached comments.",
+      "why_it_matters": "rb-propose needs this to write a sound gold answer for any get_ticket scenario targeting a comment-less ticket; inventing the shape would inject an unstated fact into every scenario built on it.",
+      "blocks": ["propose"]
     },
     {
-      "id": "gap-invalid-argument-behavior",
-      "subject": "query_tickets' behavior on a schema-invalid call",
-      "unknown": "Whether a call with a missing required action, an out-of-enum action/queue/status value, a non-integer ticket_id, or a get_ticket call with no ticket_id is rejected with a validation error, silently coerced, or handled some other way. No claim in api.json, notes.md, or trace.json describes behavior for a malformed call -- only the schema shapes a well-formed call must satisfy.",
-      "why_it_matters": "tg-propose cannot design a meaningful bad-argument scenario for either find_tickets or get_ticket without knowing what the tool actually does when an argument violates the schema, and nothing here should be filled in from how tools 'usually' validate input, since no claim actually establishes that for this target.",
+      "id": "gap-get-ticket-badarg",
+      "subject": "get_ticket's behavior on a missing or non-integer ticket_id",
+      "unknown": "Whether an invocation with a missing or wrongly-typed ticket_id is rejected as an error, coerced, or handled some other way, as distinct from a well-formed integer id that simply has no ticket.",
+      "why_it_matters": "rb-propose and rb-challenge both need this to design or perturb get_ticket scenarios around malformed input without inventing the target's actual validation behavior.",
+      "blocks": ["propose", "challenge"]
+    },
+    {
+      "id": "gap-find-tickets-notfound-distinction",
+      "subject": "Whether find_tickets has any 'not found' outcome distinct from an empty result list",
+      "unknown": "No claim addresses whether some filter state could produce a distinct not-found or invalid-filter signal from find_tickets, as opposed to an empty array.",
+      "why_it_matters": "rb-propose needs this before it can soundly claim a find_tickets scenario is exercising a 'not found' path rather than merely an 'empty results' path.",
       "blocks": ["propose"]
     }
   ],
   "denominator": {
     "version": 1,
-    "capability_cells": 6,
+    "capability_cells": 8,
     "goals": 2
   }
 }

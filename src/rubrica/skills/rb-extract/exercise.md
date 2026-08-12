@@ -163,3 +163,41 @@ contradict the section's own opening paragraph.
 `test_the_inputs_section_forbids_a_sibling_read_whatever_the_purpose` in
 `tests/unit/test_skills_extract.py` pins both halves of the wording, scoped
 to section 1.
+
+## Run record: round 3, re-record after the section-coverage change
+
+Task 2 of the claim-utilisation-and-observable-judgment plan added Method's
+"Cover the whole artifact" paragraph: for a prose artifact, every `##` heading
+must be cited by at least one claim's `evidence.locator`, or the report must
+say why not. This round re-records the exercise against the changed prompt,
+per this repository's obligation to re-record after a skill changes.
+
+Dispatched via `scripts/dispatch-stage.sh`, isolated instance
+(`--safe-mode`, its own `CLAUDE_CONFIG_DIR`, `permissions.deny` over `docs/`,
+`tests/`, `CLAUDE.md`, `README.md` and every sibling skill), model `sonnet`,
+effort `medium` (both the script's defaults -- neither `RUBRICA_MODEL` nor
+`RUBRICA_EFFORT` was set). One dispatch, `artifact_id: api-json`, against a
+toy run stopped after `intake`. 8 turns, `total_cost_usd` `0.39678075` from
+the transcript's `result` event.
+
+**Both gates clean:** `rubrica validate --stage extract` and `rubrica
+check-refs` each exited 0 against the written `01-claims/api-json.json` (13
+claims: 6 `capability`, 4 `entity`, 3 `outcome_class`).
+
+**Read audit (`scripts/audit-reads.sh`), against the contract's `reads =
+["manifest", "input_file"]`:** `Read` calls were `SKILL.md`, its own
+`00-inputs/api-json.json`, and `manifest.json`; the only `Write` was its own
+`01-claims/api-json.json`. The two `Bash` lines were both `rubrica validate`
+invocations plus one `find` for the claims schema path -- no sibling input,
+no `docs/`, no `tests/`, no other skill. Nothing out-of-contract.
+
+**Scope note, stated plainly rather than overclaimed:** `api-json` is a
+`mcp_tool_schema` artifact, not prose, so this dispatch does not exercise the
+new "Cover the whole artifact" heading rule at all -- that rule is scoped to
+prose artifacts and the toy fixture's only prose input is `notes-md`. This
+round shows the changed prompt still produces a clean, schema-valid,
+gate-passing `api-json` claims file; it is not evidence one way or the other
+about whether the heading-coverage instruction changes behaviour on a prose
+input. Re-running against `notes-md` specifically would be needed to observe
+that, and was not done here because the plan's Step 2 script names `api-json`
+as the slice to dispatch.

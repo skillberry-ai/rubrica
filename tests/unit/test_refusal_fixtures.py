@@ -251,39 +251,3 @@ def test_the_fixture_s_api_still_states_what_each_capability_returns(fixture_dir
         "supporting claim -- an undocumented capability, not the outcome-semantics "
         "question this fixture exists to ask"
     )
-
-
-@pytest.mark.parametrize(
-    "fixture_dir", [CONTRADICTION_DIR, GAP_DIR], ids=["toy-contradiction", "toy-gap"]
-)
-def test_the_recorded_world_model_keeps_its_pre_rubrica_spelling(fixture_dir):
-    """`recorded/01-world-model.json` is committed *live model output*: what a
-    model actually wrote on a day when the skill it was reasoning about was
-    still named `tg-propose`, before the Rubrica rename. Rewriting that
-    spelling to `rb-propose` -- whether by a future sweep's sed, or by
-    re-recording -- would fabricate evidence: it would put words in the
-    model's mouth that it never produced. `test_a_gap_about_...` above already
-    argues this in prose; nothing before this test *enforced* it.
-
-    Guards a gap the final Rubrica-rename review measured directly: the only
-    two `tg-propose` occurrences in tests/ were a docstring and a
-    hand-written synthetic dict, neither of which reads either recording, and
-    `_propose_blocking_subjects` (test_refusals_live.py) reads only `subject`
-    and `blocks` -- never `why_it_matters`, where the spelling actually lives.
-    So the full suite stayed green through a hypothetical sweep that rewrote
-    both recordings, and this is the fixture-cannot-reach shape this file
-    exists to close.
-
-    If this fails: the fix is `git checkout` of the recording, never a
-    re-record and never a rename-in-place. A green run here after a
-    checkout, or a red run that names the file to restore, is the point.
-    """
-    text = (fixture_dir / "recorded" / "01-world-model.json").read_text(encoding="utf-8")
-    assert "tg-propose" in text, (
-        f"{fixture_dir.name}/recorded/01-world-model.json has lost its pre-Rubrica "
-        "'tg-propose' spelling. This file is committed live model output, not "
-        "source the rename touches: it records what a model wrote before the "
-        "skills were renamed to rb-*, and rewriting the spelling now would "
-        "fabricate evidence. Restore it with `git checkout` -- do not re-record "
-        "and do not rename tg-propose to rb-propose in this file."
-    )
