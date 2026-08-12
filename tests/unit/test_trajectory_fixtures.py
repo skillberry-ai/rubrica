@@ -13,7 +13,9 @@ prose, so a legitimate re-capture with different LLM wording stays green.
 
 from __future__ import annotations
 
+import ast
 import json
+import re
 
 import pytest
 
@@ -22,6 +24,7 @@ from tests.toy import TRAJECTORIES_DIR
 
 TOOLS_LIST = TRAJECTORIES_DIR / "tools-list.json"
 TRAJECTORIES = TRAJECTORIES_DIR / "trajectories.json"
+CAPTURE_HARNESS = TRAJECTORIES_DIR / "capture_harness.py"
 
 FIVE_TOOLS = frozenset(
     {
@@ -55,11 +58,15 @@ def test_every_tool_specifies_its_inputs(tools_doc):
 
 def test_no_tool_specifies_its_outputs(tools_doc):
     """The premise of the run: outputs are opaque, so trajectories are the only
-    source of output knowledge. If this goes red the spec needs revising, not
-    the assertion."""
+    source of output knowledge. If a tool's declared `outputSchema.properties.result`
+    goes narrower than an opaque string, the spec needs revising, not the
+    assertion. An `outputSchema` that is *absent entirely* is also acceptable --
+    it is strictly more opaque than a declared opaque string, so `.get(..., "string")`
+    defaults it to the value that already passes rather than failing the one
+    direction that strengthens this test's own premise."""
     for tool in tools_doc["tools"]:
         result = tool.get("outputSchema", {}).get("properties", {}).get("result", {})
-        assert result.get("type") == "string", tool["name"]
+        assert result.get("type", "string") == "string", tool["name"]
 
 
 def test_tools_list_classifies_as_an_mcp_tool_schema():
@@ -115,3 +122,52 @@ def test_at_least_one_trace_observed_an_error_response(traces):
     """Four of the control run's five gaps are error-path questions. A fixture
     with no observed error cannot close any of them."""
     assert any(_error_payloads(trace) for trace in traces)
+
+
+def _prompts() -> list[tuple[str, str]]:
+    """The `(id, prompt_text)` pairs from `capture_harness.py`'s own `PROMPTS`
+    list, in order.
+
+    Parsed with `ast.literal_eval` rather than a regex over the whole file.
+    Measured: `re.findall(r'\\("(p\\d\\d-[a-z-]+)"', text)` finds only 6 of the
+    10 ids here, because `ruff format` reflowed several `PROMPTS` entries onto
+    their own line, putting a newline between the tuple's opening `(` and its
+    id string -- the anchor the naive regex depends on. `ast.literal_eval`
+    doesn't care how the source is line-wrapped (that is what makes it a
+    parser and not a pattern match), so the `PROMPTS` assignment is sliced out
+    by its own brackets and evaluated as a list literal instead.
+    """
+    text = CAPTURE_HARNESS.read_text(encoding="utf-8")
+    marker = "PROMPTS: list[tuple[str, str]] = ["
+    start = text.index(marker) + len(marker) - 1  # position of the assignment's own "["
+    end = text.index("]", start) + 1
+    return ast.literal_eval(text[start:end])
+
+
+def test_ten_traces_committed(traces):
+    """The fixture README's staging contract splits `trajectories.json` into
+    one file per trace "in array order" and names each from `PROMPTS`'s ids.
+    Both the count and the order (below) are load-bearing for that split, and
+    nothing else in this file or in `intake`/`check-refs` would notice a
+    re-capture that silently dropped one."""
+    assert len(traces) == 10
+
+
+def test_traces_are_in_prompt_order(traces):
+    """Guards the order the staging split depends on (README, "Staging for
+    intake": split "in array order", named from `PROMPTS`'s ids by position).
+    A reordering here would mislabel every split file with the wrong prompt.
+
+    Matches on the deterministic PROMPT TEXT the harness sent -- specifically,
+    the longest literal chunk outside any `{placeholder}`, since p03 and p05
+    are filled from an observed id before being issued -- never on the model's
+    own wording, so a legitimate re-capture with different LLM prose stays
+    green.
+    """
+    prompts = _prompts()
+    assert len(prompts) == len(traces)
+    for (pid, template), trace in zip(prompts, traces, strict=True):
+        literal_chunks = [chunk.strip() for chunk in re.split(r"\{[^}]*\}", template)]
+        distinctive = max(literal_chunks, key=len)
+        content = json.loads(trace["info"]["request_preview"])["messages"][0]["content"]
+        assert distinctive in content, f"{pid}: expected {distinctive!r} in {content!r}"

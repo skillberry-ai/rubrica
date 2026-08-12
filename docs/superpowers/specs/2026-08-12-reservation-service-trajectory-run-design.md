@@ -145,7 +145,9 @@ a wrong prose invariant in the control's world model.
 
 ## 4. Inputs
 
-Six, and the fan-out is therefore six `rb-extract` dispatches.
+Fifteen, and the fan-out is therefore fifteen `rb-extract` dispatches — not the
+six (five documents plus one `trajectories.json` array) originally planned
+here. §7 below records the measurement that forced the split.
 
 | Staged as | Kind | Origin |
 |---|---|---|
@@ -154,7 +156,7 @@ Six, and the fan-out is therefore six `rb-extract` dispatches.
 | `agent-notes.md` | `design_doc` | `a2a/reservation_service/README.md` |
 | `tools-list.json` | `mcp_tool_schema` | captured `/tools/list` |
 | `mcp-tool-notes.md` | `design_doc` | `mcp/reservation_tool/README.md` |
-| `trajectories.json` | `trace` | captured, all runs in one array |
+| `trajectory-p01-search.json` … `trajectory-p10-cancel-unknown.json` (10 files) | `trace` | captured, one file per run — split mechanics in the fixture README's "Staging for intake" section |
 
 `agent.py` is included because `get_agent_card()` is the only machine-readable
 place the agent describes its own advertised skills, which is part of the
@@ -164,9 +166,10 @@ target's public interface rather than plumbing.
 `providers/base.py`, `providers/mock.py`. The first three are the tool interface
 that `/tools/list` legitimately replaces; the last is the behavioural answer key.
 
-`intake.classify` handles all six without help: `.py` → `source_code`, `.md` →
-`design_doc`, a `{"tools": [...]}` document → `mcp_tool_schema`, and a JSON array
-whose first element carries `trace_id` → `trace`.
+`intake.classify` handles all fifteen without help: `.py` → `source_code`,
+`.md` → `design_doc`, a `{"tools": [...]}` document → `mcp_tool_schema`, and —
+since each staged trace file is a single trace object, not an array — a JSON
+object carrying a top-level `trace_id` → `trace`.
 
 ### Staging, and why it is not optional
 
@@ -175,8 +178,27 @@ rossoctl tree. `manifest.inputs[].source_path` is written by `intake` and read b
 no code in the repository, but it *is* reachable from a dispatched stage, and
 neither `dispatch-stage.sh`'s `permissions.deny` list nor its sandbox
 `allowRead` covers the rossoctl checkout. A stage following `source_path` into
-the original tree could walk to `providers/mock.py`. Staging makes that path
-lead only to the registered inputs.
+the original tree could walk to `providers/mock.py`.
+
+Staging does not, by itself, make that the only path in. Measured after
+capture (`jq '.[0].info.trace_metadata' trajectories.json`): every one of the
+ten trace files carries `info.trace_metadata["mlflow.source.name"]` set to the
+absolute path of `tests/fixtures/reservation-trajectories/capture_harness.py`
+— an MLflow-stamped provenance field, not something the harness added on
+purpose. That file's `TOOL_DIR` and `AGENT_SRC` constants (lines ~38-39) name
+the withheld rossoctl tree, so a staged trace is a **two-hop pointer to the
+answer key**: artifact → harness → `providers/mock.py`.
+
+What actually blocks both paths is `dispatch-stage.sh`'s `DENY` array (around
+line 149), which lists `$REPO/tests` by name — covering the harness file
+itself, since it lives under `tests/fixtures/`. The rossoctl checkout the
+harness points at is covered by neither the permissions layer nor the sandbox,
+as already noted above; the guarantee holds because the deny list keeps a
+dispatched stage from ever reading the pointer in the first place, not because
+staging removed it. The read audit for this run was clean on all fifteen
+slices: no extract member is recorded reading `source_path`,
+`mlflow.source.name`, or anything under the rossoctl tree. No leak was
+observed.
 
 Staging also renames: both READMEs would otherwise slug to `readme-md` and
 `readme-md-2`, which is ambiguous in a fan-out. Extensions must survive the
@@ -305,7 +327,28 @@ to disagree with. The mirror is preferred because it costs nothing and loses
 nothing.
 
 All ten traces go into one `trajectories.json` array, so one extract member sees
-every run.
+every run. That was the plan as written here, and `trajectories.json` remains
+the authentic, unsplit capture on disk — nothing below changes what was
+recorded, only how it is staged for the fan-out.
+
+**Measured after capture, and load-bearing:** the combined array is **~228k
+tokens**, larger than a 200k context window, so no single `rb-extract` member
+could in fact read it — the paragraph above describes a dispatch that cannot
+happen. Almost all of that size is MLflow redundancy — `spanInputs`/
+`spanOutputs` repeat the entire message history at every step, and
+`mlflow.chat.tools` repeats the tool schema in all 100 spans, which is
+`tools-list.json` duplicated a hundred times. Stripping those attributes was
+considered and rejected: it would have cut the file by roughly 90% and kept
+the single-input plan intact, but it would have put the spec's author inside
+the data path, and "deduplicating" is one short step from curating. A human
+ruling instead split the array into one file per trace, mechanically, in array
+order — fifteen registered inputs (five documents plus ten traces) rather than
+six, and ten `rb-extract` dispatches over the traces rather than the one this
+section originally called for. The fixture README's "Staging for intake"
+section carries the split mechanics and the isolation consequence, which runs
+opposite to what this section assumed: ten members, each seeing exactly one
+run and none seeing a sibling, is a *stronger* fan-out isolation test than one
+member reading all ten would have been — not a weaker one.
 
 ## 8. Pre-registered predictions
 

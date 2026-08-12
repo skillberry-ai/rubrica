@@ -8,6 +8,28 @@ without this record nobody could later distinguish a pipeline change from a
 capture change. Changing the harness obliges re-recording, and that re-record is
 a reviewable diff.
 
+## Re-running the harness
+
+```bash
+cd /tmp/rubrica-lab/capture
+FIX=/home/bnayahu/work/kaegis/rubrica/tests/fixtures/reservation-trajectories
+uv run --with fastmcp --with pydantic --with pydantic-settings --with mlflow \
+       --with langgraph --with langchain --with langchain-core --with langchain-openai \
+       --with langchain-mcp-adapters --with mcp \
+  python "$FIX/capture_harness.py" trajectories --out "$FIX/trajectories.json"
+```
+
+This is the command that actually worked (Task 2 report), not the plan's
+original version: `--with langchain` is required in addition to
+`--with langchain-core` because `mlflow.langchain.autolog()` imports the
+`langchain` package itself for a version check, even though the harness never
+imports it directly. Without it the run crashes with `ModuleNotFoundError: No
+module named 'langchain'` before a single prompt is issued.
+
+`capture_harness.py`'s `TOOL_DIR` and `AGENT_SRC` constants are absolute paths
+into this author's `rossoctl` checkout. Anyone else re-running the harness
+must edit both before it will find the target.
+
 ## Capture conditions
 
 | | |

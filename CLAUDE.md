@@ -27,14 +27,16 @@ make lint      # ruff check --fix
 make format    # ruff format
 ```
 
-Baseline: **1137 passed, 4 skipped**; `make check` clean; `uv run rubrica
+Baseline: **1139 passed, 4 skipped**; `make check` clean; `uv run rubrica
 check-skills` exits 0. Anything else means you broke something. (It was 1126 as
 of the skills build; the three added since are `f3b9d30`'s, and this line went
 stale because it names a build rather than a commit. It was 1129 as of
 `f3b9d30`; the eight added since are `test_trajectory_fixtures.py`'s, guarding
 the reservation-service trajectory fixture (Task 3 of the
-2026-08-12-reservation-service-trajectory-run) — re-measure it here when you
-add tests.)
+2026-08-12-reservation-service-trajectory-run). It was 1137 as of `373130b`;
+the two added since are `test_trajectory_fixtures.py`'s trace-count and
+prompt-order guards, closing findings 3 and 4 of the whole-branch review that
+examined that fixture — re-measure it here when you add tests.)
 
 Commands in `README.md` assume the venv is on `PATH`; otherwise prefix `uv run`.
 Four env overrides exist: `RUBRICA_SCHEMA_DIR` (`validate.py`),
