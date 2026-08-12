@@ -411,7 +411,7 @@ def capture_trajectories(out_path: Path) -> dict:
                 continue
             try:
                 result = await graph.ainvoke({"messages": [HumanMessage(content=text)]})
-            except Exception as exc:  # noqa: BLE001 -- a failed turn is data
+            except Exception as exc:  # a failed turn is data, not a crash
                 summary["prompts"].append(
                     {"id": pid, "status": "error", "detail": str(exc)[:300]}
                 )
