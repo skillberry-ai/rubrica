@@ -410,8 +410,19 @@ round 1 and `halted_no_progress` at round 2.
 
 ### Stage 03 score, round 1 — P10–P13, recorded 2026-08-13 before the dispatch
 
-Recorded here rather than in `decisions.md`, per §13. Verdicts are blank because
-the dispatch has not run; git dates this section before it.
+Recorded here rather than in `decisions.md`, per §13, and committed in `f7af24e`
+before the dispatch so git dates the predictions ahead of the result.
+
+Scored against `runs/run-20260813-064150`, round 1: `validate --stage score` 0,
+`check-refs` 0, `latest.json` byte-identical to `round-1.json`, all six scenarios
+promoted `proposed` → `active` with none folded, $0.860 over 18 turns.
+
+| Result | |
+|---|---|
+| `capability_matrix` | 7/14, `pct` 0.5, all 14 cells enumerated |
+| `goal_matrix` | 3/5, `pct` 0.6 |
+| `progress` | `new_cells_this_round` 7, `rounds_without_progress` 0 |
+| `verdict` | `continue` |
 
 P10 and P11 are one question split in two, and it is the question stage 02 raised:
 `rb-propose` declined five cells as gap-blocked using a term that only `rb-score`
@@ -420,16 +431,49 @@ interesting failure is not getting it wrong — it is getting it *too broadly*.
 
 | # | Prediction | Verdict |
 |---|---|---|
-| P10 | The five `underspecified` cells appear as holes with `reason: "blocked_by_gap"` and a `gap_id` that resolves in the world model's `gaps`. All five have a candidate: `oc-place-underspecified` → `gap-place-unknown-restaurant`, `oc-check-underspecified` → `gap-check-availability-empty`, `oc-cancel-underspecified` → `gap-cancel-repeat`, and both `oc-search-underspecified` and `oc-list-underspecified` → `gap-validation-errors`. | |
-| P11 | `oc-search-empty` and `oc-list-empty` get `reason: "not_yet_attempted"`, **not** `blocked_by_gap`. Both were observed — trajectories p06 and p09 — so no gap blocks them; they are open only because the scenario cap ran out. | |
-| P12 | `verdict` is `continue`: closable holes remain (P11's two), this round added cells, and round 1 is below `max_rounds: 2`. | |
-| P13 | `capability_matrix.total` is 14 with `covered` 7, and `goal_matrix` is 5/5. No scenario is folded to `duplicate`: `scn-005` and `scn-006` are the closest pair and differ by outcome class, which Method step 2 rules is not one test. | |
+| P10 | The five `underspecified` cells appear as holes with `reason: "blocked_by_gap"` and a `gap_id` that resolves in the world model's `gaps`. All five have a candidate: `oc-place-underspecified` → `gap-place-unknown-restaurant`, `oc-check-underspecified` → `gap-check-availability-empty`, `oc-cancel-underspecified` → `gap-cancel-repeat`, and both `oc-search-underspecified` and `oc-list-underspecified` → `gap-validation-errors`. | **Held**, and the mapping matched all five exactly. |
+| P11 | `oc-search-empty` and `oc-list-empty` get `reason: "not_yet_attempted"`, **not** `blocked_by_gap`. Both were observed — trajectories p06 and p09 — so no gap blocks them; they are open only because the scenario cap ran out. | **Held.** |
+| P12 | `verdict` is `continue`: closable holes remain (P11's two), this round added cells, and round 1 is below `max_rounds: 2`. | **Held.** |
+| P13 | `capability_matrix.total` is 14 with `covered` 7, and `goal_matrix` is 5/5. No scenario is folded to `duplicate`: `scn-005` and `scn-006` are the closest pair and differ by outcome class, which Method step 2 rules is not one test. | **Failed in part** — the goal half. |
 
-P11 is the load-bearing one. Marking all seven uncovered cells `blocked_by_gap`
-would produce `converged` — every remaining hole unclosable, nothing left to
-try — and that verdict would be wrong while looking like success. It is the
-denominator-shrinking failure the `rb-score` prompt warns about, arriving through
-the hole `reason` rather than through the matrix.
+P11 is the load-bearing one and it held. Marking all seven uncovered cells
+`blocked_by_gap` would have produced `converged` — every remaining hole
+unclosable, nothing left to try — and that verdict would be wrong while looking
+like success. It is the denominator-shrinking failure the `rb-score` prompt warns
+about, arriving through the hole `reason` rather than through the matrix. Taken
+with P10, the term `rb-propose` borrowed a stage early was then assigned correctly
+and *narrowly* by the stage that owns it.
+
+**P13's goal half failed, and the prediction was wrong rather than the stage.**
+`goal_matrix` came out 3/5, not 5/5. Goals carry `expected_hop_depths` — a
+*required* field of the world-model schema, which `rb-reconcile` had filled in —
+and `rb-score` applied it exactly:
+
+| Goal | expected | present | covered |
+|---|---|---|---|
+| `goal-check-availability` | `[1, 2]` | `[1]` | false |
+| `goal-place-reservation` | `[2, 3]` | `[2]` | false |
+
+That is the partial-row rule from the prompt's Method step 5 doing precisely what
+it is for: a goal exercised at one depth of two is not covered, because the
+multi-hop half is the half the suite exists to probe. `rb-propose` had reached
+every goal once; reaching a goal is not covering it.
+
+Two consequences.
+
+**There are four closable holes, not two.** `oc-search-empty`, `oc-list-empty`,
+`goal-check-availability` and `goal-place-reservation`, all `not_yet_attempted` —
+against a `max_scenarios: 6` that is already spent. Round 2's `propose` hits its
+cap refusal and adds nothing, so round 2 scores `halted_no_progress`. The §8
+prediction above that this run cannot converge holds, with a larger margin than
+stated.
+
+**And a note on my own predictions.** P13 is the second in this run, after the
+retracted P3, to be wrong by asserting against a field the artifacts already
+carry. Both would have been caught by reading the schema before writing the
+prediction rather than after reading the result. Recorded because a pre-registered
+prediction's whole value is that it was written in ignorance of the outcome, not
+in ignorance of the contract.
 
 ### P3 withdrawn as invalid — 2026-08-13
 
@@ -603,3 +647,40 @@ calls the weakest link: a fan-out member reading a *sibling's* slice, which is
 in-contract by path and produces a byte-identical artifact either way.
 `scripts/audit-reads.sh` over the transcript remains the instrument. The deny
 rules narrow the accident.
+
+## 14. What the score dispatch's read audit showed
+
+Three observations from `scripts/audit-reads.sh` over the `score` transcript, kept
+because two of them are about the harness rather than the stage.
+
+**The new deny rule engages in a live dispatch, at the OS level.** The stage ran
+its own `ls -la` of the run directory, and `decisions.md` appears in that listing
+as `crw-rw-rw- 1 nobody nogroup 1, 3` — masked to a character device by the
+sandbox layer, not merely refused by the permissions layer. That is independent
+of the three probes in §13 and stronger: it is the rule working during real work,
+against a file that by then held eleven entries about this very stage.
+
+**One out-of-contract read: `src/rubrica/schema/coverage-0.1.json`.** The stage ran
+`find / -iname "*coverage*schema*"` — which succeeded — narrowed it to the package
+directory, and read the schema. `reads` names `manifest`, `world_model` and
+`scenarios`, so by `audit-reads.sh`'s own rule this grades Important.
+
+It is substantively benign, and worth saying why rather than just excusing it: the
+coverage schema is the contract for the stage's *own output*, not evidence about
+the target, and `rubrica validate` — which the contract obliges it to invoke —
+enforces the identical constraints. Reading it is closer to reading `--help` than
+to reading a sibling's artifact. But two things follow anyway. A stage can
+enumerate the whole filesystem, so what keeps the answer key out is the deny list
+rather than the stage's incuriosity. And `schemas = ["coverage"]` in the Contract
+block already declares this relationship, which suggests the gap is that
+`check-skills` validates schema *names* without the harness granting or denying
+the corresponding *files*. Parking it rather than patching it: denying the schema
+directory might push a stage into guessing the format it must produce, which is
+worse than letting it read the file it is being validated against.
+
+**A bash `python3 -c "open('manifest.json')"` was refused** with "This command
+requires approval", while the `Read` tool on the same in-contract artifact
+succeeded. Not a leak, and not a defect — but it cost the stage a turn, and it is
+the mirror image of the §13 bypass probe: the same asymmetry that lets a
+subprocess evade the permissions layer also makes the permissions layer refuse a
+legitimate subprocess.
