@@ -623,10 +623,70 @@ the `oc-find-error` artefact.
 
 | # | Prediction | Verdict |
 |---|---|---|
-| P21 | All ten write `05-verdicts/<sid>.json` and `validate --stage challenge` is 0 on the first pass. | |
-| P22 | `minimum_tool_calls_found` equals the scenario's `hop_depth` for every one of the ten. A value *below* `hop_depth` would be a real finding — the seed permits short-circuiting a hop, most plausibly on `scn-009` or `scn-010`, where an agent that could skip `search_restaurants` would reach the answer in fewer calls than the goal row credits. | |
-| P23 | Every non-`accept` verdict names something concrete — an entry in `alternative_answers`, or a specific `flag`. A `re-seed` or `reject` carrying only prose in `notes`, with `alternative_answers` empty, is the manufactured kind. | |
-| P24 | No member reads another member's instance or verdict. | |
+| P21 | All ten write `05-verdicts/<sid>.json` and `validate --stage challenge` is 0 on the first pass. | **Held.** |
+| P22 | `minimum_tool_calls_found` equals the scenario's `hop_depth` for every one of the ten. A value *below* `hop_depth` would be a real finding — the seed permits short-circuiting a hop, most plausibly on `scn-009` or `scn-010`, where an agent that could skip `search_restaurants` would reach the answer in fewer calls than the goal row credits. | **Held**, all ten. |
+| P23 | Every non-`accept` verdict names something concrete — an entry in `alternative_answers`, or a specific `flag`. A `re-seed` or `reject` carrying only prose in `notes`, with `alternative_answers` empty, is the manufactured kind. | **Held**, both objections. |
+| P24 | No member reads another member's instance or verdict. | **Held.** |
+
+**8 `accept`, 2 `re-seed`** (`scn-005`, `scn-010`). $4.70 total — min $0.39, max $0.58,
+mean $0.47, 7–10 turns — less than half `instantiate`'s cost. `validate --stage
+challenge` and `check-refs` both 0.
+
+P22 matters more than it looks. `minimum_tool_calls_found` equals `hop_depth` on all
+ten, including `scn-009` at 2 and `scn-010` at 3, so no seed lets an agent
+short-circuit a hop. The `goal_matrix` 5/5 from round 2 is therefore not credited to
+a chain an agent could skip — the depth the coverage report claims is a depth the
+adversary independently confirmed is required.
+
+**Both objections are real `rb-instantiate` defects, and both are the same kind of
+mistake: a near-miss built so well it stopped being a miss.**
+
+`scn-005` cancels `reservation_deadbeef1234` expecting not-found. The seed contains
+`rsv_3005` whose **`confirmation_code` is the literal string
+`reservation_deadbeef1234`** — and the scenario's own `user_intent` calls that value
+"the confirmation id". Under the reading that the argument resolves against
+`confirmation_code` rather than `id`, the call finds a real confirmed reservation and
+*succeeds*. The expected answer is not uniquely determined, and the challenger said so
+without being able to see the world model.
+
+`scn-010` books "dinner tonight" for two. The seed holds **two** slots that satisfy
+every clause of the intent — `18:00:00` and `19:30:00`, both available with
+`max_party_size: 2` — while the intent names no time. Nothing picks 19:30, so the
+expected answer is arbitrary between them.
+
+Neither is the manufactured objection P23 was watching for. Both name a concrete
+alternative with a `world_consistent_reason` checkable against the seed, and both
+would have shipped as tests whose gold label a competent agent could legitimately
+fail.
+
+Two out-of-slice reads, neither a sibling's instance: `scn-002` enumerated the run
+directory, and `scn-005` read `src/rubrica/schema/verdict-0.1.json`. The latter is
+§14's schema-read pattern recurring — now three occurrences across two stages
+(`score` twice, `challenge` once), which settles it as a harness question rather than
+a quirk of one skill.
+
+### Gate 3: `emit` refuses, and the designed repair is unreachable through the harness
+
+`rubrica emit` exits **1** with two findings naming
+`05-verdicts/scn-00{5,10}.json#/verdict`: *"marked re-seed; the adversary asked for one
+re-instantiation and it has not happened."* It still wrote the eight accepted packages,
+per its own docstring — one bad instance does not cost the suite. The exit-code
+contract behaved exactly as specified: `1`, findings one per line on stdout, naming the
+right artifact.
+
+The designed repair is a re-dispatch of `rb-instantiate` for those two carrying the
+re-seed's **verdict fields verbatim** — one of exactly two things the parent spec
+permits an orchestrator to append. `scripts/dispatch-stage.sh` cannot express it: its
+prompt is fixed verbatim from the runbook with no append mechanism. **So the one repair
+path the design sanctions is currently unreachable through the harness**, and the
+tempting alternatives are both wrong:
+
+- Pasting a paraphrase of the objection is the failure the parent spec names outright —
+  the orchestrator's conclusion wearing a finding's clothes.
+- Re-dispositioning the two as `reject` makes `emit` prune them silently and exit 0
+  (`emit.py:351`), which ships a suite the round-2 coverage report no longer describes.
+  `scn-010` is the only `hop_depth: 3` scenario in the run, so rejecting it turns
+  `goal_matrix` 5/5 into a claim about a test that does not ship.
 
 P23 is the discriminating one, and note that it is deliberately *not* a prediction
 that everything is accepted. Given the seeds §8 records for `scn-007` and
