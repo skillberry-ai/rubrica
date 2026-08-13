@@ -538,6 +538,31 @@ search-then-check-then-place for depth 3. A depth-1 scenario against the same
 goal would add a row member, change nothing about coverage, and look like
 progress.
 
+### Stage 04 instantiate — P18–P20, recorded 2026-08-13 before the dispatch
+
+Ten `active` scenarios, so ten fan-out members, each given only its own
+`scenario_id`. This is the first stage that must **invent** rather than derive: its
+own preamble says the near-misses in a seed are "yours to invent and nobody
+downstream can supply it for you", and §3's boundary means the world model carries
+no value domains, so every seed value is synthetic by construction. The parked
+ruling in the parent spec applies — do not raise findings that require a stage to
+ground a value against claims.
+
+| # | Prediction | Verdict |
+|---|---|---|
+| P18 | All ten members write `seed.json`, `expected.json` and `rationale.md`, and `validate --stage instantiate` plus `check-refs` come back 0 on the first pass, with no repair round. | |
+| P19 | No member reads another member's instance directory. Note what this does *not* test: `scenarios` is in `reads` and holds all ten scenario definitions, so reading a sibling's *scenario* is in-contract; only its *instance* is off-limits. | |
+| P20 | Every seed contains at least one near-miss for its own `discriminating_fact` — for `scn-001`, Boston restaurants that are not Italian and/or Italian restaurants outside Boston, so "exactly one match" is a filter result rather than a one-row table. | |
+
+P20 is the one that matters, and it is the only one of the three that measures
+judgment rather than compliance. A seed holding exactly the rows the expected
+answer needs makes every assertion pass while testing nothing — the formality the
+skill's preamble warns about in its first paragraph. P18 and P19 would both hold
+for such a seed.
+
+Seed conformance is one-directional (seed→world), so nothing mechanical checks
+P20; it is read off the seeds by hand.
+
 ### P3 withdrawn as invalid — 2026-08-13
 
 P3 was reported as unmet after three runs. It should never have been written, and
