@@ -550,9 +550,9 @@ ground a value against claims.
 
 | # | Prediction | Verdict |
 |---|---|---|
-| P18 | All ten members write `seed.json`, `expected.json` and `rationale.md`, and `validate --stage instantiate` plus `check-refs` come back 0 on the first pass, with no repair round. | |
-| P19 | No member reads another member's instance directory. Note what this does *not* test: `scenarios` is in `reads` and holds all ten scenario definitions, so reading a sibling's *scenario* is in-contract; only its *instance* is off-limits. | |
-| P20 | Every seed contains at least one near-miss for its own `discriminating_fact` — for `scn-001`, Boston restaurants that are not Italian and/or Italian restaurants outside Boston, so "exactly one match" is a filter result rather than a one-row table. | |
+| P18 | All ten members write `seed.json`, `expected.json` and `rationale.md`, and `validate --stage instantiate` plus `check-refs` come back 0 on the first pass, with no repair round. | **Held**, ten for ten. |
+| P19 | No member reads another member's instance directory. Note what this does *not* test: `scenarios` is in `reads` and holds all ten scenario definitions, so reading a sibling's *scenario* is in-contract; only its *instance* is off-limits. | **Held** across all ten transcripts. |
+| P20 | Every seed contains at least one near-miss for its own `discriminating_fact` — for `scn-001`, Boston restaurants that are not Italian and/or Italian restaurants outside Boston, so "exactly one match" is a filter result rather than a one-row table. | **Held**, and more sharply than predicted. |
 
 P20 is the one that matters, and it is the only one of the three that measures
 judgment rather than compliance. A seed holding exactly the rows the expected
@@ -561,7 +561,50 @@ skill's preamble warns about in its first paragraph. P18 and P19 would both hold
 for such a seed.
 
 Seed conformance is one-directional (seed→world), so nothing mechanical checks
-P20; it is read off the seeds by hand.
+P20; it was read off the seeds by hand. Every one of the ten has a multi-row
+filtered collection, and every one of the ten `rationale.md` files explicitly
+reasons about the decoys it planted — near-miss, distractor or trap language in
+all ten.
+
+**Two seeds are worth quoting, because they are the run's clearest evidence of
+prompt-carried judgment.** Both are `empty`-outcome scenarios, which are exactly
+where a lazy seed is easiest: an empty table returns an empty result and passes.
+
+`scn-007` — search Fargo/Ethiopian, expect empty — seeded three restaurants:
+
+| Row | What it catches |
+|---|---|
+| Fargo Diner, city Fargo, cuisine American | matching on city alone |
+| Addis Table, Ethiopian, Minneapolis | matching on cuisine alone |
+| Taste of Addis, Ethiopian, **Moorhead** | proximity matching — Moorhead is directly across the river from Fargo |
+
+`scn-008` — list reservations for `nobody@example.com`, expect empty — seeded three
+reservations, each defeating a different wrong strategy:
+
+| Row | What it catches |
+|---|---|
+| `alice.nobody@example.com` | substring matching |
+| `n.guest@example.com`, guest_name "Nobody Guest" | matching on guest name |
+| `nobody@example.org` | local-part matching, differing only in TLD |
+
+Nothing in the contract, the schema or the world model asked for a river-adjacent
+city or a TLD collision. The world model carries no value domains at all, so these
+were invented, and they are the difference between a test and a formality that the
+skill's first paragraph names. This is the single strongest result the run has
+produced.
+
+**Cost, recorded because the estimate was wrong.** $11.07 total — min $0.64
+(`scn-007`), max $1.66 (`scn-010`), mean $1.11, 9–12 turns each, run as two
+batches of five concurrent. Before dispatching I estimated $6–9 by extrapolating
+from single-dispatch stages at $0.6–0.9. That underestimates a fan-out member of
+*this* stage, because each one invokes `validate` and `check-refs` itself. Budget
+~$1.1 per member.
+
+**One note for the parked one-directional conformance hole.** `scn-002`'s seed
+declares `reservations` and leaves it at zero rows. Legitimate here —
+`check_availability` not-found does not touch reservations — but it is a live
+instance of the shape the parent spec's §8 describes: a seed may declare a
+collection empty and pass both layers with no finding.
 
 ### P3 withdrawn as invalid — 2026-08-13
 
