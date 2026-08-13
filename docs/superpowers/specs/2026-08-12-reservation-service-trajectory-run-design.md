@@ -358,7 +358,7 @@ Recorded before capture, so the run can be wrong.
 |---|---|
 | P1 | Four of the control's five gaps close from observation. |
 | P2 | `gap-check-availability-empty` does **not** close (§6). |
-| P3 | `reservation_id` is characterised as `reservation_<hex>`, not `res_<number>`, and the README/`tools-list` disagreement surfaces as a contradiction rather than a silent pick. |
+| ~~P3~~ | **Withdrawn as invalid on 2026-08-13 — see the retraction below.** ~~`reservation_id` is characterised as `reservation_<hex>`, not `res_<number>`, and the README/`tools-list` disagreement surfaces as a contradiction rather than a silent pick.~~ |
 | P4 | `refund_policy` is characterised from the observed string, not `schemas.py`'s default — which this run cannot see. |
 | P5 | All five capabilities are recovered with correct required/optional parameter sets, from `tools-list.json` rather than from `def` lines. |
 | P6 | At least one entity (`Reservation` or `Restaurant`) is reconstructed with a field set derived from observed response bodies. |
@@ -366,6 +366,57 @@ Recorded before capture, so the run can be wrong.
 P5 and P6 are the two the control got for free and this run has to earn. P6 is
 the one most likely to fail outright, since nothing instructs a stage to mine
 entity shapes out of span outputs.
+
+### P3 withdrawn as invalid — 2026-08-13
+
+P3 was reported as unmet after three runs. It should never have been written, and
+the retraction belongs here rather than in a later document, because the failed
+prediction is what a reader of this section would otherwise carry forward.
+
+**No claim in any of the three runs asserts an id format.** The three the
+prediction treated as competing are, verbatim from
+`runs/run-20260813-064150/01-claims/`:
+
+- `tools-list-json`, kind `entity`: "`cancel_reservation` takes a required
+  `reservation_id` parameter (string): a unique reservation identifier,
+  **e.g.** `"reservation_abc123"`."
+- `agent-notes-md`, kind `capability`: "The agent supports natural-language
+  requests to cancel a reservation by its reservation id, optionally with a
+  stated reason, **e.g.** `"Cancel reservation res_12345 because plans
+  changed"`."
+- `trajectory-p05-cancel-json`, kind `outcome_class`: one observed call with
+  `reservation_id: "reservation_61e0d19f75d1"` returning success.
+
+Two illustrative examples and one observed value. Two `e.g.`s differing is not a
+disagreement about the target, it is two documents choosing different
+placeholders — and `rb-reconcile`'s Method says a contradiction is "a real
+disagreement about the target", explicitly excluding sources that "agree on the
+fact and disagree only on a bookkeeping label". So all three runs reporting zero
+contradictions here were **correct refusals**, not a replicated failure.
+
+**And there was nowhere for the format to live even had a claim asserted one.**
+`entity.fields` items permit exactly `name` and `type`, with
+`additionalProperties: false`.
+
+That is the parked limitation `2026-08-06-skill-based-test-generator-design.md`
+already records — the world model has no representation for a field's value
+domain, and its ruling says in as many words: *do not raise findings that require
+a stage to ground a value against claims; no artifact carries the domains.* This
+prediction did exactly that. The parked table's own row now carries a note
+pointing back here, because a ruling that gets violated by the next spec written
+against it is a ruling that was not visible enough.
+
+What `rb-reconcile` did do in this area is the counter-evidence: it recorded
+`Each reservation has a unique id within the reservations collection` — an
+invariant the schema *can* express — plus two inferred rules, that
+`restaurant_name` is resolved server-side from `restaurant_id`, and that
+`guest_name`/`guest_phone`/`guest_email` echo the arguments passed to
+`place_reservation`.
+
+**No fix follows from this.** A prompt change pressing `rb-reconcile` to raise
+contradictions from illustrative examples would manufacture disagreements, which
+is the quantifier-satisfaction shape already suspected behind the `oc-find-error`
+artefact recorded in `rb-reconcile/exercise.md`.
 
 ## 9. Comparison instrument
 

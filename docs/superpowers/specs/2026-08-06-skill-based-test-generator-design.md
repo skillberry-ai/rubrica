@@ -236,6 +236,19 @@ when the world model contains no queue name at all, has nowhere to put one, and
 the only real defect was that the fact was *valueless* and therefore not unique.
 Prescribing any concrete value is an instruction to stage 4, not a claim.
 
+**It cost a third round on 2026-08-13, and that is worth recording here rather
+than only where it happened.** The trajectory run's spec
+([`2026-08-12-reservation-service-trajectory-run-design.md`](2026-08-12-reservation-service-trajectory-run-design.md))
+pre-registered a prediction — its P3 — that `rb-reconcile` would characterise a
+`reservation_id`'s *shape* and raise a contradiction between two documents whose
+only disagreement was which placeholder each used in an `e.g.`. That is precisely
+the finding this row forbids: it required a stage to ground a value against
+claims, and no claim in three runs asserted a format at all. Three runs reporting
+zero contradictions were correct refusals; the prediction was retracted, and that
+spec now carries the retraction and its evidence. Recorded on this row because a
+ruling violated by the next spec written against it was not visible enough where
+it stood.
+
 **Scenario** (`02-scenarios.json`):
 
 ```
