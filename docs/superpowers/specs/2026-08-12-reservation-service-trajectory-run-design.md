@@ -606,6 +606,35 @@ declares `reservations` and leaves it at zero rows. Legitimate here —
 instance of the shape the parent spec's §8 describes: a seed may declare a
 collection empty and pass both layers with no finding.
 
+### Stage 05 challenge — P21–P24, recorded 2026-08-13 before the dispatch
+
+Ten members again, one per instance. `reads = ["scenarios", "seed", "expected"]` —
+note it does **not** read the world model, so a challenger cannot check a seed
+against the target's declared entities; it judges the instance on its own terms.
+A verdict carries `uniquely_determined`, `derivable_without_guessing`,
+`minimum_tool_calls_found`, a `verdict` of `accept`/`re-seed`/`reject`, and
+optional `alternative_answers` and `flags`.
+
+This stage's structural risk is the mirror of stage 04's. `rb-instantiate` could
+have passed by building a seed that tests nothing; `rb-challenge` can pass by
+manufacturing an objection, because a stage asked to attack has an incentive to
+find something. That is the quantifier-satisfaction shape already suspected behind
+the `oc-find-error` artefact.
+
+| # | Prediction | Verdict |
+|---|---|---|
+| P21 | All ten write `05-verdicts/<sid>.json` and `validate --stage challenge` is 0 on the first pass. | |
+| P22 | `minimum_tool_calls_found` equals the scenario's `hop_depth` for every one of the ten. A value *below* `hop_depth` would be a real finding — the seed permits short-circuiting a hop, most plausibly on `scn-009` or `scn-010`, where an agent that could skip `search_restaurants` would reach the answer in fewer calls than the goal row credits. | |
+| P23 | Every non-`accept` verdict names something concrete — an entry in `alternative_answers`, or a specific `flag`. A `re-seed` or `reject` carrying only prose in `notes`, with `alternative_answers` empty, is the manufactured kind. | |
+| P24 | No member reads another member's instance or verdict. | |
+
+P23 is the discriminating one, and note that it is deliberately *not* a prediction
+that everything is accepted. Given the seeds §8 records for `scn-007` and
+`scn-008`, a high accept rate is likely — but a challenger that accepts all ten
+without evidence of having tried is as uninformative as one that objects to all
+ten. What P23 tests is whether an objection, if raised, is anchored to a stated
+alternative answer that a human could check.
+
 ### P3 withdrawn as invalid — 2026-08-13
 
 P3 was reported as unmet after three runs. It should never have been written, and
