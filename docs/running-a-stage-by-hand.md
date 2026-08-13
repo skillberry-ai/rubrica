@@ -365,10 +365,21 @@ rendering. The flag refuses with exit 2 on a verdict that is not `re-seed`, on a
 stage other than `instantiate`, and on a missing verdict file, because inventing an
 objection is the same defect as paraphrasing one.
 
-**`rb-instantiate` is denied `05-verdicts/` for exactly this reason.** Its §1 says
-so outright — the directory is not in its `reads`, and "a member that treats the
-notice as something it was not supposed to see makes the re-dispatch a no-op". The
-deny is stage-scoped, since `rb-challenge` writes there and `rb-emit` reads it.
+**Do not try to enforce that with a deny rule.** `rb-instantiate`'s §1 says the
+directory is not in its `reads`, and the obvious move is to add `05-verdicts/` to
+the harness deny list for that stage. It was tried, on 2026-08-13, and it broke the
+member's own gate: `rb-instantiate`'s contract obliges it to invoke `check-refs`,
+that subprocess runs inside the same sandbox, and a denied path is masked to a
+character device — so `check-refs` saw no verdicts and reported ten fabricated
+`instance scn-XXX has no verdict` findings while the identical command outside the
+sandbox exited 0. Same failure this repository already records for an unreadable
+`01-claims/`.
+
+**The rule that came out of it:** never deny a run path `check-refs` reads. Four
+skills invoke it (`reconcile`, `instantiate`, `score`, `emit`), so in practice the
+harness can only deny what `refs.py` never looks at — `decisions.md` and
+`measurement/`. Whether a member *should* read `05-verdicts/` is a prompt-level
+obligation, and the transcript audit is what checks it.
 
 An empty `alternative_answers` is a *shape*, not a missing value: paired with
 populated `notes` it means the defect was not ambiguity at all — an undeclared

@@ -145,25 +145,43 @@ export PATH="$REPO/.venv/bin:$PATH"
 #                   `ls -la` in the run directory with P7-P9 sitting in that
 #                   file, one Read away from the answer to its own exercise. It
 #                   was killed before it got there, which is luck, not a control.
-#   07-report.json  smoke's output; read by compare-gold and diff-runs, never by
-#                   a stage.
 #   measurement/    recall.json/.md and review/sample.json/packet.md -- the
 #                   human review surface, which is scored *against* the stages.
 #
 # Derived, not guessed: the union of every skill's `reads` is claims_dir,
 # coverage_latest, expected, input_file, manifest, scenarios, seed, verdict and
-# world_model. These three are what a run holds that no stage may name.
-RUN_DENY=("$RUN/decisions.md" "$RUN/07-report.json" "$RUN/measurement")
+# world_model. Neither of these two is in it -- and, per the block below, neither
+# is read by check-refs, which is the constraint that actually bounds this list.
+RUN_DENY=("$RUN/decisions.md" "$RUN/measurement")
 
-# Stage-specific, and stated outright by the skill rather than inferred:
-# rb-instantiate's SKILL.md says 05-verdicts/ "is not in your `reads`, so a member
-# that treats the notice as something it was not supposed to see makes the
-# re-dispatch a no-op." A re-seed's alternatives have to arrive through the prompt
-# (RUBRICA_RESEED below) or not at all, so the file is denied for this stage only --
-# rb-challenge writes there and rb-emit reads it.
-if [ "$STAGE" = "instantiate" ]; then
-  RUN_DENY+=("$RUN/05-verdicts")
-fi
+# ---------------------------------------------------------------------------
+# What may NOT go in that list, MEASURED on 2026-08-13 and costing a wrong commit:
+# any path `rubrica check-refs` reads.
+#
+# Four skills' contracts oblige them to invoke check-refs (reconcile, instantiate,
+# score, emit). That subprocess runs inside the same sandbox as the member, so a
+# denied artifact is invisible to the *checker* too -- and bubblewrap masks a
+# denied path to a character device, which is not absent and not readable.
+#
+# The first version of this block also denied $RUN/05-verdicts to instantiate,
+# because rb-instantiate's SKILL.md says outright that 05-verdicts/ is not in its
+# `reads` and a notice arriving any other way makes the re-dispatch a no-op. The
+# intent was right and the mechanism was wrong: the scn-005 re-seed's own
+# check-refs then reported ten fabricated "instance scn-XXX has no verdict"
+# findings, while the identical command outside the sandbox exited 0. That is
+# exactly the failure this repository already records for an unreadable
+# 01-claims/ -- a `1` naming the wrong artifact.
+#
+# $RUN/07-report.json came out for the same reason without waiting to be bitten:
+# check-refs reads it (refs.py:115 and :1279). It survived only because no run had
+# reached smoke yet.
+#
+# So the rule is not "deny what the stage may not read" -- that is unenforceable
+# here, because the stage's own gate must read the whole run. It is "deny only
+# what check-refs never looks at", which is why decisions.md and measurement/
+# stay: refs.py never references either. tests/unit/test_dispatch_harness.py
+# derives this from refs._readable_targets rather than trusting this comment.
+# ---------------------------------------------------------------------------
 
 if [ "${RUBRICA_NO_SANDBOX:-0}" = "1" ]; then
   echo '{}' > "$CLAUDE_CONFIG_DIR/settings.json"

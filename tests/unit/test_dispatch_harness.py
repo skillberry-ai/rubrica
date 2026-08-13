@@ -1,12 +1,17 @@
 """The dispatch harness's deny lists, exercised through the script itself.
 
 `scripts/dispatch-stage.sh` grants the dispatched stage `Read(<run>/**)`, which is
-right for artifacts and wrong for the three run-local paths no skill's Contract
-lists under `reads`. One of them, `decisions.md`, is the orchestrator's log --
-and in a measured run it holds the pre-registered predictions for the very stage
-being dispatched. On 2026-08-13 a `propose` dispatch ran `ls -la` in a run
-directory with P7-P9 sitting in that file; it was one Read from its own answer
-key, and what stopped it was an unrelated premature kill.
+right for artifacts and wrong for `decisions.md` -- the orchestrator's log, which in
+a measured run holds the pre-registered predictions for the very stage being
+dispatched. On 2026-08-13 a `propose` dispatch ran `ls -la` in a run directory with
+P7-P9 sitting in that file; it was one Read from its own answer key, and what
+stopped it was an unrelated premature kill.
+
+The deny list is bounded from the other side too, which cost a wrong commit to
+learn: four skills' contracts oblige them to invoke `check-refs`, that subprocess
+runs inside the member's sandbox, and a denied artifact is therefore invisible to
+the *checker*. Denying one makes a stage's own gate fabricate findings about what it
+cannot see.
 
 The second half covers the re-seed append -- the one channel by which an
 adversary's `alternative_answers` and `notes` reach a re-dispatched
@@ -25,12 +30,15 @@ Measured in every direction before committing:
 - deleting `$RUN/decisions.md` from RUN_DENY turns exactly three red and leaves
   the other parametrizations green
 - denying a world model the stage must read turns the over-subtraction test red
-- dropping the stage-scoped `05-verdicts` deny turns its own test red, while the
-  `challenge` half of that same test proves the deny is not applied globally
 - appending the *whole* verdict instead of two fields turns the over-inclusion
   test red; appending only `notes` turns the verbatim and empty-list tests red
 - moving the sandbox `+ $rundeny` concatenation outside its parenthesis makes jq
   fail the run outright rather than emitting a list quietly missing the entries
+- restoring either of the two denies that were wrong -- `07-report.json`, or
+  `05-verdicts` for `instantiate` -- turns
+  `test_nothing_check_refs_reads_is_ever_denied` red. The `05-verdicts` half only
+  goes red against a *populated* run, which is why that test builds a toy run
+  through `challenge` rather than using a bare directory.
 """
 
 import json
@@ -92,10 +100,15 @@ def settings(tmp_path):
 
 # Derived, not guessed: the union of every skill's Contract `reads` is claims_dir,
 # coverage_latest, expected, input_file, manifest, scenarios, seed, verdict and
-# world_model. These three are what a run holds that no stage may name, and all
-# three are *about* the stages rather than merely outside their scope -- an
-# orchestrator log, a smoke report, and the human review surface.
-OUT_OF_CONTRACT = ("decisions.md", "07-report.json", "measurement")
+# world_model. Neither of these is in it, and both are *about* the stages rather
+# than merely outside their scope -- an orchestrator log and the human review
+# surface.
+#
+# The list is short for a second reason, which cost a wrong commit to learn: a path
+# check-refs reads must never be denied. See
+# test_nothing_check_refs_reads_is_ever_denied below, which derives that from
+# refs.py rather than from this comment.
+OUT_OF_CONTRACT = ("decisions.md", "measurement")
 
 
 @pytest.mark.parametrize("leaf", OUT_OF_CONTRACT)
@@ -259,23 +272,57 @@ def test_a_reseed_notice_with_no_verdict_file_is_a_usage_error(tmp_path):
     assert "no verdict to re-seed from" in proc.stderr
 
 
-def test_instantiate_is_denied_the_verdicts_directory_and_challenge_is_not(tmp_path):
-    """rb-instantiate's SKILL.md states this outright, so the harness enforces it.
+def test_nothing_check_refs_reads_is_ever_denied(tmp_path):
+    """The guard that would have caught two wrong denies, derived from refs.py.
 
-    "05-verdicts/ is not in your `reads`, so a member that treats the notice as
-    something it was not supposed to see makes the re-dispatch a no-op." The deny
-    has to be stage-scoped: rb-challenge writes there and rb-emit reads it.
+    Four skills' contracts oblige them to invoke `check-refs`, and that subprocess
+    runs inside the member's sandbox. So denying an artifact hides it from the
+    *checker* as well, and bubblewrap masks a denied path to a character device --
+    neither absent nor readable.
+
+    MEASURED on 2026-08-13: with `$RUN/05-verdicts` denied to `instantiate`, the
+    scn-005 re-seed's own `check-refs` reported ten fabricated "instance scn-XXX has
+    no verdict" findings while the identical command outside the sandbox exited 0.
+    That is the `1`-naming-the-wrong-artifact failure this repository already
+    records for an unreadable `01-claims/`. `07-report.json` was the same mistake
+    unbitten: `refs.py` reads it at :115 and :1279, and no run had reached smoke.
+
+    Asserting against `refs._readable_targets` rather than a hand-list means a
+    future check-refs that starts reading `decisions.md` fails this test instead of
+    silently fabricating findings in a live dispatch.
+
+    **It has to run against a populated run, and the first version did not.**
+    `_readable_targets` enumerates instances and verdicts with `list_json`, so on an
+    empty directory those contribute nothing and a `05-verdicts` deny sails through
+    — measured: restoring that exact deny left this test green. That is the
+    fixture-cannot-reach weakness, so the fixture is now a full toy run carrying
+    real verdict files.
     """
-    run = _run_with_verdict(tmp_path)
-    resolved = run.resolve()
-    inst_perms, inst_sandbox, _ = _paths(
-        _dispatch(tmp_path, "instantiate", str(run), "scn-001", run=run)
-    )
-    assert f"Read(/{resolved}/05-verdicts)" in inst_perms["permissions"]["deny"]
-    assert f"{resolved}/05-verdicts" in inst_sandbox["sandbox"]["filesystem"]["denyRead"]
+    from rubrica.paths import RunPaths
+    from rubrica.refs import _readable_targets
+    from tests.toy import build_toy_run
 
-    chal_perms, chal_sandbox, _ = _paths(
-        _dispatch(tmp_path, "challenge", str(run), "scn-001", run=run)
-    )
-    assert f"Read(/{resolved}/05-verdicts)" not in chal_perms["permissions"]["deny"]
-    assert f"{resolved}/05-verdicts" not in chal_sandbox["sandbox"]["filesystem"]["denyRead"]
+    # upto=None builds through challenge, so 05-verdicts/ and 04-instances/ are
+    # populated and reachable by _readable_targets.
+    run_paths = build_toy_run(tmp_path / "runs")
+    run = run_paths.root
+    perms, sandbox, _ = _paths(_dispatch(tmp_path, "instantiate", str(run), "scn-001", run=run))
+    resolved = run.resolve()
+
+    denied_run_paths = {
+        Path(p) for p in sandbox["sandbox"]["filesystem"]["denyRead"] if str(resolved) in p
+    }
+    # permissions.deny carries the same intent in "Read(/abs)" form
+    denied_run_paths |= {
+        Path(r[len("Read(/") : -1])
+        for r in perms["permissions"]["deny"]
+        if r.startswith("Read(/") and str(resolved) in r and not r.endswith("/**)")
+    }
+
+    read_by_check_refs = {p.resolve() for p in _readable_targets(RunPaths(resolved))}
+    for denied in denied_run_paths:
+        for target in read_by_check_refs:
+            assert denied != target and denied not in target.parents, (
+                f"{denied} is denied but check-refs reads {target}; a stage that invokes "
+                "check-refs will get fabricated findings about what it cannot see"
+            )
