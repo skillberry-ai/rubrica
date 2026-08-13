@@ -552,10 +552,31 @@ without spending a model call. A test that greps the script's source instead
 would pass on a rule that is present and unreachable, which is the
 substring-of-message weakness the parent spec's §6 names.
 
-**What this does not fix.** Neither layer is the instrument. The permissions
-layer covers the file tools and the file commands Claude Code parses out of a
-Bash line; the sandbox layer was measured non-functional on the machine this was
-built on. A stage that reads a denied path through a Python `open()` may still
-succeed, and `scripts/audit-reads.sh` over the transcript remains the only way to
-find out. The deny rules narrow the accident; they do not close the hole the
-parent spec's §8 records as the weakest link.
+**Both layers were then measured against this rule, and both engaged.** Three
+dispatches against a probe run holding a canary line in `decisions.md` and an
+in-contract `01-world-model.json`, at Claude Code 2.1.231, $0.24 in total:
+
+| Probe | Result |
+|---|---|
+| `Read` the world model, then `decisions.md` | world model returned; `decisions.md` refused — *"File is in a directory that is denied by your permission settings."* |
+| `python3 -c "open('<run>/decisions.md').read()"` via Bash | `PermissionError: [Errno 13] Permission denied` |
+| `python3 -c "open('<run>/01-world-model.json').read()"` via Bash | contents returned |
+
+The third is the control, and it is what makes the second mean anything: a
+sandbox blocking *every* Bash file read would produce the same `PermissionError`
+without isolating anything. The canary string appears zero times across all three
+transcripts.
+
+The second result contradicts what `dispatch-stage.sh` has said since it was
+written — that the sandbox layer did not engage on this machine, measured with
+`bubblewrap` 0.9.0 working standalone. That measurement was taken at 2.1.227
+against a *directory* deny entry. This one is at 2.1.231 against a *file* entry.
+Which of the two differences accounts for it is unknown and was not chased; the
+comment now records both observations rather than replacing one with the other.
+
+**What this still does not fix.** Two measurements of one rule on one machine are
+not a general guarantee, and nothing here touches the case the parent spec's §8
+calls the weakest link: a fan-out member reading a *sibling's* slice, which is
+in-contract by path and produces a byte-identical artifact either way.
+`scripts/audit-reads.sh` over the transcript remains the instrument. The deny
+rules narrow the accident.

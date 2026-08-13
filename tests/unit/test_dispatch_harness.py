@@ -83,9 +83,10 @@ def test_the_sandbox_scope_denies_each_run_local_answer_key(settings, leaf):
     """The second scope exists because the first one only covers the file tools.
 
     A `python -c "open(...)"` leaves no Read event for permissions.deny to match,
-    which is why the same intent is expressed twice. The sandbox layer was
-    measured non-functional on the machine this was built on, so this asserts the
-    rule is *emitted*, never that the OS honours it.
+    which is why the same intent is expressed twice. This asserts the rule is
+    *emitted*, never that the OS honours it -- the script's own comment records
+    that layer engaging at Claude Code 2.1.231 and not engaging at 2.1.227, so a
+    test asserting enforcement would encode one machine's version.
     """
     _, sandbox, run = settings
     assert f"{run}/{leaf}" in sandbox["sandbox"]["filesystem"]["denyRead"]

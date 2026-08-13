@@ -112,12 +112,23 @@ export PATH="$REPO/.venv/bin:$PATH"
 #   sandbox.filesystem.denyRead  OS-level, via bubblewrap, so a Python script
 #                                that opens the file itself is stopped too
 #
-# The sandbox layer is the unverified one. On the machine this was built on it
-# did not engage even with bubblewrap and socat installed and working: a
-# `python -c "open(...)"` read a denyRead path successfully. failIfUnavailable
-# is set so a silent fall-through becomes loud rather than being mistaken for
-# enforcement. Set RUBRICA_NO_SANDBOX=1 to drop the block if it gets in the way,
-# and read the read audit rather than trusting either layer.
+# The sandbox layer has been measured twice, with opposite results, and both
+# observations are kept because neither explains the other:
+#
+#   2.1.227, directory entry ($REPO/docs): did NOT engage, even with bubblewrap
+#     0.9.0 and socat installed and `bwrap --unshare-all` working standalone -- a
+#     `python -c "open(...)"` read a denyRead path successfully.
+#   2.1.231, file entry ($RUN/decisions.md): DID engage -- the same
+#     `python3 -c "open(...)"` got PermissionError [Errno 13], while a control
+#     read of $RUN/01-world-model.json in the same dispatch returned its
+#     contents, so it was that path being denied and not Bash file access
+#     failing wholesale.
+#
+# Version, or file-versus-directory: unknown which accounts for it. Do not rely
+# on this layer on a machine where you have not checked it yourself.
+# failIfUnavailable is set so a silent fall-through becomes loud rather than
+# being mistaken for enforcement. Set RUBRICA_NO_SANDBOX=1 to drop the block if
+# it gets in the way, and read the read audit rather than trusting either layer.
 # ---------------------------------------------------------------------------
 
 # Three paths inside the run are the run's own answer key. Granting the whole run

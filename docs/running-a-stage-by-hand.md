@@ -281,9 +281,18 @@ to close exactly that gap at the OS level, and on the machine this was written o
 it did not engage: with `bubblewrap` 0.9.0 and `socat` installed and
 `bwrap --unshare-all` working standalone, a Python `open()` still read a
 `denyRead` path. `failIfUnavailable` is set so a silent fall-through becomes loud;
-`RUBRICA_NO_SANDBOX=1` drops the block. Until someone confirms that layer on the
-machine they are using, treat OS-level read isolation as absent and read the
-audit.
+`RUBRICA_NO_SANDBOX=1` drops the block.
+
+It has since engaged once, and both observations are kept because neither
+explains the other. At 2.1.231, against a *file* deny entry
+(`$RUN/decisions.md`), a `python3 -c "open(...)"` got
+`PermissionError: [Errno 13]` — while the same command against
+`$RUN/01-world-model.json`, not denied, returned its contents in the same
+configuration. That control matters: a sandbox failing every Bash file read looks
+identical to one denying the right path. The 2.1.227 measurement above was against
+a *directory* entry. Version or granularity — unknown which accounts for the
+difference. So: check that layer on the machine you are using before relying on
+it, and read the audit either way.
 
 Which is the point of `scripts/audit-reads.sh`. §5's last paragraph says an
 out-of-contract read shows up nowhere on disk, and §8 of the design spec records
