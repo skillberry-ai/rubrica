@@ -475,6 +475,34 @@ prediction rather than after reading the result. Recorded because a pre-register
 prediction's whole value is that it was written in ignorance of the outcome, not
 in ignorance of the contract.
 
+### Round 2 — P14–P17, recorded 2026-08-13 before the dispatch
+
+Gate 2 raised `max_scenarios` 6 → 10 and left `max_rounds` at 2. The new cap is
+derived: 6 open scenarios plus the 4 `not_yet_attempted` holes. Nothing else in
+the manifest changed. `converged` stays reachable at round 2 despite round 2 being
+`max_rounds`, because `rb-score`'s verdict ordering puts `converged` above
+`halted_round_cap`.
+
+**Round 2 is the first time in this project's history that a stage is dispatched
+with a coverage report to read.** Every earlier `propose` ran round 1, where
+`coverage_latest` is absent and the skill says to treat every cell as open. So
+P14 tests the `blocked_by_gap` refusal condition with the artifact it was written
+against — the same condition round 1 acted on from world-model prose without one.
+
+| # | Prediction | Verdict |
+|---|---|---|
+| P14 | `propose` targets exactly the four `not_yet_attempted` holes and re-proposes against none of the five `blocked_by_gap` cells. | |
+| P15 | The two goal holes are closed by scenarios whose `hop_depth` is the missing member of `expected_hop_depths` — 2 for `goal-check-availability`, 3 for `goal-place-reservation` — rather than by another depth-1 scenario that leaves the row partial. | |
+| P16 | `scn-001`–`scn-006` are untouched: no renumbering, no status change from `active`, no field edited. New ids continue at `scn-007`. | |
+| P17 | Round 2's `score` returns `converged`, with `capability_matrix` 9/14 and `goal_matrix` 5/5. Conditional on P14 and P15 holding; if `propose` closes only some holes, `halted_no_progress` or `halted_round_cap` follows instead. | |
+
+P15 is the sharp one. Closing a *goal* hole is not the same shape of work as
+closing a cell: the hole names a depth, not a capability×outcome pair, and the
+scenario has to be a genuinely longer chain — search-then-check for depth 2,
+search-then-check-then-place for depth 3. A depth-1 scenario against the same
+goal would add a row member, change nothing about coverage, and look like
+progress.
+
 ### P3 withdrawn as invalid — 2026-08-13
 
 P3 was reported as unmet after three runs. It should never have been written, and
