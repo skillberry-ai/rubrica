@@ -70,6 +70,35 @@ def test_it_does_not_fire_before_a_world_model_exists(tmp_path):
     assert claim_utilisation(run)["artifacts"] == []
 
 
+def test_an_input_cited_only_through_a_contradiction_is_not_a_finding(tmp_path):
+    """The false-positive direction. `refs.check_world_model` (refs.py:464-467)
+    already resolves contradictions[].claim_a and claim_b as claim references, so a
+    definition of "cited" that ignores them disagrees with that checker. Measured
+    before this test existed: stripping an artifact's citations from the four walked
+    groups and putting two of its claim ids into a new `contradictions` entry made
+    `check_claim_utilisation` return "no world-model element cites any claim from
+    api-json (9 claims)" against a world model that visibly cites it -- the
+    wrong-artifact class this repo calls out specifically.
+    """
+    run = build_toy_run(tmp_path / "runs")
+    claims = json.loads((run.claims_dir / "api-json.json").read_text(encoding="utf-8"))
+    doomed = [c["id"] for c in claims["claims"]]
+    world = json.loads(run.world_model.read_text(encoding="utf-8"))
+    for group in ("capabilities", "entities", "actors", "goals"):
+        for item in world.get(group, []):
+            item["claims"] = [c for c in item.get("claims", []) if c not in doomed]
+    world.setdefault("contradictions", []).append(
+        {
+            "claim_a": doomed[0],
+            "claim_b": doomed[1],
+            "description": "test contradiction",
+        }
+    )
+    run.world_model.write_text(json.dumps(world, indent=2) + "\n", encoding="utf-8")
+
+    assert check_claim_utilisation(run) == []
+
+
 def test_partial_utilisation_is_reported_but_is_not_a_finding(tmp_path):
     """The whole design decision, pinned: 8% is data, 0% is a defect."""
     run = build_toy_run(tmp_path / "runs")

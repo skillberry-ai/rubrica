@@ -501,6 +501,11 @@ def check_claim_utilisation(run: RunPaths) -> list[Finding]:
     """
     out: list[Finding] = []
     for entry in claim_utilisation(run)["artifacts"]:
+        # `entry["total"]` guards a claims file with zero claims -- exactly the first
+        # of the two causes named above ("rb-extract produced nothing usable"), which
+        # `rb-extract` is explicitly allowed to produce for an input with nothing to
+        # extract. Exempting it is not a hole: the report above still shows the
+        # artifact at 0/0, so a human at gate 1 still sees it, it just is not a finding.
         if entry["total"] and entry["cited"] == 0:
             out.append(
                 Finding(

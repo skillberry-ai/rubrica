@@ -283,3 +283,29 @@ validate them. The re-records in §6 are the only live dispatches.
 - **Whether `agent-server-py` belongs in an input set at all.** Its 8%
   utilisation is a finding about that input, and change 4 exists to surface such
   findings, not to act on them.
+- **The `oc-find-error` anomaly.** The re-record for this plan's Task 2 introduced
+  an outcome class of `kind: error` into
+  `tests/fixtures/toy-contradiction/recorded/01-world-model.json` whose own
+  `description` states plainly that no error path exists for the capability it is
+  filed under. Recorded unedited in `src/rubrica/skills/rb-reconcile/exercise.md`
+  ("Observation: a self-describing-absent outcome class, from the
+  toy-contradiction re-record") rather than fixed here -- it is a candidate defect
+  against `rb-reconcile`, and this plan does not touch that skill's Method beyond
+  the one quantified sentence in change 3.
+- **The invented-outcome-class live check is scoped to the gap fixture only.**
+  `tests/unit/test_refusals_live.py`'s
+  `test_the_gap_fixture_did_not_acquire_invented_outcome_classes` reads `GAP_DIR`
+  only, so the contradiction fixture's outcome classes are unguarded -- which is
+  why the item above passed every existing check silently. Widening it is not a
+  drop-in: its forbidden-kind set is derived from the gap fixture's subtracted
+  prose, and the contradiction fixture legitimately carries `empty` among its
+  outcome classes, so a widened check needs its own expected-kind set rather than
+  the gap fixture's borrowed one.
+- **Two prose refinements to the sentences change 3 quantified, deferred.**
+  `rb-reconcile`'s sentence quantifies existence ("becomes an entity") but not
+  completeness, so a one-field stub entity would satisfy it as written;
+  `rb-extract`'s heading rule leaves the locator-to-section mapping implicit.
+  Both deferred rather than folded into this change because editing either
+  skill's prose obliges re-recording its live evidence, already paid for once on
+  this branch (`ec150e3`), and neither refinement is worth a second paid
+  re-record on its own.

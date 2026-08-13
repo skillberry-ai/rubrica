@@ -60,6 +60,16 @@ def _cited_claim_ids(run: RunPaths) -> set[str] | None:
     for group in ("capabilities", "entities", "actors", "goals"):
         for item in world.get(group, []):
             cited.update(item.get("claims", []) or [])
+    # `refs.check_world_model` (refs.py:464-467) already resolves contradictions[].claim_a
+    # and claim_b as claim references -- it reports one as a finding if it does not
+    # resolve. A definition of "cited" that excludes them would disagree with that
+    # checker in the same module family, and would tell an input whose only surviving
+    # contribution is a recorded contradiction that nothing cites it, which is false.
+    for contradiction in world.get("contradictions", []):
+        for side in ("claim_a", "claim_b"):
+            claim_id = contradiction.get(side)
+            if claim_id is not None:
+                cited.add(claim_id)
     return cited
 
 

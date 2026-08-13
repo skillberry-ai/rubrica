@@ -27,7 +27,7 @@ make lint      # ruff check --fix
 make format    # ruff format
 ```
 
-Baseline: **1146 passed, 4 skipped**; `make check` clean; `uv run rubrica
+Baseline: **1147 passed, 4 skipped**; `make check` clean; `uv run rubrica
 check-skills` exits 0. Anything else means you broke something. (It was 1126 as
 of the skills build; the three added since are `f3b9d30`'s, and this line went
 stale because it names a build rather than a commit. It was 1129 as of
@@ -47,8 +47,14 @@ whitespace-normalisation fix to those same two. It was 1148 as of `399dba5`;
 the two removed since are Task 3's deletion of
 `test_the_recorded_world_model_keeps_its_pre_rubrica_spelling` (one
 parametrized test, two ids), retired per spec §6's ruling that this file's
-re-recording obligation wins its documented contradiction with that test —
-re-measure it here when you add tests.)
+re-recording obligation wins its documented contradiction with that test. It
+was 1146 as of `9dbf203`; the one added since is
+`test_utilisation.py`'s `test_an_input_cited_only_through_a_contradiction_is_not_a_finding`,
+proving finding 1's fix of a whole-branch review — `_cited_claim_ids` was
+missing `contradictions[].claim_a`/`claim_b`, which `refs.check_world_model`
+already treats as claim citations, so the gate fired on an input whose only
+surviving contribution was a recorded contradiction — re-measure it here when
+you add tests.)
 
 Commands in `README.md` assume the venv is on `PATH`; otherwise prefix `uv run`.
 Four env overrides exist: `RUBRICA_SCHEMA_DIR` (`validate.py`),

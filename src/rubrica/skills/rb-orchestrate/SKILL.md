@@ -31,7 +31,7 @@ reads = ["manifest", "world_model", "scenarios", "coverage_latest", "verdict"]
 writes = ["decisions"]
 invokes = [
   "check-skills", "validate", "check-refs", "record-stage", "decide",
-  "dedupe-candidates", "emit", "smoke",
+  "dedupe-candidates", "emit", "smoke", "claim-utilisation",
 ]
 ```
 
@@ -431,6 +431,13 @@ is the highest-leverage review in the pipeline: every downstream stage
 inherits whatever is wrong here, and it is the one artifact small enough to
 read carefully. A7 above says what stopping at a gate means and what
 `--no-gate` does to it.
+
+Before you present, run `rubrica claim-utilisation --run <run>` and fold its
+per-artifact cited/total figures into what you show the human: this is a
+report, not a gate -- it always exits 0 on a readable run, so there is nothing
+to repair here -- but an input that contributed a handful of its claims is
+exactly the kind of fact gate 1 exists to surface, because this is where a
+human is already deciding whether the input set was right.
 
 **B6. The round loop, `round = 1..K` where `K = manifest.limits.max_rounds`.**
 
