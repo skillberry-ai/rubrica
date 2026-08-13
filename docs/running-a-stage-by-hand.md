@@ -299,3 +299,35 @@ permission and sandbox configuration, so a single instance running
 member's slice. Per-member read isolation needs one process per member, which is
 what dispatching stage by stage with this script gives you. A whole-pipeline
 orchestrate exercise remains the looser measurement it always was.
+
+**The run directory holds three paths the stage may not read, and one of them is
+an answer key.** Granting `Read(<run>/**)` is right for artifacts and wrong for
+`decisions.md`, `07-report.json` and `measurement/`: no skill's Contract lists any
+of them under `reads`, and all three are *about* the stages rather than merely
+outside their scope — an orchestrator log, a smoke report, and the human review
+surface. The script denies all three, in both settings scopes.
+
+`decisions.md` is the one that bites. On 2026-08-13 a `propose` dispatch was given
+a run whose `decisions.md` carried that stage's own pre-registered predictions,
+written there minutes earlier so the reading could not be hindsight. The
+transcript shows it running `ls -la` in the run directory: one `Read` from the
+answer to its own exercise, and what stopped it was an unrelated premature kill.
+So, two rules for scoring a stage by hand:
+
+- **Predictions go in the design spec, never in the run.** On disk before the
+  dispatch is the right instinct; inside the dispatch's read scope is the wrong
+  destination.
+- **The gate-1 human report is not an artifact either.** Anything you write while
+  holding a gate is the orchestrator's, and a later stage reading it has been
+  briefed.
+
+`RUBRICA_PRINT_SETTINGS=1` writes both settings files and exits before
+dispatching, which is how `tests/unit/test_dispatch_harness.py` checks the deny
+lists without spending a model call — and how to check them by hand:
+
+```bash
+RUBRICA_PRINT_SETTINGS=1 ./scripts/dispatch-stage.sh propose "$RUN"   # prints both paths
+```
+
+None of this makes the deny list the instrument. It narrows the accident; the
+audit is still what tells you what the stage read.

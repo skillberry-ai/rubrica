@@ -120,17 +120,38 @@ export PATH="$REPO/.venv/bin:$PATH"
 # and read the read audit rather than trusting either layer.
 # ---------------------------------------------------------------------------
 
+# Three paths inside the run are the run's own answer key. Granting the whole run
+# directory is right for artifacts and wrong for these, because no skill's
+# Contract lists any of them under `reads`:
+#
+#   decisions.md    the orchestrator's log -- gate rulings, and in a measured
+#                   run the pre-registered predictions for the very stage being
+#                   dispatched. Observed on 2026-08-13: a propose dispatch ran
+#                   `ls -la` in the run directory with P7-P9 sitting in that
+#                   file, one Read away from the answer to its own exercise. It
+#                   was killed before it got there, which is luck, not a control.
+#   07-report.json  smoke's output; read by compare-gold and diff-runs, never by
+#                   a stage.
+#   measurement/    recall.json/.md and review/sample.json/packet.md -- the
+#                   human review surface, which is scored *against* the stages.
+#
+# Derived, not guessed: the union of every skill's `reads` is claims_dir,
+# coverage_latest, expected, input_file, manifest, scenarios, seed, verdict and
+# world_model. These three are what a run holds that no stage may name.
+RUN_DENY=("$RUN/decisions.md" "$RUN/07-report.json" "$RUN/measurement")
+
 if [ "${RUBRICA_NO_SANDBOX:-0}" = "1" ]; then
   echo '{}' > "$CLAUDE_CONFIG_DIR/settings.json"
 else
   jq -n --arg repo "$REPO" --arg run "$RUN" --arg skilldir "$SKILL_DIR" \
+    --argjson rundeny "$(printf '%s\n' "${RUN_DENY[@]}" | jq -R . | jq -s .)" \
     '{sandbox: {
         enabled: true,
         autoAllowBashIfSandboxed: true,
         failIfUnavailable: true,
         filesystem: {
           allowRead: [$repo, $run, $skilldir],
-          denyRead: [$repo + "/docs", $repo + "/tests", $repo + "/src/rubrica/skills"],
+          denyRead: ([$repo + "/docs", $repo + "/tests", $repo + "/src/rubrica/skills"] + $rundeny),
           allowWrite: [$run]
         },
         network: { allowedDomains: [] }
@@ -146,7 +167,7 @@ fi
 # -- the siblings get enumerated one at a time. sandbox.filesystem uses the
 # opposite rule (more specific path wins), which is why the two lists above and
 # below are built differently from the same intent.
-DENY=("$REPO/docs" "$REPO/tests" "$REPO/CLAUDE.md" "$REPO/README.md")
+DENY=("$REPO/docs" "$REPO/tests" "$REPO/CLAUDE.md" "$REPO/README.md" "${RUN_DENY[@]}")
 for d in "$REPO"/src/rubrica/skills/rb-*; do
   [ "$d" = "$SKILL_DIR" ] || DENY+=("$d")
 done
@@ -162,6 +183,17 @@ jq -n --arg repo "$REPO" --arg run "$RUN" --arg skilldir "$SKILL_DIR" \
               "Edit(/" + $run + "/**)", "Write",
               "Bash(rubrica *)", "Bash(" + $repo + "/.venv/bin/rubrica *)"]
     }}' > "$SETTINGS_FILE"
+
+# Stop here with both settings files written and nothing dispatched. This exists
+# so the deny lists above are testable: every other way of checking them either
+# costs a model dispatch or greps this file's source, and a test that greps the
+# source passes when the rule is present and unreachable. Prints the two paths in
+# a fixed order -- permissions file first, sandbox file second.
+if [ "${RUBRICA_PRINT_SETTINGS:-0}" = "1" ]; then
+  echo "$SETTINGS_FILE"
+  echo "$CLAUDE_CONFIG_DIR/settings.json"
+  exit 0
+fi
 
 # The dispatch prompt, verbatim from docs/running-a-stage-by-hand.md §2. Nothing
 # else may be added to it: not a summary of what an earlier stage concluded, not

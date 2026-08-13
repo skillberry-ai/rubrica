@@ -367,6 +367,47 @@ P5 and P6 are the two the control got for free and this run has to earn. P6 is
 the one most likely to fail outright, since nothing instructs a stage to mine
 entity shapes out of span outputs.
 
+### Stage 02 propose, round 1 — P7–P9, recorded 2026-08-13
+
+P1–P6 are about what `rb-extract` and `rb-reconcile` recover from the captured
+evidence, and were recorded before capture. P7–P9 are a separate set, about what
+`rb-propose` does with the resulting world model, and were recorded after gate 1
+passed and before the dispatch — into `decisions.md`, which turned out to be the
+wrong place; see §13.
+
+Scored against `runs/run-20260813-064150`, round 1: 6 scenarios, `validate
+--stage propose` 0, `check-refs` 0, read audit clean, $0.668 over 8 turns.
+
+| # | Prediction | Verdict |
+|---|---|---|
+| P7 | `propose` stops at `max_scenarios: 6` and names the holes it left, rather than proposing past the cap or covering 6 of 19 silently. | **Held.** It named `oc-search-empty` and `oc-list-empty` as "deferred past the `max_scenarios: 6` cap for this round — a decision for round 2 or the orchestrator, not a defect." |
+| P8 | Every scenario carries `status: "proposed"` and cites one of the world model's five `goal_id`s; none invents a goal, capability or outcome class. | **Held.** All 6 `proposed`, 5/5 goals covered, no `hole_ref` naming anything undeclared. |
+| P9 | The four gaps do **not** stop it targeting the cells they concern, because the `blocked_by_gap` refusal condition keys off a coverage report's hole `reason` and round 1 has no coverage report. | **Failed, in the better direction the prediction anticipated.** |
+
+P9 is the result worth keeping. Nothing in the prompt obliged it: the refusal
+condition it acted on is written against an artifact that does not exist in round
+1. It made the correspondence from prose instead, and the correspondence is
+sound — each `underspecified` outcome class restates a gap's `unknown` nearly
+verbatim, `oc-place-underspecified` and `gap-place-unknown-restaurant` both
+resting on the same `rest_999` trace where `check_availability` failed before
+`place_reservation` was reached. It declined all five and said so.
+
+One imprecision inside that, recorded because the substance being right is what
+makes the wording easy to miss: it called those cells "`blocked_by_gap` per the
+world model's `gaps` list." `blocked_by_gap` is a *coverage-report* hole reason
+that additionally requires a `gap_id`, and no artifact assigns it in round 1 —
+the label was borrowed one stage early, and the world model's gaps carry no cell
+references for it to have been read off. No fix follows: pressing the prompt to
+withhold judgment until a coverage report exists would trade a correct refusal
+for a confabulated scenario, which is the trade §11 already rules against.
+
+**This run cannot reach `converged`,** and the reason is not the five gap-blocked
+cells. `rb-score` defines `converged` as no *closable* hole remaining, "whether
+or not the matrices read 100%". `oc-search-empty` and `oc-list-empty` are
+closable — both were observed, in trajectories p06 and p09 — and the scenario cap
+is spent, so a closable hole survives to the round cap. Expect `continue` at
+round 1 and `halted_no_progress` at round 2.
+
 ### P3 withdrawn as invalid — 2026-08-13
 
 P3 was reported as unmet after three runs. It should never have been written, and
@@ -473,3 +514,48 @@ the tool side is deterministic given fixed inputs.
   experiment.
 - Registering `providers/mock.py` to close a surviving gap. Doing so would
   improve the suite and destroy the measurement.
+
+## 13. The run's own answer key, and where predictions live
+
+Two mistakes were made in running stage 02 on 2026-08-13, both about where a
+prediction is written down rather than about the pipeline. Recorded here because
+the second one nearly invalidated a measurement, and the shape recurs for anyone
+scoring a stage by hand.
+
+**Predictions belong in this file, not in `decisions.md`.** P7–P9 were recorded
+into the run's `decisions.md` — the right instinct (on disk before the dispatch,
+so the reading cannot be hindsight) with the wrong destination. `decisions.md`
+lives *inside the run directory*, and `scripts/dispatch-stage.sh` granted
+`Read(<run>/**)`. P7 and P8 state, in plain language, what the stage is expected
+to do: stop at the cap, name the deferred holes, use `status: "proposed"` and
+real `goal_id`s. A dispatch that read them would have produced a worthless
+observation and a passing one.
+
+It came closer than it should have. The transcript of the first (killed) attempt
+shows the stage running `ls -la` in the run directory with that file present. It
+was one `Read` from its own answer key, and what stopped it was an unrelated
+premature kill.
+
+**The fix is in the harness, not in the procedure.** `dispatch-stage.sh` now
+denies three run-local paths in both settings scopes — `decisions.md`,
+`07-report.json`, and `measurement/`. The set is derived rather than guessed: the
+union of every skill's Contract `reads` is `claims_dir`, `coverage_latest`,
+`expected`, `input_file`, `manifest`, `scenarios`, `seed`, `verdict` and
+`world_model`, and those three are what a run holds that no stage may name. They
+are also the three that are *about* the stages — an orchestrator log, a smoke
+report, and the human review surface — which is what makes them answer keys
+rather than merely out-of-scope.
+
+`RUBRICA_PRINT_SETTINGS=1` writes both settings files and exits before
+dispatching, so `tests/unit/test_dispatch_harness.py` can assert the deny rules
+without spending a model call. A test that greps the script's source instead
+would pass on a rule that is present and unreachable, which is the
+substring-of-message weakness the parent spec's §6 names.
+
+**What this does not fix.** Neither layer is the instrument. The permissions
+layer covers the file tools and the file commands Claude Code parses out of a
+Bash line; the sandbox layer was measured non-functional on the machine this was
+built on. A stage that reads a denied path through a Python `open()` may still
+succeed, and `scripts/audit-reads.sh` over the transcript remains the only way to
+find out. The deny rules narrow the accident; they do not close the hole the
+parent spec's §8 records as the weakest link.

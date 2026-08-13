@@ -27,7 +27,7 @@ make lint      # ruff check --fix
 make format    # ruff format
 ```
 
-Baseline: **1147 passed, 4 skipped**; `make check` clean; `uv run rubrica
+Baseline: **1155 passed, 4 skipped**; `make check` clean; `uv run rubrica
 check-skills` exits 0. Anything else means you broke something. (It was 1126 as
 of the skills build; the three added since are `f3b9d30`'s, and this line went
 stale because it names a build rather than a commit. It was 1129 as of
@@ -53,8 +53,12 @@ was 1146 as of `9dbf203`; the one added since is
 proving finding 1's fix of a whole-branch review — `_cited_claim_ids` was
 missing `contradictions[].claim_a`/`claim_b`, which `refs.check_world_model`
 already treats as claim citations, so the gate fired on an input whose only
-surviving contribution was a recorded contradiction — re-measure it here when
-you add tests.)
+surviving contribution was a recorded contradiction. It was 1147 as of
+`8f1ea7c`; the eight added since are `test_dispatch_harness.py`'s, holding
+`scripts/dispatch-stage.sh`'s deny lists over the three run-local paths no
+skill's `reads` names — they skip, rather than fail, on a machine without
+`claude` or `jq` on `PATH`, so a green run there is not evidence — re-measure
+it here when you add tests.)
 
 Commands in `README.md` assume the venv is on `PATH`; otherwise prefix `uv run`.
 Four env overrides exist: `RUBRICA_SCHEMA_DIR` (`validate.py`),
