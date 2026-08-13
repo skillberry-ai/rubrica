@@ -408,6 +408,29 @@ closable — both were observed, in trajectories p06 and p09 — and the scenari
 is spent, so a closable hole survives to the round cap. Expect `continue` at
 round 1 and `halted_no_progress` at round 2.
 
+### Stage 03 score, round 1 — P10–P13, recorded 2026-08-13 before the dispatch
+
+Recorded here rather than in `decisions.md`, per §13. Verdicts are blank because
+the dispatch has not run; git dates this section before it.
+
+P10 and P11 are one question split in two, and it is the question stage 02 raised:
+`rb-propose` declined five cells as gap-blocked using a term that only `rb-score`
+is entitled to assign. Now the stage that owns the term gets to assign it, and the
+interesting failure is not getting it wrong — it is getting it *too broadly*.
+
+| # | Prediction | Verdict |
+|---|---|---|
+| P10 | The five `underspecified` cells appear as holes with `reason: "blocked_by_gap"` and a `gap_id` that resolves in the world model's `gaps`. All five have a candidate: `oc-place-underspecified` → `gap-place-unknown-restaurant`, `oc-check-underspecified` → `gap-check-availability-empty`, `oc-cancel-underspecified` → `gap-cancel-repeat`, and both `oc-search-underspecified` and `oc-list-underspecified` → `gap-validation-errors`. | |
+| P11 | `oc-search-empty` and `oc-list-empty` get `reason: "not_yet_attempted"`, **not** `blocked_by_gap`. Both were observed — trajectories p06 and p09 — so no gap blocks them; they are open only because the scenario cap ran out. | |
+| P12 | `verdict` is `continue`: closable holes remain (P11's two), this round added cells, and round 1 is below `max_rounds: 2`. | |
+| P13 | `capability_matrix.total` is 14 with `covered` 7, and `goal_matrix` is 5/5. No scenario is folded to `duplicate`: `scn-005` and `scn-006` are the closest pair and differ by outcome class, which Method step 2 rules is not one test. | |
+
+P11 is the load-bearing one. Marking all seven uncovered cells `blocked_by_gap`
+would produce `converged` — every remaining hole unclosable, nothing left to
+try — and that verdict would be wrong while looking like success. It is the
+denominator-shrinking failure the `rb-score` prompt warns about, arriving through
+the hole `reason` rather than through the matrix.
+
 ### P3 withdrawn as invalid — 2026-08-13
 
 P3 was reported as unmet after three runs. It should never have been written, and
