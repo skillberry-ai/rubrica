@@ -491,10 +491,45 @@ against — the same condition round 1 acted on from world-model prose without o
 
 | # | Prediction | Verdict |
 |---|---|---|
-| P14 | `propose` targets exactly the four `not_yet_attempted` holes and re-proposes against none of the five `blocked_by_gap` cells. | |
-| P15 | The two goal holes are closed by scenarios whose `hop_depth` is the missing member of `expected_hop_depths` — 2 for `goal-check-availability`, 3 for `goal-place-reservation` — rather than by another depth-1 scenario that leaves the row partial. | |
-| P16 | `scn-001`–`scn-006` are untouched: no renumbering, no status change from `active`, no field edited. New ids continue at `scn-007`. | |
-| P17 | Round 2's `score` returns `converged`, with `capability_matrix` 9/14 and `goal_matrix` 5/5. Conditional on P14 and P15 holding; if `propose` closes only some holes, `halted_no_progress` or `halted_round_cap` follows instead. | |
+| P14 | `propose` targets exactly the four `not_yet_attempted` holes and re-proposes against none of the five `blocked_by_gap` cells. | **Held.** |
+| P15 | The two goal holes are closed by scenarios whose `hop_depth` is the missing member of `expected_hop_depths` — 2 for `goal-check-availability`, 3 for `goal-place-reservation` — rather than by another depth-1 scenario that leaves the row partial. | **Held.** |
+| P16 | `scn-001`–`scn-006` are untouched: no renumbering, no status change from `active`, no field edited. New ids continue at `scn-007`. | **Held.** |
+| P17 | Round 2's `score` returns `converged`, with `capability_matrix` 9/14 and `goal_matrix` 5/5. Conditional on P14 and P15 holding; if `propose` closes only some holes, `halted_no_progress` or `halted_round_cap` follows instead. | **Held**, both figures exact. |
+
+**All four held.** Round 2: `propose` $0.726 over 10 turns, `score` $1.550 over 17,
+`validate` and `check-refs` 0 at both, `latest.json` byte-identical to
+`round-2.json`, all ten scenarios `active` and none folded.
+
+| | Round 1 | Round 2 |
+|---|---|---|
+| `capability_matrix` | 7/14 | **9/14** |
+| `goal_matrix` | 3/5 | **5/5** |
+| holes | 9 | **5**, all `blocked_by_gap` |
+| `verdict` | `continue` | **`converged`** |
+
+`converged` is the right verdict despite round 2 being `max_rounds`: every
+remaining hole is `blocked_by_gap` against a gap that resolves, so no further
+round could close one. The run reached it by the definition the prompt states —
+no closable hole remaining — with the matrices at 0.643 and 1.0 rather than at
+100%.
+
+P14 is the result to keep. Round 1 declined those same five cells by reading gap
+prose, without the coverage report its refusal condition is written against.
+Round 2 had the report and reached the identical conclusion through the stated
+mechanism. The same judgment arrived with and without its instrument, which is
+about as directly as this project's central question can be put to a single
+stage.
+
+Two audit notes, both from `score`:
+
+- **The out-of-contract read of `src/rubrica/schema/coverage-0.1.json` reproduced
+  — two dispatches for two.** It is systematic behaviour, not a one-off, which
+  strengthens §14's reading that the gap is a harness that neither grants nor
+  denies the schema files a Contract's `schemas` list already names.
+- Round 2 read `manifest.json` with a bash `grep` rather than the `Read` tool.
+  In-contract either way, but worth recording: a bash-only read leaves no `Read`
+  event, so the audit's file-tool list alone would not have shown it. The bash
+  section is not optional reading.
 
 P15 is the sharp one. Closing a *goal* hole is not the same shape of work as
 closing a cell: the hole names a depth, not a capability×outcome pair, and the
