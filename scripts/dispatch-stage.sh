@@ -24,6 +24,10 @@
 #   RUBRICA_EFFORT       effort for the dispatch (default medium)
 #   RUBRICA_BUDGET       hard dollar ceiling for the dispatch (default 2)
 #   RUBRICA_NO_SANDBOX   set to 1 to omit the sandbox block entirely
+#   RUBRICA_RESEED       set to 1 to carry a re-seed verdict's alternative_answers
+#                        and notes into an instantiate re-dispatch, verbatim
+#   RUBRICA_PRINT_SETTINGS  set to 1 to write the settings files and the prompt,
+#                        print their three paths, and dispatch nothing
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -151,6 +155,16 @@ export PATH="$REPO/.venv/bin:$PATH"
 # world_model. These three are what a run holds that no stage may name.
 RUN_DENY=("$RUN/decisions.md" "$RUN/07-report.json" "$RUN/measurement")
 
+# Stage-specific, and stated outright by the skill rather than inferred:
+# rb-instantiate's SKILL.md says 05-verdicts/ "is not in your `reads`, so a member
+# that treats the notice as something it was not supposed to see makes the
+# re-dispatch a no-op." A re-seed's alternatives have to arrive through the prompt
+# (RUBRICA_RESEED below) or not at all, so the file is denied for this stage only --
+# rb-challenge writes there and rb-emit reads it.
+if [ "$STAGE" = "instantiate" ]; then
+  RUN_DENY+=("$RUN/05-verdicts")
+fi
+
 if [ "${RUBRICA_NO_SANDBOX:-0}" = "1" ]; then
   echo '{}' > "$CLAUDE_CONFIG_DIR/settings.json"
 else
@@ -195,15 +209,50 @@ jq -n --arg repo "$REPO" --arg run "$RUN" --arg skilldir "$SKILL_DIR" \
               "Bash(rubrica *)", "Bash(" + $repo + "/.venv/bin/rubrica *)"]
     }}' > "$SETTINGS_FILE"
 
-# Stop here with both settings files written and nothing dispatched. This exists
-# so the deny lists above are testable: every other way of checking them either
-# costs a model dispatch or greps this file's source, and a test that greps the
-# source passes when the rule is present and unreachable. Prints the two paths in
-# a fixed order -- permissions file first, sandbox file second.
-if [ "${RUBRICA_PRINT_SETTINGS:-0}" = "1" ]; then
-  echo "$SETTINGS_FILE"
-  echo "$CLAUDE_CONFIG_DIR/settings.json"
-  exit 0
+# ---------------------------------------------------------------------------
+# The re-seed append -- one of exactly two things an orchestrator may add to a
+# re-dispatch, and the reason this mechanism exists at all rather than a human
+# retyping the objection.
+#
+# rb-orchestrate's step 227 and rb-instantiate's section 1 agree on the payload,
+# and it is two fields, not four: the verdict's `alternative_answers` and its
+# `notes`. Nothing else -- not `uniquely_determined`, not the verdict string.
+#
+# Built with jq straight from the verdict file, so a paraphrase is not something
+# this script declines to write, it is something it cannot express. That is the
+# whole design constraint: the parent spec calls a paraphrased finding "the
+# orchestrator's conclusion wearing a finding's clothes", and the only structural
+# defence is to make the text a copy rather than a rendering.
+#
+# `alternative_answers` arriving empty is meaningful rather than missing:
+# rb-instantiate's section 1 says an empty list plus populated `notes` is the
+# other defect shape -- a call the scenario never declared, or a disputed oracle --
+# and the notes are then the entire reason. So the field is passed through as-is,
+# empty or not, and this script never decides which shape it is.
+# ---------------------------------------------------------------------------
+RESEED_BLOCK=""
+if [ "${RUBRICA_RESEED:-0}" = "1" ]; then
+  if [ "$STAGE" != "instantiate" ]; then
+    echo "RUBRICA_RESEED applies only to instantiate; $STAGE takes no re-seed notice" >&2
+    exit 2
+  fi
+  if [ -z "$SLICE" ]; then
+    echo "RUBRICA_RESEED needs the scenario_id whose verdict is being carried" >&2
+    exit 2
+  fi
+  VERDICT="$RUN/05-verdicts/$SLICE.json"
+  if [ ! -f "$VERDICT" ]; then
+    echo "no verdict to re-seed from: $VERDICT" >&2
+    exit 2
+  fi
+  # A re-seed notice for a verdict that is not a re-seed would be the orchestrator
+  # inventing an objection, which is the same defect as paraphrasing one.
+  actual=$(jq -r '.verdict' "$VERDICT")
+  if [ "$actual" != "re-seed" ]; then
+    echo "$SLICE's verdict is '$actual', not 're-seed'; nothing to carry" >&2
+    exit 2
+  fi
+  RESEED_BLOCK=$(jq '{alternative_answers, notes}' "$VERDICT")
 fi
 
 # The dispatch prompt, verbatim from docs/running-a-stage-by-hand.md §2. Nothing
@@ -223,6 +272,37 @@ contract does not name.
 
 When you are done, report only: the paths you wrote, and any refusal
 condition you hit."
+
+# The appended block names its own provenance and quotes; it does not interpret.
+# rb-instantiate already knows what a re-seed notice obliges it to do, so the
+# framing stops at naming which file the JSON came out of.
+if [ -n "$RESEED_BLOCK" ]; then
+  PROMPT="$PROMPT
+
+rb-challenge judged this scenario \`re-seed\`. Its verdict's
+\`alternative_answers\` and \`notes\`, quoted verbatim from $VERDICT:
+
+$RESEED_BLOCK"
+fi
+
+# Written out every run, not only in print-settings mode: the prompt is the one
+# input to a dispatch that the transcript does not let you reconstruct exactly,
+# and a re-seed run is precisely when you want to prove what was appended.
+PROMPT_FILE="$LAB/prompt-$STAGE${SLICE:+-$SLICE}.txt"
+printf '%s\n' "$PROMPT" > "$PROMPT_FILE"
+
+# Stop here with both settings files and the prompt written, and nothing
+# dispatched. This exists so the deny lists and the re-seed append are testable:
+# every other way of checking them either costs a model dispatch or greps this
+# file's source, and a test that greps the source passes when the rule is present
+# and unreachable. Prints three paths in a fixed order -- permissions file,
+# sandbox file, prompt file.
+if [ "${RUBRICA_PRINT_SETTINGS:-0}" = "1" ]; then
+  echo "$SETTINGS_FILE"
+  echo "$CLAUDE_CONFIG_DIR/settings.json"
+  echo "$PROMPT_FILE"
+  exit 0
+fi
 
 TRANSCRIPT="$LAB/transcripts/$STAGE${SLICE:+-$SLICE}.jsonl"
 

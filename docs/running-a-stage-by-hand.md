@@ -340,3 +340,55 @@ RUBRICA_PRINT_SETTINGS=1 ./scripts/dispatch-stage.sh propose "$RUN"   # prints b
 
 None of this makes the deny list the instrument. It narrows the accident; the
 audit is still what tells you what the stage read.
+
+## 8. Re-dispatching a `re-seed` by hand
+
+`rb-challenge` can return `re-seed` for an instance, and `rubrica emit` refuses to
+compile one — it reports a finding no further stage can clear. The repair is a
+single re-dispatch of `rb-instantiate` for that scenario, carrying the adversary's
+objection. That objection is one of exactly **two** things an orchestrator may
+append to a dispatch, and the payload is fixed by two skills that agree on it:
+`rb-orchestrate` step 227 and `rb-instantiate` §1 both say the verdict's
+**`alternative_answers` and its `notes`** — not the verdict string, not
+`uniquely_determined`, not the flags.
+
+```bash
+RUBRICA_RESEED=1 ./scripts/dispatch-stage.sh instantiate "$RUN" scn-005
+```
+
+The block is extracted with `jq` straight from `05-verdicts/scn-005.json`, so a
+paraphrase is not something the script declines to write — it is something the
+script cannot express. That distinction is the point: the design spec calls a
+paraphrased notice "the orchestrator's conclusion wearing a finding's clothes",
+and the only structural defence is to make the appended text a copy rather than a
+rendering. The flag refuses with exit 2 on a verdict that is not `re-seed`, on a
+stage other than `instantiate`, and on a missing verdict file, because inventing an
+objection is the same defect as paraphrasing one.
+
+**`rb-instantiate` is denied `05-verdicts/` for exactly this reason.** Its §1 says
+so outright — the directory is not in its `reads`, and "a member that treats the
+notice as something it was not supposed to see makes the re-dispatch a no-op". The
+deny is stage-scoped, since `rb-challenge` writes there and `rb-emit` reads it.
+
+An empty `alternative_answers` is a *shape*, not a missing value: paired with
+populated `notes` it means the defect was not ambiguity at all — an undeclared
+call, or a disputed oracle — and the notes carry the whole reason. The script
+passes the field through empty rather than omitting it, so the member can tell
+which of the two shapes arrived.
+
+After re-seeding, re-challenge that scenario and only then re-run `emit`. A second
+`re-seed` verdict is not another repair: `rb-orchestrate` §505 says treat it as a
+rejection, because `emit` refuses a `re-seed` no matter how many rounds produced
+it.
+
+To inspect what a dispatch *would* send without spending anything:
+
+```bash
+RUBRICA_PRINT_SETTINGS=1 RUBRICA_RESEED=1 \
+  ./scripts/dispatch-stage.sh instantiate "$RUN" scn-005   # prints 3 paths, dispatches nothing
+```
+
+The third path is the composed prompt. It is written on every run, not only in this
+mode, because the prompt is the one dispatch input a transcript does not let you
+reconstruct exactly — and a re-seed run is precisely when you want to prove what
+was appended.

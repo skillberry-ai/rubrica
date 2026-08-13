@@ -8,17 +8,29 @@ being dispatched. On 2026-08-13 a `propose` dispatch ran `ls -la` in a run
 directory with P7-P9 sitting in that file; it was one Read from its own answer
 key, and what stopped it was an unrelated premature kill.
 
-These tests drive the real script with `RUBRICA_PRINT_SETTINGS=1`, which writes
-both settings files and exits before dispatching. Asserting against the emitted
-JSON rather than against the script's source matters: a source grep passes on a
-rule that is present and unreachable -- the substring-of-message weakness the
-design spec's section 6 names -- and this rule's whole difficulty is that it has
-to survive two settings scopes with opposite precedence rules.
+The second half covers the re-seed append -- the one channel by which an
+adversary's `alternative_answers` and `notes` reach a re-dispatched
+`rb-instantiate`, which cannot read `05-verdicts/` itself.
 
-Measured both directions before committing: deleting `$RUN/decisions.md` from the
-script's RUN_DENY array turns all four assertions below red, and moving the
-sandbox `+ $rundeny` concatenation without the parenthesis makes jq fail the run
-outright rather than emitting a list quietly missing the entries.
+These tests drive the real script with `RUBRICA_PRINT_SETTINGS=1`, which writes
+both settings files plus the composed prompt and exits before dispatching.
+Asserting against the emitted JSON and prompt rather than against the script's
+source matters: a source grep passes on a rule that is present and unreachable --
+the substring-of-message weakness the design spec's section 6 names -- and these
+rules' whole difficulty is that they have to survive two settings scopes with
+opposite precedence rules.
+
+Measured in every direction before committing:
+
+- deleting `$RUN/decisions.md` from RUN_DENY turns exactly three red and leaves
+  the other parametrizations green
+- denying a world model the stage must read turns the over-subtraction test red
+- dropping the stage-scoped `05-verdicts` deny turns its own test red, while the
+  `challenge` half of that same test proves the deny is not applied globally
+- appending the *whole* verdict instead of two fields turns the over-inclusion
+  test red; appending only `notes` turns the verbatim and empty-list tests red
+- moving the sandbox `+ $rundeny` concatenation outside its parenthesis makes jq
+  fail the run outright rather than emitting a list quietly missing the entries
 """
 
 import json
@@ -40,28 +52,42 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.fixture
-def settings(tmp_path):
-    """Run the harness in print-settings mode; return (permissions, sandbox) JSON.
+def _dispatch(tmp_path, *args, run=None, **env):
+    """Run the harness in print-settings mode. Returns the CompletedProcess.
 
     The run directory only has to exist -- the script resolves and grants it
     without reading any artifact, and nothing is dispatched in this mode.
     """
-    run = tmp_path / "run"
-    run.mkdir()
-    proc = subprocess.run(
-        [str(SCRIPT), "propose", str(run)],
+    if run is None:
+        run = tmp_path / "run"
+        run.mkdir(exist_ok=True)
+    return subprocess.run(
+        [str(SCRIPT), *args],
         capture_output=True,
         text=True,
-        env={**os.environ, "RUBRICA_LAB": str(tmp_path / "lab"), "RUBRICA_PRINT_SETTINGS": "1"},
+        env={
+            **os.environ,
+            "RUBRICA_LAB": str(tmp_path / "lab"),
+            "RUBRICA_PRINT_SETTINGS": "1",
+            **env,
+        },
     )
+
+
+def _paths(proc):
+    """The three paths print-settings mode emits, in its fixed order."""
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    perms_path, sandbox_path = proc.stdout.split()
-    return (
-        json.loads(Path(perms_path).read_text()),
-        json.loads(Path(sandbox_path).read_text()),
-        run.resolve(),
-    )
+    perms, sandbox, prompt = proc.stdout.split()
+    return json.loads(Path(perms).read_text()), json.loads(Path(sandbox).read_text()), prompt
+
+
+@pytest.fixture
+def settings(tmp_path):
+    """(permissions JSON, sandbox JSON, resolved run dir) for a propose dispatch."""
+    run = tmp_path / "run"
+    run.mkdir()
+    perms, sandbox, _ = _paths(_dispatch(tmp_path, "propose", str(run), run=run))
+    return perms, sandbox, run.resolve()
 
 
 # Derived, not guessed: the union of every skill's Contract `reads` is claims_dir,
@@ -118,3 +144,138 @@ def test_the_run_artifacts_a_stage_must_read_are_not_denied(settings):
     }
     for artifact in ("manifest.json", "01-world-model.json", "02-scenarios.json", "01-claims"):
         assert f"Read(/{run}/{artifact})" not in denied
+
+
+# --- the re-seed append -------------------------------------------------------
+#
+# rb-orchestrate step 227 and rb-instantiate section 1 agree on the payload and it
+# is two fields: the verdict's `alternative_answers` and its `notes`. The parent
+# spec calls a paraphrased notice "the orchestrator's conclusion wearing a
+# finding's clothes", so what these tests hold is not that the script declines to
+# paraphrase -- it is that a copy is the only thing it can produce.
+
+VERDICT = {
+    "schema_version": "0.1",
+    "scenario_id": "scn-001",
+    "uniquely_determined": False,
+    "derivable_without_guessing": True,
+    "minimum_tool_calls_found": 1,
+    "verdict": "re-seed",
+    "alternative_answers": [
+        {"answer": "CANARY-ALT-ANSWER", "world_consistent_reason": "CANARY-REASON"}
+    ],
+    "flags": ["CANARY-FLAG"],
+    "notes": "CANARY-NOTES",
+}
+
+
+def _run_with_verdict(tmp_path, verdict=None, sid="scn-001"):
+    run = tmp_path / "run"
+    (run / "05-verdicts").mkdir(parents=True, exist_ok=True)
+    (run / "05-verdicts" / f"{sid}.json").write_text(json.dumps(verdict or VERDICT))
+    return run
+
+
+def test_a_reseed_dispatch_carries_the_two_verdict_fields_verbatim(tmp_path):
+    run = _run_with_verdict(tmp_path)
+    _, _, prompt_file = _paths(
+        _dispatch(tmp_path, "instantiate", str(run), "scn-001", run=run, RUBRICA_RESEED="1")
+    )
+    prompt = Path(prompt_file).read_text()
+    assert "CANARY-ALT-ANSWER" in prompt
+    assert "CANARY-REASON" in prompt
+    assert "CANARY-NOTES" in prompt
+
+
+def test_a_reseed_dispatch_carries_nothing_but_those_two_fields(tmp_path):
+    """The over-inclusion direction, which a `cat the verdict` implementation fails.
+
+    `verdict` and `minimum_tool_calls_found` are the adversary's *conclusions*;
+    handing them over invites the member to defer rather than re-judge, which
+    rb-instantiate's section 1 rules out in as many words.
+    """
+    run = _run_with_verdict(tmp_path)
+    _, _, prompt_file = _paths(
+        _dispatch(tmp_path, "instantiate", str(run), "scn-001", run=run, RUBRICA_RESEED="1")
+    )
+    prompt = Path(prompt_file).read_text()
+    assert "CANARY-FLAG" not in prompt
+    assert "minimum_tool_calls_found" not in prompt
+    assert "uniquely_determined" not in prompt
+
+
+def test_an_empty_alternatives_list_is_passed_through_rather_than_dropped(tmp_path):
+    """Empty is a *shape*, not a missing value.
+
+    rb-instantiate section 1: an empty `alternative_answers` with populated notes
+    is the other defect class -- an undeclared call, or a disputed oracle -- and the
+    notes are then the entire reason. A script that omitted the empty field would
+    hide which of the two shapes arrived.
+    """
+    run = _run_with_verdict(tmp_path, {**VERDICT, "alternative_answers": []})
+    _, _, prompt_file = _paths(
+        _dispatch(tmp_path, "instantiate", str(run), "scn-001", run=run, RUBRICA_RESEED="1")
+    )
+    assert '"alternative_answers": []' in Path(prompt_file).read_text()
+
+
+def test_no_reseed_flag_means_no_appended_block(tmp_path):
+    run = _run_with_verdict(tmp_path)
+    _, _, prompt_file = _paths(_dispatch(tmp_path, "instantiate", str(run), "scn-001", run=run))
+    prompt = Path(prompt_file).read_text()
+    assert "CANARY-NOTES" not in prompt
+    assert "re-seed" not in prompt
+
+
+@pytest.mark.parametrize(
+    "verdict_value, sid, stage, expected_in_stderr",
+    [
+        ("accept", "scn-001", "instantiate", "not 're-seed'"),
+        ("reject", "scn-001", "instantiate", "not 're-seed'"),
+    ],
+)
+def test_a_reseed_notice_for_a_non_reseed_verdict_is_a_usage_error(
+    tmp_path, verdict_value, sid, stage, expected_in_stderr
+):
+    """Inventing an objection is the same defect as paraphrasing one."""
+    run = _run_with_verdict(tmp_path, {**VERDICT, "verdict": verdict_value}, sid=sid)
+    proc = _dispatch(tmp_path, stage, str(run), sid, run=run, RUBRICA_RESEED="1")
+    assert proc.returncode == 2
+    assert expected_in_stderr in proc.stderr
+
+
+def test_a_reseed_notice_to_a_stage_that_takes_none_is_a_usage_error(tmp_path):
+    run = _run_with_verdict(tmp_path)
+    proc = _dispatch(tmp_path, "reconcile", str(run), run=run, RUBRICA_RESEED="1")
+    assert proc.returncode == 2
+    assert "only to instantiate" in proc.stderr
+
+
+def test_a_reseed_notice_with_no_verdict_file_is_a_usage_error(tmp_path):
+    run = tmp_path / "run"
+    run.mkdir()
+    proc = _dispatch(tmp_path, "instantiate", str(run), "scn-001", run=run, RUBRICA_RESEED="1")
+    assert proc.returncode == 2
+    assert "no verdict to re-seed from" in proc.stderr
+
+
+def test_instantiate_is_denied_the_verdicts_directory_and_challenge_is_not(tmp_path):
+    """rb-instantiate's SKILL.md states this outright, so the harness enforces it.
+
+    "05-verdicts/ is not in your `reads`, so a member that treats the notice as
+    something it was not supposed to see makes the re-dispatch a no-op." The deny
+    has to be stage-scoped: rb-challenge writes there and rb-emit reads it.
+    """
+    run = _run_with_verdict(tmp_path)
+    resolved = run.resolve()
+    inst_perms, inst_sandbox, _ = _paths(
+        _dispatch(tmp_path, "instantiate", str(run), "scn-001", run=run)
+    )
+    assert f"Read(/{resolved}/05-verdicts)" in inst_perms["permissions"]["deny"]
+    assert f"{resolved}/05-verdicts" in inst_sandbox["sandbox"]["filesystem"]["denyRead"]
+
+    chal_perms, chal_sandbox, _ = _paths(
+        _dispatch(tmp_path, "challenge", str(run), "scn-001", run=run)
+    )
+    assert f"Read(/{resolved}/05-verdicts)" not in chal_perms["permissions"]["deny"]
+    assert f"{resolved}/05-verdicts" not in chal_sandbox["sandbox"]["filesystem"]["denyRead"]
