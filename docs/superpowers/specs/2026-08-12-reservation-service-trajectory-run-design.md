@@ -1,10 +1,10 @@
 # Reservation-Service Trajectory Run — Design
 
 **Date:** 2026-08-12
-**Status:** Proposed design, awaiting approval. No capture has been run yet; the
-`/tools/list` and determinism findings in §3 were measured today against the
-target's source, the litellm proxy in §5 was reachability- and tool-call-tested,
-and everything in §8 is a prediction recorded before the fact.
+**Status:** Executed. The run completed stage 06 on 2026-08-13, producing ten
+Harbor packages; stage 07 `smoke` is out of scope per §12. All predictions
+P1–P24 are scored in §8, with P3 withdrawn as invalid. §13–§15 record what the
+run found out about the harness rather than the target.
 **Author:** Jonathan Bnayahu (with Claude)
 
 ## 1. What this is
@@ -904,3 +904,67 @@ succeeded. Not a leak, and not a defect — but it cost the stage a turn, and it
 the mirror image of the §13 bypass probe: the same asymmetry that lets a
 subprocess evade the permissions layer also makes the permissions layer refuse a
 legitimate subprocess.
+
+## 15. The repair loop, stage 06, and where the run ends
+
+**Gate 3's blocker was removed by making the re-dispatch expressible.**
+`RUBRICA_RESEED=1` extracts the verdict's `alternative_answers` and `notes` with
+`jq` and appends them to an `instantiate` re-dispatch. Two fields, per
+`rb-orchestrate` step 227 and `rb-instantiate` §1 — a first sketch of this listed
+four, and the skills govern. Built as a copy rather than a rendering, so a
+paraphrase is not something the script declines to write but something it cannot
+express.
+
+**The loop closed in one round.** `scn-005` $0.827/12 turns and `scn-010`
+$0.526/11 to re-seed; $0.476/10 and $0.478/8 to re-challenge. Both went
+`re-seed` → **`accept`**, `uniquely_determined: true`, zero alternatives, with
+`minimum_tool_calls_found` still equal to `hop_depth`.
+
+**Both repairs changed the world rather than the question,** which is what
+`rb-instantiate` §1 prescribes and what no gate could have checked:
+
+- `scn-005` removed the `confirmation_code` collision — codes are now `cnf_*` —
+  while **keeping** the one-character-off distractor id
+  `reservation_deadbeef1235`. The near-miss stayed a near-miss; only the accidental
+  exact match went.
+- `scn-010` flipped the 18:00 slot to `available: false`, leaving exactly one
+  qualifying slot and every remaining near-miss failing for a *different* reason:
+  11:30 is lunch, 19:00 unavailable, 20:00 too small at `max_party_size: 1`, 20:30
+  unavailable.
+
+**Stage 06 emitted ten packages, exit 0, and the determinism requirement was
+confirmed against a real run for the first time.** `rubrica emit` invoked directly
+and `rb-emit`'s dispatched invocation produced a **byte-identical** `06-suite`
+(sha256 over the sorted per-file digests: `2af8938bbe31f75c…`). That property is
+what lets variance be attributed to a stage, and it had never been checked outside
+the toy fixture. The `rb-emit` dispatch cost $0.258 over 5 turns — the cheapest of
+the run.
+
+**Stage 07 `smoke` is out of scope, not blocked.** It requires a human-authored
+`--agents` roster of three runnable commands, and the emitted packages declare
+`mcp_servers` with a `${BACKEND_MCP_URL}` alongside a `docker_image`. §12 rules out
+standing up A2A, Keycloak, MLflow's server or Docker. A roster of no-op commands
+would exit 0 and measure nothing, which is precisely the formality this run was
+built to detect — so the run ends at stage 06 with the suite produced and unrun.
+
+### A harness defect the run found in the harness change the run motivated
+
+Denying `05-verdicts/` to `instantiate` — added to enforce `rb-instantiate` §1 —
+made the `scn-005` re-seed's **own** `check-refs` report ten fabricated `instance
+scn-XXX has no verdict` findings, while the identical command outside the sandbox
+exited 0. Four skills' contracts oblige them to invoke `check-refs`, that
+subprocess runs inside the member's sandbox, and bubblewrap masks a denied path to
+a character device: neither absent nor readable.
+
+**Rule, now measured: never deny a run path `check-refs` reads.** That also
+condemned `07-report.json` (`refs.py:115`, `:1279`), which had shipped one commit
+earlier and survived only because no run had reached `smoke`. The deny list is
+`decisions.md` and `measurement/` — the only run-local paths `refs.py` never
+references. Whether a member *should* read `05-verdicts/` is a prompt-level
+obligation, and the transcript audit is what checks it.
+
+Worth recording because the shape recurs: the first guard written against this rule
+was itself weak in this project's documented **fixture-cannot-reach** form.
+`_readable_targets` enumerates instances and verdicts with `list_json`, so against
+a bare directory they contribute nothing and restoring the bad deny left the test
+green. It now builds a toy run through `challenge`.
