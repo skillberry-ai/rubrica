@@ -3,7 +3,18 @@ import os
 
 import pytest
 
+from rubrica import artifacts
 from rubrica.artifacts import ArtifactError, append_decision, read_json, write_json
+
+
+def test_canonical_bytes_are_exactly_what_write_json_writes(tmp_path):
+    """Survey hashes an element before it exists as a file; intake materialises
+    it later and refs re-hashes the result. One function, or the two disagree
+    and every exploded input reports a digest mismatch."""
+    payload = {"b": 1, "a": [2, 3]}
+    path = tmp_path / "x.json"
+    artifacts.write_json(path, payload)
+    assert path.read_bytes() == artifacts.canonical_bytes(payload)
 
 
 def test_round_trip(tmp_path):

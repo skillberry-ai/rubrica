@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from rubrica import survey
+from rubrica.errors import UsageError
 
 
 def _corpus(tmp_path):
@@ -77,6 +80,27 @@ def test_no_file_is_excluded_for_being_large(tmp_path):
     kept, excluded = survey.walk_corpus([root])
     assert kept == [big]
     assert excluded == []
+
+
+def test_an_unreadable_root_raises_rather_than_reporting_an_empty_corpus(tmp_path):
+    """The narrow case this module's own comment already named but did not yet
+    hold: `Path.rglob` swallows a PermissionError raised while listing the
+    *root* itself, so an EACCES root used to return `kept=[]` silently instead
+    of raising -- reporting an unreadable corpus as an empty one, exactly the
+    hazard `list_dir`'s docstring documents for `Path.glob`. Task 7's own
+    `test_an_unreadable_corpus_root_is_exit_two_material` exercises this
+    through `survey.survey`; this is the same defect pinned directly against
+    `walk_corpus`, one level down.
+    """
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / "fine.md").write_text("# Fine\n", encoding="utf-8")
+    root.chmod(0o000)
+    try:
+        with pytest.raises(UsageError, match="cannot read corpus root"):
+            survey.walk_corpus([root])
+    finally:
+        root.chmod(0o755)
 
 
 def test_an_unreadable_file_is_recorded_rather_than_raised(tmp_path):

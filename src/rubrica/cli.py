@@ -60,7 +60,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from rubrica import refs, skills
+from rubrica import refs, skills, survey
 from rubrica.artifacts import ArtifactError, read_json
 from rubrica.dedupe import candidate_pairs
 from rubrica.emit import emit_run
@@ -86,6 +86,7 @@ CLEAN, FINDINGS, USAGE = 0, 1, 2
 # SKILL.md's `invokes` list against the real CLI would go stale the first
 # time a subcommand was added.
 SUBCOMMANDS: tuple[tuple[str, str], ...] = (
+    ("survey", "inventory a corpus into a catalogue of candidates and mint a run"),
     ("intake", "register inputs and mint a run"),
     ("validate", "schema-validate one stage's output"),
     ("check-refs", "cross-artifact and reachability checks"),
@@ -110,6 +111,19 @@ def _build_parser() -> argparse.ArgumentParser:
     # are added below, keyed off the same dict, because they differ too much
     # (required vs. optional, choices, types) to fold into the tuple itself.
     parsers = {name: subparsers.add_parser(name, help=help_) for name, help_ in SUBCOMMANDS}
+
+    p_survey = parsers["survey"]
+    p_survey.add_argument("--corpus", action="append", required=True, metavar="PATH")
+    p_survey.add_argument("--runs-dir", required=True)
+    p_survey.add_argument("--target-name", required=True)
+    p_survey.add_argument("--target-interface", required=True)
+    p_survey.add_argument("--objective", required=True, choices=["breadth", "depth"])
+    p_survey.add_argument("--objective-note", default=None)
+    p_survey.add_argument("--scope-note", default=None)
+    p_survey.add_argument("--exclude", action="append", default=[], metavar="GLOB")
+    p_survey.add_argument("--max-rounds", type=int, default=2)
+    p_survey.add_argument("--max-scenarios", type=int, default=128)
+    p_survey.add_argument("--max-candidates", type=int, default=survey.DEFAULT_MAX_CANDIDATES)
 
     p_intake = parsers["intake"]
     p_intake.add_argument("--input", action="append", required=True, metavar="PATH")
@@ -233,6 +247,32 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None or extra:
         parser.print_usage(sys.stderr)
         return USAGE
+
+    if args.command == "survey":
+        # Its own block and its own catch, exactly like intake's below: it
+        # mints a run from arguments a human or orchestrator supplied and reads
+        # a corpus, not a run artifact, so every failure here really is a
+        # usage error or a misconfigured harness -- there is no stage to send
+        # a finding back to.
+        try:
+            run = survey.survey(
+                corpus_roots=[Path(p) for p in args.corpus],
+                runs_dir=Path(args.runs_dir),
+                target_name=args.target_name,
+                target_interface=args.target_interface,
+                objective=args.objective,
+                objective_note=args.objective_note,
+                scope_note=args.scope_note,
+                operator_globs=args.exclude,
+                max_rounds=args.max_rounds,
+                max_scenarios=args.max_scenarios,
+                max_candidates=args.max_candidates,
+            )
+        except (UsageError, ArtifactError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return USAGE
+        print(run.root)
+        return CLEAN
 
     if args.command == "intake":
         # intake's own block, with its own catch. It reads paths the human
