@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import rubrica.cli
 import rubrica.validate
 from rubrica.artifacts import read_json, write_json
 from rubrica.cli import main, subcommand_names
@@ -327,7 +328,40 @@ def test_intake_defaults_the_first_slice_limits(tmp_path, capsys):
     )
     printed = capsys.readouterr().out.strip()
     manifest = read_json(Path(printed) / "manifest.json")
-    assert manifest["limits"] == {"max_rounds": 2, "max_scenarios": 8}
+    assert manifest["limits"] == {"max_rounds": 2, "max_scenarios": 128}
+
+
+def test_the_scenario_default_is_a_ceiling_not_an_estimate():
+    """128 is a blast-radius guard, not a suite size.
+
+    refs.check_scenarios already reports a finding above max_scenarios and
+    rb-propose already refuses at it, so the parameter was always a guard --
+    a default of 8 just made it bind in normal operation, which is why the
+    parsec run (docs/.../2026-08-13-parsec-full-run-design.md §10, error 4)
+    had to raise it by hand and had the hand-raise read as a defect.
+    """
+    parser = rubrica.cli._build_parser()
+    args = parser.parse_args(
+        [
+            "intake",
+            "--input",
+            "x",
+            "--runs-dir",
+            "r",
+            "--target-name",
+            "t",
+            "--target-interface",
+            "i",
+        ]
+    )
+    assert args.max_scenarios == 128
+    # Deliberately no schema maximum: a human who types 300 has asked for it.
+    # The default protects the autonomous run that sets nothing.
+    schema = json.loads(
+        (rubrica.validate.schema_dir() / "manifest-0.1.json").read_text(encoding="utf-8")
+    )
+    limits = schema["properties"]["limits"]
+    assert "maximum" not in limits["properties"]["max_scenarios"]
 
 
 def _write_roster(tmp_path, weak_is_competent=False):

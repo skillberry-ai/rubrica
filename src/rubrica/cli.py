@@ -117,7 +117,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_intake.add_argument("--target-name", required=True)
     p_intake.add_argument("--target-interface", required=True)
     p_intake.add_argument("--max-rounds", type=int, default=2)
-    p_intake.add_argument("--max-scenarios", type=int, default=8)
+    # A ceiling, not an estimate of the right suite size: the point past which
+    # no human reviews the output (128 Harbor packages) and a run costs on the
+    # order of $200 at the parsec run's ~$1.66/scenario across instantiate and
+    # challenge. It was 8, which made refs.check_scenarios' guard bind in normal
+    # operation and forced a hand-raise on the first real target.
+    p_intake.add_argument("--max-scenarios", type=int, default=128)
 
     p_validate = parsers["validate"]
     p_validate.add_argument("--run", required=True)
