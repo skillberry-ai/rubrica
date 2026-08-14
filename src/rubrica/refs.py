@@ -98,7 +98,7 @@ def _readable_targets(run: RunPaths) -> list[Path]:
     each of these in turn, which is what keeps the list complete: an artifact
     missing here is one whose truncation still misdirects the repair.
     """
-    targets = [run.manifest]
+    targets = [run.catalogue, run.triage, run.manifest]
     targets += list_json(run.claims_dir)
     targets += [run.world_model, run.scenarios]
     targets += list_json(run.coverage_dir)
@@ -167,6 +167,57 @@ def _cells(world: dict) -> set[tuple[str, str]]:
 
 def _dupes(values: list[str]) -> list[str]:
     return sorted({v for v in values if values.count(v) > 1})
+
+
+def check_catalogue(run: RunPaths) -> list[Finding]:
+    """Conditional constraints over 00-catalogue.json that layer 1 cannot state.
+
+    An absent catalogue is not a finding: a run minted through `intake --input`
+    never had one, and treating that as a defect would report every pre-triage
+    run as broken. Same ruling as intake's and smoke's absence from
+    manifest.stages.
+    """
+    catalogue = _load(run.catalogue)
+    if not isinstance(catalogue, dict):
+        return []
+    out: list[Finding] = []
+
+    def report(pointer: str, message: str) -> None:
+        out.append(Finding(run.catalogue, "refs", pointer, message))
+
+    candidates = catalogue.get("candidates")
+    if not isinstance(candidates, list):
+        return []
+
+    ids = [c.get("candidate_id") for c in candidates if isinstance(c, dict)]
+    for duplicate in _dupes([i for i in ids if isinstance(i, str)]):
+        report("/candidates", f"duplicate candidate_id {duplicate!r}")
+    known = {i for i in ids if isinstance(i, str)}
+
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, dict):
+            continue
+        origin = candidate.get("origin")
+        pointer = f"/candidates/{index}"
+        if origin == "corpus" and not candidate.get("path"):
+            report(f"{pointer}/path", "a corpus candidate must carry the path it was read from")
+        if origin == "container_element":
+            container = candidate.get("container")
+            if not isinstance(container, dict):
+                report(f"{pointer}/container", "a container element must name its container")
+                continue
+            parent = container.get("candidate_id")
+            if parent not in known:
+                report(
+                    f"{pointer}/container/candidate_id",
+                    f"no such candidate {parent!r} to have been exploded from",
+                )
+        if origin == "projection" and not isinstance(candidate.get("provenance"), dict):
+            report(
+                f"{pointer}/provenance",
+                "an adopted projection must record the projection_id it satisfies",
+            )
+    return out
 
 
 def check_manifest(run: RunPaths) -> list[Finding]:
@@ -1422,6 +1473,7 @@ def check_all(run: RunPaths) -> list[Finding]:
     if unreadable:
         return unreadable
     findings: list[Finding] = []
+    findings.extend(check_catalogue(run))
     findings.extend(check_manifest(run))
     findings.extend(check_inputs(run))
     findings.extend(check_limits(run))

@@ -1,0 +1,9 @@
+{
+  "tools": [
+    {
+      "name": "search",
+      "description": "Find tickets by free-text query.",
+      "params": [{"name": "query", "type": "string", "required": true}]
+    }
+  ]
+}
