@@ -77,23 +77,46 @@ def _collect_names(node: Any, depth: int, out: set[str]) -> None:
             _collect_names(item, depth - 1, out)
 
 
-def _has_error_marker(node: Any, depth: int) -> bool:
+def _has_error_key(node: Any, depth: int) -> bool:
+    """Structural signal only: a literal error-shaped key with a non-empty
+    value, anywhere in the tree. No value-substring scan here -- see
+    `_has_error_marker`'s docstring for why that was measured too noisy to
+    keep."""
     if depth < 0:
         return False
     if isinstance(node, dict):
         for key, value in node.items():
-            lowered = key.lower()
-            if lowered in _ERROR_KEYS and value not in (None, "", [], {}):
+            if key.lower() in _ERROR_KEYS and value not in (None, "", [], {}):
                 return True
-            if isinstance(value, str) and any(
-                marker in value.lower() for marker in _ERROR_SUBSTRINGS
-            ):
-                return True
-            if _has_error_marker(value, depth - 1):
+            if _has_error_key(value, depth - 1):
                 return True
     elif isinstance(node, list):
-        return any(_has_error_marker(item, depth - 1) for item in node)
+        return any(_has_error_key(item, depth - 1) for item in node)
     return False
+
+
+def _has_error_marker(payload: dict, status: Any, depth: int) -> bool:
+    """Whether this trace shows a structural sign of failure.
+
+    Originally also scanned every string value in the tree for "error" or
+    "exception" as a substring. Measured against the real 130-element parsec
+    capture, that fired on 63 elements -- 62 of them `TraceStatus.OK` (47.7%
+    of the whole corpus) -- because parsec is an ops assistant whose ordinary,
+    successful answers discuss "error logs" and "error rate" as domain
+    vocabulary, and because span-level attributes like `{"status": "error"}`
+    show up on internal or recovered steps, not just trace-level failures.
+    That noise made the field useless: `heuristics_fired` only records that
+    it *fired*, so a triage reading it could not tell the one real failure
+    (t7, the corpus's only `TraceStatus.ERROR`) from ordinary prose.
+
+    Narrowed to two structural signals only: the trace's own status/state/
+    outcome value (the same field already surfaced as `result["status"]`)
+    naming an error, or a literal error-shaped key (`_ERROR_KEYS`) somewhere
+    in the tree with a non-empty value.
+    """
+    if isinstance(status, str) and any(marker in status.lower() for marker in _ERROR_SUBSTRINGS):
+        return True
+    return _has_error_key(payload, depth)
 
 
 def _json_type_name(value: Any) -> str:
@@ -119,7 +142,18 @@ def _skeleton(node: Any, pointer: str, depth: int, out: dict) -> None:
     if isinstance(node, dict):
         shown = sorted(node)[:_SKELETON_MAX_CHILDREN]
         if pointer:
-            out[pointer] = {"type": "object", "keys": shown}
+            out[pointer] = {
+                "type": "object",
+                "keys": shown,
+                # True count and an explicit flag, not just a shorter list --
+                # the array branch below reports the true `length` even
+                # though it only expands element 0, and a capped `keys` list
+                # with no count is the exact silent-truncation shape that
+                # produced the 783KB ec2_pricing.json digest this module was
+                # measured against.
+                "key_count": len(node),
+                "keys_truncated": len(node) > len(shown),
+            }
         # Recurse only into the keys actually listed above -- see
         # _SKELETON_MAX_CHILDREN. A key omitted from `keys` would be a fact the
         # skeleton can't cite anyway, so descending into it buys nothing.
@@ -218,7 +252,7 @@ def digest_for_payload(payload: Any, kind: str, *, body_chars: int) -> dict:
             result["names"] = sorted(names)
             fired.append("names")
 
-        if _has_error_marker(payload, _SKELETON_DEPTH):
+        if _has_error_marker(payload, status, _SKELETON_DEPTH):
             result["error_markers"] = True
             fired.append("error_markers")
 
@@ -245,8 +279,14 @@ def digest_for_path(path: Path, kind: str, *, body_chars: int) -> dict:
         return _source_digest(text)
     try:
         payload = json.loads(text)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError):
         # Not JSON and not a kind we have a reader for: give triage the prose
         # digest rather than nothing, and let it decline if that is not enough.
+        # RecursionError alongside JSONDecodeError: survey.py's "no
+        # size-based exclusion" rule means a pathologically nested file (a
+        # 200,000-deep [[[...]]]) reaches here uncaught by anything upstream,
+        # and CPython's json decoder raises RecursionError rather than
+        # JSONDecodeError for that shape. The module's own contract is never
+        # to raise; this is that contract's other half.
         return _prose_digest(text, body_chars)
     return digest_for_payload(payload, kind, body_chars=body_chars)

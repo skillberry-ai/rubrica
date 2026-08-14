@@ -129,3 +129,104 @@ def test_an_undecodable_file_digests_to_a_recorded_failure(tmp_path):
     path.write_bytes(b"\xff\xfe\x00bad")
     result = digest.digest_for_path(path, "design_doc", body_chars=2000)
     assert result["undecodable"] is True
+
+
+def test_a_pathologically_nested_json_document_does_not_raise(tmp_path):
+    """survey.py's own module docstring states its rule as 'no size-based
+    exclusion,' so nothing upstream screens a file for shape before it reaches
+    here. CPython's json decoder raises RecursionError, not JSONDecodeError,
+    for a deeply nested document -- measured directly: json.loads on a
+    10,000-deep [[[...]]] raises RecursionError under this interpreter's
+    default recursion limit. A stage defect surfacing as an uncaught
+    exception is exactly what this module's own contract (never raise) rules
+    out."""
+    path = tmp_path / "deep.json"
+    depth = 10_000
+    path.write_text("[" * depth + "]" * depth, encoding="utf-8")
+    result = digest.digest_for_path(path, "mcp_tool_schema", body_chars=2000)
+    assert "undecodable" not in result
+    # Fell back to the prose digest, same as any other file this module has
+    # no reader for -- not a crash, and not a fabricated "skeleton".
+    assert "headings" in result
+
+
+def test_error_markers_does_not_fire_on_ordinary_error_vocabulary():
+    """Narrowed after being measured too noisy to trust: a blanket scan of
+    every string value for "error"/"exception" fired on 63 of the real
+    130-element parsec capture's elements, 62 of them at TraceStatus.OK.
+    Parsec is an ops assistant, so a correct answer routinely discusses
+    "error rate" and "error logs" as ordinary domain vocabulary, and a
+    recovered step's own status attribute can read "error" without the trace
+    having failed. Neither should raise this flag -- only the trace's own
+    status/state/outcome value, or a literal error-shaped key, should."""
+    element = {
+        "status": "TraceStatus.OK",
+        "response_preview": '{"response": "The error rate held steady; no errors were logged."}',
+        "spans": [{"name": "db_query", "status": "error"}],
+    }
+    result = digest.digest_for_payload(element, "trace", body_chars=2000)
+    assert "error_markers" not in result
+    assert "error_markers" not in result["heuristics_fired"]
+
+
+def test_error_markers_still_fires_on_a_structural_error_key_without_error_status():
+    """The narrowed heuristic keeps a second, independent path: a literal
+    error-shaped key (_ERROR_KEYS) fires even when the trace's own status
+    says nothing about failure -- e.g. a caught-and-logged exception in a
+    trace whose top-level status was never updated to reflect it."""
+    element = {"status": "OK", "steps": [{"traceback": "boom"}]}
+    result = digest.digest_for_payload(element, "trace", body_chars=2000)
+    assert result["error_markers"] is True
+
+
+def test_a_wide_object_skeleton_does_not_scale_with_key_count_past_the_cap():
+    """_SKELETON_MAX_CHILDREN is the fix that actually brought the real
+    corpus under its context budget: one 1191-key pricing dict
+    (ec2_pricing.json) produced a 783KB digest by itself before this cap
+    existed, because the skeleton recursed into every key even though its
+    displayed `keys` list was already capped at 32. None of the original
+    seven tests exercised a dict wider than the cap, so this fix could be
+    silently reverted with nothing turning red. A 40-key and a 1000-key dict
+    must cost the digest the same."""
+    small = {f"k{i:04d}": i for i in range(40)}
+    huge = {f"k{i:04d}": i for i in range(1000)}
+    small_result = digest.digest_for_payload({"d": small}, "other", body_chars=2000)
+    huge_result = digest.digest_for_payload({"d": huge}, "other", body_chars=2000)
+    small_size = len(json.dumps(small_result))
+    huge_size = len(json.dumps(huge_result))
+    # Both are past the 32-key cap, so the only difference between them
+    # should be the digit width of `key_count` (40 vs 1000) -- not per-key
+    # growth. A generous bound: nowhere near the ~24,000 extra bytes 960
+    # uncapped extra keys would cost.
+    assert huge_size - small_size < 50
+
+
+def test_a_wide_object_skeleton_reports_its_true_key_count_and_truncation():
+    """The array branch reports the true `length` even though it only
+    expands element 0; the object branch's `keys` list, capped silently,
+    was the one truncation point in the module with no visible marker -- the
+    exact shape that produced the ec2_pricing.json overrun above. A digest
+    that hides its own truncation is what turns this module's blindness into
+    a silent bad selection instead of a `digest_insufficient` decline."""
+    narrow = {f"k{i:03d}": i for i in range(5)}
+    wide = {f"k{i:03d}": i for i in range(40)}
+    narrow_skeleton = digest.digest_for_payload({"d": narrow}, "other", body_chars=2000)[
+        "skeleton"
+    ]["/d"]
+    wide_skeleton = digest.digest_for_payload({"d": wide}, "other", body_chars=2000)["skeleton"][
+        "/d"
+    ]
+    assert narrow_skeleton["key_count"] == 5
+    assert narrow_skeleton["keys_truncated"] is False
+    assert wide_skeleton["key_count"] == 40
+    assert wide_skeleton["keys_truncated"] is True
+    assert len(wide_skeleton["keys"]) == 32
+
+
+def test_a_non_dict_trace_payload_falls_back_to_the_generic_skeleton():
+    """survey.explode can hand a trace-kind element that is not itself a dict
+    (a heterogeneous or scalar element); digest_for_payload's trace branch
+    guards on isinstance(payload, dict), so this must not raise and must not
+    silently produce an empty result."""
+    result = digest.digest_for_payload(["not", "a", "dict"], "trace", body_chars=2000)
+    assert result["skeleton"]["/"] == {"type": "array", "length": 3}
