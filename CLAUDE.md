@@ -27,7 +27,7 @@ make lint      # ruff check --fix
 make format    # ruff format
 ```
 
-Baseline: **1162 passed, 4 skipped**; `make check` clean; `uv run rubrica
+Baseline: **1173 passed, 4 skipped**; `make check` clean; `uv run rubrica
 check-skills` exits 0. Anything else means you broke something. (It was 1126 as
 of the skills build; the three added since are `f3b9d30`'s, and this line went
 stale because it names a build rather than a commit. It was 1129 as of
@@ -64,7 +64,17 @@ removed since are that commit's stage-scoped `05-verdicts` deny test plus one
 `OUT_OF_CONTRACT` parametrization, because **denying a path `check-refs` reads
 makes a stage's own gate fabricate findings** — measured, and now guarded by
 `test_nothing_check_refs_reads_is_ever_denied` — re-measure it here when you add
-tests.)
+tests. It was 1162 as of `eded30d`; the eleven added since are
+`test_dispatch_harness.py`'s again, covering the two appends the script had
+never implemented — `RUBRICA_REJECT`, which builds rb-score's rejection notice,
+and `RUBRICA_FINDINGS_FILE`, which routes a gate's stdout back to the stage that
+provoked it — plus `test_write_is_scoped_to_the_run_and_not_granted_bare`, which
+pins the fix for the first *write* outside a run this project has measured: the
+allow list carried a bare `Write`, and `rb-emit` used it to put a scratch script
+in the repository root. All eleven predicates were measured in the failure
+direction: widening the rejection jq to the whole verdict, narrowing it to
+`{notes}`, dropping the accept guard, making an empty findings file a silent
+no-append, and restoring the bare `Write` each turn exactly one red.)
 
 Commands in `README.md` assume the venv is on `PATH`; otherwise prefix `uv run`.
 Four env overrides exist: `RUBRICA_SCHEMA_DIR` (`validate.py`),

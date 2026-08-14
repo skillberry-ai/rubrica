@@ -26,6 +26,12 @@
 #   RUBRICA_NO_SANDBOX   set to 1 to omit the sandbox block entirely
 #   RUBRICA_RESEED       set to 1 to carry a re-seed verdict's alternative_answers
 #                        and notes into an instantiate re-dispatch, verbatim
+#   RUBRICA_REJECT       space-separated scenario ids whose rejection is being
+#                        carried into a score re-dispatch, verbatim
+#   RUBRICA_FINDINGS_FILE  path to a file holding a gate's stdout, appended to a
+#                        repair re-dispatch verbatim. Takes a FILE, never a
+#                        string, so the text is a gate's bytes and not the
+#                        orchestrator's retyping of them.
 #   RUBRICA_PRINT_SETTINGS  set to 1 to write the settings files and the prompt,
 #                        print their three paths, and dispatch nothing
 set -euo pipefail
@@ -215,6 +221,17 @@ for d in "$REPO"/src/rubrica/skills/rb-*; do
   [ "$d" = "$SKILL_DIR" ] || DENY+=("$d")
 done
 
+# `Write` is scoped to the run, and was a bare "Write" until 2026-08-14. MEASURED
+# on the parsec run: the `rb-emit` dispatch wrote /home/.../rubrica/check_prune.py
+# into the *repository root*, ran it, and deleted it. Harmless in content -- a
+# read-only analysis script it used to check its own pruning -- but the capability
+# is not: the same grant would let a dispatch edit src/rubrica/*.py or a sibling
+# SKILL.md, which is the one thing that would corrupt what this project measures,
+# and `record-stage`'s digest would only reveal a skill change after the run.
+# `Edit` was already scoped; `Write` was the hole. Note also that the sandbox
+# scope's allowWrite: [$run] did NOT stop it, which is a third data point for the
+# "do not rely on this layer" comment above.
+#
 # A "//abs" rule is "/" prepended to a path that already starts with "/".
 SETTINGS_FILE="$LAB/settings-$STAGE${SLICE:+-$SLICE}.json"
 jq -n --arg repo "$REPO" --arg run "$RUN" --arg skilldir "$SKILL_DIR" \
@@ -223,7 +240,7 @@ jq -n --arg repo "$REPO" --arg run "$RUN" --arg skilldir "$SKILL_DIR" \
   '{permissions: {
       deny: $deny,
       allow: ["Read(/" + $skilldir + "/**)", "Read(/" + $run + "/**)",
-              "Edit(/" + $run + "/**)", "Write",
+              "Edit(/" + $run + "/**)", "Write(/" + $run + "/**)",
               "Bash(rubrica *)", "Bash(" + $repo + "/.venv/bin/rubrica *)"]
     }}' > "$SETTINGS_FILE"
 
@@ -273,6 +290,83 @@ if [ "${RUBRICA_RESEED:-0}" = "1" ]; then
   RESEED_BLOCK=$(jq '{alternative_answers, notes}' "$VERDICT")
 fi
 
+# ---------------------------------------------------------------------------
+# The rejection notice -- the third sanctioned append, and the one CLAUDE.md's
+# "exactly two things" summary omits. rb-score's Inputs section names it as "a
+# whole kind of dispatch rather than an edge case": score may be re-dispatched
+# after rb-challenge has judged, to record a rejection and recompute against it.
+#
+# The payload is fixed at three fields per rejected scenario -- uniquely_determined,
+# derivable_without_guessing, and notes -- quoted from the verdict file. score's
+# `reads` still excludes 05-verdicts/, so this text is the only way a rejection
+# reaches it.
+#
+# What must NOT go in: `rejected_reason`. The enum is score's to choose from the
+# quoted evidence, and rb-score says a notice that had already picked from it
+# "would be the conclusion-passing the orchestrator's own rules forbid". So this
+# block carries no reason, and `verdict` and `flags` stay out for the same reason
+# they stay out of the re-seed block -- they are the adversary's conclusions.
+#
+# A second re-seed is accepted here because rb-orchestrate's table maps it to a
+# rejection ("Verdict re-seed, second time | Treat as a rejection"). The
+# escalation is announced on stderr rather than made silently, because it is the
+# orchestrator's ruling and not something the verdict file says.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# The repair append -- the first of the two the design sanctions, and the one
+# this script never implemented until a gate finding needed routing back.
+#
+# It takes a FILE rather than a string on purpose. A string parameter invites the
+# orchestrator to type what it believes the gate said; a file makes the append a
+# copy of the gate's own stdout. Same defence as the re-seed block: a paraphrase
+# is not declined here, it is inexpressible.
+#
+# An empty or missing file is exit 2 rather than a silent no-append, because a
+# repair dispatch that arrives carrying nothing is indistinguishable from a first
+# dispatch -- which is exactly the no-op that cost this run a wasted challenge.
+# ---------------------------------------------------------------------------
+FINDINGS_BLOCK=""
+if [ -n "${RUBRICA_FINDINGS_FILE:-}" ]; then
+  if [ ! -s "$RUBRICA_FINDINGS_FILE" ]; then
+    echo "RUBRICA_FINDINGS_FILE is empty or missing: $RUBRICA_FINDINGS_FILE" >&2
+    echo "       A repair dispatch must carry the findings that provoked it." >&2
+    exit 2
+  fi
+  FINDINGS_BLOCK=$(cat "$RUBRICA_FINDINGS_FILE")
+fi
+
+REJECT_BLOCK=""
+if [ -n "${RUBRICA_REJECT:-}" ]; then
+  if [ "$STAGE" != "score" ]; then
+    echo "RUBRICA_REJECT applies only to score; $STAGE takes no rejection notice" >&2
+    exit 2
+  fi
+  for sid in $RUBRICA_REJECT; do
+    V="$RUN/05-verdicts/$sid.json"
+    if [ ! -f "$V" ]; then
+      echo "no verdict to build a rejection notice from: $V" >&2
+      exit 2
+    fi
+    actual=$(jq -r '.verdict' "$V")
+    case "$actual" in
+      reject) ;;
+      re-seed)
+        echo "note: $sid's verdict is 're-seed'; carrying it as a rejection per" >&2
+        echo "      rb-orchestrate section 3 (re-seed, second time -> treat as a rejection)." >&2
+        ;;
+      *)
+        echo "$sid's verdict is '$actual'; a rejection notice for it would invent one" >&2
+        exit 2
+        ;;
+    esac
+    REJECT_BLOCK="$REJECT_BLOCK
+$sid, quoted verbatim from $V:
+
+$(jq '{uniquely_determined, derivable_without_guessing, notes}' "$V")
+"
+  done
+fi
+
 # The dispatch prompt, verbatim from docs/running-a-stage-by-hand.md §2. Nothing
 # else may be added to it: not a summary of what an earlier stage concluded, not
 # an excerpt of the world model, and not a correction for something a skill got
@@ -301,6 +395,24 @@ rb-challenge judged this scenario \`re-seed\`. Its verdict's
 \`alternative_answers\` and \`notes\`, quoted verbatim from $VERDICT:
 
 $RESEED_BLOCK"
+fi
+
+if [ -n "$FINDINGS_BLOCK" ]; then
+  PROMPT="$PROMPT
+
+A gate reported findings against the artifact you wrote. Its stdout, verbatim:
+
+$FINDINGS_BLOCK
+
+Repair only what these findings name."
+fi
+
+if [ -n "$REJECT_BLOCK" ]; then
+  PROMPT="$PROMPT
+
+rb-challenge rejected the following scenarios of this round. For each, its
+verdict's \`uniquely_determined\`, \`derivable_without_guessing\` and \`notes\`:
+$REJECT_BLOCK"
 fi
 
 # Written out every run, not only in print-settings mode: the prompt is the one
