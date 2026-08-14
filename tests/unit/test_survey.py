@@ -145,6 +145,55 @@ def test_a_blank_target_name_is_refused_before_the_run_is_minted(tmp_path):
     assert not (tmp_path / "runs").exists()
 
 
+def test_root_index_is_the_loop_index_not_a_rematch(tmp_path):
+    """The required change this task made over the brief's own pseudocode:
+    root_index comes from enumerate(corpus_roots) inside the walk_corpus loop,
+    never from re-matching a candidate's path against corpus_roots afterwards
+    (the brief's `next(r for r in corpus_roots if path.is_relative_to(r))`,
+    which picks the wrong root whenever two roots share a path).
+
+    Pinned two ways at once, because both are the point of the field:
+    - two roots share the relative path "shared.md" with different content,
+      so the same `path` string appears with root_index 0 from the first root
+      and root_index 1 from the second -- the exact case a re-match approach
+      gets wrong, since it would have to guess which root "shared.md" came
+      from after the fact.
+    - a container_element candidate carries no root_index at all: the field
+      is scoped to origin "corpus" only, and this pins the absence, not just
+      the presence.
+
+    Not attempted: making the shared path also byte-identical across roots to
+    additionally exercise duplicate detection. walk_corpus's `seen` dict is
+    local to one call (see the task report's cross-root-dedupe finding), so a
+    byte-identical file across two roots is never flagged `duplicate` under
+    the current per-root loop regardless of this test -- forcing that here
+    would test the dedupe gap, not root_index, so the two roots' shared file
+    deliberately differs in content instead.
+    """
+    root0 = tmp_path / "root0"
+    root0.mkdir()
+    (root0 / "shared.md").write_text("# From root0\n", encoding="utf-8")
+    root1 = tmp_path / "root1"
+    root1.mkdir()
+    (root1 / "shared.md").write_text("# From root1, different bytes\n", encoding="utf-8")
+    (root1 / "capture.json").write_text(
+        json.dumps(
+            [{"trace_id": f"tr-{i}", "status": "OK", "spans": [{"name": "t"}]} for i in range(4)]
+        ),
+        encoding="utf-8",
+    )
+
+    catalogue = read_json(_survey(tmp_path, corpus_roots=[root0, root1]).catalogue)
+    corpus_candidates = [c for c in catalogue["candidates"] if c["origin"] == "corpus"]
+    shared = [c for c in corpus_candidates if c["path"] == "shared.md"]
+    assert {c["root_index"] for c in shared} == {0, 1}
+    assert len({c["sha256"] for c in shared}) == 2  # not deduped against each other
+
+    element_candidates = [c for c in catalogue["candidates"] if c["origin"] == "container_element"]
+    assert element_candidates, "fixture must still explode something to exercise the negative case"
+    assert all("root_index" not in c for c in element_candidates)
+
+
 def test_an_unreadable_corpus_root_is_exit_two_material(tmp_path):
     root = _corpus(tmp_path)
     root.chmod(0o000)
