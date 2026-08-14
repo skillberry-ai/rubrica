@@ -1,6 +1,6 @@
 # Parsec full-pipeline run — design and record
 
-**Status:** In progress, started 2026-08-13. This file is written before the run
+**Status:** Executed 2026-08-13/14, complete through stage 06. This file is written before the run
 and appended to as each gate is held; sections numbered above §6 are results.
 
 **Target:** `parsec` — a natural-language cloud-cost and provisioning
@@ -111,10 +111,22 @@ and which of those happens is worth knowing.
 
 ## 4. Run parameters
 
-`max_rounds` 2, `max_scenarios` 10 — both matching
-`run-20260813-064150` so the two runs are comparable. Model `claude-sonnet-5`,
-effort `medium`, per-dispatch budget $2 (raised to $3 for the two inputs over
-20KB). Target name `parsec`, interface `http-sse`.
+`intake` was invoked with `max_rounds` 2 and `max_scenarios` 10, to match
+`run-20260813-064150`. **Both were then raised by hand, before extract ran, to 3
+and 64** — 10 is far too low for an application of parsec's size, and the human's
+ruling is that the cap cannot sensibly sit below ~50 for any real target
+(`intake`'s default is 8). So the run is *not* parameter-comparable to its
+predecessor, by design rather than by accident, and the 36-scenario suite is
+intended scale rather than overrun. A proper heuristic for the cap — presumably a
+function of the world model's cell and goal denominators rather than a constant —
+is owed and deferred; see §11 and §12, where it turns out to be the same question
+as input triage.
+
+Model `claude-sonnet-5`, effort `medium`, per-dispatch budget $2, raised per stage
+as the artifacts grew: $3 for the two inputs over 20KB, $10 for reconcile (362KB
+of claims to fold), $5–6 for the score dispatches. Budget is a harness parameter
+rather than a prompt parameter, so raising it does not change the judgment under
+test. Target name `parsec`, interface `http-sse`.
 
 Every stage is dispatched through `scripts/dispatch-stage.sh`, so no dispatch
 sees this repository's `CLAUDE.md`, `docs/`, `tests/`, a sibling skill, or this
@@ -165,3 +177,196 @@ artifact and the field that settles it.
 - **P9** — The suite emits with at least 8 of 10 scenarios accepted, and
   `rb-emit`'s dispatch reproduces `rubrica emit`'s bytes exactly.
   *Settled by:* `05-verdicts/`, and a `sha256` of `06-suite` from both paths.
+
+---
+
+# Results
+
+**Status: complete through stage 06.** 23 Harbor packages at
+`runs/run-20260813-204203/06-suite/`. Stage 07 `smoke` not run — the packages
+need parsec's MCP backends and Docker, which §2 excludes. Total dispatch spend
+**$85.98**; 54 rulings in `decisions.md`.
+
+## 6. What the run produced
+
+| Stage | Result |
+|---|---|
+| intake | 16 inputs, `validate` 0 |
+| 01a extract | 16/16 members, **815 claims**, $11.96, zero out-of-contract reads, zero denials |
+| 01b reconcile | 6 actors, 14 capabilities, 12 entities, 12 goals, 7 gaps, **2 contradictions**; 28 cells / 12 goals; $5.72, 42 turns |
+| 02/03 round 1 | 25 scenarios, verdict `continue`, 23/28 cells, 1/12 goals |
+| 02/03 round 2 | +11 scenarios, verdict `halted_no_progress`, 23/28 cells, 3/12 goals |
+| 04 instantiate | 36 dispatched, **30 instances, 6 refusals**, $35.66 |
+| 05 challenge | 30 verdicts → **23 accept, 6 reject, 1 unrepaired re-seed** |
+| 06 emit | **23 packages, byte-identical across both paths**, `1f484e9e0d30f8d7…` |
+
+Final coverage **22/28 capability cells, 3/12 goals**. The cell count fell by one
+when a rejected scenario stopped crediting a row — the asymmetry rb-score's
+Method step 3 warns about, observed rather than assumed.
+
+## 7. Prediction scoring
+
+| | Prediction | Outcome |
+|---|---|---|
+| P1 | A multiplexed tool is split into per-action capabilities | **Wrong.** Every `binding.fixed_args` is `{}` — one capability per tool, `action` left a param |
+| P2 | `db_describe_table` becomes a gap, not a capability | **Wrong.** It became `cap-db-describe-table` (confidence `medium`) from one trace claim, with no schema anywhere in the input set |
+| P3 | A gap names t7's truncated-result shape | **Wrong, in the better direction.** Truncation came back as a *testable outcome class* on `fetch_github_file` rather than an acknowledged unknown |
+| P4 | Round 1 returns `continue` | **Held** |
+| P5 | `submit_alert_verdict` becomes a capability and the "if in doubt" rule survives | **Half.** The capability exists; what survived is the *system default* to `should_alert=true`, not the skill's "if in doubt" instruction |
+| P6 | ≥35% of claims uncited | **Held decisively.** 148 of 815 cited — **82% uncited** |
+| P7 | At least one contradiction (my least-confident) | **Held.** Two, both verified against the raw traces |
+| P8 | A goal carries `expected_hop_depths` ≥ 3 | **Held.** Up to `[4,5]` |
+| P9 | ≥8/10 accepted, and `rb-emit` reproduces `emit` byte-for-byte | **Half.** Byte-identity confirmed; acceptance 23/30 = 77%, just under the 80% predicted |
+
+Four of nine wrong or half, against 23 of 24 on the reservation-service run. That
+is the price of predicting against a target nobody involved had read, and it is
+the more honest number of the two.
+
+## 8. Findings
+
+**F1 — the loop's stopping rule is blind to goal-coverage progress.**
+`coverage-0.1.json` defines `progress` as `new_cells_this_round` plus
+`rounds_without_progress`, with no goal term. All five remaining cell holes are
+`blocked_by_gap`, so `new_cells_this_round` was structurally guaranteed to be 0 in
+every future round — the loop was certain to halt after round 2 however much goal
+coverage remained closable. Round 2 tripled goal coverage and registered as zero
+progress. After it, **each of the nine uncovered goals was missing exactly one hop
+depth, always the deepest**, and `max_rounds` permitted a third round. The suite
+ships at 3/12 goals as a direct result. Not overridden: that arithmetic is score's
+to own, and the fix belongs in the schema, not in one run's control flow.
+
+**F2 — propose is not held to the world model's entity set.** It wrote scenarios
+requiring seeded agnosticv PR results, GitHub file content, AWS account records
+with a `region` field, and Icinga downtime objects — none declared as entities.
+`validate` and `check-refs` both pass such a scenario. Cost: six refusals plus
+scn-011's reject, roughly $5, and 7 of 36 scenarios.
+
+**F3 — a re-challenge is indistinguishable from a first challenge.** The repair
+loop is "re-dispatch rb-instantiate, then re-challenge", but a plain challenge
+re-dispatch found a complete verdict in its one `writes` slot and correctly
+declined to re-judge. The loop's second half was a $0.37 no-op leaving a verdict
+that described a seed which no longer existed. Once the stale verdict was moved
+aside, the genuine re-judgment returned `accept`. **The repair worked; only the
+signalling was missing.**
+
+**F4 — a re-seed whose remedy lies outside instantiate's `writes` cannot be
+repaired at all.** scn-003's notice asked for a `capability_refs` change in
+`02-scenarios.json`, which `rb-propose` owns; the member verified seed and
+expected could not close it, and declined. `rb-orchestrate` shuts the propose door
+explicitly. scn-003 is the run's one unrepairable scenario and the sole reason
+`emit` exits 1.
+
+**F5 — the rejection notice cannot express an escalated re-seed.** Its three
+fields are the re-seed's own and encode no rejection reason, so `rb-score` cannot
+choose from the enum. It reported that back rather than guessing.
+
+**F6 — a dispatch wrote outside the run, and the harness allowed it.** The
+permissions allow list carried a bare `Write` while `Edit` was scoped; `rb-emit`
+used it to write `check_prune_scratch.py` into the *repository root*, run it, and
+delete it. Content harmless, capability not: the same grant reaches
+`src/rubrica/*.py` and every sibling `SKILL.md`. The sandbox scope's
+`allowWrite: [$run]` did not stop it — a third data point for that layer's
+unreliability. Both prior observed isolation violations in this project were
+reads; this is the first write. Fixed and pinned by a test measured both ways.
+
+## 9. What the prompts got right, which is the substance of the run
+
+**Five instantiate members refused rather than fabricate.** Each hit §5 — the
+scenario needs an entity the world model does not declare — enumerated all 12
+declared entities to prove the absence, and wrote nothing. Inventing a collection
+name is legitimate for that stage and would have produced an artifact both gates
+pass. None did it.
+
+**reconcile found a contradiction no mechanical check could reach.** Two
+trajectories make the identical `search_github_repo(owner=rhpds,
+repo=agnosticd-v2)` call; t4 returns 8 matches, t5 returns `GitHub API returned
+404: Not Found`. It also caught that `prompt-aap2-agent-md` contradicts itself on
+the same point in two of its own sections, and recorded the whole thing
+`unresolved` with a stated refusal to confidence-weight. Verified verbatim against
+the raw traces.
+
+**challenge earned its stage three separate ways.** It found a seed that embedded
+a check threshold inside an output string, making a "deep" scenario answerable in
+one call; a seed where two records each self-declared an exact match for the same
+key, with the oracle ruling one out by strict `value_equals` rather than by
+anything the world states; and a seed whose `github_repos` collection had no file
+index, so nothing in that world could answer at all. Unprompted, it also flagged a
+scenario whose `trajectory` requires two operations while none of its three
+assertions grades the second.
+
+**score refused to act on a bad notice.** Handed scn-003 among the rejections, it
+observed that the quoted evidence is the *accept* pattern, that no enum value
+fits, and reported it back as a gap in the notice — which is what its skill says to
+do, and which caught the orchestrator's error.
+
+**propose read only `03-coverage/latest.json`** and produced exactly 11 scenarios
+for the 11 uncovered goal rows, each deeper than that goal had. It never saw
+score's reasoning.
+
+## 10. The orchestrator's own errors, for the record
+
+1. **Escalated scn-003 to a rejection on a rule that did not apply.** "Second
+   re-seed becomes a rejection" needs a second re-seed *verdict*; scn-003's
+   re-dispatch refused without judging, so only one existed. `rb-score` caught it.
+   Worse, the stderr note added to `RUBRICA_REJECT` dressed the mis-application as
+   sanctioned.
+2. **Reported `audit-reads.sh` as under-reporting reconcile's bash section.** The
+   script was right; a bad `sed` range had truncated its output.
+3. **Read scn-006's unchanged `expected.json` mtime as an inconsistency.** It was
+   correct: the re-seed changed the world and left the oracle alone, because the
+   right answer had not moved.
+4. **Called the `max_scenarios` value an unexplained discrepancy.** It was a
+   deliberate human edit. Every mechanism was checked except the person.
+
+## 11. §2's descoping, reconsidered
+
+**§2's second reason for excluding all parsec source does not survive.** It says
+registering source "would improve the suite and destroy the measurement" — true
+when a run exists to test the *pipeline*, which is what every prior run did. For a
+run whose deliverable is a parsec suite it is backwards, and importing that
+constraint was a category error.
+
+The cost is measurable rather than hypothetical: the six refusals and scn-011's
+reject all died for want of entities whose result shapes are declared in
+`src/tools/*.py` — precisely what was excluded. **A triage pass asking "are these
+13 tools' result shapes declared anywhere in the candidate set?" would have
+predicted that exact failure before intake minted the run.**
+
+Three constraints such a phase would have to respect, each from this run's data:
+
+- **Its output cannot be a scalar.** `tool_definitions.py` at 74KB was unusable
+  whole and fine as a projected 19KB eleven-tool contract, whose claims came back
+  7% cited but load-bearing — every capability binds to them. The useful verdict is
+  "container of N independent contracts, extract per-tool", not "0.4, keep". Size
+  was never the binding constraint; shape was.
+- **Utilisation is what a value indicator would be predicting**, and it is already
+  measurable after the fact: 18% overall, prose 2–21%, traces 36–73%,
+  `prompt-aap2-agent-md` at 5 of 139. Roughly $6.7 of extract bought ~46 citations
+  from eight prose documents; ~$5.9 bought ~92 from seven traces.
+- **Declining must stay visible, or descoping becomes invisible.** A gap whose
+  closing evidence was declined at triage is indistinguishable, in the world model,
+  from a gap nothing could close — and this run has four of the first kind
+  presenting as the second. Guard: triage records every candidate it scored *and*
+  every one it declined with a reason, and `check-refs` gains the ability to report
+  a gap whose named closing input was declined as a finding rather than as a fact
+  about the target.
+
+The objective has to be explicit too. This run's manual pass optimised for a
+*coherent* run — one surface, deep chains, comparable to its predecessor.
+Optimising for *coverage of parsec* would have chosen differently: the
+tool-definition projection, one trajectory per agent persona, and almost none of
+the prompt files, which were the 2–21% cohort.
+
+## 12. Owed
+
+- A `max_scenarios` heuristic and a triage phase — the same question, since both
+  size the run from the target rather than from a constant. `intake`'s default is
+  8; the floor for a real target is ~50.
+- `progress` needs a goal term, or `halted_no_progress` needs a name admitting it
+  means "no new cells".
+- A gate holding propose's scenarios to the world model's declared entities.
+- A signal that makes a re-judgment distinguishable from a first judgment.
+- A disposition for a re-seed whose remedy lies outside instantiate's `writes`.
+- Whether the five internal-persona goals belong in the denominator at all: three
+  of twelve goals describe one journey from three vantage points, and only
+  `act-end-user` goals are exercisable through an `http-sse` interface.

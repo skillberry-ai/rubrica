@@ -144,6 +144,25 @@ def test_the_deny_of_a_run_path_outranks_the_blanket_run_read_grant(settings):
     assert f"Read(/{run}/decisions.md)" in perms["permissions"]["deny"]
 
 
+def test_write_is_scoped_to_the_run_and_not_granted_bare(settings):
+    """A bare "Write" lets a dispatch write anywhere, and one did.
+
+    MEASURED on 2026-08-14: with `Write` unscoped, the `rb-emit` dispatch wrote
+    `check_prune_scratch.py` into the *repository root*, ran it, and removed it.
+    The content was a read-only analysis script, but the same grant reaches
+    `src/rubrica/*.py` and every sibling `SKILL.md` -- the one class of write that
+    would corrupt what this project measures. The sandbox scope's
+    `allowWrite: [$run]` did not stop it, so this rule is the enforcement.
+
+    Asserting the absence of the bare string as well as the presence of the scoped
+    one: granting both would leave the hole open while looking fixed.
+    """
+    perms, _, run = settings
+    allow = perms["permissions"]["allow"]
+    assert "Write" not in allow
+    assert f"Write(/{run}/**)" in allow
+
+
 def test_the_run_artifacts_a_stage_must_read_are_not_denied(settings):
     """The over-subtraction direction, which an over-broad deny list would fail.
 
@@ -270,6 +289,169 @@ def test_a_reseed_notice_with_no_verdict_file_is_a_usage_error(tmp_path):
     proc = _dispatch(tmp_path, "instantiate", str(run), "scn-001", run=run, RUBRICA_RESEED="1")
     assert proc.returncode == 2
     assert "no verdict to re-seed from" in proc.stderr
+
+
+# --- the rejection notice -----------------------------------------------------
+#
+# rb-score's Inputs section calls this "a whole kind of dispatch rather than an
+# edge case": score may be re-dispatched after rb-challenge has judged, to record
+# a rejection and recompute against it. Its `reads` still exclude `05-verdicts/`,
+# so the quoted fields are the only way a rejection reaches it.
+#
+# The payload is three fields -- `uniquely_determined`, `derivable_without_guessing`
+# and `notes`. What must stay out is `rejected_reason`: rb-score says the enum is
+# its own and a notice that had already chosen from it "would be the
+# conclusion-passing the orchestrator's own rules forbid". `verdict` and `flags`
+# stay out for the reason they stay out of the re-seed block.
+#
+# Measured on 2026-08-14, when this mode was added mid-run: widening the jq
+# projection to the whole verdict turns the over-inclusion test red; narrowing it
+# to `{notes}` turns the verbatim test red; dropping the accept guard turns
+# test_a_rejection_notice_for_an_accepted_verdict_is_a_usage_error red while
+# leaving the rest green.
+
+REJECT_VERDICT = {
+    "schema_version": "0.1",
+    "scenario_id": "scn-042",
+    "uniquely_determined": False,
+    "derivable_without_guessing": False,
+    "minimum_tool_calls_found": 2,
+    "verdict": "reject",
+    "alternative_answers": [
+        {"answer": "CANARY-REJECT-ALT", "world_consistent_reason": "CANARY-REJECT-REASON"}
+    ],
+    "flags": ["CANARY-REJECT-FLAG"],
+    "notes": "CANARY-REJECT-NOTES",
+}
+
+
+def test_a_rejection_notice_carries_the_three_verdict_fields_verbatim(tmp_path):
+    run = _run_with_verdict(tmp_path, REJECT_VERDICT, sid="scn-042")
+    _, _, prompt_file = _paths(
+        _dispatch(tmp_path, "score", str(run), run=run, RUBRICA_REJECT="scn-042")
+    )
+    prompt = Path(prompt_file).read_text()
+    assert "CANARY-REJECT-NOTES" in prompt
+    assert '"uniquely_determined": false' in prompt
+    assert '"derivable_without_guessing": false' in prompt
+    assert "scn-042" in prompt
+
+
+def test_a_rejection_notice_never_carries_the_reason_or_the_conclusions(tmp_path):
+    """The over-inclusion direction, and `rejected_reason` is the load-bearing one.
+
+    A notice that named the reason would pick from an enum rb-score says is its
+    own. The adversary's `flags` and `alternative_answers` are its conclusions and
+    belong no more here than in the re-seed block.
+    """
+    run = _run_with_verdict(tmp_path, REJECT_VERDICT, sid="scn-042")
+    _, _, prompt_file = _paths(
+        _dispatch(tmp_path, "score", str(run), run=run, RUBRICA_REJECT="scn-042")
+    )
+    prompt = Path(prompt_file).read_text()
+    assert "rejected_reason" not in prompt
+    assert "CANARY-REJECT-FLAG" not in prompt
+    assert "CANARY-REJECT-ALT" not in prompt
+    assert "minimum_tool_calls_found" not in prompt
+
+
+def test_a_rejection_notice_covers_every_id_it_is_given(tmp_path):
+    run = _run_with_verdict(tmp_path, REJECT_VERDICT, sid="scn-042")
+    second = {**REJECT_VERDICT, "scenario_id": "scn-043", "notes": "CANARY-SECOND-NOTES"}
+    (run / "05-verdicts" / "scn-043.json").write_text(json.dumps(second))
+    _, _, prompt_file = _paths(
+        _dispatch(tmp_path, "score", str(run), run=run, RUBRICA_REJECT="scn-042 scn-043")
+    )
+    prompt = Path(prompt_file).read_text()
+    assert "CANARY-REJECT-NOTES" in prompt
+    assert "CANARY-SECOND-NOTES" in prompt
+
+
+def test_a_rejection_notice_to_a_stage_that_takes_none_is_a_usage_error(tmp_path):
+    run = _run_with_verdict(tmp_path, REJECT_VERDICT, sid="scn-042")
+    proc = _dispatch(tmp_path, "propose", str(run), run=run, RUBRICA_REJECT="scn-042")
+    assert proc.returncode == 2
+    assert "only to score" in proc.stderr
+
+
+def test_a_rejection_notice_for_an_accepted_verdict_is_a_usage_error(tmp_path):
+    """Inventing a rejection is the same defect as inventing an objection."""
+    run = _run_with_verdict(tmp_path, {**REJECT_VERDICT, "verdict": "accept"}, sid="scn-042")
+    proc = _dispatch(tmp_path, "score", str(run), run=run, RUBRICA_REJECT="scn-042")
+    assert proc.returncode == 2
+    assert "would invent one" in proc.stderr
+
+
+def test_a_rejection_notice_with_no_verdict_file_is_a_usage_error(tmp_path):
+    run = tmp_path / "run"
+    run.mkdir()
+    proc = _dispatch(tmp_path, "score", str(run), run=run, RUBRICA_REJECT="scn-042")
+    assert proc.returncode == 2
+    assert "no verdict to build a rejection notice from" in proc.stderr
+
+
+def test_a_second_reseed_carried_as_a_rejection_announces_the_escalation(tmp_path):
+    """rb-orchestrate maps a second re-seed to a rejection, so the id is accepted.
+
+    It is announced on stderr rather than carried silently because the escalation
+    is the orchestrator's ruling and not something the verdict file says. Measured
+    on this run: the announcement is also what let a misapplication of that rule
+    be caught afterwards, when the escalated scenario had never actually received
+    a second re-seed verdict.
+    """
+    run = _run_with_verdict(tmp_path, {**REJECT_VERDICT, "verdict": "re-seed"}, sid="scn-042")
+    proc = _dispatch(tmp_path, "score", str(run), run=run, RUBRICA_REJECT="scn-042")
+    assert proc.returncode == 0
+    assert "re-seed" in proc.stderr and "treat as a rejection" in proc.stderr
+
+
+# --- the repair append --------------------------------------------------------
+#
+# The first of the two appends the design sanctions, and the one this script did
+# not implement until a `check-refs` finding needed routing back to rb-challenge.
+# It takes a file rather than a string so the appended text is a gate's own bytes.
+
+
+def test_a_repair_dispatch_carries_the_gate_findings_verbatim(tmp_path):
+    findings = tmp_path / "findings.txt"
+    findings.write_text(
+        "[refs] runs/r/05-verdicts/scn-042.json#/minimum_tool_calls_found: CANARY-GATE-FINDING\n"
+    )
+    run = _run_with_verdict(tmp_path, REJECT_VERDICT, sid="scn-042")
+    _, _, prompt_file = _paths(
+        _dispatch(
+            tmp_path,
+            "challenge",
+            str(run),
+            "scn-042",
+            run=run,
+            RUBRICA_FINDINGS_FILE=str(findings),
+        )
+    )
+    assert "CANARY-GATE-FINDING" in Path(prompt_file).read_text()
+
+
+def test_an_empty_findings_file_is_a_usage_error(tmp_path):
+    """A repair dispatch carrying nothing is indistinguishable from a first one.
+
+    Measured on the parsec run: a plain challenge re-dispatch found a complete
+    verdict already in its one `writes` slot and correctly declined to re-judge,
+    so the repair was a silent no-op. Exit 2 rather than a quiet no-append.
+    """
+    empty = tmp_path / "empty.txt"
+    empty.write_text("")
+    run = _run_with_verdict(tmp_path, REJECT_VERDICT, sid="scn-042")
+    proc = _dispatch(
+        tmp_path, "challenge", str(run), "scn-042", run=run, RUBRICA_FINDINGS_FILE=str(empty)
+    )
+    assert proc.returncode == 2
+    assert "empty or missing" in proc.stderr
+
+
+def test_no_findings_file_means_no_repair_block(tmp_path):
+    run = _run_with_verdict(tmp_path, REJECT_VERDICT, sid="scn-042")
+    _, _, prompt_file = _paths(_dispatch(tmp_path, "challenge", str(run), "scn-042", run=run))
+    assert "A gate reported findings" not in Path(prompt_file).read_text()
 
 
 def test_nothing_check_refs_reads_is_ever_denied(tmp_path):
