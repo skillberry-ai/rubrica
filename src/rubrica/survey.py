@@ -21,6 +21,7 @@ from __future__ import annotations
 import fnmatch
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from rubrica.artifacts import sha256_of
 from rubrica.errors import UsageError
@@ -176,3 +177,49 @@ def walk_corpus(
             kept.append(path)
 
     return kept, excluded
+
+
+def _escape_pointer_token(token: str) -> str:
+    """RFC 6901 escaping. `~` first, or escaping `/` would then be re-escaped."""
+    return token.replace("~", "~0").replace("/", "~1")
+
+
+def _homogeneous(elements: list) -> bool:
+    """Whether these elements are independent records of one kind.
+
+    Objects only, and their key sets must share EXPLODE_MIN_COMMON_KEYS. The
+    intersection rule rather than identity is the point -- see that constant.
+    """
+    if not all(isinstance(element, dict) for element in elements):
+        return False
+    key_sets = [set(element) for element in elements]
+    if any(len(keys) < EXPLODE_MIN_COMMON_KEYS for keys in key_sets):
+        return False
+    return len(set.intersection(*key_sets)) >= EXPLODE_MIN_COMMON_KEYS
+
+
+def explode(payload: Any) -> list[tuple[str, Any]] | None:
+    """Split a container of independent records, or return None.
+
+    Returns (json_pointer, element) pairs in document order. `None` means "this
+    is one candidate": a scalar, an array of scalars, a heterogeneous array, or
+    an object that is a single document with many sections rather than many
+    documents. An OpenAPI spec is the case that matters for that last one --
+    it has many `paths` and is still one contract, and a fragment of it cannot
+    be read alone.
+
+    Only these two shapes explode, which is spec §3's ruling: no Python
+    literals, no multi-document markdown, no archive members.
+    """
+    if isinstance(payload, list):
+        if len(payload) < EXPLODE_MIN_ELEMENTS or not _homogeneous(payload):
+            return None
+        return [(f"/{index}", element) for index, element in enumerate(payload)]
+
+    if isinstance(payload, dict):
+        values = list(payload.values())
+        if len(values) < EXPLODE_MIN_ELEMENTS or not _homogeneous(values):
+            return None
+        return [(f"/{_escape_pointer_token(key)}", value) for key, value in payload.items()]
+
+    return None
