@@ -82,7 +82,7 @@ and was never written down.
 | Where the run boundary sits | **`survey` mints the run.** `intake` still writes `manifest.json`. | A reusable corpus workspace outside `runs/` was declined: gate 0 would leave no `decisions.md` entry, and the channel rule would span two roots. |
 | Who supplies the objective | **The human declares it; triage is held to it and must challenge it.** | *Human declares, triage obeys* assumes the human already knows the corpus, which was untrue for parsec and will be untrue for a plugin user's first run. *Triage proposes and the human ratifies* lets one dispatch both pick the objective and select against it, so a self-serving objective yields a selection that looks coherent and can be held to nothing. |
 | What `rb-triage` reads | **The catalogue only**, with `digest_insufficient` as a decline reason. | *Catalogue plus bounded corpus reads* would put an arbitrary user tree — including `.env` and `.git` — in the dispatch allow list, and make cost unbounded. *Catalogue only with no refusal path* was declined because the decision still gets made, silently and badly, which is the shape that produced four mislabelled gaps. |
-| Whether the `max_scenarios` heuristic is in scope | **In scope, resolved at a human gate**, from the world model's own denominators. | Raising the default and deferring keeps a magic constant in the MVP, and §10 records that a hand-raise was mistaken for a defect. Estimating at survey time computes the least defensible of the available numbers, from the input set rather than from the grid the cap bounds. |
+| Whether the `max_scenarios` heuristic is in scope | **In scope, and split in two.** `max_scenarios` becomes a *safety ceiling* at 128 (§5) — the point past which no human reviews the output. The *sizing* question it was standing in for becomes a report computed from the world model's own denominators at a human gate (§9). | Treating one number as both was the original error: at a default of 8 a guard behaved like a design parameter, so the parsec run had to raise it by hand and the hand-raise was then mistaken for a defect. Estimating the size at survey time was also declined — it computes the least defensible of the available numbers, from the input set rather than from the capability grid. |
 
 ## 4. Pipeline shape
 
@@ -110,7 +110,7 @@ already derives `SKILL_DIR` as `rb-$STAGE`, and triage takes no slice id.
 
 **One artifact carries the run's parameters, not two.** A separate
 `survey.json` was considered and rejected. The catalogue's `request` block holds
-target, interface, objective and provisional limits, so there is one file the
+target, interface, objective and the run's limits, so there is one file the
 human edits at gate 0 and one file `intake` reads. It also makes the right thing
 happen when the objective is overridden: the catalogue changed, so triage must
 be re-dispatched rather than silently kept.
@@ -145,12 +145,34 @@ held to them:
 The parsec run was `depth` without saying so. §2's fourth constraint is that
 this choice determined its answer and was never written down.
 
-`--max-rounds` and `--max-scenarios` keep `intake`'s current defaults of 2 and
-8, and are **provisional by construction**: §9's arithmetic cannot run until a
-world model exists. `gate-brief --gate 1` always prints the recommended cap, so
-the gate cannot be held without seeing it. A wrong-but-visible provisional value
-is better than an invented one; the residual risk of a run that never reads the
-brief is recorded in §14.
+`--max-scenarios` defaults to **128**, and that number comes with a change in
+what the parameter *is*. It is not an estimate of the right suite size. It is a
+**safety ceiling** — the point past which no human would review the output, so a
+run that reaches it has gone wrong rather than gone large. `intake`'s default of
+8 made a guard behave like a design parameter, which is why the parsec run had to
+raise it by hand and why that hand-raise was then mistaken for a defect (§10 of
+that record, error 4).
+
+**No machinery is needed for this, because the ceiling is already enforced.**
+`refs.check_scenarios` reports a finding when the count of proposed-or-active
+scenarios exceeds `max_scenarios`, and `rb-propose`'s refusal conditions stop it
+proposing once the cap is reached. Duplicate and rejected scenarios already do
+not count against it. Only the default was wrong.
+
+128 is defensible on both axes a ceiling guards. **Review:** 128 Harbor packages
+is already past what anyone reads, and the emitted suite is what a human signs
+off. **Spend:** the parsec run's recorded totals imply roughly $1.66 per scenario
+across instantiate and challenge — $35.66 for 36 instantiate dispatches, and
+about $20 for 30 challenge verdicts — so a run reaching the ceiling costs on the
+order of $200. That per-scenario figure is arithmetic over recorded totals, not
+itself a recorded figure.
+
+**`max_rounds` is the same class of parameter, and this design does not fix it.**
+Its default of 2 is binding rather than protective — the parsec run raised it to
+3 — while in practice the loop should stop on `converged` or
+`halted_no_progress`. A ceiling nearer 6 would make it a guard too, but that is a
+change to the propose/score loop rather than to ingestion, and it belongs with
+F1. Recorded in §15.
 
 ### 5.1 Walk and exclude, visibly
 
@@ -245,7 +267,7 @@ the prose documents were admitted on path and title, not content.
     "objective_note": "...",              // optional prose
     "scope_note": "...",                  // optional prose
     "corpus_roots": ["..."],
-    "limits": {"max_rounds": N, "max_scenarios": N}   // provisional; see §10
+    "limits": {"max_rounds": 2, "max_scenarios": 128}  // ceilings, not targets; see §5
   },
   "policy": {
     "exclusion_reasons": ["gitignored", ...],
@@ -519,36 +541,49 @@ and run code against the target**, which is precisely what "full manufacture"
 was declined for in §3. The deferral is real and this block is the bridge across
 it. Building the loop later costs a skill and a `STAGES` entry, not a redesign.
 
-## 9. The scenario cap
+## 9. Implied suite size — a sizing report, not a cap
+
+§5 makes `max_scenarios` a safety ceiling at 128. That leaves a different
+question unanswered, and it is the one §12 of the parsec record actually asked:
+**how big should this run's suite be, given this target?** The ceiling does not
+answer it, because a guard set where output stops being reviewable says nothing
+about whether 12 scenarios is thin or 60 is bloated for a particular world model.
 
 Computed from `run-20260813-204203`'s own artifacts:
 
 ```
-denominator = capability_cells + Σ |goals[].expected_hop_depths|
-recommended = ceil(denominator / acceptance_allowance)
+implied_size = ceil( (capability_cells + Σ |goals[].expected_hop_depths|)
+                     / acceptance_allowance )
 ```
 
-| Available at | Denominator | Recommended | Note |
+| Available at | Denominator | Implied size | Note |
 |---|---|---|---|
 | **Gate 1** (world model only) | 28 + 23 = **51** | **68** | No gap deduction: which cells are `blocked_by_gap` is *score's* judgment, produced at stage 03 |
 | **Gate 2** (after round 1) | 51 − 5 blocked = **46** | **62** | |
 
-The parsec cap was hand-set to **64**; the recorded floor for a real target was
-**~50**. The un-deducted denominator lands within one of the floor that was
-ruled by instinct, and the recommendation within two of the number chosen. That
-agreement is the reason to believe the formula at all, and it is why F1 matters:
-those 23 hop-depth slots are exactly the term `coverage-0.1.json`'s `progress`
-definition has no representation for.
+The parsec cap was hand-set to **64** and the recorded floor for a real target
+was **~50**. The un-deducted denominator lands within one of the floor that was
+ruled by instinct, and the implied size within two of the number chosen by hand.
+That agreement is the reason to believe the formula at all, and it is why F1
+matters: those 23 hop-depth slots are exactly the term `coverage-0.1.json`'s
+`progress` definition has no representation for.
 
-`acceptance_allowance` is **0.75**, which is parsec's measured acceptance — 23
-accepted of 30 instantiated. It is one run's constant and must be labelled as
-one, not as a law.
+`acceptance_allowance` is **0.75**, parsec's measured acceptance — 23 accepted of
+30 instantiated. One run's constant, and it must be labelled as one rather than
+as a law.
 
-The cap is *reported*, never applied. `rubrica set-limit --run RUN
---max-scenarios N --reason TEXT` records the change in the manifest with its
-reason, which is what §10 of the parsec record asks for: a hand edit of
-`max_scenarios` was one of four orchestrator errors on that run, mistaken for an
-unexplained discrepancy because every mechanism was checked except the person.
+**Nothing acts on this number.** It is reported at gates 1 and 2 by
+`gate-brief`, alongside coverage, for a human deciding whether the suite under
+construction is the right size for the target. Its two real uses are diagnostic:
+an implied size *above* the 128 ceiling means the target is too large for one run
+and wants splitting, which is exactly the ruling the parsec run made by hand in
+its §2; and a suite that halts far *below* the implied size — 36 proposed against
+68 implied, as parsec did — is the signal that F1's stopping rule gave up early.
+
+`rubrica set-limit --run RUN --max-scenarios N --reason TEXT` exists for
+*lowering* the ceiling on a deliberately cheap probe run, and records the change
+with its reason. It is not how the implied size gets applied, because the implied
+size never gets applied.
 
 ## 10. `check-refs`
 
@@ -588,8 +623,8 @@ the two this design adds:
 - **Gate 0** — the catalogue and triage record made readable: surfaces found,
   objective supported or not, admits by priority, declines by reason code,
   open deficiencies and their projections.
-- **Gate 1** — `claim-utilisation` (calling the existing code), the §9 cap
-  arithmetic, and the two sides of §10's semantic pairing side by side: the
+- **Gate 1** — `claim-utilisation` (calling the existing code), §9's implied
+  suite size, and the two sides of §10's semantic pairing side by side: the
   world model's gaps, and the triage record's open deficiencies. A human seeing
   `gap-decimal-serialization-root-cause` next to *"declined: src/tools/aws.py —
   implementation_detail"* makes that connection in a second; a regex never will.
@@ -613,7 +648,16 @@ This is more than one plan's worth of work; §16 is the phasing.
 to be smaller; the other three each carry a stage or a gate.
 
 **Schemas: 12 → 14.** `catalogue-0.1.json`, `triage-0.1.json`. Plus an additive
-change to `manifest-0.1.json` for `inputs[].provenance`.
+change to `manifest-0.1.json` for `inputs[].provenance`. `limits.max_scenarios`
+keeps `minimum: 1` and gains **no `maximum`**: the ceiling is a default, so a
+human who types 300 has explicitly asked for it, while an autonomous run that
+sets nothing — the case §5 exists to protect — gets 128.
+
+**The ceiling itself is a two-line change**, independent of everything else here:
+`cli.py`'s `--max-scenarios` default, and `test_cli.py:330`, which is the only
+test pinning it. Every other `max_scenarios=8` in the suite is an explicit
+argument, and `tests/toy.py` keeps its own 8 because the toy world has five
+scenarios and `test_toy_fixture.py` depends on that cap being meaningful.
 
 **Skills: 8 → 9.** `rb-triage`, with its `exercise.md`.
 
@@ -694,14 +738,19 @@ already records for fan-out isolation.
 **The 0.75 and the 51/68 arithmetic rest on one run.** A second target could
 move both substantially.
 
-**A run that never reads `gate-brief --gate 1` ships at `max_scenarios` 8.**
-That is the parsec failure preserved rather than fixed: the cap is reported and
-never applied (§9), so an autonomous run that holds gate 1 without reading the
-brief gets the provisional default. Mitigated only by the brief being the gate's
-designated surface. Applying the recommendation automatically was rejected for
-the reason the whole design rests on — a computed cap acting on its own would be
-score-style arithmetic taking an orchestrator's decision — but the residual risk
-is real and belongs here rather than in a footnote.
+**The 128 ceiling is a blast-radius bound, not a quality bound.** A run that
+reaches it has spent on the order of $200 producing more packages than anyone
+will read, and the only things that stop it earlier are `converged`,
+`halted_no_progress`, and a human at gate 2. F1 records that
+`halted_no_progress` is blind to goal progress, so the stopping rule that
+*should* bind is the one known to be weakest. The ceiling holds either way, which
+is the point of a ceiling — but a run halting for the right reason is not
+something this design improves.
+
+**`max_rounds` remains a design parameter masquerading as a guard.** §5 explains
+why it is the same error at 2 that `max_scenarios` was at 8, and why fixing it
+belongs with F1 rather than here. Until then a run's real bound is often the round
+cap rather than its coverage.
 
 ## 15. Owed, and explicitly not solved here
 
@@ -712,7 +761,7 @@ is real and belongs here rather than in a footnote.
   "standalone plugin" and is out of scope here.
 - **`rb-project`** — the projection fan-out, bridged by §8 and costed at a skill
   plus a `STAGES` entry.
-- **F1's goal term in `progress`** — §9's arithmetic leans on the 23 hop-depth
+- **F1's goal term in `progress`** — §9's sizing leans on the 23 hop-depth
   slots that `progress` has no representation for, so the two are related, but
   F1 is not fixed here.
 - **§12's last item cuts §9 directly.** If the five internal-persona goals do
@@ -720,24 +769,32 @@ is real and belongs here rather than in a footnote.
   three vantage points, and only `act-end-user` goals are exercisable through an
   `http-sse` interface — the gate-1 denominator drops from 51 to roughly 46.
   That ruling is owed before the formula is trusted.
+- **`max_rounds` is the same error `max_scenarios` had.** A default of 2 is
+  binding rather than protective; a ceiling nearer 6 would make it a guard, and
+  the loop would then stop on `converged` or `halted_no_progress` as intended.
+  Deferred rather than done because it changes the propose/score loop's
+  parameters, not ingestion's, and because F1 has to be settled first — raising
+  the round ceiling while `progress` stays blind to goal coverage buys rounds the
+  stopping rule will refuse to use.
 - **F2's entity gate on propose**, F3, F4 and F5 are untouched by this design.
 
 ## 16. Build order
 
 This is more than one implementation plan's worth of work, so it decomposes into
-four phases. Each ends with `make test` and `make check` green and
-`rubrica check-skills` at 0, and each is useful on its own — phase 1 alone
-replaces the manual inventory, and phases 1–3 replace the whole manual pass
-except projections.
+a two-line change and four phases. Each ends with `make test` and `make check`
+green and `rubrica check-skills` at 0, and each is useful on its own — phase 0
+stands entirely alone, phase 1 replaces the manual inventory, and phases 1–3
+replace the whole manual pass except projections.
 
 | Phase | Contents | Ends usefully at |
 |---|---|---|
+| **0 — the ceiling** | `--max-scenarios` default 8 → 128, and the one test that pins it | Nothing else in this design is needed for it, and it removes the default that made the parsec run's hand-raise necessary |
 | **1 — the catalogue** | `paths.STAGES`/`RunPaths`/`STAGE_ARTIFACTS` entries for `survey`, `catalogue-0.1.json`, `rubrica survey` with its exclusion policy, container explosion and digests, `tests/fixtures/corpus-toy/`, unreadable-input paths | A corpus becomes a reviewable inventory; operations 1 and 3 of §1 are code |
 | **2 — the skill** | `triage-0.1.json`, `rb-triage` with its five sections and its `exercise.md`, the §10 reference checks over the triage record, both negative catalogue fixtures, the dispatch-harness deny coverage | Operation 2 of §1 is a stage with a contract and a gate |
 | **3 — admission** | `intake` split into mint and register, `intake --run`, materialisation and `provenance`, the manifest↔dispositions check, `tests/toy.py`'s two new checkpoints | The pipeline runs end to end from a corpus; operation 5 is code |
-| **4 — the human's instruments** | `projections[]`, `adopt-projection`, `gate-brief`, §9's cap arithmetic, `set-limit` | Gate 0 has a surface, and operation 4 is a dispatchable brief |
+| **4 — the human's instruments** | `projections[]`, `adopt-projection`, `gate-brief`, §9's implied-size report, `set-limit` | Gate 0 has a surface, and operation 4 is a dispatchable brief |
 
 Phase 4 is the one to cut down if the build needs to be smaller: `set-limit`
-first, then §9's arithmetic — but not `projections[]`, which is the artifact
+first, then §9's implied-size report — but not `projections[]`, which is the artifact
 §8.3's post-MVP stage is designed against and the only part that is expensive to
 add later.
