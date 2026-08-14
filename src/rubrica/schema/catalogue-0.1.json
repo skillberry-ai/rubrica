@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "catalogue-0.1.json",
+  "title": "Corpus catalogue",
+  "type": "object",
+  "required": ["schema_version", "run_id", "created_utc", "request", "policy",
+               "candidates", "excluded"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "run_id": {"$ref": "#/$defs/id"},
+    "created_utc": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "\\A\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z\\Z"
+    },
+    "request": {
+      "type": "object",
+      "required": ["target", "objective", "corpus_roots", "limits"],
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "type": "object",
+          "required": ["name", "interface"],
+          "additionalProperties": false,
+          "properties": {
+            "name": {"type": "string", "minLength": 1},
+            "interface": {"type": "string", "minLength": 1}
+          }
+        },
+        "objective": {"enum": ["breadth", "depth"]},
+        "objective_note": {"type": "string", "minLength": 1},
+        "scope_note": {"type": "string", "minLength": 1},
+        "corpus_roots": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "limits": {
+          "type": "object",
+          "required": ["max_rounds", "max_scenarios"],
+          "additionalProperties": false,
+          "properties": {
+            "max_rounds": {"type": "integer", "minimum": 1},
+            "max_scenarios": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "required": ["exclusion_reasons", "explode_min_elements",
+                   "explode_min_common_keys", "digest_body_chars",
+                   "max_candidates"],
+      "additionalProperties": false,
+      "properties": {
+        "exclusion_reasons": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/exclusion_reason"}
+        },
+        "explode_min_elements": {"type": "integer", "minimum": 2},
+        "explode_min_common_keys": {"type": "integer", "minimum": 1},
+        "digest_body_chars": {"type": "integer", "minimum": 1},
+        "max_candidates": {"type": "integer", "minimum": 1},
+        "operator_globs": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "origin", "bytes", "sha256", "kind",
+                     "admissible", "digest"],
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {"$ref": "#/$defs/id"},
+          "origin": {"enum": ["corpus", "container_element", "projection"]},
+          "path": {"type": "string", "minLength": 1},
+          "container": {
+            "type": "object",
+            "required": ["candidate_id", "json_pointer"],
+            "additionalProperties": false,
+            "properties": {
+              "candidate_id": {"$ref": "#/$defs/id"},
+              "json_pointer": {"type": "string", "minLength": 1}
+            }
+          },
+          "provenance": {
+            "type": "object",
+            "required": ["projection_id", "source_candidate_ids"],
+            "additionalProperties": false,
+            "properties": {
+              "projection_id": {"$ref": "#/$defs/id"},
+              "source_candidate_ids": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"$ref": "#/$defs/id"}
+              }
+            }
+          },
+          "bytes": {"type": "integer", "minimum": 0},
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "kind": {"$ref": "#/$defs/kind"},
+          "admissible": {"type": "boolean"},
+          "digest_truncated": {"type": "boolean"},
+          "digest": {"type": "object"}
+        }
+      }
+    },
+    "excluded": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "reason": {"$ref": "#/$defs/exclusion_reason"},
+          "detail": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "\\A[A-Za-z0-9][A-Za-z0-9._-]*\\Z",
+      "maxLength": 128
+    },
+    "sha256": {"type": "string", "pattern": "\\A[0-9a-f]{64}\\Z"},
+    "kind": {
+      "enum": ["openapi", "mcp_tool_schema", "entity_schema", "trace",
+               "design_doc", "source_code", "other"]
+    },
+    "exclusion_reason": {
+      "enum": ["gitignored", "vcs_metadata", "binary", "lockfile", "vendored",
+               "duplicate", "unreadable", "operator_excluded"]
+    }
+  }
+}

@@ -402,3 +402,28 @@ def minimal_verdict(**over: Any) -> dict[str, Any]:
     }
     payload.update(over)
     return payload
+
+
+def minimal_catalogue(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "run_id": "run-20260806-120000",
+        "created_utc": "2026-08-06T12:00:00Z",
+        "request": {
+            "target": {"name": "aap2", "interface": "mcp"},
+            "objective": "breadth",
+            "corpus_roots": ["/tmp/aap2"],
+            "limits": {"max_rounds": 2, "max_scenarios": 8},
+        },
+        "policy": {
+            "exclusion_reasons": ["binary"],
+            "explode_min_elements": 3,
+            "explode_min_common_keys": 3,
+            "digest_body_chars": 2000,
+            "max_candidates": 500,
+        },
+        "candidates": [],
+        "excluded": [],
+    }
+    payload.update(over)
+    return payload

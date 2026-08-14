@@ -14,6 +14,7 @@ from rubrica.validate import (
 )
 from tests.builders import (
     minimal_agents,
+    minimal_catalogue,
     minimal_claims,
     minimal_coverage,
     minimal_expected,
@@ -72,6 +73,7 @@ def test_the_schema_directory_env_override_wins(monkeypatch, tmp_path):
 # Keyed off ARTIFACT_SCHEMAS below, so registering a kind without adding its
 # builder here fails loudly rather than silently skipping it.
 MINIMAL_BUILDERS = {
+    "catalogue": minimal_catalogue,
     "manifest": minimal_manifest,
     "claims": minimal_claims,
     "world-model": minimal_world_model,
