@@ -38,7 +38,9 @@ contract, not a diagram convention.
 
 | Dir | Stage | Runs as | Reads | Writes | Gate |
 |---|---|---|---|---|---|
-| `00` | intake | code | the input files you name, plus target name, interface, limits | `manifest.json`, `00-inputs/<stored_as>` | validate |
+| — | survey | code — walks a corpus and mints the run | the corpus roots you name, plus target name, interface, objective | `00-catalogue.json` | validate |
+| — | triage | `rb-triage` | `00-catalogue.json` only | `00-triage.json` | validate · check-refs · **human gate 0** |
+| `00` | intake | code | the input files you name, plus target name, interface, limits — or, on the survey path, an already-admitted `00-triage.json` | `manifest.json`, `00-inputs/<stored_as>` | validate |
 | `01a` | extract | `rb-extract` — **fan-out**, one per input | the manifest, and its own one file under `00-inputs/` — never a sibling's | `01-claims/<artifact-id>.json` | validate |
 | `01b` | reconcile | `rb-reconcile` — **barrier** | the manifest and every claims file | `01-world-model.json` | validate · check-refs · **human gate 1** |
 | `02` | propose | `rb-propose` | `manifest.json`, `01-world-model.json`, `02-scenarios.json`, `03-coverage/latest.json` | `02-scenarios.json` (appends this round) | validate |
@@ -47,6 +49,17 @@ contract, not a diagram convention.
 | `05` | challenge | `rb-challenge` — **fan-out**, one per instance | the scenario and the seed — then `expected.json` **last** | `05-verdicts/<sid>.json` | validate · **human gate 3** |
 | `06` | emit | `rb-emit` — wraps code | `02-scenarios.json`, `05-verdicts/`, `04-instances/*/expected.json`, `01-world-model.json` | `06-suite/<sid>/` task packages | validate · check-refs |
 | `07` | smoke | code | the emitted suite and the agent roster | `07-report.json` | validate · check-refs |
+
+`survey` and `triage` carry no `0N` prefix of their own — they write
+`00-catalogue.json` and `00-triage.json` ahead of the `manifest.json` and
+`00-inputs/` that `intake` mints once gate 0 has passed, so the numbering
+stays intake's. Gate 0 is different in kind from the three gates below: it
+decides what the run can ever know, because nothing downstream of `intake`
+reads the corpus again — a candidate `rb-triage` declines is gone as
+completely as if the corpus never contained it, which is why triage cannot
+also hold its own gate. `intake --input` still works unchanged for anyone who
+would rather hand-pick the inputs directly, with no corpus, no catalogue, no
+triage record, and no gate 0.
 
 **Stages 02 and 03 are a loop.** Propose targets the holes the coverage report
 names; score recomputes coverage and returns a verdict — `continue`,

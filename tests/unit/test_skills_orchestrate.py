@@ -26,6 +26,15 @@ SKILL = skills_dir() / ORCHESTRATOR / "SKILL.md"
 METHOD = "3. Method"
 
 
+def _norm(text: str) -> str:
+    """Whitespace-normalised, so a reflow does not break a phrase pin.
+
+    399dba5 fixed exactly this in the extract/reconcile prose tests; the same
+    risk applies here, so the two Task 20 predicates below use it too.
+    """
+    return re.sub(r"\s+", " ", text.lower())
+
+
 def method_body() -> str:
     """The `## 3. Method` section only.
 
@@ -131,6 +140,30 @@ def test_it_names_every_stage_it_dispatches():
             assert stage in method, f"the loop never mentions the code stage {stage!r}"
         else:
             assert f"rb-{stage}" in method, f"the loop never dispatches rb-{stage}"
+
+
+def test_the_orchestrator_dispatches_survey_triage_and_holds_gate_zero():
+    """`survey` and `triage` both precede intake, and gate 0 precedes the
+    orchestrator's own dispatch entirely -- the orchestrator never runs
+    `rubrica survey`, never dispatches `rb-triage`, and never holds gate 0
+    itself. But a reader of this file needs the whole pipeline in view, not
+    just the seven stages this skill dispatches, so the Method section must
+    say where its own walk picks up."""
+    body = _norm(method_body())
+    assert "survey" in body and "triage" in body
+    assert "gate 0" in body
+
+
+def test_the_orchestrator_knows_gate_zero_decides_what_the_run_can_know():
+    """The reason this gate is different in kind from 1-3: a model that both
+    selects the inputs and ratifies the selection makes triage unfalsifiable.
+
+    Scoped to the whole file rather than the Method section, because the
+    explanation of *why* gate 0 differs is framing for the reader, not a step
+    in the walk -- it can live anywhere the prose puts it.
+    """
+    body = _norm(load(SKILL).body)
+    assert "what the run can" in body
 
 
 def test_it_states_all_three_exit_codes_and_what_each_means():

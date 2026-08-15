@@ -27,7 +27,7 @@ make lint      # ruff check --fix
 make format    # ruff format
 ```
 
-Baseline: **1173 passed, 4 skipped**; `make check` clean; `uv run rubrica
+Baseline: **1378 passed, 4 skipped**; `make check` clean; `uv run rubrica
 check-skills` exits 0. Anything else means you broke something. (It was 1126 as
 of the skills build; the three added since are `f3b9d30`'s, and this line went
 stale because it names a build rather than a commit. It was 1129 as of
@@ -74,7 +74,21 @@ allow list carried a bare `Write`, and `rb-emit` used it to put a scratch script
 in the repository root. All eleven predicates were measured in the failure
 direction: widening the rejection jq to the whole verdict, narrowing it to
 `{notes}`, dropping the accept guard, making an empty findings file a silent
-no-append, and restoring the bare `Write` each turn exactly one red.)
+no-append, and restoring the bare `Write` each turn exactly one red. It was
+1173 as of `d600b98`; the 205 added since are this ingestion-and-triage
+build's — Tasks 1 through 20 of the 2026-08-14-ingestion-and-triage plan,
+adding two stages (`survey`, `triage`) and four subcommands (`survey`,
+`adopt-projection`, `gate-brief`, `set-limit`), and the tests each carries,
+across 39 commits. Naming the whole build rather than one commit is the same
+move this parenthetical made earlier for the skills build, and for the same
+reason: too many commits to enumerate honestly as one. Task 20's own share is
+two — `test_skills_orchestrate.py`'s two new predicates pinning
+`rb-orchestrate`'s survey/triage/gate-0 prose — plus one test that already
+existed and turned from red to green
+(`test_it_names_every_stage_it_dispatches`, which needed a prose fix, not a
+new assertion) and one rename with no net count change (`test_brief.py`'s
+`test_gate_two_does_not_raise_on_a_present_but_malformed_coverage_document` →
+`..._world_model`, correcting what its fixture actually corrupts).)
 
 Commands in `README.md` assume the venv is on `PATH`; otherwise prefix `uv run`.
 Four env overrides exist: `RUBRICA_SCHEMA_DIR` (`validate.py`),
@@ -98,12 +112,15 @@ machine text, never paraphrased: a repair's gate findings, and a re-seed's
 verdict fields. A paraphrase is the orchestrator's conclusion wearing a
 finding's clothes.
 
-## Nine stages, eight skills
+## Eleven stages, nine skills
 
-`paths.STAGES` is the ordering and the on-disk numbering:
+`paths.STAGES` is the ordering and the on-disk numbering. `survey` and
+`triage` precede `intake` and bracket the newest gate:
 
 | Dir | Stage | Runs as | Gate |
 |---|---|---|---|
+| — | survey | code — walks a corpus, writes `00-catalogue.json` | validate |
+| — | triage | `rb-triage` | validate · check-refs · **human gate 0** |
 | `00` | intake | code | validate |
 | `01a` | extract | `rb-extract` — fan-out, one per input | validate |
 | `01b` | reconcile | `rb-reconcile` — barrier | validate · check-refs · **human gate 1** |
@@ -114,16 +131,33 @@ finding's clothes.
 | `06` | emit | `rb-emit` — thin wrapper over `rubrica emit` | validate · check-refs |
 | `07` | smoke | code | validate · check-refs |
 
+`survey` and `triage` have no `0N` directory prefix of their own: `survey`
+writes `00-catalogue.json` and `triage` writes `00-triage.json`, both ahead of
+the `00-inputs/` and `manifest.json` that `intake` mints once gate 0 has
+passed — the numbering stays intake's, not theirs, because intake is still
+what fixes the run's identity.
+
 Stages 02 and 03 are a loop bounded by `max_rounds`. Score *computes* the
 coverage verdict (`continue` / `converged` / `halted_no_progress` /
 `halted_round_cap`); only the orchestrator acts on it.
 
-`rb-orchestrate` is the eighth skill and **is not a stage**: it declares no
-`stage` and no `schemas`. It dispatches the seven, holds the gates, and writes
-`decisions.md`.
+**Gate 0 is different in kind from gates 1–3.** Gates 1 through 3 review a
+judgment made from evidence already in the run; a human overturning one of
+them corrects an inference about the target. Gate 0 decides what the run can
+ever know — nothing downstream of `intake` reads the corpus again, so a
+candidate `rb-triage` declines is gone as completely as if the corpus never
+contained it. That is why triage cannot also hold its own gate: the same
+party selecting the inputs and ratifying the selection would make the whole
+run unfalsifiable.
 
-`intake` and `smoke` are code, so they have no skill and no `manifest.stages`
-entry. Their absence there is not a finding.
+`rb-orchestrate` is the ninth skill and **is not a stage**: it declares no
+`stage` and no `schemas`. It dispatches the seven prompt stages from
+`extract` through `emit`, holds gates 1 through 3, and writes
+`decisions.md`. It never runs `survey`, never dispatches `rb-triage`, and
+never holds gate 0 — all three are finished before it is ever dispatched.
+
+`intake`, `smoke`, and `survey` are code, so they have no skill and no
+`manifest.stages` entry. Their absence there is not a finding.
 
 ## The exit-code contract — load-bearing, do not weaken
 
@@ -186,12 +220,13 @@ in the design. Treat a refusal condition as decorative if its trigger has no
 stated action, its action is one a model cannot take, or its condition is one a
 model cannot detect from what it can read.
 
-## Thirteen deterministic subcommands
+## Seventeen deterministic subcommands
 
 Everything a prompt is not trusted to do:
 
-`intake` · `validate` · `check-refs` · `check-skills` · `dedupe-candidates` ·
-`record-stage` · `decide` · `emit` · `smoke` · `compare-gold` · `diff-runs` ·
+`survey` · `intake` · `validate` · `check-refs` · `check-skills` ·
+`dedupe-candidates` · `record-stage` · `decide` · `adopt-projection` ·
+`gate-brief` · `set-limit` · `emit` · `smoke` · `compare-gold` · `diff-runs` ·
 `sample-for-review` · `claim-utilisation`
 
 `emit` is code, not a prompt, because two runs with identical stage-4 and
@@ -203,6 +238,20 @@ that is the hook working, not a defect. `claim-utilisation` is a report, not a
 gate — it always exits clean on a readable run and surfaces each input's
 cited/total claim count for a human to read at gate 1; the zero-utilisation
 finding it shares its arithmetic with lives in `check-refs`, never here.
+
+`survey` is `intake`'s counterpart for the corpus path: it walks a corpus,
+digests each candidate, and mints the run, but writes `00-catalogue.json`
+instead of a manifest — there is nothing to extract from yet, because nothing
+has been admitted. `adopt-projection` admits a manufactured artifact into the
+catalogue structurally, without touching the corpus or the run's identity.
+`gate-brief` is a report with the same ruling as `claim-utilisation` — it
+always exits clean on a readable run — and composes what already exists into
+the reading surface at any of the four human gates: the objective verdict and
+grouped declines at gate 0, utilisation and implied size at gate 1, the
+coverage matrix at gate 2, the verdict tally at gate 3. `set-limit` changes a
+manifest limit — `max_scenarios` most often — with the reason recorded in
+`decisions.md`, so raising a ceiling is a decision on the record rather than a
+silent hand-edit.
 
 ## Testing prompts: the traps that actually recur here
 

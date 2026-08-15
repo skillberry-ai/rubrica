@@ -144,14 +144,51 @@ failed, the answer is the halt in refusal condition 2, not the artifact.
 
 ## 3. Method
 
-The whole run, in one block. `→` reads "then", and every `rubrica` command
-shown is one you actually run. Every subcommand below except `check-skills`
-takes `--run <run>`, naming the run directory you were dispatched with, and it
-is required -- the block omits it only to stay readable, and a subcommand run
-without it exits 2 on a usage error, which is an exit code you would otherwise
-have to read as a misconfigured run:
+**This pipeline has eleven stages and nine skills; you dispatch seven of the
+nine yourself.** The other two skills bracket you rather than sitting inside
+your walk. Before you exist at all, `rubrica survey` walks a corpus and mints
+this run, writing `00-catalogue.json` -- one bounded digest per candidate,
+never the candidate's own bytes. `rb-triage` reads only that catalogue and
+rules on every candidate -- `admit`, `decline`, or `needs_projection` --
+writing `00-triage.json`. Then **HUMAN GATE 0** holds on that record, and only
+once it has passed does `rubrica intake --run <run>` materialise the admitted
+candidates into `manifest.json`, the file B1 tells you to verify rather than
+produce. You never run `rubrica survey`, never dispatch `rb-triage`, and never
+hold gate 0 -- all three are finished before you are ever dispatched.
+
+**Gate 0 is different in kind from the three gates you do hold (B5, B7, B10),
+and the difference is worth carrying with you rather than filing as one more
+item on a list.** Gates 1 through 3 review a judgment made *from* evidence
+that is already in the run -- a world model, a scenario list, a set of
+verdicts -- so a human overturning one of them is correcting an inference
+about the target. Gate 0 is not that: it decides what the run can ever know,
+because nothing downstream of intake reads the corpus again. `rb-extract`
+reads only what `intake` admitted, never a byte of what `rb-triage` declined,
+and a candidate marked `decline` is not deferred for a later stage to
+reconsider -- it is gone as completely as if the corpus had never contained
+it. That is why the same party cannot both select the inputs and ratify the
+selection: a triage that also rules on its own admission would make the whole
+run unfalsifiable, because no stage after it could ever surface a candidate it
+was wrong to exclude. You inherit the consequence of that gate rather than its
+judgment -- every blocking gap you halt on at B4 and every claim
+`rb-reconcile` never had a chance to see traces back to what gate 0 let
+through.
+
+The whole run, in one block, picking up where gate 0 left off. `→` reads
+"then", and every `rubrica` command shown is one you actually run. Every
+subcommand below except `check-skills` takes `--run <run>`, naming the run
+directory you were dispatched with, and it is required -- the block omits it
+only to stay readable, and a subcommand run without it exits 2 on a usage
+error, which is an exit code you would otherwise have to read as a
+misconfigured run. The first four lines are not yours -- they already
+happened, and they are shown only so the sequence reads as one block rather
+than as a pipeline with an invisible seam:
 
 ```
+rubrica survey --corpus <corpus> ...          # mints the run, writes 00-catalogue.json -- not yours
+rb-triage                                    → validate --stage triage → check-refs
+                                             → HUMAN GATE 0: the triage record -- not yours
+rubrica intake --run <run>                    # admits it into manifest.json -- not yours
 rubrica check-skills                          # before anything: a bad skill is not a stage defect
 verify manifest.json                          # `rubrica intake` is the operator's, never yours
 fan out rb-extract, one per input artifact   → validate --stage extract

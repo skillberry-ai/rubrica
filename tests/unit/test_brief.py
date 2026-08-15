@@ -380,10 +380,22 @@ def test_the_gate_three_brief_tallies_the_real_verdicts(tmp_path):
     assert "accept: 4" in text
 
 
-def test_gate_two_does_not_raise_on_a_present_but_malformed_coverage_document(tmp_path):
-    """Same review finding, the gate-2 call site: a malformed
-    03-coverage/latest.json must not turn `implied_size`'s KeyError into an
-    exit-1 fabricated finding or an exit-2 usage error either."""
+def test_gate_two_does_not_raise_on_a_present_but_malformed_world_model(tmp_path):
+    """Same review finding as the gate-1 test above, a second call site: gate
+    2 also calls `implied_size`, so a world model missing `denominator` must
+    not turn its KeyError into an exit-1 fabricated finding or an exit-2
+    usage error there either.
+
+    Renamed from ...malformed_coverage_document (Task 20's review): the
+    fixture below has always corrupted `run.world_model`, never
+    `run.coverage_latest`, so the old name and docstring described a case
+    nothing here exercises. Checked before renaming rather than repointing:
+    `_gate_2` reads every coverage field through `.get(..., default)` after
+    an early return on `coverage is None` (`_quietly` swallows bad JSON), so
+    there is no unguarded coverage-document read left for a fixture change to
+    reach -- pointing this at `run.coverage_latest` would pass trivially and
+    prove nothing. The malformed-world-model path is the real second call
+    site worth pinning, so the name now says that instead."""
     run = build_toy_run(tmp_path / "runs", upto="score")
     world = read_json(run.world_model)
     del world["denominator"]

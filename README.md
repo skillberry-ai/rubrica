@@ -14,18 +14,20 @@ produce a suite worth running. Design:
 Three layers, all of them present. The **contract spine**: the deterministic
 components every stage depends on. A **measurement layer** on top of it — four
 tools that score, compare, and sample a suite once `emit` has produced one. And
-the **eight skills** that carry the pipeline's judgment. The whole pipeline has
-run end to end with a model at every stage, from three input files to a scored
-suite whose tasks discriminate between agent roles.
+the **nine skills** that carry the pipeline's judgment, across eleven stages
+(two of the eleven, `survey` and `intake`, are code, alongside `smoke`). The
+whole pipeline has run end to end with a model at every stage, from three
+input files to a scored suite whose tasks discriminate between agent roles.
 
 ### The skills
 
-Seven stage skills plus the orchestrator, at
+Eight stage skills plus the orchestrator, at
 `src/rubrica/skills/rb-<name>/SKILL.md`. Each carries one judgment and reads
 only what its `## Contract` block declares.
 
 | Skill | The judgment it carries |
 |---|---|
+| `rb-triage` | Decides what the run can ever know: rules on every catalogued candidate `admit` / `decline` / `needs_projection`, with a reason for every one — not just the ones it kept — and states what the admitted set still cannot cover |
 | `rb-extract` | Turns one input artifact into evidence-backed claims, in isolation from every sibling artifact — and grades each claim `stated` / `inferred` / `reverse_engineered` instead of flattening the difference |
 | `rb-reconcile` | Merges every extract's claims into one world model, *recording* contradictions and gaps rather than resolving them, and computes the coverage denominator once |
 | `rb-propose` | Appends scenarios targeting holes that proposing can actually close — never rewriting or renumbering what an earlier round proposed |
@@ -80,8 +82,21 @@ them, so they are never silently absent.
 
 ## Running the pipeline
 
-The stages are prompts, so no command in this repository runs them.
-`rb-orchestrate` does: point an agent at
+Before any of that, a run has to exist and its inputs have to be admitted.
+`rubrica survey --corpus …` walks a corpus and mints the run, writing
+`00-catalogue.json` — one bounded digest per candidate file, never the
+candidate's own bytes. `rb-triage` reads only that catalogue and rules on
+every candidate, writing `00-triage.json`. **Human gate 0** holds on that
+record — reviewed with `rubrica gate-brief --gate 0` — before
+`rubrica intake --run <run>` materialises the admitted candidates into
+`manifest.json`. This gate is different in kind from the three the
+orchestrator holds below: it decides what the run can ever know, since
+nothing after `intake` reads the corpus again — `rb-extract` sees only what
+was admitted. `intake --input` still works unchanged as the direct path for a
+hand-picked input set with no survey or triage step at all.
+
+The stages from there on are prompts, so no command in this repository runs
+them. `rb-orchestrate` does: point an agent at
 [`src/rubrica/skills/rb-orchestrate/SKILL.md`](src/rubrica/skills/rb-orchestrate/SKILL.md)
 with a run directory, and it dispatches one subagent per stage, gates every
 artifact before the next stage sees it, holds the round loop and the three human
@@ -119,7 +134,8 @@ Commands below assume the venv is on your `PATH` (`make setup` creates it);
 otherwise prefix each with `uv run`.
 
 ```bash
-# Stage 0: register inputs and mint a run
+# Stage 0, path A: hand-pick the inputs yourself and mint a run directly.
+# No corpus, no catalogue, no triage record, no gate 0.
 rubrica intake \
   --input path/to/api.json \
   --input path/to/schema.json \
@@ -127,9 +143,27 @@ rubrica intake \
   --target-name aap2 \
   --target-interface mcp \
   --max-rounds 2 \
-  --max-scenarios 8
+  --max-scenarios 128
 # --max-rounds and --max-scenarios are optional; those are their defaults.
 # prints the new run directory, e.g. runs/run-20260806-123005
+
+# Stage 0, path B: point at a whole corpus instead and let triage decide.
+rubrica survey \
+  --corpus path/to/corpus \
+  --runs-dir runs \
+  --target-name aap2 \
+  --target-interface mcp \
+  --objective breadth
+# mints the run and prints its directory, same as intake above, but writes
+# 00-catalogue.json rather than a manifest -- there is nothing to extract from
+# yet, because nothing has been admitted
+
+# rb-triage is dispatched against that catalogue (see "Running the pipeline"
+# above); once its 00-triage.json exists and human gate 0 has held --
+# rubrica gate-brief --run runs/run-20260806-123005 --gate 0 -- admission
+# finally mints the manifest:
+rubrica intake --run runs/run-20260806-123005
+# prints the same run directory; --run and --input are mutually exclusive
 
 # After each stage: shape, then references
 rubrica validate --run runs/run-20260806-123005 --stage reconcile
@@ -140,6 +174,27 @@ rubrica dedupe-candidates --run runs/run-20260806-123005
 
 # Every skill's Contract block against the code that owns each name
 rubrica check-skills
+```
+
+### The human's own subcommands
+
+Two more, neither one a gate itself: `gate-brief` composes what already
+exists into the reading surface at any of the four gates, and `set-limit`
+changes a manifest limit deliberately, with the reason on record rather than
+as a silent hand-edit.
+
+```bash
+# The reading surface at gate 0, 1, 2 or 3 -- utilisation and implied size at
+# 1, the coverage matrices at 2, the verdict tallies at 3
+rubrica gate-brief --run runs/run-20260806-123005 --gate 1
+
+# Raise a ceiling deliberately, with the reason recorded in decisions.md
+rubrica set-limit --run runs/run-20260806-123005 --max-scenarios 200 \
+  --reason "breadth objective under-covered the tool surface at 128"
+
+# Bring a manufactured projection back into the catalogue, structurally
+rubrica adopt-projection --run runs/run-20260806-123005 \
+  --projection proj-001 --file path/to/manufactured-tool-schema.json
 ```
 
 ### The two writers the orchestrator uses
