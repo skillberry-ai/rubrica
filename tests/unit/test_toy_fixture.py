@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from rubrica import refs
 from rubrica.artifacts import read_json
 from rubrica.invariants import evaluate
 from rubrica.validate import validate_artifact
@@ -363,3 +364,13 @@ def test_an_unknown_upto_raises_rather_than_silently_building_something_else(tmp
     """
     with pytest.raises(ValueError):
         build_toy_run(tmp_path / "runs", upto=bad_upto)
+
+
+def test_the_toy_run_still_has_no_catalogue_and_that_is_not_a_finding(tmp_path):
+    """build_toy_run mints through intake --input, so it exercises spec §7.1's
+    ruling on every existing test in the suite for free."""
+    run = build_toy_run(tmp_path)
+    assert not run.catalogue.exists()
+    assert refs.check_catalogue(run) == []
+    assert refs.check_triage(run) == []
+    assert refs.check_admitted_inputs(run) == []

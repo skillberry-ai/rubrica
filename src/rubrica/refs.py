@@ -550,6 +550,73 @@ def check_inputs(run: RunPaths) -> list[Finding]:
     return out
 
 
+def check_admitted_inputs(run: RunPaths) -> list[Finding]:
+    """manifest.inputs[] against the admitted dispositions, one to one.
+
+    Silent when there is no triage record: a run minted through `intake --input`
+    never had one. Matching is by artifact_id, which admit_from_triage derives
+    from candidate_id by the same suffix-on-collision rule -- so a mismatch here
+    means an admission was dropped or one arrived from outside the gate.
+    """
+    triage = _load(run.triage)
+    if not isinstance(triage, dict):
+        return []
+    manifest = _load(run.manifest)
+    if manifest is None:
+        return []
+
+    # A local import, not a top-level one: intake.py already imports
+    # check_triage from this module, so importing intake at module scope here
+    # would be a load-time cycle. Reusing _unique_artifact_id -- rather than
+    # writing a second spelling of "suffix on collision" in this module --
+    # matters because the reverse direction is genuinely ambiguous:
+    # "cap-json-2" could name either a real collision suffix or a candidate
+    # literally called that. Replaying the same forward computation
+    # admit_from_triage used, in the same sorted order, has no such ambiguity.
+    from rubrica.intake import _unique_artifact_id
+
+    admits = [
+        entry
+        for entry in _as_list(triage.get("dispositions"))
+        if isinstance(entry, dict)
+        and entry.get("disposition") == "admit"
+        and isinstance(entry.get("candidate_id"), str)
+    ]
+    admits.sort(key=lambda d: (d.get("priority", 1 << 30), d["candidate_id"]))
+    used: dict[str, int] = {}
+    expected = {_unique_artifact_id(d["candidate_id"], used): d["candidate_id"] for d in admits}
+
+    registered = {
+        entry["artifact_id"]
+        for entry in _as_list(manifest.get("inputs"))
+        if isinstance(entry, dict) and isinstance(entry.get("artifact_id"), str)
+    }
+
+    out: list[Finding] = []
+    for artifact_id, candidate_id in sorted(expected.items()):
+        if artifact_id not in registered:
+            out.append(
+                Finding(
+                    run.manifest,
+                    "refs",
+                    "/inputs",
+                    f"candidate {candidate_id!r} was admitted at triage but has no entry in the "
+                    "manifest -- an admission intake dropped",
+                )
+            )
+    for artifact_id in sorted(registered - set(expected)):
+        out.append(
+            Finding(
+                run.manifest,
+                "refs",
+                "/inputs",
+                f"input {artifact_id!r} is registered but was never admitted at triage -- it "
+                "entered the run from outside the gate",
+            )
+        )
+    return out
+
+
 def check_limits(run: RunPaths) -> list[Finding]:
     """The manifest's loop and suite bounds against what the run actually holds.
 
@@ -1637,6 +1704,7 @@ def check_all(run: RunPaths) -> list[Finding]:
     findings.extend(check_triage(run))
     findings.extend(check_manifest(run))
     findings.extend(check_inputs(run))
+    findings.extend(check_admitted_inputs(run))
     findings.extend(check_limits(run))
     findings.extend(check_world_model(run))
     findings.extend(check_claim_utilisation(run))

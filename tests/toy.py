@@ -22,8 +22,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from rubrica.artifacts import write_json
-from rubrica.intake import intake
+from rubrica.artifacts import sha256_of, write_json
+from rubrica.intake import classify, intake
 from rubrica.paths import RunPaths
 
 TOY_DIR = Path(__file__).resolve().parent / "fixtures" / "toy"
@@ -1010,8 +1010,16 @@ def toy_verdict(scenario_id: str, **over: Any) -> dict[str, Any]:
 # Named checkpoints build_toy_run's `upto` accepts, in pipeline order. Not
 # paths.STAGES verbatim: this fixture writes nothing for "emit" or "smoke" (no
 # suite package, no report), so those two are deliberately absent rather than
-# silently accepted and ignored.
+# silently accepted and ignored. "survey" and "triage" are named here too, for
+# the same reason "emit" and "smoke" are refused rather than silently
+# accepted -- but build_toy_run mints through intake() unconditionally
+# regardless of `upto`, so stopping at either produces the same run stopping
+# at "intake" would: this fixture never simulates a survey or triage stage
+# itself. build_toy_catalogue_and_triage() below is the separate helper for a
+# test that needs those two artifacts present.
 _UPTO_STAGES: tuple[str, ...] = (
+    "survey",
+    "triage",
     "intake",
     "extract",
     "reconcile",
@@ -1100,6 +1108,88 @@ def build_toy_run(runs_dir: Path, *, upto: str | None = None, **intake_kwargs: A
     for sid in SIDS:
         write_json(run.verdict(sid), toy_verdict(sid))
     return run
+
+
+def build_toy_catalogue_and_triage(run: RunPaths) -> None:
+    """Write 00-catalogue.json and 00-triage.json for the toy world's three
+    inputs, admitting all of them under their real ARTIFACT_IDS.
+
+    Deliberately separate from build_toy_run, and does not call or reroute
+    its intake() call: a run that has been through real intake --input (as
+    every existing toy run has) has no catalogue and no triage record, and
+    spec §7.1 rules that this is not a finding -- so build_toy_run must keep
+    minting exactly the way it always has. This helper exists only for a test
+    that needs a catalogue and a triage record to check *against* the same
+    manifest, and admits every candidate under its real ARTIFACT_IDS so that
+    a manifest written by real intake() lines up with it exactly, with no
+    collision suffix in play.
+    """
+    candidates = [
+        {
+            "candidate_id": artifact_id,
+            "origin": "corpus",
+            "path": path.name,
+            "bytes": path.stat().st_size,
+            "sha256": sha256_of(path),
+            "kind": classify(path),
+            "admissible": True,
+            "digest": {},
+        }
+        for artifact_id, path in zip(ARTIFACT_IDS, INPUT_FILES, strict=True)
+    ]
+    write_json(
+        run.catalogue,
+        {
+            "schema_version": "0.1",
+            "run_id": run.root.name,
+            "created_utc": "2026-08-14T21:30:00Z",
+            "request": {
+                "target": {"name": "ticketq", "interface": "mcp"},
+                "objective": "breadth",
+                "corpus_roots": [str(TOY_DIR)],
+                "limits": {"max_rounds": 2, "max_scenarios": 8},
+            },
+            "policy": {
+                "exclusion_reasons": ["binary"],
+                "explode_min_elements": 3,
+                "explode_min_common_keys": 3,
+                "digest_body_chars": 2000,
+                "max_candidates": 500,
+                "max_catalogue_bytes": 5_000_000,
+            },
+            "candidates": candidates,
+            "excluded": [],
+        },
+    )
+    write_json(
+        run.triage,
+        {
+            "schema_version": "0.1",
+            "run_id": run.root.name,
+            "objective_review": {
+                "declared_objective": "breadth",
+                "supported": True,
+                "surfaces": [
+                    {
+                        "name": "ticketq",
+                        "evidence": list(ARTIFACT_IDS),
+                        "weight": {"candidates": len(ARTIFACT_IDS), "bytes": 1},
+                    }
+                ],
+            },
+            "dispositions": [
+                {
+                    "candidate_id": artifact_id,
+                    "disposition": "admit",
+                    "reason": "part of the golden toy world",
+                    "authority": "triage",
+                }
+                for artifact_id in ARTIFACT_IDS
+            ],
+            "deficiencies": [],
+            "projections": [],
+        },
+    )
 
 
 # Scripted agents for the golden smoke run. Real subprocesses printing real
