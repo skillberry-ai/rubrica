@@ -194,10 +194,21 @@ def test_an_admit_carrying_a_decline_reason_code_is_a_finding(tmp_path):
     assert refs.check_triage(_run_with(tmp_path, mutate)) != []
 
 
-def test_a_digest_insufficient_decline_unreferenced_by_a_deficiency_is_a_finding(tmp_path):
+def test_a_digest_insufficient_decline_with_no_deficiencies_at_all_is_a_finding(tmp_path):
     """Spec §6.1: the two codes whose purpose is to make a loss visible would
     otherwise be the quietest way to lose something. A decline nothing points at
-    reads exactly like a decline that was fine."""
+    reads exactly like a decline that was fine.
+
+    Renamed from ..._unreferenced_by_a_deficiency_...: that name claims a
+    strength this check does not have. triage-0.1.json's deficiencies[] carries
+    no candidate-reference field (deficiency_id, subject, statement, optional
+    closed_by -- none names a candidate_id), so this check can only ask "does a
+    deficiency exist at all", never "does one actually reference *this*
+    candidate". needs_projection has the field it needs
+    (projections[].sources[].candidate_id) and is checked at that strength
+    below; this one stays the weak form because there is nothing stronger to
+    check mechanically without matching decline prose to deficiency prose,
+    which is semantic and out of bounds for layer 2."""
 
     def mutate(triage, catalogue):
         triage["deficiencies"] = []
@@ -211,6 +222,23 @@ def test_a_needs_projection_decline_unreferenced_by_a_projection_is_a_finding(tm
         triage["projections"] = []
 
     assert refs.check_triage(_run_with(tmp_path, mutate, decline_code="needs_projection")) != []
+
+
+def test_a_needs_projection_decline_whose_projection_names_a_different_candidate_is_a_finding(
+    tmp_path,
+):
+    """The strong half of the asymmetry above: a projection existing is not
+    enough if it is not *this* candidate's projection. The baseline projection
+    sources cap-json (the declined candidate); repointing its one source at
+    readme-md -- a real candidate, just not the declined one -- leaves the
+    projections array non-empty while the decline is still unreferenced. A
+    check that only asked "is projections[] non-empty" would miss this."""
+
+    def mutate(triage, catalogue):
+        triage["projections"][0]["sources"][0]["candidate_id"] = "readme-md"
+
+    findings = refs.check_triage(_run_with(tmp_path, mutate, decline_code="needs_projection"))
+    assert findings and "needs_projection" in str(findings[0])
 
 
 def test_a_projection_closing_an_unknown_deficiency_is_a_finding(tmp_path):

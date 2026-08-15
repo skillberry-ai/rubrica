@@ -278,8 +278,17 @@ def check_triage(run: RunPaths) -> list[Finding]:
         if isinstance(d, dict)
     } - {None}
     projections = _as_list(triage.get("projections"))
-    projection_ids = {
-        _str_or_none(p.get("projection_id")) for p in projections if isinstance(p, dict)
+    # Strong form, for needs_projection only: the candidate a decline names must
+    # actually be sourced by some projection, not merely coexist with an
+    # unrelated one. digest_insufficient stays weak (see the comment at its
+    # check below) because deficiencies[] carries no candidate-reference field
+    # to check against -- projections[].sources[] does, so this one can be tight.
+    projected_candidate_ids = {
+        _str_or_none(source.get("candidate_id"))
+        for projection in projections
+        if isinstance(projection, dict)
+        for source in _as_list(projection.get("sources"))
+        if isinstance(source, dict)
     } - {None}
 
     candidates = {}
@@ -309,16 +318,27 @@ def check_triage(run: RunPaths) -> list[Finding]:
             if not code:
                 report(f"{pointer}/reason_code", "a decline must carry a reason_code")
             elif code == "digest_insufficient" and not deficiency_ids:
+                # Weak by necessity: triage-0.1.json's deficiencies[] has no
+                # candidate-reference field (deficiency_id, subject, statement,
+                # optional closed_by -- none of them name a candidate_id), so
+                # the strongest check layer 2 can mechanically make here is
+                # "at least one deficiency exists at all". Anything stronger
+                # would mean matching decline prose to deficiency prose, which
+                # is semantic and out of bounds for this layer.
                 report(
                     f"{pointer}/reason_code",
                     "a digest_insufficient decline must be referenced by a deficiency, or the "
                     "loss it records is invisible",
                 )
-            elif code == "needs_projection" and not projection_ids:
+            elif code == "needs_projection" and cid_str not in projected_candidate_ids:
+                # Strong: projections[].sources[].candidate_id does name a
+                # candidate, so this checks the decline's own candidate is
+                # actually sourced by some projection -- not merely that the
+                # triage record contains a projection for something else.
                 report(
                     f"{pointer}/reason_code",
-                    "a needs_projection decline must be referenced by a projection, or its "
-                    "remedy is unstated",
+                    "a needs_projection decline must be sourced by a projection naming this "
+                    "candidate, or its remedy is unstated",
                 )
         else:
             admits += 1
