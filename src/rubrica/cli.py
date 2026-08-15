@@ -67,7 +67,7 @@ from rubrica.emit import emit_run
 from rubrica.errors import UsageError
 from rubrica.findings import Finding, format_findings
 from rubrica.intake import admit_from_triage, intake
-from rubrica.manifest import decide, record_stage
+from rubrica.manifest import decide, record_stage, set_limit
 from rubrica.paths import STAGES, RunPaths
 from rubrica.recall import compare_run, render
 from rubrica.review import DEFAULT_SAMPLE_SIZE, sample_run
@@ -102,6 +102,7 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("decide", "append one orchestrator decision to the run's decisions.md"),
     ("claim-utilisation", "per-artifact share of claims the world model cites"),
     ("gate-brief", "compose the existing reports into the human surface at one gate"),
+    ("set-limit", "change a manifest limit, with the reason recorded in decisions.md"),
 )
 
 
@@ -218,6 +219,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_brief = parsers["gate-brief"]
     p_brief.add_argument("--run", required=True)
     p_brief.add_argument("--gate", required=True, type=int, choices=[0, 1, 2, 3])
+
+    p_set_limit = parsers["set-limit"]
+    p_set_limit.add_argument("--run", required=True)
+    p_set_limit.add_argument("--max-rounds", type=int, default=None)
+    p_set_limit.add_argument("--max-scenarios", type=int, default=None)
+    p_set_limit.add_argument("--reason", required=True)
     return parser
 
 
@@ -503,6 +510,25 @@ def main(argv: list[str] | None = None) -> int:
             # before this line is reached, on the same SystemExit(2) path every
             # other bad argument takes.
             print(brief.gate_brief(_run_dir(args.run), args.gate))
+            return CLEAN
+
+        if args.command == "set-limit":
+            run = _run_dir(args.run)
+            # Its own UsageError catch, matching decide and record-stage just
+            # above: --max-rounds, --max-scenarios, and --reason are the
+            # orchestrator's own arguments, not a stage's output, so a bad one
+            # is a misconfigured harness rather than a repairable stage defect.
+            try:
+                set_limit(
+                    run,
+                    max_rounds=args.max_rounds,
+                    max_scenarios=args.max_scenarios,
+                    reason=args.reason,
+                )
+            except (UsageError, OSError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return USAGE
+            print(run.manifest)
             return CLEAN
 
         if args.command == "diff-runs":

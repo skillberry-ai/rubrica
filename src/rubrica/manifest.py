@@ -99,6 +99,60 @@ def record_stage(run: RunPaths, *, stage: str, model: str, effort: str, skill: P
     write_json(run.manifest, manifest)
 
 
+def set_limit(
+    run: RunPaths,
+    *,
+    max_rounds: int | None = None,
+    max_scenarios: int | None = None,
+    reason: str,
+    now: datetime | None = None,
+) -> None:
+    """Lower (or raise) a manifest limit, with the reason recorded in decisions.md.
+
+    Design spec section 9's tail names the failure this replaces: a run's
+    `max_scenarios` had been hand-edited with no trace of who did it or why,
+    and it was read as an unexplained discrepancy because every mechanism was
+    checked before the person. A limits change made through this function
+    instead always leaves a decisions.md line naming both the old and the new
+    value and the reason, so the next reader does not have to reconstruct it.
+
+    `reason` is required and refused blank, on `decide`'s own reasoning: an
+    unexplained change is worse than no change. At least one of `max_rounds`
+    or `max_scenarios` must be given -- calling this with neither is a no-op
+    that would still cost a decisions.md line about nothing, so it is a usage
+    error instead, matching the same class of guard `decide` and `record_stage`
+    apply to their own arguments.
+
+    This does not itself set `implied_size`'s number here or anywhere else --
+    `sizing.implied_size` is a diagnostic nothing acts on (see its module
+    docstring); this exists for the opposite direction, lowering the ceiling
+    on a cheap probe run, with the reason on record instead of a silent edit.
+    """
+    if max_rounds is None and max_scenarios is None:
+        raise UsageError("set_limit needs at least one of max_rounds or max_scenarios")
+    text = reason.strip()
+    if not text:
+        raise UsageError("set_limit's reason cannot be empty")
+    if "\n" in text:
+        raise UsageError(
+            "set_limit's reason cannot contain a newline; decisions.md is one line per entry"
+        )
+
+    manifest = read_json(run.manifest)
+    limits = dict(manifest.get("limits") or {})
+    changes = []
+    if max_rounds is not None:
+        changes.append(f"max_rounds {limits.get('max_rounds', '?')} -> {max_rounds}")
+        limits["max_rounds"] = max_rounds
+    if max_scenarios is not None:
+        changes.append(f"max_scenarios {limits.get('max_scenarios', '?')} -> {max_scenarios}")
+        limits["max_scenarios"] = max_scenarios
+    manifest["limits"] = limits
+    write_json(run.manifest, manifest)
+
+    append_decision(run.decisions, f"- {utc_stamp(now)} set-limit: {'; '.join(changes)} -- {text}")
+
+
 def decide(run: RunPaths, note: str, *, now: datetime | None = None) -> None:
     """Append one timestamped decision to the run's decisions.md.
 
