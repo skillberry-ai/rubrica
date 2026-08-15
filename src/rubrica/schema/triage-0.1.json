@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "triage-0.1.json",
+  "title": "Triage record",
+  "type": "object",
+  "required": ["schema_version", "run_id", "objective_review", "dispositions",
+               "deficiencies", "projections"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "run_id": {"$ref": "#/$defs/id"},
+    "objective_review": {
+      "type": "object",
+      "required": ["declared_objective", "supported", "surfaces"],
+      "additionalProperties": false,
+      "properties": {
+        "declared_objective": {"enum": ["breadth", "depth"]},
+        "supported": {"type": "boolean"},
+        "notes": {"type": "string", "minLength": 1},
+        "recommended_objective": {
+          "type": "object",
+          "required": ["objective", "reason"],
+          "additionalProperties": false,
+          "properties": {
+            "objective": {"enum": ["breadth", "depth"]},
+            "reason": {"type": "string", "minLength": 1}
+          }
+        },
+        "surfaces": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "evidence", "weight"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "evidence": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"$ref": "#/$defs/id"}
+              },
+              "weight": {
+                "type": "object",
+                "required": ["candidates", "bytes"],
+                "additionalProperties": false,
+                "properties": {
+                  "candidates": {"type": "integer", "minimum": 1},
+                  "bytes": {"type": "integer", "minimum": 0}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "dispositions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "disposition", "reason", "authority"],
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {"$ref": "#/$defs/id"},
+          "disposition": {"enum": ["admit", "decline"]},
+          "reason_code": {"$ref": "#/$defs/decline_reason"},
+          "reason": {"type": "string", "minLength": 1},
+          "priority": {"type": "integer", "minimum": 1},
+          "authority": {"enum": ["triage", "human"]}
+        }
+      }
+    },
+    "deficiencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["deficiency_id", "subject", "statement"],
+        "additionalProperties": false,
+        "properties": {
+          "deficiency_id": {"$ref": "#/$defs/id"},
+          "subject": {"type": "string", "minLength": 1},
+          "statement": {"type": "string", "minLength": 1},
+          "closed_by": {"$ref": "#/$defs/id"}
+        }
+      }
+    },
+    "projections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["projection_id", "closes", "sources", "wanted", "method",
+                     "acceptance", "boundary"],
+        "additionalProperties": false,
+        "properties": {
+          "projection_id": {"$ref": "#/$defs/id"},
+          "closes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "#/$defs/id"}
+          },
+          "sources": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["candidate_id", "digest_note"],
+              "additionalProperties": false,
+              "properties": {
+                "candidate_id": {"$ref": "#/$defs/id"},
+                "path": {"type": "string", "minLength": 1},
+                "digest_note": {"type": "string", "minLength": 1}
+              }
+            }
+          },
+          "wanted": {
+            "type": "object",
+            "required": ["kind", "statement", "why"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {"$ref": "#/$defs/kind"},
+              "statement": {"type": "string", "minLength": 1},
+              "why": {"type": "string", "minLength": 1}
+            }
+          },
+          "method": {
+            "type": "object",
+            "required": ["confidence", "steps"],
+            "additionalProperties": false,
+            "properties": {
+              "confidence": {"enum": ["high", "medium", "unknown"]},
+              "steps": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string", "minLength": 1}
+              }
+            }
+          },
+          "acceptance": {
+            "type": "object",
+            "required": ["classifies_as", "prose"],
+            "additionalProperties": false,
+            "properties": {
+              "classifies_as": {"$ref": "#/$defs/kind"},
+              "pointers_required": {"type": "array", "items": {"type": "string", "minLength": 1}},
+              "must_contain": {"type": "array", "items": {"type": "string", "minLength": 1}},
+              "must_not_contain": {"type": "array", "items": {"type": "string", "minLength": 1}},
+              "prose": {"type": "string", "minLength": 1}
+            }
+          },
+          "boundary": {"type": "string", "minLength": 1},
+          "satisfied_by": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "\\A[A-Za-z0-9][A-Za-z0-9._-]*\\Z", "maxLength": 128},
+    "kind": {
+      "enum": ["openapi", "mcp_tool_schema", "entity_schema", "trace",
+               "design_doc", "source_code", "other"]
+    },
+    "decline_reason": {
+      "enum": ["off_objective", "out_of_scope", "near_duplicate", "superseded",
+               "implementation_detail", "no_evidence_value", "digest_insufficient",
+               "needs_projection"]
+    }
+  }
+}

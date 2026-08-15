@@ -98,7 +98,7 @@ def _readable_targets(run: RunPaths) -> list[Path]:
     each of these in turn, which is what keeps the list complete: an artifact
     missing here is one whose truncation still misdirects the repair.
     """
-    targets = [run.manifest]
+    targets = [run.catalogue, run.triage, run.manifest]
     targets += list_json(run.claims_dir)
     targets += [run.world_model, run.scenarios]
     targets += list_json(run.coverage_dir)
@@ -167,6 +167,217 @@ def _cells(world: dict) -> set[tuple[str, str]]:
 
 def _dupes(values: list[str]) -> list[str]:
     return sorted({v for v in values if values.count(v) > 1})
+
+
+def _as_list(value: Any) -> list:
+    """`value` if it is a list, else `[]`.
+
+    Every list-typed field check_triage iterates is schema-required to be an
+    array, but check_all has no ordering guarantee that layer 1 has rejected a
+    malformed document before layer 2 reads it. `value or []` is not a
+    sufficient guard on its own: it only substitutes on a *falsy* value, and a
+    truthy non-list (an int, a non-empty string) still reaches a bare `for`
+    loop and raises TypeError rather than being skipped -- measured directly
+    below, where `"sources": "not-a-list"` used to do exactly that.
+    """
+    return value if isinstance(value, list) else []
+
+
+def _str_or_none(value: Any) -> str | None:
+    """`value` if it is a string, else `None`.
+
+    Every id check_triage resolves against a dict or set key is
+    schema-required to be a string, but the same ordering gap means one can
+    arrive as a list or a dict instead -- and `x in some_dict` or
+    `some_set.add(x)` raises TypeError on an unhashable `x` rather than
+    producing a finding. Routing every id through this before it touches a
+    dict or set keeps the lookup on a guaranteed-hashable value; the
+    mismatched value itself stays visible in the message, which is why call
+    sites keep reporting the original (`cid!r`), not this function's result.
+    """
+    return value if isinstance(value, str) else None
+
+
+def check_catalogue(run: RunPaths) -> list[Finding]:
+    """Conditional constraints over 00-catalogue.json that layer 1 cannot state.
+
+    An absent catalogue is not a finding: a run minted through `intake --input`
+    never had one, and treating that as a defect would report every pre-triage
+    run as broken. Same ruling as intake's and smoke's absence from
+    manifest.stages.
+    """
+    catalogue = _load(run.catalogue)
+    if not isinstance(catalogue, dict):
+        return []
+    out: list[Finding] = []
+
+    def report(pointer: str, message: str) -> None:
+        out.append(Finding(run.catalogue, "refs", pointer, message))
+
+    candidates = catalogue.get("candidates")
+    if not isinstance(candidates, list):
+        return []
+
+    ids = [c.get("candidate_id") for c in candidates if isinstance(c, dict)]
+    for duplicate in _dupes([i for i in ids if isinstance(i, str)]):
+        report("/candidates", f"duplicate candidate_id {duplicate!r}")
+    known = {i for i in ids if isinstance(i, str)}
+
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, dict):
+            continue
+        origin = candidate.get("origin")
+        pointer = f"/candidates/{index}"
+        if origin == "corpus" and not candidate.get("path"):
+            report(f"{pointer}/path", "a corpus candidate must carry the path it was read from")
+        if origin == "container_element":
+            container = candidate.get("container")
+            if not isinstance(container, dict):
+                report(f"{pointer}/container", "a container element must name its container")
+                continue
+            parent = container.get("candidate_id")
+            if parent not in known:
+                report(
+                    f"{pointer}/container/candidate_id",
+                    f"no such candidate {parent!r} to have been exploded from",
+                )
+        if origin == "projection" and not isinstance(candidate.get("provenance"), dict):
+            report(
+                f"{pointer}/provenance",
+                "an adopted projection must record the projection_id it satisfies",
+            )
+    return out
+
+
+def check_triage(run: RunPaths) -> list[Finding]:
+    """Reference checks over 00-triage.json. Nothing here is semantic.
+
+    The finding spec §11 actually asks for -- a world-model gap whose closing
+    evidence was declined at triage -- is deliberately NOT here. Matching gap
+    prose to decline prose is semantic, and layer 2 checks that an element
+    *references* a resolvable thing and never that the thing *supports* it. That
+    pairing is a human's call at gate 1, surfaced by `rubrica gate-brief`.
+    """
+    triage = _load(run.triage)
+    if not isinstance(triage, dict):
+        return []
+    catalogue = _load(run.catalogue)
+    out: list[Finding] = []
+
+    def report(pointer: str, message: str) -> None:
+        out.append(Finding(run.triage, "refs", pointer, message))
+
+    # Every list read below goes through _as_list, and every id that will
+    # touch a dict or set goes through _str_or_none, because none of this is
+    # schema-validated yet -- check_all has no ordering guarantee that layer 1
+    # has already rejected the document check_triage is reading.
+    dispositions = _as_list(triage.get("dispositions"))
+    deficiency_ids = {
+        _str_or_none(d.get("deficiency_id"))
+        for d in _as_list(triage.get("deficiencies"))
+        if isinstance(d, dict)
+    } - {None}
+    projections = _as_list(triage.get("projections"))
+    # Strong form, for needs_projection only: the candidate a decline names must
+    # actually be sourced by some projection, not merely coexist with an
+    # unrelated one. digest_insufficient stays weak (see the comment at its
+    # check below) because deficiencies[] carries no candidate-reference field
+    # to check against -- projections[].sources[] does, so this one can be tight.
+    projected_candidate_ids = {
+        _str_or_none(source.get("candidate_id"))
+        for projection in projections
+        if isinstance(projection, dict)
+        for source in _as_list(projection.get("sources"))
+        if isinstance(source, dict)
+    } - {None}
+
+    candidates = {}
+    if isinstance(catalogue, dict):
+        candidates = {
+            c["candidate_id"]: c
+            for c in _as_list(catalogue.get("candidates"))
+            if isinstance(c, dict) and isinstance(c.get("candidate_id"), str)
+        }
+
+    seen: set[str | None] = set()
+    admits = 0
+    for index, entry in enumerate(dispositions):
+        if not isinstance(entry, dict):
+            continue
+        pointer = f"/dispositions/{index}"
+        cid = entry.get("candidate_id")
+        cid_str = _str_or_none(cid)
+        if candidates and cid_str not in candidates:
+            report(f"{pointer}/candidate_id", f"no such candidate {cid!r} in the catalogue")
+        if cid_str in seen:
+            report(f"{pointer}/candidate_id", f"candidate {cid!r} already has a disposition")
+        seen.add(cid_str)
+
+        code = entry.get("reason_code")
+        if entry.get("disposition") == "decline":
+            if not code:
+                report(f"{pointer}/reason_code", "a decline must carry a reason_code")
+            elif code == "digest_insufficient" and not deficiency_ids:
+                # Weak by necessity: triage-0.1.json's deficiencies[] has no
+                # candidate-reference field (deficiency_id, subject, statement,
+                # optional closed_by -- none of them name a candidate_id), so
+                # the strongest check layer 2 can mechanically make here is
+                # "at least one deficiency exists at all". Anything stronger
+                # would mean matching decline prose to deficiency prose, which
+                # is semantic and out of bounds for this layer.
+                report(
+                    f"{pointer}/reason_code",
+                    "a digest_insufficient decline must be referenced by a deficiency, or the "
+                    "loss it records is invisible",
+                )
+            elif code == "needs_projection" and cid_str not in projected_candidate_ids:
+                # Strong: projections[].sources[].candidate_id does name a
+                # candidate, so this checks the decline's own candidate is
+                # actually sourced by some projection -- not merely that the
+                # triage record contains a projection for something else.
+                report(
+                    f"{pointer}/reason_code",
+                    "a needs_projection decline must be sourced by a projection naming this "
+                    "candidate, or its remedy is unstated",
+                )
+        else:
+            admits += 1
+            if code:
+                report(f"{pointer}/reason_code", "reason_code names a decline; an admit has none")
+            if cid_str in candidates and candidates[cid_str].get("admissible") is False:
+                report(
+                    f"{pointer}/disposition",
+                    f"candidate {cid!r} is not admissible -- it is a container whose elements "
+                    "are the candidates",
+                )
+
+    for cid in sorted(set(candidates) - seen):
+        report("/dispositions", f"candidate {cid!r} has no disposition; every one must be ruled on")
+
+    if dispositions and admits == 0:
+        report(
+            "/dispositions",
+            "no candidate was admitted; an empty admitted set is a scoping failure rather than "
+            "a triage result",
+        )
+
+    for index, projection in enumerate(projections):
+        if not isinstance(projection, dict):
+            continue
+        pointer = f"/projections/{index}"
+        for closes in _as_list(projection.get("closes")):
+            if _str_or_none(closes) not in deficiency_ids:
+                report(f"{pointer}/closes", f"no such deficiency {closes!r}")
+        for position, source in enumerate(_as_list(projection.get("sources"))):
+            if not isinstance(source, dict):
+                continue
+            source_cid = source.get("candidate_id")
+            if candidates and _str_or_none(source_cid) not in candidates:
+                report(
+                    f"{pointer}/sources/{position}/candidate_id",
+                    f"no such candidate {source_cid!r} to project from",
+                )
+    return out
 
 
 def check_manifest(run: RunPaths) -> list[Finding]:
@@ -336,6 +547,86 @@ def check_inputs(run: RunPaths) -> list[Finding]:
                     f"{artifact_id!r}",
                 )
             )
+    return out
+
+
+def check_admitted_inputs(run: RunPaths) -> list[Finding]:
+    """manifest.inputs[] against the admitted dispositions, one to one.
+
+    Silent when there is no triage record: a run minted through `intake --input`
+    never had one. Matching is by artifact_id, which admit_from_triage derives
+    from candidate_id by the same suffix-on-collision rule -- so a mismatch here
+    means an admission was dropped or one arrived from outside the gate.
+
+    What this cannot catch: it replays admit_from_triage's own derivation
+    (same sort, same _unique_artifact_id) rather than re-deriving the rule
+    independently, so a bug in that shared computation, or in its sort order,
+    is invisible here -- both sides would compute the identical wrong answer.
+    """
+    triage = _load(run.triage)
+    if not isinstance(triage, dict):
+        return []
+    manifest = _load(run.manifest)
+    if not isinstance(manifest, dict):
+        return []
+
+    # A local import, not a top-level one: intake.py already imports
+    # check_triage from this module, so importing intake at module scope here
+    # would be a load-time cycle. Reusing _unique_artifact_id -- rather than
+    # writing a second spelling of "suffix on collision" in this module --
+    # matters because the reverse direction is genuinely ambiguous:
+    # "cap-json-2" could name either a real collision suffix or a candidate
+    # literally called that. Replaying the same forward computation
+    # admit_from_triage used, in the same sorted order, has no such ambiguity.
+    from rubrica.intake import _unique_artifact_id, admit_sort_key
+
+    admits = [
+        entry
+        for entry in _as_list(triage.get("dispositions"))
+        if isinstance(entry, dict)
+        and entry.get("disposition") == "admit"
+        and isinstance(entry.get("candidate_id"), str)
+    ]
+    # intake.admit_sort_key, imported rather than respelled here, for the
+    # reason its own docstring gives: this replay must produce the *identical*
+    # order admit_from_triage materialised in, because `_unique_artifact_id`'s
+    # collision suffixes depend on it. The local lambda it replaces also
+    # shared that function's measured TypeError -- a string `priority`
+    # alongside an integer one raised out of `sort`, and check-refs turned a
+    # malformed triage record into a fabricated `[internal]` finding naming the
+    # run directory instead of the record that carries the defect.
+    admits.sort(key=admit_sort_key)
+    used: dict[str, int] = {}
+    expected = {_unique_artifact_id(d["candidate_id"], used): d["candidate_id"] for d in admits}
+
+    registered = {
+        entry["artifact_id"]
+        for entry in _as_list(manifest.get("inputs"))
+        if isinstance(entry, dict) and isinstance(entry.get("artifact_id"), str)
+    }
+
+    out: list[Finding] = []
+    for artifact_id, candidate_id in sorted(expected.items()):
+        if artifact_id not in registered:
+            out.append(
+                Finding(
+                    run.manifest,
+                    "refs",
+                    "/inputs",
+                    f"candidate {candidate_id!r} was admitted at triage but has no entry in the "
+                    "manifest -- an admission intake dropped",
+                )
+            )
+    for artifact_id in sorted(registered - set(expected)):
+        out.append(
+            Finding(
+                run.manifest,
+                "refs",
+                "/inputs",
+                f"input {artifact_id!r} is registered but was never admitted at triage -- it "
+                "entered the run from outside the gate",
+            )
+        )
     return out
 
 
@@ -1422,8 +1713,11 @@ def check_all(run: RunPaths) -> list[Finding]:
     if unreadable:
         return unreadable
     findings: list[Finding] = []
+    findings.extend(check_catalogue(run))
+    findings.extend(check_triage(run))
     findings.extend(check_manifest(run))
     findings.extend(check_inputs(run))
+    findings.extend(check_admitted_inputs(run))
     findings.extend(check_limits(run))
     findings.extend(check_world_model(run))
     findings.extend(check_claim_utilisation(run))

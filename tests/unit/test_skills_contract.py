@@ -22,6 +22,7 @@ from rubrica.cli import subcommand_names
 from rubrica.errors import UsageError
 from rubrica.paths import STAGES, RunPaths
 from rubrica.skills import (
+    CODE_ONLY_STAGES,
     ORCHESTRATOR,
     SECTIONS,
     SKILL_FILENAME,
@@ -561,3 +562,14 @@ def test_every_stage_in_STAGES_has_a_schema_entry():
         assert stage in STAGE_ARTIFACTS
         for kind in STAGE_ARTIFACTS[stage]:
             assert kind in ARTIFACT_SCHEMAS
+
+
+def test_survey_is_code_only_but_triage_is_not():
+    """survey mints run ids and timestamps, exactly like intake -- the design
+    spec forbids a skill from inventing either, so survey has no SKILL.md and
+    must never grow one. triage is not in this set: unlike survey, it carries
+    judgment (which candidates matter for the target and objective), so it is
+    a real skill stage and rb-triage arrives in a later task.
+    """
+    assert "survey" in CODE_ONLY_STAGES
+    assert "triage" not in CODE_ONLY_STAGES

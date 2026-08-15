@@ -45,6 +45,19 @@ def sha256_of(path: Path | str) -> str:
     return digest.hexdigest()
 
 
+def canonical_bytes(payload: Any) -> bytes:
+    """The canonical on-disk form of an artifact, as bytes.
+
+    Separate from write_json because survey needs the *digest* of a container
+    element before any file exists, and intake materialises that same element
+    later. Two spellings of "the canonical form" would make every exploded
+    input's sha256 mismatch after materialisation.
+    """
+    return (json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode(
+        "utf-8"
+    )
+
+
 def write_json(path: Path | str, payload: Any) -> None:
     """Write `payload` atomically in the canonical artifact format.
 
@@ -52,7 +65,7 @@ def write_json(path: Path | str, payload: Any) -> None:
     payload leaves the previous content and the directory untouched.
     """
     path = Path(path)
-    body = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    body = canonical_bytes(payload).decode("utf-8")
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:

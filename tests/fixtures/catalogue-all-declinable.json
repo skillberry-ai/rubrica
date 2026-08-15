@@ -1,0 +1,115 @@
+{
+  "candidates": [
+    {
+      "admissible": true,
+      "bytes": 152,
+      "candidate_id": "readme-md",
+      "digest": {
+        "body_head": "Prose describing the ticketing target: create, find, and inspect support\ntickets. Nothing here concerns billing, refunds, or payments.",
+        "digest_truncated": false,
+        "headings": [
+          "# Ticket system"
+        ],
+        "lines": 4
+      },
+      "kind": "design_doc",
+      "origin": "corpus",
+      "path": "README.md",
+      "root_index": 0,
+      "sha256": "8648c66076253dad3dc2d7be3827cd4fd245d1c70893fe6279d9ad6d8d0da295"
+    },
+    {
+      "admissible": true,
+      "bytes": 125,
+      "candidate_id": "api-json",
+      "digest": {
+        "skeleton": {
+          "/tools": {
+            "length": 1,
+            "type": "array"
+          },
+          "/tools/0": {
+            "key_count": 2,
+            "keys": [
+              "input_schema",
+              "name"
+            ],
+            "keys_truncated": false,
+            "type": "object"
+          },
+          "/tools/0/input_schema": {
+            "key_count": 1,
+            "keys": [
+              "properties"
+            ],
+            "keys_truncated": false,
+            "type": "object"
+          },
+          "/tools/0/name": {
+            "type": "string"
+          }
+        }
+      },
+      "kind": "mcp_tool_schema",
+      "origin": "corpus",
+      "path": "api.json",
+      "root_index": 0,
+      "sha256": "1879cff60bf7780a0f248a98f4710e16010bc126425c480107d9750cca8775c6"
+    },
+    {
+      "admissible": true,
+      "bytes": 124,
+      "candidate_id": "trace-json",
+      "digest": {
+        "element_counts": {
+          "spans": 1
+        },
+        "heuristics_fired": [
+          "element_counts"
+        ]
+      },
+      "kind": "trace",
+      "origin": "corpus",
+      "path": "trace.json",
+      "root_index": 0,
+      "sha256": "bad9d07f221ab16366fe2831b6f3d084b45e17b846ce3c6c56838cb5f4ac9811"
+    }
+  ],
+  "created_utc": "2026-08-14T21:30:00Z",
+  "excluded": [],
+  "policy": {
+    "digest_body_chars": 2000,
+    "exclusion_reasons": [
+      "gitignored",
+      "vcs_metadata",
+      "binary",
+      "lockfile",
+      "vendored",
+      "duplicate",
+      "unreadable",
+      "operator_excluded"
+    ],
+    "explode_min_common_keys": 3,
+    "explode_min_elements": 3,
+    "max_candidates": 500,
+    "max_catalogue_bytes": 1048576,
+    "operator_globs": []
+  },
+  "request": {
+    "corpus_roots": [
+      "corpora/ticketq"
+    ],
+    "limits": {
+      "max_rounds": 2,
+      "max_scenarios": 128
+    },
+    "objective": "breadth",
+    "scope_note": "Confine this run to the billing and invoicing surface: refund issuance, invoice generation, and payment reconciliation. Nothing else is in scope for this run.",
+    "target": {
+      "interface": "mcp",
+      "name": "ticketq"
+    }
+  },
+  "run_id": "run-20260814-213000",
+  "schema_version": "0.1"
+}

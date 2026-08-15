@@ -1,0 +1,6 @@
+[
+  {"trace_id": "tr-0", "status": "OK", "spans": [{"name": "search_tickets"}]},
+  {"trace_id": "tr-1", "status": "OK", "spans": [{"name": "get_ticket"}]},
+  {"trace_id": "tr-2", "status": "ERROR", "spans": [{"name": "escalate_ticket"}]},
+  {"trace_id": "tr-3", "status": "OK", "spans": [{"name": "search_tickets"}]}
+]

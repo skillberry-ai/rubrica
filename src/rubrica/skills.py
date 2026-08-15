@@ -32,10 +32,12 @@ SKILL_FILENAME = "SKILL.md"
 
 # Stages implemented entirely in code. intake mints run ids and timestamps,
 # which the design spec forbids a skill from inventing; smoke executes the
-# suite. Every other stage in STAGES has a skill, and expected_skill_names
-# derives the list rather than restating it -- so adding a stage demands a
-# skill without anyone remembering to edit a constant.
-CODE_ONLY_STAGES: frozenset[str] = frozenset({"intake", "smoke"})
+# suite; survey mints run ids and timestamps too -- it runs before intake now
+# does, but the same prohibition applies to whichever stage mints them first.
+# Every other stage in STAGES has a skill, and expected_skill_names derives
+# the list rather than restating it -- so adding a stage demands a skill
+# without anyone remembering to edit a constant.
+CODE_ONLY_STAGES: frozenset[str] = frozenset({"intake", "smoke", "survey"})
 
 # One home for the skill-directory prefix. It appeared in three places
 # before the Rubrica rename -- ORCHESTRATOR, expected_skill_names, and the

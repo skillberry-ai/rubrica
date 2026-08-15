@@ -370,6 +370,36 @@ def minimal_agents(**over: Any) -> dict[str, Any]:
     return payload
 
 
+def minimal_triage(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "run_id": "run-20260806-120000",
+        "objective_review": {
+            "declared_objective": "breadth",
+            "supported": True,
+            "surfaces": [
+                {
+                    "name": "api schema",
+                    "evidence": ["aap2-api"],
+                    "weight": {"candidates": 1, "bytes": 37},
+                }
+            ],
+        },
+        "dispositions": [
+            {
+                "candidate_id": "aap2-api",
+                "disposition": "admit",
+                "reason": "the only surface describing the tool",
+                "authority": "triage",
+            }
+        ],
+        "deficiencies": [],
+        "projections": [],
+    }
+    payload.update(over)
+    return payload
+
+
 def minimal_gold(**over: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": "0.1",
@@ -399,6 +429,32 @@ def minimal_verdict(**over: Any) -> dict[str, Any]:
         "minimum_tool_calls_found": 2,
         "verdict": "accept",
         "notes": "answered independently from the seed and matched the oracle",
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_catalogue(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "run_id": "run-20260806-120000",
+        "created_utc": "2026-08-06T12:00:00Z",
+        "request": {
+            "target": {"name": "aap2", "interface": "mcp"},
+            "objective": "breadth",
+            "corpus_roots": ["/tmp/aap2"],
+            "limits": {"max_rounds": 2, "max_scenarios": 8},
+        },
+        "policy": {
+            "exclusion_reasons": ["binary"],
+            "explode_min_elements": 3,
+            "explode_min_common_keys": 3,
+            "digest_body_chars": 2000,
+            "max_candidates": 500,
+            "max_catalogue_bytes": 1_048_576,
+        },
+        "candidates": [],
+        "excluded": [],
     }
     payload.update(over)
     return payload

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from rubrica import paths
 from rubrica.errors import UsageError
 from rubrica.paths import (
     STAGES,
@@ -22,6 +23,8 @@ UNSAFE_DIR_NAMES = ("scn 001", ".hidden", "scn:001", "-leading")
 
 def test_stages_are_in_pipeline_order():
     assert STAGES == (
+        "survey",
+        "triage",
         "intake",
         "extract",
         "reconcile",
@@ -32,6 +35,28 @@ def test_stages_are_in_pipeline_order():
         "emit",
         "smoke",
     )
+
+
+def test_survey_and_triage_lead_the_stage_ordering():
+    """STAGES is the pipeline order and the on-disk numbering.
+
+    survey and triage are 00a and 00b, so they precede intake -- which is 00c
+    and no longer the first thing that happens in a run.
+    """
+    assert paths.STAGES[:3] == ("survey", "triage", "intake")
+
+
+def test_the_catalogue_and_triage_record_are_run_paths(tmp_path):
+    """Both are 00-family singletons beside 00-inputs/.
+
+    They are RunPaths properties rather than paths joined at a call site
+    because check_contract resolves a skill's declared `reads` names against
+    this class -- a literal path in a contract is a check-skills finding.
+    """
+    run = paths.RunPaths(tmp_path / "run-20260814-000000")
+    assert run.catalogue == run.root / "00-catalogue.json"
+    assert run.triage == run.root / "00-triage.json"
+    assert run.catalogue.parent == run.inputs_dir.parent
 
 
 def test_safe_segment_accepts_ordinary_ids():

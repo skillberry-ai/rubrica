@@ -14,6 +14,8 @@ from rubrica.errors import UsageError
 # Stage names in pipeline order. The validate and check-refs CLIs accept
 # these, and the orchestrator names the stage it is dispatching with them.
 STAGES = (
+    "survey",
+    "triage",
     "intake",
     "extract",
     "reconcile",
@@ -117,6 +119,21 @@ class RunPaths:
     @property
     def inputs_dir(self) -> Path:
         return self.root / "00-inputs"
+
+    @property
+    def catalogue(self) -> Path:
+        """Every candidate survey found, with one bounded digest each.
+
+        In the 00 family beside 00-inputs/ because survey, triage and intake are
+        00a, 00b and 00c -- the same relationship 01-claims/ and
+        01-world-model.json already have.
+        """
+        return self.root / "00-catalogue.json"
+
+    @property
+    def triage(self) -> Path:
+        """One disposition per candidate, plus deficiencies and projections."""
+        return self.root / "00-triage.json"
 
     @property
     def claims_dir(self) -> Path:

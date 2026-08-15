@@ -140,6 +140,65 @@ def test_manifest_stage_entry_needs_the_full_comparability_triple(tmp_path):
     assert _findings(tmp_path, "manifest", payload)
 
 
+def test_manifest_input_with_no_provenance_still_validates(tmp_path):
+    """The additive-change guarantee itself: every manifest written before
+    provenance existed had no such key, and must keep validating unchanged."""
+    payload = minimal_manifest()
+    assert "provenance" not in payload["inputs"][0]
+    assert _findings(tmp_path, "manifest", payload) == []
+
+
+def test_manifest_input_with_container_provenance_validates(tmp_path):
+    payload = minimal_manifest()
+    payload["inputs"][0]["provenance"] = {
+        "container_sha256": "a" * 64,
+        "json_pointer": "/1",
+    }
+    assert _findings(tmp_path, "manifest", payload) == []
+
+
+def test_manifest_input_with_projection_provenance_validates(tmp_path):
+    payload = minimal_manifest()
+    payload["inputs"][0]["provenance"] = {
+        "projection_id": "proj-1",
+        "source_candidate_ids": ["capture-json"],
+    }
+    assert _findings(tmp_path, "manifest", payload) == []
+
+
+def test_manifest_input_with_merged_provenance_is_rejected(tmp_path):
+    """A payload carrying every key from both shapes matches both branches at
+    once, which oneOf's own exclusivity rejects on its own -- true whether or
+    not additionalProperties:false is present on either branch. Still worth
+    pinning, because it is exactly the shape the reviewer hand-verified."""
+    payload = minimal_manifest()
+    payload["inputs"][0]["provenance"] = {
+        "container_sha256": "a" * 64,
+        "json_pointer": "/1",
+        "projection_id": "proj-1",
+        "source_candidate_ids": ["capture-json"],
+    }
+    assert _findings(tmp_path, "manifest", payload) != []
+
+
+def test_manifest_input_with_one_stray_key_from_the_other_shape_is_rejected(tmp_path):
+    """The case the merged-object test above does *not* actually exercise:
+    a full container shape plus one stray key borrowed from the projection
+    shape, without enough of that shape's own required keys to trigger
+    oneOf's exclusivity check by itself. This is a container-shaped payload
+    that would match branch 1 alone (it has both required keys) if branch 1's
+    additionalProperties:false were not there to reject the stray key --
+    measured directly: removing additionalProperties:false from both oneOf
+    branches makes this exact payload validate with zero findings."""
+    payload = minimal_manifest()
+    payload["inputs"][0]["provenance"] = {
+        "container_sha256": "a" * 64,
+        "json_pointer": "/1",
+        "projection_id": "proj-1",  # stray; source_candidate_ids deliberately absent
+    }
+    assert _findings(tmp_path, "manifest", payload) != []
+
+
 def test_a_capability_may_declare_a_tool_binding(tmp_path):
     from rubrica.artifacts import write_json
     from rubrica.validate import validate_artifact

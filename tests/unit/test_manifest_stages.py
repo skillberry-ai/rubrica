@@ -16,10 +16,10 @@ from rubrica.artifacts import read_json, write_json
 from rubrica.cli import main
 from rubrica.errors import UsageError
 from rubrica.manifest import record_stage
-from rubrica.paths import RunPaths
+from rubrica.paths import STAGES, RunPaths
 from rubrica.skills import skill_sha256
 from rubrica.stability import comparability, stage_config
-from rubrica.validate import manifest_stage_efforts, validate_artifact
+from rubrica.validate import manifest_stage_efforts, schema_dir, validate_artifact
 from tests.builders import minimal_manifest
 
 
@@ -543,3 +543,41 @@ def test_record_stage_rejects_an_unknown_effort_called_directly(tmp_path):
     with pytest.raises(UsageError, match="extreme"):
         record_stage(run, stage="extract", model="m", effort="extreme", skill=_skill(tmp_path))
     assert read_json(run.manifest)["stages"] == {}
+
+
+def test_the_manifest_stages_enum_is_exactly_paths_STAGES():
+    """The drift guard I5 exists to make impossible, not merely fixed once.
+
+    `cli.py` builds `record-stage --stage`'s argparse choices from
+    `list(STAGES)`, while manifest-0.1.json's `stages.propertyNames.enum` was a
+    hand-kept second list -- and when `survey` and `triage` joined STAGES, the
+    enum was never extended. Measured: `record-stage --stage triage` exited 0,
+    wrote the entry, and `validate` then rejected the manifest with
+    "'triage' is not one of [...]" -- the CLI accepting a stage the schema
+    refuses, so a correct invocation corrupted the artifact.
+
+    Derived from STAGES rather than pinned to a literal list, because a literal
+    would be the third hand-kept copy of the same roster and would go stale in
+    exactly the way this test is here to catch. Order is asserted too: both
+    lists are the pipeline order, and a reader of either one should be able to
+    read it as such.
+    """
+    schema = read_json(schema_dir() / "manifest-0.1.json")
+    enum = schema["properties"]["stages"]["propertyNames"]["enum"]
+    assert tuple(enum) == STAGES
+
+
+@pytest.mark.parametrize("stage", sorted(STAGES))
+def test_record_stage_writes_a_manifest_layer_one_accepts_for_every_stage(tmp_path, stage):
+    """The property behind the test above, exercised end to end.
+
+    Every stage `record-stage` accepts on argv must produce a manifest
+    `validate` accepts -- so a stage joining STAGES cannot pass the CLI's
+    `choices` check and then fail the schema. `survey` and `triage` are the two
+    that did; the other nine are here because parametrizing over STAGES is what
+    makes the tenth free.
+    """
+    run = _run(tmp_path)
+    skill = _skill(tmp_path)
+    record_stage(run, stage=stage, model="claude-opus-4", effort="high", skill=skill)
+    assert validate_artifact(run.manifest, "manifest") == []

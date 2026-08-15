@@ -1,0 +1,131 @@
+{
+  "candidates": [
+    {
+      "admissible": true,
+      "bytes": 134,
+      "candidate_id": "glossary-md",
+      "digest": {
+        "body_head": "Definitions of terms used elsewhere in this documentation set: ticket,\nqueue, controller, SLA. Purely definitional prose.",
+        "digest_truncated": false,
+        "headings": [
+          "# Glossary"
+        ],
+        "lines": 4
+      },
+      "kind": "design_doc",
+      "origin": "corpus",
+      "path": "glossary.md",
+      "root_index": 0,
+      "sha256": "59185097c43de5fae9ce45857e9f72cfe91ef3c4d686d8af39d05b900a986fda"
+    },
+    {
+      "admissible": true,
+      "bytes": 165,
+      "candidate_id": "overview-md",
+      "digest": {
+        "body_head": "This document describes the target's general purpose: tracking support\ntickets end to end, from creation to resolution, across every team.",
+        "digest_truncated": false,
+        "headings": [
+          "# Ticket system overview"
+        ],
+        "lines": 4
+      },
+      "kind": "design_doc",
+      "origin": "corpus",
+      "path": "overview.md",
+      "root_index": 0,
+      "sha256": "72d6ca45ac22e7cede8106d723c01a02124da123508f1a9e2f8e194937ba7f1f"
+    },
+    {
+      "admissible": true,
+      "bytes": 124,
+      "candidate_id": "roadmap-md",
+      "digest": {
+        "body_head": "Forward-looking prose about planned features. Describes intent, not\nbehaviour that has ever been observed.",
+        "digest_truncated": false,
+        "headings": [
+          "# Roadmap notes"
+        ],
+        "lines": 4
+      },
+      "kind": "design_doc",
+      "origin": "corpus",
+      "path": "roadmap.md",
+      "root_index": 0,
+      "sha256": "441dca7287d193c9fb75a2cfb1b035082bdb30e25e37a2ec78be8f243c5ec420"
+    },
+    {
+      "admissible": true,
+      "bytes": 274,
+      "candidate_id": "trace-json",
+      "digest": {
+        "element_counts": {
+          "spans": 2
+        },
+        "heuristics_fired": [
+          "element_counts"
+        ]
+      },
+      "kind": "trace",
+      "origin": "corpus",
+      "path": "trace.json",
+      "root_index": 0,
+      "sha256": "5665f5090634cc1a78563b1cb5813d946ed9e6c9a6c2e0dc62d1fafb71b97bc1"
+    },
+    {
+      "admissible": true,
+      "bytes": 170,
+      "candidate_id": "workflow-md",
+      "digest": {
+        "body_head": "Prose describing how a ticket is escalated from tier 1 to tier 2 when it\nhas not been touched in 48 hours. No behavioural evidence -- intent only.",
+        "digest_truncated": false,
+        "headings": [
+          "# Escalation workflow"
+        ],
+        "lines": 4
+      },
+      "kind": "design_doc",
+      "origin": "corpus",
+      "path": "workflow.md",
+      "root_index": 0,
+      "sha256": "2db35024a0fc0cc93c987b821626b6e78ab9506c893ceed5b4dc86fa226ab7b8"
+    }
+  ],
+  "created_utc": "2026-08-14T21:30:00Z",
+  "excluded": [],
+  "policy": {
+    "digest_body_chars": 2000,
+    "exclusion_reasons": [
+      "gitignored",
+      "vcs_metadata",
+      "binary",
+      "lockfile",
+      "vendored",
+      "duplicate",
+      "unreadable",
+      "operator_excluded"
+    ],
+    "explode_min_common_keys": 3,
+    "explode_min_elements": 3,
+    "max_candidates": 500,
+    "max_catalogue_bytes": 1048576,
+    "operator_globs": []
+  },
+  "request": {
+    "corpus_roots": [
+      "corpora/ticketq"
+    ],
+    "limits": {
+      "max_rounds": 2,
+      "max_scenarios": 128
+    },
+    "objective": "depth",
+    "objective_note": "Go deep on one workflow rather than sample every surface.",
+    "target": {
+      "interface": "mcp",
+      "name": "ticketq"
+    }
+  },
+  "run_id": "run-20260814-213000",
+  "schema_version": "0.1"
+}

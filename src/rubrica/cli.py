@@ -60,14 +60,14 @@ import sys
 import traceback
 from pathlib import Path
 
-from rubrica import refs, skills
+from rubrica import brief, refs, skills, survey, triage
 from rubrica.artifacts import ArtifactError, read_json
 from rubrica.dedupe import candidate_pairs
 from rubrica.emit import emit_run
 from rubrica.errors import UsageError
 from rubrica.findings import Finding, format_findings
-from rubrica.intake import intake
-from rubrica.manifest import decide, record_stage
+from rubrica.intake import admit_from_triage, intake
+from rubrica.manifest import decide, record_stage, set_limit
 from rubrica.paths import STAGES, RunPaths
 from rubrica.recall import compare_run, render
 from rubrica.review import DEFAULT_SAMPLE_SIZE, sample_run
@@ -86,7 +86,9 @@ CLEAN, FINDINGS, USAGE = 0, 1, 2
 # SKILL.md's `invokes` list against the real CLI would go stale the first
 # time a subcommand was added.
 SUBCOMMANDS: tuple[tuple[str, str], ...] = (
+    ("survey", "inventory a corpus into a catalogue of candidates and mint a run"),
     ("intake", "register inputs and mint a run"),
+    ("adopt-projection", "admit a manufactured projection into the catalogue, structurally"),
     ("validate", "schema-validate one stage's output"),
     ("check-refs", "cross-artifact and reachability checks"),
     ("dedupe-candidates", "propose candidate duplicate scenario pairs as JSON"),
@@ -99,6 +101,8 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("record-stage", "record a stage's model, effort, and skill hash in the manifest"),
     ("decide", "append one orchestrator decision to the run's decisions.md"),
     ("claim-utilisation", "per-artifact share of claims the world model cites"),
+    ("gate-brief", "compose the existing reports into the human surface at one gate"),
+    ("set-limit", "change a manifest limit, with the reason recorded in decisions.md"),
 )
 
 
@@ -111,13 +115,60 @@ def _build_parser() -> argparse.ArgumentParser:
     # (required vs. optional, choices, types) to fold into the tuple itself.
     parsers = {name: subparsers.add_parser(name, help=help_) for name, help_ in SUBCOMMANDS}
 
+    p_survey = parsers["survey"]
+    p_survey.add_argument("--corpus", action="append", required=True, metavar="PATH")
+    p_survey.add_argument("--runs-dir", required=True)
+    p_survey.add_argument("--target-name", required=True)
+    p_survey.add_argument("--target-interface", required=True)
+    p_survey.add_argument("--objective", required=True, choices=["breadth", "depth"])
+    p_survey.add_argument("--objective-note", default=None)
+    p_survey.add_argument("--scope-note", default=None)
+    p_survey.add_argument("--exclude", action="append", default=[], metavar="GLOB")
+    p_survey.add_argument("--max-rounds", type=int, default=2)
+    p_survey.add_argument("--max-scenarios", type=int, default=128)
+    p_survey.add_argument("--max-candidates", type=int, default=survey.DEFAULT_MAX_CANDIDATES)
+    p_survey.add_argument(
+        "--max-catalogue-bytes", type=int, default=survey.DEFAULT_MAX_CATALOGUE_BYTES
+    )
+
     p_intake = parsers["intake"]
-    p_intake.add_argument("--input", action="append", required=True, metavar="PATH")
-    p_intake.add_argument("--runs-dir", required=True)
-    p_intake.add_argument("--target-name", required=True)
-    p_intake.add_argument("--target-interface", required=True)
-    p_intake.add_argument("--max-rounds", type=int, default=2)
-    p_intake.add_argument("--max-scenarios", type=int, default=8)
+    # --input (register the files named on argv, minting a fresh manifest from
+    # argv) and --run (admit whatever the triage record at an existing survey
+    # run already ruled on, minting the manifest from the catalogue instead)
+    # are two different ways to reach the same artifact, never both at once.
+    p_intake_mode = p_intake.add_mutually_exclusive_group(required=True)
+    p_intake_mode.add_argument("--input", action="append", metavar="PATH")
+    p_intake_mode.add_argument("--run", metavar="PATH")
+    # These five belong to --input only -- --run's equivalents live in the
+    # catalogue that survey already wrote, and mixing the two is the shape
+    # that produced findings against an unfixable artifact (manifest.json,
+    # which no skill wrote and no repair prompt can fix). argparse cannot make
+    # a flag conditionally required on which member of a mutually exclusive
+    # group was chosen, so none of the five below carry required=True; main()
+    # checks both directions explicitly once args.run is known.
+    p_input_group = p_intake.add_argument_group("intake --input")
+    p_input_group.add_argument("--runs-dir")
+    p_input_group.add_argument("--target-name")
+    p_input_group.add_argument("--target-interface")
+    # A ceiling, not an estimate of the right suite size: the point past which
+    # no human reviews the output (128 Harbor packages) and a run costs on the
+    # order of $200 at the parsec run's ~$1.66/scenario across instantiate and
+    # challenge. It was 8, which made refs.check_scenarios' guard bind in normal
+    # operation and forced a hand-raise on the first real target.
+    #
+    # default=None rather than 2/128 here: main() needs to tell "the flag was
+    # not on argv" apart from "the flag was given its old default value" so it
+    # can refuse either one alongside --run, and only substitutes the 2/128
+    # default itself, on the --input path, once that distinction is no longer
+    # needed.
+    p_input_group.add_argument("--max-rounds", type=int, default=None)
+    p_input_group.add_argument("--max-scenarios", type=int, default=None)
+
+    p_adopt = parsers["adopt-projection"]
+    p_adopt.add_argument("--run", required=True)
+    p_adopt.add_argument("--projection", required=True, metavar="ID")
+    p_adopt.add_argument("--file", required=True, metavar="PATH")
+    p_adopt.add_argument("--check-only", action="store_true")
 
     p_validate = parsers["validate"]
     p_validate.add_argument("--run", required=True)
@@ -164,6 +215,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_utilisation = parsers["claim-utilisation"]
     p_utilisation.add_argument("--run", required=True)
+
+    p_brief = parsers["gate-brief"]
+    p_brief.add_argument("--run", required=True)
+    p_brief.add_argument("--gate", required=True, type=int, choices=[0, 1, 2, 3])
+
+    p_set_limit = parsers["set-limit"]
+    p_set_limit.add_argument("--run", required=True)
+    p_set_limit.add_argument("--max-rounds", type=int, default=None)
+    p_set_limit.add_argument("--max-scenarios", type=int, default=None)
+    p_set_limit.add_argument("--reason", required=True)
     return parser
 
 
@@ -229,25 +290,133 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_usage(sys.stderr)
         return USAGE
 
+    if args.command == "survey":
+        # Its own block and its own catch, exactly like intake's below: it
+        # mints a run from arguments a human or orchestrator supplied and reads
+        # a corpus, not a run artifact, so every failure here really is a
+        # usage error or a misconfigured harness -- there is no stage to send
+        # a finding back to.
+        try:
+            run = survey.survey(
+                corpus_roots=[Path(p) for p in args.corpus],
+                runs_dir=Path(args.runs_dir),
+                target_name=args.target_name,
+                target_interface=args.target_interface,
+                objective=args.objective,
+                objective_note=args.objective_note,
+                scope_note=args.scope_note,
+                operator_globs=args.exclude,
+                max_rounds=args.max_rounds,
+                max_scenarios=args.max_scenarios,
+                max_candidates=args.max_candidates,
+                max_catalogue_bytes=args.max_catalogue_bytes,
+            )
+        except (UsageError, ArtifactError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return USAGE
+        print(run.root)
+        return CLEAN
+
     if args.command == "intake":
+        if args.run:
+            # Minting a run from an ambiguous parameter set (a human's
+            # --target-name alongside a catalogue that already carries one)
+            # is refused rather than resolved by precedence -- this is the
+            # one constraint argparse could not express, so it is checked
+            # here, once, in main() itself. It is a usage error like any
+            # other on this path, though, so it shares the same try/except
+            # as the admit_from_triage call below rather than escaping
+            # uncaught: an uncaught exception here would print nothing to
+            # stdout and exit 1, which is indistinguishable from a stage
+            # defect and would cost the orchestrator its one repair attempt
+            # on a run that was never broken. admit_from_triage's own
+            # findings (an inconsistent triage record) are a different
+            # failure shape -- exit 1, printed on stdout -- and must not be
+            # caught here.
+            try:
+                illegal = [
+                    flag
+                    for flag, value in (
+                        ("--runs-dir", args.runs_dir),
+                        ("--target-name", args.target_name),
+                        ("--target-interface", args.target_interface),
+                        ("--max-rounds", args.max_rounds),
+                        ("--max-scenarios", args.max_scenarios),
+                    )
+                    if value is not None
+                ]
+                if illegal:
+                    raise UsageError(
+                        f"intake --run mints its manifest from the catalogue at {args.run}; "
+                        f"{', '.join(illegal)} is illegal alongside --run"
+                    )
+                run = _run_dir(args.run)
+                findings = admit_from_triage(run)
+            except (UsageError, ArtifactError, OSError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return USAGE
+            if findings:
+                print(format_findings(findings))
+                return FINDINGS
+            print(run.root)
+            return CLEAN
+
         # intake's own block, with its own catch. It reads paths the human
         # supplied rather than artifacts a stage wrote, so every failure here
         # really is a usage error or a misconfigured harness -- there is no
         # stage to send a finding back to. OSError covers the FileNotFoundError
         # for a missing input and the FileExistsError for a run id collision.
         try:
+            missing = [
+                flag
+                for flag, value in (
+                    ("--runs-dir", args.runs_dir),
+                    ("--target-name", args.target_name),
+                    ("--target-interface", args.target_interface),
+                )
+                if value is None
+            ]
+            if missing:
+                raise UsageError(f"intake --input needs {', '.join(missing)}")
             run = intake(
                 inputs=[Path(p) for p in args.input],
                 runs_dir=Path(args.runs_dir),
                 target_name=args.target_name,
                 target_interface=args.target_interface,
-                max_rounds=args.max_rounds,
-                max_scenarios=args.max_scenarios,
+                max_rounds=args.max_rounds if args.max_rounds is not None else 2,
+                max_scenarios=args.max_scenarios if args.max_scenarios is not None else 128,
             )
         except (UsageError, ArtifactError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return USAGE
         print(run.root)
+        return CLEAN
+
+    if args.command == "adopt-projection":
+        # Its own block, mirroring intake --run just above: adopt_projection
+        # reads a human-supplied --file path as well as the run's own
+        # artifacts, so a raised UsageError -- an unreadable file, an unknown
+        # projection_id, a missing catalogue or triage record -- is a usage
+        # error like intake --run's illegal-flag check, sharing its catch
+        # rather than escaping uncaught. A non-empty return is the other
+        # failure shape: check_acceptance's findings, repairable by
+        # manufacturing the file again, so it is handled after the try like
+        # admit_from_triage's findings are.
+        try:
+            run = _run_dir(args.run)
+            findings = triage.adopt_projection(
+                run,
+                projection_id=args.projection,
+                source=Path(args.file),
+                check_only=args.check_only,
+            )
+        except (UsageError, ArtifactError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return USAGE
+        if findings:
+            print(format_findings(findings))
+            return FINDINGS
+        print(triage.ACCEPTANCE_PASS_MESSAGE)
         return CLEAN
 
     try:
@@ -331,6 +500,35 @@ def main(argv: list[str] | None = None) -> int:
             # half lives in check-refs, so this command never returns 1 and an
             # orchestrator reading its exit code cannot mistake data for a defect.
             print(json.dumps(claim_utilisation(_run_dir(args.run)), indent=2, sort_keys=True))
+            return CLEAN
+
+        if args.command == "gate-brief":
+            # Same ruling as claim-utilisation just above, for the same reason:
+            # this composes existing reports rather than checking anything, so
+            # it is never the thing that turns a readable run into exit 1.
+            # --gate's argparse choices=[0,1,2,3] already reject anything else
+            # before this line is reached, on the same SystemExit(2) path every
+            # other bad argument takes.
+            print(brief.gate_brief(_run_dir(args.run), args.gate))
+            return CLEAN
+
+        if args.command == "set-limit":
+            run = _run_dir(args.run)
+            # Its own UsageError catch, matching decide and record-stage just
+            # above: --max-rounds, --max-scenarios, and --reason are the
+            # orchestrator's own arguments, not a stage's output, so a bad one
+            # is a misconfigured harness rather than a repairable stage defect.
+            try:
+                set_limit(
+                    run,
+                    max_rounds=args.max_rounds,
+                    max_scenarios=args.max_scenarios,
+                    reason=args.reason,
+                )
+            except (UsageError, OSError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return USAGE
+            print(run.manifest)
             return CLEAN
 
         if args.command == "diff-runs":
