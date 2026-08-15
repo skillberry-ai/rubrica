@@ -20,14 +20,16 @@ jobs:
         run: uv sync --extra dev
 
       # `uv sync --extra dev` provisions this project's own environment,
-      # including the `dev` extra (ruff, pytest) -- there is no lockfile
-      # committed, so this is a real sync, not a no-op. Every gate below
-      # passes `--extra dev` again on the `uv run` that invokes it: a bare
-      # `uv run` re-syncs to just the base dependencies before running,
-      # silently dropping ruff/pytest from that invocation's environment.
-      # The three gates run in the order CONTRIBUTING.md names them. The
-      # live-dispatch test suite is deliberately excluded here: it
-      # dispatches a model, so it needs credentials and would cost money on
+      # including the `dev` extra (ruff, pytest); no lockfile is committed, so
+      # this is a real sync rather than a no-op. Each gate below repeats
+      # `--extra dev` on its own `uv run` so that every step is self-sufficient.
+      # Measured: a bare `uv run` after this sync does *not* prune the extra --
+      # ruff survives in .venv/bin and still runs -- so the flag is
+      # belt-and-braces against a step being reordered, run on its own, or
+      # reached with an environment this job did not create, rather than a
+      # workaround for pruning. The gates run in the order CONTRIBUTING.md
+      # names them. The live-dispatch test suite is deliberately excluded here:
+      # it dispatches a model, so it needs credentials and would cost money on
       # every push.
       - name: Lint and format
         run: |
