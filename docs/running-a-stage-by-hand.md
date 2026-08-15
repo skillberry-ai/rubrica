@@ -83,6 +83,25 @@ Its live exercise is a whole-pipeline run starting from an `upto="intake"`
 run, not a single-stage check against one checkpoint — see Task 13's
 `exercise.md` for its pass criteria.
 
+`rb-triage` is not in this table either, for a different reason: `paths.STAGES`
+puts it *before* `intake`, and `build_toy_run` mints its run via a real
+`intake()` call — there is no toy checkpoint that stops short of it. To
+exercise `rb-triage` by hand, mint a run with a real catalogue instead of a toy
+one:
+
+```bash
+uv run rubrica survey --corpus <path> --runs-dir /tmp/rubrica-lab/runs \
+  --target-name ticketq --target-interface mcp --objective breadth
+```
+
+This writes `00-catalogue.json` and prints the run directory on stdout — exactly
+the checkpoint `rb-triage` needs, since the catalogue is its only input.
+`tests/fixtures/catalogue-unsupported-objective.json` and
+`tests/fixtures/catalogue-all-declinable.json` are two committed catalogues that
+should make it refuse (conditions 1 and 2 of its §5); copying either one over a
+freshly-minted run's `00-catalogue.json` exercises those refusals without a
+corpus at all.
+
 `upto=None` (the default, i.e. omitting the keyword) writes everything the
 fixture knows how to write, through `challenge` — exactly the checkpoint
 `rb-emit` needs, since `build_toy_run`'s `_UPTO_STAGES` stops there (the
@@ -123,7 +142,7 @@ from §3) for the stage you dispatched:
 
 ```bash
 RUN=<the run directory from step 3>
-STAGE=<stage>  # e.g. extract, reconcile, propose, score, instantiate, challenge, emit
+STAGE=<stage>  # e.g. triage, extract, reconcile, propose, score, instantiate, challenge, emit
 
 uv run rubrica validate --run "$RUN" --stage "$STAGE"   # expect 0
 uv run rubrica check-refs --run "$RUN"                  # expect 0
@@ -221,6 +240,14 @@ RUN=$(PYTHONPATH=. uv run python /tmp/toy-run-to.py /tmp/rubrica-lab/runs intake
 # a barrier stage takes no slice id, and needs a run built one checkpoint later
 RUN=$(PYTHONPATH=. uv run python /tmp/toy-run-to.py /tmp/rubrica-lab/runs extract)
 ./scripts/dispatch-stage.sh reconcile "$RUN"
+
+# triage is also a barrier -- no slice id -- and precedes intake, so its run
+# comes from a real `rubrica survey` rather than the toy-run-to.py builder above
+RUN=$(uv run rubrica survey --corpus <path> --runs-dir /tmp/rubrica-lab/runs \
+  --target-name ticketq --target-interface mcp --objective breadth)
+./scripts/dispatch-stage.sh triage "$RUN"
+uv run rubrica validate --run "$RUN" --stage triage   # the gate: layer 1
+uv run rubrica check-refs --run "$RUN"                # then layer 2
 ```
 
 `RUBRICA_MODEL`, `RUBRICA_EFFORT` and `RUBRICA_BUDGET` set the dispatch's model,
