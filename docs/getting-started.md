@@ -127,13 +127,15 @@ cat "$RUN"/00-catalogue.json | head -40
       "admissible": true,
 ```
 
-(cut off at line 40 by `head`; 11 candidates in all, plus an `excluded` list naming the
-`.gitignore`d file, the duplicate README, the binary logo, the `node_modules`
-entry, and the lockfile, each with its exclusion reason.) One candidate,
-`capture.json`, is a container of four captured tool calls; the survey
-exploded it into four individually admissible candidates
-(`capture-json-0` … `capture-json-3`) and marked the container itself
-non-admissible, since triage rules on the elements, not the container.
+(cut off at line 40 by `head`; 11 candidates in all, plus an `excluded` list
+naming six paths and why each was left out: `.hg/branch` (`vcs_metadata`),
+`copy-of-README.md` (`duplicate`), `generated.txt` (`gitignored`),
+`logo.png` (`binary`), `node_modules/dep/index.js` (`vendored`), and
+`package-lock.json` (`lockfile`).) One candidate, `capture.json`, is a
+container of four captured tool calls; the survey exploded it into four
+individually admissible candidates (`capture-json-0` … `capture-json-3`) and
+marked the container itself non-admissible, since triage rules on the
+elements, not the container.
 
 ### 2. Triage rules on every candidate
 
@@ -184,6 +186,7 @@ without a projection that sources it.
 
 ```bash
 rubrica gate-brief --run "$RUN" --gate 0
+echo "exit=$?"
 ```
 
 ```
