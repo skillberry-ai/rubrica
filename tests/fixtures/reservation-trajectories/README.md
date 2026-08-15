@@ -1,7 +1,11 @@
 # reservation-service trajectory capture
 
-Committed live capture for the trajectory run
-(`docs/superpowers/specs/2026-08-12-reservation-service-trajectory-run-design.md`).
+Committed live capture, produced under the plan recorded at
+`docs/superpowers/specs/2026-08-12-reservation-service-trajectory-run-design.md`.
+`docs/superpowers/` is dated build history, kept as a record of what was
+decided and why at the time -- it is provenance for this fixture, not the
+project's current documentation. That lives in `docs/design/`, indexed from
+`docs/README.md`.
 
 Re-capturing draws fresh LLM spans and a fresh `confirmation_code` sequence, so
 without this record nobody could later distinguish a pipeline change from a
@@ -13,10 +17,11 @@ a reviewable diff.
 ```bash
 cd /tmp/rubrica-lab/capture
 FIX=/home/bnayahu/work/kaegis/rubrica/tests/fixtures/reservation-trajectories
+REPO=/home/bnayahu/work/kaegis/rubrica
 uv run --with fastmcp --with pydantic --with pydantic-settings --with mlflow \
        --with langgraph --with langchain --with langchain-core --with langchain-openai \
        --with langchain-mcp-adapters --with mcp \
-  python "$FIX/capture_harness.py" trajectories --out "$FIX/trajectories.json"
+  python "$REPO/scripts/capture-reservation-trajectories.py" trajectories --out "$FIX/trajectories.json"
 ```
 
 This is the command that actually worked (Task 2 report), not the plan's
@@ -26,9 +31,9 @@ original version: `--with langchain` is required in addition to
 imports it directly. Without it the run crashes with `ModuleNotFoundError: No
 module named 'langchain'` before a single prompt is issued.
 
-`capture_harness.py`'s `TOOL_DIR` and `AGENT_SRC` constants are absolute paths
-into this author's `rossoctl` checkout. Anyone else re-running the harness
-must edit both before it will find the target.
+`capture-reservation-trajectories.py`'s `TOOL_DIR` and `AGENT_SRC` constants
+are absolute paths into this author's `rossoctl` checkout. Anyone else
+re-running the harness must edit both before it will find the target.
 
 ## Capture conditions
 
@@ -62,7 +67,7 @@ either, cascading `p05`'s skip from the same single failure on `p01`. The
 8-trace corpus this pass produced was **discarded** and is not retained
 anywhere in this fixture.
 
-A `_content_text()` normaliser was added to `capture_harness.py` to resolve
+A `_content_text()` normaliser was added to `capture-reservation-trajectories.py` to resolve
 list-of-content-block shapes to text before `json.loads` ever sees them,
 fixing the parser rather than the trace. Rubrica's plan carries a single-pass
 rule for this capture, specifically to prevent selecting on the *model's*
@@ -116,6 +121,17 @@ All ten prompts captured; none skipped, errored, or `no-trace`.
 invalid restaurant id without attempting `place_reservation` — a genuine
 result of the model's own choice, not a parser artifact.
 
+## The absolute paths are deliberate
+
+`capture-reservation-trajectories.py` hardcodes the source checkout it captured
+from, and `trajectories.json` embeds that same path ten times in MLflow
+`mlflow.source.name` fields. Neither is sanitised. `trajectories.json` is a
+committed recording, and a recording is evidence of what happened -- editing one
+to look tidier corrupts the evidence it exists to carry. The harness is kept for
+the same reason: it records how this fixture was produced. Re-capturing on
+another machine means editing those constants, and that edit is the reviewable
+part.
+
 ## Single-pass rule
 
 Captured in one pass. No prompt was re-run to obtain a better trace. A prompt
@@ -126,7 +142,7 @@ aimed at stays open.
 
 `trajectories.json` is the authentic capture and stays whole here. Intake,
 however, registers **one file per trace**, split from this array in array order
-and named from `capture_harness.py`'s own `PROMPTS` ids
+and named from `capture-reservation-trajectories.py`'s own `PROMPTS` ids
 (`trajectory-p01-search.json` … `trajectory-p10-cancel-unknown.json`). Each split
 file is a complete MLflow trace verbatim, keeping the top-level `trace_id`
 mirror, so `intake.classify` returns `trace` for each. The mapping was verified
