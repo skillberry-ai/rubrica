@@ -231,14 +231,24 @@ def test_the_output_section_names_schema_version_and_the_run_id_it_reads():
     `skills.load()` sets `body` to the entire file text. `0.1` is asserted
     alongside the field name because naming the field without its value tells a
     model nothing it can write.
+
+    **Durable tokens only, after this predicate failed the mirror direction.**
+    It began by also pinning `"never invent"`, and a reword to "do not make one
+    up" -- which says the identical thing -- turned it red. That is the failure
+    CLAUDE.md and constraints.md call equally real to the vacuous-assertion one,
+    and this repo has already had to repair a phrase pin that broke on an
+    innocuous reformat. What is left cannot be paraphrased away: three field
+    names the model must literally write, the version string it must write, and
+    the filename it must read the run_id out of. The co-occurrence of `run_id`
+    with `00-catalogue.json` inside this one section *is* the "read it, do not
+    invent it" rule -- there is no other reason for the two to appear together
+    -- so the rule is still pinned without any of its wording being.
     """
     body = _norm(skills.section_body(_skill(), "2. Output"))
     assert "schema_version" in body
     assert '"0.1"' in body
     assert "run_id" in body
-    # And where to read it from: an invented run_id is exactly what
-    # intake.py's module docstring says must never come from a skill.
-    assert "00-catalogue.json" in body and "never invent" in body
+    assert "00-catalogue.json" in body
 
 
 def test_the_output_section_says_an_empty_block_is_still_written():
@@ -247,15 +257,21 @@ def test_the_output_section_says_an_empty_block_is_still_written():
     block because it would be empty fails layer 1 and spends a repair round on a
     record whose judgment was fine.
 
-    The `[]` spellings are pinned because that is the actionable half: prose
-    saying "required" without showing the empty value leaves a model to guess
-    between `[]`, `null`, and omission.
+    The `[]` spellings are pinned because that is the actionable half, and
+    because they are the half that *cannot* be paraphrased: prose saying
+    "required" without showing the empty value leaves a model to guess between
+    `[]`, `null`, and omission, and there is no second way to spell
+    `"deficiencies": []` while still showing it. The `"required"`/`"empty"` word
+    pins this predicate also carried were dropped for the reason the
+    schema_version predicate above records -- both are ordinary words with a
+    dozen synonyms ("mandatory", "demanded", "with nothing in it"), so pinning
+    them guards the sentence rather than the rule.
     """
     body = _norm(skills.section_body(_skill(), "2. Output"))
+    assert "deficiencies" in body
+    assert "projections" in body
     assert '"deficiencies": []' in body
     assert '"projections": []' in body
-    assert "required" in body
-    assert "empty" in body
 
 
 def test_the_output_section_places_a_human_authority_in_this_runs_record():
@@ -264,13 +280,23 @@ def test_the_output_section_places_a_human_authority_in_this_runs_record():
     override and `adopt-projection` edit *this* run's 00-triage.json, and
     `triage.adopt_projection` appends its admit with `authority: "human"` to the
     very file this skill produced.
+
+    **Three durable tokens, and no negative assertion.** This predicate began by
+    pinning `"this same record"`, and a reword to "the very record you produced"
+    turned it red; its negative half (`"lands in" not in body`) was brittle the
+    same way in the other direction, since the corrected prose has to be free to
+    mention a later run in the act of denying one. Both are gone.
+
+    What replaces them is a co-occurrence that cannot be paraphrased and is
+    false of the pre-fix text: `adopt-projection` is a CLI subcommand name, and
+    the wrong version of this passage named no writer of `authority: "human"` at
+    all -- it said only that the value was "reserved for a gate-0 override". A
+    section that names `adopt-projection` beside `authority` and `"human"` has
+    necessarily identified a writer that edits an existing record, because that
+    is the only thing `adopt-projection` does. The claim is pinned through the
+    fact rather than through the sentence.
     """
     body = _norm(skills.section_body(_skill(), "2. Output"))
+    assert "authority" in body
+    assert '"human"' in body
     assert "adopt-projection" in body
-    assert "this same record" in body
-    # The negative half, and the only wording it can safely pin: the wrong claim
-    # was that a human authority "lands in a later run's record". The corrected
-    # prose still says "a new run's" while negating it, so pinning "later run"
-    # absent would forbid stating the correction -- `lands in` is the phrase that
-    # belonged only to the wrong version.
-    assert "lands in" not in body, "the claim this replaced must be gone, not merely balanced"

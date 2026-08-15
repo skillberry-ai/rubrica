@@ -7,13 +7,16 @@ contains as well as what survey does with it.
 
 **`tests/fixtures/corpus-toy/.hg/branch` is not a mistake, and `.git/HEAD` is
 not the fix.** git cannot track a path under `.git/`, so a *committed* fixture
-cannot spell its VCS directory that way at all — `.hg` is one of the three names
-in `survey._VCS_DIRS` and is the only one of them a checked-in fixture can use.
-A contributor "correcting" it would not get a failing test, they would get a
-fixture file git silently declines to add, and the `vcs_metadata` assertion
-below would then fail for a reason that looks nothing like its cause.
-`test_survey_walk.py` covers the `.git/HEAD` spelling instead, from a corpus it
-builds in `tmp_path` where nothing is committed and the name is free.
+cannot spell its VCS directory that way at all. `.git` is the only one of
+`survey._VCS_DIRS`' three names with that problem — `.svn/entries` and
+`.hg/branch` both stage without complaint (measured), so `.hg` is a free choice
+between two workable ones rather than the sole option. What matters is the
+direction of the constraint: a contributor "correcting" `.hg` to `.git` would
+not get a failing test, they would get a fixture file git silently declines to
+add, and the `vcs_metadata` assertion below would then fail for a reason that
+looks nothing like its cause. `test_survey_walk.py` covers the `.git/HEAD`
+spelling instead, from a corpus it builds in `tmp_path` where nothing is
+committed and the name is free.
 
 The same asymmetry explains why `.gitignore` + `generated.txt` are here: the
 `gitignored` exclusion never fires on a real clean checkout, since the files a

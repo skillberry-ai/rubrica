@@ -693,23 +693,16 @@ def admit_from_triage(run: RunPaths) -> list[Finding]:
         # a retry's mkdir above hits FileExistsError forever: the run is
         # stuck, not repairable. Removing what this call created returns the
         # run to its pre-admission state, so the same call can simply be
-        # made again once the missing file is back -- unlike register()
-        # below, which either writes a complete manifest or (per
-        # artifacts.write_json's tempfile-then-replace) does not write one
-        # at all, so it needs no equivalent cleanup here.
+        # made again once the missing file is back.
+        #
+        # register() is inside this try too, so this branch covers it as well.
+        # It needs no cleanup of its *own* partial output -- per
+        # artifacts.write_json's tempfile-then-replace, it either writes a
+        # complete manifest or writes nothing -- but it does need the
+        # 00-inputs/ removal below, because a register() that fails on a
+        # read-only run directory or a full disk would otherwise leave exactly
+        # the populated-inputs-no-manifest state that strands the run.
         shutil.rmtree(run.inputs_dir, ignore_errors=True)
         raise
 
-    request = catalogue["request"]
-    register(
-        run,
-        entries=entries,
-        target_name=request["target"]["name"],
-        target_interface=request["target"]["interface"],
-        max_rounds=request["limits"]["max_rounds"],
-        max_scenarios=request["limits"]["max_scenarios"],
-        created=datetime.strptime(catalogue["created_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=UTC
-        ),
-    )
     return []

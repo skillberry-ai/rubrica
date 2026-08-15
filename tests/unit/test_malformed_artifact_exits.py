@@ -107,6 +107,14 @@ MUTATIONS: tuple[tuple[str, object, object], ...] = (
     # I7 and its siblings: element-level `.get` with no isinstance guard.
     ("triage deficiencies carries a string", None, lambda t: t.update(deficiencies=["oops"])),
     ("triage projections carries a string", None, lambda t: t.update(projections=["oops"])),
+    # Distinct from the entry above, and the distinction is the whole point: a
+    # list *carrying* a string lands at exit 2 by the legitimate "no such
+    # projection" path, while a `projections` that is not a list at all is a
+    # malformed record -- and that reached the same exit 2, surfacing a stage
+    # defect as a misconfigured harness, which makes the orchestrator halt
+    # instead of spending its one repair attempt. Sweep fix 6's headline case,
+    # unguarded until this line existed.
+    ("triage projections is a string", None, lambda t: t.update(projections="nope")),
     ("triage dispositions is a string", None, lambda t: t.update(dispositions="nope")),
     ("triage objective_review is a string", None, lambda t: t.update(objective_review="nope")),
     (

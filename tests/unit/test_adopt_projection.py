@@ -538,3 +538,60 @@ def test_an_acceptance_criterion_of_the_wrong_type_is_reported_never_skipped(
     assert findings, f"{field}={value!r} must be reported"
     assert any(field in f.message or "classifies as" in f.message for f in findings)
     assert read_json(run.catalogue) == _catalogue(run.root.name, NOW)
+
+
+def test_a_projections_that_is_not_a_list_is_a_finding_rather_than_exit_two(tmp_path, capsys):
+    """A malformed record must be exit 1, never exit 2 -- and this one was 2.
+
+    The distinction the fix turns on: an *absent* or *empty* `projections` with a
+    `--projection` on argv is the caller naming something that does not exist,
+    which is a usage error at exit 2 and stays one. A `projections` that is not
+    a list at all is 00-triage.json being wrong, and
+    `triage_record.get("projections") or []` sent it down the same path -- a
+    truthy non-list iterates character by character, no character is a dict, so
+    the loop found nothing and raised the "no projection" UsageError. A stage
+    defect surfacing as 2 makes the orchestrator halt instead of spending its one
+    repair attempt.
+
+    Asserted here rather than in test_malformed_artifact_exits.py because that
+    file's contract assertion (`code in (0, 1, 2)`) accepts either code by
+    design; only naming the required one guards this.
+    """
+    run = _run_with_projection(tmp_path)
+    record = read_json(run.triage)
+    record["projections"] = "nope"
+    write_json(run.triage, record)
+
+    findings = triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path))
+
+    assert len(findings) == 1
+    assert findings[0].artifact == run.triage
+    assert findings[0].pointer == "/projections"
+    assert read_json(run.catalogue) == _catalogue(run.root.name, NOW)
+
+    code = cli.main(
+        [
+            "adopt-projection",
+            "--run",
+            str(run.root),
+            "--projection",
+            "prj-tools",
+            "--file",
+            str(_good(tmp_path)),
+        ]
+    )
+    assert code == 1, "a malformed triage record is a repairable stage defect, not exit 2"
+    assert capsys.readouterr().out.strip()
+
+
+def test_an_absent_projections_block_is_still_a_usage_error(tmp_path):
+    """The other direction of the branch above: the exit-2 path the fix had to
+    preserve. Nothing in the run is defective when a caller names a projection a
+    record legitimately does not carry."""
+    run = _run_with_projection(tmp_path)
+    record = read_json(run.triage)
+    record["projections"] = []
+    write_json(run.triage, record)
+
+    with pytest.raises(UsageError, match="no projection"):
+        triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path))
