@@ -354,7 +354,13 @@ def test_the_scenario_default_is_a_ceiling_not_an_estimate():
             "i",
         ]
     )
-    assert args.max_scenarios == 128
+    # The parser itself now leaves this None rather than defaulting to 128:
+    # main() needs to tell "not on argv" apart from "given its old default"
+    # so it can refuse either one alongside --run, and substitutes 128 itself
+    # once that distinction is no longer needed -- pinned end to end by
+    # test_intake_defaults_the_first_slice_limits, which reads it back out of
+    # the manifest main() writes.
+    assert args.max_scenarios is None
     # Deliberately no schema maximum: a human who types 300 has asked for it.
     # The default protects the autonomous run that sets nothing.
     schema = json.loads(

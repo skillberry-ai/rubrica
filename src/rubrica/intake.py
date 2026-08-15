@@ -20,9 +20,10 @@ from pathlib import Path
 
 from rubrica.artifacts import ArtifactError, canonical_bytes, read_json, sha256_of, write_json
 from rubrica.errors import UsageError
+from rubrica.findings import Finding
 from rubrica.manifest import utc_stamp
 from rubrica.paths import RunPaths, is_safe_segment, safe_segment
-from rubrica.refs import resolve_pointer
+from rubrica.refs import check_triage, resolve_pointer
 
 _SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".go", ".rs", ".java", ".rb"}
 _DOC_SUFFIXES = {".md", ".rst", ".txt", ".adoc"}
@@ -89,16 +90,26 @@ def classify(path: Path) -> str:
     return "other"
 
 
+def _unique_artifact_id(base: str, used: dict[str, int]) -> str:
+    """One artifact id, suffixed on collision, `used` mutated to remember it.
+
+    The single spelling of the collision rule -- `_unique_ids` (the --input
+    path, keyed on a slugified filename) and `admit_from_triage` (the --run
+    path, keyed on a candidate_id that is already a slug) both call this
+    rather than each keeping their own counter. That matters downstream:
+    refs.check_admitted_inputs reverses this exact rule to recover a
+    candidate_id from a manifest artifact_id, and two independent spellings
+    of "suffix on collision" would make that reversal ambiguous.
+    """
+    count = used.get(base, 0) + 1
+    used[base] = count
+    return base if count == 1 else f"{base}-{count}"
+
+
 def _unique_ids(inputs: list[Path]) -> list[str]:
     """Artifact ids for the inputs, suffixed on collision, order preserved."""
     used: dict[str, int] = {}
-    ids: list[str] = []
-    for path in inputs:
-        base = slug(path.name)
-        count = used.get(base, 0) + 1
-        used[base] = count
-        ids.append(base if count == 1 else f"{base}-{count}")
-    return ids
+    return [_unique_artifact_id(slug(path.name), used) for path in inputs]
 
 
 def mint_run(runs_dir: Path, *, now: datetime | None = None) -> tuple[RunPaths, datetime]:
@@ -339,3 +350,77 @@ def intake(
         created=stamp,
     )
     return run
+
+
+def admit_from_triage(run: RunPaths) -> list[Finding]:
+    """Register every admitted candidate and write the manifest.
+
+    Returns findings and writes nothing when the triage record is internally
+    inconsistent: that is a repairable stage defect at exit 1, fixed by
+    re-dispatching triage. Only an unreadable or absent artifact is a
+    UsageError, which cli.py maps to 2 -- the distinction the orchestrator
+    branches on.
+    """
+    if not run.triage.is_file():
+        raise UsageError(
+            f"no triage record at {run.triage}; run the triage stage before intake --run"
+        )
+    if not run.catalogue.is_file():
+        raise UsageError(f"no catalogue at {run.catalogue}; this run was not minted by survey")
+    if run.manifest.exists():
+        raise FileExistsError(
+            f"manifest already exists: {run.manifest}; a re-run gets a new run id so the old "
+            "artifacts stay diffable"
+        )
+
+    findings = check_triage(run)
+    if findings:
+        return findings
+
+    catalogue = read_json(run.catalogue)
+    triage = read_json(run.triage)
+    candidates = {c["candidate_id"]: c for c in catalogue["candidates"]}
+    admitted = [
+        candidates[d["candidate_id"]]
+        for d in sorted(
+            (d for d in triage["dispositions"] if d["disposition"] == "admit"),
+            key=lambda d: (d.get("priority", 1 << 30), d["candidate_id"]),
+        )
+    ]
+    if not admitted:
+        # check_triage already reports this (admits == 0 with a non-empty
+        # dispositions list) whenever the schema-required minItems: 1 on
+        # dispositions holds, so this is a defensive backstop rather than the
+        # primary source of the finding -- kept because admit_from_triage does
+        # not itself assume layer 1 has already run.
+        return [Finding(run.triage, "refs", "/dispositions", "no candidate was admitted")]
+
+    roots = catalogue["request"]["corpus_roots"]
+    run.inputs_dir.mkdir(parents=True)
+    entries = []
+    used: dict[str, int] = {}
+    for candidate in admitted:
+        artifact_id = _unique_artifact_id(candidate["candidate_id"], used)
+        # A multi-root survey assigns root_index per corpus root (survey.py's
+        # own per-root walk_corpus loop), so each admitted candidate resolves
+        # against *its own* root rather than corpus_roots[0] -- defaulting to
+        # 0 only for a candidate that predates root_index (there are none in
+        # this build, but the field is optional in the schema).
+        source_root = Path(roots[candidate.get("root_index", 0)])
+        entries.append(
+            materialise(run, candidate=candidate, source_root=source_root, artifact_id=artifact_id)
+        )
+
+    request = catalogue["request"]
+    register(
+        run,
+        entries=entries,
+        target_name=request["target"]["name"],
+        target_interface=request["target"]["interface"],
+        max_rounds=request["limits"]["max_rounds"],
+        max_scenarios=request["limits"]["max_scenarios"],
+        created=datetime.strptime(catalogue["created_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=UTC
+        ),
+    )
+    return []
