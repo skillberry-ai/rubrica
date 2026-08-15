@@ -2,7 +2,18 @@
 name = "rubrica"
 version = "0.1.0"
 description = "Skill-based test suite generator for agentic systems"
+readme = "README.md"
 requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{name = "Jonathan Bnayahu", email = "bnayahu@il.ibm.com"}]
+keywords = ["agents", "testing", "test-generation", "llm", "evaluation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = [
     "jsonschema>=4.23",
     "tomli-w>=1.1",
@@ -15,7 +26,7 @@ dev = ["pytest>=8.3", "ruff>=0.8"]
 rubrica = "rubrica.cli:main"
 
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -31,10 +42,11 @@ rubrica = ["schema/*.json", "suite/*.py", "suite/*.sh", "skills/*/SKILL.md"]
 [tool.ruff]
 line-length = 100
 target-version = "py313"
-# Ruff formats Python code blocks inside Markdown. The specs and plans under
-# docs/ are prose records whose code blocks are illustrative and laid out for
-# reading; a formatter must not rewrite a committed design document. The code
-# that matters is transcribed into src/ and tests/, where ruff does apply.
+# Ruff formats Python code blocks inside Markdown. Everything under docs/ is
+# prose -- documentation whose code blocks are laid out for reading, and dated
+# build records under docs/superpowers/ that are history and must stay verbatim.
+# A formatter must not rewrite either. The code that matters is in src/ and
+# tests/, where ruff does apply.
 extend-exclude = ["docs"]
 
 [tool.ruff.lint]
