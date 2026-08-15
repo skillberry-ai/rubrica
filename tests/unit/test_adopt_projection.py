@@ -321,6 +321,78 @@ def test_an_unreadable_source_file_is_a_usage_error(tmp_path):
         )
 
 
+def test_a_second_call_for_an_already_satisfied_projection_is_a_usage_error(tmp_path):
+    """Without this guard, a second call re-runs check_acceptance (which still
+    passes -- the file has not changed), mints a *second* candidate,
+    appends a *second* valid `admit` disposition, and overwrites
+    `satisfied_by` -- silent duplication that neither check_triage nor
+    check_catalogue detects, since neither checks "at most one admitted
+    candidate per projection_id". The caller most likely to hit this is a
+    human at gate 0 retrying a command whose first outcome they were unsure
+    about, so the fix is a UsageError naming what already happened, not a
+    finding: nothing in the run is defective, the caller is repeating a
+    completed action.
+    """
+    run = _run_with_projection(tmp_path)
+    assert triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path)) == []
+    before_catalogue = run.catalogue.read_bytes()
+    before_triage = run.triage.read_bytes()
+
+    with pytest.raises(UsageError, match="prj-tools"):
+        triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path))
+
+    # Neither artifact changed -- not just "no second candidate", the whole
+    # byte image, so a second write that happened to be idempotent in content
+    # would still be caught.
+    assert run.catalogue.read_bytes() == before_catalogue
+    assert run.triage.read_bytes() == before_triage
+
+
+def test_a_projection_missing_its_acceptance_object_is_a_finding_not_a_traceback(tmp_path):
+    """projection["acceptance"] used to be a bare index -- on an unvalidated
+    triage record (hand-edited, or a future rb-triage bug) that raises
+    KeyError, and cli.py's adopt-projection dispatch block catches only
+    (UsageError, ArtifactError, OSError), so the KeyError would escape
+    main() as a traceback: an empty-stdout exit, exactly what the exit-code
+    contract's "a 1 must never have empty stdout" rule forbids. A malformed
+    triage record is a repairable stage defect, and this function already
+    returns findings for check_acceptance's four checks, so a missing
+    acceptance object becomes one too, naming the record it actually lives
+    in -- never the source file, which is not what is malformed here.
+    """
+    run = _run_with_projection(tmp_path)
+    record = read_json(run.triage)
+    del record["projections"][0]["acceptance"]
+    write_json(run.triage, record)
+
+    findings = triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path))
+
+    assert len(findings) == 1
+    assert findings[0].artifact == run.triage
+    assert "acceptance" in findings[0].message
+    assert "acceptance" in findings[0].pointer
+    assert read_json(run.catalogue) == _catalogue(run.root.name, NOW)
+
+
+def test_a_catalogue_missing_digest_body_chars_is_a_finding_not_a_traceback(tmp_path):
+    """catalogue["policy"]["digest_body_chars"] used to be a bare index too --
+    same failure shape, same fix, this time against the catalogue rather than
+    the triage record, since that is where policy.digest_body_chars lives.
+    """
+    run = _run_with_projection(tmp_path)
+    catalogue = read_json(run.catalogue)
+    del catalogue["policy"]["digest_body_chars"]
+    write_json(run.catalogue, catalogue)
+
+    findings = triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path))
+
+    assert len(findings) == 1
+    assert findings[0].artifact == run.catalogue
+    assert "digest_body_chars" in findings[0].message
+    assert "digest_body_chars" in findings[0].pointer
+    assert read_json(run.triage) == _triage_record(run.root.name)
+
+
 def test_structural_acceptance_never_claims_the_file_is_accepted(tmp_path):
     """Whether result_shape truly describes what a caller receives is semantic,
     and the rule against inventing a mechanical check for support applies here as

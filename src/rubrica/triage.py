@@ -133,10 +133,11 @@ def adopt_projection(
     repairable stage defect. `check_only` short-circuits the same way on a
     clean pass: nothing is ever written when it is set, findings or not.
 
-    Only a missing run artifact, an unreadable source file, or a
-    `projection_id` this run's triage record does not carry is a UsageError --
-    nothing in the run is defective in that last case, the caller named
-    something that does not exist.
+    Only a missing run artifact, an unreadable source file, a `projection_id`
+    this run's triage record does not carry, or a `projection_id` already
+    `satisfied_by` an earlier call is a UsageError -- nothing in the run is
+    defective in any of those cases, the caller is either naming something
+    that does not exist or repeating a completed action.
     """
     source = Path(source)
     if not source.is_file():
@@ -150,17 +151,67 @@ def adopt_projection(
 
     triage_record = read_json(run.triage)
     projections = triage_record.get("projections") or []
-    projection = next(
-        (p for p in projections if isinstance(p, dict) and p.get("projection_id") == projection_id),
-        None,
-    )
+    # enumerate rather than next() over a bare generator: a real index lets
+    # the acceptance-missing finding below point at exactly the projection
+    # that is malformed, not "somewhere in /projections".
+    projection = None
+    projection_index = None
+    for index, candidate_projection in enumerate(projections):
+        if (
+            isinstance(candidate_projection, dict)
+            and candidate_projection.get("projection_id") == projection_id
+        ):
+            projection = candidate_projection
+            projection_index = index
+            break
     if projection is None:
         raise UsageError(
             f"no projection {projection_id!r} in {run.triage}; nothing in the run is "
             "defective, the caller named something that does not exist"
         )
 
-    findings = check_acceptance(source, projection["acceptance"])
+    # Idempotency: a second call for a projection already satisfied is not a
+    # repeat of the same admission -- check_acceptance would still pass (the
+    # file has not changed) and everything below would mint a *second*
+    # candidate, append a *second* valid `admit` disposition, and overwrite
+    # `satisfied_by`. Neither check_triage nor check_catalogue checks "at
+    # most one admitted candidate per projection_id", so that duplication
+    # passes check_all cleanly -- two real catalogue candidates from one
+    # projection, silently feeding two identical inputs into extract. The
+    # caller most likely to hit this is a human at gate 0 retrying a command
+    # whose first outcome they were unsure about, so this is a UsageError
+    # naming what already happened, not a finding: nothing in the run is
+    # defective, the caller is repeating a completed action.
+    already_satisfied_by = projection.get("satisfied_by")
+    if already_satisfied_by:
+        raise UsageError(
+            f"projection {projection_id!r} is already satisfied by candidate "
+            f"{already_satisfied_by!r}; adopt-projection does not re-admit an "
+            "already-satisfied projection"
+        )
+
+    # projection["acceptance"] would raise KeyError on an unvalidated triage
+    # record -- and because adopt-projection's cli.py dispatch block catches
+    # only (UsageError, ArtifactError, OSError), an uncaught KeyError would
+    # escape main() entirely as a traceback: an empty-stdout exit under a
+    # code path the exit-code contract's "1 must never have empty stdout"
+    # rule exists to forbid. A malformed triage record is a repairable stage
+    # defect, and this function already returns findings, so it becomes one
+    # naming the record -- never a run.catalogue or 05-verdicts pointer,
+    # since 00-triage.json is where the defect actually lives.
+    acceptance = projection.get("acceptance")
+    if not isinstance(acceptance, dict):
+        return [
+            Finding(
+                run.triage,
+                "internal",
+                f"/projections/{projection_index}/acceptance",
+                f"projection {projection_id!r} has no acceptance object; adopt-projection "
+                "cannot judge structural acceptance without it",
+            )
+        ]
+
+    findings = check_acceptance(source, acceptance)
     if findings:
         return findings
     if check_only:
@@ -183,7 +234,23 @@ def adopt_projection(
     # human at gate 0 (gate-brief renders it) and a re-dispatched rb-triage,
     # which would be obliged to decline the very file a human just admitted,
     # via its digest_insufficient refusal path.
-    digest_body_chars = catalogue["policy"]["digest_body_chars"]
+    #
+    # catalogue["policy"]["digest_body_chars"] would raise KeyError on an
+    # unvalidated catalogue, for the same escapes-main()-as-a-traceback
+    # reason the acceptance guard above exists -- so this is a Finding
+    # against run.catalogue too, not a bare index.
+    policy = catalogue.get("policy")
+    digest_body_chars = policy.get("digest_body_chars") if isinstance(policy, dict) else None
+    if not isinstance(digest_body_chars, int):
+        return [
+            Finding(
+                run.catalogue,
+                "internal",
+                "/policy/digest_body_chars",
+                "digest_body_chars is missing or not an integer; adopt-projection cannot "
+                "digest the adopted candidate without it",
+            )
+        ]
     candidate_digest = digest_module.digest_for_path(source, kind, body_chars=digest_body_chars)
     source_candidate_ids = [
         s["candidate_id"] for s in projection.get("sources") or [] if isinstance(s, dict)

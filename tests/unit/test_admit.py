@@ -241,6 +241,32 @@ def test_intake_run_via_the_cli_reports_findings_at_exit_one(tmp_path, capsys):
     assert not run.manifest.exists()
 
 
+def test_a_catalogue_missing_corpus_roots_is_a_finding_not_a_traceback(tmp_path):
+    """catalogue["request"]["corpus_roots"] used to be a bare index -- on an
+    unvalidated catalogue (hand-edited, or written by a future producer that
+    gets it wrong) that raises KeyError, and cli.py's adopt-projection/intake
+    dispatch blocks catch only (UsageError, ArtifactError, OSError), so the
+    KeyError would escape main() as a traceback: an empty-stdout exit,
+    exactly what the exit-code contract's "a 1 must never have empty stdout"
+    rule forbids. A malformed catalogue is a repairable stage defect, and
+    this function already returns findings for one shape of that (see the
+    unknown-admitted-candidate test elsewhere in this file), so a missing
+    corpus_roots becomes one too, rather than raising.
+    """
+    run = _surveyed_and_triaged(tmp_path)
+    catalogue = read_json(run.catalogue)
+    del catalogue["request"]["corpus_roots"]
+    write_json(run.catalogue, catalogue)
+
+    findings = intake.admit_from_triage(run)
+
+    assert len(findings) == 1
+    assert findings[0].artifact == run.catalogue
+    assert "corpus_roots" in findings[0].message
+    assert not run.inputs_dir.exists()
+    assert not run.manifest.exists()
+
+
 def test_admission_is_retryable_once_a_disappeared_source_file_returns(tmp_path):
     """A source file can vanish between survey and intake -- deleted, moved,
     whatever -- and materialise raises OSError partway through the admit loop,

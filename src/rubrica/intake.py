@@ -430,7 +430,27 @@ def admit_from_triage(run: RunPaths) -> list[Finding]:
 
     admitted = [candidates[d["candidate_id"]] for d in admits]
 
-    roots = catalogue["request"]["corpus_roots"]
+    # catalogue["request"]["corpus_roots"] would raise KeyError on an
+    # unvalidated catalogue -- the same "does not itself assume layer 1 has
+    # already run" reasoning as the unknown-candidate check above, and for
+    # the same consequence: an uncaught KeyError here would escape main()'s
+    # narrow (UsageError, ArtifactError, OSError) catch as a traceback,
+    # exactly the empty-stdout-exit-1 shape the exit-code contract forbids.
+    # A malformed catalogue is a repairable stage defect, and this function
+    # already returns findings for one (see above), so this becomes one
+    # too -- against run.catalogue, where the defect actually lives.
+    request = catalogue.get("request")
+    roots = request.get("corpus_roots") if isinstance(request, dict) else None
+    if not isinstance(roots, list) or not roots:
+        return [
+            Finding(
+                run.catalogue,
+                "internal",
+                "/request/corpus_roots",
+                "corpus_roots is missing, empty, or not a list; intake --run cannot resolve "
+                "which corpus root each admitted candidate came from",
+            )
+        ]
     run.inputs_dir.mkdir(parents=True)
     try:
         entries = []
