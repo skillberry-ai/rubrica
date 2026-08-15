@@ -119,10 +119,11 @@ the rest of the run. Every element carries a `claims` array of the claim ids
 that support it.
 
 **No representation for a field's value domain.** `capability.params` and
-`entity.fields` carry only `name`/`type`(`/required`), with
-`additionalProperties: false` — there is nowhere in this schema to record
-that a field's value must be, say, one of three enumerated strings. So every
-concrete value anywhere downstream of `reconcile` is a prescription
+`entity.fields` carry only a name and a type, with `additionalProperties:
+false` on both — a param must additionally state whether it is `required`,
+and a field cannot state that at all — and neither has anywhere in the schema
+to record that a field's value must be, say, one of three enumerated strings.
+So every concrete value anywhere downstream of `reconcile` is a prescription
 `rb-instantiate` invents, never an assertion grounded in a claim. See
 [`docs/design/limitations.md`](../design/limitations.md) for what this rules
 out checking.

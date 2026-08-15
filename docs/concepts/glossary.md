@@ -167,8 +167,9 @@ arrays — because a seed's real shape comes from the world model's entities,
 which `refs.py` checks it against (`src/rubrica/schema/seed-0.1.json`).
 Every seed value is synthetic by construction: the world model has no
 representation for a field's *value domain* — `capability.params` and
-`entity.fields` carry only `name`/`type`(`/required`), with
-`additionalProperties: false`
+`entity.fields` carry only a name and a type, with `additionalProperties:
+false` on both — a param must additionally state whether it is `required`,
+and a field cannot state that at all
 (`src/rubrica/schema/world-model-0.1.json`) — so a concrete value anywhere
 downstream of reconcile is a prescription to `rb-instantiate`, never an
 assertion about the target system. See `docs/design/limitations.md` for the
