@@ -32,6 +32,7 @@ def _catalogue(**over):
             "explode_min_common_keys": 3,
             "digest_body_chars": 2000,
             "max_candidates": 500,
+            "max_catalogue_bytes": 1_048_576,
         },
         "candidates": [
             {

@@ -51,7 +51,7 @@
       "type": "object",
       "required": ["exclusion_reasons", "explode_min_elements",
                    "explode_min_common_keys", "digest_body_chars",
-                   "max_candidates"],
+                   "max_candidates", "max_catalogue_bytes"],
       "additionalProperties": false,
       "properties": {
         "exclusion_reasons": {
@@ -63,6 +63,7 @@
         "explode_min_common_keys": {"type": "integer", "minimum": 1},
         "digest_body_chars": {"type": "integer", "minimum": 1},
         "max_candidates": {"type": "integer", "minimum": 1},
+        "max_catalogue_bytes": {"type": "integer", "minimum": 1},
         "operator_globs": {"type": "array", "items": {"type": "string"}}
       }
     },

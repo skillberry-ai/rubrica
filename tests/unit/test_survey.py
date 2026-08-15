@@ -130,6 +130,30 @@ def test_too_many_candidates_is_a_usage_error_not_a_finding(tmp_path):
         _survey(tmp_path, corpus_roots=[_corpus(tmp_path, traces=40)], max_candidates=10)
 
 
+def test_the_default_catalogue_is_comfortably_under_budget(tmp_path):
+    """A small corpus writes normally under the default budget -- the common
+    case Fix 2 must not disturb."""
+    catalogue = read_json(_survey(tmp_path).catalogue)
+    assert catalogue["policy"]["max_catalogue_bytes"] == survey.DEFAULT_MAX_CATALOGUE_BYTES
+
+
+def test_a_catalogue_over_the_byte_budget_is_a_usage_error_not_a_finding(tmp_path):
+    """--max-candidates is a count guard, but the parsec corpus produced 351
+    candidates (under that cap) and a 476KB catalogue -- bytes, not count, is
+    what fills a dispatched model's context window. Same exit-2 shape as the
+    count guard: narrowing --corpus/--exclude is the only fix, and no repair
+    prompt can shrink a corpus, so this is UsageError, never a Finding.
+
+    Also proves the ordering the count guard already holds: validate before
+    run.root.mkdir(), so a rejected run leaves no trace on disk for a human or
+    orchestrator to puzzle over.
+    """
+    runs_dir = tmp_path / "runs"
+    with pytest.raises(UsageError, match=r"catalogue.*bytes.*max_catalogue_bytes=64"):
+        _survey(tmp_path, runs_dir=runs_dir, max_catalogue_bytes=64)
+    assert not runs_dir.exists()
+
+
 def test_a_naive_datetime_is_refused(tmp_path):
     """Same rule intake already holds: .astimezone() would assume the host zone,
     so two hosts would mint two different run ids for the same call."""

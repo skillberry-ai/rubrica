@@ -124,6 +124,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_survey.add_argument("--max-rounds", type=int, default=2)
     p_survey.add_argument("--max-scenarios", type=int, default=128)
     p_survey.add_argument("--max-candidates", type=int, default=survey.DEFAULT_MAX_CANDIDATES)
+    p_survey.add_argument(
+        "--max-catalogue-bytes", type=int, default=survey.DEFAULT_MAX_CATALOGUE_BYTES
+    )
 
     p_intake = parsers["intake"]
     p_intake.add_argument("--input", action="append", required=True, metavar="PATH")
@@ -267,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_rounds=args.max_rounds,
                 max_scenarios=args.max_scenarios,
                 max_candidates=args.max_candidates,
+                max_catalogue_bytes=args.max_catalogue_bytes,
             )
         except (UsageError, ArtifactError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)

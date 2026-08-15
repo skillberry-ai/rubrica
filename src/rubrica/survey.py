@@ -48,6 +48,11 @@ EXCLUSION_REASONS: tuple[str, ...] = (
 )
 
 DEFAULT_MAX_CANDIDATES = 500
+# 1MiB, chosen with headroom above the 476KB the parsec corpus's catalogue
+# measured at (351 candidates, well under DEFAULT_MAX_CANDIDATES) -- not to
+# bind on the corpus we have, but because --max-candidates is a count guard
+# and bytes are what actually fill a dispatched model's context window.
+DEFAULT_MAX_CATALOGUE_BYTES = 1_048_576
 DEFAULT_DIGEST_BODY_CHARS = 2000
 # Three, not two: exploding a two-element config array produces two candidates
 # nobody wanted, while the shape this exists for -- a capture of many
@@ -289,6 +294,7 @@ def survey(
     max_rounds: int,
     max_scenarios: int,
     max_candidates: int = DEFAULT_MAX_CANDIDATES,
+    max_catalogue_bytes: int = DEFAULT_MAX_CATALOGUE_BYTES,
     digest_body_chars: int = DEFAULT_DIGEST_BODY_CHARS,
     now: datetime | None = None,
 ) -> RunPaths:
@@ -297,7 +303,11 @@ def survey(
     Argument validation happens before the directory is created, for the reason
     intake.intake's own docstring gives: minting a run from a parameter set the
     manifest schema will later reject exits 0 and surfaces steps later as
-    findings against an artifact no repair prompt can fix.
+    findings against an artifact no repair prompt can fix. The catalogue's
+    serialised byte size is measured and checked against max_catalogue_bytes
+    for the same reason, and before the same mkdir: a catalogue too large for
+    one triage dispatch's context is exactly as unrepairable as too many
+    candidates, so it gets the same exit-2 treatment at the same point.
     """
     if not corpus_roots:
         raise UsageError("survey needs at least one --corpus root")
@@ -310,6 +320,7 @@ def survey(
         ("--max-rounds", max_rounds),
         ("--max-scenarios", max_scenarios),
         ("--max-candidates", max_candidates),
+        ("--max-catalogue-bytes", max_catalogue_bytes),
     ):
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             raise UsageError(f"survey needs {label} to be an integer >= 1, got {value!r}")
@@ -396,10 +407,7 @@ def survey(
             "triage dispatch's context"
         )
 
-    run = RunPaths(Path(runs_dir) / f"run-{stamp:%Y%m%d-%H%M%S}")
-    if run.root.exists():
-        raise FileExistsError(f"run directory already exists: {run.root}")
-    run.root.mkdir(parents=True)
+    run_id = f"run-{stamp:%Y%m%d-%H%M%S}"
 
     request = {
         "target": {"name": target_name.strip(), "interface": target_interface.strip()},
@@ -412,23 +420,41 @@ def survey(
     if scope_note:
         request["scope_note"] = scope_note
 
-    write_json(
-        run.catalogue,
-        {
-            "schema_version": "0.1",
-            "run_id": run.root.name,
-            "created_utc": utc_stamp(stamp),
-            "request": request,
-            "policy": {
-                "exclusion_reasons": list(EXCLUSION_REASONS),
-                "explode_min_elements": EXPLODE_MIN_ELEMENTS,
-                "explode_min_common_keys": EXPLODE_MIN_COMMON_KEYS,
-                "digest_body_chars": digest_body_chars,
-                "max_candidates": max_candidates,
-                "operator_globs": list(operator_globs),
-            },
-            "candidates": candidates,
-            "excluded": excluded,
+    payload = {
+        "schema_version": "0.1",
+        "run_id": run_id,
+        "created_utc": utc_stamp(stamp),
+        "request": request,
+        "policy": {
+            "exclusion_reasons": list(EXCLUSION_REASONS),
+            "explode_min_elements": EXPLODE_MIN_ELEMENTS,
+            "explode_min_common_keys": EXPLODE_MIN_COMMON_KEYS,
+            "digest_body_chars": digest_body_chars,
+            "max_candidates": max_candidates,
+            "max_catalogue_bytes": max_catalogue_bytes,
+            "operator_globs": list(operator_globs),
         },
-    )
+        "candidates": candidates,
+        "excluded": excluded,
+    }
+
+    # Measured before mkdir, same ordering as the max_candidates check above:
+    # a catalogue this large does not fit one triage dispatch's context, and
+    # narrowing --corpus/--exclude is the only fix -- no repair prompt can
+    # shrink a corpus, so a rejected run must leave no directory behind for a
+    # human or orchestrator to puzzle over.
+    measured = len(canonical_bytes(payload))
+    if measured > max_catalogue_bytes:
+        raise UsageError(
+            f"catalogue would be {measured} bytes, over max_catalogue_bytes={max_catalogue_bytes}; "
+            "narrow --corpus or raise the cap -- a catalogue this large does not fit one "
+            "triage dispatch's context"
+        )
+
+    run = RunPaths(Path(runs_dir) / run_id)
+    if run.root.exists():
+        raise FileExistsError(f"run directory already exists: {run.root}")
+    run.root.mkdir(parents=True)
+
+    write_json(run.catalogue, payload)
     return run
