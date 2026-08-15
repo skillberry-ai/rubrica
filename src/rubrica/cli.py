@@ -60,7 +60,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from rubrica import refs, skills, survey, triage
+from rubrica import brief, refs, skills, survey, triage
 from rubrica.artifacts import ArtifactError, read_json
 from rubrica.dedupe import candidate_pairs
 from rubrica.emit import emit_run
@@ -101,6 +101,7 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("record-stage", "record a stage's model, effort, and skill hash in the manifest"),
     ("decide", "append one orchestrator decision to the run's decisions.md"),
     ("claim-utilisation", "per-artifact share of claims the world model cites"),
+    ("gate-brief", "compose the existing reports into the human surface at one gate"),
 )
 
 
@@ -213,6 +214,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_utilisation = parsers["claim-utilisation"]
     p_utilisation.add_argument("--run", required=True)
+
+    p_brief = parsers["gate-brief"]
+    p_brief.add_argument("--run", required=True)
+    p_brief.add_argument("--gate", required=True, type=int, choices=[0, 1, 2, 3])
     return parser
 
 
@@ -488,6 +493,16 @@ def main(argv: list[str] | None = None) -> int:
             # half lives in check-refs, so this command never returns 1 and an
             # orchestrator reading its exit code cannot mistake data for a defect.
             print(json.dumps(claim_utilisation(_run_dir(args.run)), indent=2, sort_keys=True))
+            return CLEAN
+
+        if args.command == "gate-brief":
+            # Same ruling as claim-utilisation just above, for the same reason:
+            # this composes existing reports rather than checking anything, so
+            # it is never the thing that turns a readable run into exit 1.
+            # --gate's argparse choices=[0,1,2,3] already reject anything else
+            # before this line is reached, on the same SystemExit(2) path every
+            # other bad argument takes.
+            print(brief.gate_brief(_run_dir(args.run), args.gate))
             return CLEAN
 
         if args.command == "diff-runs":
