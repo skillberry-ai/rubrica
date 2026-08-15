@@ -68,9 +68,13 @@ Something no input artifact says anything about, recorded by `rb-reconcile`
 with a `subject`, an `unknown`, `why_it_matters`, and a `blocks` list naming
 which later stages it prevents (`src/rubrica/schema/world-model-0.1.json`'s
 `gap` definition; the enum is `propose`, `score`, `instantiate`, `challenge`,
-`emit`, `smoke`). A gap naming `propose` in its `blocks` list is what makes
-`rb-score` compute a coverage verdict of `halted_no_progress` rather than
-letting the round loop spin forever on something no input can ever answer.
+`emit`, `smoke`). A gap that blocks nothing is informational; a gap naming
+`propose` in its `blocks` list is what makes the *orchestrator* halt and ask
+for the missing artifact, rather than letting the pipeline invent the missing
+knowledge and run on. A cell that cannot be covered because of a gap is
+separately recorded as a `blocked_by_gap` hole rather than `not_yet_attempted`
+— which is what lets `rb-score` reach `converged` instead of spending rounds
+on something no round can close.
 
 ## Harbor
 
