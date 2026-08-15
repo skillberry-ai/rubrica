@@ -52,11 +52,18 @@ def test_the_unsupported_objective_fixture_still_has_only_one_behavioural_candid
 
 def test_the_unsupported_objective_fixture_has_not_lost_its_other_candidates():
     """Over-subtraction check: it still has enough prose to make a real triage
-    pass possible, so the refusal is about the objective and not about emptiness."""
+    pass possible, so the refusal is about the objective and not about emptiness.
+
+    Also checks the prose itself survived: a content-blanking edit that kept
+    the candidate count (emptying digest.body_head on each one) would pass a
+    bare count check while leaving nothing for a real triage pass to read.
+    """
     catalogue = json.loads(
         (FIXTURES / "catalogue-unsupported-objective.json").read_text(encoding="utf-8")
     )
-    assert len([c for c in catalogue["candidates"] if c["kind"] == "design_doc"]) >= 3
+    design_docs = [c for c in catalogue["candidates"] if c["kind"] == "design_doc"]
+    assert len(design_docs) >= 3
+    assert all(c["digest"].get("body_head", "").strip() for c in design_docs)
 
 
 def test_the_all_declinable_fixture_scope_note_names_nothing_in_the_set():
@@ -65,3 +72,26 @@ def test_the_all_declinable_fixture_scope_note_names_nothing_in_the_set():
     assert catalogue["candidates"]
     for candidate in catalogue["candidates"]:
         assert candidate.get("path", "").lower() not in scope
+
+
+def test_the_all_declinable_fixture_still_has_enough_candidates_for_a_real_pass():
+    """Over-subtraction check, the sibling half missing before this fix: the
+    fixture must still have enough of a corpus for the refusal to mean
+    something. It ships 3 candidates; dropping to 1 or 2 would still clear
+    every assertion above (a single leftover candidate still has a path absent
+    from the scope note) while making the decline-everything refusal trivially
+    true instead of a real judgment about scope."""
+    catalogue = json.loads((FIXTURES / "catalogue-all-declinable.json").read_text(encoding="utf-8"))
+    assert len(catalogue["candidates"]) >= 3
+
+
+def test_the_all_declinable_fixture_still_spans_more_than_one_kind():
+    """The other half: the fixture must look like a plausible corpus, not a
+    degenerate one. It ships design_doc, mcp_tool_schema and trace; collapsing
+    to a single kind (e.g. deleting api-json and trace-json, keeping only
+    readme-md three times over) would still pass the candidate-count check
+    above and the scope-note check, while no longer resembling the kind of
+    mixed corpus a real triage pass would ever be handed."""
+    catalogue = json.loads((FIXTURES / "catalogue-all-declinable.json").read_text(encoding="utf-8"))
+    kinds = {c["kind"] for c in catalogue["candidates"]}
+    assert len(kinds) >= 2
