@@ -17,11 +17,13 @@ commit by commit, was still wrong by 299.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
 from rubrica import paths, skills
+from rubrica.cli import subcommand_names
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS = REPO_ROOT / "docs"
@@ -77,3 +79,28 @@ def test_every_skill_is_named_in_the_pipeline_document(skill):
     stages, plus the orchestrator -- so this cannot drift from the code even if
     someone adds a stage and forgets the skill directory."""
     assert skill in _read(PIPELINE), f"pipeline.md never names {skill}"
+
+
+# Every subcommand gets its own section, headed `rubrica <name>`. Parsed rather
+# than substring-matched because most subcommand names are ordinary words that
+# appear in prose anyway -- `validate`, `decide`, `emit`, `smoke` -- so a bare
+# `in text` check would pass on a document that merely mentions them.
+_CLI_SECTION = re.compile(r"^#{2,4}\s+`?rubrica\s+([a-z-]+)`?", re.MULTILINE)
+
+
+def _documented_subcommands() -> set[str]:
+    return set(_CLI_SECTION.findall(_read(CLI_REF)))
+
+
+@pytest.mark.parametrize("name", sorted(subcommand_names()))
+def test_every_subcommand_has_its_own_section(name):
+    assert name in _documented_subcommands(), (
+        f"docs/reference/cli.md has no `rubrica {name}` section"
+    )
+
+
+def test_no_section_documents_a_subcommand_that_does_not_exist():
+    """The other direction: a section for a command that was renamed or removed
+    is a worse defect than a missing one, because it reads as current."""
+    stale = _documented_subcommands() - set(subcommand_names())
+    assert not stale, f"cli.md documents commands cli.SUBCOMMANDS does not define: {sorted(stale)}"
