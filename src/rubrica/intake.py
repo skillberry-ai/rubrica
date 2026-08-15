@@ -432,19 +432,36 @@ def admit_from_triage(run: RunPaths) -> list[Finding]:
 
     roots = catalogue["request"]["corpus_roots"]
     run.inputs_dir.mkdir(parents=True)
-    entries = []
-    used: dict[str, int] = {}
-    for candidate in admitted:
-        artifact_id = _unique_artifact_id(candidate["candidate_id"], used)
-        # A multi-root survey assigns root_index per corpus root (survey.py's
-        # own per-root walk_corpus loop), so each admitted candidate resolves
-        # against *its own* root rather than corpus_roots[0] -- defaulting to
-        # 0 only for a candidate that predates root_index (there are none in
-        # this build, but the field is optional in the schema).
-        source_root = Path(roots[candidate.get("root_index", 0)])
-        entries.append(
-            materialise(run, candidate=candidate, source_root=source_root, artifact_id=artifact_id)
-        )
+    try:
+        entries = []
+        used: dict[str, int] = {}
+        for candidate in admitted:
+            artifact_id = _unique_artifact_id(candidate["candidate_id"], used)
+            # A multi-root survey assigns root_index per corpus root (survey.py's
+            # own per-root walk_corpus loop), so each admitted candidate resolves
+            # against *its own* root rather than corpus_roots[0] -- defaulting to
+            # 0 only for a candidate that predates root_index (there are none in
+            # this build, but the field is optional in the schema).
+            source_root = Path(roots[candidate.get("root_index", 0)])
+            entries.append(
+                materialise(
+                    run, candidate=candidate, source_root=source_root, artifact_id=artifact_id
+                )
+            )
+    except Exception:
+        # A source file can vanish between survey and intake -- deleted,
+        # moved, permissions changed -- and materialise raises partway
+        # through the loop, having already copied some candidates in. Left
+        # alone, that leaves 00-inputs/ half-populated with no manifest, and
+        # a retry's mkdir above hits FileExistsError forever: the run is
+        # stuck, not repairable. Removing what this call created returns the
+        # run to its pre-admission state, so the same call can simply be
+        # made again once the missing file is back -- unlike register()
+        # below, which either writes a complete manifest or (per
+        # artifacts.write_json's tempfile-then-replace) does not write one
+        # at all, so it needs no equivalent cleanup here.
+        shutil.rmtree(run.inputs_dir, ignore_errors=True)
+        raise
 
     request = catalogue["request"]
     register(

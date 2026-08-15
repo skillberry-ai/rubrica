@@ -10,6 +10,7 @@ check_triage requires one disposition per candidate.
 
 from __future__ import annotations
 
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -238,3 +239,50 @@ def test_intake_run_via_the_cli_reports_findings_at_exit_one(tmp_path, capsys):
     assert code == 1
     assert captured.out.strip()
     assert not run.manifest.exists()
+
+
+def test_admission_is_retryable_once_a_disappeared_source_file_returns(tmp_path):
+    """A source file can vanish between survey and intake -- deleted, moved,
+    whatever -- and materialise raises OSError partway through the admit loop,
+    having already copied readme-md's alphabetical predecessors
+    (capture-json-0, capture-json-1) into 00-inputs/ first. Before the fix,
+    that left 00-inputs/ half-populated with no manifest, and every retry hit
+    FileExistsError on run.inputs_dir.mkdir forever -- permanently stuck. The
+    run must come back to its pre-admission state instead, so this same call
+    can simply be made again once the file is restored. That second call
+    succeeding is the point of this test, not the directory-is-gone cleanup
+    on its own.
+    """
+    # A copy, not FIXTURE itself: this test deletes one of the corpus files,
+    # and tests/fixtures/corpus-toy/ is a checked-in fixture other tests in
+    # this module (and test_survey_fixture.py) read from the same session.
+    corpus = tmp_path / "corpus-copy"
+    shutil.copytree(FIXTURE, corpus)
+    run = survey.survey(
+        corpus_roots=[corpus],
+        runs_dir=tmp_path / "runs",
+        target_name="ticketq",
+        target_interface="mcp",
+        objective="breadth",
+        max_rounds=2,
+        max_scenarios=128,
+        now=NOW,
+    )
+    write_json(
+        run.triage,
+        _triage_record(run.root.name, drop_a_disposition=False, decline_everything=False),
+    )
+
+    readme = corpus / "README.md"
+    original = readme.read_bytes()
+    readme.unlink()
+
+    with pytest.raises(OSError):
+        intake.admit_from_triage(run)
+    assert not run.inputs_dir.exists()
+    assert not run.manifest.exists()
+
+    readme.write_bytes(original)
+    assert intake.admit_from_triage(run) == []
+    manifest = read_json(run.manifest)
+    assert {e["artifact_id"] for e in manifest["inputs"]} == set(_ADMITTED)
