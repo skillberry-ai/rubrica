@@ -17,18 +17,25 @@ jobs:
           python-version: "3.13"
 
       - name: Install
-        run: uv pip install --system -e '.[dev]'
+        run: uv sync --extra dev
 
-      # The three gates, in the order CONTRIBUTING.md names them. The live-dispatch
-      # test suite is deliberately excluded here: it dispatches a model, so it
-      # needs credentials and would cost money on every push.
+      # `uv sync --extra dev` provisions this project's own environment,
+      # including the `dev` extra (ruff, pytest) -- there is no lockfile
+      # committed, so this is a real sync, not a no-op. Every gate below
+      # passes `--extra dev` again on the `uv run` that invokes it: a bare
+      # `uv run` re-syncs to just the base dependencies before running,
+      # silently dropping ruff/pytest from that invocation's environment.
+      # The three gates run in the order CONTRIBUTING.md names them. The
+      # live-dispatch test suite is deliberately excluded here: it
+      # dispatches a model, so it needs credentials and would cost money on
+      # every push.
       - name: Lint and format
         run: |
-          uv run ruff check .
-          uv run ruff format --check .
+          uv run --extra dev ruff check .
+          uv run --extra dev ruff format --check .
 
       - name: Tests
-        run: uv run pytest -q
+        run: uv run --extra dev pytest -q
 
       - name: Skill contracts
-        run: uv run rubrica check-skills
+        run: uv run --extra dev rubrica check-skills
