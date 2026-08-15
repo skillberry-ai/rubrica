@@ -166,12 +166,19 @@ def test_the_method_section_says_structural_acceptance_is_not_sufficient():
     """Weakened from a single phrase pin ("never sufficient" / "not
     sufficient") after measuring it break on a meaning-preserving reword:
     "necessary but insufficient on their own" says the same thing and failed
-    both alternatives. "insufficient" alone survives that rewording and any
-    similar one, at the cost of also matching a sentence that used the word
-    for something else -- accepted per the brief's rule to weaken to the
-    concept rather than delete the test."""
+    both alternatives.
+
+    A bare "insufficient" alternative was tried and then dropped before it ever
+    shipped: it does survive that rewording, but `digest_insufficient` is a
+    schema enum value discussed elsewhere in this same skill for an unrelated
+    reason (section 5's refusal condition about one bad digest), and nothing
+    stops Method prose from someday naming it too. A latent phrase-pin
+    collision -- not one that fires today, but one where a future, unrelated
+    edit to this section would make the assertion pass for the wrong reason,
+    vacuously, with nobody noticing. Kept to the two phrasings actually
+    measured to carry the claim."""
     body = _norm(skills.section_body(_skill(), "3. Method"))
-    assert "never sufficient" in body or "not sufficient" in body or "insufficient" in body
+    assert "never sufficient" in body or "not sufficient" in body
 
 
 def test_the_invariants_section_requires_one_disposition_per_candidate():
