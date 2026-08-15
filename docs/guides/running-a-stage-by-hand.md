@@ -2,11 +2,10 @@
 
 This is the runbook for exercising one skill for real: dispatching a fresh
 subagent with a `SKILL.md` and a run directory, then checking what it did. It
-is followed by two readers — the controller, after each of Tasks 7–13's skill
-implementations passes review, and a human debugging a stage that misbehaved
-in a real run. Both need it to work by copy-paste, not by paraphrase, so every
-command below has been run against this repository's toy fixture before this
-file was committed.
+has two readers: someone exercising a skill they have just changed, and
+someone debugging a stage that misbehaved in a real run. Both need it to work
+by copy-paste, not by paraphrase, so every command below has been run against
+this repository's toy fixture before this file was committed.
 
 These runs dispatch a model. They cost money, they are not deterministic, and
 they need credentials — which is why they live behind the `live` pytest marker
@@ -80,8 +79,8 @@ to is always the stage *before* the one you are exercising:
 
 `rb-orchestrate` is not in this table: it is not a stage, it dispatches them.
 Its live exercise is a whole-pipeline run starting from an `upto="intake"`
-run, not a single-stage check against one checkpoint — see Task 13's
-`exercise.md` for its pass criteria.
+run, not a single-stage check against one checkpoint — see
+`src/rubrica/skills/rb-orchestrate/exercise.md` for its pass criteria.
 
 `rb-triage` is not in this table either, for a different reason: `paths.STAGES`
 puts it *before* `intake`, and `build_toy_run` mints its run via a real
@@ -186,21 +185,10 @@ until you run the command.
 
 `record-stage --skill` needs a real file to hash and hard-fails
 (`UsageError: skill file does not exist`) if it is not there. Every
-`src/rubrica/skills/rb-<stage>/SKILL.md` above exists starting with the task
-that writes it (Tasks 7–13); until then, this command's shape can be proven
-against any throwaway file:
-
-```bash
-printf '## Contract\n\n```toml\nstage = "extract"\n```\n' > /tmp/throwaway-SKILL.md
-uv run rubrica record-stage --run "$RUN" --stage extract \
-  --model claude-test --effort low --skill /tmp/throwaway-SKILL.md
-```
-
-This was run against the toy fixture while writing this file and exits 0,
-merging a `stages.extract` entry into the manifest. Once a skill's real
-`SKILL.md` exists, point `--skill` at it instead — `record-stage` hashes
-whatever file it is given, so the recorded digest is only meaningful when it
-names the file that was actually used.
+`src/rubrica/skills/rb-<stage>/SKILL.md` above exists in this repository, so
+each path resolves as written. `record-stage` hashes whatever file it is
+given, so the recorded digest is only meaningful when it names the file that
+was actually used.
 
 ## 5. Reading a failure
 
@@ -232,9 +220,10 @@ not Minor, if it happens.
 
 ```bash
 uv run pytest --markers | grep live      # confirm the marker is registered
-uv run pytest -m live -q                 # today: deselected, exit 5 -- no test is
-                                          # live-marked yet (Task 14 adds the first).
-                                          # once one exists: skipped by default.
+uv run pytest -m live -q                 # skipped by default; run under RUBRICA_LIVE=1
+                                          # (or `make live`). They assert against committed
+                                          # recordings, so running them is free -- producing
+                                          # a recording is what costs money.
 RUBRICA_LIVE=1 uv run pytest -m live -q  # opt in. "", "0", "false", "no" (any
                                           # case, surrounding whitespace ignored)
                                           # do NOT opt in -- everything else does.
@@ -245,7 +234,7 @@ including that those off-spellings stay off: a live test dispatches (and bills
 for) a model, so `RUBRICA_LIVE=0` must not be the thing that turns it on.
 The exercises above are run by hand, one skill at a time, following §§1–5 — they
 are not `-m live` pytest tests themselves, because a live exercise's pass
-criteria are read by a person (or the controller), not asserted by an
+criteria are read by a person, not asserted by an
 `assert` statement.
 
 ## 7. Dispatching into an isolated instance

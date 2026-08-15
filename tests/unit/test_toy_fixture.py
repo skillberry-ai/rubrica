@@ -291,12 +291,12 @@ def test_the_open_scenario_count_stays_within_the_manifest_cap():
     assert len(live) == 4
 
 
-# -- build_toy_run(upto=...): the checkpoint mechanism every live exercise in
-# Tasks 7-13 depends on, per docs/running-a-stage-by-hand.md's table. Nothing
-# exercised it before this file: Task 4's report deferred a test to Task 5,
-# Task 5 never picked it up (its own toy_run fixture calls build_toy_run with
-# no upto at all), and Task 6's report only checked that the *code* existed --
-# never that a test of it did. These four close that gap.
+# -- build_toy_run(upto=...): the checkpoint mechanism every per-stage hand
+# exercise depends on, per docs/guides/running-a-stage-by-hand.md's table.
+# Nothing exercised it before this file: Task 4's report deferred a test to
+# Task 5, Task 5 never picked it up (its own toy_run fixture calls
+# build_toy_run with no upto at all), and Task 6's report only checked that
+# the *code* existed -- never that a test of it did. These four close that gap.
 
 
 def test_upto_intake_writes_only_the_manifest_and_the_registered_inputs(tmp_path):
