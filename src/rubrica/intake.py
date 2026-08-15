@@ -11,16 +11,18 @@ to disagree in its claims.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
-from rubrica.artifacts import sha256_of, write_json
+from rubrica.artifacts import ArtifactError, canonical_bytes, read_json, sha256_of, write_json
 from rubrica.errors import UsageError
 from rubrica.manifest import utc_stamp
 from rubrica.paths import RunPaths, is_safe_segment, safe_segment
+from rubrica.refs import resolve_pointer
 
 _SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".go", ".rs", ".java", ".rb"}
 _DOC_SUFFIXES = {".md", ".rst", ".txt", ".adoc"}
@@ -99,6 +101,159 @@ def _unique_ids(inputs: list[Path]) -> list[str]:
     return ids
 
 
+def mint_run(runs_dir: Path, *, now: datetime | None = None) -> tuple[RunPaths, datetime]:
+    """Create the run directory and return it with its resolved UTC stamp.
+
+    Split out of intake() so `survey` can mint a run before anything is admitted.
+    The manifest is still written by register(), which is what keeps
+    manifest-0.1.json's inputs.minItems at 1: the manifest appears only when
+    there are inputs to name.
+
+    A naive datetime is refused rather than interpreted, for the reason intake()
+    already refused it: .astimezone() assumes the host zone, so the same call on
+    two machines would mint two different run ids.
+    """
+    if now is None:
+        stamp = datetime.now(UTC)
+    elif now.tzinfo is None:
+        raise UsageError("intake needs a timezone-aware datetime, got a naive one")
+    else:
+        stamp = now.astimezone(UTC)
+    run = RunPaths(Path(runs_dir) / f"run-{stamp:%Y%m%d-%H%M%S}")
+    if run.root.exists():
+        raise FileExistsError(f"run directory already exists: {run.root}")
+    run.root.mkdir(parents=True)
+    return run, stamp
+
+
+def register(
+    run: RunPaths,
+    *,
+    entries: list[dict],
+    target_name: str,
+    target_interface: str,
+    max_rounds: int,
+    max_scenarios: int,
+    created: datetime,
+) -> None:
+    """Write manifest.json from already-built input entries."""
+    write_json(
+        run.manifest,
+        {
+            "schema_version": "0.1",
+            "run_id": run.root.name,
+            "created_utc": utc_stamp(created),
+            "target": {"name": target_name, "interface": target_interface},
+            "inputs": entries,
+            "stages": {},
+            "limits": {"max_rounds": max_rounds, "max_scenarios": max_scenarios},
+        },
+    )
+
+
+def _container_path(candidate: dict, run: RunPaths) -> Path:
+    """The on-disk location of the container a container_element was exploded from.
+
+    Deliberately takes only `candidate` and `run`, not a `source_root`: the
+    container being resolved here is a *different* catalogue candidate from
+    the one materialise was called for, and that candidate carries its own
+    `root_index` into 00-catalogue.json's `request.corpus_roots` -- which need
+    not be the same root the caller resolved for the element being admitted.
+    survey.py's own per-root walk_corpus loop is exactly why: a multi-root
+    survey assigns root_index per root, so a container living under
+    corpus_roots[1] must resolve correctly even when the admitted element's own
+    materialise call was handed corpus_roots[0] as `source_root`. Joining
+    `source_root` with the container's path (as if the two candidates always
+    shared a root) would sometimes still resolve -- by accident, in the common
+    single-root case -- and sometimes silently read the wrong file, or none at
+    all. Resolving independently, against the catalogue's own record of the
+    container's root, is what keeps that failure from being silent.
+
+    check_catalogue already reports a container_element whose container
+    candidate_id does not resolve, so this raises ArtifactError rather than
+    duplicating that check with a second finding shape.
+    """
+    container_id = candidate["container"]["candidate_id"]
+    try:
+        catalogue = read_json(run.catalogue)
+    except ArtifactError as exc:
+        raise ArtifactError(f"cannot resolve container {container_id!r}: {exc}") from exc
+    for entry in catalogue.get("candidates", []):
+        if not isinstance(entry, dict) or entry.get("candidate_id") != container_id:
+            continue
+        path = entry.get("path")
+        if not path:
+            break
+        if Path(path).is_absolute():
+            return Path(path)
+        roots = catalogue.get("request", {}).get("corpus_roots", [])
+        root_index = entry.get("root_index")
+        if (
+            not isinstance(root_index, int)
+            or isinstance(root_index, bool)
+            or not (0 <= root_index < len(roots))
+        ):
+            break
+        return Path(roots[root_index]) / path
+    raise ArtifactError(
+        f"no such candidate {container_id!r} in {run.catalogue} to have been exploded from"
+    )
+
+
+def materialise(run: RunPaths, *, candidate: dict, source_root: Path, artifact_id: str) -> dict:
+    """Put one admitted candidate into 00-inputs/ and describe it for the manifest.
+
+    A corpus or projection candidate is copied byte for byte, from
+    `source_root / candidate["path"]` unless that path is already absolute --
+    a projection the human manufactured is not relative to anything survey
+    walked, and `Path(source_root) / "/abs/path"` returning the absolute path
+    unchanged is an accident of pathlib's `/` operator that this makes
+    explicit rather than relying on.
+
+    A container element is *written* from the container's parsed contents
+    through canonical_bytes -- the same function survey hashed it with, so the
+    sha256 recorded at survey time equals the digest refs.check_inputs will
+    re-hash. Two spellings of "the canonical form" would make every exploded
+    input report a mismatch.
+    """
+    origin = candidate.get("origin")
+    if origin == "container_element":
+        container_file = _container_path(candidate, run)
+        payload = json.loads(container_file.read_text(encoding="utf-8"))
+        element = resolve_pointer(payload, candidate["container"]["json_pointer"])
+        body = canonical_bytes(element)
+        stored_as = f"{artifact_id}.json"
+        (run.inputs_dir / stored_as).write_bytes(body)
+        return {
+            "artifact_id": artifact_id,
+            "source_path": f"{container_file}#{candidate['container']['json_pointer']}",
+            "stored_as": stored_as,
+            "sha256": hashlib.sha256(body).hexdigest(),
+            "kind": candidate["kind"],
+            "bytes": len(body),
+            "provenance": {
+                "container_sha256": sha256_of(container_file),
+                "json_pointer": candidate["container"]["json_pointer"],
+            },
+        }
+
+    raw_path = candidate["path"]
+    source = Path(raw_path) if Path(raw_path).is_absolute() else Path(source_root) / raw_path
+    stored_as = stored_name(artifact_id, source)
+    shutil.copy2(source, run.inputs_dir / stored_as)
+    entry = {
+        "artifact_id": artifact_id,
+        "source_path": str(source),
+        "stored_as": stored_as,
+        "sha256": sha256_of(source),
+        "kind": candidate["kind"],
+        "bytes": source.stat().st_size,
+    }
+    if origin == "projection":
+        entry["provenance"] = dict(candidate["provenance"])
+    return entry
+
+
 def intake(
     *,
     inputs: list[Path],
@@ -113,6 +268,11 @@ def intake(
 
     Returns the RunPaths for the new run. Refuses to touch an existing run
     directory: a re-run gets a new id so the old artifacts stay diffable.
+
+    A caller of mint_run() and register(), so its behaviour cannot drift from
+    theirs -- but every argument check below still runs *before* mint_run is
+    called, exactly where it ran before the split: a bad --target-name or
+    --max-rounds must mint nothing, not a run directory with no manifest.
     """
     if not inputs:
         raise UsageError("intake needs at least one input artifact")
@@ -141,22 +301,7 @@ def intake(
         if not path.is_file():
             raise FileNotFoundError(f"input artifact does not exist: {path}")
 
-    # A naive datetime is refused rather than interpreted: .astimezone() would
-    # assume the system local zone, so the same call on two hosts would mint
-    # two different run ids and created_utc values. Those are the two fields
-    # the design says must never come from a skill precisely because they must
-    # be stable, so guessing at the zone is worse than failing loudly.
-    if now is None:
-        stamp = datetime.now(UTC)
-    elif now.tzinfo is None:
-        raise UsageError("intake needs a timezone-aware datetime, got a naive one")
-    else:
-        stamp = now.astimezone(UTC)
-
-    run = RunPaths(Path(runs_dir) / f"run-{stamp:%Y%m%d-%H%M%S}")
-    if run.root.exists():
-        raise FileExistsError(f"run directory already exists: {run.root}")
-
+    run, stamp = mint_run(runs_dir, now=now)
     run.inputs_dir.mkdir(parents=True)
     entries = []
     for path, artifact_id in zip(inputs, _unique_ids(inputs), strict=True):
@@ -174,16 +319,13 @@ def intake(
             }
         )
 
-    write_json(
-        run.manifest,
-        {
-            "schema_version": "0.1",
-            "run_id": run.root.name,
-            "created_utc": utc_stamp(stamp),
-            "target": {"name": target_name, "interface": target_interface},
-            "inputs": entries,
-            "stages": {},
-            "limits": {"max_rounds": max_rounds, "max_scenarios": max_scenarios},
-        },
+    register(
+        run,
+        entries=entries,
+        target_name=target_name,
+        target_interface=target_interface,
+        max_rounds=max_rounds,
+        max_scenarios=max_scenarios,
+        created=stamp,
     )
     return run
