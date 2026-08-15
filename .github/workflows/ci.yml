@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: uv pip install --system -e '.[dev]'
+
+      # The three gates, in the order CONTRIBUTING.md names them. The live-dispatch
+      # test suite is deliberately excluded here: it dispatches a model, so it
+      # needs credentials and would cost money on every push.
+      - name: Lint and format
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Tests
+        run: uv run pytest -q
+
+      - name: Skill contracts
+        run: uv run rubrica check-skills

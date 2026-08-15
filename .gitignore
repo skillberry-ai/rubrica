@@ -4,6 +4,7 @@ runs/
 # Agent harness scratch: SDD ledgers, task briefs, review packages; worktrees
 .superpowers/
 .claude/worktrees/
+.claude/.cc-writes/
 
 # Python
 .venv/
