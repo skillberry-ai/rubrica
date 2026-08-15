@@ -98,7 +98,20 @@ that one file.
 
 ## 2. Output
 
-One file: `00-triage.json`, validating against `triage-0.1.json`.
+One file: `00-triage.json`, validating against `triage-0.1.json`. It carries
+`schema_version: "0.1"`, the `run_id` of the run you are working in (read it
+from `00-catalogue.json`'s `run_id` — never invent it, and never derive it from
+the directory name), and four blocks: `objective_review`, `dispositions`,
+`deficiencies`, and `projections`.
+
+**All four blocks are required at the document root, and an empty one is still
+written.** `triage-0.1.json` requires every one of them, so a record with
+nothing to report in the last two carries `"deficiencies": []` and
+`"projections": []` — omitting a block because it would be empty fails layer 1
+and costs the run a repair round for a record whose *judgment* was fine. An
+empty `deficiencies` is also a claim, not an absence: it says the admitted set
+covers everything the objective needs, which is a statement a human at gate 0
+will read as one.
 
 **`objective_review`** — the surfaces you found, and whether the objective you
 were given is supported by them.
@@ -128,12 +141,14 @@ once, including the ones you decline and the ones marked
 `admissible: false`.** A container is inadmissible because its elements are the
 real candidates; decline it, and say that is why.
 
-Every disposition also carries `authority: "triage"`. You are the only writer
-of this record, so every disposition you write carries that value; `"human"` is
-reserved for a gate-0 override that lands in a later run's record, never in one
-you produce. State the value rather than leaving it implicit — a reader of the
+Every disposition also carries `authority: "triage"`. You are the only writer of
+this record, so every disposition you write carries that value; `"human"` is
+what a gate-0 override carries — written by a person, or by `rubrica
+adopt-projection` when a manufactured projection is admitted. Both of those edit
+**this same record**, appending to the file you produced rather than starting a
+new run's. State the value rather than leaving it implicit — a reader of the
 finished record needs to tell which admissions this stage authored from which a
-human overrode at the gate, and `authority` is the only field that says so.
+human made at the gate, and `authority` is the only field that says so.
 
 An `admit` carries `reason` (prose) and a `priority` — an integer rank, 1 for
 the most valuable, expressing where you would spend the extraction budget first.

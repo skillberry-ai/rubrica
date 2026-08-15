@@ -4,6 +4,21 @@ Both directions, because tests/fixtures/toy-gap/ taught this lesson: an
 over-subtraction there once destroyed a capability fact while still passing
 every forbidden-substring check. So this file asserts what the fixture still
 contains as well as what survey does with it.
+
+**`tests/fixtures/corpus-toy/.hg/branch` is not a mistake, and `.git/HEAD` is
+not the fix.** git cannot track a path under `.git/`, so a *committed* fixture
+cannot spell its VCS directory that way at all — `.hg` is one of the three names
+in `survey._VCS_DIRS` and is the only one of them a checked-in fixture can use.
+A contributor "correcting" it would not get a failing test, they would get a
+fixture file git silently declines to add, and the `vcs_metadata` assertion
+below would then fail for a reason that looks nothing like its cause.
+`test_survey_walk.py` covers the `.git/HEAD` spelling instead, from a corpus it
+builds in `tmp_path` where nothing is committed and the name is free.
+
+The same asymmetry explains why `.gitignore` + `generated.txt` are here: the
+`gitignored` exclusion never fires on a real clean checkout, since the files a
+repository ignores are the ones a clone does not have. It has to be staged
+deliberately or it is never observed at all.
 """
 
 from __future__ import annotations

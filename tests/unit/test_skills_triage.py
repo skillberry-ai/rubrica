@@ -217,3 +217,60 @@ def test_the_refusal_section_forbids_refusing_over_one_bad_digest():
     body = _norm(skills.section_body(_skill(), "5. Refusal conditions"))
     assert "digest_insufficient" in body
     assert "three hundred" in body or "not a reason to abandon" in body
+
+
+def test_the_output_section_names_schema_version_and_the_run_id_it_reads():
+    """Every other stage skill states its `schema_version` (rb-extract,
+    rb-reconcile, rb-propose, rb-score, rb-challenge, rb-instantiate); rb-triage
+    named neither it nor `run_id`, and `triage-0.1.json` requires both at the
+    document root. Nothing pinned it, which is the same defect the task review
+    caught one level up for `authority`.
+
+    Scoped to section 2, which owns the output's shape -- `"schema_version" in
+    body` over the whole file is vacuous for every skill in this repo, since
+    `skills.load()` sets `body` to the entire file text. `0.1` is asserted
+    alongside the field name because naming the field without its value tells a
+    model nothing it can write.
+    """
+    body = _norm(skills.section_body(_skill(), "2. Output"))
+    assert "schema_version" in body
+    assert '"0.1"' in body
+    assert "run_id" in body
+    # And where to read it from: an invented run_id is exactly what
+    # intake.py's module docstring says must never come from a skill.
+    assert "00-catalogue.json" in body and "never invent" in body
+
+
+def test_the_output_section_says_an_empty_block_is_still_written():
+    """`triage-0.1.json` requires `deficiencies` and `projections` at the root,
+    so a record with nothing to report in either still carries `[]`. Omitting a
+    block because it would be empty fails layer 1 and spends a repair round on a
+    record whose judgment was fine.
+
+    The `[]` spellings are pinned because that is the actionable half: prose
+    saying "required" without showing the empty value leaves a model to guess
+    between `[]`, `null`, and omission.
+    """
+    body = _norm(skills.section_body(_skill(), "2. Output"))
+    assert '"deficiencies": []' in body
+    assert '"projections": []' in body
+    assert "required" in body
+    assert "empty" in body
+
+
+def test_the_output_section_places_a_human_authority_in_this_runs_record():
+    """It said `authority: "human"` was reserved for a gate-0 override "that
+    lands in a later run's record" -- wrong in both directions. Both a gate-0
+    override and `adopt-projection` edit *this* run's 00-triage.json, and
+    `triage.adopt_projection` appends its admit with `authority: "human"` to the
+    very file this skill produced.
+    """
+    body = _norm(skills.section_body(_skill(), "2. Output"))
+    assert "adopt-projection" in body
+    assert "this same record" in body
+    # The negative half, and the only wording it can safely pin: the wrong claim
+    # was that a human authority "lands in a later run's record". The corrected
+    # prose still says "a new run's" while negating it, so pinning "later run"
+    # absent would forbid stating the correction -- `lands in` is the phrase that
+    # belonged only to the wrong version.
+    assert "lands in" not in body, "the claim this replaced must be gone, not merely balanced"

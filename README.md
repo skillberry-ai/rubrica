@@ -15,7 +15,7 @@ Three layers, all of them present. The **contract spine**: the deterministic
 components every stage depends on. A **measurement layer** on top of it — four
 tools that score, compare, and sample a suite once `emit` has produced one. And
 the **nine skills** that carry the pipeline's judgment, across eleven stages
-(two of the eleven, `survey` and `intake`, are code, alongside `smoke`). The
+(three of the eleven are code and have no skill: `survey`, `intake`, `smoke`). The
 whole pipeline has run end to end with a model at every stage, from three
 input files to a scored suite whose tasks discriminate between agent roles.
 
