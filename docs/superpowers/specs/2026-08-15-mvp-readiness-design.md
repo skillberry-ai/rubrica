@@ -71,6 +71,8 @@ differs.
 | `docs/pipeline-overview.md:221` | toy world "run end to end in CI" | same |
 | `README.md:181` | "Two more, neither one a gate itself" | three follow — `gate-brief`, `set-limit`, `adopt-projection` |
 | `README.md:42-59` | "The code" table | omits `brief.py`, `cli.py`, `digest.py`, `emit.py`, `findings.py`, `sizing.py`, `survey.py`, `triage.py`, `utilisation.py`, and `suite/` |
+| `docs/running-a-stage-by-hand.md:235-237` | `pytest -m live` is "deselected, exit 5 -- no test is live-marked yet" | live-marked tests exist; `make test` reports 4 skipped |
+| `docs/running-a-stage-by-hand.md:188-191` | each `SKILL.md` "exists starting with the task that writes it", with a fallback for before then | all nine exist; the hedge is obsolete |
 
 `claim-utilisation` appears in no user-facing document at all — not in
 `README.md`, not in either `docs/*.md`.
