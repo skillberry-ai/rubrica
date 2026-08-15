@@ -210,6 +210,69 @@ def test_materialising_a_container_element_under_a_second_corpus_root(tmp_path):
     assert written.read_bytes() == canonical_bytes(records[1])
 
 
+def test_materialising_a_container_element_uses_stored_names_own_fallback(tmp_path):
+    """The container branch must derive its filename through the same rule as
+    the corpus/projection branch, not a second, unchecked one.
+
+    Before the fix this pins, the container branch wrote
+    `f"{artifact_id}.json"` straight to disk with no safety check at all --
+    an asymmetry with stored_name(), which falls back to the bare artifact_id
+    whenever the *suffixed* name would be an unsafe path segment
+    (is_safe_segment rejects any segment containing ".."). An artifact_id
+    ending in a single "." (itself a safe segment: one dot, no "..") becomes
+    unsafe once ".json" is appended -- "a." + ".json" = "a..json", which
+    contains "..". That is exactly the gap the corpus branch already closes
+    via stored_name() and the container branch, before this fix, did not.
+    """
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    records = [{"trace_id": f"tr-{i}", "status": "OK", "spans": []} for i in range(2)]
+    (corpus / "capture.json").write_text(json.dumps(records), encoding="utf-8")
+
+    run, _ = intake.mint_run(tmp_path / "runs", now=NOW)
+    run.inputs_dir.mkdir()
+    _write_catalogue(
+        run,
+        corpus_roots=[corpus],
+        candidates=[
+            {
+                "candidate_id": "capture-json",
+                "origin": "corpus",
+                "path": "capture.json",
+                "root_index": 0,
+                "bytes": (corpus / "capture.json").stat().st_size,
+                "sha256": hashlib.sha256((corpus / "capture.json").read_bytes()).hexdigest(),
+                "kind": "trace",
+                "admissible": False,
+                "digest": {},
+            }
+        ],
+    )
+    candidate = {
+        "candidate_id": "capture-json-1",
+        "origin": "container_element",
+        "container": {"candidate_id": "capture-json", "json_pointer": "/1"},
+        "bytes": len(canonical_bytes(records[1])),
+        "sha256": hashlib.sha256(canonical_bytes(records[1])).hexdigest(),
+        "kind": "trace",
+        "admissible": True,
+        "digest": {},
+    }
+    # "a." is itself a safe segment (a single dot, no ".."), but suffixing it
+    # with ".json" produces "a..json" -- which contains ".." and is therefore
+    # unsafe. This is the exact case stored_name()'s fallback exists for.
+    suffixed_unsafe_id = "a."
+    entry = intake.materialise(
+        run, candidate=candidate, source_root=corpus, artifact_id=suffixed_unsafe_id
+    )
+    # stored_name() itself is the oracle: whatever it would derive for this
+    # artifact_id given a ".json"-suffixed source is what materialise must
+    # have written -- one rule, asked once, not restated.
+    assert entry["stored_as"] == intake.stored_name(suffixed_unsafe_id, Path("x.json"))
+    assert entry["stored_as"] == suffixed_unsafe_id  # fallback: no ".json" appended
+    assert run.input_file(entry["stored_as"]).read_bytes() == canonical_bytes(records[1])
+
+
 def test_materialising_a_container_whose_id_does_not_resolve_raises(tmp_path):
     """check_catalogue already reports an unresolvable container reference as
     an ordinary finding; materialise does not need to duplicate that check,
@@ -231,6 +294,89 @@ def test_materialising_a_container_whose_id_does_not_resolve_raises(tmp_path):
     }
     with pytest.raises(ArtifactError):
         intake.materialise(run, candidate=candidate, source_root=tmp_path, artifact_id="ghost-1")
+
+
+def test_materialising_a_container_with_no_path_raises_a_message_that_says_so(tmp_path):
+    """The container candidate_id *did* resolve here -- unlike the previous
+    test, where it did not -- so the message must say the entry was found and
+    malformed, not repeat "no such candidate", which would misdescribe this
+    case to whoever reads the ArtifactError.
+    """
+    run, _ = intake.mint_run(tmp_path / "runs", now=NOW)
+    run.inputs_dir.mkdir()
+    _write_catalogue(
+        run,
+        corpus_roots=[tmp_path],
+        candidates=[
+            {
+                "candidate_id": "capture-json",
+                "origin": "corpus",
+                # no "path" key: a malformed entry, not an absent one.
+                "root_index": 0,
+                "bytes": 2,
+                "sha256": hashlib.sha256(b"{}").hexdigest(),
+                "kind": "trace",
+                "admissible": False,
+                "digest": {},
+            }
+        ],
+    )
+    candidate = {
+        "candidate_id": "capture-json-1",
+        "origin": "container_element",
+        "container": {"candidate_id": "capture-json", "json_pointer": "/0"},
+        "bytes": 2,
+        "sha256": hashlib.sha256(b"{}").hexdigest(),
+        "kind": "trace",
+        "admissible": True,
+        "digest": {},
+    }
+    with pytest.raises(ArtifactError, match="no path to resolve"):
+        intake.materialise(
+            run, candidate=candidate, source_root=tmp_path, artifact_id="capture-json-1"
+        )
+
+
+def test_materialising_a_container_with_an_out_of_range_root_index_raises_a_message_that_says_so(
+    tmp_path,
+):
+    """Same shape as the no-path case above: the entry resolved, and its
+    root_index is what is wrong, so the message must name that rather than
+    falling through to the generic "no such candidate" text.
+    """
+    run, _ = intake.mint_run(tmp_path / "runs", now=NOW)
+    run.inputs_dir.mkdir()
+    _write_catalogue(
+        run,
+        corpus_roots=[tmp_path],  # only one root: index 0
+        candidates=[
+            {
+                "candidate_id": "capture-json",
+                "origin": "corpus",
+                "path": "capture.json",
+                "root_index": 7,  # out of range for a single-root survey
+                "bytes": 2,
+                "sha256": hashlib.sha256(b"{}").hexdigest(),
+                "kind": "trace",
+                "admissible": False,
+                "digest": {},
+            }
+        ],
+    )
+    candidate = {
+        "candidate_id": "capture-json-1",
+        "origin": "container_element",
+        "container": {"candidate_id": "capture-json", "json_pointer": "/0"},
+        "bytes": 2,
+        "sha256": hashlib.sha256(b"{}").hexdigest(),
+        "kind": "trace",
+        "admissible": True,
+        "digest": {},
+    }
+    with pytest.raises(ArtifactError, match="invalid root_index"):
+        intake.materialise(
+            run, candidate=candidate, source_root=tmp_path, artifact_id="capture-json-1"
+        )
 
 
 def test_materialising_a_plain_corpus_file_copies_it_byte_for_byte(tmp_path):

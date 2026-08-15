@@ -183,7 +183,9 @@ def _container_path(candidate: dict, run: RunPaths) -> Path:
             continue
         path = entry.get("path")
         if not path:
-            break
+            raise ArtifactError(
+                f"candidate {container_id!r} in {run.catalogue} has no path to resolve"
+            )
         if Path(path).is_absolute():
             return Path(path)
         roots = catalogue.get("request", {}).get("corpus_roots", [])
@@ -193,7 +195,10 @@ def _container_path(candidate: dict, run: RunPaths) -> Path:
             or isinstance(root_index, bool)
             or not (0 <= root_index < len(roots))
         ):
-            break
+            raise ArtifactError(
+                f"candidate {container_id!r} in {run.catalogue} has an invalid "
+                f"root_index {root_index!r} for {len(roots)} corpus_roots"
+            )
         return Path(roots[root_index]) / path
     raise ArtifactError(
         f"no such candidate {container_id!r} in {run.catalogue} to have been exploded from"
@@ -222,7 +227,12 @@ def materialise(run: RunPaths, *, candidate: dict, source_root: Path, artifact_i
         payload = json.loads(container_file.read_text(encoding="utf-8"))
         element = resolve_pointer(payload, candidate["container"]["json_pointer"])
         body = canonical_bytes(element)
-        stored_as = f"{artifact_id}.json"
+        # Same rule as the corpus/projection branch below: one definition of how
+        # an input's on-disk filename is derived, not two. stored_name needs only
+        # a suffix from its `source` argument, and a container element is always
+        # written as JSON, so a synthetic path supplies exactly that -- there is
+        # no real source file to point at.
+        stored_as = stored_name(artifact_id, Path("container-element.json"))
         (run.inputs_dir / stored_as).write_bytes(body)
         return {
             "artifact_id": artifact_id,
