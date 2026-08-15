@@ -43,6 +43,7 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "suite-expected": "suite-expected-0.1.json",
     "report": "report-0.1.json",
     "catalogue": "catalogue-0.1.json",
+    "triage": "triage-0.1.json",
     # Config kinds. Human-authored inputs, not stage outputs, so they are
     # deliberately absent from STAGE_ARTIFACTS: no stage produces them and
     # `validate --stage X` must never look for them.
@@ -63,6 +64,7 @@ CONFIG_KINDS: frozenset[str] = frozenset({"agents", "gold"})
 # next stage against an empty or missing output.
 STAGE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "survey": ("catalogue",),
+    "triage": ("triage",),
     "intake": ("manifest",),
     "extract": ("claims",),
     "reconcile": ("world-model",),
@@ -170,6 +172,8 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         # An expected artifact that is missing has to be reported by name, or
         # a survey that wrote nothing passes its own gate.
         return [run.catalogue]
+    if kind == "triage":
+        return [run.triage] if run.triage.is_file() else []
     if kind == "manifest":
         return [run.manifest] if run.manifest.is_file() else []
     if kind == "world-model":

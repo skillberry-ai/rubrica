@@ -24,6 +24,7 @@ from tests.builders import (
     minimal_scenarios,
     minimal_seed,
     minimal_suite_expected,
+    minimal_triage,
     minimal_verdict,
     minimal_world_model,
 )
@@ -74,6 +75,7 @@ def test_the_schema_directory_env_override_wins(monkeypatch, tmp_path):
 # builder here fails loudly rather than silently skipping it.
 MINIMAL_BUILDERS = {
     "catalogue": minimal_catalogue,
+    "triage": minimal_triage,
     "manifest": minimal_manifest,
     "claims": minimal_claims,
     "world-model": minimal_world_model,

@@ -370,6 +370,36 @@ def minimal_agents(**over: Any) -> dict[str, Any]:
     return payload
 
 
+def minimal_triage(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "run_id": "run-20260806-120000",
+        "objective_review": {
+            "declared_objective": "breadth",
+            "supported": True,
+            "surfaces": [
+                {
+                    "name": "api schema",
+                    "evidence": ["aap2-api"],
+                    "weight": {"candidates": 1, "bytes": 37},
+                }
+            ],
+        },
+        "dispositions": [
+            {
+                "candidate_id": "aap2-api",
+                "disposition": "admit",
+                "reason": "the only surface describing the tool",
+                "authority": "triage",
+            }
+        ],
+        "deficiencies": [],
+        "projections": [],
+    }
+    payload.update(over)
+    return payload
+
+
 def minimal_gold(**over: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": "0.1",
