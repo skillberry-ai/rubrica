@@ -169,6 +169,35 @@ def _dupes(values: list[str]) -> list[str]:
     return sorted({v for v in values if values.count(v) > 1})
 
 
+def _as_list(value: Any) -> list:
+    """`value` if it is a list, else `[]`.
+
+    Every list-typed field check_triage iterates is schema-required to be an
+    array, but check_all has no ordering guarantee that layer 1 has rejected a
+    malformed document before layer 2 reads it. `value or []` is not a
+    sufficient guard on its own: it only substitutes on a *falsy* value, and a
+    truthy non-list (an int, a non-empty string) still reaches a bare `for`
+    loop and raises TypeError rather than being skipped -- measured directly
+    below, where `"sources": "not-a-list"` used to do exactly that.
+    """
+    return value if isinstance(value, list) else []
+
+
+def _str_or_none(value: Any) -> str | None:
+    """`value` if it is a string, else `None`.
+
+    Every id check_triage resolves against a dict or set key is
+    schema-required to be a string, but the same ordering gap means one can
+    arrive as a list or a dict instead -- and `x in some_dict` or
+    `some_set.add(x)` raises TypeError on an unhashable `x` rather than
+    producing a finding. Routing every id through this before it touches a
+    dict or set keeps the lookup on a guaranteed-hashable value; the
+    mismatched value itself stays visible in the message, which is why call
+    sites keep reporting the original (`cid!r`), not this function's result.
+    """
+    return value if isinstance(value, str) else None
+
+
 def check_catalogue(run: RunPaths) -> list[Finding]:
     """Conditional constraints over 00-catalogue.json that layer 1 cannot state.
 
@@ -217,6 +246,117 @@ def check_catalogue(run: RunPaths) -> list[Finding]:
                 f"{pointer}/provenance",
                 "an adopted projection must record the projection_id it satisfies",
             )
+    return out
+
+
+def check_triage(run: RunPaths) -> list[Finding]:
+    """Reference checks over 00-triage.json. Nothing here is semantic.
+
+    The finding spec §11 actually asks for -- a world-model gap whose closing
+    evidence was declined at triage -- is deliberately NOT here. Matching gap
+    prose to decline prose is semantic, and layer 2 checks that an element
+    *references* a resolvable thing and never that the thing *supports* it. That
+    pairing is a human's call at gate 1, surfaced by `rubrica gate-brief`.
+    """
+    triage = _load(run.triage)
+    if not isinstance(triage, dict):
+        return []
+    catalogue = _load(run.catalogue)
+    out: list[Finding] = []
+
+    def report(pointer: str, message: str) -> None:
+        out.append(Finding(run.triage, "refs", pointer, message))
+
+    # Every list read below goes through _as_list, and every id that will
+    # touch a dict or set goes through _str_or_none, because none of this is
+    # schema-validated yet -- check_all has no ordering guarantee that layer 1
+    # has already rejected the document check_triage is reading.
+    dispositions = _as_list(triage.get("dispositions"))
+    deficiency_ids = {
+        _str_or_none(d.get("deficiency_id"))
+        for d in _as_list(triage.get("deficiencies"))
+        if isinstance(d, dict)
+    } - {None}
+    projections = _as_list(triage.get("projections"))
+    projection_ids = {
+        _str_or_none(p.get("projection_id")) for p in projections if isinstance(p, dict)
+    } - {None}
+
+    candidates = {}
+    if isinstance(catalogue, dict):
+        candidates = {
+            c["candidate_id"]: c
+            for c in _as_list(catalogue.get("candidates"))
+            if isinstance(c, dict) and isinstance(c.get("candidate_id"), str)
+        }
+
+    seen: set[str | None] = set()
+    admits = 0
+    for index, entry in enumerate(dispositions):
+        if not isinstance(entry, dict):
+            continue
+        pointer = f"/dispositions/{index}"
+        cid = entry.get("candidate_id")
+        cid_str = _str_or_none(cid)
+        if candidates and cid_str not in candidates:
+            report(f"{pointer}/candidate_id", f"no such candidate {cid!r} in the catalogue")
+        if cid_str in seen:
+            report(f"{pointer}/candidate_id", f"candidate {cid!r} already has a disposition")
+        seen.add(cid_str)
+
+        code = entry.get("reason_code")
+        if entry.get("disposition") == "decline":
+            if not code:
+                report(f"{pointer}/reason_code", "a decline must carry a reason_code")
+            elif code == "digest_insufficient" and not deficiency_ids:
+                report(
+                    f"{pointer}/reason_code",
+                    "a digest_insufficient decline must be referenced by a deficiency, or the "
+                    "loss it records is invisible",
+                )
+            elif code == "needs_projection" and not projection_ids:
+                report(
+                    f"{pointer}/reason_code",
+                    "a needs_projection decline must be referenced by a projection, or its "
+                    "remedy is unstated",
+                )
+        else:
+            admits += 1
+            if code:
+                report(f"{pointer}/reason_code", "reason_code names a decline; an admit has none")
+            if cid_str in candidates and candidates[cid_str].get("admissible") is False:
+                report(
+                    f"{pointer}/disposition",
+                    f"candidate {cid!r} is not admissible -- it is a container whose elements "
+                    "are the candidates",
+                )
+
+    for cid in sorted(set(candidates) - seen):
+        report("/dispositions", f"candidate {cid!r} has no disposition; every one must be ruled on")
+
+    if dispositions and admits == 0:
+        report(
+            "/dispositions",
+            "no candidate was admitted; an empty admitted set is a scoping failure rather than "
+            "a triage result",
+        )
+
+    for index, projection in enumerate(projections):
+        if not isinstance(projection, dict):
+            continue
+        pointer = f"/projections/{index}"
+        for closes in _as_list(projection.get("closes")):
+            if _str_or_none(closes) not in deficiency_ids:
+                report(f"{pointer}/closes", f"no such deficiency {closes!r}")
+        for position, source in enumerate(_as_list(projection.get("sources"))):
+            if not isinstance(source, dict):
+                continue
+            source_cid = source.get("candidate_id")
+            if candidates and _str_or_none(source_cid) not in candidates:
+                report(
+                    f"{pointer}/sources/{position}/candidate_id",
+                    f"no such candidate {source_cid!r} to project from",
+                )
     return out
 
 
@@ -1474,6 +1614,7 @@ def check_all(run: RunPaths) -> list[Finding]:
         return unreadable
     findings: list[Finding] = []
     findings.extend(check_catalogue(run))
+    findings.extend(check_triage(run))
     findings.extend(check_manifest(run))
     findings.extend(check_inputs(run))
     findings.extend(check_limits(run))
