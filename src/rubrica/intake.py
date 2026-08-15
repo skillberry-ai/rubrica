@@ -55,9 +55,20 @@ def stored_name(artifact_id: str, source: Path) -> str:
 
 
 def _json_or_none(path: Path):
+    # RecursionError alongside the three obvious ones, matching
+    # digest.digest_for_path's own catch and for the same measured reason:
+    # survey.py's "no size-based exclusion" rule means a pathologically nested
+    # file (a 200,000-deep `[[[...]]]`) reaches classify() uncaught by anything
+    # upstream, and CPython's json decoder raises RecursionError rather than
+    # JSONDecodeError for that shape. classify is on the hot path of both new
+    # commands -- `survey --corpus DIR` walks an arbitrary user tree, and
+    # `adopt-projection` reaches it through triage.check_acceptance -- and
+    # neither cli.py dispatch block catches RecursionError, so it escaped
+    # main() as a traceback: exit 1 with empty stdout, the shape the exit-code
+    # contract forbids.
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError):
         return None
 
 
@@ -112,6 +123,45 @@ def _unique_ids(inputs: list[Path]) -> list[str]:
     return [_unique_artifact_id(slug(path.name), used) for path in inputs]
 
 
+# The lowest priority a disposition without one sorts at -- admits run in
+# priority order and one that declares none goes last.
+_NO_PRIORITY = 1 << 30
+
+
+def admit_sort_key(disposition: dict) -> tuple[int, str]:
+    """The order admitted candidates are materialised in, as one function.
+
+    Two callers need the *identical* order, not merely a compatible one:
+    admit_from_triage materialises in this order and `_unique_artifact_id`'s
+    collision suffixes therefore depend on it, and
+    refs.check_admitted_inputs replays the same sort to recover which
+    artifact_id each admitted candidate_id became. Two spellings of "sorted by
+    priority then id" would make that replay silently disagree the first time
+    they drifted, so there is one.
+
+    Total-ordering is the whole reason this is a named function rather than a
+    lambda. `(d.get("priority", _NO_PRIORITY), d.get("candidate_id"))` was
+    measured to raise TypeError on two shapes an *unvalidated* triage record
+    reaches it with -- a string `priority` alongside an integer one
+    ("'<' not supported between instances of 'int' and 'str'") and a null
+    `candidate_id` alongside a string one -- and neither cli.py's `intake
+    --run` block nor its `check-refs` block catches TypeError, so it escaped
+    main() as a traceback: exit 1 with empty stdout. admit_from_triage does
+    not assume layer 1 has already run (its own module comments say so twice),
+    so every value is coerced to a comparable one here instead: a non-integer
+    priority sorts as if absent, and the id goes through repr() -- the same
+    device the `unknown` sort in admit_from_triage already uses, and
+    order-preserving for the ids the schema actually permits, since
+    `\\A[A-Za-z0-9][A-Za-z0-9._-]*\\Z` contains nothing repr escapes and every
+    result gains the same leading quote. A malformed id is reported as a
+    finding moments later; all this has to do is get there without raising.
+    """
+    priority = disposition.get("priority")
+    if not isinstance(priority, int) or isinstance(priority, bool):
+        priority = _NO_PRIORITY
+    return (priority, repr(disposition.get("candidate_id")))
+
+
 def mint_run(runs_dir: Path, *, now: datetime | None = None) -> tuple[RunPaths, datetime]:
     """Create the run directory and return it with its resolved UTC stamp.
 
@@ -162,6 +212,30 @@ def register(
     )
 
 
+def _resolvable_root_index(root_index, roots) -> bool:
+    """Whether `root_index` is a usable index into `roots`.
+
+    One spelling, read by `_container_path` (for the container a
+    container_element was exploded from) and by `admit_from_triage` (for each
+    admitted corpus candidate). Both were indexing `request.corpus_roots` with
+    a number the catalogue supplied and neither layer checks against the list's
+    actual length; `_container_path` had this test inline and the admit loop had
+    none at all, which is how a hand-edited `root_index` reached `roots[5]` and
+    raised IndexError out of main().
+
+    `isinstance(root_index, bool)` is excluded explicitly because
+    `isinstance(True, int)` is True in Python, and `roots[True]` silently reads
+    the *second* corpus root rather than raising -- the wrong file, with no
+    error anywhere, which is the failure mode `_container_path`'s docstring
+    already says resolving independently exists to prevent.
+    """
+    return (
+        isinstance(root_index, int)
+        and not isinstance(root_index, bool)
+        and 0 <= root_index < len(roots)
+    )
+
+
 def _container_path(candidate: dict, run: RunPaths) -> Path:
     """The on-disk location of the container a container_element was exploded from.
 
@@ -201,11 +275,7 @@ def _container_path(candidate: dict, run: RunPaths) -> Path:
             return Path(path)
         roots = catalogue.get("request", {}).get("corpus_roots", [])
         root_index = entry.get("root_index")
-        if (
-            not isinstance(root_index, int)
-            or isinstance(root_index, bool)
-            or not (0 <= root_index < len(roots))
-        ):
+        if not _resolvable_root_index(root_index, roots):
             raise ArtifactError(
                 f"candidate {container_id!r} in {run.catalogue} has an invalid "
                 f"root_index {root_index!r} for {len(roots)} corpus_roots"
@@ -352,6 +422,102 @@ def intake(
     return run
 
 
+def _registration_from_catalogue(run: RunPaths, catalogue: dict) -> tuple[dict, list[Finding]]:
+    """register()'s five arguments, read out of the catalogue, or findings.
+
+    Every read below was a bare index -- `catalogue["request"]["target"]["name"]`,
+    `["limits"]["max_rounds"]`, `datetime.strptime(catalogue["created_utc"], ...)`
+    -- and every one of them ran *after* the 00-inputs/ materialise loop and
+    *outside* the try whose except cleans it up. Deleting `request.target` from
+    a surveyed catalogue, which is exactly the hand-edit gate 0 authorises, was
+    measured to breach the exit-code contract three ways at once: the KeyError
+    escaped cli.py's `(UsageError, ArtifactError, OSError)` catch and left
+    main() with exit 1 and empty stdout; 00-inputs/ stayed behind fully
+    populated; and every retry after repairing the catalogue then died on
+    `[Errno 17] File exists` at exit 2, so the run was permanently unusable
+    rather than repairable.
+
+    So this runs *before* the mkdir, alongside the corpus_roots check that was
+    already there -- a malformed catalogue leaves no directory behind at all --
+    and returns findings against 00-catalogue.json, where the defect lives,
+    with a pointer at the key that is wrong. Stricter than the manifest schema
+    on the two target strings and on both limits, for the reason intake()'s own
+    argument checks give: "   " satisfies minLength: 1 but names no target
+    anyone could act on, and a manifest written from a limit the schema rejects
+    surfaces steps later as a finding against an artifact no repair prompt can
+    fix.
+    """
+    out: list[Finding] = []
+
+    def report(pointer: str, message: str) -> None:
+        out.append(Finding(run.catalogue, "internal", pointer, message))
+
+    request = catalogue.get("request")
+    if not isinstance(request, dict):
+        report(
+            "/request",
+            "request is missing or not an object; intake --run mints the manifest from it and "
+            "has nothing to read",
+        )
+        return {}, out
+
+    target = request.get("target")
+    values: dict[str, object] = {}
+    if not isinstance(target, dict):
+        report(
+            "/request/target",
+            "target is missing or not an object; the manifest's target block is minted from it",
+        )
+    else:
+        for key in ("name", "interface"):
+            value = target.get(key)
+            if not isinstance(value, str) or not value.strip():
+                report(
+                    f"/request/target/{key}",
+                    f"target.{key} is missing or blank; manifest.target.{key} is minted from it "
+                    "and cannot be empty",
+                )
+            else:
+                values[f"target_{key}"] = value
+
+    limits = request.get("limits")
+    if not isinstance(limits, dict):
+        report(
+            "/request/limits",
+            "limits is missing or not an object; the manifest's limits block is minted from it",
+        )
+    else:
+        for key in ("max_rounds", "max_scenarios"):
+            value = limits.get(key)
+            # isinstance(True, int) is True, so bool is excluded explicitly --
+            # the same guard intake() and survey() apply to the same two
+            # limits, because JSON `true` is not an integer to the manifest
+            # schema either.
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                report(
+                    f"/request/limits/{key}",
+                    f"limits.{key} is {value!r}, not an integer >= 1; manifest.limits.{key} is "
+                    "minted from it and the manifest schema requires one",
+                )
+            else:
+                values[key] = value
+
+    created = catalogue.get("created_utc")
+    try:
+        # TypeError as well as ValueError: strptime raises TypeError, not
+        # ValueError, when created_utc is absent (None) or is a number rather
+        # than a string, and both escaped main() identically before this guard.
+        values["created"] = datetime.strptime(created, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except (TypeError, ValueError):
+        report(
+            "/created_utc",
+            f"created_utc is {created!r}, not a UTC stamp in manifest.UTC_FORMAT "
+            "('%Y-%m-%dT%H:%M:%SZ'); manifest.created_utc is minted from it",
+        )
+
+    return values, out
+
+
 def admit_from_triage(run: RunPaths) -> list[Finding]:
     """Register every admitted candidate and write the manifest.
 
@@ -390,7 +556,7 @@ def admit_from_triage(run: RunPaths) -> list[Finding]:
             for d in triage.get("dispositions") or []
             if isinstance(d, dict) and d.get("disposition") == "admit"
         ),
-        key=lambda d: (d.get("priority", 1 << 30), d.get("candidate_id")),
+        key=admit_sort_key,
     )
     if not admits:
         # check_triage already reports this (admits == 0 with a non-empty
@@ -451,6 +617,40 @@ def admit_from_triage(run: RunPaths) -> list[Finding]:
                 "which corpus root each admitted candidate came from",
             )
         ]
+    # `roots[candidate.get("root_index", 0)]` in the loop below is an index into
+    # a list whose length nothing has checked against the value the catalogue
+    # supplies. `_container_path` already guards its own copy of exactly this
+    # lookup, with exactly this reasoning, for the container it resolves; a
+    # *corpus* candidate's root_index had no such guard, and a hand-edited
+    # root_index of 5 against one corpus root was measured to raise IndexError
+    # (a string one, TypeError) straight out of main() -- the cleanup below
+    # fired, so the run stayed retryable, but the exit was still 1 with empty
+    # stdout. Checked here rather than in the loop so a malformed catalogue
+    # leaves no directory behind at all, and reported per candidate so a human
+    # repairing 00-catalogue.json is told which one is wrong.
+    root_findings = [
+        Finding(
+            run.catalogue,
+            "internal",
+            "/candidates",
+            f"admitted candidate {candidate.get('candidate_id')!r} has an invalid root_index "
+            f"{candidate.get('root_index')!r} for {len(roots)} corpus_roots",
+        )
+        for candidate in admitted
+        if not _resolvable_root_index(candidate.get("root_index", 0), roots)
+    ]
+    if root_findings:
+        return root_findings
+
+    # Before the mkdir, exactly like the corpus_roots check just above and for
+    # the same reason: a catalogue this function cannot mint a manifest from
+    # must leave no half-created run behind. Reading these five values here
+    # rather than at the register() call below is the fix for the measured
+    # breach _registration_from_catalogue's docstring records.
+    registration, findings = _registration_from_catalogue(run, catalogue)
+    if findings:
+        return findings
+
     run.inputs_dir.mkdir(parents=True)
     try:
         entries = []
@@ -468,6 +668,23 @@ def admit_from_triage(run: RunPaths) -> list[Finding]:
                     run, candidate=candidate, source_root=source_root, artifact_id=artifact_id
                 )
             )
+        # Inside the try, not after it. The five arguments are already read and
+        # checked (above, before the mkdir), so nothing here can raise the
+        # KeyError this used to -- but register() itself can still fail, on a
+        # read-only run directory or a full disk, and a failure there outside
+        # this try left 00-inputs/ populated with no manifest and every retry
+        # dead on FileExistsError. Whatever the reason a run does not get its
+        # manifest, it comes back to its pre-admission state and the same call
+        # can simply be made again.
+        register(
+            run,
+            entries=entries,
+            target_name=registration["target_name"],
+            target_interface=registration["target_interface"],
+            max_rounds=registration["max_rounds"],
+            max_scenarios=registration["max_scenarios"],
+            created=registration["created"],
+        )
     except Exception:
         # A source file can vanish between survey and intake -- deleted,
         # moved, permissions changed -- and materialise raises partway

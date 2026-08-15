@@ -463,3 +463,78 @@ def test_adopt_projection_via_the_cli_reports_an_unknown_projection_as_exit_two(
     assert code == 2
     assert captured.out == ""
     assert captured.err.strip()
+
+
+def test_an_acceptance_contract_with_no_classifies_as_is_a_finding_not_a_traceback(tmp_path):
+    """`acceptance["classifies_as"]` was a bare index one function away from the
+    guard that already existed for `acceptance` itself.
+
+    That is what makes it worth its own test rather than a line in the sweep:
+    `adopt_projection` goes to the trouble of returning a finding for a missing
+    `acceptance` object (the test above), and then hands what it found to
+    `check_acceptance`, which indexed straight into it. Measured with
+    `"acceptance": {"prose": "p"}`: KeyError, exit 1, empty stdout.
+
+    The finding names the *source file*, not the triage record, and that is
+    deliberate rather than an oversight: every finding check_acceptance produces
+    names the manufactured file, because that is what the acceptance contract is
+    judged against. The record-level pointer belongs to adopt_projection, which
+    owns the "no acceptance object at all" case.
+    """
+    run = _run_with_projection(tmp_path)
+    record = read_json(run.triage)
+    record["projections"][0]["acceptance"] = {"prose": "p"}
+    write_json(run.triage, record)
+    source = _good(tmp_path)
+
+    findings = triage.adopt_projection(run, projection_id="prj-tools", source=source)
+
+    assert findings
+    assert all(f.artifact == source for f in findings)
+    assert any("classifies_as" in f.message for f in findings)
+    # Nothing written: a projection whose acceptance contract cannot be
+    # evaluated has not passed it.
+    assert read_json(run.catalogue) == _catalogue(run.root.name, NOW)
+    assert read_json(run.triage) == record
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("classifies_as", ["mcp_tool_schema"]),
+        ("must_contain", [17]),
+        ("must_contain", "list_tickets"),
+        ("must_not_contain", [17]),
+        ("pointers_required", [17]),
+        ("pointers_required", "/tools"),
+    ],
+)
+def test_an_acceptance_criterion_of_the_wrong_type_is_reported_never_skipped(
+    tmp_path, field, value
+):
+    """Each of these raised out of main(), or would have checked the wrong thing.
+
+    `needle not in text` raises TypeError on a non-string needle
+    ("'in <string>' requires string as left operand"), and `resolve_pointer`
+    raises AttributeError on `pointer.startswith` for a non-string pointer --
+    both measured escaping cli.main(). The bare-string cases are the quieter
+    half: `acceptance.get("must_contain") or []` substitutes only on a *falsy*
+    value, so `"list_tickets"` iterated character by character and checked
+    twelve one-character criteria instead of the one asked for.
+
+    Reported rather than silently skipped, because check_acceptance returning
+    clean is precisely what authorises `adopt_projection` to write to the
+    catalogue: a criterion nobody could evaluate must not read as one that
+    passed.
+    """
+    run = _run_with_projection(tmp_path)
+    record = read_json(run.triage)
+    record["projections"][0]["acceptance"][field] = value
+    write_json(run.triage, record)
+    source = _good(tmp_path)
+
+    findings = triage.adopt_projection(run, projection_id="prj-tools", source=source)
+
+    assert findings, f"{field}={value!r} must be reported"
+    assert any(field in f.message or "classifies as" in f.message for f in findings)
+    assert read_json(run.catalogue) == _catalogue(run.root.name, NOW)

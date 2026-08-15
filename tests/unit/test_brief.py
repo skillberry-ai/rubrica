@@ -401,3 +401,44 @@ def test_gate_two_does_not_raise_on_a_present_but_malformed_world_model(tmp_path
     del world["denominator"]
     write_json(run.world_model, world)
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "2"]) == 0
+
+
+def test_a_surveyed_but_untriaged_run_is_not_told_it_was_minted_by_intake_input(tmp_path):
+    """The absent-triage message had two causes and named only one.
+
+    `gate-brief --gate 0` on a run `survey` minted, before triage has written
+    its record, printed "This run was minted through `intake --input`, which has
+    no catalogue and no triage step at all" -- false, and said to the human at
+    precisely the moment they are waiting for triage and asking this command
+    whether it has landed. The catalogue is right there on disk, so the two
+    cases are mechanically distinguishable and the message now branches on it.
+    """
+    run = survey.survey(
+        corpus_roots=[CORPUS],
+        runs_dir=tmp_path / "runs",
+        target_name="ticketq",
+        target_interface="mcp",
+        objective="breadth",
+        max_rounds=2,
+        max_scenarios=128,
+    )
+    assert not run.triage.exists()
+    text = brief.gate_brief(run, 0)
+
+    assert "intake --input" not in text
+    assert "minted by `survey`" in text
+    assert "rb-triage" in text, "and it must say what to do next"
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "0"]) == 0
+
+
+def test_a_run_with_neither_catalogue_nor_triage_still_names_intake_input(tmp_path):
+    """The other direction of the branch above: on a run that really was minted
+    through `intake --input`, spec §7.1's ruling is unchanged and the message
+    must still say so rather than invite a triage dispatch that has no
+    catalogue to read."""
+    run = build_toy_run(tmp_path / "runs")
+    assert not run.catalogue.exists()
+    text = brief.gate_brief(run, 0)
+
+    assert "intake --input" in text
+    assert "rb-triage" not in text

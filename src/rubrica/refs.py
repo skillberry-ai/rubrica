@@ -578,7 +578,7 @@ def check_admitted_inputs(run: RunPaths) -> list[Finding]:
     # "cap-json-2" could name either a real collision suffix or a candidate
     # literally called that. Replaying the same forward computation
     # admit_from_triage used, in the same sorted order, has no such ambiguity.
-    from rubrica.intake import _unique_artifact_id
+    from rubrica.intake import _unique_artifact_id, admit_sort_key
 
     admits = [
         entry
@@ -587,7 +587,15 @@ def check_admitted_inputs(run: RunPaths) -> list[Finding]:
         and entry.get("disposition") == "admit"
         and isinstance(entry.get("candidate_id"), str)
     ]
-    admits.sort(key=lambda d: (d.get("priority", 1 << 30), d["candidate_id"]))
+    # intake.admit_sort_key, imported rather than respelled here, for the
+    # reason its own docstring gives: this replay must produce the *identical*
+    # order admit_from_triage materialised in, because `_unique_artifact_id`'s
+    # collision suffixes depend on it. The local lambda it replaces also
+    # shared that function's measured TypeError -- a string `priority`
+    # alongside an integer one raised out of `sort`, and check-refs turned a
+    # malformed triage record into a fabricated `[internal]` finding naming the
+    # run directory instead of the record that carries the defect.
+    admits.sort(key=admit_sort_key)
     used: dict[str, int] = {}
     expected = {_unique_artifact_id(d["candidate_id"], used): d["candidate_id"] for d in admits}
 

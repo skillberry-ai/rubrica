@@ -267,6 +267,168 @@ def test_a_catalogue_missing_corpus_roots_is_a_finding_not_a_traceback(tmp_path)
     assert not run.manifest.exists()
 
 
+def test_a_catalogue_missing_its_target_is_a_finding_and_leaves_the_run_retryable(tmp_path, capsys):
+    """The Critical of this branch's whole-branch review, in one test.
+
+    `catalogue["request"]["target"]["name"]`, `["limits"]["max_rounds"]` and
+    `datetime.strptime(catalogue["created_utc"], ...)` were bare indexes running
+    *after* the 00-inputs/ materialise loop and *outside* the try whose except
+    cleans it up. Deleting `request.target` -- exactly the hand-edit gate 0
+    authorises on 00-catalogue.json -- breached the contract three ways in one
+    command:
+
+        KeyError: 'target'   -> escaped cli.main(), exit 1, empty stdout
+        00-inputs/ left fully populated with no manifest
+        every retry -> "error: [Errno 17] File exists: .../00-inputs", exit 2
+
+    That third one is what made it Critical rather than Important: repairing the
+    catalogue could not recover the run, so a survey plus a triage dispatch were
+    both wasted. The retry succeeding at exit 0 is the assertion that matters
+    most here; the finding and the absent 00-inputs/ are how it gets there.
+    """
+    run = _surveyed_and_triaged(tmp_path)
+    catalogue = read_json(run.catalogue)
+    del catalogue["request"]["target"]
+    write_json(run.catalogue, catalogue)
+
+    assert cli.main(["intake", "--run", str(run.root)]) == 1
+    printed = capsys.readouterr().out
+    assert printed.strip(), "exit 1 with empty stdout is the shape this closed"
+    assert "00-catalogue.json" in printed, "the finding must name the artifact carrying the defect"
+    assert "/request/target" in printed, "and point at the key that is missing"
+    # Nothing left behind: the check runs before the mkdir, so the failed
+    # admission is not merely cleaned up, it never created anything.
+    assert not run.inputs_dir.exists()
+    assert not run.manifest.exists()
+
+    catalogue["request"]["target"] = {"name": "ticketq", "interface": "mcp"}
+    write_json(run.catalogue, catalogue)
+    assert cli.main(["intake", "--run", str(run.root)]) == 0
+    assert {e["artifact_id"] for e in read_json(run.manifest)["inputs"]} == set(_ADMITTED)
+
+
+@pytest.mark.parametrize(
+    ("pointer", "mutate"),
+    [
+        ("/request/target", lambda c: c["request"].pop("target")),
+        ("/request/target/name", lambda c: c["request"]["target"].update(name="   ")),
+        ("/request/target/interface", lambda c: c["request"]["target"].pop("interface")),
+        ("/request/limits", lambda c: c["request"].pop("limits")),
+        ("/request/limits/max_rounds", lambda c: c["request"]["limits"].update(max_rounds=0)),
+        (
+            "/request/limits/max_scenarios",
+            lambda c: c["request"]["limits"].update(max_scenarios="8"),
+        ),
+        ("/created_utc", lambda c: c.pop("created_utc")),
+        ("/created_utc", lambda c: c.update(created_utc=17)),
+    ],
+)
+def test_no_catalogue_defect_ever_yields_a_manifest_layer_one_rejects(tmp_path, pointer, mutate):
+    """Every one of register()'s five arguments, checked at its own pointer.
+
+    Two failure shapes hide behind these eight mutations and only the first was
+    ever reported. The absent-key ones raised out of main(); the *out-of-range*
+    ones (`max_rounds: 0`, `max_scenarios: "8"`, a blank target name) did not
+    raise at all -- they wrote a manifest at exit 0 that `validate --stage
+    intake` then rejected, which is the same misdirection intake()'s own
+    argument checks exist to prevent: a finding against manifest.json, an
+    artifact no skill wrote and no repair prompt can fix.
+
+    So the assertion is the *property* rather than either shape: whatever is
+    wrong with the catalogue, this command either writes a manifest layer 1
+    accepts or writes nothing and says why.
+    """
+    run = _surveyed_and_triaged(tmp_path)
+    catalogue = read_json(run.catalogue)
+    mutate(catalogue)
+    write_json(run.catalogue, catalogue)
+
+    findings = intake.admit_from_triage(run)
+
+    assert findings, f"{pointer}: a malformed catalogue must be reported, not written through"
+    assert all(f.artifact == run.catalogue for f in findings)
+    assert any(f.pointer == pointer for f in findings), (
+        f"expected a finding at {pointer}, got {[f.pointer for f in findings]}"
+    )
+    assert not run.manifest.exists()
+    assert not run.inputs_dir.exists()
+
+
+@pytest.mark.parametrize("root_index", [5, -1, "0", True, None])
+def test_an_admitted_candidates_root_index_is_checked_against_the_roots_it_indexes(
+    tmp_path, root_index
+):
+    """`roots[candidate.get("root_index", 0)]` had no length check.
+
+    `_container_path` already guarded its own copy of this lookup, with the
+    reasoning that resolving against the catalogue's own record of a root is
+    what keeps a wrong-file read from being silent -- and a *corpus* candidate's
+    root_index had no guard at all. A hand-edited `5` against one corpus root
+    raised IndexError straight out of main() (a string one, TypeError); `True`
+    is here because `isinstance(True, int)` is True in Python and `roots[True]`
+    silently reads the second root rather than raising, which is the wrong file
+    with no error anywhere.
+    """
+    run = _surveyed_and_triaged(tmp_path)
+    catalogue = read_json(run.catalogue)
+    for candidate in catalogue["candidates"]:
+        if candidate.get("candidate_id") == "readme-md":
+            candidate["root_index"] = root_index
+    write_json(run.catalogue, catalogue)
+
+    findings = intake.admit_from_triage(run)
+
+    assert findings
+    assert all(f.artifact == run.catalogue for f in findings)
+    assert any("root_index" in f.message for f in findings)
+    assert not run.inputs_dir.exists()
+    assert not run.manifest.exists()
+
+
+def test_the_admit_order_survives_a_priority_the_schema_would_have_rejected(tmp_path):
+    """The sort key had to become a total order over unvalidated JSON.
+
+    `(d.get("priority", 1 << 30), d.get("candidate_id"))` raised
+    `TypeError: '<' not supported between instances of 'int' and 'str'` on a
+    triage record mixing a string priority with an integer one, out of main()
+    at exit 1 with empty stdout -- and admit_from_triage's own comments say
+    twice that it does not assume layer 1 has already run. The three callers of
+    intake.admit_sort_key (this one, refs.check_admitted_inputs, and
+    brief._gate_0) must also agree on the *order*, not merely each not raise,
+    because _unique_artifact_id's collision suffixes are derived from it.
+    """
+    run = _surveyed_and_triaged(tmp_path)
+    triage = read_json(run.triage)
+    for index, disposition in enumerate(triage["dispositions"]):
+        if disposition["disposition"] == "admit":
+            disposition["priority"] = "high" if index == 0 else 1
+    write_json(run.triage, triage)
+
+    assert intake.admit_from_triage(run) == []
+    assert {e["artifact_id"] for e in read_json(run.manifest)["inputs"]} == set(_ADMITTED)
+    # check_admitted_inputs replays the same sort to recover which artifact_id
+    # each candidate became, so a second spelling of the key would report every
+    # admission as both missing and unadmitted.
+    assert refs.check_admitted_inputs(run) == []
+
+
+def test_a_string_priority_sorts_as_if_absent_rather_than_reordering_the_admits(tmp_path):
+    """The other direction of the guard above: coercion must not silently
+    reorder admits whose priorities are fine. A disposition with no usable
+    priority sorts last, which is where one that declares none already sorted.
+    """
+    ordered = sorted(
+        [
+            {"candidate_id": "b", "priority": 2},
+            {"candidate_id": "a", "priority": "high"},
+            {"candidate_id": "c", "priority": 1},
+            {"candidate_id": "d"},
+        ],
+        key=intake.admit_sort_key,
+    )
+    assert [d["candidate_id"] for d in ordered] == ["c", "b", "a", "d"]
+
+
 def test_admission_is_retryable_once_a_disappeared_source_file_returns(tmp_path):
     """A source file can vanish between survey and intake -- deleted, moved,
     whatever -- and materialise raises OSError partway through the admit loop,

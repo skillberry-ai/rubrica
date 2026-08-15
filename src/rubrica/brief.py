@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from rubrica.artifacts import read_json
 from rubrica.errors import UsageError
+from rubrica.intake import admit_sort_key
 from rubrica.paths import RunPaths, list_json
 from rubrica.sizing import implied_size
 from rubrica.utilisation import claim_utilisation
@@ -57,27 +58,90 @@ def _quietly(path):
         return None
 
 
+def _dicts(value) -> list[dict]:
+    """The dict members of `value`, or `[]` if it is not a list at all.
+
+    `_quietly` above only guards the document; every loop below then indexed
+    into that document's *elements* with a bare `.get`, and half of them had an
+    `isinstance` guard while their siblings in the same function did not. A
+    triage record carrying `"deficiencies": ["oops-a-string"]` -- which is
+    precisely the shape a human hand-editing the document gate 0 invites them
+    to hand-edit produces -- raised `AttributeError: 'str' object has no
+    attribute 'get'` and turned this command into a fabricated `[internal]`
+    finding at exit 1.
+
+    That is two promises at once: this module's docstring says `gate_brief`
+    never raises on a readable run's *content*, and the exit-code contract's
+    ruling for a report (claim-utilisation's, restated at cli.py's gate-brief
+    arm) is that it always exits 0 on a readable run, so an orchestrator
+    reading its code cannot mistake data for a defect. A report that reports
+    "this document is malformed" by crashing is the least useful reading of a
+    document, and gate 0 is not holdable without it.
+
+    Silently dropping the malformed element is deliberate and is the *only*
+    thing this can do: raising breaks the promise above, and inventing a
+    finding is `validate`'s job -- run `rubrica validate --stage triage` and
+    the schema names it precisely. Each caller states the count it rendered, so
+    a dropped element shows up as a number that disagrees with the file.
+    """
+    if not isinstance(value, list):
+        return []
+    return [member for member in value if isinstance(member, dict)]
+
+
+def _mapping(value) -> dict:
+    """`value` if it is a dict, else `{}`.
+
+    The `x.get("y") or {}` idiom this replaces substitutes only on a *falsy*
+    value, so a truthy non-dict -- `"objective_review": "nope"`,
+    `"capability_matrix": "x"` -- reached `.get` and raised AttributeError.
+    Measured at gates 0, 1 and 2, all three at exit 1.
+    """
+    return value if isinstance(value, dict) else {}
+
+
 def _gate_0(run: RunPaths) -> str:
     if not run.triage.is_file():
         # Design spec section 7.1's ruling, held by the report as well as by
         # the check: a run minted through `intake --input` never had a triage
         # step, and that absence is not a finding.
+        #
+        # Branched on the catalogue rather than stated unconditionally, because
+        # a missing triage record has two causes and this used to name only
+        # one. On a run `survey` minted, the catalogue is right there and triage
+        # simply has not run yet -- so telling that reader "this run was minted
+        # through `intake --input`, which has no catalogue and no triage step at
+        # all" was false, and false at precisely the moment they are waiting for
+        # triage and asking this command whether it has landed.
+        if run.catalogue.is_file():
+            return (
+                f"GATE 0 -- {run.root}\n\n"
+                "No triage record for this run yet (00-triage.json is absent), but "
+                "00-catalogue.json is present: this run was minted by `survey` and the "
+                "triage stage has not run, or has not written its record. Dispatch "
+                "`rb-triage` and read this brief again -- there is nothing to review "
+                "at gate 0 until it lands.\n"
+            )
         return (
             f"GATE 0 -- {run.root}\n\n"
-            "No triage record for this run (00-triage.json is absent). This run "
-            "was minted through `intake --input`, which has no catalogue and no "
-            "triage step at all -- nothing to review at gate 0.\n"
+            "No triage record for this run (00-triage.json is absent), and no "
+            "00-catalogue.json either. This run was minted through `intake --input`, "
+            "which has no catalogue and no triage step at all -- nothing to review "
+            "at gate 0.\n"
         )
 
-    triage = _quietly(run.triage) or {}
-    catalogue = _quietly(run.catalogue) or {}
+    triage = _mapping(_quietly(run.triage))
+    catalogue = _mapping(_quietly(run.catalogue))
     candidates = {
         c["candidate_id"]: c
-        for c in catalogue.get("candidates", [])
-        if isinstance(c, dict) and "candidate_id" in c
+        for c in _dicts(catalogue.get("candidates"))
+        # isinstance rather than `"candidate_id" in c`: an unhashable id (a
+        # list) raises TypeError building this dict, the same shape
+        # adopt_projection's own `used` map was measured raising.
+        if isinstance(c.get("candidate_id"), str)
     }
 
-    review = triage.get("objective_review") or {}
+    review = _mapping(triage.get("objective_review"))
     lines = [f"GATE 0 -- {run.root}", "", "Objective verdict"]
     lines.append(f"  declared objective: {review.get('declared_objective', '?')}")
     lines.append(
@@ -85,7 +149,7 @@ def _gate_0(run: RunPaths) -> str:
     )
     if review.get("notes"):
         lines.append(f"  notes: {review['notes']}")
-    recommended = review.get("recommended_objective")
+    recommended = _mapping(review.get("recommended_objective"))
     if recommended:
         lines.append(
             f"  recommended objective instead: {recommended.get('objective')} -- "
@@ -93,10 +157,17 @@ def _gate_0(run: RunPaths) -> str:
         )
     lines.append("")
 
-    dispositions = triage.get("dispositions") or []
+    dispositions = _dicts(triage.get("dispositions"))
+    # intake.admit_sort_key, not a third spelling of the same sort. The lambda
+    # this replaces (`d.get("priority", 10**9)`) shared the measured TypeError
+    # of the two it is now unified with -- a string `priority` alongside an
+    # integer one raised out of `sorted`, at exit 1 from a command whose whole
+    # ruling is that it exits 0. Using the *pipeline's* order here has a second
+    # benefit beyond not raising: the admits a human reads at gate 0 are listed
+    # in the order intake will actually materialise them.
     admits = sorted(
-        (d for d in dispositions if isinstance(d, dict) and d.get("disposition") == "admit"),
-        key=lambda d: d.get("priority", 10**9),
+        (d for d in dispositions if d.get("disposition") == "admit"),
+        key=admit_sort_key,
     )
     lines.append(f"Admits, by priority ({len(admits)})")
     if admits:
@@ -110,8 +181,12 @@ def _gate_0(run: RunPaths) -> str:
 
     declines_by_code: dict[str, list[dict]] = {}
     for d in dispositions:
-        if isinstance(d, dict) and d.get("disposition") == "decline":
-            declines_by_code.setdefault(d.get("reason_code") or "?", []).append(d)
+        if d.get("disposition") == "decline":
+            code = d.get("reason_code")
+            # str() on the key, not the bare value: `reason_code` is grouped on
+            # and then sorted, and a non-string one both risks being unhashable
+            # and makes `sorted(declines_by_code)` compare str to int.
+            declines_by_code.setdefault(str(code) if code else "?", []).append(d)
     total_declines = sum(len(v) for v in declines_by_code.values())
     lines.append(f"Declines, by reason code ({total_declines})")
     if declines_by_code:
@@ -120,7 +195,12 @@ def _gate_0(run: RunPaths) -> str:
             lines.append(f"  {code} ({len(entries)}):")
             for d in entries:
                 bytes_note = ""
-                candidate = candidates.get(d.get("candidate_id"))
+                # `candidates.get(...)` raises TypeError on an unhashable
+                # candidate_id, so the lookup is gated on the key being the
+                # string the schema requires; a non-string one simply renders
+                # without its byte count.
+                cid = d.get("candidate_id")
+                candidate = candidates.get(cid) if isinstance(cid, str) else None
                 if candidate is not None:
                     bytes_note = f", {candidate.get('bytes', '?')} bytes"
                 lines.append(
@@ -130,13 +210,17 @@ def _gate_0(run: RunPaths) -> str:
         lines.append("  (none)")
     lines.append("")
 
-    deficiencies = triage.get("deficiencies") or []
+    deficiencies = _dicts(triage.get("deficiencies"))
     projections_by_closes: dict[str, list[dict]] = {}
-    for projection in triage.get("projections") or []:
-        if not isinstance(projection, dict):
-            continue
-        for closes in projection.get("closes") or []:
-            projections_by_closes.setdefault(closes, []).append(projection)
+    for projection in _dicts(triage.get("projections")):
+        raw_closes = projection.get("closes")
+        # Strings only, from a real list. A non-string `closes` entry can be
+        # unhashable (`setdefault` raises TypeError on a list), and one that is
+        # not a string cannot match a `deficiency_id` that is, so nothing
+        # renderable is lost by skipping it.
+        for closes in raw_closes if isinstance(raw_closes, list) else []:
+            if isinstance(closes, str):
+                projections_by_closes.setdefault(closes, []).append(projection)
 
     lines.append(f"Open deficiencies and their projections ({len(deficiencies)})")
     if deficiencies:
@@ -147,10 +231,10 @@ def _gate_0(run: RunPaths) -> str:
             lines.append(f"  {deficiency_id} [{status}]: {deficiency.get('statement', '')}")
             for projection in projections_by_closes.get(deficiency_id, []):
                 projection_id = projection.get("projection_id", "?")
-                confidence = (projection.get("method") or {}).get("confidence", "?")
+                confidence = _mapping(projection.get("method")).get("confidence", "?")
                 satisfied_by = projection.get("satisfied_by")
                 satisfied_note = f", satisfied by {satisfied_by}" if satisfied_by else ""
-                wanted = (projection.get("wanted") or {}).get("statement", "")
+                wanted = _mapping(projection.get("wanted")).get("statement", "")
                 lines.append(
                     f"      -> {projection_id} (confidence: {confidence}{satisfied_note}): {wanted}"
                 )
@@ -201,8 +285,8 @@ def _gate_1(run: RunPaths) -> str:
         )
     lines.append("")
 
-    world = _quietly(run.world_model) or {}
-    gaps = world.get("gaps") or []
+    world = _mapping(_quietly(run.world_model))
+    gaps = _dicts(world.get("gaps"))
     lines.append(f"World-model gaps ({len(gaps)})")
     if gaps:
         for gap in gaps:
@@ -221,7 +305,7 @@ def _gate_1(run: RunPaths) -> str:
         lines.append("  (no triage record for this run)")
     else:
         open_deficiencies = [
-            d for d in (triage.get("deficiencies") or []) if not d.get("closed_by")
+            d for d in _dicts(_mapping(triage).get("deficiencies")) if not d.get("closed_by")
         ]
         if open_deficiencies:
             for deficiency in open_deficiencies:
@@ -241,20 +325,24 @@ def _gate_2(run: RunPaths) -> str:
         lines.append("No coverage report yet (03-coverage/latest.json is absent).")
         return "\n".join(lines) + "\n"
 
+    coverage = _mapping(coverage)
     lines.append(f"Coverage verdict: {coverage.get('verdict', '?')}")
-    capability_matrix = coverage.get("capability_matrix") or {}
-    goal_matrix = coverage.get("goal_matrix") or {}
+    capability_matrix = _mapping(coverage.get("capability_matrix"))
+    goal_matrix = _mapping(coverage.get("goal_matrix"))
     lines.append(
         f"  capability cells: {capability_matrix.get('covered', '?')}/"
         f"{capability_matrix.get('total', '?')}"
     )
     lines.append(f"  goals: {goal_matrix.get('covered', '?')}/{goal_matrix.get('total', '?')}")
-    progress = coverage.get("progress") or {}
+    progress = _mapping(coverage.get("progress"))
     lines.append(
         f"  round {coverage.get('round', '?')}: {progress.get('new_cells_this_round', '?')} new "
         f"cells this round, {progress.get('rounds_without_progress', '?')} rounds without progress"
     )
-    lines.append(f"  open holes: {len(coverage.get('holes') or [])}")
+    # len() over the raw value would count a string's characters as holes, so
+    # the count is of a real list or nothing.
+    raw_holes = coverage.get("holes")
+    lines.append(f"  open holes: {len(raw_holes) if isinstance(raw_holes, list) else 0}")
 
     size = implied_size(run)
     if size is not None:
@@ -272,7 +360,12 @@ def _gate_3(run: RunPaths) -> str:
     for path in list_json(run.verdicts_dir):
         payload = _quietly(path)
         if isinstance(payload, dict):
-            verdict = payload.get("verdict") or "?"
+            # str() on the key: `tallies` is grouped on and then `sorted`, so a
+            # non-string verdict would either be unhashable or make the sort
+            # compare str to int -- the same reason gate 0's reason_code key is
+            # coerced.
+            verdict = payload.get("verdict")
+            verdict = str(verdict) if verdict else "?"
             tallies[verdict] = tallies.get(verdict, 0) + 1
 
     total = sum(tallies.values())

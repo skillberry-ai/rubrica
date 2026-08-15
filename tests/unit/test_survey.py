@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from rubrica import survey, validate
+from rubrica import intake, survey, validate
 from rubrica.artifacts import canonical_bytes, read_json
 from rubrica.errors import UsageError
 
@@ -251,3 +251,57 @@ def test_an_unreadable_corpus_root_is_exit_two_material(tmp_path):
             _survey(tmp_path, corpus_roots=[root])
     finally:
         root.chmod(0o755)
+
+
+# 200,000 opening brackets: deep enough that CPython's json decoder exhausts
+# its recursion limit rather than reporting a syntax error, which is the whole
+# point -- it raises RecursionError, not JSONDecodeError, and nothing on either
+# new command's dispatch path caught that.
+_PATHOLOGICALLY_NESTED = "[" * 200_000 + "]" * 200_000
+
+
+def test_a_pathologically_nested_file_does_not_abort_the_inventory(tmp_path):
+    """survey.py's own header rules out size-based exclusion, so an arbitrary
+    user tree's worst file reaches `json.loads` on the explode path with nothing
+    upstream having filtered it. Measured: `survey --corpus DIR` over a corpus
+    containing one 200,000-deep `[[[...]]]` raised RecursionError out of
+    cli.main() -- one hostile file took down the whole inventory, and cli.py's
+    survey block catches only (UsageError, ArtifactError, OSError) so it was an
+    empty-stdout exit rather than a message.
+
+    Task 6 had already fixed exactly this in digest.digest_for_path; the two
+    siblings that decode JSON (this one and intake._json_or_none) were missed
+    and are now on the hot path of both new commands.
+
+    Not exploding the file is the right outcome and is asserted, not merely
+    tolerated: a container this decoder cannot read is one candidate, and the
+    catalogue must still validate.
+    """
+    root = _corpus(tmp_path)
+    (root / "nested.json").write_text(_PATHOLOGICALLY_NESTED, encoding="utf-8")
+
+    run = _survey(tmp_path, corpus_roots=[root])
+
+    catalogue = read_json(run.catalogue)
+    nested = [c for c in catalogue["candidates"] if c.get("path") == "nested.json"]
+    assert len(nested) == 1, "the file is one candidate, exploded into nothing"
+    assert nested[0]["admissible"] is True
+    assert not [
+        c
+        for c in catalogue["candidates"]
+        if (c.get("container") or {}).get("candidate_id") == nested[0]["candidate_id"]
+    ]
+    assert validate.validate_stage(run, "survey") == []
+
+
+def test_classify_returns_a_kind_for_a_pathologically_nested_file(tmp_path):
+    """intake._json_or_none's half of the same gap. `classify` is reached by
+    `survey` (for every corpus file), by `intake --input`, and by
+    `adopt-projection` through triage.check_acceptance -- three commands, none
+    of whose dispatch blocks catch RecursionError. A kind of "other" is the
+    correct answer: nothing about the content is readable, and the extract skill
+    reads the artifact itself and is free to disagree.
+    """
+    source = tmp_path / "nested.json"
+    source.write_text(_PATHOLOGICALLY_NESTED, encoding="utf-8")
+    assert intake.classify(source) == "other"

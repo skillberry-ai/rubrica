@@ -351,9 +351,21 @@ def survey(
                 # Only structured files can be containers. Reading a 6MB capture
                 # is the cost this whole stage exists to pay once rather than
                 # per-stage.
+                # RecursionError alongside the three obvious ones, matching
+                # digest.digest_for_path's and intake._json_or_none's catches
+                # and for the reason this module's own header states: with no
+                # size-based exclusion, a pathologically nested file (a
+                # 200,000-deep `[[[...]]]`) in an arbitrary user tree reaches
+                # this line, and CPython's json decoder raises RecursionError
+                # rather than JSONDecodeError for that shape. cli.py's survey
+                # block catches only (UsageError, ArtifactError, OSError), so
+                # it escaped main() as a traceback -- one hostile file in the
+                # corpus took down the whole inventory. Not exploding it is the
+                # right outcome anyway: a file this decoder cannot read is one
+                # candidate, and the digest heuristics record that.
                 try:
                     exploded = explode(json.loads(path.read_text(encoding="utf-8")))
-                except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError):
                     exploded = None
 
             entry = {

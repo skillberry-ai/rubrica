@@ -39,6 +39,32 @@ ACCEPTANCE_PASS_MESSAGE = (
 )
 
 
+def _strings(value, report, label: str) -> list[str]:
+    """The string members of `value`, reporting every other shape it carries.
+
+    `value or []` is not a sufficient guard, for the reason
+    `refs._as_list`'s docstring records: it substitutes only on a *falsy*
+    value, so a truthy non-list (`"nope"`, an int) still reaches the `for`
+    loop -- a string iterates character by character, silently checking the
+    wrong thing, and an int raises TypeError. Both are the caller's criterion
+    being quietly not-checked, which is worse here than anywhere else in this
+    module: `check_acceptance` returning clean is what lets `adopt_projection`
+    write to the catalogue.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        report(f"the acceptance contract's {label} is {value!r}, not a list of strings")
+        return []
+    out = []
+    for member in value:
+        if isinstance(member, str):
+            out.append(member)
+        else:
+            report(f"the acceptance contract's {label} carries {member!r}, which is not a string")
+    return out
+
+
 def check_acceptance(path: Path, acceptance: dict) -> list[Finding]:
     """Run one projection's acceptance contract's mechanical checks against `path`.
 
@@ -74,29 +100,54 @@ def check_acceptance(path: Path, acceptance: dict) -> list[Finding]:
         raise UsageError(f"cannot read projection source: {path} ({exc})") from exc
 
     actual_kind = classify(path)
-    wanted_kind = acceptance["classifies_as"]
-    if actual_kind != wanted_kind:
+    # `acceptance["classifies_as"]` was a bare index, one function away from the
+    # guard at adopt_projection's own `acceptance` read that exists for exactly
+    # this reason -- and measured with `"acceptance": {"prose": "p"}` it raised
+    # KeyError straight out of main(): exit 1, empty stdout. The finding names
+    # `path` like every other one here, because the whole point of this function
+    # is that a projection's acceptance contract is judged against the
+    # manufactured file; the *record*-level defect is reported by
+    # adopt_projection, which owns the run.triage pointer.
+    wanted_kind = acceptance.get("classifies_as")
+    if not isinstance(wanted_kind, str):
+        report(
+            f"the projection's acceptance contract asks for classifies_as {wanted_kind!r}, "
+            "which is not an artifact kind; structural acceptance cannot be judged against it"
+        )
+    elif actual_kind != wanted_kind:
         report(
             f"classifies as {actual_kind!r} (via intake.classify), but the projection's "
             f"acceptance contract asked for {wanted_kind!r}"
         )
 
-    for needle in acceptance.get("must_contain") or []:
+    # `_strings` on all three lists below. `needle not in text` raises TypeError
+    # for a non-string needle ("'in <string>' requires string as left operand"),
+    # and `resolve_pointer` raises AttributeError on `pointer.startswith` for a
+    # non-string pointer -- both measured escaping main(). A non-string entry is
+    # itself the defect, so it is reported rather than skipped: silently
+    # ignoring it would let a projection pass structural acceptance on a
+    # criterion nobody checked.
+    for needle in _strings(acceptance.get("must_contain"), report, "must_contain"):
         if needle not in text:
             report(f"must contain {needle!r}, which is not present")
 
-    for needle in acceptance.get("must_not_contain") or []:
+    for needle in _strings(acceptance.get("must_not_contain"), report, "must_not_contain"):
         if needle in text:
             report(
                 f"must not contain {needle!r}, which is present -- the boundary this "
                 "projection was scoped to exclude"
             )
 
-    pointers = acceptance.get("pointers_required") or []
+    pointers = _strings(acceptance.get("pointers_required"), report, "pointers_required")
     if pointers:
         try:
             document = json.loads(text)
-        except json.JSONDecodeError:
+        # RecursionError alongside JSONDecodeError, matching
+        # digest.digest_for_path and intake._json_or_none: a manufactured
+        # projection is a file a human wrote outside the run, so nothing has
+        # vetted its nesting depth, and CPython's decoder raises RecursionError
+        # rather than JSONDecodeError on a pathologically nested one.
+        except (json.JSONDecodeError, RecursionError):
             document = None
         for pointer in pointers:
             if document is None:
@@ -150,7 +201,27 @@ def adopt_projection(
         raise UsageError(f"no catalogue at {run.catalogue}; this run was not minted by survey")
 
     triage_record = read_json(run.triage)
-    projections = triage_record.get("projections") or []
+    # A *present but not a list* `projections` is a malformed record, which is
+    # exit 1 with a finding -- not the "no projection X" UsageError below at
+    # exit 2, which is where `"projections": "nope"` was measured to land it.
+    # A stage defect must never surface as 2 (the orchestrator halts rather
+    # than spending its one repair), and the distinction this preserves is
+    # real: an *absent* or *empty* projections list with a `--projection` on
+    # argv is the caller naming something that does not exist, which is a
+    # usage error, while a string where an array belongs is 00-triage.json
+    # being wrong.
+    raw_projections = triage_record.get("projections")
+    if raw_projections is not None and not isinstance(raw_projections, list):
+        return [
+            Finding(
+                run.triage,
+                "internal",
+                "/projections",
+                f"projections is {raw_projections!r}, not a list; adopt-projection cannot find "
+                "the projection it was asked to adopt",
+            )
+        ]
+    projections = raw_projections or []
     # enumerate rather than next() over a bare generator: a real index lets
     # the acceptance-missing finding below point at exactly the projection
     # that is malformed, not "somewhere in /projections".
@@ -218,8 +289,48 @@ def adopt_projection(
         return []
 
     catalogue = read_json(run.catalogue)
-    candidates = catalogue.get("candidates") or []
-    used = {c["candidate_id"]: 1 for c in candidates if isinstance(c, dict) and "candidate_id" in c}
+    # Both containers this function *appends to* are checked before it does,
+    # and for a sharper reason than the read-only guards above: `"nope".append`
+    # raises AttributeError, which escaped main() as exit 1 with empty stdout
+    # (measured on both `candidates` and `dispositions`), and unlike a bad read
+    # the failure lands halfway through a two-file write -- catalogue written,
+    # triage record not, or the reverse. Refusing before the first write_json
+    # is what keeps the pair consistent.
+    raw_candidates = catalogue.get("candidates")
+    if raw_candidates is not None and not isinstance(raw_candidates, list):
+        return [
+            Finding(
+                run.catalogue,
+                "internal",
+                "/candidates",
+                f"candidates is {raw_candidates!r}, not a list; adopt-projection cannot append "
+                "the adopted candidate to it",
+            )
+        ]
+    raw_dispositions = triage_record.get("dispositions")
+    if raw_dispositions is not None and not isinstance(raw_dispositions, list):
+        return [
+            Finding(
+                run.triage,
+                "internal",
+                "/dispositions",
+                f"dispositions is {raw_dispositions!r}, not a list; adopt-projection cannot "
+                "append the human's admit to it",
+            )
+        ]
+    candidates = raw_candidates or []
+    # `isinstance(..., str)` rather than the `"candidate_id" in c` this replaced:
+    # a candidate_id that is not a string need not even be *hashable*, and a
+    # list one raised `TypeError: unhashable type: 'list'` building this dict --
+    # out of main(), again at exit 1 with empty stdout. A non-string id cannot
+    # collide with `projection_id` (which _unique_artifact_id compares as a
+    # string) so dropping it from the collision map loses nothing, and
+    # check_catalogue already reports it as a finding of its own.
+    used = {
+        c["candidate_id"]: 1
+        for c in candidates
+        if isinstance(c, dict) and isinstance(c.get("candidate_id"), str)
+    }
     candidate_id = _unique_artifact_id(projection_id, used)
 
     kind = classify(source)
@@ -241,7 +352,13 @@ def adopt_projection(
     # against run.catalogue too, not a bare index.
     policy = catalogue.get("policy")
     digest_body_chars = policy.get("digest_body_chars") if isinstance(policy, dict) else None
-    if not isinstance(digest_body_chars, int):
+    # bool excluded explicitly: isinstance(True, int) is True in Python, so
+    # `"digest_body_chars": true` passed this guard and reached
+    # digest_for_path as body_chars=1, truncating every digest body to a single
+    # character with no error anywhere. JSON `true` is not an integer to the
+    # catalogue schema either, so this is layer 1's rule held one step earlier
+    # -- the same reason intake() and survey() exclude bool from their limits.
+    if not isinstance(digest_body_chars, int) or isinstance(digest_body_chars, bool):
         return [
             Finding(
                 run.catalogue,
@@ -252,8 +369,27 @@ def adopt_projection(
             )
         ]
     candidate_digest = digest_module.digest_for_path(source, kind, body_chars=digest_body_chars)
+    raw_sources = projection.get("sources")
+    # `or []` alone let a truthy non-list through -- `"sources": "nope"`
+    # iterated character by character, and only `isinstance(s, dict)` filtering
+    # every character out kept it from raising. It recorded an empty
+    # `source_candidate_ids` on a projection that declared sources, which is
+    # provenance silently lost rather than reported, so the shape is checked
+    # instead of tolerated.
+    if raw_sources is not None and not isinstance(raw_sources, list):
+        return [
+            Finding(
+                run.triage,
+                "internal",
+                f"/projections/{projection_index}/sources",
+                f"sources is {raw_sources!r}, not a list; the adopted candidate's provenance is "
+                "minted from the candidate_ids it names",
+            )
+        ]
     source_candidate_ids = [
-        s["candidate_id"] for s in projection.get("sources") or [] if isinstance(s, dict)
+        s["candidate_id"]
+        for s in raw_sources or []
+        if isinstance(s, dict) and isinstance(s.get("candidate_id"), str)
     ]
     candidate = {
         "candidate_id": candidate_id,
@@ -272,7 +408,7 @@ def adopt_projection(
     candidates.append(candidate)
     catalogue["candidates"] = candidates
 
-    dispositions = triage_record.get("dispositions") or []
+    dispositions = raw_dispositions or []
     dispositions.append(
         {
             "candidate_id": candidate_id,
@@ -283,8 +419,19 @@ def adopt_projection(
     )
     triage_record["dispositions"] = dispositions
 
-    closes = set(projection.get("closes") or [])
-    for deficiency in triage_record.get("deficiencies") or []:
+    # Only the *hashable* members, and only from a real list. `set(...)` over a
+    # `closes` carrying a list raised `TypeError: unhashable type: 'list'` out
+    # of main(); a truthy non-list `closes` (a string) would have built a set of
+    # its characters and closed nothing. A deficiency_id that is not a string
+    # cannot match one that is, so restricting to strings changes no correct
+    # outcome, and check_triage already reports a `closes` entry that resolves
+    # to no deficiency.
+    raw_closes = projection.get("closes")
+    closes = (
+        {c for c in raw_closes if isinstance(c, str)} if isinstance(raw_closes, list) else set()
+    )
+    raw_deficiencies = triage_record.get("deficiencies")
+    for deficiency in raw_deficiencies if isinstance(raw_deficiencies, list) else []:
         if isinstance(deficiency, dict) and deficiency.get("deficiency_id") in closes:
             deficiency["closed_by"] = projection_id
     projection["satisfied_by"] = candidate_id
