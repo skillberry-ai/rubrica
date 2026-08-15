@@ -557,12 +557,17 @@ def check_admitted_inputs(run: RunPaths) -> list[Finding]:
     never had one. Matching is by artifact_id, which admit_from_triage derives
     from candidate_id by the same suffix-on-collision rule -- so a mismatch here
     means an admission was dropped or one arrived from outside the gate.
+
+    What this cannot catch: it replays admit_from_triage's own derivation
+    (same sort, same _unique_artifact_id) rather than re-deriving the rule
+    independently, so a bug in that shared computation, or in its sort order,
+    is invisible here -- both sides would compute the identical wrong answer.
     """
     triage = _load(run.triage)
     if not isinstance(triage, dict):
         return []
     manifest = _load(run.manifest)
-    if manifest is None:
+    if not isinstance(manifest, dict):
         return []
 
     # A local import, not a top-level one: intake.py already imports

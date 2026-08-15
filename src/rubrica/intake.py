@@ -379,21 +379,56 @@ def admit_from_triage(run: RunPaths) -> list[Finding]:
 
     catalogue = read_json(run.catalogue)
     triage = read_json(run.triage)
-    candidates = {c["candidate_id"]: c for c in catalogue["candidates"]}
-    admitted = [
-        candidates[d["candidate_id"]]
-        for d in sorted(
-            (d for d in triage["dispositions"] if d["disposition"] == "admit"),
-            key=lambda d: (d.get("priority", 1 << 30), d["candidate_id"]),
-        )
-    ]
-    if not admitted:
+    candidates = {
+        c["candidate_id"]: c
+        for c in catalogue.get("candidates") or []
+        if isinstance(c, dict) and isinstance(c.get("candidate_id"), str)
+    }
+    admits = sorted(
+        (
+            d
+            for d in triage.get("dispositions") or []
+            if isinstance(d, dict) and d.get("disposition") == "admit"
+        ),
+        key=lambda d: (d.get("priority", 1 << 30), d.get("candidate_id")),
+    )
+    if not admits:
         # check_triage already reports this (admits == 0 with a non-empty
         # dispositions list) whenever the schema-required minItems: 1 on
         # dispositions holds, so this is a defensive backstop rather than the
         # primary source of the finding -- kept because admit_from_triage does
         # not itself assume layer 1 has already run.
         return [Finding(run.triage, "refs", "/dispositions", "no candidate was admitted")]
+
+    # check_triage's own "no such candidate" check is gated behind `if
+    # candidates` (refs.py), so it is silent whenever the catalogue's own
+    # candidates list is empty or carries no valid string ids -- a degenerate
+    # catalogue can pass that gate with an admit disposition naming a
+    # candidate that does not exist. admit_from_triage checks this itself,
+    # unconditionally, for the same reason as the check above: an unresolved
+    # candidate_id must come back as a finding against 00-triage.json, not
+    # the KeyError that indexing `candidates` below would otherwise raise --
+    # an uncaught exception here would escape every handler as an
+    # empty-stdout exit 1, indistinguishable from a crashed harness rather
+    # than a repairable stage defect.
+    # key=repr rather than the bare default: a malformed disposition's
+    # candidate_id need not even be a string on an unvalidated artifact (see
+    # the "does not itself assume layer 1 has already run" comment above),
+    # and sorted() over a set mixing None/int/str raises TypeError -- which
+    # would reintroduce exactly the crash this check exists to prevent.
+    unknown = sorted({d.get("candidate_id") for d in admits} - set(candidates), key=repr)
+    if unknown:
+        return [
+            Finding(
+                run.triage,
+                "refs",
+                "/dispositions",
+                f"admitted candidate {cid!r} is not in the catalogue",
+            )
+            for cid in unknown
+        ]
+
+    admitted = [candidates[d["candidate_id"]] for d in admits]
 
     roots = catalogue["request"]["corpus_roots"]
     run.inputs_dir.mkdir(parents=True)

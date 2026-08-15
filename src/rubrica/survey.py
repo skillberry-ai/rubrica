@@ -29,7 +29,7 @@ from typing import Any
 from rubrica import digest as digest_module
 from rubrica.artifacts import canonical_bytes, sha256_of, write_json
 from rubrica.errors import UsageError
-from rubrica.intake import classify, slug
+from rubrica.intake import _unique_artifact_id, classify, slug
 from rubrica.manifest import utc_stamp
 from rubrica.paths import RunPaths
 
@@ -274,13 +274,6 @@ def explode(payload: Any) -> list[tuple[str, Any]] | None:
     return None
 
 
-def _unique(base: str, used: dict[str, int]) -> str:
-    """`base`, suffixed on collision, so ids are stable under a sorted walk."""
-    count = used.get(base, 0) + 1
-    used[base] = count
-    return base if count == 1 else f"{base}-{count}"
-
-
 def survey(
     *,
     corpus_roots: Sequence[Path],
@@ -352,7 +345,7 @@ def survey(
         for path in kept:
             relative = path.relative_to(Path(root)).as_posix()
             kind = classify(path)
-            candidate_id = _unique(slug(path.name), used)
+            candidate_id = _unique_artifact_id(slug(path.name), used)
             exploded = None
             if kind != "design_doc" and kind != "source_code":
                 # Only structured files can be containers. Reading a 6MB capture
@@ -384,7 +377,9 @@ def survey(
                 element_kind = classify_payload(element)
                 candidates.append(
                     {
-                        "candidate_id": _unique(f"{candidate_id}{pointer.replace('/', '-')}", used),
+                        "candidate_id": _unique_artifact_id(
+                            f"{candidate_id}{pointer.replace('/', '-')}", used
+                        ),
                         "origin": "container_element",
                         "container": {"candidate_id": candidate_id, "json_pointer": pointer},
                         "bytes": len(body),

@@ -166,6 +166,35 @@ def test_admitting_twice_refuses_rather_than_rewriting(tmp_path):
         intake.admit_from_triage(run)
 
 
+def test_an_admit_naming_a_candidate_the_catalogue_does_not_carry_is_a_finding(tmp_path):
+    """check_triage's own "no such candidate" check (refs.py) is gated behind
+    `if candidates`, so it is silent whenever the catalogue's own candidates
+    list is empty -- exactly what a degenerate catalogue looks like. Without
+    its own check, admit_from_triage would hit `candidates[d["candidate_id"]]`
+    directly and raise KeyError: an uncaught exception here is exit 1 with
+    empty stdout, indistinguishable from a crashed harness rather than a
+    repairable stage defect. Must come back as a finding against
+    00-triage.json instead, and write nothing.
+    """
+    run = _surveyed(tmp_path)
+    catalogue = read_json(run.catalogue)
+    catalogue["candidates"] = []
+    write_json(run.catalogue, catalogue)
+    write_json(
+        run.triage,
+        _triage_record(run.root.name, drop_a_disposition=False, decline_everything=False),
+    )
+
+    assert refs.check_triage(run) == [], "the setup itself must not be caught by layer 2 first"
+
+    findings = intake.admit_from_triage(run)
+    assert findings
+    assert all("00-triage.json" in str(f.artifact) for f in findings)
+    assert any("readme-md" in f.message for f in findings)
+    assert not run.manifest.exists()
+    assert not run.inputs_dir.exists()
+
+
 def test_a_missing_triage_record_is_a_usage_error(tmp_path):
     """Stages run out of order is a misconfigured harness, which is exit 2."""
     run = _surveyed(tmp_path)
@@ -179,15 +208,20 @@ def test_run_and_input_are_mutually_exclusive():
         parser.parse_args(["intake", "--run", "r", "--input", "x"])
 
 
-def test_run_mode_rejects_the_parameters_the_catalogue_already_carries():
+def test_run_mode_rejects_the_parameters_the_catalogue_already_carries(capsys):
     """Refused in the CLI rather than resolved by precedence: minting from an
     ambiguous parameter set is the shape that produced findings against an
     unfixable artifact. argparse cannot express "illegal only alongside --run"
-    directly, so this is checked in cli.main after parsing and raises
-    UsageError rather than exiting through argparse's own SystemExit path.
+    directly, so this is checked in cli.main after parsing -- but it is a
+    usage error like any other on this path, caught in the same try/except as
+    the admit_from_triage call rather than left to escape cli.main(): an
+    escaping UsageError would print nothing to stdout and exit 1, indistinguishable
+    from a stage defect. exit 2 with a message on stderr, not SystemExit or an
+    uncaught exception.
     """
-    with pytest.raises(UsageError):
-        cli.main(["intake", "--run", "r", "--target-name", "t"])
+    code = cli.main(["intake", "--run", "r", "--target-name", "t"])
+    assert code == 2
+    assert "target-name" in capsys.readouterr().err
 
 
 def test_intake_run_via_the_cli_prints_the_run_and_exits_clean(tmp_path, capsys):

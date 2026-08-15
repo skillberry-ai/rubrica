@@ -300,36 +300,37 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "intake":
         if args.run:
-            # Deliberately unguarded: minting a run from an ambiguous
-            # parameter set (a human's --target-name alongside a catalogue
-            # that already carries one) is refused rather than resolved by
-            # precedence, and this is the one branch of intake's argument
-            # handling that is not a repairable usage error to catch and
-            # report at exit 2 -- it is checked here, once, so main() itself
-            # documents the constraint argparse could not express.
-            illegal = [
-                flag
-                for flag, value in (
-                    ("--runs-dir", args.runs_dir),
-                    ("--target-name", args.target_name),
-                    ("--target-interface", args.target_interface),
-                    ("--max-rounds", args.max_rounds),
-                    ("--max-scenarios", args.max_scenarios),
-                )
-                if value is not None
-            ]
-            if illegal:
-                raise UsageError(
-                    f"intake --run mints its manifest from the catalogue at {args.run}; "
-                    f"{', '.join(illegal)} is illegal alongside --run"
-                )
-            # Its own catch, exactly like the --input path below: --run names
-            # a run directory a human or the orchestrator supplied, not an
-            # artifact a stage wrote, so an absent/unreadable run here is a
-            # usage error too. admit_from_triage's own findings (an
-            # inconsistent triage record) are a different failure shape --
-            # exit 1, printed on stdout -- and must not be caught here.
+            # Minting a run from an ambiguous parameter set (a human's
+            # --target-name alongside a catalogue that already carries one)
+            # is refused rather than resolved by precedence -- this is the
+            # one constraint argparse could not express, so it is checked
+            # here, once, in main() itself. It is a usage error like any
+            # other on this path, though, so it shares the same try/except
+            # as the admit_from_triage call below rather than escaping
+            # uncaught: an uncaught exception here would print nothing to
+            # stdout and exit 1, which is indistinguishable from a stage
+            # defect and would cost the orchestrator its one repair attempt
+            # on a run that was never broken. admit_from_triage's own
+            # findings (an inconsistent triage record) are a different
+            # failure shape -- exit 1, printed on stdout -- and must not be
+            # caught here.
             try:
+                illegal = [
+                    flag
+                    for flag, value in (
+                        ("--runs-dir", args.runs_dir),
+                        ("--target-name", args.target_name),
+                        ("--target-interface", args.target_interface),
+                        ("--max-rounds", args.max_rounds),
+                        ("--max-scenarios", args.max_scenarios),
+                    )
+                    if value is not None
+                ]
+                if illegal:
+                    raise UsageError(
+                        f"intake --run mints its manifest from the catalogue at {args.run}; "
+                        f"{', '.join(illegal)} is illegal alongside --run"
+                    )
                 run = _run_dir(args.run)
                 findings = admit_from_triage(run)
             except (UsageError, ArtifactError, OSError) as exc:
