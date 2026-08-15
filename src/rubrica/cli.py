@@ -60,7 +60,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from rubrica import refs, skills, survey
+from rubrica import refs, skills, survey, triage
 from rubrica.artifacts import ArtifactError, read_json
 from rubrica.dedupe import candidate_pairs
 from rubrica.emit import emit_run
@@ -88,6 +88,7 @@ CLEAN, FINDINGS, USAGE = 0, 1, 2
 SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("survey", "inventory a corpus into a catalogue of candidates and mint a run"),
     ("intake", "register inputs and mint a run"),
+    ("adopt-projection", "admit a manufactured projection into the catalogue, structurally"),
     ("validate", "schema-validate one stage's output"),
     ("check-refs", "cross-artifact and reachability checks"),
     ("dedupe-candidates", "propose candidate duplicate scenario pairs as JSON"),
@@ -160,6 +161,12 @@ def _build_parser() -> argparse.ArgumentParser:
     # needed.
     p_input_group.add_argument("--max-rounds", type=int, default=None)
     p_input_group.add_argument("--max-scenarios", type=int, default=None)
+
+    p_adopt = parsers["adopt-projection"]
+    p_adopt.add_argument("--run", required=True)
+    p_adopt.add_argument("--projection", required=True, metavar="ID")
+    p_adopt.add_argument("--file", required=True, metavar="PATH")
+    p_adopt.add_argument("--check-only", action="store_true")
 
     p_validate = parsers["validate"]
     p_validate.add_argument("--run", required=True)
@@ -371,6 +378,33 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return USAGE
         print(run.root)
+        return CLEAN
+
+    if args.command == "adopt-projection":
+        # Its own block, mirroring intake --run just above: adopt_projection
+        # reads a human-supplied --file path as well as the run's own
+        # artifacts, so a raised UsageError -- an unreadable file, an unknown
+        # projection_id, a missing catalogue or triage record -- is a usage
+        # error like intake --run's illegal-flag check, sharing its catch
+        # rather than escaping uncaught. A non-empty return is the other
+        # failure shape: check_acceptance's findings, repairable by
+        # manufacturing the file again, so it is handled after the try like
+        # admit_from_triage's findings are.
+        try:
+            run = _run_dir(args.run)
+            findings = triage.adopt_projection(
+                run,
+                projection_id=args.projection,
+                source=Path(args.file),
+                check_only=args.check_only,
+            )
+        except (UsageError, ArtifactError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return USAGE
+        if findings:
+            print(format_findings(findings))
+            return FINDINGS
+        print(triage.ACCEPTANCE_PASS_MESSAGE)
         return CLEAN
 
     try:
