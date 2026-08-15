@@ -47,10 +47,22 @@ def test_the_inputs_section_forbids_opening_a_candidate_file():
 def test_the_inputs_section_names_heuristics_fired_as_a_fact_about_the_digest():
     """A heuristic that did not fire is a fact about the digest, not the
     candidate -- the mitigation for the module's blindness only works if the
-    skill reads the field that way."""
+    skill reads the field that way.
+
+    Review of this task found the second assertion satisfiable by a different
+    paragraph than the one it names: correction 2's skeleton-truncation prose
+    also contains the literal phrase "about the digest", roughly 520 chars
+    after this mention, so a section-wide search could pass even if the
+    heuristics_fired sentence itself dropped the phrase entirely. Bounded to
+    a 300-char window right after the heuristics_fired mention -- long enough
+    to survive a reword of that one sentence, short enough to stay well clear
+    of the second occurrence -- so this predicate is scoped to the sentence
+    it is meant to guard, not to the section that happens to contain it."""
     body = _norm(skills.section_body(_skill(), "1. Inputs"))
     assert "heuristics_fired" in body
-    assert "about the digest" in body
+    start = body.index("heuristics_fired")
+    window = body[start : start + 300]
+    assert "about the digest" in window
 
 
 def test_the_inputs_section_names_trace_heuristics_reachably():
@@ -86,6 +98,17 @@ def test_the_inputs_section_warns_status_and_error_markers_are_not_independent()
     assert "one fact" in body or "stated twice" in body
 
 
+def test_the_output_section_names_the_authority_field():
+    """triage-0.1.json:62 requires authority on every disposition (enum
+    ["triage", "human"], schema line 70). Finding 1 of this task's review:
+    the skill never named it, so a live dispatch's first `rubrica validate`
+    would report a missing-required-property finding on every disposition it
+    wrote -- the primary output artifact, not an edge case."""
+    body = _norm(skills.section_body(_skill(), "2. Output"))
+    assert "authority" in body
+    assert "gate-0 override" in body or "gate 0 override" in body
+
+
 def test_the_method_section_names_all_seven_projection_fields():
     """triage-0.1.json's projections[] requires all seven of projection_id,
     closes, sources, wanted, method, acceptance, and boundary -- a projection
@@ -102,6 +125,16 @@ def test_the_method_section_names_all_seven_projection_fields():
         "boundary",
     ):
         assert field in body
+
+
+def test_the_method_section_names_the_projection_sources_digest_note():
+    """triage-0.1.json:107 requires digest_note on every projections[].sources
+    entry alongside candidate_id. Finding 3 of this task's review: every other
+    leaf field in this paragraph was named at the key level (wanted.kind/
+    statement/why, method.steps/confidence, all five acceptance keys) but
+    sources was described only in prose, without its literal required key."""
+    body = _norm(skills.section_body(_skill(), "3. Method"))
+    assert "digest_note" in body
 
 
 def test_the_method_section_requires_the_absence_check():

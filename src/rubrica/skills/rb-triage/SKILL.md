@@ -128,6 +128,13 @@ once, including the ones you decline and the ones marked
 `admissible: false`.** A container is inadmissible because its elements are the
 real candidates; decline it, and say that is why.
 
+Every disposition also carries `authority: "triage"`. You are the only writer
+of this record, so every disposition you write carries that value; `"human"` is
+reserved for a gate-0 override that lands in a later run's record, never in one
+you produce. State the value rather than leaving it implicit — a reader of the
+finished record needs to tell which admissions this stage authored from which a
+human overrode at the gate, and `authority` is the only field that says so.
+
 An `admit` carries `reason` (prose) and a `priority` — an integer rank, 1 for
 the most valuable, expressing where you would spend the extraction budget first.
 No code acts on `priority`; it orders the human's reading.
@@ -204,8 +211,8 @@ back empty is a `deficiencies[]` entry.
 A projection is a work order someone else executes — a human tonight, possibly a
 subagent later — so it has to be complete without you. It carries all seven
 fields the schema requires: a `projection_id`; `closes` (the deficiency ids it
-remedies); `sources` (the candidate ids and what their digests told you);
-`wanted` (the `kind`, a `statement` of the artifact, and `why` it matters);
+remedies); `sources` (each a `candidate_id` and a `digest_note` saying what
+that candidate's digest told you, plus an optional `path`); `wanted` (the `kind`, a `statement` of the artifact, and `why` it matters);
 `method` (`steps`, and a `confidence` of `high`, `medium` or `unknown` —
 **`unknown` is an honest value**; you usually cannot know an extraction method
 from a digest, and a confident-sounding wrong method is worse than an admitted
