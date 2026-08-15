@@ -176,17 +176,28 @@ def _gate_1(run: RunPaths) -> str:
     lines.append("Implied suite size")
     size = implied_size(run)
     if size is None:
-        lines.append("  (no world model yet; nothing to report)")
+        # None means either "no world model yet" or "one exists but could not
+        # be read" (sizing.implied_size's own guard) -- this report cannot
+        # tell those apart without re-reading what implied_size already
+        # decided not to raise on, so it says both rather than picking one
+        # and being wrong half the time.
+        lines.append("  (implied size unavailable -- no world model yet, or it could not be read)")
     else:
         binding_note = (
             " -- ABOVE the ceiling; this target may want splitting across runs"
             if size["ceiling_binding"]
             else ""
         )
+        # blocked_note makes the arithmetic on this line actually add up when
+        # coverage has narrowed the denominator: capability_cells + hop_slots
+        # alone is the *pre-deduction* total, and printing "= denominator"
+        # right after it without showing the subtraction reads as broken math
+        # to the human this line exists for.
+        blocked_note = f" - {size['blocked_cells']} blocked" if size["blocked_cells"] else ""
         lines.append(
             f"  {size['capability_cells']} capability cells + {size['hop_slots']} hop-depth "
-            f"slots ({size['basis']}) = {size['denominator']} -> implied {size['implied']}, "
-            f"ceiling {size['ceiling']}{binding_note}"
+            f"slots{blocked_note} ({size['basis']}) = {size['denominator']} -> "
+            f"implied {size['implied']}, ceiling {size['ceiling']}{binding_note}"
         )
     lines.append("")
 

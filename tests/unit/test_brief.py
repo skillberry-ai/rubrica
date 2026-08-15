@@ -8,6 +8,7 @@ pairing (spec section 10) has both halves to render.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from rubrica import brief, cli, survey
@@ -203,6 +204,20 @@ def _full_run(tmp_path) -> RunPaths:
     ]
     write_json(run.triage, triage)
 
+    # One blocked_by_gap hole, referencing the gap above -- so gate 1's
+    # implied-size line actually exercises the subtraction path (blocked_cells
+    # > 0), not just the zero case toy_coverage() ships by default.
+    coverage = read_json(run.coverage_latest)
+    coverage["holes"] = [
+        {
+            "ref": "cell:cap-get-ticket/oc-detail",
+            "reason": "blocked_by_gap",
+            "justification": "comment ordering stability is unknown; see gap-comment-ordering",
+            "gap_id": "gap-comment-ordering",
+        }
+    ]
+    write_json(run.coverage_latest, coverage)
+
     return run
 
 
@@ -300,3 +315,77 @@ def test_gate_brief_covers_gates_two_and_three_without_raising(tmp_path):
 def test_an_unknown_gate_is_a_usage_error(tmp_path):
     run = build_toy_run(tmp_path / "runs")
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "4"]) != 0
+
+
+def test_the_gate_one_sizing_line_arithmetic_is_internally_consistent(tmp_path):
+    """Review finding 2: the shipped line printed `28 + 23 (...) = 46`, which
+    does not add up, because the denominator already has blocked_cells
+    subtracted while the two addends are pre-deduction. Extracts the numbers
+    straight out of the rendered text rather than hard-coding an expected
+    value, so this stays a check on the *line's own arithmetic* and keeps
+    catching the bug even if the fixture's numbers ever change. `_full_run`'s
+    coverage carries one blocked_by_gap hole, so blocked_cells > 0 here --
+    the case the shipped bug was invisible in the zero case."""
+    run = _full_run(tmp_path)
+    text = brief.gate_brief(run, 1)
+    line = next(
+        line for line in text.splitlines() if "capability cells" in line and "hop-depth" in line
+    )
+    capability_cells = int(re.search(r"(\d+) capability cells", line).group(1))
+    hop_slots = int(re.search(r"(\d+) hop-depth slots", line).group(1))
+    blocked_match = re.search(r"-\s*(\d+) blocked", line)
+    blocked = int(blocked_match.group(1)) if blocked_match else 0
+    denominator = int(re.search(r"=\s*(\d+)\s*->", line).group(1))
+
+    assert blocked > 0, "fixture must exercise the subtraction path, not just the zero case"
+    assert capability_cells + hop_slots - blocked == denominator
+
+
+def test_gate_one_does_not_raise_on_a_present_but_malformed_world_model(tmp_path):
+    """Review finding 1: sizing.implied_size's unguarded reads let a
+    malformed-but-present 01-world-model.json raise straight through
+    gate_brief -- ArtifactError on bad JSON -- turning a report into exit 2.
+    Exercised through cli.main, the actual promise gate-brief makes, not just
+    the library function directly."""
+    run = build_toy_run(tmp_path / "runs", upto="reconcile")
+    run.world_model.write_text("{not valid json", encoding="utf-8")
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+
+
+def test_the_gate_two_brief_renders_the_real_coverage_matrix_and_verdict(tmp_path):
+    """Review finding 3: the only prior coverage of gates 2/3 exercised the
+    early-exit "not reached yet" branch, so a rendering that dropped or
+    mis-mapped a real capability_matrix/goal_matrix/progress field would have
+    passed every test in the diff. `build_toy_run`'s default `upto=None`
+    already ships `toy_coverage()` (tests/toy.py) with known numbers -- 4/4
+    capability cells, 2/2 goals, round 1 with 4 new cells and 0 holes, verdict
+    converged -- so this is a real oracle, not an invented fixture."""
+    run = build_toy_run(tmp_path / "runs")
+    text = brief.gate_brief(run, 2)
+    assert "Coverage verdict: converged" in text
+    assert "capability cells: 4/4" in text
+    assert "goals: 2/2" in text
+    assert "round 1: 4 new cells this round, 0 rounds without progress" in text
+    assert "open holes: 0" in text
+
+
+def test_the_gate_three_brief_tallies_the_real_verdicts(tmp_path):
+    """Same oracle as the gate-2 test above: `build_toy_run`'s default writes
+    `toy_verdict()` (verdict "accept") for all four SIDS scenarios at
+    challenge, so the tally this asserts is the fixture's real content, not a
+    hand-invented one."""
+    run = build_toy_run(tmp_path / "runs")
+    text = brief.gate_brief(run, 3)
+    assert "Verdict tallies (4 instances challenged)" in text
+    assert "accept: 4" in text
+
+
+def test_gate_two_does_not_raise_on_a_present_but_malformed_coverage_document(tmp_path):
+    """Same review finding, the gate-2 call site: a malformed
+    03-coverage/latest.json must not turn `implied_size`'s KeyError into an
+    exit-1 fabricated finding or an exit-2 usage error either."""
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    world = read_json(run.world_model)
+    del world["denominator"]
+    write_json(run.world_model, world)
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "2"]) == 0

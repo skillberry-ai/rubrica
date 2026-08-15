@@ -56,6 +56,16 @@ def test_setting_neither_limit_is_a_usage_error(tmp_path):
         set_limit(run, reason="no limit named, so nothing to do")
 
 
+def test_a_reason_with_a_newline_is_a_usage_error(tmp_path):
+    """Mirrors `decide`'s own rule: decisions.md is one entry per line, and
+    append_decision only strips a *trailing* newline, so an embedded one would
+    split the entry across two physical lines."""
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+
+    with pytest.raises(UsageError):
+        set_limit(run, max_scenarios=32, reason="two lines\nof reasoning")
+
+
 def test_the_manifest_still_validates_after_the_change(tmp_path):
     run = build_toy_run(tmp_path / "runs", upto="intake")
 

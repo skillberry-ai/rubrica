@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from rubrica import sizing
-from rubrica.artifacts import write_json
+from rubrica.artifacts import read_json, write_json
 from rubrica.paths import RunPaths
 from tests.toy import build_toy_run
 
@@ -184,4 +184,25 @@ def test_implied_size_is_none_before_a_world_model_exists(tmp_path):
     the same absence-is-not-a-defect ruling claim_utilisation already makes,
     and `gate-brief` depends on this returning cleanly rather than raising."""
     run = build_toy_run(tmp_path / "runs", upto="extract")
+    assert sizing.implied_size(run) is None
+
+
+def test_implied_size_is_none_on_a_present_but_malformed_world_model(tmp_path):
+    """A world model that exists but is not valid JSON is a repairable stage
+    defect (validate's finding to raise, not this diagnostic's) -- guards the
+    review finding that `read_json`'s ArtifactError reached gate-brief
+    unguarded and turned a report into exit 2."""
+    run = build_toy_run(tmp_path / "runs", upto="reconcile")
+    run.world_model.write_text("{not valid json", encoding="utf-8")
+    assert sizing.implied_size(run) is None
+
+
+def test_implied_size_is_none_when_denominator_is_missing(tmp_path):
+    """A schema-shaped document with no `denominator` key at all raises
+    KeyError out of `world["denominator"]["capability_cells"]` -- a malformed
+    artifact, not this function's to surface as an exception."""
+    run = build_toy_run(tmp_path / "runs", upto="reconcile")
+    world = read_json(run.world_model)
+    del world["denominator"]
+    write_json(run.world_model, world)
     assert sizing.implied_size(run) is None
