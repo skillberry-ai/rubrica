@@ -15,6 +15,7 @@ import pytest
 from rubrica import intake, survey, validate
 from rubrica.artifacts import canonical_bytes, read_json
 from rubrica.errors import UsageError
+from rubrica.paths import is_safe_segment
 
 NOW = datetime(2026, 8, 14, 21, 30, 0, tzinfo=UTC)
 
@@ -305,3 +306,116 @@ def test_classify_returns_a_kind_for_a_pathologically_nested_file(tmp_path):
     source = tmp_path / "nested.json"
     source.write_text(_PATHOLOGICALLY_NESTED, encoding="utf-8")
     assert intake.classify(source) == "other"
+
+
+def _dict_keyed_corpus(tmp_path):
+    """A corpus whose only container is an *object*, keyed on ids like real ones.
+
+    Its own directory rather than an addition to `_corpus` or to the committed
+    `corpus-toy/` fixture: both are pinned by candidate-count assertions here and
+    in test_admit.py / test_survey_fixture.py, and this test is about ids, not
+    counts.
+
+    The three keys are not adversarial inventions -- spec section 5.2 makes
+    id-keyed containers first-class, and the ids real captures use carry `:`,
+    `/` and spaces. `~` is here because `_escape_pointer_token` turns it into
+    `~0` and `/` into `~1`, so the escaping the pointer *needs* is itself a
+    source of characters no id may contain.
+    """
+    root = tmp_path / "dict-corpus"
+    root.mkdir()
+    (root / "traces.json").write_text(
+        json.dumps(
+            {
+                "trace one/a": {"trace_id": "a", "status": "OK", "spans": [{"name": "t"}]},
+                "trace two~b": {"trace_id": "b", "status": "OK", "spans": [{"name": "t"}]},
+                "Trace Three": {"trace_id": "c", "status": "OK", "spans": [{"name": "t"}]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_a_dict_keyed_container_mints_a_catalogue_that_passes_its_own_gate(tmp_path):
+    """The coverage gap that let this survive twenty reviews.
+
+    `test_survey_explode.py` exercises `explode()` in isolation and
+    `corpus-toy/capture.json` is an *array*, so no test had ever driven a
+    dict-keyed container through `survey()` into a validated catalogue.
+    Measured on the keys below: survey exited 0 and `validate --stage survey`
+    then reported three schema findings -- the command minting an artifact that
+    fails its own layer-1 gate, which no exit code anywhere would have revealed.
+
+    validate_stage == [] is the assertion that matters. The id-shape assertions
+    below it say the same thing more legibly when it fails.
+    """
+    run = _survey(tmp_path, corpus_roots=[_dict_keyed_corpus(tmp_path)])
+
+    assert validate.validate_stage(run, "survey") == []
+
+    catalogue = read_json(run.catalogue)
+    elements = [c for c in catalogue["candidates"] if c["origin"] == "container_element"]
+    assert len(elements) == 3, "one candidate per key, in document order"
+    for element in elements:
+        assert is_safe_segment(element["candidate_id"]), element["candidate_id"]
+        assert len(element["candidate_id"]) <= 128
+    # The pointers themselves keep their RFC 6901 escaping -- the id is slugged,
+    # the pointer is not, because intake resolves the element with it.
+    assert [e["container"]["json_pointer"] for e in elements] == [
+        "/trace one~1a",
+        "/trace two~0b",
+        "/Trace Three",
+    ]
+    # Distinct ids, so intake materialises three inputs rather than overwriting.
+    assert len({e["candidate_id"] for e in elements}) == 3
+
+
+def test_an_exploded_array_element_keeps_the_id_it_already_had(tmp_path):
+    """The other direction of the slug fix, and the reason it is a `-` join
+    rather than a rewrite: `capture-json-0` is written into committed fixtures
+    and named by tests/unit/test_admit.py's triage records, so slugging the
+    pointer half had to leave the array case byte-identical."""
+    run = _survey(tmp_path)
+    catalogue = read_json(run.catalogue)
+    elements = [c for c in catalogue["candidates"] if c["origin"] == "container_element"]
+    assert [e["candidate_id"] for e in elements] == [
+        "capture-json-0",
+        "capture-json-1",
+        "capture-json-2",
+        "capture-json-3",
+    ]
+
+
+def test_a_long_container_name_and_a_long_key_stay_inside_the_id_cap(tmp_path):
+    """maxLength 128 on catalogue-0.1.json's `id`, which the composed id can
+    exceed on its own: `slug` caps each half at 96, so an unbudgeted join
+    reaches 193. The container prefix is what gets truncated, never the
+    pointer-derived suffix -- every element of one container shares the prefix,
+    so trimming it identically keeps the elements distinguishable, while
+    trimming the suffix would collapse them onto one base id."""
+    root = tmp_path / "long-corpus"
+    root.mkdir()
+    long_key = "k" * 120
+    (root / f"{'c' * 120}.json").write_text(
+        json.dumps(
+            {
+                f"{long_key}-{index}": {"trace_id": str(index), "status": "OK", "spans": []}
+                for index in range(3)
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    run = _survey(tmp_path, corpus_roots=[root])
+
+    assert validate.validate_stage(run, "survey") == []
+    catalogue = read_json(run.catalogue)
+    element_ids = [
+        c["candidate_id"] for c in catalogue["candidates"] if c["origin"] == "container_element"
+    ]
+    assert len(element_ids) == 3
+    assert len(set(element_ids)) == 3, "truncation must not make two elements the same candidate"
+    for element_id in element_ids:
+        assert len(element_id) <= 128
+        assert is_safe_segment(element_id), element_id

@@ -233,6 +233,58 @@ def _escape_pointer_token(token: str) -> str:
     return token.replace("~", "~0").replace("/", "~1")
 
 
+# catalogue-0.1.json's `id` definition: `\A[A-Za-z0-9][A-Za-z0-9._-]*\Z`, with
+# maxLength 128. Named here because _element_candidate_id has to *budget*
+# against it, not merely hope.
+_MAX_CANDIDATE_ID = 128
+# Reserved for `_unique_artifact_id`'s collision suffix, which is appended
+# *after* this function returns and so cannot be accounted for inside it. Eight
+# characters carries "-9999999" -- far past the point DEFAULT_MAX_CANDIDATES
+# (500) allows a single base id to collide.
+_COLLISION_SUFFIX_ROOM = 8
+
+
+def _element_candidate_id(container_id: str, pointer: str) -> str:
+    """The candidate_id for one element exploded out of `container_id`.
+
+    This was `f"{container_id}{pointer.replace('/', '-')}"`, which slugged the
+    container half and left the pointer-derived half raw -- and
+    `_escape_pointer_token` had just introduced `~0`/`~1` into it. Measured on
+    `{"trace one/a": ..., "trace two~b": ..., "Trace Three": ...}`: `survey`
+    exited 0 and `validate --stage survey` then reported three schema findings,
+    so the command minted a catalogue that fails its own layer-1 gate. Spec
+    §5.2 makes id-keyed containers first-class and real ids carry `:`, `/` and
+    spaces, so this is the ordinary case rather than a hostile one.
+
+    The pointer goes through `slug`, the same function every other id in this
+    pipeline is built with -- one spelling of "make this a safe id", not a
+    second. For an *array* container the result is byte-identical to what this
+    replaced (`slug("/0")` is `"0"`, so `capture-json` + `-0` is still
+    `capture-json-0`), which matters: those ids are written into committed
+    fixtures and a triage record names them.
+
+    maxLength 128 is budgeted rather than assumed, because a long container name
+    plus a long key can exceed it on its own. The *prefix* is what gets
+    truncated, never the suffix: every element of one container shares the
+    prefix, so trimming it identically keeps them distinguishable, while
+    trimming the suffix would collapse them all onto one base id and leave
+    `_unique_artifact_id` to tell them apart by collision counter alone.
+    """
+    suffix = slug(pointer)
+    budget = _MAX_CANDIDATE_ID - _COLLISION_SUFFIX_ROOM
+    room_for_prefix = budget - len(suffix) - 1
+    # rstrip so a truncation landing mid-separator does not leave a trailing
+    # "-" or "." doubled against the one this joins with. The id pattern would
+    # tolerate it; a reader would not.
+    prefix = container_id[:room_for_prefix].rstrip("-._") if room_for_prefix > 0 else ""
+    if not prefix:
+        # A container id long enough to leave no room is pathological, and the
+        # suffix alone is still a valid id (slug guarantees that) and still
+        # unique per element within this container.
+        return suffix
+    return f"{prefix}-{suffix}"
+
+
 def _homogeneous(elements: list) -> bool:
     """Whether these elements are independent records of one kind.
 
@@ -390,7 +442,7 @@ def survey(
                 candidates.append(
                     {
                         "candidate_id": _unique_artifact_id(
-                            f"{candidate_id}{pointer.replace('/', '-')}", used
+                            _element_candidate_id(candidate_id, pointer), used
                         ),
                         "origin": "container_element",
                         "container": {"candidate_id": candidate_id, "json_pointer": pointer},
