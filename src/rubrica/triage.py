@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from rubrica import digest as digest_module
 from rubrica.artifacts import read_json, sha256_of, write_json
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
@@ -171,6 +172,19 @@ def adopt_projection(
     candidate_id = _unique_artifact_id(projection_id, used)
 
     kind = classify(source)
+    # digest.digest_for_path, the same call survey makes for every corpus
+    # candidate -- one spelling of "how a candidate is digested", not a
+    # second one for projections. body_chars comes from this catalogue's own
+    # policy rather than survey.DEFAULT_DIGEST_BODY_CHARS: no import cycle
+    # forces the choice (survey does not import this module), but reading it
+    # from the catalogue keeps the adopted candidate's digest consistent with
+    # every sibling *in this catalogue*, not with whatever today's global
+    # default happens to be. An empty digest here would starve two readers: a
+    # human at gate 0 (gate-brief renders it) and a re-dispatched rb-triage,
+    # which would be obliged to decline the very file a human just admitted,
+    # via its digest_insufficient refusal path.
+    digest_body_chars = catalogue["policy"]["digest_body_chars"]
+    candidate_digest = digest_module.digest_for_path(source, kind, body_chars=digest_body_chars)
     source_candidate_ids = [
         s["candidate_id"] for s in projection.get("sources") or [] if isinstance(s, dict)
     ]
@@ -182,7 +196,7 @@ def adopt_projection(
         "sha256": sha256_of(source),
         "kind": kind,
         "admissible": True,
-        "digest": {},
+        "digest": candidate_digest,
         "provenance": {
             "projection_id": projection_id,
             "source_candidate_ids": source_candidate_ids,

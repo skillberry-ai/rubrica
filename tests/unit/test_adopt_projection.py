@@ -168,6 +168,34 @@ def test_a_file_meeting_every_structural_criterion_is_adopted(tmp_path):
     )
 
 
+def test_the_adopted_candidates_digest_is_computed_not_empty(tmp_path):
+    """digest.digest_for_path, not `{}` -- gate-brief (a later stage) renders a
+    candidate's digest for the human at gate 0, and a re-dispatched rb-triage
+    reading the catalogue fresh would be obliged to decline an empty-digest
+    candidate as digest_insufficient, naming the field it needed, for the very
+    file a human just manufactured and admitted. That is the failure this test
+    pins.
+
+    mcp_tool_schema is not "trace", so digest_for_payload's generic branch
+    fires: `{"skeleton": {...}}`, a flat dict keyed by JSON-pointer-shaped
+    strings rather than a nested structure -- so the way to confirm it "carries"
+    a pointer is membership, not refs.resolve_pointer (which walks nested
+    containers, and would not resolve a flat pointer-string key at all). Both
+    pointers_required entries land in the skeleton at _SKELETON_DEPTH=3, which
+    ties the two halves of the acceptance contract together: the same pointers
+    check_acceptance already required resolvable are exactly what triage's own
+    reader gets to see.
+    """
+    run = _run_with_projection(tmp_path)
+    assert triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path)) == []
+    catalogue = read_json(run.catalogue)
+    adopted = next(c for c in catalogue["candidates"] if c["origin"] == "projection")
+    assert adopted["digest"]
+    skeleton = adopted["digest"]["skeleton"]
+    for pointer in _acceptance()["pointers_required"]:
+        assert pointer in skeleton, f"{pointer!r} missing from the adopted candidate's skeleton"
+
+
 def test_the_adopted_run_still_passes_check_all(tmp_path):
     """The seven checks above pin the fields the brief names; this one pins the
     shapes it does not: a wrong provenance, a candidate_id collision, or a
