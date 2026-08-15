@@ -1,0 +1,179 @@
+"""Prose predicates for rb-triage, each scoped to the section that owns the rule.
+
+Roughly nineteen assertions in this repo were measured satisfiable by unrelated
+content before this convention existed. Task 11's brief measured each of these
+in both directions; a predicate nobody has watched fail is not a guard.
+"""
+
+from __future__ import annotations
+
+import re
+
+from rubrica import digest, skills
+
+
+def _skill():
+    # skills_dir() re-read on every call, not cached at import time, so a
+    # test run under RUBRICA_SKILLS_DIR=/tmp/skills-probe (the both-direction
+    # measurement in the task) reads that copy rather than the installed one.
+    return skills.load(skills.skills_dir() / "rb-triage" / "SKILL.md")
+
+
+def _norm(text):
+    """Whitespace-normalised, so a reflow does not break a phrase pin.
+
+    399dba5 fixed exactly this: two phrase pins broke on an innocuous reformat.
+    """
+    return re.sub(r"\s+", " ", text.lower())
+
+
+def test_the_inputs_section_forbids_opening_a_candidate_file():
+    """The catalogue-only rule is the design's cost bound and its comparability
+    guarantee. It has to be stated where a reader looking for what to read looks.
+
+    The first assertion is weakened from a bare "not the corpus" pin after
+    measuring it break on the meaning-preserving reword "you never open the
+    corpus itself" -- accepted as an alternative rather than deleting the
+    concept check. The second assertion is weakened the same way, after the
+    same batch reword also replaced "Opening one is out of contract." with
+    "Doing so falls outside your contract." -- "outside your contract"
+    carries the identical claim and is accepted alongside the original."""
+    body = _norm(skills.section_body(_skill(), "1. Inputs"))
+    assert "00-catalogue.json" in body
+    assert "not the corpus" in body or "never open the corpus" in body
+    assert "out of contract" in body or "outside your contract" in body
+
+
+def test_the_inputs_section_names_heuristics_fired_as_a_fact_about_the_digest():
+    """A heuristic that did not fire is a fact about the digest, not the
+    candidate -- the mitigation for the module's blindness only works if the
+    skill reads the field that way."""
+    body = _norm(skills.section_body(_skill(), "1. Inputs"))
+    assert "heuristics_fired" in body
+    assert "about the digest" in body
+
+
+def test_the_inputs_section_names_trace_heuristics_reachably():
+    """digest.TRACE_HEURISTICS is the code's list; heuristics_fired is the
+    field the skill has to know carries it. Enumerating each heuristic name in
+    prose would pin digest.py's internals to a document, which 2f93726 warns
+    against, so this only checks that the code's list is non-empty and the
+    skill names the field."""
+    body = _norm(_skill().body)
+    assert digest.TRACE_HEURISTICS
+    assert "heuristics_fired" in body
+
+
+def test_the_inputs_section_marks_a_truncated_skeleton_as_a_digest_fact():
+    """A JSON candidate's skeleton is width-bounded at 32 children; without
+    this the skill would read an incomplete skeleton as a complete one."""
+    body = _norm(skills.section_body(_skill(), "1. Inputs"))
+    assert "keys_truncated" in body
+    assert "fact about the digest" in body
+
+
+def test_the_inputs_section_warns_status_and_error_markers_are_not_independent():
+    """Measured on the real 130-element parsec capture: after narrowing,
+    error_markers fires on exactly one element and every firing resolves
+    through status, so the two names can be one fact reported twice.
+
+    The second assertion is weakened from a bare "one fact" pin after
+    measuring it break on the meaning-preserving reword "a single observation
+    ... stated twice" -- "stated twice" is the part of the sentence that
+    survived that reword, so it replaces "one fact" as the anchor."""
+    body = _norm(skills.section_body(_skill(), "1. Inputs"))
+    assert "error_markers" in body and "status" in body
+    assert "one fact" in body or "stated twice" in body
+
+
+def test_the_method_section_names_all_seven_projection_fields():
+    """triage-0.1.json's projections[] requires all seven of projection_id,
+    closes, sources, wanted, method, acceptance, and boundary -- a projection
+    missing either of the two the brief's text omitted fails layer 1, which
+    would be discovered at a live dispatch rather than in tests."""
+    body = _norm(skills.section_body(_skill(), "3. Method"))
+    for field in (
+        "projection_id",
+        "closes",
+        "sources",
+        "wanted",
+        "method",
+        "acceptance",
+        "boundary",
+    ):
+        assert field in body
+
+
+def test_the_method_section_requires_the_absence_check():
+    """Step 5 is the block that would have predicted six parsec refusals.
+
+    The first assertion accepts a couple of synonyms for "result shape"
+    after measuring the bare phrase break on the reword "returned structure"
+    -- not widened to the bare word "shape", which step 4's near-duplicate
+    prose ("distinct shape") would satisfy regardless of what step 5 says."""
+    body = _norm(skills.section_body(_skill(), "3. Method"))
+    assert "result shape" in body or "returned structure" in body or "return shape" in body
+    assert "deficien" in body
+
+
+def test_the_method_section_protects_a_failing_trace_from_near_duplicate_folding():
+    """The one ERROR trace in 130 was the parsec run's only evidence of failure
+    behaviour, and near_duplicate is exactly how it would have been lost."""
+    body = _norm(skills.section_body(_skill(), "3. Method"))
+    assert "failing trace" in body
+    assert "near-duplicate" in body
+
+
+def test_the_method_section_admits_unknown_as_a_method_confidence():
+    body = _norm(skills.section_body(_skill(), "3. Method"))
+    assert "unknown" in body and "honest" in body
+
+
+def test_the_method_section_says_structural_acceptance_is_not_sufficient():
+    """Weakened from a single phrase pin ("never sufficient" / "not
+    sufficient") after measuring it break on a meaning-preserving reword:
+    "necessary but insufficient on their own" says the same thing and failed
+    both alternatives. "insufficient" alone survives that rewording and any
+    similar one, at the cost of also matching a sentence that used the word
+    for something else -- accepted per the brief's rule to weaken to the
+    concept rather than delete the test."""
+    body = _norm(skills.section_body(_skill(), "3. Method"))
+    assert "never sufficient" in body or "not sufficient" in body or "insufficient" in body
+
+
+def test_the_invariants_section_requires_one_disposition_per_candidate():
+    body = _norm(skills.section_body(_skill(), "4. Invariants"))
+    assert "exactly one disposition" in body
+    assert "not fewer" in body
+
+
+def test_the_invariants_section_forbids_acting_on_a_recommended_objective():
+    """A re-scope the stage performs itself is invisible, and produces a
+    selection that looks coherent and answers a question nobody asked."""
+    body = _norm(skills.section_body(_skill(), "4. Invariants"))
+    assert "recommended_objective" in body
+    assert "recommendation" in body
+
+
+def test_the_refusal_section_refuses_a_missing_objective_and_an_empty_admit_set():
+    """The second assertion's first half is weakened from a bare "every
+    candidate" pin after measuring it break on the meaning-preserving reword
+    "an admitted set with nothing in it" -- "zero admits" alone, which that
+    reword still left standing one sentence later, carries the same claim."""
+    body = _norm(skills.section_body(_skill(), "5. Refusal conditions"))
+    assert "objective" in body and "absent" in body
+    assert ("every candidate" in body or "nothing in it" in body) and "zero admits" in body
+
+
+def test_the_refusal_section_forbids_refusing_on_an_unsupported_objective():
+    """Refusing there leaves the human nothing to rule on, which is the opposite
+    of the help gate 0 needs."""
+    body = _norm(skills.section_body(_skill(), "5. Refusal conditions"))
+    assert "do not refuse" in body
+    assert "unsupported" in body
+
+
+def test_the_refusal_section_forbids_refusing_over_one_bad_digest():
+    body = _norm(skills.section_body(_skill(), "5. Refusal conditions"))
+    assert "digest_insufficient" in body
+    assert "three hundred" in body or "not a reason to abandon" in body
