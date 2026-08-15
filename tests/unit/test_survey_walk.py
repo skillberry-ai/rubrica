@@ -122,3 +122,30 @@ def test_an_unreadable_file_is_recorded_rather_than_raised(tmp_path):
         assert _reasons(excluded)["locked.md"] == "unreadable"
     finally:
         bad.chmod(0o644)
+
+
+def test_a_shared_seen_dict_dedupes_across_two_separate_calls(tmp_path):
+    """The fix for the per-root loop's own dedup gap, one level down from
+    survey.survey: two *separate* walk_corpus calls, sharing one `seen` dict
+    passed in by the caller, must dedupe against each other exactly as if
+    they were one call over both roots. This is what lets survey() call
+    walk_corpus once per root (for root_index) without losing cross-root
+    duplicate detection.
+    """
+    root0 = tmp_path / "root0"
+    root0.mkdir()
+    root1 = tmp_path / "root1"
+    root1.mkdir()
+    (root0 / "a.md").write_text("same bytes\n", encoding="utf-8")
+    (root1 / "b.md").write_text("same bytes\n", encoding="utf-8")
+
+    seen: dict[str, object] = {}
+    kept0, excluded0 = survey.walk_corpus([root0], seen=seen)
+    kept1, excluded1 = survey.walk_corpus([root1], seen=seen)
+
+    # The earlier call's file survives; the later call's byte-identical file
+    # is the one dropped, and it is dropped exactly once.
+    assert kept0 == [root0 / "a.md"]
+    assert kept1 == []
+    assert excluded0 == []
+    assert _reasons(excluded1)["b.md"] == "duplicate"

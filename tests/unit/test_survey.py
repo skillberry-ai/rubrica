@@ -194,6 +194,31 @@ def test_root_index_is_the_loop_index_not_a_rematch(tmp_path):
     assert all("root_index" not in c for c in element_candidates)
 
 
+def test_a_file_duplicated_across_two_roots_is_excluded_once(tmp_path):
+    """The cross-root dedup gap the per-root loop opened: each walk_corpus
+    call used to start with its own empty `seen`, so a byte-identical file
+    present under two --corpus roots (a source tree and a docs tree, say) was
+    admitted twice -- two identical inputs, two identical claims files, no
+    finding anywhere. survey() now shares one `seen` dict across every
+    per-root call, so the duplicate is caught exactly once, and the surviving
+    copy is the one under the earlier root -- same rule as within one root.
+    """
+    root0 = tmp_path / "root0"
+    root0.mkdir()
+    root1 = tmp_path / "root1"
+    root1.mkdir()
+    (root0 / "shared.md").write_text("identical bytes\n", encoding="utf-8")
+    (root1 / "shared.md").write_text("identical bytes\n", encoding="utf-8")
+
+    catalogue = read_json(_survey(tmp_path, corpus_roots=[root0, root1]).catalogue)
+    corpus_candidates = [c for c in catalogue["candidates"] if c["origin"] == "corpus"]
+    assert [c["root_index"] for c in corpus_candidates] == [0]
+
+    duplicates = [e for e in catalogue["excluded"] if e["reason"] == "duplicate"]
+    assert len(duplicates) == 1
+    assert duplicates[0]["path"] == "shared.md"
+
+
 def test_an_unreadable_corpus_root_is_exit_two_material(tmp_path):
     root = _corpus(tmp_path)
     root.chmod(0o000)

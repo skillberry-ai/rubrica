@@ -117,17 +117,29 @@ def _matches_any(relative: str, patterns: Sequence[str]) -> bool:
 
 
 def walk_corpus(
-    roots: Sequence[Path], *, operator_globs: Sequence[str] = ()
+    roots: Sequence[Path],
+    *,
+    operator_globs: Sequence[str] = (),
+    seen: dict[str, Path] | None = None,
 ) -> tuple[list[Path], list[dict]]:
     """Every file worth cataloguing, and every one dropped with its reason.
 
     Order matters and is sorted, so `duplicate` always names the *later* of two
     byte-identical paths and two runs over the same corpus produce the same
     catalogue. Returns paths, not digests: digesting is digest.py's job.
+
+    `seen` is digest -> the path that already claimed it, and defaults to a
+    fresh dict private to this call -- the behaviour every existing caller and
+    test already depends on. survey() passes one dict across its per-root
+    calls instead, so a file byte-identical across two `--corpus` roots is
+    still caught as `duplicate` even though each root gets its own call (for
+    `root_index`); without a shared dict, each call started from empty and a
+    cross-root duplicate was admitted twice with no finding anywhere.
     """
     kept: list[Path] = []
     excluded: list[dict] = []
-    seen: dict[str, Path] = {}
+    if seen is None:
+        seen = {}
 
     for root in roots:
         root = Path(root)
@@ -315,14 +327,15 @@ def survey(
     # One walk_corpus call per root, rather than one call over the whole list,
     # so root_index is the loop variable and no path needs to be re-matched
     # against corpus_roots afterwards -- see this task's brief for why
-    # re-matching is wrong for nested roots. The cost: walk_corpus's duplicate
-    # detection keeps its `seen` digests in a dict local to one call, so a file
-    # byte-identical across two roots is no longer caught as `duplicate` --
-    # each call starts with an empty `seen` and only dedupes within its own
-    # root. Cross-root dedupe is out of scope for this task; report it rather
-    # than silently pick a behaviour.
+    # re-matching is wrong for nested roots. `seen` is created once here and
+    # passed into every call so a file byte-identical across two roots is
+    # still caught as `duplicate`, naming the copy under the *later* root --
+    # the per-root loop must not reopen the cross-root dedup gap a bare
+    # `walk_corpus([Path(root)], ...)` call (a fresh, private `seen` each
+    # time) would silently admit twice.
+    seen: dict[str, Path] = {}
     for root_index, root in enumerate(corpus_roots):
-        kept, root_excluded = walk_corpus([Path(root)], operator_globs=operator_globs)
+        kept, root_excluded = walk_corpus([Path(root)], operator_globs=operator_globs, seen=seen)
         excluded.extend(root_excluded)
 
         for path in kept:
