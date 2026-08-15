@@ -161,6 +161,29 @@ built in §3 — that is expected, since the stage's artifact does not exist yet
 "Expect 0" applies only after the dispatched skill has actually written its
 artifact.
 
+**`survey` and `triage` are the two stages whose `record-stage` runs late.**
+`record-stage` merges into `manifest.json`, and on a run minted by `survey`
+there *is* no manifest until `intake --run` writes it after gate 0 — so at the
+moment you have just dispatched `rb-triage`, the command above raises
+`ArtifactError` on the absent manifest at exit 2. Run `validate` and
+`check-refs` for those two stages when the brief above says to, then come back
+and record them **retroactively, after gate 0**, once the manifest exists:
+
+```bash
+# after `uv run rubrica intake --run "$RUN"` has minted manifest.json
+uv run rubrica record-stage --run "$RUN" --stage triage \
+  --model <the model you dispatched> --effort <the effort you used> \
+  --skill src/rubrica/skills/rb-triage/SKILL.md
+```
+
+The alternative — having the triage record carry its own provenance — was
+considered and rejected: a model-invented skill digest is precisely what
+`record-stage` exists to prevent, since the whole point of the hook is that the
+recorded hash is of the file that was actually used. Recording retroactively
+keeps the digest checkable, at the cost of the ordering. Write down which model
+and effort you dispatched at the time; nothing on disk remembers them for you
+until you run the command.
+
 `record-stage --skill` needs a real file to hash and hard-fails
 (`UsageError: skill file does not exist`) if it is not there. Every
 `src/rubrica/skills/rb-<stage>/SKILL.md` above exists starting with the task
@@ -254,7 +277,9 @@ uv run rubrica check-refs --run "$RUN"                # then layer 2
 effort and hard dollar ceiling (`sonnet`, `medium`, `2`); `RUBRICA_LAB` moves the
 scratch directory that holds the generated settings and the transcripts. The
 model and effort you used are what `record-stage --model/--effort` should then be
-given, per §4.
+given, per §4 — and for the `triage` dispatch above, note them down: that run has
+no manifest yet, so §4's `record-stage` for it cannot run until `intake --run`
+has minted one after gate 0.
 
 This one *is* shipped, unlike §3's five-line toy-run builder, and the difference
 is worth stating because the reasoning there was that a mapping table is cheaper

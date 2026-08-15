@@ -130,6 +130,28 @@ def set_limit(
     """
     if max_rounds is None and max_scenarios is None:
         raise UsageError("set_limit needs at least one of max_rounds or max_scenarios")
+    # The integers, refused here rather than left for the manifest schema --
+    # exactly what `record_stage` above does for `--model` and `--effort`, and
+    # `intake()` for these same two limits, with the same reasoning and the same
+    # measured consequence. `set-limit --max-scenarios 0 --max-rounds -3` exited
+    # 0, wrote both values, and appended a decisions.md line announcing the
+    # change; the defect surfaced only the next time somebody happened to run
+    # `validate`, as two findings against manifest.json -- an artifact no skill
+    # wrote and no repair prompt can fix, so a bad orchestrator argument was
+    # misattributed to the run. manifest-0.1.json puts `minimum: 1` on both, and
+    # nothing between argparse's `type=int` and the schema was checking it.
+    #
+    # isinstance-checked, not just `< 1`, because set_limit is a library
+    # function a direct caller reaches with 2.5 or "2" -- which would write a
+    # manifest the schema rejects for its *type* rather than its value, the same
+    # class of defect one step further out. bool is excluded because
+    # isinstance(True, int) is True and `max_rounds=True` would write JSON
+    # `true`, which is not an integer to the schema either.
+    for label, value in (("max_rounds", max_rounds), ("max_scenarios", max_scenarios)):
+        if value is None:
+            continue
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise UsageError(f"set_limit needs {label} to be an integer >= 1, got {value!r}")
     text = reason.strip()
     if not text:
         raise UsageError("set_limit's reason cannot be empty")
@@ -139,7 +161,21 @@ def set_limit(
         )
 
     manifest = read_json(run.manifest)
-    limits = dict(manifest.get("limits") or {})
+    raw_limits = manifest.get("limits")
+    # The same guard `record_stage` applies to `manifest.stages`, for the same
+    # reason: a hand-edited or corrupt `limits` that is present but not a mapping
+    # makes `dict(raw_limits or {})` either raise ValueError -- which cli.py's
+    # set-limit handler does not catch, so it fell through to the internal-error
+    # branch and became exit 1, a fabricated stage finding for a corrupt
+    # manifest -- or, for something falsy like `[]`, silently discard it in
+    # favour of an empty map and lose the limit it was asked to leave alone.
+    # This is the harness pointed at a manifest it cannot act on, which is exit 2.
+    if raw_limits is not None and not isinstance(raw_limits, dict):
+        raise UsageError(
+            f"manifest.limits is a {type(raw_limits).__name__}, not an object; "
+            f"the manifest at {run.manifest} is corrupt"
+        )
+    limits = dict(raw_limits or {})
     changes = []
     if max_rounds is not None:
         changes.append(f"max_rounds {limits.get('max_rounds', '?')} -> {max_rounds}")
@@ -148,6 +184,23 @@ def set_limit(
         changes.append(f"max_scenarios {limits.get('max_scenarios', '?')} -> {max_scenarios}")
         limits["max_scenarios"] = max_scenarios
     manifest["limits"] = limits
+    # Two writes, and they are not transactional: nothing here makes the manifest
+    # and decisions.md succeed or fail together, so a failure between them leaves
+    # one written and the other not. Manifest first is the deliberate choice, and
+    # the ordering is the whole mitigation.
+    #
+    # This way round, the survivable outcome is a limit that changed with no
+    # decisions.md line -- bad, and precisely the failure spec section 9's tail
+    # names (a hand-edited max_scenarios with no trace of who did it or why),
+    # but recoverable: the manifest still carries the new value, `diff-runs`
+    # still sees it, and a human can append the missing note.
+    #
+    # The other way round would leave a decisions.md line asserting a change that
+    # did not happen, and decisions.md is append-only -- the run's lab notebook
+    # would carry a false entry that nothing can retract, and the next reader
+    # would trust it over the manifest. A record that lies is worse than a record
+    # that is missing, which is the same ruling `decide` makes in refusing to
+    # write a blank note.
     write_json(run.manifest, manifest)
 
     append_decision(run.decisions, f"- {utc_stamp(now)} set-limit: {'; '.join(changes)} -- {text}")
