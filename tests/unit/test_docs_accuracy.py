@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from rubrica import paths, skills
+from rubrica import paths, skills, validate
 from rubrica.cli import subcommand_names
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -104,3 +104,17 @@ def test_no_section_documents_a_subcommand_that_does_not_exist():
     is a worse defect than a missing one, because it reads as current."""
     stale = _documented_subcommands() - set(subcommand_names())
     assert not stale, f"cli.md documents commands cli.SUBCOMMANDS does not define: {sorted(stale)}"
+
+
+def _artifact_kinds() -> set[str]:
+    return {kind for kinds in validate.STAGE_ARTIFACTS.values() for kind in kinds}
+
+
+@pytest.mark.parametrize("kind", sorted(_artifact_kinds()))
+def test_every_artifact_kind_is_documented(kind):
+    """Backtick-delimited on purpose: a bare `expected in text` check is
+    satisfied by the string `suite-expected`, so two distinct artifact kinds
+    would collapse into one and the missing one would never be noticed."""
+    assert f"`{kind}`" in _read(ARTIFACTS_REF), (
+        f"docs/reference/artifacts.md never names the {kind} artifact as `{kind}`"
+    )
