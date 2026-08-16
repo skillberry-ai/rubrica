@@ -204,8 +204,11 @@ rubrica decide --run runs/run-20260806-123005 \
 
 ## The human's own reports
 
-Three subcommands compose or report what already exists in the run; none of
-them is itself a gate.
+Three subcommands serve the human holding a gate rather than a stage. Two of
+them — `gate-brief` and `claim-utilisation` — only compose or report what the
+run already contains; `set-limit` is the odd one out and *writes*, changing a
+manifest limit and appending its reason to `decisions.md`. None of the three
+is itself a gate: none can turn a readable run into a defect finding.
 
 ### `rubrica gate-brief`
 
@@ -250,7 +253,13 @@ recorded in `decisions.md`, so raising a ceiling is a decision on the record
 rather than a silent hand-edit.
 
 Required: `--run RUN`, `--reason REASON`. Optional: `--max-rounds
-MAX_ROUNDS`, `--max-scenarios MAX_SCENARIOS`.
+MAX_ROUNDS`, `--max-scenarios MAX_SCENARIOS` — but **at least one of the two
+optional flags is required in practice.** Passing neither is a usage error
+(`set_limit needs at least one of max_rounds or max_scenarios`, exit 2), since
+a change with nothing to change would append a `decisions.md` line announcing
+a decision that was never made. `--help` cannot show this: argparse has no way
+to express "at least one of these two", so the rule lives in `set_limit` and
+surfaces only when you trip it.
 
 Prints the manifest path.
 
@@ -259,12 +268,18 @@ rubrica set-limit --run runs/run-20260806-123005 --max-scenarios 200 \
   --reason "breadth objective under-covered the tool surface at 128"
 ```
 
-## Emitting and measuring
+## Emitting and smoke-testing
 
-The five commands below take a run that already has a `06-suite/` (and, for
-`smoke`, a `07-report.json`) and write outside the numbered stage
-directories, under `measurement/` — nothing dispatches them, so nothing in
-the artifact contract expects their output.
+The two commands below are **pipeline stages, not measurement tools.** `emit`
+*creates* `06-suite/` and `smoke` writes `07-report.json`, both inside the
+numbered stage directories, and `validate.STAGE_ARTIFACTS` names an artifact
+kind for each (`suite-expected` for `emit`, `report` for `smoke`) — so the
+artifact contract does expect their output, and `validate --stage emit` and
+`validate --stage smoke` gate it exactly as every other stage's output is
+gated. Neither is left to a human to remember, either: `rb-emit` is dispatched
+as stage 6 and invokes `rubrica emit`, and `rb-orchestrate`'s own `invokes`
+list names both commands — it runs `rubrica smoke` itself, since there is no
+`rb-smoke` skill.
 
 ### `rubrica emit`
 
@@ -341,6 +356,24 @@ The report renders one of four verdicts:
 - **`inconclusive`** — not enough comparable data to render a verdict at all
   (a required role never scored, or too few tasks had every role score
   together). A statement about the run, not the suite.
+
+**`smoke` is a gate, not only a reporter.** Any verdict other than `healthy`
+comes back as a finding, so the command writes `07-report.json` *and* exits 1
+with that finding on stdout — it does not exit 0 and leave the bad news inside
+the JSON, because "exit 0 with `broken_labels` printed in a file nobody opened"
+is how a broken suite gets shipped. The repair is never a re-run of `smoke`:
+`degenerate_trivial` indicts the scenarios and `broken_labels` indicts the gold
+labels or the verifier.
+
+## Measuring what a run produced
+
+The three commands below are the measurement tools, and they are the ones
+nothing in the pipeline dispatches: no stage runs them, no `invokes` list names
+them, and nothing in the artifact contract expects their output. None writes
+inside a numbered stage directory — `compare-gold` and `sample-for-review`
+write under `measurement/`, and `diff-runs` writes nothing at all, printing its
+report to stdout. Each of the first two takes a run that already has a
+`06-suite/`; `diff-runs` takes two runs and compares them stage by stage.
 
 ### `rubrica compare-gold`
 
