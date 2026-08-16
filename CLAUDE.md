@@ -22,7 +22,7 @@ ruling, and re-litigating one has cost this project two fix rounds.
 Python 3.13+, `uv`. Console script `rubrica` (`rubrica.cli:main`).
 
 ```
-make setup     # uv venv --python 3.13; uv pip install -e '.[dev]'
+make setup     # uv sync --python 3.13 --extra dev  (installs from uv.lock)
 make test      # uv run pytest -q
 make check     # ruff check + ruff format --check, no changes
 make live      # RUBRICA_LIVE=1 pytest -m live  (see "Live tests" below)

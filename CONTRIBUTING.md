@@ -14,10 +14,18 @@ Python 3.13+, [`uv`](https://docs.astral.sh/uv/).
 make setup
 ```
 
-This creates a venv (`uv venv --python 3.13`) and installs the package with
-its dev dependencies (`uv pip install -e '.[dev]'`). `README.md`'s commands
-assume that venv is on `PATH`; if it is not, prefix each command with `uv
-run` instead (e.g. `uv run rubrica --help`).
+This runs `uv sync --python 3.13 --extra dev`, which creates the venv and
+installs the package and its dev dependencies **from the committed
+`uv.lock`** — so you get the same pins CI does. `README.md`'s commands assume
+that venv is on `PATH`; if it is not, prefix each command with `uv run`
+instead (e.g. `uv run rubrica --help`).
+
+**If you change a dependency, re-lock in the same commit.** Run `uv lock`
+(or `uv lock --upgrade` to refresh within the constraints `pyproject.toml`
+allows) and commit the resulting `uv.lock`. CI installs with `uv sync
+--extra dev --locked`, which fails outright if the lockfile is out of date
+with `pyproject.toml` rather than quietly re-resolving — so a forgotten
+re-lock is a red gate, not a silent divergence between your machine and CI.
 
 ## The gates CI runs
 

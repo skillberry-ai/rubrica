@@ -19,11 +19,12 @@ Prerequisites: Python 3.13+ and [`uv`](https://docs.astral.sh/uv/).
 make setup
 ```
 
-This runs `uv venv --python 3.13` followed by `uv pip install -e '.[dev]'`,
-producing a `.venv` with the `rubrica` console script and the dev
-dependencies (`pytest`, `ruff`). Everything else on this page assumes that
-venv is on `PATH`; if it is not, prefix every command with `uv run` instead
-(`uv run rubrica --help`, `uv run pytest -q`, and so on).
+This runs `uv sync --python 3.13 --extra dev`, producing a `.venv` with the
+`rubrica` console script and the dev dependencies (`pytest`, `ruff`)
+installed from the committed `uv.lock`, so your toolchain matches CI's.
+Everything else on this page assumes that venv is on `PATH`; if it is not,
+prefix every command with `uv run` instead (`uv run rubrica --help`, `uv run
+pytest -q`, and so on).
 
 ## The two ways to start a run
 

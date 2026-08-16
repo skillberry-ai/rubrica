@@ -3,9 +3,13 @@
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
 
-setup: ## Create the venv and install runtime + dev deps
-	uv venv --python 3.13
-	uv pip install -e '.[dev]'
+# `uv sync` creates the venv itself, so there is no separate `uv venv` step, and
+# it installs from the committed uv.lock -- which is the point: CI resolves the
+# same pins a contributor gets, so `ruff format --check` cannot go red on a
+# version difference nobody chose. --python is explicit because there is no
+# .python-version file; requires-python admits >=3.13 and dev pins 3.13.
+setup: ## Create the venv and install runtime + dev deps from uv.lock
+	uv sync --python 3.13 --extra dev
 
 test: ## Run the test suite
 	uv run pytest -q

@@ -21,11 +21,13 @@ dependencies = [
 
 [project.optional-dependencies]
 # ruff is capped, pytest is not, and the asymmetry is the point: `ruff format`
-# output changes across minor releases, and CI resolves the dev extra fresh on
-# every push (no lockfile is committed). Uncapped, `ruff format --check .` can
-# go red on a push containing no code change at all, while the contributor's
-# own `make check` stays green on the version they installed weeks ago. The cap
-# makes that a deliberate bump instead of a surprise.
+# output changes across minor releases, so uncapped, `ruff format --check .` can
+# go red on a push containing no code change at all. uv.lock is what actually
+# prevents that now -- it is committed, and both `make setup` and CI install
+# through `uv sync`, so contributor and CI get the same pins. The cap is kept as
+# the belt to that braces: it bounds what `uv lock --upgrade` can pull in, so a
+# formatter bump has to be a deliberate widening of this line rather than a
+# side effect of refreshing the lock.
 dev = ["pytest>=8.3", "ruff>=0.8,<0.17"]
 
 [project.scripts]

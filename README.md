@@ -41,7 +41,7 @@ the way it is, including the trade-offs made on purpose.
 Python 3.13+ and [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
-make setup     # create the venv, install runtime + dev deps
+make setup     # create the venv, install runtime + dev deps from uv.lock
 make test      # run the test suite
 make check     # ruff lint + format check, no changes
 make lint      # ruff check --fix

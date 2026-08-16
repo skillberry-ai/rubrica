@@ -18,15 +18,14 @@ build/
 dist/
 *.egg-info/
 
-# `make setup` uses `uv pip install`, which neither writes nor reads a lockfile,
-# but CI's install step is `uv sync --extra dev` -- so the condition this comment
-# used to defer to ("track it later if the workflow starts using it") is already
-# met, and the lockfile is still ignored on purpose. Committing it is a change of
-# posture, not a tidy-up: it would pin every contributor to one resolution and
-# make dependency updates a reviewed diff. That is the maintainer's call and is
-# deliberately left open; the dev extra's ruff cap in pyproject.toml is what
-# keeps CI's fresh resolution from drifting into a formatter change meanwhile.
-uv.lock
+# uv.lock is tracked, deliberately -- it used to be ignored here. Measured on
+# 2026-08-16: the lock pinned ruff 0.16.1 while a fresh resolution picked 0.16.3,
+# so CI and a contributor's machine were two patch releases apart on a gate
+# (`ruff format --check`) whose output can change across them. Both `make setup`
+# and CI now install through `uv sync`, so both read this file; pinning only one
+# of the two would have been worse than pinning neither, because CI could fail on
+# a formatting difference the contributor could not reproduce. The cost accepted
+# in exchange: a dependency bump is a reviewed diff via `uv lock --upgrade`.
 
 # Secrets
 .env
