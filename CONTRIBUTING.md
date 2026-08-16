@@ -23,17 +23,27 @@ run` instead (e.g. `uv run rubrica --help`).
 
 CI runs exactly three checks, in this order:
 
-1. `make check` — `ruff check` and `ruff format --check`, making no changes.
-2. `make test` — the pytest suite (`uv run pytest -q`).
-3. `uv run rubrica check-skills` — validates every skill's `## Contract`
-   block against the code that owns those names (stages, artifact kinds,
-   subcommands).
+1. **Lint and format** — `ruff check .` and `ruff format --check .`, making no
+   changes.
+2. **Tests** — the pytest suite.
+3. **Skill contracts** — `rubrica check-skills`, validating every skill's
+   `## Contract` block against the code that owns those names (stages, artifact
+   kinds, subcommands).
 
-A red gate is not mergeable. Run all three locally before opening a PR:
+A red gate is not mergeable. Run all three locally before opening a PR — these
+`make` targets are the same three checks, in the same order:
 
 ```sh
 make check && make test && uv run rubrica check-skills
 ```
+
+**`make` is not CI's entry point, though.** `.github/workflows/ci.yml` invokes
+each check directly, as `uv run --extra dev <tool>`, rather than through a
+target: every step repeats `--extra dev` so it is self-sufficient if the job is
+reordered or a step is run on its own. The two are equivalent today, and nothing
+enforces that they stay equivalent — so if you add a check to a `make` target,
+add the matching step to `ci.yml` in the same commit, or it will simply not run
+in CI while this file claims it does.
 
 ## `make live` is not one of them
 

@@ -18,9 +18,14 @@ build/
 dist/
 *.egg-info/
 
-# `make setup` uses `uv pip install`, which neither writes nor reads a lockfile;
-# one only appears if someone runs `uv lock`/`uv sync` by hand. Track it later if
-# the workflow starts using it.
+# `make setup` uses `uv pip install`, which neither writes nor reads a lockfile,
+# but CI's install step is `uv sync --extra dev` -- so the condition this comment
+# used to defer to ("track it later if the workflow starts using it") is already
+# met, and the lockfile is still ignored on purpose. Committing it is a change of
+# posture, not a tidy-up: it would pin every contributor to one resolution and
+# make dependency updates a reviewed diff. That is the maintainer's call and is
+# deliberately left open; the dev extra's ruff cap in pyproject.toml is what
+# keeps CI's fresh resolution from drifting into a formatter change meanwhile.
 uv.lock
 
 # Secrets
