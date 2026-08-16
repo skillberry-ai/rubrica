@@ -1,7 +1,7 @@
 """Run-directory layout: the single source of truth for artifact paths.
 
 Every module reads and writes artifacts through this module, so the on-disk
-contract (design spec section 4) is expressed in exactly one place.
+contract is expressed in exactly one place.
 """
 
 from __future__ import annotations

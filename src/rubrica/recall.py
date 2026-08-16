@@ -1,6 +1,6 @@
 """compare-gold: recall and novelty against the authored bench tasks.
 
-Design spec section 7. The question is whether the pipeline found the tests a
+The question is whether the pipeline found the tests a
 human already wrote, and what it found that they did not -- and the answer is a
 smoke signal, never a metric to optimize. With a denominator of ten, one task is
 ten percentage points: 7/10 against 8/10 is noise. The rendered report says so
@@ -173,7 +173,7 @@ def classify_novelty(scenario: dict[str, Any], gold_tasks: list[dict[str, Any]])
     A goal gold never covers is folded into new_hop_depth rather than given a
     fifth category: it has no authored depths, so every depth it reaches is new,
     and the `why` string names the goal so the reason is not lost. That keeps the
-    vocabulary the design spec fixed.
+    vocabulary this report is defined in terms of.
     """
     authored_capabilities = {
         ref["capability_id"] for task in gold_tasks for ref in task["capability_refs"]
@@ -275,7 +275,7 @@ def compare(run: RunPaths, gold: dict[str, Any]) -> dict[str, Any]:
 
 
 def caveat(report: dict[str, Any]) -> str:
-    """The sentence design spec section 7 requires beside every recall number."""
+    """The sentence that must sit beside every recall number."""
     if report.get("unreadable"):
         return _UNREADABLE_CAVEAT.format(reason=report["unreadable"])
     denominator = report["gold_denominator"]

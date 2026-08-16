@@ -1,10 +1,10 @@
 """sample-for-review: a stratified review packet, with a fixed rubric.
 
-Design spec section 7, and one instruction in it decides the whole design:
+One instruction decides the whole design:
 **sample preferentially from high-confidence `accept` verdicts.** That is where a
 correlated labeler/adversary blind spot hides. A sample drawn from the cases the
 adversary flagged would surface only what the adversary already found, which is
-the one risk in section 10 the pipeline cannot mitigate from inside itself.
+the one risk the pipeline cannot mitigate from inside itself.
 
 Everything here is deterministic. No `random`, no builtin `hash()` -- which is
 salted per process -- and no timestamp anywhere in the output. A sample that moved

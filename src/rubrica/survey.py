@@ -254,8 +254,8 @@ def _element_candidate_id(container_id: str, pointer: str) -> str:
     `_escape_pointer_token` had just introduced `~0`/`~1` into it. Measured on
     `{"trace one/a": ..., "trace two~b": ..., "Trace Three": ...}`: `survey`
     exited 0 and `validate --stage survey` then reported three schema findings,
-    so the command minted a catalogue that fails its own layer-1 gate. Spec
-    §5.2 makes id-keyed containers first-class and real ids carry `:`, `/` and
+    so the command minted a catalogue that fails its own layer-1 gate. Id-keyed
+    containers are first-class here and real ids carry `:`, `/` and
     spaces, so this is the ordinary case rather than a hostile one.
 
     The pointer goes through `slug`, the same function every other id in this
@@ -311,7 +311,7 @@ def explode(payload: Any) -> list[tuple[str, Any]] | None:
     it has many `paths` and is still one contract, and a fragment of it cannot
     be read alone.
 
-    Only these two shapes explode, which is spec §3's ruling: no Python
+    Only these two shapes explode, by ruling: no Python
     literals, no multi-document markdown, no archive members.
     """
     if isinstance(payload, list):

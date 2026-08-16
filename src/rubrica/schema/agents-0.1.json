@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "agents-0.1.json",
   "title": "Agent roster for a smoke run",
-  "description": "Human-authored, not a stage output. The three roles of design spec section 7: a weak baseline that should fail nearly everything, the agent under test, and an oracle handed the reference answer that should pass nearly everything. Each command is an argv list; smoke substitutes {task_dir}, {logs_dir} and {scenario_id} into each element and expects the command to write a stream-json transcript into {logs_dir} or to stdout. Because a person wrote this file, a schema failure here is a usage error (exit 2) rather than a finding -- there is no stage to send a repair prompt to.",
+  "description": "Human-authored, not a stage output. The three roles smoke requires: a weak baseline that should fail nearly everything, the agent under test, and an oracle handed the reference answer that should pass nearly everything. Each command is an argv list; smoke substitutes {task_dir}, {logs_dir} and {scenario_id} into each element and expects the command to write a stream-json transcript into {logs_dir} or to stdout. Because a person wrote this file, a schema failure here is a usage error (exit 2) rather than a finding -- there is no stage to send a repair prompt to.",
   "type": "object",
   "required": ["schema_version", "agents"],
   "additionalProperties": false,

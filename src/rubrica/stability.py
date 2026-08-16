@@ -1,6 +1,6 @@
 """diff-runs: attribute variance to a stage instead of to "the pipeline".
 
-Design spec section 291. Three Jaccards -- capability ids after 1b, goal-by-cell
+Three Jaccards -- capability ids after 1b, goal-by-cell
 claims after 2, emitted task ids after 6 -- so a reader can tell "stage 2 is
 nondeterministic and everything downstream is stable given a fixed 02" from "the
 whole thing is unstable". That distinction is the only reason to measure it.

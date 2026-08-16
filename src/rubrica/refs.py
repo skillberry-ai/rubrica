@@ -46,12 +46,12 @@ OPEN_STATUSES = frozenset({"proposed", "active"})
 # on, or thrown out afterwards. This is the status set that may legitimately
 # appear under 04/05/06.
 #
-# The design spec's layer-2 enumeration (section 5, clause 2) originally said
-# `active`, which contradicts the same spec's challenge loop: a rejected
-# scenario is marked `rejected` in 02-scenarios.json *after* it has been
-# instantiated and judged, so requiring `active` made check-refs permanently
-# dirty in a state the spec prescribes, with no repair able to clear it. The
-# spec's reasoned commitment wins over its one-clause enumeration -- the
+# An earlier enumeration of this check said `active`, which contradicts the
+# challenge loop it was written beside: a rejected scenario is marked
+# `rejected` in 02-scenarios.json *after* it has been instantiated and judged,
+# so requiring `active` made check-refs permanently dirty in a state the reject
+# path prescribes, with no repair able to clear it. The reasoned commitment
+# wins over the one-clause enumeration -- the
 # artifact record of the rejection is what makes the honest-hole report ("87%,
 # 3 cells lost to rejected scenarios") possible, so that record must survive.
 #
@@ -252,7 +252,7 @@ def check_catalogue(run: RunPaths) -> list[Finding]:
 def check_triage(run: RunPaths) -> list[Finding]:
     """Reference checks over 00-triage.json. Nothing here is semantic.
 
-    The finding spec §11 actually asks for -- a world-model gap whose closing
+    The finding this check might seem to ask for -- a world-model gap whose closing
     evidence was declined at triage -- is deliberately NOT here. Matching gap
     prose to decline prose is semantic, and layer 2 checks that an element
     *references* a resolvable thing and never that the thing *supports* it. That
@@ -780,7 +780,7 @@ def check_claim_utilisation(run: RunPaths) -> list[Finding]:
 
     The mirror of check_world_model's claim check, which reports a world model
     citing an id that does not exist; this reports a claims file no world model
-    cites. Same pair, opposite directions -- the shape the spec's parked table
+    cites. Same pair, opposite directions -- the shape the parked-decisions record
     already has four rows of.
 
     Zero, not a percentage. Measured on run-20260812-130056: 130 of 287 claims
@@ -936,7 +936,7 @@ def check_coverage(run: RunPaths) -> list[Finding]:
         """A row marked covered must be credited to a scenario that still counts.
 
         `covered` means an accepted scenario exercises the row. When challenge
-        rejects that scenario, the design spec's reject path is "mark rejected in
+        rejects that scenario, the reject path is "mark rejected in
         02, recompute coverage" -- because the cell is a hole again. Nothing
         enforced the recomputation: this function checked only that a cited
         scenario_id *existed*, so the post-rejection state with the recomputation
@@ -1310,8 +1310,8 @@ def check_instances(run: RunPaths) -> list[Finding]:
             continue
         # Every scenario_id under 04/05/06 must have been *judged* in 02:
         # `active`, or `rejected` after the fact by challenge. A `rejected`
-        # scenario that was already instantiated is the state the design spec
-        # prescribes for the reject path, so it is not a finding; a `proposed`
+        # scenario that was already instantiated is the state the reject path
+        # prescribes, so it is not a finding; a `proposed`
         # one is, because score has not ruled on it yet, and so is a
         # `duplicate`, because dedupe folded it into another scenario.
         status = scenario.get("status")
@@ -1459,7 +1459,7 @@ def check_suite(run: RunPaths) -> list[Finding]:
     package for a scenario that stopped qualifying, but nothing orders emit and
     check-refs, so between challenge marking a scenario `rejected` and the next
     emit the package is legitimately still on disk. Reporting it would make
-    check-refs dirty in a state the design spec prescribes, and no repair the
+    check-refs dirty in a state the reject path prescribes, and no repair the
     orchestrator dispatched could clear it. See JUDGED_STATUSES.
 
     **The `.get()` calls below are deliberate, not an inconsistency with this
@@ -1546,7 +1546,7 @@ def check_report(run: RunPaths) -> list[Finding]:
     it rejected *after* smoke ran, emit prunes the package, and that record is
     what the honest-hole report ("87%, 3 cells lost to rejected scenarios") is
     built from. Reporting it would make check-refs permanently dirty in a state the
-    design spec prescribes, and the only way to clear it would be to delete the
+    reject path prescribes, and the only way to clear it would be to delete the
     evidence. An `active` scenario with no package, or an id absent from
     02-scenarios.json, is the real defect: a report over a suite nobody emitted.
 

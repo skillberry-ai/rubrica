@@ -3,7 +3,7 @@
 Layer 1 checks shape only. Cross-artifact references, seed-pointer
 reachability, and world-model invariants are layer 2 and live in refs.py;
 layer 3 is the smoke gate. A stage's output must clear layer 1 before the
-orchestrator dispatches the next stage (design spec section 5).
+orchestrator dispatches the next stage.
 
 Findings are returned, never raised: the orchestrator's contract is one
 bounded repair attempt with the findings appended to the stage prompt, which

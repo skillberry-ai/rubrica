@@ -1,6 +1,6 @@
 """Stage 7: run the emitted suite against three agents and report the spread.
 
-Design spec section 7. The suite is scored three ways -- by a weak baseline that
+The suite is scored three ways -- by a weak baseline that
 should fail nearly everything, by the agent under test, and by an oracle handed
 the reference answer that should pass nearly everything -- because a single
 average hides every way a suite can be worthless. A weak baseline that scores
@@ -752,7 +752,7 @@ def smoke_run(run: RunPaths, specs: tuple[AgentSpec, ...]) -> tuple[dict | None,
                     run.report,
                     "smoke",
                     "/agents",
-                    f"the roster declares no {role!r} agent. Design spec section 7 makes it "
+                    f"the roster declares no {role!r} agent. All three roles are "
                     "load-bearing for degenerate-suite detection, so this run cannot be judged "
                     "healthy however good the scores look",
                 )

@@ -1,6 +1,6 @@
 """`gate-brief`: the human surface at all four human gates.
 
-Design spec section 11. A composer, not a new analysis -- it renders reports
+A composer, not a new analysis -- it renders reports
 that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
 `sizing.implied_size`, in the shape each gate's human decision actually needs:
 
@@ -11,7 +11,7 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   seen it. Admits by priority, declines grouped by reason code, and every open
   deficiency beside the projection that would close it follow.
 - **Gate 1** puts the world model's gaps next to the triage record's open
-  deficiencies -- section 10's pairing, which is deliberately *not* a
+  deficiencies -- a pairing that is deliberately *not* a
   mechanical check (matching gap prose to decline prose is semantic, the same
   hole `check-refs` leaves for a claim's support), so this rendering is the
   whole instrument for a human making that call. Claim utilisation and the
@@ -102,7 +102,7 @@ def _mapping(value) -> dict:
 
 def _gate_0(run: RunPaths) -> str:
     if not run.triage.is_file():
-        # Design spec section 7.1's ruling, held by the report as well as by
+        # A ruling held by the report as well as by
         # the check: a run minted through `intake --input` never had a triage
         # step, and that absence is not a finding.
         #
@@ -298,7 +298,7 @@ def _gate_1(run: RunPaths) -> str:
     triage = _quietly(run.triage)
     lines.append(
         "Triage's open deficiencies -- read against the gaps above. This pairing is "
-        "semantic (spec section 10), so it is a human's call and this rendering is the "
+        "semantic, so it is a human's call and this rendering is the "
         "whole instrument for making it, not a check"
     )
     if triage is None:

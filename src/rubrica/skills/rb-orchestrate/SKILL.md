@@ -213,8 +213,8 @@ rubrica smoke --agents <roster>              → 07-report.json
 Two readings of that block to correct before you start, because both are
 natural and both are wrong.
 
-**`rb-propose` is one dispatch per round, not a fan-out.** The design spec
-writes this line as "fan-out rb-propose per hole cluster", and that names the
+**`rb-propose` is one dispatch per round, not a fan-out.** An earlier design
+note writes this line as "fan-out rb-propose per hole cluster", and that names the
 *work* a round does -- a round targets the cluster of closable holes -- not a
 set of concurrent subagents. It cannot be a fan-out: `rb-propose` declares
 `scenarios` under both `reads` and `writes` because `02-scenarios.json` is one
@@ -224,7 +224,7 @@ to report the loss. One dispatch per round, holding every hole that round
 targets.
 
 **`dedupe-candidates` is not something you pipe into a dispatch.** It is in
-your `invokes` because the spec's loop places it before scoring and because
+your `invokes` because the round loop places it before scoring and because
 running it yourself is how you read a round's candidate pairs when a fold
 looks wrong. But `rb-score` runs it as its own Method step 1, from inside its
 own dispatch -- and handing it the JSON output instead would be the context
@@ -347,7 +347,7 @@ than a field to fill in.
 `--effort` is one of the values the manifest schema declares
 (`manifest_stage_efforts()` reads them out of it: `low`, `medium`, `high`,
 `xhigh`, `max`). The command writes a `skill_sha256` for you, computed from the
-file `--skill` names. This is section 4's reproducibility hook, and it is not
+file `--skill` names. This is the reproducibility hook, and it is not
 bookkeeping: two runs are comparable only if their model, effort and skill
 digest match per stage, and `stability.comparability` gates `diff-runs`'
 headline verdict on the two manifests' stage maps agreeing. **An unrecorded

@@ -1,14 +1,16 @@
 """Writing into a run after intake minted it: the stage map and the notebook.
 
-Both are declared by the design spec (section 4's reproducibility hook, and
-decisions.md as the run's append-only lab notebook) and had no writer. The
+Both belong to the run's on-disk contract -- the reproducibility hook that
+hashes each stage's skill, and decisions.md as the run's append-only lab
+notebook -- and had no writer. The
 consequence for the stage map was not cosmetic: stability.comparability gates
 diff-runs' headline verdict on the two manifests' stage maps matching, so an
 always-empty map made every pair of runs comparable -- a check passing because
 its input was absent.
 
-Timestamps are minted here rather than passed in, for the reason section 4
-gives: a skill that invents a timestamp makes two otherwise-identical runs diff.
+Timestamps are minted here rather than passed in, for the reproducibility
+reason: a skill that invents a timestamp makes two otherwise-identical runs
+diff.
 """
 
 from __future__ import annotations
@@ -109,7 +111,7 @@ def set_limit(
 ) -> None:
     """Lower (or raise) a manifest limit, with the reason recorded in decisions.md.
 
-    Design spec section 9's tail names the failure this replaces: a run's
+    This function replaces a specific failure: a run's
     `max_scenarios` had been hand-edited with no trace of who did it or why,
     and it was read as an unexplained discrepancy because every mechanism was
     checked before the person. A limits change made through this function
@@ -190,8 +192,8 @@ def set_limit(
     # the ordering is the whole mitigation.
     #
     # This way round, the survivable outcome is a limit that changed with no
-    # decisions.md line -- bad, and precisely the failure spec section 9's tail
-    # names (a hand-edited max_scenarios with no trace of who did it or why),
+    # decisions.md line -- bad, and precisely the failure this function exists
+    # to prevent (a hand-edited max_scenarios with no trace of who did it or why),
     # but recoverable: the manifest still carries the new value, `diff-runs`
     # still sees it, and a human can append the missing note.
     #

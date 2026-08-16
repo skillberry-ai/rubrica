@@ -188,7 +188,7 @@ def _prose_digest(text: str, body_chars: int) -> dict:
 def _source_digest(text: str) -> dict:
     """Top-level names only, via ast -- never a regex over source.
 
-    `assignments` is the field spec §8 depends on: a projection brief can only
+    `assignments` is the field a projection brief depends on: such a brief can only
     say "the schemas are the literals named TOOL_DEFINITIONS" if triage can see
     that name, and defs and classes alone do not carry it.
     """

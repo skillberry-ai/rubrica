@@ -2,7 +2,7 @@
 
 `max_scenarios` (paths.py, cli.py) is a safety ceiling: the point past which no
 human reviews the output. It says nothing about whether *this* target's world
-model wants twelve scenarios or sixty. Design spec section 9 derives a second
+model wants twelve scenarios or sixty. This module derives a second
 number from the world model itself -- capability cells plus expected hop-depth
 slots, divided by one run's measured acceptance rate -- and nothing acts on it.
 `gate-brief` reports it at gates 1 and 2 for a human deciding whether the suite

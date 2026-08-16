@@ -80,9 +80,8 @@ def write_json(path: Path | str, payload: Any) -> None:
 def append_decision(path: Path | str, entry: str) -> None:
     """Append one orchestrator decision to decisions.md.
 
-    decisions.md is the run's append-only lab notebook (design spec section
-    4); it is never rewritten, so this is a plain append rather than an
-    atomic replace.
+    decisions.md is the run's append-only lab notebook; it is never rewritten,
+    so this is a plain append rather than an atomic replace.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -31,7 +31,7 @@ from rubrica.paths import STAGES, RunPaths
 SKILL_FILENAME = "SKILL.md"
 
 # Stages implemented entirely in code. intake mints run ids and timestamps,
-# which the design spec forbids a skill from inventing; smoke executes the
+# which a skill must never invent; smoke executes the
 # suite; survey mints run ids and timestamps too -- it runs before intake now
 # does, but the same prohibition applies to whichever stage mints them first.
 # Every other stage in STAGES has a skill, and expected_skill_names derives
@@ -49,7 +49,7 @@ SKILL_PREFIX = "rb-"
 # Not a stage: it dispatches them. It has no `stage` key and no `schemas`.
 ORCHESTRATOR = f"{SKILL_PREFIX}orchestrate"
 
-# The uniform five-section skill shape (design spec section 5), in order.
+# The uniform five-section skill shape, in order.
 # Section 5 is the one that matters most: skills default to helpfulness, and
 # confabulation under under-specification is the characteristic failure of a
 # prompt pipeline.
