@@ -340,3 +340,12 @@ subcommands, gates); and no citation of the recorded-history tree, which
 `docs/README.md` alone is allowed to link. `## Two check layers` is permitted
 deliberately — there are exactly two by architecture, and a third would be a
 design change rather than an increment.
+
+One of those documents is drawn rather than written:
+[`docs/concepts/pipeline-diagram.html`](docs/concepts/pipeline-diagram.html) is
+**generated**, by `scripts/render-pipeline-diagram.py`. Edit the script's `ROWS`
+table and re-render; never hand-edit the page. The same test module checks both
+halves — that `ROWS` draws `paths.STAGES` in order, and that the committed page
+is byte-identical to a fresh render — so a stage added without a row, or a page
+edited without its script, is a failure rather than a drawing that quietly
+describes an older pipeline.

@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Rubrica Run</title>
+<style>
+:root{
+  --ground:#E7EAE7; --paper:#F8F9F7; --sunk:#DEE2DE;
+  --ink:#141917; --ink2:#4B5754; --ink3:#77827E; --rule:#C2CAC5; --rule2:#D5DBD6;
+  --stamp:#A81E5B; --stamp-ink:#8E1A4D; --stamp-soft:rgba(168,30,91,.09);
+  --ok:#1E6B4A; --warn:#8A5806; --stop:#A32B1C;
+  --ok-b:rgba(30,107,74,.08); --warn-b:rgba(138,88,6,.08); --stop-b:rgba(163,43,28,.08);
+  --mono:ui-monospace,"SF Mono","JetBrains Mono","IBM Plex Mono",Menlo,Consolas,monospace;
+  --serif:Charter,"Iowan Old Style","Source Serif 4",Georgia,"Times New Roman",serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#121514; --paper:#1B1F1D; --sunk:#0D100F;
+    --ink:#E7EAE6; --ink2:#A2ACA7; --ink3:#7B857F; --rule:#333A36; --rule2:#272D2A;
+    --stamp:#F1749F; --stamp-ink:#F79CBC; --stamp-soft:rgba(241,116,159,.13);
+    --ok:#63C295; --warn:#D7A24C; --stop:#EA8875;
+    --ok-b:rgba(99,194,149,.10); --warn-b:rgba(215,162,76,.10); --stop-b:rgba(234,136,117,.10);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#121514; --paper:#1B1F1D; --sunk:#0D100F;
+  --ink:#E7EAE6; --ink2:#A2ACA7; --ink3:#7B857F; --rule:#333A36; --rule2:#272D2A;
+  --stamp:#F1749F; --stamp-ink:#F79CBC; --stamp-soft:rgba(241,116,159,.13);
+  --ok:#63C295; --warn:#D7A24C; --stop:#EA8875;
+  --ok-b:rgba(99,194,149,.10); --warn-b:rgba(215,162,76,.10); --stop-b:rgba(234,136,117,.10);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:var(--serif); font-size:17px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1200px; margin:0 auto; padding:64px 32px 96px}
+
+
+/* ---- masthead */
+.mast{border-bottom:2px solid var(--ink); padding-bottom:22px; margin-bottom:14px}
+.eyebrow{
+  font-family:var(--mono); font-size:11px; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--ink3); display:flex; gap:16px; flex-wrap:wrap; margin-bottom:20px;
+}
+h1{
+  font-family:var(--mono); font-weight:600; font-size:clamp(30px,5.4vw,52px);
+  letter-spacing:-.02em; line-height:1.02; margin:0; text-wrap:balance;
+}
+h1 .dim{color:var(--ink3)}
+.standfirst{
+  max-width:63ch; margin:20px 0 0; font-size:19px; line-height:1.55; color:var(--ink2);
+}
+.standfirst em{color:var(--ink); font-style:italic}
+
+/* ---- prose */
+section{margin-top:60px}
+h2{
+  font-family:var(--mono); font-size:13px; letter-spacing:.14em; text-transform:uppercase;
+font-weight:600; color:var(--stamp-ink); margin:0 0 6px; display:flex; align-items:baseline;
+    gap:12px;
+}
+h2::after{content:""; flex:1; height:1px; background:var(--rule)}
+h3{
+  font-family:var(--mono); font-size:15px; font-weight:600; letter-spacing:-.01em;
+  margin:34px 0 8px; color:var(--ink);
+}
+p{max-width:66ch; margin:14px 0}
+.lede{font-size:18px; max-width:64ch}
+code,kbd{
+  font-family:var(--mono); font-size:.86em; background:var(--sunk);
+  padding:.12em .34em; border-radius:2px; color:var(--ink);
+}
+strong{font-weight:600}
+a{color:var(--stamp-ink); text-decoration-thickness:1px; text-underline-offset:2px}
+a:focus-visible{outline:2px solid var(--stamp); outline-offset:2px; border-radius:2px}
+
+/* ---- figures */
+figure{margin:34px 0 0; padding:0}
+.plate{
+  background:var(--paper); border:1px solid var(--rule);
+  padding:26px 26px 18px; overflow-x:auto;
+}
+.plate.wide{
+  /* the hero breaks the reading column on wide screens */
+  /* capped under the .wrap padding (32px) so the bleed can never scroll the body */
+  margin-left:calc(-1 * min(3.4vw, 30px)); margin-right:calc(-1 * min(3.4vw, 30px));
+}
+svg.dia{display:block; width:100%; height:auto; min-width:0; color:var(--ink)}
+svg.hero{min-width:940px}
+figcaption{
+  font-family:var(--mono); font-size:11px; line-height:1.6; color:var(--ink3);
+  margin-top:12px; max-width:90ch;
+}
+figcaption b{color:var(--ink2); font-weight:600}
+figcaption code,.legend code{background:none; padding:0; color:var(--ink2)}
+
+/* ---- svg element classes */
+.hd{font-family:var(--mono); fill:var(--ink3); letter-spacing:.1em; text-transform:uppercase}
+.rule-hd{stroke:var(--ink); stroke-width:1}
+.dir{font-family:var(--mono); fill:var(--ink3)}
+.box-code{fill:var(--paper); stroke:var(--ink2); stroke-width:1.4}
+.box-prompt{fill:var(--paper); stroke:var(--ink2); stroke-width:1.4;
+  stroke-dasharray:none}
+.prompt-edge{fill:var(--ink)}
+.box-gate{fill:var(--sunk); stroke:var(--ink2); stroke-width:1.4}
+.dispatch{fill:none; stroke:var(--ink2); stroke-width:1; stroke-dasharray:3 2.6}
+.rule-hair{stroke:var(--rule); stroke-width:1}
+.ghost{opacity:.34; fill:none}
+.st-name{font-family:var(--mono); fill:var(--ink); font-weight:600}
+.st-runs{font-family:var(--mono); fill:var(--ink2)}
+.artifact{fill:none; stroke:var(--rule); stroke-width:1; stroke-dasharray:3 2.6}
+.artifact.hi{stroke:var(--ink2); stroke-dasharray:3 2.6}
+.art-t{font-family:var(--mono); fill:var(--ink2)}
+.edge{stroke:var(--ink2); stroke-width:1.2; fill:none}
+.edge.ok{stroke:var(--ok)} .edge.warn{stroke:var(--warn)} .edge.stop{stroke:var(--stop)}
+.edge.cut{stroke:var(--ink3); stroke-dasharray:4 4}
+.cut-x{stroke:var(--stop); stroke-width:1.6}
+.cut-t{font-family:var(--mono); fill:var(--ink3)}
+.ar{fill:var(--ink2)} .ar-s{fill:var(--stamp)}
+.edge-t{font-family:var(--mono); fill:var(--ink3); letter-spacing:.06em}
+.g-pill{fill:none; stroke:var(--ink2); stroke-width:1}
+.g-pill-t{font-family:var(--mono); fill:var(--ink2)}
+.g-note{font-family:var(--mono); fill:var(--ink3)}
+.band{fill:var(--stamp-soft); stroke:var(--stamp); stroke-width:1}
+.band-edge{fill:var(--stamp)}
+.band-n{font-family:var(--mono); fill:var(--stamp-ink); font-weight:700; letter-spacing:.1em}
+.band-t{font-family:var(--mono); fill:var(--ink); font-weight:600}
+.band-s{font-family:var(--serif); fill:var(--ink2)}
+.barrier{stroke:var(--ink); stroke-width:3.4}
+.barrier-t{font-family:var(--mono); fill:var(--ink2); letter-spacing:.04em}
+.fan-t{font-family:var(--mono); fill:var(--ink3)}
+.loop{stroke:var(--ink); stroke-width:1.4}
+.loop-t{font-family:var(--mono); fill:var(--ink2); letter-spacing:.1em; text-transform:uppercase}
+.loop-note{font-family:var(--mono); fill:var(--ink2); letter-spacing:.04em}
+.back{stroke:var(--stamp); stroke-width:1.3; stroke-dasharray:5 3}
+.back-t{font-family:var(--mono); fill:var(--stamp-ink); letter-spacing:.06em}
+.vd-lab{font-family:var(--mono); fill:var(--ink3)}
+.vd-pill{fill:var(--sunk); stroke:var(--rule); stroke-width:1}
+.vd-pill-t{font-family:var(--mono); fill:var(--ink)}
+.vd-eff{font-family:var(--mono); fill:var(--ink3)}
+.member{fill:var(--sunk); stroke:var(--rule); stroke-width:1}
+.tick{stroke:var(--ink3); stroke-width:1; stroke-dasharray:3 3}
+.out{fill:none; stroke-width:1}
+.ok-b{fill:var(--ok-b); stroke:var(--ok)}
+.warn-b{fill:var(--warn-b); stroke:var(--warn)}
+.stop-b{fill:var(--stop-b); stroke:var(--stop)}
+.out-t{font-family:var(--mono); fill:var(--ink); font-weight:600}
+.out-s{font-family:var(--serif); fill:var(--ink2)}
+.code-0{font-family:var(--mono); fill:var(--ok); font-weight:700}
+.code-1{font-family:var(--mono); fill:var(--warn); font-weight:700}
+.code-2{font-family:var(--mono); fill:var(--stop); font-weight:700}
+
+/* ---- legend */
+.legend{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:14px 26px;
+  border-top:1px solid var(--rule); margin-top:16px; padding-top:16px;
+}
+.legend div{display:flex; gap:11px; align-items:flex-start;
+  font-family:var(--mono); font-size:10.5px; line-height:1.5; color:var(--ink3)}
+.legend b{display:block; color:var(--ink2); font-weight:600; letter-spacing:.03em}
+.swatch{flex:0 0 30px; height:17px; margin-top:1px}
+
+/* ---- tables */
+.tbl{width:100%; border-collapse:collapse; margin-top:20px; font-size:14px}
+.tbl caption{
+  font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--ink3); text-align:left; padding-bottom:8px;
+}
+.tbl th{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--ink3); font-weight:600; text-align:left; padding:0 14px 8px 0;
+  border-bottom:1px solid var(--ink);
+}
+.tbl td{padding:11px 14px 11px 0; border-bottom:1px solid var(--rule2); vertical-align:top}
+.tbl td:first-child{font-family:var(--mono); font-size:12.5px; white-space:nowrap; color:var(--ink)}
+.tbl .n{font-family:var(--mono); color:var(--stamp-ink); font-weight:700}
+.scroll{overflow-x:auto}
+
+/* ---- callouts */
+.rail{
+  border-left:3px solid var(--stamp); background:var(--stamp-soft);
+  padding:16px 20px; margin:28px 0 0; max-width:72ch;
+}
+.rail p{margin:0; max-width:none; font-size:16px}
+.rail p + p{margin-top:10px}
+.rail .tag{
+  font-family:var(--mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--stamp-ink); display:block; margin-bottom:6px;
+}
+.cols.two{grid-template-columns:repeat(auto-fit,minmax(400px,1fr))}
+.cols{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:28px;
+  margin-top:26px}
+.cols > div > h3{margin-top:0}
+.cols p{max-width:46ch}
+
+footer{
+  margin-top:72px; padding-top:20px; border-top:1px solid var(--rule);
+  font-family:var(--mono); font-size:11px; color:var(--ink3); line-height:1.7;
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important; animation:none!important}}
+
+/* Responsive overrides live last on purpose: an earlier copy of this block lost
+   the cascade to the .plate.wide bleed declared further down, and the page
+   scrolled sideways by the few pixels the bleed exceeded the padding by. */
+@media (max-width:720px){
+  body{font-size:16px}
+  .wrap{padding:40px 18px 64px}
+  .plate{padding:18px 16px 14px}
+  .plate.wide{margin-left:0; margin-right:0}
+  .standfirst{font-size:17px}
+  .cols{gap:22px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="mast">
+<div class="eyebrow"><span>rubrica</span><span>pipeline plate</span><span>artifacts on disk are the
+    only channel</span></div>
+  <h1>The Rubrica Run<br><span class="dim">the stages, the gates, and the
+  artifacts between them</span></h1>
+  <p class="standfirst">Rubrica builds an agent test suite for a target system out of the
+  artifacts that describe it — specs, captured trajectories, source — by chaining AI skills over a
+  schema-validated on-disk contract. The experiment it runs is falsifiable: <em>does
+  prompt-carried judgment survive a chain of artifact handoffs well enough to produce a suite worth
+  running?</em> Everything below is the apparatus that makes the answer readable.</p>
+</header>
+
+<section>
+  <h2>The run, end to end</h2>
+  <p class="lede">Read top to bottom. Each row is one stage: what dispatches it, the artifact it
+  leaves in the run directory, and the deterministic gates that must pass before the next stage is
+  dispatched at all. The magenta bands are where the run stops for a human.</p>
+
+  <figure>
+    <div class="plate wide"><svg viewBox="0 0 1120 1594" class="dia hero" role="img" aria-label="Every stage of a Rubrica run in order, each with what it runs as, the artifact it writes into the run directory, and the deterministic gates that follow it. The human gates sit as full-width bands after triage, reconcile, score and challenge.">
+<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ar"/></marker><marker id="ar-s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ar-s"/></marker></defs>
+<text x="96" y="30" class="hd" text-anchor="end" font-size="11">dir</text>
+<text x="108" y="30" class="hd" text-anchor="start" font-size="11">stage · what runs it</text>
+<text x="466" y="30" class="hd" text-anchor="start" font-size="11">what it writes into the run directory</text>
+<text x="786" y="30" class="hd" text-anchor="start" font-size="11">gates, in order</text>
+<line x1="56" y1="42" x2="1100" y2="42" class="rule-hd"/>
+<text x="96" y="100" class="dir" text-anchor="end" font-size="12">—</text>
+<rect x="108" y="74" width="286" height="62" rx="2" class="box-code"/>
+<text x="124" y="100" class="st-name" text-anchor="start" font-size="15">survey</text>
+<text x="124" y="119" class="st-runs" text-anchor="start" font-size="10.5">code · walks a corpus</text>
+<line x1="402" y1="105" x2="458" y2="105" class="edge" marker-end="url(#ar)"/>
+<text x="434" y="97" class="edge-t" text-anchor="middle" font-size="9">writes</text>
+<rect x="466" y="92" width="300" height="27" rx="2" class="artifact"/>
+<text x="478" y="108" class="art-t" text-anchor="start" font-size="10">00-catalogue.json</text>
+<rect x="786" y="83" width="68" height="19" rx="9.5" class="g-pill"/><text x="820" y="96" class="g-pill-t" text-anchor="middle" font-size="10.5">validate</text>
+<text x="786" y="120" class="g-note" text-anchor="start" font-size="10">one bounded digest per candidate; mints the run</text>
+<text x="96" y="182" class="dir" text-anchor="end" font-size="12">—</text>
+<rect x="108" y="156" width="286" height="62" rx="2" class="box-prompt"/>
+<rect x="108" y="156" width="4.5" height="62" class="prompt-edge"/>
+<text x="124" y="182" class="st-name" text-anchor="start" font-size="15">triage</text>
+<text x="124" y="201" class="st-runs" text-anchor="start" font-size="10.5">rb-triage</text>
+<line x1="402" y1="187" x2="458" y2="187" class="edge" marker-end="url(#ar)"/>
+<text x="434" y="179" class="edge-t" text-anchor="middle" font-size="9">writes</text>
+<rect x="466" y="174" width="300" height="27" rx="2" class="artifact"/>
+<text x="478" y="190" class="art-t" text-anchor="start" font-size="10">00-triage.json</text>
+<rect x="786" y="165" width="68" height="19" rx="9.5" class="g-pill"/><text x="820" y="178" class="g-pill-t" text-anchor="middle" font-size="10.5">validate</text>
+<rect x="862" y="165" width="81" height="19" rx="9.5" class="g-pill"/><text x="903" y="178" class="g-pill-t" text-anchor="middle" font-size="10.5">check-refs</text>
+<text x="786" y="202" class="g-note" text-anchor="start" font-size="10">admit / decline, one disposition per candidate</text>
+<rect x="60" y="254" width="1040" height="42" rx="3" class="band"/>
+<rect x="60" y="254" width="5" height="42" class="band-edge"/>
+<text x="80" y="280" class="band-n" text-anchor="start" font-size="13">GATE 0</text>
+<text x="156" y="280" class="band-t" text-anchor="start" font-size="13.5">Human gate 0 — the triage record</text>
+<text x="80" y="313" class="band-s" text-anchor="start" font-size="12">Decides what the run can ever know. Nothing below intake reads the corpus again, so a declined candidate is gone as completely as if it never existed.</text>
+<text x="96" y="358" class="dir" text-anchor="end" font-size="12">00</text>
+<rect x="108" y="332" width="286" height="62" rx="2" class="box-code"/>
+<text x="124" y="358" class="st-name" text-anchor="start" font-size="15">intake</text>
+<text x="124" y="377" class="st-runs" text-anchor="start" font-size="10.5">code · admits what triage ruled on</text>
+<line x1="402" y1="363" x2="458" y2="363" class="edge" marker-end="url(#ar)"/>
+<text x="434" y="355" class="edge-t" text-anchor="middle" font-size="9">writes</text>
+<rect x="466" y="342" width="300" height="42" rx="2" class="artifact"/>
+<text x="478" y="358" class="art-t" text-anchor="start" font-size="10">manifest.json</text>
+<text x="478" y="373" class="art-t" text-anchor="start" font-size="10">00-inputs/&lt;stored_as&gt;</text>
+<rect x="786" y="341" width="68" height="19" rx="9.5" class="g-pill"/><text x="820" y="354" class="g-pill-t" text-anchor="middle" font-size="10.5">validate</text>
+<text x="786" y="378" class="g-note" text-anchor="start" font-size="10">fixes the run&#x27;s identity: digests, limits, target</text>
+<text x="96" y="440" class="dir" text-anchor="end" font-size="12">01a</text>
+<rect x="122" y="428" width="286" height="62" rx="2" class="box-prompt ghost"/>
+<rect x="115" y="421" width="286" height="62" rx="2" class="box-prompt ghost"/>
+<rect x="108" y="414" width="286" height="62" rx="2" class="box-prompt"/>
+<rect x="108" y="414" width="4.5" height="62" class="prompt-edge"/>
+<text x="124" y="440" class="st-name" text-anchor="start" font-size="15">extract</text>
+<text x="124" y="459" class="st-runs" text-anchor="start" font-size="10.5">rb-extract</text>
+<text x="108" y="503" class="fan-t" text-anchor="start" font-size="9.5">fan-out · one member per admitted input</text>
+<line x1="416" y1="445" x2="458" y2="445" class="edge" marker-end="url(#ar)"/>
+<text x="441" y="437" class="edge-t" text-anchor="middle" font-size="9">writes</text>
+<rect x="466" y="432" width="300" height="27" rx="2" class="artifact"/>
+<text x="478" y="448" class="art-t" text-anchor="start" font-size="10">01-claims/&lt;artifact_id&gt;.json</text>
+<rect x="786" y="423" width="68" height="19" rx="9.5" class="g-pill"/><text x="820" y="436" class="g-pill-t" text-anchor="middle" font-size="10.5">validate</text>
+<line x1="108" y1="533" x2="394" y2="533" class="barrier"/>
+<text x="402" y="537" class="barrier-t" text-anchor="start" font-size="9.5">barrier · every extract member has finished</text>
+<text x="96" y="568" class="dir" text-anchor="end" font-size="12">01b</text>
+<rect x="108" y="542" width="286" height="62" rx="2" class="box-prompt"/>
+<rect x="108" y="542" width="4.5" height="62" class="prompt-edge"/>
+<text x="124" y="568" class="st-name" text-anchor="start" font-size="15">reconcile</text>
+<text x="124" y="587" class="st-runs" text-anchor="start" font-size="10.5">rb-reconcile</text>
+<line x1="402" y1="573" x2="458" y2="573" class="edge" marker-end="url(#ar)"/>
+<text x="434" y="565" class="edge-t" text-anchor="middle" font-size="9">writes</text>
+<rect x="466" y="560" width="300" height="27" rx="2" class="artifact"/>
+<text x="478" y="576" class="art-t" text-anchor="start" font-size="10">01-world-model.json</text>
+<rect x="786" y="551" width="68" height="19" rx="9.5" class="g-pill"/><text x="820" y="564" class="g-pill-t" text-anchor="middle" font-size="10.5">validate</text>
+<rect x="862" y="551" width="81" height="19" rx="9.5" class="g-pill"/><text x="903" y="564" class="g-pill-t" text-anchor="middle" font-size="10.5">check-refs</text>
+<rect x="60" y="640" width="1040" height="42" rx="3" class="band"/>
+<rect x="60" y="640" width="5" height="42" class="band-edge"/>
+<text x="80" y="666" class="band-n" text-anchor="start" font-size="13">GATE 1</text>
+<text x="156" y="666" class="band-t" text-anchor="start" font-size="13.5">Human gate 1 — the world model</text>
+<text x="80" y="699" class="band-s" text-anchor="start" font-size="12">gate-brief lays out claim utilisation per input and the implied suite size. A blocking gap halts one step earlier and arrives at this same human.</text>
+<text x="108" y="738" class="loop-note" text-anchor="start" font-size="11">loop · round = 1 … K,  K = manifest.limits.max_rounds</text>
+<text x="96" y="778" class="dir" text-anchor="end" font-size="12">02</text>
+<rect x="108" y="752" width="286" height="62" rx="2" class="box-prompt"/>
+<rect x="108" y="752" width="4.5" height="62" class="prompt-edge"/>
+<text x="124" y="778" class="st-name" text-anchor="start" font-size="15">propose</text>
+<text x="124" y="797" class="st-runs" text-anchor="start" font-size="10.5">rb-propose · one dispatch per round</text>
+<line x1="402" y1="783" x2="458" y2="783" class="edge" marker-end="url(#ar)"/>
+<text x="434" y="775" class="edge-t" text-anchor="middle" font-size="9">writes</text>
+<rect x="466" y="770" width="300" height="27" rx="2" class="artifact"/>
+<text x="478" y="786" class="art-t" text-anchor="start" font-size="10">02-scenarios.json</text>
+<rect x="786" y="761" width="68" height="19" rx="9.5" class="g-pill"/><text x="820" y="774" class="g-pill-t" text-anchor="middle" font-size="10.5">validate</text>
+<text x="786" y="798" class="g-note" text-anchor="start" font-size="10">append-only, so it can never be a fan-out</text>
+<line x1="108" y1="843" x2="394" y2="843" class="barrier"/>
+<text x="402" y="847" class="barrier-t" text-anchor="start" font-size="9.5">barrier · closes the round</text>
+<text x="96" y="878" class="dir" text-anchor="end" font-size="12">03</text>
+<rect x="108" y="852" width="286" height="62" rx="2" class="box-prompt"/>
+<rect x="108" y="852" width="4.5" height="62" class="prompt-edge"/>
+<text x="124" y="878" class="st-name" text-anchor="start" font-size="15">score</text>
+<text x="124" y="897" class="st-runs" text-anchor="start" font-size="10.5">rb-score</text>
+<line x1="402" y1="883" x2="458" y2="883" class="edge" marker-end="url(#ar)"/>
+<text x="434" y="875" class="edge-t" text-anchor="middle" font-size="9">writes</text>
+<rect x="466" y="862" width="300" height="42" rx="2" class="artifact"/>
+<text x="478" y="878" class="art-t" text-anchor="start" font-size="10">03-coverage/round-N.json · latest.json</text>
+<text x="478" y="893" class="art-t" text-anchor="start" font-size="10">02-scenarios.json  (folds, rejects)</text>
+<rect x="786" y="861" width="68" height="19" rx="9.5" class="g-pill"/><text x="820" y="874" class="g-pill-t" text-anchor="middle" font-size="10.5">validate</text>
+<rect x="862" y="861" width="81" height="19" rx="9.5" class="g-pill"/><text x="903" y="874" class="g-pill-t" text-anchor="middle" font-size="10.5">check-refs</text>
+<text x="786" y="898" class="g-note" text-anchor="start" font-size="10">runs dedupe-candidates itself, as Method step 1</text>
+<text x="108" y="950" class="vd-lab" text-anchor="start" font-size="10.5">latest.json verdict — score computes it, only the orchestrator acts on it</text>
+<rect x="108" y="960" width="68" height="19" rx="9.5" class="vd-pill"/><text x="142" y="974" class="vd-pill-t" text-anchor="middle" font-size="10.5">continue</text>
+<text x="142" y="990" class="vd-eff" text-anchor="middle" font-size="9.5">round++</text>
+<rect x="188" y="960" width="75" height="19" rx="9.5" class="vd-pill"/><text x="226" y="974" class="vd-pill-t" text-anchor="middle" font-size="10.5">converged</text>
+<text x="226" y="990" class="vd-eff" text-anchor="middle" font-size="9.5">leave the loop</text>
+<rect x="275" y="960" width="131" height="19" rx="9.5" class="vd-pill"/><text x="341" y="974" class="vd-pill-t" text-anchor="middle" font-size="10.5">halted_no_progress</text>
+<text x="341" y="990" class="vd-eff" text-anchor="middle" font-size="9.5">leave the loop</text>
+<rect x="418" y="960" width="119" height="19" rx="9.5" class="vd-pill"/><text x="478" y="974" class="vd-pill-t" text-anchor="middle" font-size="10.5">halted_round_cap</text>
+<text x="478" y="990" class="vd-eff" text-anchor="middle" font-size="9.5">leave the loop</text>
+<rect x="60" y="1014" width="1040" height="42" rx="3" class="band"/>
+<rect x="60" y="1014" width="5" height="42" class="band-edge"/>
+<text x="80" y="1040" class="band-n" text-anchor="start" font-size="13">GATE 2</text>
+<text x="156" y="1040" class="band-t" text-anchor="start" font-size="13.5">Human gate 2 — scenarios and coverage</text>
+<text x="80" y="1073" class="band-s" text-anchor="start" font-size="12">The cost gate. Everything below is paid per scenario, twice over: once to instantiate it and once to challenge it.</text>
+<text x="96" y="1118" class="dir" text-anchor="end" font-size="12">04</text>
+<rect x="122" y="1106" width="286" height="62" rx="2" class="box-prompt ghost"/>
+<rect x="115" y="1099" width="286" height="62" rx="2" class="box-prompt ghost"/>
+<rect x="108" y="1092" width="286" height="62" rx="2" class="box-prompt"/>
+<rect x="108" y="1092" width="4.5" height="62" class="prompt-edge"/>
+<text x="124" y="1118" class="st-name" text-anchor="start" font-size="15">instantiate</text>
+<text x="124" y="1137" class="st-runs" text-anchor="start" font-size="10.5">rb-instantiate</text>
+<text x="108" y="1181" class="fan-t" text-anchor="start" font-size="9.5">fan-out · one member per active scenario</text>
+<line x1="416" y1="1123" x2="458" y2="1123" class="edge" marker-end="url(#ar)"/>
+<text x="441" y="1115" class="edge-t" text-anchor="middle" font-size="9">writes</text>
+<rect x="466" y="1102" width="300" height="42" rx="2" class="artifact"/>
+<text x="478" y="1118" class="art-t" text-anchor="start" font-size="10">04-instances/&lt;sid&gt;/</text>
+<text x="478" y="1133" class="art-t" text-anchor="start" font-size="10">seed.json · expected.json · rationale.md</text>
+<rect x="786" y="1101" width="68" height="19" rx="9.5" class="g-pill"/><text x="820" y="1114" class="g-pill-t" text-anchor="middle" font-size="10.5">validate</text>
+<rect x="862" y="1101" width="81" height="19" rx="9.5" class="g-pill"/><text x="903" y="1114" class="g-pill-t" text-anchor="middle" font-size="10.5">check-refs</text>
+<text x="786" y="1138" class="g-note" text-anchor="start" font-size="10">check-refs here is the reachability gate</text>
+<text x="96" y="1228" class="dir" text-anchor="end" font-size="12">05</text>
+<rect x="122" y="1216" width="286" height="62" rx="2" class="box-prompt ghost"/>
+<rect x="115" y="1209" width="286" height="62" rx="2" class="box-prompt ghost"/>
+<rect x="108" y="1202" width="286" height="62" rx="2" class="box-prompt"/>
+<rect x="108" y="1202" width="4.5" height="62" class="prompt-edge"/>
+<text x="124" y="1228" class="st-name" text-anchor="start" font-size="15">challenge</text>
+<text x="124" y="1247" class="st-runs" text-anchor="start" font-size="10.5">rb-challenge</text>
+<text x="108" y="1291" class="fan-t" text-anchor="start" font-size="9.5">fan-out · one member per instance</text>
+<line x1="416" y1="1233" x2="458" y2="1233" class="edge" marker-end="url(#ar)"/>
+<text x="441" y="1225" class="edge-t" text-anchor="middle" font-size="9">writes</text>
+<rect x="466" y="1220" width="300" height="27" rx="2" class="artifact"/>
+<text x="478" y="1236" class="art-t" text-anchor="start" font-size="10">05-verdicts/&lt;sid&gt;.json</text>
+<rect x="786" y="1211" width="68" height="19" rx="9.5" class="g-pill"/><text x="820" y="1224" class="g-pill-t" text-anchor="middle" font-size="10.5">validate</text>
+<rect x="862" y="1211" width="81" height="19" rx="9.5" class="g-pill"/><text x="903" y="1224" class="g-pill-t" text-anchor="middle" font-size="10.5">check-refs</text>
+<text x="786" y="1248" class="g-note" text-anchor="start" font-size="10">check-refs only once every member has finished</text>
+<rect x="60" y="1328" width="1040" height="42" rx="3" class="band"/>
+<rect x="60" y="1328" width="5" height="42" class="band-edge"/>
+<text x="80" y="1354" class="band-n" text-anchor="start" font-size="13">GATE 3</text>
+<text x="156" y="1354" class="band-t" text-anchor="start" font-size="13.5">Human gate 3 — rejects and re-seeds</text>
+<text x="80" y="1387" class="band-s" text-anchor="start" font-size="12">The verdict tally: accept · re-seed · reject. A re-seed buys one more instantiate dispatch; a reject sends the scenario back to be scored again.</text>
+<text x="96" y="1432" class="dir" text-anchor="end" font-size="12">06</text>
+<rect x="108" y="1406" width="286" height="62" rx="2" class="box-prompt"/>
+<rect x="108" y="1406" width="4.5" height="62" class="prompt-edge"/>
+<text x="124" y="1432" class="st-name" text-anchor="start" font-size="15">emit</text>
+<text x="124" y="1451" class="st-runs" text-anchor="start" font-size="10.5">rb-emit · thin wrapper over rubrica emit</text>
+<line x1="402" y1="1437" x2="458" y2="1437" class="edge" marker-end="url(#ar)"/>
+<text x="434" y="1429" class="edge-t" text-anchor="middle" font-size="9">writes</text>
+<rect x="466" y="1401" width="300" height="72" rx="2" class="artifact"/>
+<text x="478" y="1417" class="art-t" text-anchor="start" font-size="10">06-suite/&lt;sid&gt;/</text>
+<text x="478" y="1432" class="art-t" text-anchor="start" font-size="10">task.toml · instruction.md · seed.json</text>
+<text x="478" y="1447" class="art-t" text-anchor="start" font-size="10">golden.json · provenance.md</text>
+<text x="478" y="1462" class="art-t" text-anchor="start" font-size="10">tests/{expected.json,verify.py,test.sh}</text>
+<rect x="786" y="1415" width="68" height="19" rx="9.5" class="g-pill"/><text x="820" y="1428" class="g-pill-t" text-anchor="middle" font-size="10.5">validate</text>
+<rect x="862" y="1415" width="81" height="19" rx="9.5" class="g-pill"/><text x="903" y="1428" class="g-pill-t" text-anchor="middle" font-size="10.5">check-refs</text>
+<text x="786" y="1452" class="g-note" text-anchor="start" font-size="10">the compiler is code: same inputs, same bytes</text>
+<text x="96" y="1532" class="dir" text-anchor="end" font-size="12">07</text>
+<rect x="108" y="1506" width="286" height="62" rx="2" class="box-code"/>
+<text x="124" y="1532" class="st-name" text-anchor="start" font-size="15">smoke</text>
+<text x="124" y="1551" class="st-runs" text-anchor="start" font-size="10.5">code · runs the suite against the roster</text>
+<line x1="402" y1="1537" x2="458" y2="1537" class="edge" marker-end="url(#ar)"/>
+<text x="434" y="1529" class="edge-t" text-anchor="middle" font-size="9">writes</text>
+<rect x="466" y="1524" width="300" height="27" rx="2" class="artifact"/>
+<text x="478" y="1540" class="art-t" text-anchor="start" font-size="10">07-report.json</text>
+<rect x="786" y="1515" width="68" height="19" rx="9.5" class="g-pill"/><text x="820" y="1528" class="g-pill-t" text-anchor="middle" font-size="10.5">validate</text>
+<rect x="862" y="1515" width="81" height="19" rx="9.5" class="g-pill"/><text x="903" y="1528" class="g-pill-t" text-anchor="middle" font-size="10.5">check-refs</text>
+<text x="786" y="1552" class="g-note" text-anchor="start" font-size="10">a reporter and a gate: any verdict but healthy stops</text>
+<path d="M102 900 H30 V766 H102" class="edge loop" marker-end="url(#ar)"/>
+<text x="24" y="833" class="loop-t" text-anchor="middle" font-size="9.5" transform="rotate(-90 24 833)">continue</text>
+<path d="M102 1220 H44 V1138 H102" class="edge back" marker-end="url(#ar-s)"/>
+<text x="38" y="1179" class="back-t" text-anchor="middle" font-size="9" transform="rotate(-90 38 1179)">re-seed · once</text>
+<path d="M102 1236 H14 V884 H102" class="edge back" marker-end="url(#ar-s)"/>
+<text x="8" y="1060" class="back-t" text-anchor="middle" font-size="9" transform="rotate(-90 8 1060)">reject</text>
+</svg>
+    <div class="legend">
+<div><svg class="swatch" viewBox="0 0 30 17" aria-hidden="true"><rect x="1" y="1" width="28"
+        height="15" class="box-code"/></svg>
+        <span><b>code</b>deterministic; no skill file, no manifest.stages entry</span></div>
+<div><svg class="swatch" viewBox="0 0 30 17" aria-hidden="true"><rect x="1" y="1" width="28"
+        height="15" class="box-prompt"/><rect x="1" y="1" width="3" height="15"
+        class="prompt-edge"/></svg>
+        <span><b>prompt</b>a dispatched rb-* skill; judgment lives in its prose</span></div>
+<div><svg class="swatch" viewBox="0 0 30 17" aria-hidden="true"><rect x="4" y="4" width="24"
+        height="12" class="box-prompt ghost"/><rect x="1" y="1" width="24" height="12"
+        class="box-prompt"/></svg>
+<span><b>fan-out</b>concurrent members, one per slice, each blind to its siblings</span></div>
+<div><svg class="swatch" viewBox="0 0 30 17" aria-hidden="true"><line x1="0" y1="9" x2="30" y2="9"
+        class="barrier"/></svg>
+        <span><b>barrier</b>the gate runs once, after the last member finishes</span></div>
+<div><svg class="swatch" viewBox="0 0 30 17" aria-hidden="true"><rect x="1" y="1" width="28"
+        height="15" class="artifact"/></svg>
+<span><b>artifact</b>a file or directory in the run — the only channel between stages</span></div>
+<div><svg class="swatch" viewBox="0 0 30 17" aria-hidden="true"><rect x="1" y="1" width="28"
+        height="15" class="band"/><rect x="1" y="1" width="3" height="15" class="band-edge"/></svg>
+        <span><b>human gate</b>the run stops; only <code>--no-gate</code> skips one</span></div>
+    </div></div>
+    <figcaption><b>Fig. 1</b> — Stage order and on-disk numbering come from
+    <code>paths.STAGES</code>; the artifact each stage must produce comes from
+    <code>validate.STAGE_ARTIFACTS</code>. <code>survey</code> and <code>triage</code> carry no
+    <code>0N</code> prefix of their own: they write ahead of the <code>00-inputs/</code> and
+    <code>manifest.json</code> that <code>intake</code> mints once gate 0 has passed, and the
+    numbering stays intake's, because intake is still what fixes the run's identity.
+    <code>decisions.md</code> is not shown as a row — the orchestrator appends to it throughout,
+    through <code>rubrica decide</code>.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>Artifacts on disk are the only channel</h2>
+  <p class="lede">This is the one architectural rule, and the reason the experiment can be read at
+  all. A stage is dispatched with exactly three things — the run directory, the stage name, and its
+skill file path. If a stage needs a fact, it reads it from an artifact, or it does not have it.</p>
+
+  <figure>
+    <div class="plate">
+<svg viewBox="0 0 940 388" class="dia" role="img" aria-label="A dispatched stage receives only
+three things — the run directory, its stage name and its skill file path — and every fact it uses
+comes from an artifact on disk. There is no edge at all between one stage and the next.">
+  <defs><marker id="c-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+    orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ar"/></marker>
+  <marker id="c-ar-s" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7"
+    orient="auto-start-reverse"><path d="M10 0 L0 5 L10 10 z" class="ar"/></marker></defs>
+
+  <text x="16" y="24" class="hd" font-size="11">what a dispatch carries</text>
+  <text x="372" y="24" class="hd" font-size="11">two adjacent stages</text>
+  <text x="700" y="24" class="hd" font-size="11">the run directory</text>
+  <line x1="16" y1="36" x2="924" y2="36" class="rule-hd"/>
+
+  <rect x="16" y="128" width="152" height="96" rx="2" class="box-code"/>
+  <text x="92" y="158" class="st-name" text-anchor="middle" font-size="13">rb-orchestrate</text>
+  <text x="92" y="178" class="st-runs" text-anchor="middle" font-size="10">not a stage:</text>
+<text x="92" y="193" class="st-runs" text-anchor="middle" font-size="10">no stage, no schemas</text>
+<text x="92" y="211" class="st-runs" text-anchor="middle" font-size="10">writes decisions.md</text>
+
+  <line x1="172" y1="176" x2="196" y2="176" class="edge" marker-end="url(#c-ar)"/>
+
+  <rect x="200" y="140" width="118" height="76" rx="2" class="dispatch"/>
+  <text x="212" y="160" class="art-t" font-size="10">run dir</text>
+  <text x="212" y="178" class="art-t" font-size="10">stage name</text>
+  <text x="212" y="196" class="art-t" font-size="10">skill path</text>
+  <text x="259" y="232" class="edge-t" text-anchor="middle" font-size="9">and nothing else</text>
+
+  <line x1="322" y1="160" x2="368" y2="128" class="edge" marker-end="url(#c-ar)"/>
+  <line x1="322" y1="196" x2="368" y2="264" class="edge" marker-end="url(#c-ar)"/>
+
+  <rect x="372" y="94" width="196" height="62" rx="2" class="box-prompt"/>
+  <rect x="372" y="94" width="4.5" height="62" class="prompt-edge"/>
+  <text x="388" y="120" class="st-name" font-size="14">reconcile</text>
+  <text x="388" y="139" class="st-runs" font-size="10">rb-reconcile</text>
+
+  <rect x="372" y="236" width="196" height="62" rx="2" class="box-prompt"/>
+  <rect x="372" y="236" width="4.5" height="62" class="prompt-edge"/>
+  <text x="388" y="262" class="st-name" font-size="14">propose</text>
+  <text x="388" y="281" class="st-runs" font-size="10">rb-propose</text>
+
+  <line x1="470" y1="160" x2="470" y2="232" class="edge cut"/>
+  <line x1="452" y1="212" x2="488" y2="182" class="cut-x"/>
+  <line x1="452" y1="182" x2="488" y2="212" class="cut-x"/>
+  <text x="496" y="192" class="cut-t" font-size="9.5">no conversational</text>
+  <text x="496" y="205" class="cut-t" font-size="9.5">context is threaded</text>
+
+  <rect x="700" y="58" width="224" height="26" rx="2" class="artifact"/>
+  <text x="712" y="75" class="art-t" font-size="10">manifest.json</text>
+  <rect x="700" y="94" width="224" height="26" rx="2" class="artifact"/>
+  <text x="712" y="111" class="art-t" font-size="10">01-claims/&lt;artifact_id&gt;.json</text>
+  <rect x="700" y="156" width="224" height="26" rx="2" class="artifact hi"/>
+  <text x="712" y="173" class="art-t" font-size="10">01-world-model.json</text>
+  <rect x="700" y="240" width="224" height="26" rx="2" class="artifact"/>
+  <text x="712" y="257" class="art-t" font-size="10">02-scenarios.json</text>
+  <rect x="700" y="276" width="224" height="26" rx="2" class="artifact"/>
+  <text x="712" y="293" class="art-t" font-size="10">03-coverage/latest.json</text>
+
+  <line x1="696" y1="71" x2="574" y2="108" class="edge" marker-end="url(#c-ar)"/>
+  <line x1="696" y1="107" x2="574" y2="118" class="edge" marker-end="url(#c-ar)"/>
+  <text x="662" y="100" class="edge-t" text-anchor="middle" font-size="9">reads</text>
+
+  <line x1="574" y1="136" x2="696" y2="164" class="edge" marker-end="url(#c-ar)"/>
+  <text x="640" y="142" class="edge-t" text-anchor="middle" font-size="9">writes</text>
+
+  <line x1="696" y1="176" x2="574" y2="250" class="edge" marker-end="url(#c-ar)"/>
+  <line x1="696" y1="289" x2="574" y2="278" class="edge" marker-end="url(#c-ar)"/>
+  <text x="628" y="228" class="edge-t" text-anchor="middle" font-size="9">reads</text>
+
+  <line x1="574" y1="264" x2="696" y2="252" class="edge" marker-start="url(#c-ar-s)"
+    marker-end="url(#c-ar)"/>
+  <text x="636" y="272" class="edge-t" text-anchor="middle" font-size="9">reads + appends</text>
+
+  <line x1="16" y1="330" x2="924" y2="330" class="rule-hair"/>
+<text x="16" y="352" class="g-note" font-size="10.5">The orchestrator may append exactly two things
+    to a re-dispatch, both verbatim machine text, never paraphrased:</text>
+<text x="16" y="370" class="g-note" font-size="10.5">a repair's gate findings, and a re-seed's
+    verdict fields. A paraphrase is the orchestrator's own conclusion in a finding's clothes.</text>
+</svg>
+</div>
+    <figcaption><b>Fig. 2</b> — The missing edge is the point. <code>propose</code> never hears
+    from <code>reconcile</code>; it reads <code>01-world-model.json</code>. Fan-out members get a
+    fourth thing — the id of their own slice — and never a sibling's. One read edge is left out to
+    keep the rest legible: <code>propose</code> also reads <code>manifest.json</code>, for the
+    limits it must respect.</figcaption>
+  </figure>
+
+  <p>The cost of that rule is real: no stage can lean on a fact it was not handed a file for. The
+  payoff is that every handoff is inspectable after the fact. When a suite comes out wrong, the
+  artifact that carried the mistake is on disk with a name, and the stage that wrote it is the one
+  to blame — which is what makes a bad run evidence instead of an anecdote.</p>
+
+  <div class="rail">
+    <span class="tag">Before you raise a finding against a stage</span>
+    <p>Check what the stage's <code>reads</code> actually gives it. A finding that requires
+    knowledge outside the contract is a finding against the <em>contract or the fixture</em>, never
+    against the prompt.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Two check layers, and what neither of them checks</h2>
+  <div class="cols">
+    <div>
+      <h3>Layer 1 · rubrica validate</h3>
+      <p>JSON Schema, one schema per artifact kind, shipped as package data.
+      <code>validate.STAGE_ARTIFACTS</code> says which kinds a stage must have produced, so a stage
+      that wrote nothing fails rather than passing trivially.</p>
+    </div>
+    <div>
+      <h3>Layer 2 · rubrica check-refs</h3>
+      <p>Cross-artifact references, seed conformance, reachability, invariant evaluation. It runs
+      every checker the run currently has inputs for — there is no such thing as a stage-scoped
+      <code>check-refs</code>.</p>
+    </div>
+  </div>
+  <p>Layer 2 checks that an element <em>references</em> a resolvable claim. It never checks that
+  the claim <em>supports</em> it. Support is semantic, and no mechanical check for it exists here on
+  purpose — two real defects once lived under that hole in the golden fixture itself. What no check
+  reaches at all is whether a dispatched model actually followed its prompt; that is what the live
+  exercises are for, and one recorded dispatch is one sample.</p>
+</section>
+
+<section>
+  <h2>The exit-code contract</h2>
+  <p class="lede">The orchestrator has no judgment of its own about whether a stage went well. It
+  branches on three integers, and the whole repair policy follows from them.</p>
+  <figure>
+    <div class="plate">
+<svg viewBox="0 0 900 292" class="dia" role="img" aria-label="A gate's exit code decides the
+orchestrator's next move: zero records the stage and dispatches the next one, one is a repairable
+stage defect worth exactly one re-dispatch with the findings appended verbatim, and two means the
+harness is misconfigured, so retrying cannot help.">
+  <defs><marker id="e-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+    orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ar"/></marker>
+  <marker id="e-ar-p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6"
+    orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ar-s"/></marker></defs>
+
+  <rect x="16" y="98" width="152" height="58" rx="2" class="box-code"/>
+  <text x="92" y="123" class="st-name" text-anchor="middle" font-size="13">stage N runs</text>
+<text x="92" y="141" class="st-runs" text-anchor="middle" font-size="10">writes its artifact</text>
+
+  <line x1="172" y1="127" x2="212" y2="127" class="edge" marker-end="url(#e-ar)"/>
+  <rect x="216" y="90" width="128" height="74" rx="2" class="box-gate"/>
+  <text x="280" y="114" class="st-name" text-anchor="middle" font-size="12">the gate</text>
+  <text x="280" y="132" class="st-runs" text-anchor="middle" font-size="9.5">validate</text>
+  <text x="280" y="147" class="st-runs" text-anchor="middle" font-size="9.5">check-refs</text>
+
+  <line x1="348" y1="104" x2="470" y2="62" class="edge ok" marker-end="url(#e-ar)"/>
+  <line x1="348" y1="127" x2="470" y2="127" class="edge warn" marker-end="url(#e-ar)"/>
+  <path d="M250 168 V240 H466" class="edge stop" marker-end="url(#e-ar)"/>
+
+  <text x="398" y="84" class="code-0" font-size="16">0</text>
+  <text x="410" y="120" class="code-1" font-size="16">1</text>
+  <text x="236" y="212" class="code-2" text-anchor="end" font-size="16">2</text>
+
+  <rect x="474" y="34" width="410" height="48" rx="2" class="out ok-b"/>
+<text x="490" y="54" class="out-t" font-size="11.5">clean — record-stage, then dispatch stage
+    N+1</text>
+<text x="490" y="72" class="out-s" font-size="10">the manifest keeps the model, the effort, and a
+    hash of the skill file this run used</text>
+
+  <rect x="474" y="94" width="410" height="70" rx="2" class="out warn-b"/>
+<text x="490" y="114" class="out-t" font-size="11.5">findings on stdout, one per line — a repairable
+    defect</text>
+<text x="490" y="132" class="out-s" font-size="10">re-dispatch that stage exactly once, the findings
+    appended verbatim.</text>
+<text x="490" y="148" class="out-s" font-size="10">Fails its gate a second time → halt and report.
+    An exit 1 always names an artifact.</text>
+
+  <rect x="474" y="214" width="410" height="52" rx="2" class="out stop-b"/>
+<text x="490" y="234" class="out-t" font-size="11.5">usage error, or a run that cannot be
+    read</text>
+<text x="490" y="252" class="out-s" font-size="10">halt: the harness is wrong, not the stage, and
+    retrying cannot help</text>
+
+  <path d="M560 164 V188 H300 V168" class="edge back" marker-end="url(#e-ar-p)"/>
+<text x="430" y="204" class="back-t" text-anchor="middle" font-size="9.5">one repair, then this same
+    gate again</text>
+</svg>
+</div>
+    <figcaption><b>Fig. 3</b> — Two invariants hold the contract up, and both have been violated in
+    this repo before: <b>a stage defect must never surface as 2</b>, and <b>a 1 must never have
+    empty stdout</b>. A third was learned the hard way — a 1 must name the <em>right</em> artifact.
+    <code>check-refs</code> over an unreadable <code>01-claims/</code> once reported four fabricated
+    “no such claim” findings against a world model that was perfectly correct.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>Fan-outs, and why the barrier is not decoration</h2>
+  <p class="lede">Three stages fan out: <code>extract</code> per admitted input,
+  <code>instantiate</code> per active scenario, <code>challenge</code> per instance. Members are
+  concurrent and mutually blind. The gate that follows is not.</p>
+  <figure>
+    <div class="plate">
+<svg viewBox="0 0 900 284" class="dia" role="img" aria-label="Timeline of the challenge fan-out:
+three members finish at different times, and because the verdict checker reports every instance
+without a verdict from the moment the verdicts directory exists, the reference check is only
+meaningful once the last member has finished.">
+  <defs><marker id="b-ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+    orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ar"/></marker></defs>
+
+  <text x="16" y="24" class="hd" font-size="11">dispatch</text>
+  <text x="180" y="24" class="hd" font-size="11">members, running concurrently</text>
+  <text x="714" y="24" class="hd" font-size="11">barrier, then the gate</text>
+  <line x1="16" y1="36" x2="884" y2="36" class="rule-hd"/>
+
+  <rect x="16" y="96" width="120" height="58" rx="2" class="box-prompt"/>
+  <rect x="16" y="96" width="4.5" height="58" class="prompt-edge"/>
+  <text x="32" y="120" class="st-name" font-size="13">challenge</text>
+  <text x="32" y="138" class="st-runs" font-size="9.5">one per instance</text>
+
+  <line x1="140" y1="116" x2="176" y2="70" class="edge" marker-end="url(#b-ar)"/>
+  <line x1="140" y1="125" x2="176" y2="125" class="edge" marker-end="url(#b-ar)"/>
+  <line x1="140" y1="134" x2="176" y2="180" class="edge" marker-end="url(#b-ar)"/>
+
+  <rect x="180" y="56" width="320" height="28" rx="14" class="member"/>
+  <text x="196" y="74" class="art-t" font-size="10">scn-001 → 05-verdicts/scn-001.json</text>
+  <rect x="180" y="111" width="500" height="28" rx="14" class="member"/>
+  <text x="196" y="129" class="art-t" font-size="10">scn-002 → 05-verdicts/scn-002.json</text>
+  <rect x="180" y="166" width="250" height="28" rx="14" class="member"/>
+  <text x="196" y="184" class="art-t" font-size="10">scn-003 → 05-verdicts/scn-003.json</text>
+
+  <line x1="430" y1="46" x2="430" y2="216" class="tick"/>
+<text x="440" y="234" class="cut-t" font-size="9.5">the first verdict lands, so 05-verdicts/ now
+    exists —</text>
+<text x="440" y="248" class="cut-t" font-size="9.5">run check-refs here and it condemns the other
+    two as missing</text>
+
+  <text x="180" y="236" class="edge-t" font-size="9">bar length = elapsed time  →</text>
+  <line x1="700" y1="46" x2="700" y2="206" class="barrier"/>
+  <text x="714" y="66" class="barrier-t" font-size="10">every member finished</text>
+  <rect x="714" y="112" width="86" height="19" rx="9.5" class="g-pill"/>
+  <text x="757" y="125.5" class="g-pill-t" text-anchor="middle" font-size="10.5">check-refs</text>
+  <text x="714" y="154" class="g-note" font-size="10">now, and only now, a</text>
+  <text x="714" y="168" class="g-note" font-size="10">missing verdict is a</text>
+  <text x="714" y="182" class="g-note" font-size="10">real finding</text>
+</svg>
+</div>
+    <figcaption><b>Fig. 4</b> — <code>refs.check_verdicts</code> reports every instance without a
+    verdict from the moment <code>05-verdicts/</code> exists, so run mid-fan-out it condemns the
+    members that simply have not finished yet. Run the gate <em>once</em>, after the last member
+    returns.</figcaption>
+  </figure>
+  <p><code>propose</code> looks like a fan-out and is not. It declares <code>scenarios</code> under
+  both <code>reads</code> and <code>writes</code>, because <code>02-scenarios.json</code> is a
+  single append-only document: two members appending at once would each read the same file and
+  overwrite the other's scenarios, with no gate anywhere able to report the loss. One dispatch per
+  round, holding every hole that round targets.</p>
+</section>
+
+<section>
+  <h2>The human gates</h2>
+  <p class="lede">Gates 1 through 3 review a judgment made from evidence already in the run; a
+  human overturning one corrects an inference about the target. Gate 0 decides what the run can
+  ever know — which makes it different in kind, and is why <code>rb-triage</code> cannot also hold
+  it. The same party selecting the inputs and ratifying the selection would make the whole run
+  unfalsifiable.</p>
+  <div class="scroll">
+  <table class="tbl">
+    <caption>What is on the table at each stop, and who is holding it</caption>
+<thead><tr><th>Gate</th><th>Sits after</th><th>Held by</th><th>What the human is ruling
+      on</th></tr></thead>
+    <tbody>
+<tr><td><span class="n">0</span> the triage record</td><td>triage</td><td>the operator — the
+        orchestrator is not yet dispatched</td>
+        <td>The objective verdict and the grouped declines. A candidate <code>rb-triage</code>
+        declined is gone as completely as if the corpus never contained it, so this is the only
+        moment the run's evidence base is negotiable.</td></tr>
+      <tr><td><span class="n">1</span> the world model</td><td>reconcile</td><td>rb-orchestrate</td>
+        <td>Claim utilisation per input and the implied suite size. An input the world model cites
+        nothing from is exactly the fact this gate exists to surface.</td></tr>
+<tr><td><span class="n">2</span> scenarios and coverage</td><td>the round
+        loop</td><td>rb-orchestrate</td>
+        <td>The coverage matrix, and the bill. Every scenario past here is paid for twice — once to
+        instantiate, once to challenge — so this is the cost gate.</td></tr>
+<tr><td><span class="n">3</span> rejects and re-seeds</td><td>challenge</td><td>rb-orchestrate</td>
+        <td>The verdict tally. A re-seed buys one more <code>instantiate</code> dispatch with the
+        adversary's alternatives appended verbatim; a reject goes back to <code>score</code> to be
+        marked and recounted.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="rail">
+    <span class="tag">--no-gate</span>
+    <p>The only way to skip a human gate, and it substitutes an assumption — that the human would
+    have approved — for the gate's entire content. Recording that it was passed is what keeps the
+reproducibility claim honest; claiming to have gated while skipping is worse than not gating.</p>
+  </div>
+</section>
+
+<section>
+  <h2>What is on the plate but is not a stage</h2>
+  <div class="cols two">
+    <div>
+      <h3>rb-orchestrate</h3>
+      <p>A skill that declares no <code>stage</code> and no <code>schemas</code>. It dispatches
+      <code>extract</code> through <code>emit</code>, holds gates 1–3, and writes
+      <code>decisions.md</code>. It never runs <code>survey</code>, never dispatches
+      <code>rb-triage</code>, and never holds gate 0 — all three are finished before it is
+      dispatched at all.</p>
+    </div>
+    <div>
+      <h3>The code stages</h3>
+      <p><code>survey</code>, <code>intake</code> and <code>smoke</code> run as code, so they have
+      no skill file and no <code>manifest.stages</code> entry. Their absence there is not a
+      finding.</p>
+    </div>
+    <div>
+      <h3>The measurement tools</h3>
+      <p><code>compare-gold</code> and <code>sample-for-review</code> write under
+      <code>measurement/</code>, deliberately outside the numbered prefixes: those are the stage
+      contract, and no orchestrator dispatches a tool. <code>diff-runs</code> and
+      <code>claim-utilisation</code> write nothing at all — they print.</p>
+    </div>
+    <div>
+      <h3>The reports that are not gates</h3>
+      <p><code>claim-utilisation</code> and <code>gate-brief</code> always exit clean on a readable
+      run. <code>gate-brief</code> composes what already exists into the reading surface at each
+      human gate — it does not decide anything.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Drawn from the repository, not from memory: <code>src/rubrica/paths.py</code> (stage order and
+  every artifact path) · <code>src/rubrica/validate.py</code> (what each stage must produce) ·
+  <code>src/rubrica/skills/rb-*/SKILL.md</code> (each contract's reads, writes and invokes) ·
+  <code>src/rubrica/cli.py</code> (the subcommand roster and the exit codes) ·
+  <code>CLAUDE.md</code> and <code>docs/design/rationale.md</code> (the rulings).<br>
+  Where this page and the repository disagree, the repository is right.
+</footer>
+
+</div>
+</body>
+</html>

@@ -12,6 +12,11 @@ it from an artifact, or it does not have it. That constraint is what makes the
 pipeline inspectable: every handoff is a file you can open, schema-check, and
 diff between runs.
 
+[`pipeline-diagram.html`](pipeline-diagram.html) draws the same pipeline this
+document describes — open it in a browser. The drawing is where the fan-outs,
+their barriers, the round loop and the human gates are easiest to see; the
+tables below are where the exact reads and writes live.
+
 ## The stages
 
 Stage numbers are the real on-disk directory numbers — the ordering is the

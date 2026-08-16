@@ -17,8 +17,10 @@ commit by commit, was still wrong by 299.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -31,6 +33,12 @@ DOCS = REPO_ROOT / "docs"
 PIPELINE = DOCS / "concepts" / "pipeline.md"
 CLI_REF = DOCS / "reference" / "cli.md"
 ARTIFACTS_REF = DOCS / "reference" / "artifacts.md"
+
+# The drawn counterpart to pipeline.md, and the script that renders it. Loaded
+# by path rather than imported: scripts/ is a directory of tools, not a package,
+# which is how test_trajectory_fixtures.py already reaches its capture harness.
+DIAGRAM = DOCS / "concepts" / "pipeline-diagram.html"
+RENDERER = REPO_ROOT / "scripts" / "render-pipeline-diagram.py"
 
 
 def _user_facing() -> list[Path]:
@@ -199,6 +207,42 @@ def test_no_heading_counts_something_that_grows(doc):
     hits = _COUNTED_HEADING.findall(_without_fences(_read(doc)))
     assert not hits, (
         f"{_doc_id(doc)} has a heading counting stages/skills/subcommands/gates: {hits}"
+    )
+
+
+def _renderer() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("render_pipeline_diagram", RENDERER)
+    assert spec is not None and spec.loader is not None, f"cannot load {RENDERER}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_diagram_draws_every_stage_in_contract_order():
+    """The drawing carries the same stage list as pipeline.md, so it can go stale
+    the same way -- and a drawing does it silently, because nobody re-reads an
+    image looking for a missing row. ROWS is the renderer's whole content model,
+    so asserting on it is asserting on the drawing.
+    """
+    rows = _renderer().ROWS
+    drawn = [row["name"] for row in rows if row["kind"] == "stage"]
+    assert drawn == list(paths.STAGES), (
+        "the pipeline diagram's ROWS table does not draw paths.STAGES in order: "
+        f"{drawn} != {list(paths.STAGES)}"
+    )
+
+
+def test_the_committed_diagram_matches_a_fresh_render():
+    """The page is committed so a reader needs no build step; this is what keeps
+    that copy honest. Fires on either mistake: a hand-edit to the HTML, or a
+    change to the renderer that was never re-rendered.
+
+    The renderer is pure string building over ROWS -- no clock, no filesystem
+    reads -- so a mismatch is always one of those two and never flake.
+    """
+    assert DIAGRAM.is_file(), f"{_doc_id(DIAGRAM)} is missing; run {_doc_id(RENDERER)}"
+    assert _read(DIAGRAM) == _renderer().page(), (
+        f"{_doc_id(DIAGRAM)} is stale or hand-edited; re-run {_doc_id(RENDERER)}"
     )
 
 
