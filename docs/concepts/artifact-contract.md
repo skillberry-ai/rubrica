@@ -109,8 +109,12 @@ it cites exists somewhere in `01-world-model.json` — never that the claim
 actually backs the assertion built on it is a judgment call, not a mechanical
 property a reference check can compute, so this document does not pretend one
 exists. Do not invent a mechanical check for it. Two real defects lived under
-exactly that hole in the golden fixture itself, undetected by either check
-layer, until a human reader caught them.
+exactly that hole in the golden fixture itself, and **neither check layer ever
+objected to either of them** — that is the load-bearing part. What surfaced both
+was a live `rb-reconcile` dispatch, which reported one of them — a capability
+whose described behaviour no claim in the set supports — as a *gap*; both were
+then confirmed by a human reading `tests/toy.py`. A prompt noticing and a person
+reading, in other words, and no check in between.
 
 That gap is deliberate, not an oversight: matching an element's prose against
 the claim it cites is a human's call, made at the gate that follows the
@@ -163,11 +167,16 @@ traced to its root cause: a directory listing must distinguish "this does not
 exist" from "this exists and I cannot read it," and only the second belongs at
 exit `2`.
 
-Every run-directory listing in this codebase goes through
+Every listing of an artifact a check reads goes through
 `paths.list_dir`/`paths.list_json` rather than a bare `glob` or `iterdir`
 call, specifically because both of those raise `UsageError` — and therefore
 map to exit `2` — on a directory that cannot be read, instead of silently
-reporting it as empty.
+reporting it as empty. Transcript logs are a separate class and are globbed
+directly: they are an agent's output being collected, not an artifact a gate
+resolves references against, and the one that lives inside the run
+(`smoke.py`'s clearing of a role's log directory) handles the `OSError` on the
+spot — a transcript it could not clear is exactly the transcript it must not
+score, so it returns that as a note instead of failing the run.
 
 ## The two checks worth understanding
 
