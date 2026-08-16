@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gold-0.1.json",
   "title": "Authored bench tasks to compare a generated suite against",
-  "description": "Human-authored. The ~10 hand-written aap2 bench tasks compare-gold measures recall and novelty against. Ids here are world-model ids: goal_id and capability_refs must name the same goals, capabilities and outcome classes the run's 01-world-model.json declares, or nothing can match. A schema failure here is a usage error (exit 2), not a finding: a person wrote this file.",
+  "description": "Human-authored. The ~10 hand-written bench tasks compare-gold measures recall and novelty against. Ids here are world-model ids: goal_id and capability_refs must name the same goals, capabilities and outcome classes the run's 01-world-model.json declares, or nothing can match. A schema failure here is a usage error (exit 2), not a finding: a person wrote this file.",
   "type": "object",
   "required": ["schema_version", "target", "tasks"],
   "additionalProperties": false,

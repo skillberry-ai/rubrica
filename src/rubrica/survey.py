@@ -6,7 +6,9 @@ pipeline could read. Its output exists so that rb-triage's judgment is
 affordable: one bounded digest per candidate rather than the corpus itself,
 which is what keeps triage's cost O(candidates) instead of O(corpus bytes).
 
-Two rules govern every choice below, both from the parsec run's §11:
+Two rules govern every choice below, both learned from the 2026-08-13
+development run -- a full-pipeline run over a large real-world corpus, called
+"the development corpus" throughout this module:
 
 * **No size-based exclusion.** The largest single file in that corpus was also
   its most load-bearing input, unusable whole and correct as a projection. Size
@@ -48,7 +50,7 @@ EXCLUSION_REASONS: tuple[str, ...] = (
 )
 
 DEFAULT_MAX_CANDIDATES = 500
-# 1MiB, chosen with headroom above the 476KB the parsec corpus's catalogue
+# 1MiB, chosen with headroom above the 476KB the development corpus's catalogue
 # measured at (351 candidates, well under DEFAULT_MAX_CANDIDATES) -- not to
 # bind on the corpus we have, but because --max-candidates is a count guard
 # and bytes are what actually fill a dispatched model's context window.
@@ -56,11 +58,11 @@ DEFAULT_MAX_CATALOGUE_BYTES = 1_048_576
 DEFAULT_DIGEST_BODY_CHARS = 2000
 # Three, not two: exploding a two-element config array produces two candidates
 # nobody wanted, while the shape this exists for -- a capture of many
-# independent records -- is never that small. 130 in the parsec case.
+# independent records -- is never that small. 130 in the development corpus.
 EXPLODE_MIN_ELEMENTS = 3
 # Homogeneity is a key-set *intersection*, not identity: real captures carry
 # optional fields, and 130 traces where one lacks an `assessments` key are not
-# two kinds of thing. Measured on the parsec capture: 12 common keys, zero
+# two kinds of thing. Measured on that capture: 12 common keys, zero
 # union-only keys, so identity would have worked there and the tolerant rule
 # costs nothing.
 EXPLODE_MIN_COMMON_KEYS = 3

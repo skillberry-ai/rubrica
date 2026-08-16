@@ -152,7 +152,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_input_group.add_argument("--target-interface")
     # A ceiling, not an estimate of the right suite size: the point past which
     # no human reviews the output (128 Harbor packages) and a run costs on the
-    # order of $200 at the parsec run's ~$1.66/scenario across instantiate and
+    # order of $200 at the development run's ~$1.66/scenario across instantiate and
     # challenge. It was 8, which made refs.check_scenarios' guard bind in normal
     # operation and forced a hand-raise on the first real target.
     #

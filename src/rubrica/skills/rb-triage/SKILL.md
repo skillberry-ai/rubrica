@@ -75,7 +75,7 @@ object `no_evidence_value` because its visible keys look thin, when
 `heuristics_fired` exists to prevent on traces.
 
 Two of `heuristics_fired`'s five names are not always independent evidence,
-either. Measured on the real 130-element parsec capture, after the noisy
+either. Measured on a real 130-element trace capture, after the noisy
 substring scan was narrowed out of `error_markers`: it fired on exactly one
 element, and that firing resolved through the same value already reported under
 `status` -- the independent error-key path fired zero times on that corpus. On

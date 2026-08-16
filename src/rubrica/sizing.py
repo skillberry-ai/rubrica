@@ -26,9 +26,10 @@ import math
 from rubrica.artifacts import read_json
 from rubrica.paths import RunPaths
 
-# parsec's measured acceptance rate: 23 of 30 instantiated scenarios accepted
-# at challenge. One run's constant, labelled as one rather than a law -- see
-# design spec section 9's own warning against treating it as universal.
+# The 2026-08-13 development run's measured acceptance rate: 23 of 30
+# instantiated scenarios accepted at challenge. One run's constant, labelled as
+# one rather than a law: it is a single sample from a single corpus, and nothing
+# establishes that a different target accepts at the same rate.
 ACCEPTANCE_ALLOWANCE = 0.75
 
 

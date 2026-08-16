@@ -11,9 +11,11 @@ that cannot rule on a candidate declines it `digest_insufficient` and names the
 field it needed, which turns this module's blindness into a finding a human
 reads at gate 0 rather than a silent bad selection.
 
-Every field here is anchored to a decision the 2026-08-13 parsec run made by
-hand. If a new field cannot be traced to a decision somebody actually took, it
-is weight in a barrier's context window and does not belong.
+Every field here is anchored to a decision the 2026-08-13 development run made
+by hand -- a full-pipeline run over a large real-world corpus, referred to
+throughout this module as "the development corpus". If a new field cannot be
+traced to a decision somebody actually took, it is weight in a barrier's
+context window and does not belong.
 """
 
 from __future__ import annotations
@@ -38,14 +40,14 @@ _REQUEST_KEYS = ("question", "request_preview", "input", "request", "query", "pr
 _NAME_KEYS = ("name", "tool", "tool_name", "tools_called", "operation")
 _ERROR_KEYS = ("error", "exception", "traceback", "stack_trace")
 # Substrings checked against string *values* regardless of their key -- the
-# parsec traces carry the failure as "TraceStatus.ERROR", not under a key
-# named "error", so a key-name-only check misses the exact fact t7 was kept
-# for.
+# development corpus's traces carry the failure as "TraceStatus.ERROR", not
+# under a key named "error", so a key-name-only check misses the exact fact t7
+# was kept for.
 _ERROR_SUBSTRINGS = ("exception", "error")
 _SKELETON_DEPTH = 3
 _MAX_NAMES = 64
-# The parsec corpus carries a 1191-key pricing table as one JSON file
-# (ec2_pricing.json, classified "other"). Recursing into every key produced a
+# The development corpus carries a 1191-key pricing table as one JSON file
+# (classified "other"). Recursing into every key produced a
 # 783KB digest for that single candidate -- measured, not assumed. The "keys"
 # list below was already capped at this width for display; recursion now
 # matches it, so a wide dict costs the same whether it has ten entries or a
@@ -99,10 +101,11 @@ def _has_error_marker(payload: dict, status: Any, depth: int) -> bool:
     """Whether this trace shows a structural sign of failure.
 
     Originally also scanned every string value in the tree for "error" or
-    "exception" as a substring. Measured against the real 130-element parsec
-    capture, that fired on 63 elements -- 62 of them `TraceStatus.OK` (47.7%
-    of the whole corpus) -- because parsec is an ops assistant whose ordinary,
-    successful answers discuss "error logs" and "error rate" as domain
+    "exception" as a substring. Measured against the development corpus's real
+    130-element trace capture, that fired on 63 elements -- 62 of them
+    `TraceStatus.OK` (47.7% of the whole corpus) -- because its target was an
+    operations assistant whose ordinary, successful answers discuss "error
+    logs" and "error rate" as domain
     vocabulary, and because span-level attributes like `{"status": "error"}`
     show up on internal or recovered steps, not just trace-level failures.
     That noise made the field useless: `heuristics_fired` only records that
@@ -149,7 +152,7 @@ def _skeleton(node: Any, pointer: str, depth: int, out: dict) -> None:
                 # the array branch below reports the true `length` even
                 # though it only expands element 0, and a capped `keys` list
                 # with no count is the exact silent-truncation shape that
-                # produced the 783KB ec2_pricing.json digest this module was
+                # produced the 783KB pricing-table digest this module was
                 # measured against.
                 "key_count": len(node),
                 "keys_truncated": len(node) > len(shown),
@@ -240,7 +243,7 @@ def digest_for_payload(payload: Any, kind: str, *, body_chars: int) -> dict:
 
         request = _first_scalar(payload, _REQUEST_KEYS)
         if isinstance(request, str) and request.strip():
-            # Kept raw and truncated rather than parsed: the parsec captures
+            # Kept raw and truncated rather than parsed: those captures
             # store request_preview as a *truncated* JSON string, so json.loads
             # fails on it while the question text sits in the first 80 chars.
             result["request_text"] = request[:body_chars]

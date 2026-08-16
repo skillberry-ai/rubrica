@@ -4,12 +4,14 @@ Deliberately not an expression language. Each invariant is a structured
 directive with a `form` discriminator, so there is nothing to parse and
 nothing to sandbox: a malformed directive fails schema validation before it
 ever reaches this module. Four forms cover the invariant classes observed in
-the aap2 simulation skill; anything that does not fit is recorded as `prose:`
-and left to the authoring stage's own self-check.
+the simulation skill of the corpus this was developed against; anything that
+does not fit is recorded as `prose:` and left to the authoring stage's own
+self-check.
 
-Known limit: arithmetic over timestamps (aap2's
-`duration_seconds == finished - started`) is not expressible here and must be
-prose. A `derive` form is the natural extension when a second target needs it.
+Known limit: arithmetic over timestamps (a
+`duration_seconds == finished - started` invariant seen in that corpus) is not
+expressible here and must be prose. A `derive` form is the natural extension
+when a second target needs it.
 
 Every function returns violation messages rather than raising, because a
 seed with three problems should report three problems in one pass.
