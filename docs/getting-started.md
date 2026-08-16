@@ -5,7 +5,11 @@ artifacts describe it — specs, captured trajectories, source — by chaining A
 skills over a schema-validated contract on disk. This page gets a first-time
 reader from a clone of this repository to a minted run they can inspect.
 Every command below was run against this repository before this page was
-committed; where the output is long, it is shown truncated and said so.
+committed; where the output is long, it is shown truncated and said so. One
+step is the exception, and it is called out where it happens: §2 dispatches a
+model, which no command in this repository does, so §§3–5 were run against a
+triage record hand-authored for this walkthrough rather than one committed
+here.
 
 ## Install
 
@@ -55,10 +59,18 @@ demonstrate an unrelated permission test.
 
 ### 1. Survey the corpus
 
+`survey` prints the run directory it minted on stdout and nothing else, so
+capture it rather than going looking for it afterwards — the same way
+[`docs/guides/running-a-stage-by-hand.md`](guides/running-a-stage-by-hand.md)
+does. `ls -d "$RUNS"/run-*` yields *two* paths as soon as a second run exists
+under `$RUNS` — the "other path" section at the end of this page mints one — and
+`--run` handed two paths at once exits 2:
+
 ```bash
 export RUNS=runs   # or any directory you want runs written under
-rubrica survey --corpus tests/fixtures/corpus-toy --runs-dir "$RUNS" \
-  --target-name toy --target-interface mcp --objective breadth
+export RUN=$(rubrica survey --corpus tests/fixtures/corpus-toy --runs-dir "$RUNS" \
+  --target-name toy --target-interface mcp --objective breadth)
+echo "$RUN"
 ```
 
 Prints the new run directory:
@@ -68,7 +80,6 @@ runs/run-20260815-201344
 ```
 
 ```bash
-export RUN=$(ls -d "$RUNS"/run-*)   # runs/run-20260815-201344, in this run
 rubrica validate --run "$RUN" --stage survey
 echo "exit=$?"
 ```
@@ -152,6 +163,18 @@ pipeline.** Nothing downstream of `intake` ever reads the corpus again, so a
 candidate `rb-triage` declines is gone as completely as if the corpus never
 contained it. A human reviews the ruling before anything is minted — that
 review is what the rest of this section is building toward.
+
+**The next three sections need that dispatch to have happened.** They read
+`00-triage.json`, and nothing in this repository writes it: the record behind
+the output shown below was hand-authored for this walkthrough and is *not*
+committed here, so you cannot reproduce these three blocks by following the
+page alone. Walking on from §1 without dispatching `rb-triage` gives you, in
+order, exit 1 from `validate --stage triage` (`stage 'triage' produced no
+triage artifact`), the absence message from `gate-brief --gate 0`, and exit 2
+from `intake --run` (`no triage record at …`). All three are correct
+behaviour — each command is telling you the stage has not run — not a broken
+page. (§3's `check-refs` does exit 0 on a survey-only run, but vacuously:
+with no triage record there is nothing to resolve against the catalogue.)
 
 ### 3. Check what triage wrote
 

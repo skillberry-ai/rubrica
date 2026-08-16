@@ -6,15 +6,19 @@ by chaining AI skills over a schema-validated, on-disk artifact contract.
 
 ## How it works
 
-A run moves through eleven stages: `survey` and `intake` are deterministic
-code that mint the run and admit its inputs, `smoke` is deterministic code
-that exercises the emitted suite, and the other eight — `triage`, `extract`,
-`reconcile`, `propose`, `score`, `instantiate`, `challenge`, and `emit` —
-carry the pipeline's judgment as prompts. Each of those eight is dispatched
-with only a run directory, a stage name, and its skill file — plus, for the
-three fan-out stages (`extract`, `instantiate`, `challenge`), the id of its
-own slice, which is an address rather than context — never a summary of what
-an earlier stage concluded; see
+A run moves through eleven stages. `survey` and `intake` are deterministic
+code that mint the run and admit its inputs, and `smoke` is deterministic code
+that exercises the emitted suite. The other eight are dispatched as prompts,
+with only a run directory, a stage name, and a skill file — plus, for the three
+fan-out stages (`extract`, `instantiate`, `challenge`), the id of its own
+slice, which is an address rather than context — never a summary of what an
+earlier stage concluded. Seven of those eight carry the pipeline's judgment:
+`triage`, `extract`, `reconcile`, `propose`, `score`, `instantiate`, and
+`challenge`. The eighth, `emit`, is the exception that the rest of the design
+leans on — its skill is a thin wrapper that runs `rubrica emit` and writes
+nothing itself, because compiling the suite has to be deterministic code: two
+runs with identical inputs to it must produce byte-identical suites, or
+variance stops being attributable to any one stage. See
 [`docs/concepts/artifact-contract.md`](docs/concepts/artifact-contract.md)
 for the exact rule, including the two things an orchestrator may append when
 it retries one. Every handoff between stages is therefore a file on disk you

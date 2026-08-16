@@ -73,9 +73,16 @@ The run's identity: `run_id`, `target` (name and interface), the registered
 `sha256`, `kind`, and `bytes`), the current `limits` (`max_rounds`,
 `max_scenarios`), and `stages` — one entry per stage that has actually run,
 recording the `model`, `effort`, and `skill_sha256` `record-stage` computed
-from the skill file used. `stages` only ever gains entries for the seven
-skill-run stages between `extract` and `emit`; `intake`, `smoke`, and `survey`
-are code and never appear there, and their absence is not a finding.
+from the skill file used. `stages` gains entries for the seven skill-run stages
+between `extract` and `emit`, plus `triage` — which is recorded **after** gate
+0 rather than when it ran, because a run minted by `survey` has no manifest to
+merge into until `intake --run` writes one
+([`docs/guides/running-a-stage-by-hand.md`](../guides/running-a-stage-by-hand.md)
+§4 has the command). `intake`, `smoke`, and `survey` are code: they have no
+skill file for `record-stage` to hash, so they never appear there, and their
+absence is not a finding. The schema's `propertyNames` enum permits all eleven
+stage names — it constrains the vocabulary, not which of them a real run
+records.
 
 Fields worth knowing: `inputs[].provenance` (present only for an input that
 came from inside a container file or from a projection — `container_sha256`
@@ -141,7 +148,9 @@ goal matrix).
 - **Written by:** `propose`, run as `rb-propose` (appends; never renumbers a
   prior round); also rewritten by `score`, run as `rb-score`, which folds
   duplicates and applies rejections
-- **Read by:** `rb-score`, `rb-instantiate`, `rb-challenge`, `emit` (code),
+- **Read by:** `rb-propose` itself (it declares `scenarios` in `reads` and has
+  to read the file it appends to, so an earlier round's ids survive
+  unrenumbered), `rb-score`, `rb-instantiate`, `rb-challenge`, `emit` (code),
   `rb-orchestrate`; `dedupe-candidates`, `compare-gold`
 - **Path:** `02-scenarios.json`
 

@@ -13,20 +13,22 @@ they need credentials — which is why they live behind the `live` pytest marker
 
 ## 1. What a dispatched stage receives
 
-The design spec (§4) is exact about this:
+[`docs/concepts/artifact-contract.md`](../concepts/artifact-contract.md) carries
+this rule, in its first section, "The one architectural rule". The form worth
+memorising:
 
 > A dispatched subagent receives exactly three things: the run directory path,
 > its stage name, and its skill. No conversational context is threaded
 > through. That is what makes the contract real.
 
 Nothing else may be passed — no summary of what an earlier stage concluded, no
-excerpt from the design spec, no "by the way, the world model says...". If the
-subagent needs a fact, it must get it by reading an artifact its skill's
-Contract block lists under `reads`, because the artifact contract is the only
-channel this system trusts. A dispatch that pastes in "helpful" context has
-silently removed the fan-out isolation the design relies on, and the resulting
-artifact will still validate — so this is a rule to follow, not something
-`validate` will ever catch for you.
+excerpt from this repository's own documentation, no "by the way, the world
+model says...". If the subagent needs a fact, it must get it by reading an
+artifact its skill's Contract block lists under `reads`, because the artifact
+contract is the only channel this system trusts. A dispatch that pastes in
+"helpful" context has silently removed the fan-out isolation the design relies
+on, and the resulting artifact will still validate — so this is a rule to
+follow, not something `validate` will ever catch for you.
 
 ## 2. The dispatch prompt
 
@@ -160,13 +162,13 @@ built in §3 — that is expected, since the stage's artifact does not exist yet
 "Expect 0" applies only after the dispatched skill has actually written its
 artifact.
 
-**`survey` and `triage` are the two stages whose `record-stage` runs late.**
-`record-stage` merges into `manifest.json`, and on a run minted by `survey`
-there *is* no manifest until `intake --run` writes it after gate 0 — so at the
-moment you have just dispatched `rb-triage`, the command above raises
-`ArtifactError` on the absent manifest at exit 2. Run `validate` and
-`check-refs` for those two stages when the brief above says to, then come back
-and record them **retroactively, after gate 0**, once the manifest exists:
+**`triage` is the one stage whose `record-stage` runs late.** `record-stage`
+merges into `manifest.json`, and on a run minted by `survey` there *is* no
+manifest until `intake --run` writes it after gate 0 — so at the moment you
+have just dispatched `rb-triage`, the command above raises `ArtifactError` on
+the absent manifest at exit 2. Run `validate` and `check-refs` for it when the
+brief above says to, then come back and record it **retroactively, after gate
+0**, once the manifest exists:
 
 ```bash
 # after `uv run rubrica intake --run "$RUN"` has minted manifest.json
@@ -182,6 +184,11 @@ recorded hash is of the file that was actually used. Recording retroactively
 keeps the digest checkable, at the cost of the ordering. Write down which model
 and effort you dispatched at the time; nothing on disk remembers them for you
 until you run the command.
+
+`survey` is *not* the other half of this. It is code, not a prompt: there is no
+`rb-survey/SKILL.md` for `record-stage --skill` to hash, so `survey` never gets
+a `manifest.stages` entry at all — the same as `intake` and `smoke`, and its
+absence there is not a finding.
 
 `record-stage --skill` needs a real file to hash and hard-fails
 (`UsageError: skill file does not exist`) if it is not there. Every
@@ -279,10 +286,11 @@ reconstruct from memory, and getting one wrong fails silently rather than loudly
 **Why isolation is not tidiness.** The falsifiable claim in this project is that
 prompt-carried judgment survives a chain of artifact handoffs. A dispatch that
 also carries a global `CLAUDE.md`, whatever plugins and hooks the developer runs,
-and *this repository's* `CLAUDE.md`, `README.md` and design spec is measuring the
-skill plus a briefing — and the briefing is the answer key. `docs/` holds the
-spec; `tests/fixtures/toy/` is described elsewhere in this repository as the model
-answer a skill imitates. A stage that can read either is not being exercised.
+and *this repository's* `CLAUDE.md`, `README.md` and `docs/` tree is measuring the
+skill plus a briefing — and the briefing is the answer key. `docs/` describes
+every stage's job, what it reads and what it writes; `tests/fixtures/toy/` is
+described elsewhere in this repository as the model answer a skill imitates. A
+stage that can read either is not being exercised.
 
 Three mechanisms do it, all per-session, none of which changes anything on disk
 outside the scratch directory:
@@ -336,8 +344,9 @@ difference. So: check that layer on the machine you are using before relying on
 it, and read the audit either way.
 
 Which is the point of `scripts/audit-reads.sh`. §5's last paragraph says an
-out-of-contract read shows up nowhere on disk, and §8 of the design spec records
-that both isolation violations ever observed here surfaced only because a
+out-of-contract read shows up nowhere on disk, and
+[`docs/design/limitations.md`](../design/limitations.md)'s isolation entry
+records that both read violations ever observed here surfaced only because a
 subagent volunteered them in a report nobody obliged it to write. That is luck,
 not an instrument. The transcript is the instrument: the audit prints every file
 tool call and every Bash line, and those get read against the stage's Contract
@@ -364,9 +373,11 @@ transcript shows it running `ls -la` in the run directory: one `Read` from the
 answer to its own exercise, and what stopped it was an unrelated premature kill.
 So, two rules for scoring a stage by hand:
 
-- **Predictions go in the design spec, never in the run.** On disk before the
-  dispatch is the right instinct; inside the dispatch's read scope is the wrong
-  destination.
+- **Predictions go where the dispatch cannot read them, never in the run.** On
+  disk before the dispatch is the right instinct; inside the dispatch's read
+  scope is the wrong destination. `docs/` and `tests/` are both denied in both
+  settings scopes, so a note under either is out of reach; anywhere under `$RUN`
+  is not.
 - **The gate-1 human report is not an artifact either.** Anything you write while
   holding a gate is the orchestrator's, and a later stage reading it has been
   briefed.
@@ -399,7 +410,8 @@ RUBRICA_RESEED=1 ./scripts/dispatch-stage.sh instantiate "$RUN" scn-005
 
 The block is extracted with `jq` straight from `05-verdicts/scn-005.json`, so a
 paraphrase is not something the script declines to write — it is something the
-script cannot express. That distinction is the point: the design spec calls a
+script cannot express. That distinction is the point:
+[`docs/concepts/artifact-contract.md`](../concepts/artifact-contract.md) calls a
 paraphrased notice "the orchestrator's conclusion wearing a finding's clothes",
 and the only structural defence is to make the appended text a copy rather than a
 rendering. The flag refuses with exit 2 on a verdict that is not `re-seed`, on a
