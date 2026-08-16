@@ -3,7 +3,7 @@
 # Dispatch one stage into a Claude Code instance that shares nothing with the
 # developer's own setup.
 #
-# docs/running-a-stage-by-hand.md is the runbook this automates; §7 there covers
+# docs/guides/running-a-stage-by-hand.md is the runbook this automates; §7 there covers
 # why an isolated instance is worth the trouble and what is and is not enforced.
 # The short version: this project's falsifiable claim is that the *prompt*
 # carries the judgment across artifact handoffs. A dispatch that also carries a
@@ -367,7 +367,7 @@ $(jq '{uniquely_determined, derivable_without_guessing, notes}' "$V")
   done
 fi
 
-# The dispatch prompt, verbatim from docs/running-a-stage-by-hand.md §2. Nothing
+# The dispatch prompt, verbatim from docs/guides/running-a-stage-by-hand.md §2. Nothing
 # else may be added to it: not a summary of what an earlier stage concluded, not
 # an excerpt of the world model, and not a correction for something a skill got
 # wrong. A skill defect belongs in the skill.

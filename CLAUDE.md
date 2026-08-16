@@ -10,9 +10,12 @@ worth running? Keep that in mind when changing things — a change that makes th
 pipeline more likely to produce output while making a stage's judgment less
 observable is a loss, not a win.
 
-Design spec: `docs/superpowers/specs/2026-08-06-skill-based-test-generator-design.md`.
-Read §8's **Parked from the skills build** table before proposing a fix — it is
-long, current, and most "bugs you just found" are in it with a ruling.
+Why the system is shaped this way, including the trade-offs made on purpose:
+[`docs/design/rationale.md`](docs/design/rationale.md). What is known to be
+wrong or missing, each entry with the ruling that parked it:
+[`docs/design/limitations.md`](docs/design/limitations.md). **Read the second
+before proposing a fix** — most "bugs you just found" are already in it, with a
+ruling, and re-litigating one has cost this project two fix rounds.
 
 ## Setup and commands
 
@@ -27,75 +30,17 @@ make lint      # ruff check --fix
 make format    # ruff format
 ```
 
-Baseline: **1378 passed, 4 skipped**; `make check` clean; `uv run rubrica
-check-skills` exits 0. Anything else means you broke something. (It was 1126 as
-of the skills build; the three added since are `f3b9d30`'s, and this line went
-stale because it names a build rather than a commit. It was 1129 as of
-`f3b9d30`; the eight added since are `test_trajectory_fixtures.py`'s, guarding
-the reservation-service trajectory fixture (Task 3 of the
-2026-08-12-reservation-service-trajectory-run). It was 1137 as of `373130b`;
-the two added since are `test_trajectory_fixtures.py`'s trace-count and
-prompt-order guards, closing findings 3 and 4 of the whole-branch review that
-examined that fixture. It was 1139 as of `a31c4d0`; the seven added since are
-`test_utilisation.py`'s five, plus two `test_cli.py` grows for free whenever
-`cli.SUBCOMMANDS` gains an entry — its `parametrize("command",
-sorted(subcommand_names()))` × `parametrize("breakage", ...)` picked up
-`claim-utilisation` automatically. It was 1146 as of `c6a1020`; the two added
-since are `e20726c`'s new phrase-pin assertions in `test_skills_extract.py`
-and `test_skills_reconcile.py`, unchanged in count by `399dba5`'s
-whitespace-normalisation fix to those same two. It was 1148 as of `399dba5`;
-the two removed since are Task 3's deletion of
-`test_the_recorded_world_model_keeps_its_pre_rubrica_spelling` (one
-parametrized test, two ids), retired per spec §6's ruling that this file's
-re-recording obligation wins its documented contradiction with that test. It
-was 1146 as of `9dbf203`; the one added since is
-`test_utilisation.py`'s `test_an_input_cited_only_through_a_contradiction_is_not_a_finding`,
-proving finding 1's fix of a whole-branch review — `_cited_claim_ids` was
-missing `contradictions[].claim_a`/`claim_b`, which `refs.check_world_model`
-already treats as claim citations, so the gate fired on an input whose only
-surviving contribution was a recorded contradiction. It was 1147 as of
-`8f1ea7c`; the eight added since are `test_dispatch_harness.py`'s, holding
-`scripts/dispatch-stage.sh`'s deny lists over the three run-local paths no
-skill's `reads` names — they skip, rather than fail, on a machine without
-`claude` or `jq` on `PATH`, so a green run there is not evidence. It was 1155 as
-of `2644639`; the nine added since are `test_dispatch_harness.py`'s again,
-covering the `RUBRICA_RESEED` append. It was 1164 as of `2f93726`; the two
-removed since are that commit's stage-scoped `05-verdicts` deny test plus one
-`OUT_OF_CONTRACT` parametrization, because **denying a path `check-refs` reads
-makes a stage's own gate fabricate findings** — measured, and now guarded by
-`test_nothing_check_refs_reads_is_ever_denied` — re-measure it here when you add
-tests. It was 1162 as of `eded30d`; the eleven added since are
-`test_dispatch_harness.py`'s again, covering the two appends the script had
-never implemented — `RUBRICA_REJECT`, which builds rb-score's rejection notice,
-and `RUBRICA_FINDINGS_FILE`, which routes a gate's stdout back to the stage that
-provoked it — plus `test_write_is_scoped_to_the_run_and_not_granted_bare`, which
-pins the fix for the first *write* outside a run this project has measured: the
-allow list carried a bare `Write`, and `rb-emit` used it to put a scratch script
-in the repository root. All eleven predicates were measured in the failure
-direction: widening the rejection jq to the whole verdict, narrowing it to
-`{notes}`, dropping the accept guard, making an empty findings file a silent
-no-append, and restoring the bare `Write` each turn exactly one red. It was
-1173 as of `d600b98`; the 205 added since are this ingestion-and-triage
-build's — Tasks 1 through 20 of the 2026-08-14-ingestion-and-triage plan,
-adding two stages (`survey`, `triage`) and four subcommands (`survey`,
-`adopt-projection`, `gate-brief`, `set-limit`), and the tests each carries,
-across 39 commits. Naming the whole build rather than one commit is the same
-move this parenthetical made earlier for the skills build, and for the same
-reason: too many commits to enumerate honestly as one. Task 20's own share is
-two — `test_skills_orchestrate.py`'s two new predicates pinning
-`rb-orchestrate`'s survey/triage/gate-0 prose — plus one test that already
-existed and turned from red to green
-(`test_it_names_every_stage_it_dispatches`, which needed a prose fix, not a
-new assertion) and one rename with no net count change (`test_brief.py`'s
-`test_gate_two_does_not_raise_on_a_present_but_malformed_coverage_document` →
-`..._world_model`, correcting what its fixture actually corrupts).)
+`make test` green, `make check` clean, and `uv run rubrica check-skills` exiting
+0 are the three gates; anything else means something broke. Do not write a test
+count down anywhere — the number grows with every capability, and the prose that
+used to reconcile it here, commit by commit, was still wrong by 299 when it was
+deleted.
 
 Commands in `README.md` assume the venv is on `PATH`; otherwise prefix `uv run`.
-Four env overrides exist: `RUBRICA_SCHEMA_DIR` (`validate.py`),
-`RUBRICA_SKILLS_DIR` (`skills.py`), `RUBRICA_SUITE_DIR` (`emit.py`), and
-`RUBRICA_LIVE` (`tests/conftest.py`). Three are exercised by tests —
-`RUBRICA_SUITE_DIR` currently has no test referencing it — but all four are
-fair game: prefer them over editing repo files when probing behaviour.
+Four env overrides exist, and each is exercised by tests: `RUBRICA_SCHEMA_DIR`
+(`validate.py`), `RUBRICA_SKILLS_DIR` (`skills.py`), `RUBRICA_SUITE_DIR`
+(`emit.py`), and `RUBRICA_LIVE` (`tests/conftest.py`). Prefer them over editing
+repo files when probing behaviour.
 
 ## The one architectural rule
 
@@ -112,10 +57,10 @@ machine text, never paraphrased: a repair's gate findings, and a re-seed's
 verdict fields. A paraphrase is the orchestrator's conclusion wearing a
 finding's clothes.
 
-## Eleven stages, nine skills
+## The stages and their skills
 
 `paths.STAGES` is the ordering and the on-disk numbering. `survey` and
-`triage` precede `intake` and bracket the newest gate:
+`triage` precede `intake` and bracket the earliest gate:
 
 | Dir | Stage | Runs as | Gate |
 |---|---|---|---|
@@ -127,34 +72,39 @@ finding's clothes.
 | `02` | propose | `rb-propose` | validate |
 | `03` | score | `rb-score` — barrier | validate · check-refs · **human gate 2** |
 | `04` | instantiate | `rb-instantiate` — fan-out, one per active scenario | validate · check-refs |
-| `05` | challenge | `rb-challenge` — fan-out, one per instance | validate · **human gate 3** |
+| `05` | challenge | `rb-challenge` — fan-out, one per instance | validate · check-refs · **human gate 3** |
 | `06` | emit | `rb-emit` — thin wrapper over `rubrica emit` | validate · check-refs |
 | `07` | smoke | code | validate · check-refs |
+
+Challenge's `check-refs` runs **only once every member has finished**:
+`refs.check_verdicts` reports every instance without a verdict from the moment
+`05-verdicts/` exists, so mid-fan-out most of them are missing by construction.
+`refs.check_all` runs every checker the run has inputs for, so there is no such
+thing as a stage-scoped `check-refs`.
 
 `survey` and `triage` have no `0N` directory prefix of their own: `survey`
 writes `00-catalogue.json` and `triage` writes `00-triage.json`, both ahead of
 the `00-inputs/` and `manifest.json` that `intake` mints once gate 0 has
-passed — the numbering stays intake's, not theirs, because intake is still
-what fixes the run's identity.
+passed — the numbering stays intake's, not theirs, because intake is still what
+fixes the run's identity.
 
 Stages 02 and 03 are a loop bounded by `max_rounds`. Score *computes* the
 coverage verdict (`continue` / `converged` / `halted_no_progress` /
 `halted_round_cap`); only the orchestrator acts on it.
 
-**Gate 0 is different in kind from gates 1–3.** Gates 1 through 3 review a
-judgment made from evidence already in the run; a human overturning one of
-them corrects an inference about the target. Gate 0 decides what the run can
-ever know — nothing downstream of `intake` reads the corpus again, so a
-candidate `rb-triage` declines is gone as completely as if the corpus never
-contained it. That is why triage cannot also hold its own gate: the same
-party selecting the inputs and ratifying the selection would make the whole
-run unfalsifiable.
+**Gate 0 is different in kind from the others.** Gates 1 through 3 review a
+judgment made from evidence already in the run; a human overturning one of them
+corrects an inference about the target. Gate 0 decides what the run can ever
+know — nothing downstream of `intake` reads the corpus again, so a candidate
+`rb-triage` declines is gone as completely as if the corpus never contained it.
+That is why triage cannot also hold its own gate: the same party selecting the
+inputs and ratifying the selection would make the whole run unfalsifiable.
 
-`rb-orchestrate` is the ninth skill and **is not a stage**: it declares no
-`stage` and no `schemas`. It dispatches the seven prompt stages from
-`extract` through `emit`, holds gates 1 through 3, and writes
-`decisions.md`. It never runs `survey`, never dispatches `rb-triage`, and
-never holds gate 0 — all three are finished before it is ever dispatched.
+`rb-orchestrate` is a skill and **is not a stage**: it declares no `stage` and no
+`schemas`. It dispatches the prompt stages from `extract` through `emit`, holds
+gates 1 through 3, and writes `decisions.md`. It never runs `survey`, never
+dispatches `rb-triage`, and never holds gate 0 — all three are finished before it
+is ever dispatched.
 
 `intake`, `smoke`, and `survey` are code, so they have no skill and no
 `manifest.stages` entry. Their absence there is not a finding.
@@ -215,43 +165,42 @@ The `rb-` prefix itself lives in `skills.SKILL_PREFIX` — one home, because it
 was three before the rename and a partial update makes `check-skills` reject
 every correctly named skill.
 
-Section 5 is described in the spec as the most important prompt-level decision
-in the design. Treat a refusal condition as decorative if its trigger has no
-stated action, its action is one a model cannot take, or its condition is one a
-model cannot detect from what it can read.
+Section 5 is the most important prompt-level decision in the design —
+[`docs/design/rationale.md`](docs/design/rationale.md) argues why. Treat a
+refusal condition as decorative if its trigger has no stated action, its action
+is one a model cannot take, or its condition is one a model cannot detect from
+what it can read.
 
-## Seventeen deterministic subcommands
+## The deterministic subcommands
 
-Everything a prompt is not trusted to do:
+Everything a prompt is not trusted to do. `cli.SUBCOMMANDS` is the list;
+[`docs/reference/cli.md`](docs/reference/cli.md) documents each one, and
+`tests/unit/test_docs_accuracy.py` fails if the two disagree. The rulings that
+are judgments rather than list entries:
 
-`survey` · `intake` · `validate` · `check-refs` · `check-skills` ·
-`dedupe-candidates` · `record-stage` · `decide` · `adopt-projection` ·
-`gate-brief` · `set-limit` · `emit` · `smoke` · `compare-gold` · `diff-runs` ·
-`sample-for-review` · `claim-utilisation`
-
-`emit` is code, not a prompt, because two runs with identical stage-4 and
-stage-5 artifacts must produce byte-identical suites — otherwise variance can no
-longer be attributed to a stage. `dedupe-candidates` proposes pairs and never
-decides. `record-stage` hashes the skill file the run actually used, so a digest
-that no longer matches the file on disk means the file changed after the run —
-that is the hook working, not a defect. `claim-utilisation` is a report, not a
-gate — it always exits clean on a readable run and surfaces each input's
-cited/total claim count for a human to read at gate 1; the zero-utilisation
-finding it shares its arithmetic with lives in `check-refs`, never here.
-
-`survey` is `intake`'s counterpart for the corpus path: it walks a corpus,
-digests each candidate, and mints the run, but writes `00-catalogue.json`
-instead of a manifest — there is nothing to extract from yet, because nothing
-has been admitted. `adopt-projection` admits a manufactured artifact into the
-catalogue structurally, without touching the corpus or the run's identity.
-`gate-brief` is a report with the same ruling as `claim-utilisation` — it
-always exits clean on a readable run — and composes what already exists into
-the reading surface at any of the four human gates: the objective verdict and
-grouped declines at gate 0, utilisation and implied size at gate 1, the
-coverage matrix at gate 2, the verdict tally at gate 3. `set-limit` changes a
-manifest limit — `max_scenarios` most often — with the reason recorded in
-`decisions.md`, so raising a ceiling is a decision on the record rather than a
-silent hand-edit.
+- `emit` is code, not a prompt, because two runs with identical stage-4 and
+  stage-5 artifacts must produce byte-identical suites — otherwise variance can
+  no longer be attributed to a stage.
+- `dedupe-candidates` proposes pairs and never decides.
+- `record-stage` hashes the skill file the run actually used, so a digest that no
+  longer matches the file on disk means the file changed after the run — that is
+  the hook working, not a defect.
+- `claim-utilisation` and `gate-brief` are **reports, not gates**: each always
+  exits clean on a readable run. `claim-utilisation` surfaces each input's
+  cited/total claim count for a human to read at gate 1 — the zero-utilisation
+  finding it shares its arithmetic with lives in `check-refs`, never here.
+  `gate-brief` composes what already exists into the reading surface at each
+  human gate: the objective verdict and grouped declines at gate 0, utilisation
+  and implied size at gate 1, the coverage matrix at gate 2, the verdict tally
+  at gate 3.
+- `survey` is `intake`'s counterpart for the corpus path: it walks a corpus,
+  digests each candidate, and mints the run, but writes `00-catalogue.json`
+  instead of a manifest — there is nothing to extract from yet, because nothing
+  has been admitted. `adopt-projection` admits a manufactured artifact into the
+  catalogue structurally, without touching the corpus or the run's identity.
+- `set-limit` changes a manifest limit — `max_scenarios` most often — with the
+  reason recorded in `decisions.md`, so raising a ceiling is a decision on the
+  record rather than a silent hand-edit.
 
 ## Testing prompts: the traps that actually recur here
 
@@ -262,8 +211,8 @@ write:
 - `skills.load()` sets `body` to the **entire file text**, and the five section
   headings are mandatory — so `"refusal" in body.lower()` is vacuous for every
   conforming skill.
-- The frontmatter `description:` line and the plan-mandated contract block also
-  satisfy naive substring checks.
+- The frontmatter `description:` line and the contract block also satisfy naive
+  substring checks.
 
 **Use `skills.section_body(skill, "<heading>")`** to scope an assertion to the
 section that owns the rule. Assert co-occurrence within that section, not
@@ -277,7 +226,7 @@ fail is not yet a guard — and the mirror failure is equally real here, where a
 phrase pin broke on an innocuous reformat.
 
 Two weakness shapes recur in text-level tests: **substring-of-message** and
-**fixture-cannot-reach**. The third shape the spec names,
+**fixture-cannot-reach**. The third shape the design records,
 *holds-identically*, has no prompt analogue — do not hunt for it.
 
 What no test can reach: whether a dispatched model actually *followed* the
@@ -310,7 +259,7 @@ prompt. That is what the live exercises are for.
   expected, since a lone world model has no claims or manifest to resolve
   against.
 
-## Live tests and exercises
+## Live tests and exercise records
 
 `make live` runs the `live`-marked tests, gated by `RUBRICA_LIVE`
 (`tests/conftest.py`, which treats `0`/`false`/`no`/empty as off so
@@ -319,18 +268,27 @@ so running them is free; *producing* a recording dispatches a model and costs
 money. They are not part of `make test`, and the skip message names the command
 that runs them.
 
-Each skill also has an `exercise.md` beside it recording a real dispatch's
-measured result — the only behavioural evidence this project has. Two rules:
+Most skills also carry an `exercise.md` beside the `SKILL.md`, recording what
+**one** real dispatch measurably did — the only behavioural evidence this project
+has, and one sample is one sample. `rb-triage` is the exception and carries
+none, which is **not** explained by never having been dispatched; see
+[`docs/design/limitations.md`](docs/design/limitations.md) for what those runs
+produced and why the record is not in the repository. Two rules for an exercise
+record:
 
-- An exercise record states what **happened**. A reasoned number presented as an
-  observed one corrupts the evidence; one such misattribution shipped and had to
-  be corrected.
+- It states what **happened**. A reasoned number presented as an observed one
+  corrupts the evidence; one such misattribution shipped and had to be
+  retracted.
 - Results belong in that file, not only in a review ledger elsewhere. Ledgers
-  get deleted.
+  get deleted — a gitignored run directory most of all.
 
-To run a stage by hand, follow `docs/running-a-stage-by-hand.md`.
+To run a stage by hand, follow
+[`docs/guides/running-a-stage-by-hand.md`](docs/guides/running-a-stage-by-hand.md).
 
 ## Conventions (non-negotiable)
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) is the full set. The ones you will hit
+first:
 
 - **Every commit signed and DCO'd: `git commit -S -s`.** Both flags — `-s` is
   the `Signed-off-by` trailer, `-S` the cryptographic signature. If signing
@@ -339,48 +297,46 @@ To run a stage by hand, follow `docs/running-a-stage-by-hand.md`.
 - Attribution trailer is `Assisted-By: Claude (Anthropic AI)
   <noreply@anthropic.com>`. **Never** `Co-Authored-By` or `Made-with` — GitHub
   parses those as co-authorship.
-- ruff: `line-length = 100`, `select = ["E","F","I","UP","B","SIM"]`. `docs/` is
-  excluded because committed design records must not be reformatted; `README.md`
-  is **not** excluded, so run `make check` after editing it.
+- ruff: `line-length = 100`, `select = ["E","F","I","UP","B","SIM"]`. Ruff
+  formats Python code blocks inside Markdown, so `extend-exclude` covers all of
+  `docs/` — its code blocks are laid out for reading, and the dated build records
+  in there must stay verbatim. `README.md` and `CLAUDE.md` are **not** excluded,
+  so run `make check` after editing either.
 - Comment density here is high and deliberate: comments explain *why* a choice
   was made, usually citing a measurement. Match that; do not strip them.
-
-## Known limitations worth knowing before you "fix" something
-
-All are recorded in the spec's §8 with the reasoning that parked them. The three
-that most often look like new bugs:
-
-1. **The isolation rule is enforceable on artifacts inside a run and
-   unenforceable on everything else a subagent can reach.** A member that read a
-   sibling's seed produces a byte-identical artifact to one that did not. Both
-   observed violations surfaced only because a subagent volunteered them in a
-   report nobody obliged it to write. No schema, no `check-refs`, no digest can
-   catch this; the only instrument is a transcript audit at dispatch time. This
-   is the weakest link in the build.
-2. **The world model has no representation for a field's value domain.**
-   `capability.params` and `entity.fields` carry only name/type(/required), with
-   `additionalProperties: false`. So a concrete value anywhere downstream of
-   reconcile is a *prescription* to `rb-instantiate`, never an assertion about
-   the target — every seed value is synthetic by construction. Do not raise
-   findings that require a stage to ground a value against claims; no artifact
-   carries the domains.
-3. **Seed conformance is one-directional** (seed→world only), so a seed can drop
-   a declared collection, or declare all of them empty, and pass both layers
-   with zero findings. Whether *partial* seeds are legal is an open design
-   question — it needs a ruling, not a patch.
-
-Also open: golden `scn-empty`'s `answer_excludes` marks a correct,
-more-informative answer wrong (assertions 0.5, reward 0.6 against the oracle's
-1.0), parked because the reward means it feeds are pinned in three places.
 
 ## Before raising a finding against a skill's output
 
 **Check what the stage's `reads` actually gives it.** A finding that requires
 knowledge outside the contract is a finding against the *contract or the
-fixture*, never against the prompt. This mistake once drove two wasted fix
-rounds: a stage was blamed for not knowing a fact that lived only in a claims
-file it is forbidden to read. One `grep` would have settled it.
+fixture*, never against the prompt. This is the mistake behind the two fix
+rounds named at the top of this file — the same two, not another pair: a stage
+was blamed for not knowing a fact that lived only in a claims file it is
+forbidden to read, and one `grep` would have settled it.
 
 The mirror question, for a proposed `reads` addition: **does a deterministic
 gate already enforce the property?** If yes, the requirement belongs to the
 gate, not to a declared read.
+
+## Where documentation lives
+
+[`docs/README.md`](docs/README.md) is the index, and everything it lists is
+current. The dated build records that sit alongside those documents are
+**recorded history**: they were accurate on their own date, they have been
+superseded, and they **must not be cited as describing current behaviour** —
+which is why this file no longer names that directory at all. Do not edit
+anything inside it either; a record of what happened is falsified, not
+corrected, by a later edit.
+
+Adding or renaming a stage, skill, subcommand, or artifact kind means updating
+[`docs/concepts/pipeline.md`](docs/concepts/pipeline.md),
+[`docs/reference/cli.md`](docs/reference/cli.md), or
+[`docs/reference/artifacts.md`](docs/reference/artifacts.md) as appropriate.
+`tests/unit/test_docs_accuracy.py` fails until you do, and that failure is the
+guard working — update the document, not the assertion. Three policies it also
+enforces on this file and every other user-facing document: no hand-typed test
+count; no heading that counts something that grows (stages, skills,
+subcommands, gates); and no citation of the recorded-history tree, which
+`docs/README.md` alone is allowed to link. `## Two check layers` is permitted
+deliberately — there are exactly two by architecture, and a third would be a
+design change rather than an increment.

@@ -1,0 +1,48 @@
+# Rubrica documentation
+
+An index of the current documentation, grouped by what you are trying to do.
+Each line names the question that document answers.
+
+## Start here
+
+- [`getting-started.md`](getting-started.md) — How do I get from a clone of
+  this repository to a minted run I can inspect?
+
+## Concepts
+
+- [`concepts/pipeline.md`](concepts/pipeline.md) — What stages does a run go
+  through, in what order, and what does each one do?
+- [`concepts/artifact-contract.md`](concepts/artifact-contract.md) — What is
+  the rule that governs how a stage is dispatched, and what are the two
+  layers that check what it writes?
+- [`concepts/glossary.md`](concepts/glossary.md) — What does this term mean,
+  precisely, and what actually produces or consumes it?
+
+## Reference
+
+- [`reference/cli.md`](reference/cli.md) — What does this `rubrica`
+  subcommand do, what does it take, and what does it print?
+- [`reference/artifacts.md`](reference/artifacts.md) — What is this artifact
+  for, which stage writes it, which stages read it, and what fields does it
+  carry?
+
+## Guides
+
+- [`guides/running-a-stage-by-hand.md`](guides/running-a-stage-by-hand.md) —
+  How do I dispatch one skill for real, against a fresh run, and check what
+  it did?
+
+## Design
+
+- [`design/rationale.md`](design/rationale.md) — Why is the system shaped
+  this way, including the choices that cost something and were made anyway?
+- [`design/limitations.md`](design/limitations.md) — What is known to be
+  wrong or missing, and what was the ruling that left it that way on purpose?
+
+## History
+
+- [`superpowers/`](superpowers/README.md) — dated build records: design specs
+  and implementation plans written during the build, superseded by the
+  documents above. Kept for provenance, not to be cited as current — see
+  [`superpowers/README.md`](superpowers/README.md) before reading anything
+  else in that tree.

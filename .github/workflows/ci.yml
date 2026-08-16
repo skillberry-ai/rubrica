@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: uv sync --extra dev
+
+      # `uv sync --extra dev` provisions this project's own environment,
+      # including the `dev` extra (ruff, pytest); no lockfile is committed, so
+      # this is a real sync rather than a no-op. Each gate below repeats
+      # `--extra dev` on its own `uv run` so that every step is self-sufficient.
+      # Measured: a bare `uv run` after this sync does *not* prune the extra --
+      # ruff survives in .venv/bin and still runs -- so the flag is
+      # belt-and-braces against a step being reordered, run on its own, or
+      # reached with an environment this job did not create, rather than a
+      # workaround for pruning. The gates run in the order CONTRIBUTING.md
+      # names them. The live-dispatch test suite is deliberately excluded here:
+      # it dispatches a model, so it needs credentials and would cost money on
+      # every push.
+      - name: Lint and format
+        run: |
+          uv run --extra dev ruff check .
+          uv run --extra dev ruff format --check .
+
+      - name: Tests
+        run: uv run --extra dev pytest -q
+
+      - name: Skill contracts
+        run: uv run --extra dev rubrica check-skills

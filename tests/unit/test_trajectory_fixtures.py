@@ -16,6 +16,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -24,7 +25,14 @@ from tests.toy import TRAJECTORIES_DIR
 
 TOOLS_LIST = TRAJECTORIES_DIR / "tools-list.json"
 TRAJECTORIES = TRAJECTORIES_DIR / "trajectories.json"
-CAPTURE_HARNESS = TRAJECTORIES_DIR / "capture_harness.py"
+# The harness lives in scripts/, not beside the fixture: it is a capture tool
+# whose absolute paths only resolve on the machine that ran it, not a test.
+# Still read from here, because PROMPTS is the fixture's own record of which
+# trace is which -- derived from the source rather than copied into a literal,
+# so a re-capture that changes the prompts changes what these tests expect.
+CAPTURE_HARNESS = (
+    Path(__file__).resolve().parents[2] / "scripts" / "capture-reservation-trajectories.py"
+)
 
 FIVE_TOOLS = frozenset(
     {
@@ -125,8 +133,8 @@ def test_at_least_one_trace_observed_an_error_response(traces):
 
 
 def _prompts() -> list[tuple[str, str]]:
-    """The `(id, prompt_text)` pairs from `capture_harness.py`'s own `PROMPTS`
-    list, in order.
+    """The `(id, prompt_text)` pairs from `capture-reservation-trajectories.py`'s
+    own `PROMPTS` list, in order.
 
     Parsed with `ast.literal_eval` rather than a regex over the whole file.
     Measured: `re.findall(r'\\("(p\\d\\d-[a-z-]+)"', text)` finds only 6 of the
