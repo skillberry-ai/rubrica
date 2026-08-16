@@ -271,8 +271,8 @@ rubrica set-limit --run runs/run-20260806-123005 --max-scenarios 200 \
 ## Emitting and smoke-testing
 
 The two commands below are **pipeline stages, not measurement tools.** `emit`
-*creates* `06-suite/` and `smoke` writes `07-report.json`, both inside the
-numbered stage directories, and `validate.STAGE_ARTIFACTS` names an artifact
+*creates* `06-suite/` and `smoke` writes `07-report.json` at the run root, and
+`validate.STAGE_ARTIFACTS` names an artifact
 kind for each (`suite-expected` for `emit`, `report` for `smoke`) — so the
 artifact contract does expect their output, and `validate --stage emit` and
 `validate --stage smoke` gate it exactly as every other stage's output is

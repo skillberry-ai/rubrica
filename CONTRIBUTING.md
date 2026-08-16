@@ -95,7 +95,7 @@ that isn't a contributor in that sense.
 
 This codebase's comment density is high and deliberate. A comment here
 explains *why* a choice was made — usually citing a measurement, a prior
-failure, or a constraint from the design spec — not what the next line
+failure, or a constraint the artifact contract imposes — not what the next line
 literally does. Match that when you add code; do not strip comments you
 find inconvenient to keep updated.
 

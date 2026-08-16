@@ -359,12 +359,21 @@ member's slice. Per-member read isolation needs one process per member, which is
 what dispatching stage by stage with this script gives you. A whole-pipeline
 orchestrate exercise remains the looser measurement it always was.
 
-**The run directory holds three paths the stage may not read, and one of them is
-an answer key.** Granting `Read(<run>/**)` is right for artifacts and wrong for
-`decisions.md`, `07-report.json` and `measurement/`: no skill's Contract lists any
-of them under `reads`, and all three are *about* the stages rather than merely
-outside their scope — an orchestrator log, a smoke report, and the human review
-surface. The script denies all three, in both settings scopes.
+**The run directory holds three paths no skill's Contract lists under `reads`,
+and the script denies exactly two of them.** `decisions.md`, `07-report.json`
+and `measurement/` are each *about* the stages rather than merely outside their
+scope — an orchestrator log, a smoke report, and the human review surface — so
+granting `Read(<run>/**)` is right for artifacts and wrong for these three. But
+the enforceable rule is narrower than "deny what the stage may not read." Four
+skills' contracts oblige them to invoke `check-refs`, that subprocess runs
+inside the same sandbox as the member, and a denied artifact is invisible to the
+*checker* too — which surfaces as an exit `1` naming the wrong artifact, the
+same class of defect an unreadable `01-claims/` once produced. So the rule the
+script actually applies is **deny only what `check-refs` never reads**:
+`decisions.md` and `measurement/` stay denied in both settings scopes, and
+`07-report.json` came out, because `refs.py` appends it to the targets it
+resolves. `tests/unit/test_dispatch_harness.py` derives that pair from
+`refs._readable_targets` rather than trusting the script's own comment.
 
 `decisions.md` is the one that bites. On 2026-08-13 a `propose` dispatch was given
 a run whose `decisions.md` carried that stage's own pre-registered predictions,
@@ -376,8 +385,10 @@ So, two rules for scoring a stage by hand:
 - **Predictions go where the dispatch cannot read them, never in the run.** On
   disk before the dispatch is the right instinct; inside the dispatch's read
   scope is the wrong destination. `docs/` and `tests/` are both denied in both
-  settings scopes, so a note under either is out of reach; anywhere under `$RUN`
-  is not.
+  settings scopes, so a note under either is out of reach. Most of `$RUN` is
+  not — and the two paths under it that *are* denied are the wrong destination
+  anyway, since a prediction filed in the orchestrator's log or the review
+  surface is a prediction filed in an answer key.
 - **The gate-1 human report is not an artifact either.** Anything you write while
   holding a gate is the orchestrator's, and a later stage reading it has been
   briefed.

@@ -353,8 +353,8 @@ subagent from reading anything its skill does not list.
 Every dispatch — whether `rb-orchestrate` sending out one stage, or a stage
 being run by hand — hands a subagent exactly three things: the run directory,
 the stage's name, and the path to its skill file. Nothing else. No summary of
-what an earlier stage concluded, no excerpt of this page or the design spec,
-no "by the way" context. If a stage needs a fact, it reads it from an
+what an earlier stage concluded, no excerpt of this page or anything else under
+`docs/`, no "by the way" context. If a stage needs a fact, it reads it from an
 artifact its skill's contract lists, or it does not have it.
 
 The three fan-out stages — `extract`, `instantiate`, `challenge` — get a
