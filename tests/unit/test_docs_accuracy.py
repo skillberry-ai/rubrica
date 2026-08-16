@@ -135,6 +135,15 @@ _NUMBER = (
 )
 # Only sets that grow. `## Two check layers` stays: there are exactly two by
 # architecture, and a third would be a design change rather than an increment.
+#
+# `gates?` means the *human* gates, which are the set that grew -- three (after
+# reconcile, score and challenge) until triage added gate 0. It cannot tell that
+# sense from the closed one: `## The three gates you must pass`, over the three
+# checks CI runs, matches too, and that is semantically the `Two check layers`
+# case rather than a defect. Rewording the heading is the right response to such
+# a hit -- CONTRIBUTING.md's own section is titled `## The gates CI runs` for
+# exactly this reason -- because narrowing the token would cost the predicate the
+# case it exists for. Judge a hit before obeying it.
 _GROWING = r"(?:stages?|skills?|subcommands?|gates?)"
 # `[ \t]` rather than `\s`, twice, and `[^\n]*` rather than `.*`: with `\s+` the
 # pattern spans the newline at the end of a heading and consumes words from the
@@ -171,7 +180,8 @@ def _doc_id(path: Path) -> str:
 # relatively, as `superpowers/`, because `docs/superpowers/` from inside docs/
 # would be a broken link -- so a predicate keyed on the qualified path computes
 # "nothing cites history" and then fails its own allowlist assertion on a
-# correct tree. Measured: docs/README.md carries `superpowers` twice and
+# correct tree. Measured: docs/README.md carries `superpowers` four times, on two
+# lines (each is a link whose text and target both spell it), and
 # `docs/superpowers` zero times.
 _HISTORY_TREE = "superpowers"
 

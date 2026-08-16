@@ -863,7 +863,7 @@ The gap fixture's forbidden-substring list **is its specification.** Do not
 relax it to make prose easier; if a word is truly unavoidable, remove it and say
 so.
 
-### Two smaller test-accuracy residues
+### Three smaller test-accuracy residues
 
 `test_the_effort_choices_are_read_from_the_schema` opens "Not a second copy of
 the enum" and then asserts the tuple against a literal copy of the enum. It is
@@ -882,8 +882,8 @@ new test is a shape that could hide a real circularity in a less careful
 instance. Separately, one strengthened predicate's docstring justifies itself
 with a hazard that measurement showed never occurs in that document.
 
-Both parked as accuracy residues in tests whose properties hold: the cost of
-each is one misleading docstring, and the benefit of an edit is not worth
+All three parked as accuracy residues in tests whose properties hold: the cost
+of each is one misleading docstring, and the benefit of an edit is not worth
 re-measuring predicates that are currently pinned in four directions.
 
 ### `tests/unit/test_live_marker.py` writes into the tracked tree

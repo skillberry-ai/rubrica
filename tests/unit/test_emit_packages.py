@@ -81,9 +81,9 @@ def test_the_suite_directory_env_override_wins(monkeypatch, tmp_path):
 
     Before this test, mutating the env-var literal in emit.py had zero test
     references catching it: the final Rubrica-rename review flagged that a
-    misspelling of RUBRICA_SUITE_DIR during the rename would have left all
-    1126 tests passing. CLAUDE.md discloses the gap rather than hiding it,
-    but the fix is to close it, not just to disclose it.
+    misspelling of RUBRICA_SUITE_DIR during the rename would have left the whole
+    suite green. This test is what closed that gap, which is why CLAUDE.md no
+    longer discloses it -- disclosure was the stopgap, and closing it was the fix.
     """
     monkeypatch.setenv("RUBRICA_SUITE_DIR", str(tmp_path))
     assert suite_template_dir() == tmp_path

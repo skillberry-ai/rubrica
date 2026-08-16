@@ -309,9 +309,10 @@ first:
 
 **Check what the stage's `reads` actually gives it.** A finding that requires
 knowledge outside the contract is a finding against the *contract or the
-fixture*, never against the prompt. This mistake once drove two wasted fix
-rounds: a stage was blamed for not knowing a fact that lived only in a claims
-file it is forbidden to read. One `grep` would have settled it.
+fixture*, never against the prompt. This is the mistake behind the two fix
+rounds named at the top of this file — the same two, not another pair: a stage
+was blamed for not knowing a fact that lived only in a claims file it is
+forbidden to read, and one `grep` would have settled it.
 
 The mirror question, for a proposed `reads` addition: **does a deterministic
 gate already enforce the property?** If yes, the requirement belongs to the
@@ -332,9 +333,10 @@ Adding or renaming a stage, skill, subcommand, or artifact kind means updating
 [`docs/reference/cli.md`](docs/reference/cli.md), or
 [`docs/reference/artifacts.md`](docs/reference/artifacts.md) as appropriate.
 `tests/unit/test_docs_accuracy.py` fails until you do, and that failure is the
-guard working — update the document, not the assertion. Two policies it also
+guard working — update the document, not the assertion. Three policies it also
 enforces on this file and every other user-facing document: no hand-typed test
-count, and no heading that counts something that grows (stages, skills,
-subcommands, gates). `## Two check layers` is permitted deliberately — there are
-exactly two by architecture, and a third would be a design change rather than an
-increment.
+count; no heading that counts something that grows (stages, skills,
+subcommands, gates); and no citation of the recorded-history tree, which
+`docs/README.md` alone is allowed to link. `## Two check layers` is permitted
+deliberately — there are exactly two by architecture, and a third would be a
+design change rather than an increment.
