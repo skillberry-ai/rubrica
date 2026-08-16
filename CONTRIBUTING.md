@@ -4,7 +4,7 @@ Thanks for looking at Rubrica. This file covers the mechanics of contributing:
 how to set up a dev environment, what CI checks, and the conventions every
 commit is expected to follow. For what the project *is*, start with
 `README.md`; for how the pipeline is put together, start with
-`docs/pipeline-overview.md`.
+`docs/concepts/pipeline.md`.
 
 ## Setup
 
