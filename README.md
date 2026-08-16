@@ -11,8 +11,10 @@ code that mint the run and admit its inputs, `smoke` is deterministic code
 that exercises the emitted suite, and the other eight — `triage`, `extract`,
 `reconcile`, `propose`, `score`, `instantiate`, `challenge`, and `emit` —
 carry the pipeline's judgment as prompts. Each of those eight is dispatched
-with only a run directory, a stage name, and its skill file, never a summary
-of what an earlier stage concluded; see
+with only a run directory, a stage name, and its skill file — plus, for the
+three fan-out stages (`extract`, `instantiate`, `challenge`), the id of its
+own slice, which is an address rather than context — never a summary of what
+an earlier stage concluded; see
 [`docs/concepts/artifact-contract.md`](docs/concepts/artifact-contract.md)
 for the exact rule, including the two things an orchestrator may append when
 it retries one. Every handoff between stages is therefore a file on disk you
@@ -50,6 +52,9 @@ costs nothing. Producing or re-producing one of those recordings is the part
 that dispatches a model and costs money.
 
 ## Quickstart
+
+Commands below assume the venv `make setup` created is on `PATH`; otherwise
+prefix each with `uv run`.
 
 ```bash
 export RUN=$(rubrica intake \
