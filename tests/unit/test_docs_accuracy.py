@@ -118,3 +118,89 @@ def test_every_artifact_kind_is_documented(kind):
     assert f"`{kind}`" in _read(ARTIFACTS_REF), (
         f"docs/reference/artifacts.md never names the {kind} artifact as `{kind}`"
     )
+
+
+# Policy predicates. Unlike the four above, these do not check that a document
+# names something the code owns -- they enforce a decision about what a document
+# may contain. All were motivated by measurement, recorded here because a future
+# author will feel them as friction and deserves the reason: four hand-maintained
+# counts were stale simultaneously, and the ~800-word parenthetical in CLAUDE.md
+# that existed purely to keep the test count honest was itself wrong by 299.
+
+_TEST_COUNT = re.compile(r"\b\d{3,4}\s+(?:tests?|passed)\b")
+
+_NUMBER = (
+    r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|"
+    r"fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)"
+)
+# Only sets that grow. `## Two check layers` stays: there are exactly two by
+# architecture, and a third would be a design change rather than an increment.
+_GROWING = r"(?:stages?|skills?|subcommands?|gates?)"
+# `[ \t]` rather than `\s`, twice, and `[^\n]*` rather than `.*`: with `\s+` the
+# pattern spans the newline at the end of a heading and consumes words from the
+# line below it. Measured on the pre-rewrite README, where `# 1, the coverage
+# matrices at 2, the verdict tallies at 3` matched because `3` -> newline ->
+# `rubrica ` -> `gate` satisfied NUMBER -> space -> word -> GROWING.
+_COUNTED_HEADING = re.compile(
+    rf"^#+[ \t]+[^\n]*\b{_NUMBER}[ \t]+(?:\w+[ \t]+)?{_GROWING}\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _without_fences(text: str) -> str:
+    """Markdown text with fenced blocks blanked out.
+
+    A shell comment inside a ```bash block starts with `#` and is not a
+    heading. Measured: `# runs all three gates in order` inside a fence
+    matched the heading pattern before this was added.
+    """
+    out, fence = [], False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fence = not fence
+            continue
+        out.append("" if fence else line)
+    return "\n".join(out)
+
+
+def _doc_id(path: Path) -> str:
+    return path.relative_to(REPO_ROOT).as_posix()
+
+
+# The bare token, not `docs/superpowers`. docs/README.md links the tree
+# relatively, as `superpowers/`, because `docs/superpowers/` from inside docs/
+# would be a broken link -- so a predicate keyed on the qualified path computes
+# "nothing cites history" and then fails its own allowlist assertion on a
+# correct tree. Measured: docs/README.md carries `superpowers` twice and
+# `docs/superpowers` zero times.
+_HISTORY_TREE = "superpowers"
+
+
+@pytest.mark.parametrize("doc", _user_facing(), ids=_doc_id)
+def test_no_user_facing_document_carries_a_hand_typed_test_count(doc):
+    """The count grows with every capability, so a number typed into prose is
+    wrong shortly after it is written. `make test` reports the real one."""
+    hits = _TEST_COUNT.findall(_read(doc))
+    assert not hits, f"{_doc_id(doc)} states a test count ({hits}); run make test instead"
+
+
+@pytest.mark.parametrize("doc", _user_facing(), ids=_doc_id)
+def test_no_heading_counts_something_that_grows(doc):
+    hits = _COUNTED_HEADING.findall(_without_fences(_read(doc)))
+    assert not hits, (
+        f"{_doc_id(doc)} has a heading counting stages/skills/subcommands/gates: {hits}"
+    )
+
+
+def test_claude_md_does_not_cite_recorded_history():
+    """The instruction every agent in this repository follows must point at
+    current documentation. It used to point into a dated build record."""
+    assert _HISTORY_TREE not in _read(REPO_ROOT / "CLAUDE.md")
+
+
+def test_only_the_docs_index_cites_recorded_history():
+    citing = [_doc_id(doc) for doc in _user_facing() if _HISTORY_TREE in _read(doc)]
+    assert citing == ["docs/README.md"], (
+        "docs/README.md is the one user-facing file that may link recorded history; "
+        f"these do: {citing}"
+    )
