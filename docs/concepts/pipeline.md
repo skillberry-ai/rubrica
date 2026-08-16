@@ -27,7 +27,7 @@ contract, not a diagram convention.
 | `02` | `propose` | `rb-propose` | `manifest.json`, `01-world-model.json`, `02-scenarios.json`, `03-coverage/latest.json` | `02-scenarios.json` (appends this round) | validate |
 | `03` | `score` | `rb-score` — barrier | `manifest.json`, `01-world-model.json`, `02-scenarios.json` | `03-coverage/round-N.json`, `03-coverage/latest.json`, `02-scenarios.json` (statuses) | validate · check-refs · human gate 2 |
 | `04` | `instantiate` | `rb-instantiate` — fan-out, one per active scenario | `01-world-model.json`, `02-scenarios.json` | `04-instances/<sid>/{seed.json,expected.json,rationale.md}` | validate · check-refs |
-| `05` | `challenge` | `rb-challenge` — fan-out, one per instance | the scenario and the seed — then `expected.json` last | `05-verdicts/<sid>.json` | validate · human gate 3 |
+| `05` | `challenge` | `rb-challenge` — fan-out, one per instance | the scenario and the seed — then `expected.json` last | `05-verdicts/<sid>.json` | validate · check-refs · human gate 3 |
 | `06` | `emit` | `rb-emit` — wraps code | `02-scenarios.json`, `05-verdicts/`, `04-instances/*/expected.json`, `01-world-model.json` | `06-suite/<sid>/` task packages | validate · check-refs |
 | `07` | `smoke` | code | the emitted suite and the agent roster | `07-report.json` | validate · check-refs |
 
