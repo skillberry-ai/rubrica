@@ -148,6 +148,26 @@ there -- an incomplete claim is a validation failure, not a smaller claim.
    yourself about to write `invariant` for a sentence describing what an
    operation *does*, that is the sign you have the pair backwards.
 
+   **A state observation needs its instant.** A trace records what the target
+   did at one moment, and for a target that stores anything, the same call can
+   correctly return different results at different moments. So when this input
+   is a trace and you are writing a claim about *observed state* -- what a
+   query returned, what the store held at the time -- state the capture instant
+   in the `statement`, and cite it as a second `evidence` entry: the locator of
+   the field it came from (`/info/request_time` in an MLflow trace) with the
+   value in `quote`. It rides as evidence because that is what it is, a fact
+   read off this artifact rather than anything you concluded. Do not attach it
+   to a claim about a declared contract, a capability or an argument schema,
+   where the moment of capture means nothing.
+
+   You are the only stage that reads this artifact. `rb-reconcile` sees claims
+   and never a trace, so an instant you leave out is one no later stage can
+   recover. Measured on a real run: two traces listing the same user's
+   reservations, either side of a cancellation, produced two claims that read
+   as a flat contradiction, and reconcile could only record it unresolved
+   "because no input carries a timestamp or sequence relating them" -- while
+   both input files carried `info.request_time` all along.
+
 4. **Set `derivation` honestly, one of three values.** `stated` -- the
    artifact says this in so many words. `inferred` -- you concluded it from
    what the artifact says, without the artifact stating it outright, and

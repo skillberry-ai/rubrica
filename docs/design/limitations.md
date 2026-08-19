@@ -318,6 +318,99 @@ has spent.
 What this means for you: **a number in an exercise record is an observation, not
 a rate.** If you are about to reason from one, say which run it came from.
 
+### Two runs over the same inputs disagreed on claim count, and on which stages a gap blocks
+
+The entry above says nobody has yet run the same inputs twice and diffed the
+result. On 2026-08-16 that happened by accident, for one stage, and the answer is
+worth writing down.
+
+`run-20260816-172810` ran the `extract` fan-out twice over the same 31 admitted
+inputs, `sonnet` at `medium` effort both times. Claim totals came out **639 and
+then 546**, and the drop is concentrated in two inputs that the intervening
+prompt change explicitly excludes:
+
+| input | first run | second run |
+|---|---|---|
+| `tools-list-json` | 54 | 22 |
+| `readme-md` | 42 | 30 |
+| 27 trace inputs, combined | 493 | 453 |
+
+`tools-list-json` is a static JSON schema file. Same model, same effort, same
+input bytes, and one dispatch extracted 54 claims where the next extracted 22.
+Not truncation: both reported `subtype: success` at about $0.46, far short of the
+$2 ceiling, and `rubrica validate --stage extract` exited 0 over both sets.
+
+Why this one hurts more than a count normally would: `tools-list-json` is the
+input `rb-triage` ranked priority 1, on the grounds that it is "the only
+candidate that declares what a tool returns" — and `rb-reconcile` builds its
+coverage denominator from `outcome_class` claims, so how many of them arrive
+bounds the width of the test matrix downstream.
+
+**The confound, stated plainly.** The prompt was not byte-identical between the
+two runs: Method step 3 gained the capture-instant paragraph. That paragraph is
+scoped to trace inputs, and both files above cite `/info/request_time` zero
+times, so it is inapplicable to them rather than merely unused — but it was still
+in the prompt they were dispatched with, and a longer prompt is not a neutral
+change. So this is *evidence of large variance* and not a clean variance
+measurement. A clean one needs the identical skill dispatched twice.
+
+**What was not measured.** Whether the claim *content* diverged as much as the
+count — no semantic diff of the two claim sets was taken, so 22 claims may say
+most of what 54 said at lower granularity, or may not. `rubrica diff-runs` is
+the tool for the stage-level form of this and was not run across the pair.
+
+Parked for the same reason as the entry above: taking it properly means paying
+for repeated fan-outs over a real corpus, and this one cost $21.69 per pass.
+
+What this means for you: **a claim count is a property of a dispatch, not of an
+input.** If a run's numbers look thin, that is not by itself evidence the input
+was thin, and if they look rich, that is not evidence the extraction was
+thorough. `src/rubrica/skills/rb-extract/exercise.md` round 4 records the
+observation in full.
+
+#### The same pair of runs moved a halt, which is worse
+
+`rb-reconcile` was dispatched twice in that run, `opus` at `high` effort both
+times, over claim sets differing only as described above. Both produced a clean
+world model. They did not agree on which stages a gap blocks -- and `blocks` is
+the field `rb-orchestrate` branches on at B4 to decide whether the pipeline
+stops.
+
+| first run | second run |
+|---|---|
+| `gap.place_reservation_failure_paths` -> `propose`, `challenge` | `gap-place-reservation-unknown-restaurant` -> `score` |
+| `gap.tool_argument_validation` -> `propose`, `challenge` | `gap-search-tool-level-validation` -> `score` |
+| `gap.llm_failure_visible_result` -> `propose` | `gap-deployed-llm-backend` -> `instantiate`, `score` |
+
+The substantive unknown is the same in each row: `place_reservation`'s
+non-success surface is unobserved, tool-level argument validation is unobserved,
+the deployed chat model is undetermined. What moved is the stage each one is
+declared to block. The first run halted `propose`; the second explicitly declined
+to, on the stated grounds that "scenario design against all 7 capabilities'
+described behaviour is possible, so claiming a halt would have been dishonest."
+Both positions are defensible, which is the problem: nothing in the artifact
+distinguishes a considered judgment here from a coin flip, and the reader of a
+single run cannot tell which they have.
+
+Neither run's `blocks` assignment is wrong, and no gate can see the difference --
+`validate` and `check-refs` passed on both world models, because `blocks` is a
+free enum of stage names and any subset of them is well-formed. The consequence
+is asymmetric: claim-count variance costs coverage that a human at gate 1 might
+notice, while `blocks` variance decides whether the run reaches gate 2 at all.
+
+This also means an easy misattribution is available and was nearly made in the
+run that found it: after a prompt fix aimed at a *different* gap, `propose` came
+out unblocked, and the fix looked responsible. It was not. The fix closed
+`gap.cancellation_aftermath`, which is attributable and confirmed; `propose`
+cleared because a second dispatch of an unchanged prompt filed the same unknowns
+against a different stage. **Before crediting a change with unblocking a stage,
+check whether the gap closed or merely moved.**
+
+What this means for you: **do not read a single run's `blocks` as the design's
+verdict on what is answerable.** It is one dispatch's judgment about one claim
+set, and B4 is strict enough that on a real corpus the question is usually which
+stage halts rather than whether one does.
+
 ### `rb-triage` carries no `exercise.md`, and the evidence it would hold is not in the repository
 
 `rb-triage` is the skill without one — and **not** because it has never been

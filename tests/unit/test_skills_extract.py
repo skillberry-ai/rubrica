@@ -176,3 +176,44 @@ def test_it_requires_every_prose_heading_to_be_cited_or_explained():
     method = " ".join(section_body(load(SKILL), "3. Method").lower().split())
     assert "every `##` heading" in method
     assert "carries nothing about the target" in method
+
+
+def test_the_method_ties_a_state_observation_to_its_capture_instant():
+    """A trace claim that omits when it was observed is unresolvable downstream.
+
+    Measured on run-20260816-172810: `trajectories2-json-3` and
+    `trajectories2-json-10` both list jane@example.com's reservations, either
+    side of the cancellation in `trajectories2-json-4`, and produced claims
+    reading "returned a list containing exactly one reservation" against
+    "returned `[]`". `rb-reconcile` recorded that as `both_possible` on the
+    stated grounds that "no input carries a timestamp or sequence relating
+    them" -- while all three input files carried `info.request_time`, inside the
+    one artifact each fan-out member is allowed to read.
+
+    Asserted as a co-occurrence inside section 3 rather than as presence
+    anywhere in the file: `skills.load()` sets `body` to the entire file text,
+    so a bare substring check here would also be satisfied by the frontmatter
+    description or the Contract block.
+
+    Whitespace-normalised for the same reason the heading test above is -- the
+    words are the rule, not where a reflow put the line break.
+    """
+    method = " ".join(section_body(load(SKILL), "3. Method").lower().split())
+    assert "observed state" in method
+    assert "capture instant" in method
+    assert "request_time" in method
+    # The scoping half of the rule: it must NOT be attached to contract claims,
+    # or every claim in a trace acquires a timestamp and the signal is noise.
+    assert "declared contract" in method
+
+
+def test_the_method_says_why_only_extract_can_carry_the_instant():
+    """The rule is load-bearing because of where it sits in the pipeline, and a
+    reader who does not know that will treat it as bookkeeping and drop it.
+
+    rb-reconcile's `reads` is claims_dir and manifest: it never sees a trace, so
+    an instant extract leaves out is unrecoverable rather than merely absent.
+    """
+    method = " ".join(section_body(load(SKILL), "3. Method").lower().split())
+    assert "only stage that reads this artifact" in method
+    assert "no later stage can recover" in method

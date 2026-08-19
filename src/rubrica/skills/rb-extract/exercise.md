@@ -201,3 +201,83 @@ about whether the heading-coverage instruction changes behaviour on a prose
 input. Re-running against `notes-md` specifically would be needed to observe
 that, and was not done here because the plan's Step 2 script names `api-json`
 as the slice to dispatch.
+
+## Run record: round 4, re-record after the capture-instant change
+
+Method step 3 gained "A state observation needs its instant": when the input is
+a trace, a claim about observed state must state the capture instant and cite it
+as a second `evidence` entry, and must not attach it to a claim about a declared
+contract, a capability or an argument schema. This round re-records against the
+changed prompt, per the obligation to re-record after a skill changes.
+
+Unlike rounds 1-3 this was not a toy run. The fan-out ran against a real corpus
+(`run-20260816-172810`, the reservation-service target: two MLflow trace
+captures, a tool schema, a README and two source files), so it is 31 dispatches
+rather than one. That is a larger sample than this file's format assumes, and
+the aggregate is reported as an aggregate rather than dressed up as a single
+observation.
+
+Dispatched via `scripts/dispatch-stage.sh`, one isolated instance per member,
+each with its own `RUBRICA_LAB` so no two shared a `CLAUDE_CONFIG_DIR`. Model
+`sonnet`, effort `medium`, five concurrent. **31 of 31 exited 0 with
+`subtype: success`**, 251 turns and $21.69 in total, mean $0.70 per member.
+`rubrica validate --stage extract` exited 0 over all 31 claims files.
+
+**The rule fired where it applies and nowhere else.** 25 claims files cite
+`/info/request_time` as evidence. The four non-trace inputs -- `tools-list-json`,
+`readme-md`, `agent-py`, `test-agent-py` -- cite it zero times between them, so
+the scoping clause held rather than every claim in the run acquiring a
+timestamp. The two trace inputs that do not cite it are `trajectories2-json-13`
+and `trajectories2-json-14`, the two captures in which the agent called no tool
+at all: it rejected an unparseable datetime and an out-of-range `price_tier` in
+its own turn. Those traces observe no state, so the rule correctly does not
+reach them. Of the 25 trace inputs that do observe state, 25 carried the
+instant.
+
+**What the change was for, observed end to end.** The three claims that had been
+unorderable now carry their moments:
+
+| claim | `evidence[].quote` | statement |
+|---|---|---|
+| `clm-trajectories2-json-3-016` | `2026-08-16T15:05:04.297Z` | `list_reservations` for jane@example.com returned exactly one reservation |
+| `clm-trajectories2-json-4-013` | `2026-08-16T15:05:20.180Z` | that reservation id was cancelled |
+| `clm-trajectories2-json-10-017` | `2026-08-16T15:07:24.653Z` | the same call returned an empty list |
+
+Before the change, the first and third of these were two claims that read as a
+flat contradiction, and `rb-reconcile` recorded them `both_possible` on the
+stated grounds that "no input carries a timestamp or sequence relating them" --
+while all three input files carried `info.request_time` the whole time, inside
+the one artifact each member is allowed to read.
+
+Compliance was to the letter but not uniform in form: 25 files put the instant in
+`evidence`, and 7 also wrote it into the `statement` as the paragraph asks.
+Phrasings varied ("as observed at the request instant", "as captured at
+request_time"). The instant is machine-readable in `evidence[].quote` either
+way, so this is not a defect, but a later round wanting the statement form
+consistently would need the paragraph to say so more plainly than it does.
+
+**Read audit, all 31 transcripts, against `reads = ["manifest", "input_file"]`:**
+every member touched its own `00-inputs/<id>` and its own `01-claims/<id>.json`
+and no other member's slice. Zero foreign reads across 31 concurrent processes.
+This is the strongest isolation evidence recorded here: rounds 1-3 covered three
+members or one, and round 2 recorded an actual sibling read, so a clean 31 is a
+result rather than a formality.
+
+**A finding this round produced that has nothing to do with the change, and
+matters more than it.** Claim totals across the same 31 inputs moved 639 -> 546
+between the round-3-era prompt and this one, and the drop is concentrated in two
+inputs the new rule explicitly excludes: `tools-list-json` 54 -> 22 and
+`readme-md` 42 -> 30. `tools-list-json` is a static JSON schema file. Same
+prompt for it, same model, same effort, same input bytes, and one run extracted
+54 claims where the next extracted 22 -- both `success`, both around $0.46, both
+far short of the $2 ceiling, so not truncation. The variance is run-to-run
+nondeterminism on the single input triage ranked priority 1, "the only candidate
+that declares what a tool returns".
+
+Two consequences worth stating rather than leaving implicit. First, this round
+cannot cleanly attribute anything else to the prompt change: the noise floor
+between two extract runs is larger than most effects anyone would want to
+measure, so the timestamp result above is trusted because it is a
+presence/absence check with a scoping control, not because 546 differs from 639.
+Second, the sample size in this file has been one dispatch per round until now.
+`docs/design/limitations.md` carries the entry this observation motivated.
