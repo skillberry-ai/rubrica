@@ -341,11 +341,22 @@ subcommands, gates); and no citation of the recorded-history tree, which
 deliberately — there are exactly two by architecture, and a third would be a
 design change rather than an increment.
 
-One of those documents is drawn rather than written:
+Two of this project's drawings are generated rather than written, and neither
+may be hand-edited.
 [`docs/concepts/pipeline-diagram.html`](docs/concepts/pipeline-diagram.html) is
-**generated**, by `scripts/render-pipeline-diagram.py`. Edit the script's `ROWS`
+the detailed one, from `scripts/render-pipeline-diagram.py`. Edit the script's `ROWS`
 table and re-render; never hand-edit the page. The same test module checks both
 halves — that `ROWS` draws `paths.STAGES` in order, and that the committed page
 is byte-identical to a fresh render — so a stage added without a row, or a page
 edited without its script, is a failure rather than a drawing that quietly
 describes an older pipeline.
+
+The other is the pair of SVGs the README shows, `docs/assets/how-it-works.svg`
+and its `-dark` twin, from `scripts/render-readme-diagram.py`. It draws the same
+run at a newcomer's altitude — the stages collapsed into five phases, the human
+gates kept, everything else dropped — and its `PHASES` table is checked to
+partition `paths.STAGES` in order and to mark every `brief.GATES` entry. Two
+files because GitHub's dark theme does not follow the OS `prefers-color-scheme`
+an `<img>`-referenced SVG resolves against, so the README picks between them
+with a `<picture>` element. Which phase a stage belongs to is editorial and no
+test can rule on it; that judgment is yours to read.

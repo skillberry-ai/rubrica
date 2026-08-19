@@ -6,24 +6,48 @@ by chaining AI skills over a schema-validated, on-disk artifact contract.
 
 ## How it works
 
-A run moves through eleven stages. `survey` and `intake` are deterministic
-code that mint the run and admit its inputs, and `smoke` is deterministic code
-that exercises the emitted suite. The other eight are dispatched as prompts,
-with only a run directory, a stage name, and a skill file — plus, for the three
-fan-out stages (`extract`, `instantiate`, `challenge`), the id of its own
-slice, which is an address rather than context — never a summary of what an
-earlier stage concluded. Seven of those eight carry the pipeline's judgment:
-`triage`, `extract`, `reconcile`, `propose`, `score`, `instantiate`, and
-`challenge`. The eighth, `emit`, is the exception that the rest of the design
-leans on — its skill is a thin wrapper that runs `rubrica emit` and writes
-nothing itself, because compiling the suite has to be deterministic code: two
-runs with identical inputs to it must produce byte-identical suites, or
-variance stops being attributable to any one stage. See
-[`docs/concepts/artifact-contract.md`](docs/concepts/artifact-contract.md)
-for the exact rule, including the two things an orchestrator may append when
-it retries one. Every handoff between stages is therefore a file on disk you
-can open, schema-check, and diff, never something carried only in a model's
-memory.
+Point Rubrica at whatever already describes your system — a specification, a
+captured trajectory, a directory of source. It reads those into a single world
+model of claims about what the system does, proposes scenarios that would test
+those claims, turns each surviving scenario into a concrete test case, attacks
+the cases to find the ones that do not hold up, and compiles the rest into a
+suite you can run. You sign off at each gate below, and nothing past a gate
+happens until you do.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)"
+            srcset="docs/assets/how-it-works-dark.svg">
+    <img src="docs/assets/how-it-works.svg" width="100%"
+         alt="Left to right: the artifacts you bring, then five phases — select,
+              understand, cover, build, compile — then the runnable test suite that
+              comes out. A numbered marker between two phases is a gate a human
+              holds, and each phase lists the stages it covers.">
+  </picture>
+</p>
+
+Three things in that picture are worth a sentence each, because they are what
+make the design unusual rather than just long:
+
+- **Every arrow is a file on disk.** No stage is told what an earlier one
+  concluded — it reads an artifact or it does not know. So each handoff is
+  something you can open, schema-check, and diff between runs, which is also
+  what makes a bad result attributable to one stage:
+  [`docs/concepts/artifact-contract.md`](docs/concepts/artifact-contract.md).
+- **Every test traces back to a claim, and every claim to your artifacts.** A
+  claim carries the evidence it came from, so a test you disagree with can be
+  followed back to the line that produced it:
+  [`docs/concepts/glossary.md`](docs/concepts/glossary.md).
+- **The gates are human, and gate 0 is different in kind from the rest.** The
+  later ones ask you to review a judgment made from evidence the run already
+  holds. Gate 0 decides what the run can ever know: nothing after `intake`
+  reads your corpus again, so a candidate declined there is gone as completely
+  as if it had never been in the corpus at all.
+
+The stage-by-stage picture — what each stage reads, writes, and is checked by —
+is [`docs/concepts/pipeline.md`](docs/concepts/pipeline.md), and
+[`docs/concepts/pipeline-diagram.html`](docs/concepts/pipeline-diagram.html)
+draws the same pipeline in full detail, fan-outs and barriers included.
 
 ## Status
 

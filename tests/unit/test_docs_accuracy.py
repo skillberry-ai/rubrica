@@ -24,7 +24,7 @@ from types import ModuleType
 
 import pytest
 
-from rubrica import paths, skills, validate
+from rubrica import brief, paths, skills, validate
 from rubrica.cli import subcommand_names
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -257,4 +257,87 @@ def test_only_the_docs_index_cites_recorded_history():
     assert citing == ["docs/README.md"], (
         "docs/README.md is the one user-facing file that may link recorded history; "
         f"these do: {citing}"
+    )
+
+
+# The README's own drawing. Same discipline as the detailed page above -- a
+# content table in a script, the committed output compared against a fresh
+# render -- because a README picture is the one drawing a reader sees before they
+# have any way to tell it is out of date. It differs from that page in one respect
+# only: it groups the stages into phases rather than giving each its own row, so
+# the predicate below asserts on the partition rather than on a row per stage.
+README_RENDERER = REPO_ROOT / "scripts" / "render-readme-diagram.py"
+
+
+def _readme_renderer() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("render_readme_diagram", README_RENDERER)
+    assert spec is not None and spec.loader is not None, f"cannot load {README_RENDERER}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_readme_diagram_covers_every_stage_in_contract_order():
+    """A partition, so this is stronger than the presence check a grouped drawing
+    might seem to allow: concatenating the phases has to reproduce paths.STAGES
+    exactly. Measured red on a stage deleted from its phase, on a renumbered gate,
+    and on a hand-edited SVG.
+
+    What it does not catch, also measured: moving `reconcile` from the second phase
+    to the front of the third leaves the concatenation identical and passes. Which
+    phase a stage belongs to is an editorial judgment about altitude, not a fact
+    the code owns -- the same reason check-refs resolves a claim reference without
+    ruling on whether the claim supports it. Reading the drawing is what catches
+    that; this predicate catches the drift a reader would not notice.
+    """
+    covered = [stage for phase in _readme_renderer().PHASES for stage in phase["stages"]]
+    assert covered == list(paths.STAGES), (
+        "the README diagram's PHASES table does not partition paths.STAGES in order: "
+        f"{covered} != {list(paths.STAGES)}"
+    )
+
+
+def test_the_readme_diagram_marks_every_human_gate():
+    """brief.GATES is the code-side source of truth -- `rubrica gate-brief` refuses
+    any number outside it -- so the drawing's gates stay derived rather than typed.
+    Gate 0 is why this exists: it was added after the other three, and every
+    hand-maintained count of them went stale in the same commit.
+    """
+    marked = tuple(
+        phase["gate"] for phase in _readme_renderer().PHASES if phase["gate"] is not None
+    )
+    assert marked == brief.GATES, (
+        f"the README diagram marks gates {marked}; brief.GATES is {brief.GATES}"
+    )
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_the_committed_readme_diagram_matches_a_fresh_render(theme):
+    """Both themes, because the pair is what the README's <picture> element
+    references and a reader only ever sees one of them -- so a stale dark file is
+    invisible to anyone browsing in light mode, including the author who forgot
+    to re-render."""
+    renderer = _readme_renderer()
+    path = renderer.OUTPUTS[theme]
+    assert path.is_file(), f"{_doc_id(path)} is missing; run {_doc_id(README_RENDERER)}"
+    assert _read(path) == renderer.svg(theme), (
+        f"{_doc_id(path)} is stale or hand-edited; re-run {_doc_id(README_RENDERER)}"
+    )
+
+
+def test_the_readme_references_both_diagram_themes():
+    """The guard above keeps the files honest; this one keeps them reachable. A
+    <picture> that lost its dark <source> still renders, which is exactly why the
+    omission would go unnoticed on a light-themed page.
+    """
+    text = _read(REPO_ROOT / "README.md")
+    renderer = _readme_renderer()
+    for theme, path in renderer.OUTPUTS.items():
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        assert rel in text, f"README.md never references the {theme} diagram, {rel}"
+    dark = renderer.OUTPUTS["dark"].relative_to(REPO_ROOT).as_posix()
+    source = text[text.index("<picture>") : text.index("</picture>")]
+    assert "prefers-color-scheme: dark" in source and dark in source, (
+        "README.md's <picture> does not offer the dark diagram under a "
+        "prefers-color-scheme media query"
     )
