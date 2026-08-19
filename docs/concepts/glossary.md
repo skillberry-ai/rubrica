@@ -13,7 +13,22 @@ catalogue schema's `candidates[]` entries carry `sha256`, `bytes`, `kind`, and
 per candidate; `rb-triage` then rules on each as `admit` or `decline`, with
 `needs_projection` recorded as a decline reason code when the candidate is
 valuable but not usable as-is (`src/rubrica/schema/triage-0.1.json`'s
-`decline_reason` enum).
+`decline_reason` enum). A candidate also carries `admissible`, and a container
+file whose elements were exploded into candidates of their own is recorded
+`admissible: false` — it stays visible rather than vanishing, because declining
+it and saying why is what tells a reader at gate 0 that its elements are the
+real candidates.
+
+## cell
+
+One capability × outcome-class pair, and the unit coverage is counted in. Each
+`capability_matrix.cells[]` entry names a `capability_id`, an
+`outcome_class_id`, the `scenario_ids` that reach it, and a boolean `covered`
+(`src/rubrica/schema/coverage-0.1.json`); the goal matrix counts `rows` the same
+way for goals. How many cells exist is fixed by `denominator.capability_cells`
+before the first round runs, so "coverage" here always means a fraction of a
+frozen set — never a judgment that enough tests exist. A cell that is not
+covered is recorded as a `hole`, with a reason for why not.
 
 ## claim
 
@@ -35,6 +50,34 @@ Two claims that cannot both hold, recorded rather than resolved.
 definition). The world model carries the disagreement forward instead of
 quietly picking a side.
 
+## corpus
+
+The directory roots `rubrica survey` walks, recorded verbatim in
+`request.corpus_roots` (`src/rubrica/schema/catalogue-0.1.json`). It is the only
+thing a run ever sees of the target's own files, and it is read exactly once:
+`survey` catalogues what it finds, `rb-triage` rules on the catalogue, and
+nothing downstream of `intake` opens the corpus again.
+
+A file can fail to reach `extract` two different ways, and the difference is
+load-bearing. `survey` *excludes* it mechanically, recording a `path` and one
+`exclusion_reason` — `gitignored`, `vcs_metadata`, `binary`, `lockfile`,
+`vendored`, `duplicate`, `unreadable`, or `operator_excluded` — and it never
+becomes a candidate at all. `rb-triage` *declines* a candidate as a judgment,
+under one of the `decline_reason` codes. An exclusion is arithmetic; a decline
+is the thing gate 0 exists to review.
+
+## deficiency
+
+Something the admitted set does not cover that the objective needs, recorded by
+`rb-triage` with a `deficiency_id`, a `subject`, a `statement`, and optionally a
+`closed_by` naming the projection that answers it
+(`src/rubrica/schema/triage-0.1.json`). It is triage's own account of what its
+selection cannot do, which is why an empty `deficiencies` array is a claim
+rather than an absence: it says the admitted candidates cover everything the
+objective needs, and a human at gate 0 will read it as that. Distinct from a
+`gap`, which `rb-reconcile` records later about the *target* rather than about
+the corpus.
+
 ## denominator
 
 The coverage denominator, computed once by `rb-reconcile` and frozen at a
@@ -51,6 +94,39 @@ A claim's honesty grade: `stated`, `inferred`, or `reverse_engineered`
 that "the spec says this" and "I guessed from one trace" never look alike
 downstream — a claim's derivation travels with it through the world model and
 into every scenario that cites it.
+
+## digest
+
+The bounded summary of one candidate that `survey` writes into the catalogue,
+and the only thing `rb-triage` ever reads about that candidate — never its
+bytes. `policy.digest_body_chars` caps the size and `digest_truncated` records
+when the cap bit (`src/rubrica/schema/catalogue-0.1.json`).
+
+`src/rubrica/digest.py` calls itself "the design's single point of failure and is
+written knowing it": a fact absent from a digest is a fact triage does not have,
+and the generator is code that cannot know what matters about a target it has
+never seen. Completeness being unreachable, the mitigation is honesty instead —
+`heuristics_fired` records which extractors actually found something, and a
+triage that cannot rule on a candidate declines it `digest_insufficient` and
+names the field it needed. That turns the module's blindness into a finding a
+human reads at gate 0 rather than a silent bad selection.
+
+## disposition
+
+`rb-triage`'s ruling on one candidate: `admit` or `decline`, carrying a prose
+`reason`, an `authority`, a `reason_code` from the `decline_reason` enum when it
+declines, and a `priority` when it admits
+(`src/rubrica/schema/triage-0.1.json`). No code acts on `priority` — an integer
+rank, 1 for the most valuable — it orders the human's reading. There is exactly
+one disposition per catalogued candidate, including containers marked
+`admissible: false` and every candidate that will be declined, because a surface
+with nothing but declines is precisely what a human needs to see at gate 0.
+
+`authority` is `triage` for everything the skill wrote, and `human` for a gate-0
+override — written by a person, or by `rubrica adopt-projection` when a
+manufactured projection is admitted. Both edit that same record rather than
+starting a new run, so `authority` is the only field that tells which admissions
+the stage authored from which a human made at the gate.
 
 ## distractor
 
@@ -75,6 +151,25 @@ knowledge and run on. A cell that cannot be covered because of a gap is
 separately recorded as a `blocked_by_gap` hole rather than `not_yet_attempted`
 — which is what lets `rb-score` reach `converged` instead of spending rounds
 on something no round can close.
+
+## gate
+
+A check standing between one stage and the next, in two kinds that are not
+interchangeable. A *deterministic* gate is `rubrica validate` (layer 1, JSON
+Schema, one per artifact kind) or `rubrica check-refs` (layer 2, cross-artifact
+references, seed conformance, reachability, invariant evaluation): it passes or
+fails on evidence already in the run, and its findings are machine text the
+orchestrator may hand back to a stage verbatim. A *human* gate is a point where
+the pipeline stops and a person rules; `brief.GATES` enumerates them and
+`rubrica gate-brief --gate N` composes the reading surface for each
+(`src/rubrica/brief.py`).
+
+Gate 0, which follows `triage`, is different in kind from the human gates after
+it. They review a judgment made from evidence the run already holds, so
+overturning one corrects an inference about the target. Gate 0 decides what the
+run can ever know — nothing after `intake` reads the corpus again — which is also
+why `triage` cannot hold it: the same party selecting the inputs and ratifying
+the selection would make the run unfalsifiable.
 
 ## Harbor
 
@@ -109,11 +204,43 @@ that gap does; `not_yet_attempted` carries no such requirement and implies
 another round of `propose` could still close it — the two reasons are not
 interchangeable even though both leave the cell uncovered today.
 
+## instance
+
+One instantiated scenario: the directory `04-instances/<scenario_id>/` holding
+`seed.json`, `expected.json`, and `rationale.md`, written by a single
+`rb-instantiate` fan-out member (`src/rubrica/paths.py`'s `instance_dir`,
+`seed`, `expected` and `rationale`). A scenario becomes an instance only if
+`rb-score` left it `active`, and from there the run's later stages address
+instances rather than scenarios: `rb-challenge` writes one verdict per instance,
+and `emit` compiles one Harbor package per instance whose verdict accepted it.
+`RunPaths.scenario_ids_with_instances` is how the rest of the run asks which
+scenarios got that far.
+
+## manifest
+
+`manifest.json`, minted by `intake`, holding the run's identity: its `target`
+(`name` and `interface`), one `inputs[]` entry per admitted artifact carrying
+`artifact_id`, `source_path`, `stored_as`, `sha256`, `kind` and `bytes`, the
+`limits` (`max_rounds`, `max_scenarios`), and a `stages` map
+(`src/rubrica/schema/manifest-0.1.json`). Changing a limit is `rubrica
+set-limit`, which records the reason in `decisions.md` — so raising a ceiling is
+a decision on the record rather than a silent hand-edit.
+
+The `stages` map is written by `rubrica record-stage` as each stage is
+dispatched: one entry per stage name with the `model`, the `effort`, and the
+`skill_sha256` of the skill file that dispatch actually used. A digest that no
+longer matches the file on disk therefore means the file changed after the run —
+the hook working, not a defect. `intake`, `smoke` and `survey` are code and have
+no entry there, and their absence is not a finding.
+
 ## objective
 
 The survey's stated aim, `breadth` or `depth`, recorded in
 `request.objective` in the catalogue (`src/rubrica/schema/catalogue-0.1.json`)
-and read by `rb-triage` before it rules on any candidate. Triage may record a
+and read by `rb-triage` before it rules on any candidate. Triage judges whether
+the objective is `supported` against the surfaces it found — `depth` on a surface
+with one candidate is not supported, and neither is `breadth` when almost every
+surface has no behavioural evidence at all. It may record a
 `recommended_objective` if it disagrees, but its contract forbids acting on
 that recommendation — it selects against the objective it was given and lets
 a human decide at gate 0 (`src/rubrica/skills/rb-triage/SKILL.md`).
@@ -138,6 +265,19 @@ which deficiency it `closes`, which candidates it draws on as `sources`, and
 a `method` with a stated `confidence`
 (`src/rubrica/schema/triage-0.1.json`'s `projection` definition) — it is a
 declared substitute, never a silent stand-in.
+
+## round
+
+One `propose` → `score` iteration of the loop that stages 02 and 03 form,
+bounded by `limits.max_rounds`. `rb-propose` appends that round's scenarios to
+`02-scenarios.json` and never renumbers an earlier round's; `rb-score` writes
+`03-coverage/round-N.json` alongside `03-coverage/latest.json`, carrying
+`progress.new_cells_this_round`, `progress.rounds_without_progress`, and a
+`verdict` of `continue`, `converged`, `halted_no_progress`, or
+`halted_round_cap` (`src/rubrica/schema/coverage-0.1.json`). Score *computes*
+that verdict and stops there; only the orchestrator acts on it, so the stage
+that measures progress is never the stage that decides whether to spend another
+round.
 
 ## run
 
@@ -174,6 +314,23 @@ and a field cannot state that at all
 downstream of reconcile is a prescription to `rb-instantiate`, never an
 assertion about the target system. See `docs/design/limitations.md` for the
 consequences this has for what a seed can and cannot be checked against.
+
+## surface
+
+A coherent region of the target's behaviour that a suite could be built about: a
+persona, an API area, a workflow, a subsystem. `rb-triage` groups every
+candidate into exactly one surface — including the ones it declines — and records
+each with a `name`, the `evidence` candidate ids, and a `weight` of
+`{candidates, bytes}` that is plain arithmetic over the catalogue so a reader can
+check it (`src/rubrica/schema/triage-0.1.json`'s `objective_review.surfaces[]`;
+the term itself is defined in `src/rubrica/skills/rb-triage/SKILL.md`).
+
+A surface is not a guess at the target's internal structure — it groups the
+evidence by what that evidence is *about*. Enumerating them is not a courtesy
+either: the surfaces and their weights are what let a human at gate 0 see that
+the objective they declared excludes something they wanted, and `supported` in
+the same record is triage's judgment on whether the surfaces it found can carry
+that objective at all.
 
 ## verdict
 
