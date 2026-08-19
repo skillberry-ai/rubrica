@@ -100,10 +100,12 @@ def start_server() -> subprocess.Popen:
     raise RuntimeError(f"MCP server did not open {SERVER_HOST}:{SERVER_PORT} within 30s")
 
 
-# Ten prompts. Five happy paths, five aimed at the output questions the control
-# run could not answer. Prompts 7 and 8 name an obviously-invalid id explicitly,
-# because a model told only "a restaurant that does not exist" will search first
-# and never drive the error path.
+# p01-p10 are the original list: five happy paths, five aimed at the output
+# questions the control run could not answer. Prompts 7 and 8 name an
+# obviously-invalid id explicitly, because a model told only "a restaurant that
+# does not exist" will search first and never drive the error path. p11 onwards
+# were added later, each closing a gap a pipeline run recorded -- see the block
+# above them.
 #
 # {restaurant_id} and {reservation_id} are filled from an OBSERVED span output,
 # never authored -- see substitute() below.
@@ -133,6 +135,41 @@ PROMPTS: list[tuple[str, str]] = [
     ),
     ("p09-list-empty", "List all reservations for nobody@example.com"),
     ("p10-cancel-unknown", "Cancel reservation reservation_deadbeef1234 because it does not exist"),
+    # p11 onwards were added on 2026-08-16 to close gaps a full pipeline run
+    # recorded against the p01-p10 capture. Each one exists because
+    # 01-world-model.json named an input that would close a specific gap, and
+    # every one of those asks was for a trace. They are appended rather than
+    # interleaved so p01-p10 keep the ids and the order the committed
+    # trajectories.json was captured under.
+    #
+    # p11 is the one that unblocked the run. p05-cancel cancels jane's
+    # reservation and nothing in the original ten ever listed afterwards, so
+    # whether cancelling deletes the record or flags it was unknowable from the
+    # capture -- and every place-then-cancel-then-list scenario had two possible
+    # gold answers. Listing the same guest after p05 settles it by observation.
+    # It reads {reservation_id} indirectly: p05 must have run for this to mean
+    # anything, and p05 skips itself if place_reservation was never observed.
+    ("p11-list-after-cancel", "List all reservations for jane@example.com"),
+    (
+        "p12-check-over-capacity",
+        "Check availability at restaurant {restaurant_id} for 30 people on 2025-03-15 at 7:00 PM",
+    ),
+    ("p13-list-by-phone", "List all reservations for +1-555-987-6543"),
+    (
+        "p14-check-bad-datetime",
+        "Check availability at restaurant {restaurant_id} for 4 people on the 45th of "
+        "Foguary at 25:00",
+    ),
+    ("p15-search-bad-price-tier", "Find restaurants in Boston with price tier 9"),
+    (
+        "p16-place-over-capacity",
+        "Book a table at restaurant {restaurant_id} for 2025-03-15T19:00:00, party of 40. "
+        "Name: Overflow Test, Phone: +1-555-000-0002, Email: overflow@example.com",
+    ),
+    (
+        "p17-search-city-catalogue",
+        "List every restaurant you know about in Boston, with cuisine and price tier for each",
+    ),
 ]
 
 

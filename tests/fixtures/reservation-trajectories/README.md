@@ -163,3 +163,141 @@ mechanical split loses nothing and keeps this file the record.
 One consequence worth stating: ten trace files mean ten `rb-extract` members, each
 seeing exactly one run and none seeing a sibling. That is a stronger fan-out
 isolation test than one member reading all ten would have been.
+
+# Second capture: `trajectories2.json`
+
+A full pipeline run over `trajectories.json` (`runs/run-20260816-085526`) reached
+`rb-reconcile`, produced a clean world model, and then **halted at B4**: all
+seven of its gaps named a stage still to come. Six of the seven asked for
+evidence this capture could supply, and an operator ruling put
+`gap-a2a-method-envelope` out of scope. `p11`–`p17` were appended to
+`PROMPTS` to close the other six, and the harness was run once over the whole
+list.
+
+`p11` is the one that unblocked the run, and it is a one-line addition rather
+than a new mechanism. `p05-cancel` already cancels jane's reservation with a
+`{reservation_id}` filled from an observed `place_reservation` span; nothing in
+`p01`–`p10` ever listed afterwards, so whether cancelling deletes the record or
+flags it was unknowable, and every place-then-cancel-then-list scenario had two
+possible gold answers. Listing the same guest after `p05` settles it.
+
+## Capture conditions
+
+| | |
+|---|---|
+| Date | 2026-08-16 |
+| Model | `Azure/gpt-4.1` via litellm proxy (`OPENAI_API_BASE`) — same as the first capture |
+| MLflow | 3.15.1, `sqlite:///` backend, `autolog()` for LangChain |
+| Target | `rossoctl/examples` at `dbbc5e0f46cc92c8f642e44d1124965394cf36e5`, clean — the same commit |
+| MCP server | in-process build, `streamable-http` on `127.0.0.1:8765` |
+| Agent | `graph.ainvoke` driven directly; A2A layer not used |
+| Traces written | 17 |
+
+Same harness, same model, same target commit as `trajectories.json`. So the two
+files differ by exactly two things: LLM nondeterminism, and the seven appended
+prompts. Anything else a reader finds between them is a finding, not a
+configuration difference.
+
+**This file re-captures `p01`–`p10` as well as adding `p11`–`p17`**, because the
+harness runs its whole `PROMPTS` list. The two files therefore hold independent
+captures of the same first ten prompts, and the corpus containing both has
+deliberate redundancy for triage to rule on rather than for this fixture to
+pre-resolve.
+
+## Added prompts, verbatim, and the gap each closes
+
+| id | text | closes |
+|---|---|---|
+| `p11-list-after-cancel` | List all reservations for jane@example.com | `gap-post-cancellation-state` |
+| `p12-check-over-capacity` | Check availability at restaurant `{restaurant_id}` for 30 people on 2025-03-15 at 7:00 PM | `gap-check-availability-party-size` |
+| `p13-list-by-phone` | List all reservations for +1-555-987-6543 | `gap-list-reservations-user-id` |
+| `p14-check-bad-datetime` | Check availability at restaurant `{restaurant_id}` for 4 people on the 45th of Foguary at 25:00 | `gap-argument-validation` |
+| `p15-search-bad-price-tier` | Find restaurants in Boston with price tier 9 | `gap-argument-validation` |
+| `p16-place-over-capacity` | Book a table at restaurant `{restaurant_id}` for 2025-03-15T19:00:00, party of 40. Name: Overflow Test, Phone: +1-555-000-0002, Email: overflow@example.com | `gap-place-reservation-failures` |
+| `p17-search-city-catalogue` | List every restaurant you know about in Boston, with cuisine and price tier for each | `gap-restaurant-catalogue` |
+
+`p12`, `p14` and `p16` use `{restaurant_id}` rather than a literal `rest_001` so
+they inherit `substitute()`'s discipline: if `p01-search` never observes an id
+they skip, rather than run against an authored one.
+
+**The gap ids live here and never in the capture.** An earlier attempt at this
+capture used a bespoke driver that wrapped each invocation in an MLflow span
+carrying `label` and `targets_gap` attributes, which put the string
+`gap-post-cancellation-state` inside the trace data. Admitting that would have
+let `rb-extract` read the analysis instead of deriving it, and every gate would
+still have passed — schema-valid, references resolvable, no finding anywhere. It
+was caught by grepping the file before admitting it, not by any check. That
+driver's output was discarded; this file is the harness's.
+
+The same wrapper did quiet second damage worth recording, because it is not
+obvious: it made MLflow name each trace after the wrapper span rather than
+`LangGraph`, and consequently record **no `request_preview`** — which is exactly
+the field `digest.py`'s `request_text` heuristic reads. The user's own utterance
+would have been invisible to `rb-triage`, reproducing the blindness the first
+run's `def-multi-turn-utterances` deficiency complained about. One instrumentation
+choice both injected the answer and hid the question.
+
+## Outcome per prompt
+
+| id | status | tools_called |
+|---|---|---|
+| `p01-search` | captured | `search_restaurants` |
+| `p02-search-then-check` | captured | `search_restaurants`, `check_availability` |
+| `p03-place` | captured | `check_availability`, `place_reservation` |
+| `p04-list` | captured | `list_reservations` |
+| `p05-cancel` | captured | `cancel_reservation` |
+| `p06-search-empty` | captured | `search_restaurants` |
+| `p07-check-unknown` | captured | `check_availability` |
+| `p08-place-unknown` | captured | `check_availability` |
+| `p09-list-empty` | captured | `list_reservations` |
+| `p10-cancel-unknown` | captured | `cancel_reservation` |
+| `p11-list-after-cancel` | captured | `list_reservations` |
+| `p12-check-over-capacity` | captured | `check_availability` |
+| `p13-list-by-phone` | captured | `list_reservations` |
+| `p14-check-bad-datetime` | captured | *(none)* |
+| `p15-search-bad-price-tier` | captured | *(none)* |
+| `p16-place-over-capacity` | captured | `check_availability` |
+| `p17-search-city-catalogue` | captured | `search_restaurants` |
+
+All seventeen captured; none skipped, errored, or `no-trace`.
+
+Three outcomes are results rather than failures, and each answers its gap
+differently from how the gap expected:
+
+- `p14` and `p15` called **no tool at all**. The agent rejected "the 45th of
+  Foguary at 25:00" and "price tier 9" in its own turn, before dispatching
+  anything. `gap-argument-validation` asked what the *tools* reject; the observed
+  answer is that these arguments never reach them.
+- `p16` stopped at `check_availability` and never attempted
+  `place_reservation`, the same shape `p08-place-unknown` showed in the first
+  capture. `gap-place-reservation-failures` asked what happens when that call
+  fails; the observed answer is that the agent's guard stops it earlier. Two
+  independent bad-booking shapes now attest that guard.
+- `p11` returned `[]`. Cancellation removes the record; a cancelled reservation
+  does not linger with a status. `reservation_61e0d19f75d1` is present in
+  `p04-list`, receipted in `p05-cancel`, and absent in `p11`.
+
+## Capture history
+
+The harness was launched twice. The first launch **hung** on `p03-place`'s LLM
+call and was killed after roughly fifty minutes of silence; it wrote no output
+file, because `capture_trajectories` writes only after every prompt completes,
+so there was nothing to select from and nothing to discard. The second launch
+produced this file.
+
+That is an infrastructure stall, not a re-roll: no prompt was re-run to obtain a
+better trace, and no trace from a first attempt was compared against a second.
+The single-pass rule holds for this file.
+
+The stall has a cause worth recording as a finding about the target rather than
+about the harness. `graph.py` builds `ChatOpenAI` with `temperature=0` and
+**no `timeout` and no `max_retries`**, so a stalled upstream request hangs the
+agent indefinitely with no recovery. The second launch was given a wall-clock
+`timeout 1500` for exactly that reason. A suite built from this corpus arguably
+ought to cover the behaviour; it is recorded here because the capture harness
+inherits the agent's own client construction and therefore inherits the defect.
+
+## Single-pass rule
+
+Captured in one pass over the full seventeen-prompt list. No prompt was re-run
+to obtain a better trace, and no value was filled that was not observed.
