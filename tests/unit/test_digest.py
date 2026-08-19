@@ -96,6 +96,79 @@ def test_a_trace_digest_reaches_every_parsec_selection():
     assert "names" in result["heuristics_fired"]
 
 
+def test_an_mlflow_enveloped_trace_reaches_the_same_facts():
+    """The same four facts, from a capture that wraps them in `info`/`data`.
+
+    MEASURED on the reservation-service corpus: all 27 MLflow trace elements
+    fired `names` alone, because it was the only heuristic that recursed.
+    `status` wanted a top-level `state` and MLflow puts it at `info.state`;
+    `request_text` wanted `request_preview` and MLflow puts it at
+    `info.request_preview`; `element_counts` wanted `spans` and MLflow puts it
+    at `data.spans`. Three of five were structurally unable to fire, and
+    rb-triage reported that nothing in the catalogue attested a failure -- for a
+    corpus in which nine traces carry an error payload or an empty result.
+
+    The parsec capture above is flat, which is why the top-level-only lookup was
+    right for the corpus it was measured against and wrong for this one.
+    """
+    element = {
+        "trace_id": "tr-59ef",
+        "info": {
+            "trace_id": "tr-59ef",
+            "state": "OK",
+            "request_preview": '{"messages": [{"content": "Check availability at rest_999"}]}',
+            "execution_duration_ms": 4210,
+        },
+        "data": {
+            "spans": [
+                {"name": "LangGraph"},
+                {"name": "check_availability"},
+            ]
+        },
+    }
+    result = digest.digest_for_payload(element, "trace", body_chars=2000)
+    assert result["status"] == "OK"
+    assert result["element_counts"]["spans"] == 2
+    assert "rest_999" in result["request_text"]
+    assert result["names"] == ["LangGraph", "check_availability"]
+    for heuristic in ("status", "element_counts", "request_text", "names"):
+        assert heuristic in result["heuristics_fired"], heuristic
+
+
+def test_a_top_level_field_outranks_the_envelope():
+    """Scope order is precedence, not a merge. A capture that states its own
+    status at the top level keeps that value even when an envelope disagrees --
+    otherwise adding envelope support would silently change what every flat
+    capture already digests to."""
+    element = {
+        "status": "TraceStatus.ERROR",
+        "spans": [{"name": "a"}],
+        "info": {"state": "OK", "request_preview": "ignored"},
+        "data": {"spans": [{"name": "b"}, {"name": "c"}]},
+    }
+    result = digest.digest_for_payload(element, "trace", body_chars=2000)
+    assert result["status"] == "TraceStatus.ERROR"
+    assert result["element_counts"]["spans"] == 1
+
+
+def test_the_envelope_widening_does_not_reach_into_spans():
+    """One level into named envelope keys, never a tree walk.
+
+    This is the constraint `_has_error_marker` was narrowed to satisfy: a
+    span-level `status` reads "error" on internal or recovered steps, and
+    treating one as the trace's own status is how the earlier version came to
+    fire on 62 successful elements out of 130. A trace whose only `status` sits
+    inside `data.spans[*]` must therefore report no status at all.
+    """
+    element = {"data": {"spans": [{"name": "db_query", "status": "error"}]}}
+    result = digest.digest_for_payload(element, "trace", body_chars=2000)
+    assert "status" not in result
+    assert "status" not in result["heuristics_fired"]
+    assert "error_markers" not in result["heuristics_fired"]
+    # The span list itself is still counted -- that is one level, not a walk.
+    assert result["element_counts"]["spans"] == 1
+
+
 def test_a_heuristic_that_does_not_fire_is_absent_from_heuristics_fired():
     """This is the whole mitigation for §5.3.
 

@@ -55,11 +55,47 @@ _MAX_NAMES = 64
 _SKELETON_MAX_CHILDREN = 32
 
 
-def _first_scalar(payload: dict, keys: tuple[str, ...]) -> Any | None:
-    for key in keys:
+# Capture formats that wrap the trace in an envelope, keyed by the envelope's own
+# field names. MLflow 3 puts everything one level down -- `info.state`,
+# `info.request_preview`, `data.spans` -- so a top-level-only lookup finds none of
+# them.
+#
+# MEASURED on the reservation-service corpus, 27 MLflow trace elements: `names`
+# was the only heuristic that fired on any of them, because it is the only one
+# that recurses. `status`, `request_text` and `element_counts` were structurally
+# unable to fire, and rb-triage consequently reported that nothing in the
+# catalogue attested a failure -- for a corpus in which nine traces carry an
+# error payload or an empty result. It was reasoning correctly from one signal out
+# of five.
+#
+# Deliberately a fixed one-level widening and NOT a tree walk. `_has_error_marker`
+# documents why: an earlier version scanned every string in the tree and fired on
+# 63 of 130 elements, 62 of them successful, because span-level attributes and
+# ordinary prose both look like failures from a distance. Two named envelope keys
+# reach the fields real captures put there without going near a span.
+_ENVELOPE_KEYS = ("info", "data")
+
+
+def _lookup_scopes(payload: dict) -> list[dict]:
+    """The payload, then any envelope object it carries, outermost first.
+
+    Order is precedence: a capture that puts `status` at the top level keeps
+    that value, and the envelope is consulted only when the top level is silent.
+    """
+    scopes = [payload]
+    for key in _ENVELOPE_KEYS:
         value = payload.get(key)
-        if isinstance(value, str | int | float | bool):
-            return value
+        if isinstance(value, dict):
+            scopes.append(value)
+    return scopes
+
+
+def _first_scalar(payload: dict, keys: tuple[str, ...]) -> Any | None:
+    for scope in _lookup_scopes(payload):
+        for key in keys:
+            value = scope.get(key)
+            if isinstance(value, str | int | float | bool):
+                return value
     return None
 
 
@@ -234,9 +270,13 @@ def digest_for_payload(payload: Any, kind: str, *, body_chars: int) -> dict:
             result["status"] = status
             fired.append("status")
 
-        counts = {
-            key: len(payload[key]) for key in _COUNT_KEYS if isinstance(payload.get(key), list)
-        }
+        # Same envelope widening as _first_scalar, and first scope wins for the
+        # same reason: MLflow's span list is `data.spans`, not `spans`.
+        counts: dict[str, int] = {}
+        for scope in _lookup_scopes(payload):
+            for key in _COUNT_KEYS:
+                if key not in counts and isinstance(scope.get(key), list):
+                    counts[key] = len(scope[key])
         if counts:
             result["element_counts"] = counts
             fired.append("element_counts")
