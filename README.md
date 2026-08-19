@@ -38,7 +38,9 @@ the way it is, including the trade-offs made on purpose.
 
 ## Install
 
-Python 3.13+ and [`uv`](https://docs.astral.sh/uv/).
+Python 3.13+ and [`uv`](https://docs.astral.sh/uv/). Nothing else: every
+`rubrica` subcommand is pure Python, so a machine that can `make setup` can run
+the pipeline's whole deterministic half.
 
 ```bash
 make setup     # create the venv, install runtime + dev deps from uv.lock
@@ -48,6 +50,13 @@ make lint      # ruff check --fix
 make format    # ruff format
 make help      # every target, with its one-line description
 ```
+
+The two scripts under `scripts/` are the exception, because they drive a real
+dispatch rather than the CLI: `dispatch-stage.sh` and `audit-reads.sh` each need
+`jq` on `PATH`, and `dispatch-stage.sh` needs the `claude` CLI as well. Both
+check up front and exit `2` naming the missing tool — a misconfigured
+environment, not a stage defect. See
+[`docs/guides/running-a-stage-by-hand.md`](docs/guides/running-a-stage-by-hand.md).
 
 There is one more target, `make live`, deliberately not part of `make test`:
 it runs behind the `live` pytest marker and the `RUBRICA_LIVE` opt-in,

@@ -250,6 +250,12 @@ criteria are read by a person, not asserted by an
 automates them, and adds the thing a hand dispatch cannot: it runs the stage in a
 Claude Code instance that shares nothing with the developer's own setup.
 
+It needs two tools the rest of this repository does not: the `claude` CLI and
+`jq`. Both are checked before anything is dispatched, and a missing one exits `2`
+naming it — the same code an unreadable run gets, since in both cases retrying
+cannot help. `scripts/audit-reads.sh` needs `jq` too. Neither tool is a
+dependency of the `rubrica` package, and `make setup` does not install either.
+
 ```bash
 # the checkpoint is still the stage *before* the one under test -- §3's table
 RUN=$(PYTHONPATH=. uv run python /tmp/toy-run-to.py /tmp/rubrica-lab/runs intake)
