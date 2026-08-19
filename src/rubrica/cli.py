@@ -218,7 +218,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_brief = parsers["gate-brief"]
     p_brief.add_argument("--run", required=True)
-    p_brief.add_argument("--gate", required=True, type=int, choices=[0, 1, 2, 3])
+    # brief.GATES, not a literal: gate_brief already refuses anything outside it,
+    # and a second spelling of the gate set is a thing to forget. Gate 0 was added
+    # after the other three, which is the update this would have missed.
+    p_brief.add_argument("--gate", required=True, type=int, choices=brief.GATES)
 
     p_set_limit = parsers["set-limit"]
     p_set_limit.add_argument("--run", required=True)
@@ -506,9 +509,9 @@ def main(argv: list[str] | None = None) -> int:
             # Same ruling as claim-utilisation just above, for the same reason:
             # this composes existing reports rather than checking anything, so
             # it is never the thing that turns a readable run into exit 1.
-            # --gate's argparse choices=[0,1,2,3] already reject anything else
-            # before this line is reached, on the same SystemExit(2) path every
-            # other bad argument takes.
+            # --gate's argparse choices are brief.GATES, so anything outside the
+            # set is already rejected before this line is reached, on the same
+            # SystemExit(2) path every other bad argument takes.
             print(brief.gate_brief(_run_dir(args.run), args.gate))
             return CLEAN
 

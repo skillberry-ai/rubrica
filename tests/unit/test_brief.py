@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from rubrica import brief, cli, survey
 from rubrica.artifacts import read_json, write_json
 from rubrica.paths import RunPaths
@@ -312,9 +314,39 @@ def test_gate_brief_covers_gates_two_and_three_without_raising(tmp_path):
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "3"]) == 0
 
 
-def test_an_unknown_gate_is_a_usage_error(tmp_path):
+def test_the_gate_argument_offers_exactly_the_gates_the_code_defines():
+    """A consistency check, not a style one: it passes on any spelling of the set
+    that agrees with brief.GATES and fails only when the two diverge, which is the
+    defect. Reaches into the built parser because that is where the divergence
+    would live -- `rubrica gate-brief --gate N` rejecting a gate the code defines,
+    or offering one it does not."""
+    parser = cli._build_parser()
+    action = next(
+        a
+        for a in parser._subparsers._group_actions[0].choices["gate-brief"]._actions
+        if "--gate" in a.option_strings
+    )
+    assert tuple(action.choices) == brief.GATES
+
+
+@pytest.mark.parametrize("gate", brief.GATES)
+def test_every_gate_the_code_defines_is_accepted_by_the_parser(gate, tmp_path):
+    """`--gate`'s argparse choices derive from brief.GATES rather than repeating
+    the set, so the two cannot disagree. Parametrised over GATES because a literal
+    here would reintroduce exactly the second spelling the choices no longer are:
+    the run is deliberately bare, since gate-brief is a report and renders cleanly
+    at every gate whether or not that stage has happened."""
     run = build_toy_run(tmp_path / "runs")
-    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "4"]) != 0
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", str(gate)]) == 0
+
+
+def test_an_unknown_gate_is_a_usage_error(tmp_path):
+    """The out-of-range value is derived, not typed. With a literal `4` this test
+    asserted that a valid gate was an error the moment gate 4 existed -- the
+    mirror of the drift the choices change fixes."""
+    run = build_toy_run(tmp_path / "runs")
+    beyond = max(brief.GATES) + 1
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", str(beyond)]) != 0
 
 
 def test_the_gate_one_sizing_line_arithmetic_is_internally_consistent(tmp_path):
