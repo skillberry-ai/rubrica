@@ -55,47 +55,47 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "operation": { "type": "string", "minLength": 1 },
-        "binding": {
-          "type": "object",
-          "description": "How this capability is invoked on the target: the tool name a transcript will show, plus the arguments that identify this capability rather than a sibling sharing the tool. Optional in the schema and required by emit, which reports a finding for an accepted scenario whose capability has none.",
-          "required": ["tool", "fixed_args"],
-          "additionalProperties": false,
-          "properties": {
-            "tool": { "type": "string", "minLength": 1 },
-            "fixed_args": { "type": "object" }
-          }
-        },
-        "params": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["name", "type", "required"],
-            "additionalProperties": false,
-            "properties": {
-              "name": { "type": "string", "minLength": 1 },
-              "type": { "type": "string", "minLength": 1 },
-              "required": { "type": "boolean" }
-            }
-          }
-        },
+        "binding": { "$ref": "#/$defs/binding" },
+        "params": { "type": "array", "items": { "$ref": "#/$defs/param" } },
         "outcome_classes": {
           "type": "array",
           "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": ["id", "kind", "description"],
-            "additionalProperties": false,
-            "properties": {
-              "id": { "$ref": "#/$defs/id" },
-              "kind": {
-                "enum": ["success", "empty", "not_found", "error", "underspecified"]
-              },
-              "description": { "type": "string", "minLength": 1 }
-            }
-          }
+          "items": { "$ref": "#/$defs/outcome_class" }
         },
         "claims": { "$ref": "#/$defs/claim_refs" },
         "confidence": { "enum": ["high", "medium", "low"] }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "description": "How this capability is invoked on the target: the tool name a transcript will show, plus the arguments that identify this capability rather than a sibling sharing the tool. Optional in the schema and required by emit, which reports a finding for an accepted scenario whose capability has none.",
+      "required": ["tool", "fixed_args"],
+      "additionalProperties": false,
+      "properties": {
+        "tool": { "type": "string", "minLength": 1 },
+        "fixed_args": { "type": "object" }
+      }
+    },
+    "outcome_class": {
+      "type": "object",
+      "required": ["id", "kind", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": {
+          "enum": ["success", "empty", "not_found", "error", "underspecified"]
+        },
+        "description": { "type": "string", "minLength": 1 }
+      }
+    },
+    "param": {
+      "type": "object",
+      "required": ["name", "type", "required"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "minLength": 1 },
+        "required": { "type": "boolean" }
       }
     },
     "entity": {

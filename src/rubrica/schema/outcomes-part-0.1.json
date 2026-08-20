@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "outcomes-part-0.1.json",
+  "title": "Outcome classes, keyed by capability",
+  "description": "A join table, not a collection: outcome_classes is nested inside the capability object in the world model, so this pass cannot write a sibling array and reconcile-seal folds each entry into its capability. Keeping it a separate pass makes the capability list a file rather than a memory of having just written one -- the quantification the 45% measurement in rb-reconcile's method step 4 rests on.",
+  "type": "object",
+  "required": ["schema_version", "outcomes"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "outcomes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["capability_id", "outcome_classes"],
+        "additionalProperties": false,
+        "properties": {
+          "capability_id": {"$ref": "world-model-0.1.json#/$defs/id"},
+          "outcome_classes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "world-model-0.1.json#/$defs/outcome_class"}
+          }
+        }
+      }
+    }
+  }
+}

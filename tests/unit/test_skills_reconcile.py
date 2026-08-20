@@ -45,9 +45,10 @@ def test_it_names_every_outcome_class_kind():
     capability, and coverage is then measured against a surface smaller than
     the target's.
     """
-    enum = _world_schema()["$defs"]["capability"]["properties"]["outcome_classes"]["items"][
-        "properties"
-    ]["kind"]["enum"]
+    # $defs/outcome_class, not the shape inlined under $defs/capability: the
+    # definition was extracted so the partial schemas could $ref it, and reading
+    # it through capability's `items` now lands on a $ref and raises KeyError.
+    enum = _world_schema()["$defs"]["outcome_class"]["properties"]["kind"]["enum"]
     body = load(SKILL).body
     missing = [kind for kind in enum if kind not in body]
     assert not missing, f"the skill never mentions outcome class kind(s) {missing}"

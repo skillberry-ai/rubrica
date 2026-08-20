@@ -46,6 +46,16 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "report": "report-0.1.json",
     "catalogue": "catalogue-0.1.json",
     "triage": "triage-0.1.json",
+    # The reconcile partials. Each is one pass's slice of what was once a single
+    # world model, and every one of them $refs world-model-0.1.json's $defs
+    # rather than restating an element definition.
+    "subjects": "subjects-0.1.json",
+    "contradictions-part": "contradictions-part-0.1.json",
+    "capabilities-part": "capabilities-part-0.1.json",
+    "outcomes-part": "outcomes-part-0.1.json",
+    "entities-part": "entities-part-0.1.json",
+    "goals-part": "goals-part-0.1.json",
+    "gaps-part": "gaps-part-0.1.json",
     # Config kinds. Human-authored inputs, not stage outputs, so they are
     # deliberately absent from STAGE_ARTIFACTS: no stage produces them and
     # `validate --stage X` must never look for them.
@@ -242,6 +252,23 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         ]
     if kind == "report":
         return [run.report] if run.report.is_file() else []
+    if kind == "subjects":
+        # Returned even when absent, like catalogue: read_json's ArtifactError
+        # names the path, so a pass that wrote nothing fails its own gate by name
+        # rather than passing trivially.
+        return [run.subjects]
+    if kind == "contradictions-part":
+        return list_json(run.contradictions_dir)
+    if kind == "capabilities-part":
+        return [run.capabilities_part]
+    if kind == "outcomes-part":
+        return [run.outcomes_part]
+    if kind == "entities-part":
+        return [run.entities_part]
+    if kind == "goals-part":
+        return [run.goals_part]
+    if kind == "gaps-part":
+        return [run.gaps_part]
     raise KeyError(f"unknown artifact kind {kind!r}")
 
 

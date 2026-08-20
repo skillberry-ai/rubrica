@@ -140,6 +140,41 @@ class RunPaths:
         return self.root / "01-claims"
 
     @property
+    def subjects(self) -> Path:
+        """The claim subject cover: every claim, assigned to one or more subjects.
+
+        In the 01 family with the rest of world-model construction, because that
+        is what the band means -- the numbering stays intake's, and everything
+        between 01-claims/ and 01-world-model.json is one logical step engineered
+        as substeps.
+        """
+        return self.root / "01-subjects.json"
+
+    @property
+    def contradictions_dir(self) -> Path:
+        return self.root / "01-contradictions"
+
+    @property
+    def capabilities_part(self) -> Path:
+        return self.root / "01-capabilities.json"
+
+    @property
+    def outcomes_part(self) -> Path:
+        return self.root / "01-outcomes.json"
+
+    @property
+    def entities_part(self) -> Path:
+        return self.root / "01-entities.json"
+
+    @property
+    def goals_part(self) -> Path:
+        return self.root / "01-goals.json"
+
+    @property
+    def gaps_part(self) -> Path:
+        return self.root / "01-gaps.json"
+
+    @property
     def world_model(self) -> Path:
         return self.root / "01-world-model.json"
 
@@ -188,6 +223,20 @@ class RunPaths:
 
     def claims(self, artifact_id: str) -> Path:
         return self.claims_dir / f"{safe_segment(artifact_id)}.json"
+
+    def contradiction_part(self, subject_id: str) -> Path:
+        return self.contradictions_dir / f"{safe_segment(subject_id)}.json"
+
+    def subject_part_ids(self) -> list[str]:
+        """Subject ids that have a contradictions part on disk, from the filenames.
+
+        Derived from the directory rather than from 01-subjects.json on purpose:
+        this is what the fan-out actually produced, and comparing it against the
+        cover is exactly the check refs.check_contradiction_parts performs. A
+        helper that read the cover instead could never report a part nobody
+        asked for.
+        """
+        return [path.stem for path in list_json(self.contradictions_dir)]
 
     def coverage_round(self, round_n: int) -> Path:
         if round_n < 1:

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contradictions-part-0.1.json",
+  "title": "One subject's contradictions",
+  "description": "What one rb-reconcile-contradict fan-out member found within its own subject, across every input file. An empty contradictions array is a real record -- it says this member swept this subject and found no disagreement -- which is why the array has no minItems and why refs.check_contradiction_parts requires a file per subject rather than a non-empty one.",
+  "type": "object",
+  "required": ["schema_version", "subject_id", "contradictions"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "subject_id": {"$ref": "world-model-0.1.json#/$defs/id"},
+    "contradictions": {
+      "type": "array",
+      "items": {"$ref": "world-model-0.1.json#/$defs/contradiction"}
+    }
+  }
+}
