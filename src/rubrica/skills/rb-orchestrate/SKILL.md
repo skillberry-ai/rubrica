@@ -194,7 +194,7 @@ verify manifest.json                          # `rubrica intake` is the operator
 fan out rb-extract, one per input artifact   → validate --stage extract
 rb-reconcile-subjects                        → validate --stage reconcile-subjects → check-refs
 fan out rb-reconcile-contradict, one per subject → validate --stage reconcile-contradict
-                                             → check-refs (after all members finish)
+    at most 3 members concurrently           → check-refs (after all members finish)
 rb-reconcile-capabilities                    → validate --stage reconcile-capabilities → check-refs
 rb-reconcile-outcomes                        → validate --stage reconcile-outcomes → check-refs
 rb-reconcile-entities                        → validate --stage reconcile-entities → check-refs
@@ -450,6 +450,33 @@ single dispatch in that order. Gate each with
 per stage, which is what lets a think-heavy pass carry a different model or
 effort from a mechanical one.
 
+**Run at most three `rb-reconcile-contradict` members at a time.** The gateway
+is shared, and envoy returns `upstream connect error or disconnect/reset before
+headers. reset reason: connection timeout` intermittently once five or more
+dispatches are streaming output concurrently; one to three was measured clean.
+A subject cover is a cover, so this fan-out is the widest one in the run, and
+draining it as a queue three at a time is the whole mitigation -- never a reason
+to ask `rb-reconcile-subjects` for fewer subjects, which would trade a
+throughput problem for a coverage one.
+
+**That is a different failure from the one the pass split addresses**, and the
+two must not be reasoned about interchangeably. The split exists because a
+single dispatch holding every claim and planning the whole merge draws the
+gateway's idle reset -- one over-long request, zero bytes back. The cap exists
+because several requests generating at once exhaust something upstream of any
+one of them. Capping concurrency does not shorten a dispatch, and shortening a
+dispatch does not make the gateway tolerate more of them at once, so a reader
+who "fixes" one by reasoning about the other has fixed nothing and removed a
+mitigation.
+
+Gate the fan-out with `check-refs` **only after every member has finished**,
+exactly as at B9. `refs.check_contradiction_parts` reports every subject in
+`01-subjects.json` that has no part in `01-contradictions/` from the moment that
+directory exists, so mid-fan-out most subjects are missing by construction and
+every one of those findings is about a member still in flight.
+`validate --stage reconcile-contradict` is safe at any point, because it only
+judges the parts that are already there.
+
 Then run the seal, which is code, not a dispatch:
 `rubrica reconcile-seal --run <run>`. It assembles the seven partials into
 `01-world-model.json`, folds each capability's outcome classes in, and counts
@@ -458,6 +485,14 @@ the denominator once. Gate it with
 `rubrica check-refs --run <run>`. It writes nothing at all when it reports a
 finding, so a partial that cannot be assembled faithfully is a repair on the
 pass that wrote it rather than a half-built world model reaching gate 1.
+
+`--denominator-version` is **not** part of that invocation. Pass it only when
+you have decided an amendment and recorded that decision in `decisions.md` --
+the rule stated under B6 -- and never on a run's first seal, where there is no
+earlier denominator to amend. The seal takes the number rather than inferring
+it precisely so that the version cannot move without a decision behind it, and
+an orchestrator that passes the flag by habit hands back the silent bump the
+rule exists to prevent.
 
 **B4. Halt on a blocking gap.** Read the world model's `gaps`. Each one
 carries `blocks`, an array of stage names drawn from `propose`, `score`,

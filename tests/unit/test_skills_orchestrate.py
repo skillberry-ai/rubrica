@@ -65,6 +65,27 @@ def gate_step(method: str, number: str) -> str:
     return rest[: stop.start()] if stop else rest
 
 
+def step_body(method: str, label: str) -> str:
+    """One numbered Method step's text, from its `**BN.` marker to the next one.
+
+    Same reasoning as `gate_step` above, for the walk's steps rather than its
+    gates, and measured rather than assumed. Every reconcile rule below lives in
+    B3, and against the whole Method section three of the four predicates stay
+    **green** with their B3 paragraph deleted: the concurrency cap is satisfied
+    by the one-block walk's own `at most 3 members concurrently` marker, the
+    check-refs timing by B9's identical rule for `rb-challenge`, and the
+    denominator flag by B6's amendment rule. All three are real prose about a
+    different place in the run, which is exactly the borrowing a scoped slice
+    prevents.
+    """
+    hit = re.search(rf"\*\*{label}\.", method)
+    if hit is None:
+        return ""
+    rest = method[hit.end() :]
+    stop = re.search(r"\n\n\*\*[AB]\d", rest)
+    return rest[: stop.start()] if stop else rest
+
+
 def test_it_declares_no_stage_because_it_dispatches_them():
     contract = load(SKILL).contract
     assert "stage" not in contract
@@ -309,3 +330,85 @@ def test_it_records_each_stage_and_each_decision():
     assert "record-stage --run" in method, "the Method must invoke record-stage"
     assert "decide --run" in method, "the Method must invoke decide"
     assert "skill_sha256" in method, "the recording step must name the digest it writes"
+
+
+def test_b3_caps_the_contradict_fan_out_at_three_concurrent_members():
+    """The widest fan-out in the run, against a shared gateway. Envoy returns
+    `upstream connect error ... reset reason: connection timeout` intermittently
+    at five or more concurrently streaming dispatches, and one to three was
+    measured clean, so the cap is a mitigation the orchestrator has to carry --
+    nothing in the artifacts records that it was dropped.
+
+    Scoped to B3 and stated as an alternation rather than one phrase: the
+    property is that the step names a bound of three on concurrent members, not
+    that it spells the bound "at most three", so a meaning-preserving reword
+    ("no more than 3 at a time") must stay green while deleting the rule goes
+    red.
+    """
+    b3 = step_body(method_body(), "B3")
+    assert b3, "B3 is not a labelled step in the Method section"
+    assert re.search(
+        # The bound, however it is spelled, then a word for simultaneity within a
+        # sentence of it. The first draft of this pattern listed "never more than"
+        # as one fixed phrase and went red on the reword "Never dispatch more than
+        # 3 ... in parallel", which preserves the rule exactly -- the negation and
+        # the comparative can have words between them, so the pattern allows that
+        # rather than enumerating the ways an author might separate them.
+        r"(?:at most|(?:no|not|never)\b[^.]{0,40}\bmore than|limit\w*[^.]{0,30}\bto|"
+        r"cap\w*[^.]{0,30}\b(?:at|to))\s*(?:three|3)\b"
+        r".{0,120}(?:at a time|concurrent|at once|in parallel|side by side)",
+        b3,
+        re.I | re.S,
+    ), "B3 must bound the rb-reconcile-contradict fan-out to three concurrent members"
+
+
+def test_b3_separates_the_concurrency_cap_from_the_reset_the_split_addresses():
+    """Two different gateway failures, and the whole risk is a later reader
+    "fixing" one by reasoning about the other: capping concurrency does not
+    shorten a dispatch, and shortening a dispatch does not make the gateway
+    tolerate more of them at once. So B3 has to say they are different, not just
+    happen to describe both.
+    """
+    b3 = step_body(method_body(), "B3")
+    assert re.search(r"different failure|not the same failure|unrelated to", b3, re.I), (
+        "B3 must say the concurrency cap and the idle reset are different failures"
+    )
+    assert re.search(r"idle reset|zero bytes|zero-byte", b3, re.I), (
+        "B3 must name the reset the pass split addresses, or the distinction has no second half"
+    )
+
+
+def test_b3_defers_the_contradict_check_refs_until_every_member_has_finished():
+    """Exactly B9's rule, for the run's other fan-out with a run-global checker:
+    `refs.check_contradiction_parts` reports every subject with no part from the
+    moment `01-contradictions/` exists, so mid-fan-out findings are about members
+    still in flight. Pinned on the checker's own function name, which is a code
+    identifier rather than a phrase, plus the timing rule -- either alone would be
+    satisfiable by prose that named the mechanism without stating when to run it.
+    """
+    b3 = step_body(method_body(), "B3")
+    assert "check_contradiction_parts" in b3, "B3 must name the checker whose timing this is"
+    assert re.search(
+        r"check-refs\b.{0,120}(only )?(after|once) (every|all) member",
+        b3,
+        re.I | re.S,
+    ), "B3 must defer check-refs until every contradict member has finished"
+
+
+def test_b3_invokes_the_seal_as_code_and_reserves_the_denominator_flag():
+    """`reconcile-seal` is code, not a dispatch, and it takes the number rather
+    than inferring it precisely so the denominator cannot move without a decision
+    behind it. An orchestrator that passes `--denominator-version` by habit hands
+    back the silent bump B6's rule exists to prevent, so the flag's condition has
+    to be stated where the seal is invoked, not only where the amendment rule
+    lives.
+    """
+    b3 = step_body(method_body(), "B3")
+    assert "rubrica reconcile-seal --run <run>" in b3, "B3 must invoke the seal as code"
+    assert re.search(
+        # Either order. Proximity is the property -- the flag named beside the
+        # decision it costs -- and which clause an author puts first is not.
+        r"--denominator-version.{0,400}decisions\.md|decisions\.md.{0,400}--denominator-version",
+        b3,
+        re.I | re.S,
+    ), "B3 must tie --denominator-version to a decision recorded in decisions.md"
