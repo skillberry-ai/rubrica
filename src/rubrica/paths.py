@@ -227,6 +227,16 @@ class RunPaths:
     def contradiction_part(self, subject_id: str) -> Path:
         return self.contradictions_dir / f"{safe_segment(subject_id)}.json"
 
+    def _contradiction_part_stems(self) -> list[str]:
+        """Every contradictions part filename on disk, without its suffix, sorted.
+
+        The shared half of the two listings below, the way _instance_dir_names is
+        for scenario_ids_with_instances and unsafe_instance_dir_names: one read of
+        the directory, partitioned twice, so the two can never disagree about what
+        is there.
+        """
+        return [path.stem for path in list_json(self.contradictions_dir)]
+
     def subject_part_ids(self) -> list[str]:
         """Subject ids that have a contradictions part on disk, from the filenames.
 
@@ -235,8 +245,30 @@ class RunPaths:
         cover is exactly the check refs.check_contradiction_parts performs. A
         helper that read the cover instead could never report a part nobody
         asked for.
+
+        Names that are not safe path segments are excluded and surfaced by
+        unsafe_contradiction_part_names() instead, for the reason
+        scenario_ids_with_instances records further down this file -- an incident,
+        not a precaution: every caller joins these back onto a path, here through
+        contradiction_part(), and returning an unsafe one made the later call
+        raise UnsafeSegment, which cli.py mapped to exit 2, so one badly-named
+        entry both misreported a repairable stage defect as a misconfigured
+        harness and discarded every other finding in the run. A fan-out member
+        told to write `01-contradictions/<subject_id>.json` can emit
+        `01-contradictions/subject 1.json`, and this listing is what
+        refs.check_contradiction_parts consumes.
         """
-        return [path.stem for path in list_json(self.contradictions_dir)]
+        return [name for name in self._contradiction_part_stems() if is_safe_segment(name)]
+
+    def unsafe_contradiction_part_names(self) -> list[str]:
+        """Contradictions part names that are not safe path segments, sorted.
+
+        What unsafe_instance_dir_names is to the instances directory:
+        refs.check_contradiction_parts turns each into an ordinary finding, so a
+        pass that wrote a badly-named part is reported at exit 1 alongside
+        everything else rather than being silently dropped by the listing above.
+        """
+        return [name for name in self._contradiction_part_stems() if not is_safe_segment(name)]
 
     def coverage_round(self, round_n: int) -> Path:
         if round_n < 1:

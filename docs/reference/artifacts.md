@@ -193,9 +193,16 @@ The one place in this family where a definition is restated rather than
 `$ref`'d. `$defs/capability_core` is `world-model-0.1.json#/$defs/capability`
 minus `outcome_classes`, and JSON Schema cannot express that subtraction while
 `additionalProperties: false` holds — a `$ref` plus an override does not
-compose under it. `tests/unit/test_schema_part_sharing.py` pins the restated
-`properties` and `required` sets to the world model's, in both directions, so
-the duplication cannot drift silently.
+compose under it. Four of `capability_core`'s properties (`id`, `binding`,
+`params`, `claims`) still `$ref` the world model and cannot drift; `operation`
+and `confidence` are genuinely copied.
+`tests/unit/test_schema_part_sharing.py` is the compensating control, and it
+compares the two definitions **element for element** — every property shape
+with refs normalised, plus the `required` list — not just their names, because a
+fourth value added to the world model's `confidence` enum would pass a name
+check while making `capabilities-part` reject a document `reconcile-seal`
+accepts. Measured red in both directions, so the duplication cannot drift
+silently.
 
 Fields worth knowing: `capabilities[].binding` (optional in the schema and
 required by `emit`, which reports a finding for an accepted scenario whose

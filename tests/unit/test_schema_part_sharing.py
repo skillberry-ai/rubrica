@@ -44,6 +44,40 @@ def test_a_partial_refs_the_world_model_definition_rather_than_copying_it(filena
     )
 
 
+def _normalise_refs(node):
+    """`node` with every cross-file ref into world-model rewritten to a local one.
+
+    `world-model-0.1.json#/$defs/param` and `#/$defs/param` name the same element
+    once validate._schema_registry has resolved them, so normalising is what lets
+    the two definitions be compared for equality at all. Without it `params` --
+    whose ref is nested inside `items`, not at the top of the property -- reads as
+    a difference when it is the same array of the same element.
+    """
+    if isinstance(node, dict):
+        return {
+            key: (
+                value.removeprefix("world-model-0.1.json")
+                if key == "$ref" and isinstance(value, str)
+                else _normalise_refs(value)
+            )
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_normalise_refs(item) for item in node]
+    return node
+
+
+def _pure_literals(definition: dict) -> set[str]:
+    """Properties of `definition` carrying no `$ref` at any depth.
+
+    These are the sanctioned duplication in the strict sense: nothing links them
+    to the world model, so only a test can hold them in step.
+    """
+    return {
+        name for name, shape in definition["properties"].items() if "$ref" not in json.dumps(shape)
+    }
+
+
 def test_capabilities_part_carries_exactly_the_capability_minus_outcome_classes():
     """The restatement this file exists for. Measured red by adding a property to
     world-model's $defs/capability and not to the partial, and by the reverse."""
@@ -57,6 +91,47 @@ def test_capabilities_part_carries_exactly_the_capability_minus_outcome_classes(
         "capabilities-part's required list has drifted from world-model's $defs/capability"
     )
     assert part["additionalProperties"] is False
+
+
+def test_the_restated_properties_are_identical_and_not_merely_identically_named():
+    """The name sets above are not enough, and the gap is not hypothetical.
+
+    `operation` and `confidence` are copied subschemas, not `$ref`s, so their
+    *contents* are the sanctioned duplication -- and capabilities-part-0.1.json's
+    own description, docs/reference/artifacts.md and this module's docstring all
+    claim the duplication cannot drift silently. On names alone that claim was
+    false for exactly the two properties it was written about: a fourth value in
+    world-model's `confidence` enum would leave every name check passing while
+    capabilities-part rejected a document reconcile-seal accepts, failing the
+    pass's own gate for a reason nothing explains.
+
+    Compares whole property shapes with refs normalised, which is stronger than
+    checking the two literals alone: the wrapper around a shared element is
+    duplicated too, so a `minItems` added to world-model's `params` is caught here
+    as well.
+
+    Measured red in both directions by adding a fourth value to $defs/capability's
+    `confidence` enum and not to the partial's, and by the reverse; and by
+    tightening `operation` in one file only.
+    """
+    world = _schema("world-model-0.1.json")["$defs"]["capability"]
+    part = _schema("capabilities-part-0.1.json")["$defs"]["capability_core"]
+
+    expected = _normalise_refs(world)["properties"]
+    expected.pop("outcome_classes", None)
+    assert _normalise_refs(part)["properties"] == expected, (
+        "capability_core's properties no longer match world-model-0.1.json's "
+        "$defs/capability, element for element"
+    )
+
+    # Recorded rather than derived, so converting one of these to a $ref -- or
+    # adding a third literal -- is a visible decision rather than a quiet one.
+    # If this set ever empties, the duplication is gone and the test above is
+    # holding identically; delete it then rather than leave it passing on {}.
+    assert _pure_literals(part) == {"operation", "confidence"}, (
+        "the set of properties capability_core restates outright has changed; "
+        "check that the duplication is still what this test compensates for"
+    )
 
 
 def test_every_extracted_definition_is_actually_referenced_by_the_capability():

@@ -191,6 +191,62 @@ def test_unsafe_instance_dir_names_is_empty_when_stage_has_not_run(tmp_path):
     assert RunPaths(tmp_path).unsafe_instance_dir_names() == []
 
 
+def _write_parts(rp, *stems):
+    rp.contradictions_dir.mkdir(parents=True, exist_ok=True)
+    for stem in stems:
+        (rp.contradictions_dir / f"{stem}.json").write_text("{}", encoding="utf-8")
+
+
+def test_subject_part_ids_lists_sorted_stems(tmp_path):
+    rp = RunPaths(tmp_path)
+    _write_parts(rp, "sub-jobs", "sub-api")
+    (rp.contradictions_dir / "notes.md").write_text("x", encoding="utf-8")
+    assert rp.subject_part_ids() == ["sub-api", "sub-jobs"]
+
+
+def test_subject_part_ids_is_empty_when_the_pass_has_not_run(tmp_path):
+    assert RunPaths(tmp_path).subject_part_ids() == []
+
+
+# UNSAFE_DIR_NAMES rather than a subject-flavoured copy: segment safety is one
+# property of a name, defined once in is_safe_segment, not a per-artifact rule --
+# and these four are all legal filename stems as well as legal directory names.
+def test_subject_part_ids_excludes_unsafe_names(tmp_path):
+    """The same ruling scenario_ids_with_instances records, on the same evidence.
+
+    refs.check_contradiction_parts joins these back onto a path through
+    contradiction_part(), so handing one back raises UnsafeSegment at a call site
+    that maps it to exit 2 -- a repairable stage defect misreported as a broken
+    harness, and every other finding in the run discarded with it.
+    """
+    rp = RunPaths(tmp_path)
+    _write_parts(rp, *UNSAFE_DIR_NAMES, "sub-jobs")
+    assert rp.subject_part_ids() == ["sub-jobs"]
+    for name in rp.subject_part_ids():
+        rp.contradiction_part(name)  # would raise UnsafeSegment on a leaked name
+
+
+def test_unsafe_contradiction_part_names_returns_the_rejected_ones_sorted(tmp_path):
+    rp = RunPaths(tmp_path)
+    _write_parts(rp, *UNSAFE_DIR_NAMES, "sub-jobs")
+    assert rp.unsafe_contradiction_part_names() == sorted(UNSAFE_DIR_NAMES)
+
+
+def test_the_two_contradiction_listings_partition_every_part_file(tmp_path):
+    """Nothing on disk is silently dropped by either listing."""
+    rp = RunPaths(tmp_path)
+    stems = UNSAFE_DIR_NAMES + ("sub-api", "sub-jobs")
+    _write_parts(rp, *stems)
+    (rp.contradictions_dir / "notes.md").write_text("x", encoding="utf-8")
+    safe, unsafe = rp.subject_part_ids(), rp.unsafe_contradiction_part_names()
+    assert set(safe) | set(unsafe) == set(stems)
+    assert not set(safe) & set(unsafe)
+
+
+def test_unsafe_contradiction_part_names_is_empty_when_the_pass_has_not_run(tmp_path):
+    assert RunPaths(tmp_path).unsafe_contradiction_part_names() == []
+
+
 def test_input_file_resolves_under_the_inputs_directory():
     run = RunPaths("/runs/run-1")
     assert run.input_file("aap2-api.json") == Path("/runs/run-1/00-inputs/aap2-api.json")
@@ -265,21 +321,35 @@ def test_listing_an_unreadable_directory_raises_a_usage_error(tmp_path, mode):
 
 @pytest.mark.parametrize("mode", [0o000, 0o444])
 def test_the_listing_methods_raise_a_usage_error_on_an_unreadable_directory(tmp_path, mode):
-    """The two RunPaths listings validate and emit iterate, same ruling."""
+    """Every RunPaths listing a checker iterates over, same ruling."""
     if os.geteuid() == 0:
         pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
     run = RunPaths(tmp_path)
+    directories = (run.instances_dir, run.suite_dir, run.contradictions_dir)
     for directory in (run.instances_dir, run.suite_dir):
         (directory / "scn-001").mkdir(parents=True)
+    # A *.json child, not a subdirectory, because that is what 01-contradictions/
+    # really holds -- and because it is what makes mode 0o444 raise here at all.
+    # list_json short-circuits `p.suffix == ".json" and p.is_file()`, so with only
+    # non-json entries the is_file() stat that raises inside a listable but
+    # untraversable directory is never reached and the listing comes back empty.
+    run.contradictions_dir.mkdir(parents=True)
+    (run.contradictions_dir / "sub-jobs.json").write_text("{}", encoding="utf-8")
+    for directory in directories:
         directory.chmod(mode)
     try:
         for call in (
             run.scenario_ids_with_instances,
             run.unsafe_instance_dir_names,
             run.scenario_ids_with_tasks,
+            # The contradictions listings go through list_json, so an unreadable
+            # 01-contradictions/ must be exit 2 as well -- not an empty listing
+            # that reports every subject's part as missing.
+            run.subject_part_ids,
+            run.unsafe_contradiction_part_names,
         ):
             with pytest.raises(UsageError, match="cannot read run directory"):
                 call()
     finally:
-        for directory in (run.instances_dir, run.suite_dir):
+        for directory in directories:
             directory.chmod(0o755)
