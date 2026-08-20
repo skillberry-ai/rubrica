@@ -358,6 +358,37 @@ def test_the_readme_diagram_footnote_appears_only_when_something_folds():
         assert (renderer.FOLD_NOTE in renderer.svg(theme)) is folds
 
 
+def test_drawn_stages_folds_a_synthetic_reconcile_family():
+    """The two tests above run only against real PHASES, which has no
+    reconcile-* stage yet -- so len(drawn) == len(set(drawn)) can never be
+    driven to fail by any input the committed suite supplies: no real phase
+    folds two stages to the same label. That gap matters because Task 7 is
+    what re-renders and commits the SVGs; whatever the renderer emits at that
+    point becomes the new expected bytes, and the byte-compare test will
+    ratify it without ever having watched a fold regression fail. This test
+    supplies the fold-triggering input itself -- a throwaway spec, never
+    PHASES or paths.STAGES -- so the guard exists before the bytes move.
+
+    The expected lists are spelled out by hand rather than computed from
+    FOLD_PREFIX or any partition of the input spec: recomputing the fold here
+    would be the same logic checking itself and could not catch a regression
+    in that logic (the holds-identically shape).
+    """
+    renderer = _readme_renderer()
+    spec = dict(
+        stages=["intake", "reconcile-subjects", "reconcile-merge", "reconcile-seal", "propose"]
+    )
+    assert renderer.drawn_stages(spec) == ["intake", "reconcile*", "propose"], (
+        "three reconcile-* stages should collapse to one line, in the position "
+        "the family occupied, with the unfolded stages either side kept in order"
+    )
+
+    # Edge case sharing the same root cause: a phase where every stage folds.
+    assert renderer.drawn_stages(dict(stages=["reconcile-subjects", "reconcile-merge"])) == [
+        "reconcile*"
+    ]
+
+
 def test_the_readme_references_both_diagram_themes():
     """The guard above keeps the files honest; this one keeps them reachable. A
     <picture> that lost its dark <source> still renders, which is exactly why the
