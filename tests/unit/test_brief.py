@@ -540,12 +540,15 @@ def test_gate_one_does_not_raise_on_hand_edited_reconcile_partials(tmp_path):
     pins, and it is the exact failure `_dicts` and `_mapping` were added for at
     gate 0.
 
-    Four shapes, one per guard: a truthy non-list collection (`_mapping`/`_dicts`),
-    a bare string where a dict belongs (`_dicts`), a `claims` value that is not a
-    list (`_as_list`), a non-string `resolution` that would otherwise be a dict key
-    (the isinstance in the tally), and a part that is not JSON at all (`_quietly`).
-    Asserted through cli.main, because the exit code is the promise, not the
-    return value.
+    One shape per guard, and no count of them here -- the enumeration is the
+    list, and a number beside a list that grows is the first thing to go stale: a
+    truthy non-list collection (`_mapping`/`_dicts`), a bare string where a dict
+    belongs (`_dicts`), a `claims` value that is not a list (`_as_list`), a
+    `claims` list holding unhashable members (the isinstance in the `covered` set
+    comprehension), a non-string `resolution` that would otherwise be a dict key
+    (the isinstance in the tally), and a part that is not JSON at all
+    (`_quietly`). Asserted through cli.main, because the exit code is the
+    promise, not the return value.
     """
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     write_json(
@@ -557,6 +560,12 @@ def test_gate_one_does_not_raise_on_hand_edited_reconcile_partials(tmp_path):
                 # `TypeError: 'NoneType' object is not iterable` from a bare `for`.
                 {"id": "sub-a", "label": "a"},
                 {"id": "sub-b", "label": "b", "claims": "not-a-list"},
+                # A real list holding unhashable elements. `_as_list` guards the
+                # container and nothing guarded the members, so these two reached
+                # a *set* comprehension: measured `TypeError: unhashable type:
+                # 'dict'` and `... 'list'` at exit 1 with a fabricated
+                # `[internal]` finding, on a readable run.
+                {"id": "sub-c", "label": "c", "claims": [{"id": "clm-notes-001"}, ["clm-x"]]},
                 "not-a-dict-at-all",
             ],
         },

@@ -70,13 +70,22 @@ def step_body(method: str, label: str) -> str:
 
     Same reasoning as `gate_step` above, for the walk's steps rather than its
     gates, and measured rather than assumed. Every reconcile rule below lives in
-    B3, and against the whole Method section three of the four predicates stay
-    **green** with their B3 paragraph deleted: the concurrency cap is satisfied
-    by the one-block walk's own `at most 3 members concurrently` marker, the
-    check-refs timing by B9's identical rule for `rb-challenge`, and the
-    denominator flag by B6's amendment rule. All three are real prose about a
-    different place in the run, which is exactly the borrowing a scoped slice
-    prevents.
+    B3, and **two** of the four tests stay green with their own B3 paragraph
+    deleted if they are asserted against the whole Method section instead: the
+    concurrency cap, satisfied by the one-block walk's own `at most 3 members
+    concurrently` marker, and the denominator flag, satisfied by B6's amendment
+    rule. Both are real prose about a different place in the run, which is
+    exactly the borrowing a scoped slice prevents.
+
+    The count is two rather than three, corrected after measuring each test
+    whole instead of only its regex half: the check-refs timing test *would*
+    leak on its `after every member` clause, which B9 states verbatim for
+    `rb-challenge`, but it also requires the literal `check_contradiction_parts`
+    and that identifier appears exactly once in the file -- in the paragraph
+    being deleted. So that one goes red either way, and the scoping is
+    belt-and-braces for it rather than load-bearing. Recorded rather than
+    trimmed to the two that need it, because the next rule added to B3 has no
+    guarantee of carrying its own unique identifier.
     """
     hit = re.search(rf"\*\*{label}\.", method)
     if hit is None:

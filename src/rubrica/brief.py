@@ -17,11 +17,11 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   whole instrument for a human making that call. Claim utilisation and the
   implied suite size are reported alongside it, and the reconcile sweep --
   the subject cover's size, how many subjects were swept for contradictions,
-  and the resolution tally with `unresolved` named even at zero -- comes
-  first, because cross-pass incoherence has that same shape: a later pass
-  quietly modelling what `rb-reconcile-contradict` recorded `unresolved` is
-  not something layer 2 can see, so a human reading the contradictions beside
-  what was modelled is the only instrument there is.
+  and the resolution tally, which names `unresolved` at zero whenever the sweep
+  recorded anything at all -- comes first, because cross-pass incoherence has
+  that same shape: a later pass quietly modelling what `rb-reconcile-contradict`
+  recorded `unresolved` is not something layer 2 can see, so a human reading the
+  contradictions beside what was modelled is the only instrument there is.
 - **Gates 2 and 3** render what already exists: the coverage verdict, and the
   challenge stage's verdict tallies.
 
@@ -269,7 +269,21 @@ def _gate_1(run: RunPaths) -> str:
     # contradictions in front of the human who is about to read what was modelled.
     cover = _mapping(_quietly(run.subjects))
     subjects = _dicts(cover.get("subjects"))
-    covered = {cid for subject in subjects for cid in _as_list(subject.get("claims"))}
+    covered = {
+        cid
+        for subject in subjects
+        # isinstance rather than a truthiness check, and for the same reason gate
+        # 0's candidate map above carries one: this builds a *set*, so an
+        # unhashable member -- `"claims": [["c-1"]]`, `[{"id": "c-1"}]`, both
+        # readable JSON and both what a hand-edit at this gate produces -- raises
+        # `TypeError: unhashable type` out of the comprehension. Measured at exit
+        # 1 with a fabricated `[internal]` finding, which is the third instance in
+        # this module of the shape adopt_projection's `used` map was measured
+        # raising. `_as_list` guards the container; only this guards the members,
+        # and a truthy element can still be a dict.
+        for cid in _as_list(subject.get("claims"))
+        if isinstance(cid, str)
+    }
     lines.append("Reconcile sweep")
     if subjects:
         lines.append(f"  {len(subjects)} subjects over {len(covered)} claims")
@@ -292,10 +306,13 @@ def _gate_1(run: RunPaths) -> str:
             resolution = contradiction.get("resolution")
             key = resolution if isinstance(resolution, str) else "(no resolution)"
             tally[key] = tally.get(key, 0) + 1
-        # unresolved first and always shown, including as a zero: it is the value
-        # under the most pressure to be dropped by a pass that wants to look
-        # decisive, so a run with none of them should be visibly odd rather than
-        # merely unremarked.
+        # unresolved first, and shown as a zero whenever this branch renders at
+        # all: it is the value under the most pressure to be dropped by a pass
+        # that wants to look decisive, so a sweep that recorded contradictions and
+        # resolved every one should be visibly odd rather than merely unremarked.
+        # Scoped to the branch on purpose -- a run with *no* contradictions at all
+        # never reaches here, and its reading is the "0 contradictions recorded"
+        # line above, which is the stronger claim of the two anyway.
         ordered = ["unresolved", *sorted(k for k in tally if k != "unresolved")]
         lines.append("  " + ", ".join(f"{key}: {tally.get(key, 0)}" for key in ordered))
     lines.append("")
