@@ -26,6 +26,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
+from referencing.exceptions import Unresolvable
 from referencing.jsonschema import DRAFT202012
 
 from rubrica.artifacts import ArtifactError, read_json
@@ -199,17 +200,37 @@ def _pointer(parts) -> str:
 
 
 def validate_artifact(path: Path, kind: str) -> list[Finding]:
-    """Validate one artifact file against the schema for `kind`."""
+    """Validate one artifact file against the schema for `kind`.
+
+    A `$ref` the registry cannot resolve is re-raised as an ArtifactError naming
+    the **schema directory**, because that is the thing that is wrong. Measured
+    before this wrapper existed, with world-model-0.1.json absent from
+    RUBRICA_SCHEMA_DIR and a partial schema $ref-ing into it: iter_errors raised
+    jsonschema's _WrappedReferencingError, which is neither ArtifactError nor
+    OSError, so cli.py's catch-all turned a misconfigured schema set into exit 1
+    with an [internal] finding against the run root -- telling the orchestrator to
+    spend its one repair attempt rewriting an artifact that was fine. A
+    misconfigured run is exit 2, and a 1 must name the right artifact; this is
+    both rules at once. Resolution is lazy, so the raise happens here inside
+    iter_errors rather than when _validator_for compiled the schema.
+    """
     path = Path(path)
     try:
         payload = read_json(path)
     except ArtifactError as exc:
         return [Finding(path, "schema", "", str(exc))]
-    validator = _validator_for(kind, schema_dir())
-    return [
-        Finding(path, "schema", _pointer(error.absolute_path), error.message)
-        for error in validator.iter_errors(payload)
-    ]
+    root = schema_dir()
+    validator = _validator_for(kind, root)
+    try:
+        return [
+            Finding(path, "schema", _pointer(error.absolute_path), error.message)
+            for error in validator.iter_errors(payload)
+        ]
+    except Unresolvable as exc:
+        raise ArtifactError(
+            f"unresolvable schema reference while validating {kind!r} against the schemas "
+            f"in {root}: {exc}"
+        ) from exc
 
 
 def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:

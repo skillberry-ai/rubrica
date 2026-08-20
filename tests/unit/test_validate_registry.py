@@ -13,7 +13,8 @@ import json
 import pytest
 
 from rubrica import validate
-from rubrica.artifacts import ArtifactError
+from rubrica.artifacts import ArtifactError, write_json
+from rubrica.cli import main
 
 PART = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -162,3 +163,76 @@ def test_an_unreadable_schema_directory_is_not_a_stage_defect(tmp_path, monkeypa
     doc.write_text("{}", encoding="utf-8")
     with pytest.raises(ArtifactError):
         validate.validate_artifact(doc, "world-model")
+
+
+def test_an_incomplete_schema_directory_is_not_a_stage_defect(tmp_path, monkeypatch):
+    """A schema dir holding a partial's schema but *not* the one it `$ref`s.
+
+    This module's docstring names the failure the registry closed. The registry
+    closes it only for a *complete* schema directory: with world-model-0.1.json
+    absent, the `$ref` compiles fine (resolution is lazy) and raises
+    `jsonschema.exceptions._WrappedReferencingError` from inside `iter_errors`
+    -- outside cli.py's catch tuple, so it reached the catch-all as exit 1 with
+    an `[internal]` finding against the run root, telling the orchestrator to
+    repair an artifact that is fine.
+
+    Measured both directions at the CLI before this test was written: with the
+    `except Unresolvable` arm removed, `rubrica validate --stage
+    reconcile-capabilities` printed the traceback plus
+    `[internal] <run root>: validate raised _WrappedReferencingError` and exited
+    1; with it, exit 2 and one `error:` line naming the schema directory.
+
+    The message must name the **schema directory**, because that is the thing
+    that is misconfigured -- naming the document would be the wrong-artifact
+    failure this repo already has a rule against.
+    """
+    from tests.toy import split_world_model
+
+    (tmp_path / "capabilities-part-0.1.json").write_text(
+        (validate.schema_dir() / "capabilities-part-0.1.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path))
+    doc = tmp_path / "01-capabilities.json"
+    doc.write_text(json.dumps(split_world_model()["capabilities"]), encoding="utf-8")
+
+    with pytest.raises(ArtifactError) as caught:
+        validate.validate_artifact(doc, "capabilities-part")
+    assert str(tmp_path) in str(caught.value)
+    # The unresolved reference itself stays visible: a human fixing
+    # RUBRICA_SCHEMA_DIR needs to know *which* schema file is missing.
+    assert "world-model-0.1.json" in str(caught.value)
+
+
+def test_an_incomplete_schema_directory_exits_2_at_the_cli(tmp_path, monkeypatch, capsys):
+    """The same misconfiguration through `main`, where the contract is stated.
+
+    A `1` is a repairable stage defect and costs the orchestrator its one repair
+    attempt; a misconfigured run is a `2`, which retrying cannot help. Held at
+    the CLI as well as at validate_artifact because the mapping from
+    ArtifactError to 2 lives in cli.py, and the unit test above cannot see it.
+    """
+    from tests.toy import build_toy_run, split_world_model
+
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+    write_json(run.capabilities_part, split_world_model()["capabilities"])
+
+    schemas = tmp_path / "schemas"
+    schemas.mkdir()
+    for name in ("manifest-0.1.json", "capabilities-part-0.1.json"):
+        # manifest-0.1.json is needed for parser construction alone:
+        # `record-stage`'s argparse choices come from manifest_stage_efforts().
+        (schemas / name).write_text(
+            (validate.schema_dir() / name).read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(schemas))
+
+    code = main(["validate", "--run", str(run.root), "--stage", "reconcile-capabilities"])
+
+    captured = capsys.readouterr()
+    assert code == 2, captured.out
+    assert captured.out.strip() == "", "a misconfigured schema set must not print a finding line"
+    assert captured.err.startswith("error: ")
+    assert str(schemas) in captured.err
+    # Never the run root: that is the fabricated-[internal]-finding shape.
+    assert str(run.root) not in captured.err

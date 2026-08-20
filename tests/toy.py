@@ -485,13 +485,36 @@ def split_world_model(
     # never show. A contradiction lands under the first subject holding its
     # claim_a, so the assignment is a function of the cover rather than a second
     # judgment.
+    #
+    # Both sides then join that subject, and that is the load-bearing half.
+    # rb-reconcile-contradict's invariant 3 is that both sides of a recorded
+    # contradiction are claims the member's *own* subject names -- a member sees
+    # only its own slice, so a contradiction reaching outside it is one the member
+    # could not have found. Measured before this: sub-cap-get-ticket held
+    # clm-notes-004 but not clm-trace-002, and carried con-missing-semantics
+    # anyway. Since tests/fixtures/toy/ is the model answer a skill imitates, that
+    # taught the member reaching across subjects was fine, and it left the fixture
+    # unable to demonstrate the whole point of the split -- that a cross-artifact
+    # contradiction is findable *within* one subject. Over-assigning is legal
+    # (a cover may put one claim in several subjects) and is exactly what
+    # rb-reconcile-subjects instructs when a claim bears on more than one subject.
+    #
+    # Ownership is resolved against a snapshot taken before any of this widening,
+    # so which subject owns a contradiction stays a function of the cover the
+    # passes above built rather than of the order this loop happens to run in.
     by_subject: dict[str, list[dict[str, Any]]] = {s["id"]: [] for s in subjects}
+    by_id = {s["id"]: s for s in subjects}
+    as_covered = {s["id"]: list(s["claims"]) for s in subjects}
     for contradiction in world["contradictions"]:
         owner = next(
-            (s["id"] for s in subjects if contradiction["claim_a"] in s["claims"]),
+            (s["id"] for s in subjects if contradiction["claim_a"] in as_covered[s["id"]]),
             subjects[-1]["id"],
         )
         by_subject[owner].append(contradiction)
+        for side in ("claim_a", "claim_b"):
+            claim_id = contradiction[side]
+            if claim_id not in by_id[owner]["claims"]:
+                by_id[owner]["claims"].append(claim_id)
 
     return {
         "subjects": {"schema_version": "0.1", "subjects": subjects},

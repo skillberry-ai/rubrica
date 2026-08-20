@@ -76,3 +76,51 @@ def test_outcomes_covers_every_declared_capability():
     assert {o["capability_id"] for o in parts["outcomes"]["outcomes"]} == {
         c["id"] for c in parts["capabilities"]["capabilities"]
     }
+
+
+def test_each_contradiction_lands_in_a_subject_that_names_both_its_sides():
+    """rb-reconcile-contradict's invariant 3, held against the model answer.
+
+    Measured before split_world_model widened the owning subject:
+    sub-cap-get-ticket held clm-notes-004 but not clm-trace-002 and carried
+    con-missing-semantics anyway, and refs.check_contradiction_parts was clean
+    over it because it resolved both ids against the whole run. A fixture that
+    breaks a skill's own invariant teaches the skill to break it -- this is the
+    model answer a member imitates.
+    """
+    parts = split_world_model()
+    covered_by = {s["id"]: set(s["claims"]) for s in parts["subjects"]["subjects"]}
+    for subject_id, part in parts["contradictions"].items():
+        for contradiction in part["contradictions"]:
+            for side in ("claim_a", "claim_b"):
+                assert contradiction[side] in covered_by[subject_id], (
+                    f"{contradiction['id']}'s {side} reaches outside {subject_id}, which is a "
+                    "contradiction the member could not have found from its own slice"
+                )
+
+
+def test_a_cross_artifact_contradiction_is_findable_inside_one_subject():
+    """The branch's central claim, demonstrated rather than asserted in prose.
+
+    Splitting reconcile is only sound if a disagreement *between two inputs* is
+    still visible to the single fan-out member that records it. The golden world's
+    one contradiction pits the operator notes against the captured trace, so this
+    checks that both of those claims live in the same subject -- the only way one
+    member, handed one slice and no sibling's claims, could ever have seen it.
+    """
+    parts = split_world_model()
+    origin = {
+        claim["id"]: artifact_id
+        for artifact_id in ARTIFACT_IDS
+        for claim in toy_claims(artifact_id)["claims"]
+    }
+    found = [
+        (subject_id, c)
+        for subject_id, part in parts["contradictions"].items()
+        for c in part["contradictions"]
+        if origin[c["claim_a"]] != origin[c["claim_b"]]
+    ]
+    assert found, "the golden world must carry a contradiction spanning two inputs"
+    covered_by = {s["id"]: set(s["claims"]) for s in parts["subjects"]["subjects"]}
+    for subject_id, contradiction in found:
+        assert {contradiction["claim_a"], contradiction["claim_b"]} <= covered_by[subject_id]

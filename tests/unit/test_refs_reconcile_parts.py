@@ -133,6 +133,118 @@ def test_a_contradiction_naming_an_unextracted_claim_is_reported(tmp_path):
     assert any("clm-invented-999" in f.message for f in refs.check_contradiction_parts(run))
 
 
+def test_a_contradiction_reaching_outside_its_own_subject_is_reported(tmp_path):
+    """rb-reconcile-contradict's invariant 3, at layer 2.
+
+    `clm-api-003` is a real claim in the run -- it belongs to `sub-ent-ticket` --
+    so the "no such claim" clause stays quiet and only the own-subject clause can
+    report this. Nothing enforced the invariant before: both ids were resolved
+    against the whole run, so a member reaching into a sibling's slice was clean.
+
+    A **reference** check, not a support check: it asks whether the id appears in
+    that subject's claim list, never whether the two claims contradict.
+    """
+    run, parts = _seeded(tmp_path)
+    subject_id, part = next(
+        (sid, p) for sid, p in parts["contradictions"].items() if p["contradictions"]
+    )
+    covered_by = {s["id"]: s["claims"] for s in parts["subjects"]["subjects"]}
+    outsider = next(
+        cid
+        for sid, claims in covered_by.items()
+        if sid != subject_id
+        for cid in claims
+        if cid not in covered_by[subject_id]
+    )
+    part["contradictions"][0]["claim_b"] = outsider
+    write_json(run.contradiction_part(subject_id), part)
+
+    findings = refs.check_contradiction_parts(run)
+
+    assert any(outsider in f.message and subject_id in f.message for f in findings), [
+        f.message for f in findings
+    ]
+    # Not *also* reported as unresolvable: the claim exists, and a second finding
+    # saying otherwise would send the repair after the wrong defect.
+    assert not any("no such claim" in f.message for f in findings), [f.message for f in findings]
+
+
+def test_an_unresolvable_side_is_reported_once_not_twice(tmp_path):
+    """The `elif` in the pair of clauses, measured.
+
+    A fabricated claim id is outside every subject's list as well as outside the
+    run, so an `if`/`if` pair would draw two findings for one defect -- and the
+    own-subject one would be the misleading half, implying the repair is a cover
+    edit when the claim does not exist at all.
+    """
+    run, parts = _seeded(tmp_path)
+    subject_id, part = next(
+        (sid, p) for sid, p in parts["contradictions"].items() if p["contradictions"]
+    )
+    part["contradictions"][0]["claim_a"] = "clm-invented-999"
+    write_json(run.contradiction_part(subject_id), part)
+
+    findings = refs.check_contradiction_parts(run)
+
+    assert len(findings) == 1, [f.message for f in findings]
+    assert "no such claim" in findings[0].message
+
+
+def test_an_id_less_contradiction_is_not_reported_as_a_duplicate_id(tmp_path):
+    """`str(None)` used to make two id-less contradictions collide on 'None'.
+
+    The finding read `duplicate contradiction id 'None' across parts`, naming an
+    id that exists nowhere in the run and sending the orchestrator's one repair
+    after a phantom. The real defect -- a missing required `id` -- is layer 1's,
+    and contradictions-part-0.1.json rejects it, which is why this is about the
+    message being false rather than about adding a check.
+    """
+    run, parts = _seeded(tmp_path)
+    ids = [sid for sid, p in parts["contradictions"].items()][:2]
+    assert len(ids) == 2, "this fixture needs at least two subjects"
+    for subject_id in ids:
+        write_json(
+            run.contradiction_part(subject_id),
+            {
+                "schema_version": "0.1",
+                "subject_id": subject_id,
+                "contradictions": [
+                    {
+                        "claim_a": parts["subjects"]["subjects"][0]["claims"][0],
+                        "claim_b": parts["subjects"]["subjects"][0]["claims"][0],
+                        "statement": "no id here",
+                    }
+                ],
+            },
+        )
+
+    findings = refs.check_contradiction_parts(run)
+
+    assert not any("duplicate contradiction id" in f.message for f in findings), [
+        f.message for f in findings
+    ]
+
+
+def test_a_real_duplicate_contradiction_id_is_still_reported(tmp_path):
+    """The mirror of the test above: dropping `str()` must not drop the check.
+
+    The copy goes into the *same* part, so both sides stay inside that subject's
+    claim list and the own-subject clause contributes nothing -- the duplicate id
+    is the only defect present, which is what makes the tally below meaningful.
+    """
+    run, parts = _seeded(tmp_path)
+    subject_id, part = next(
+        (sid, p) for sid, p in parts["contradictions"].items() if p["contradictions"]
+    )
+    part["contradictions"].append(dict(part["contradictions"][0]))
+    write_json(run.contradiction_part(subject_id), part)
+
+    findings = refs.check_contradiction_parts(run)
+
+    assert len(findings) == 1, [f.message for f in findings]
+    assert "duplicate contradiction id 'con-missing-semantics'" in findings[0].message
+
+
 def test_matched_capabilities_and_outcomes_are_clean(tmp_path):
     run, _ = _seeded(tmp_path)
     assert refs.check_outcomes(run) == []
@@ -167,18 +279,51 @@ def test_check_all_reaches_the_new_checkers(tmp_path):
     assert any("clm-invented-999" in f.message for f in refs.check_all(run))
 
 
-def test_an_unparseable_partial_short_circuits_everything_below_it(tmp_path):
+def _independent_defect(run, parts):
+    """Seed a layer-2 defect in an artifact unrelated to the reconcile partials
+    under test, and return the string that identifies its finding.
+
+    The suppression tests below need a finding that check_all *would* report were
+    it to continue past check_readable. Without one, `len(findings) == 1` holds
+    identically whether the short circuit exists or not -- measured, by stubbing
+    check_readable out: the truncated file produced no downstream finding of its
+    own, so the assertion could never distinguish suppression from silence.
+    """
+    parts["outcomes"]["outcomes"].append(
+        {
+            "capability_id": "cap-invented",
+            "outcome_classes": [{"id": "oc-x", "kind": "success", "description": "x"}],
+        }
+    )
+    write_json(run.outcomes_part, parts["outcomes"])
+    return "cap-invented"
+
+
+def test_an_unparseable_partial_suppresses_the_findings_below_it(tmp_path):
     """check_readable must name the broken partial and stop. Continuing produces
     findings that blame artifacts which are fine -- and the orchestrator's single
-    repair attempt then rewrites the wrong file."""
-    run, _ = _seeded(tmp_path)
+    repair attempt then rewrites the wrong file.
+
+    The unrelated defect is what makes this a measurement of *suppression*: it is
+    reported when the broken file is well-formed (the control below) and absent
+    when it is not, so the single-finding assertion can only hold because
+    check_all stopped.
+    """
+    run, parts = _seeded(tmp_path)
+    marker = _independent_defect(run, parts)
+    # Control first: the seeded defect is reachable, so its absence afterwards is
+    # suppression rather than a fixture that could never reach it.
+    assert any(marker in f.message for f in refs.check_all(run))
+
     run.subjects.write_text("{not json", encoding="utf-8")
+
     findings = refs.check_all(run)
-    assert len(findings) == 1
+    assert len(findings) == 1, [str(f) for f in findings]
     assert "01-subjects.json" in str(findings[0].artifact)
+    assert not any(marker in f.message for f in findings)
 
 
-def test_a_malformed_contradictions_part_is_named_and_short_circuits(tmp_path):
+def test_a_malformed_contradictions_part_is_named_and_suppresses_the_rest(tmp_path):
     """The fan-out directory's own entry in _readable_targets, measured.
 
     Nothing else reports this. check_contradiction_parts' _load treats an
@@ -187,8 +332,15 @@ def test_a_malformed_contradictions_part_is_named_and_short_circuits(tmp_path):
     *clean* over a part it could not read -- measured, by deleting that line. A
     check announcing "nothing wrong" because its input was unreadable is the
     incident the whole list exists to prevent.
+
+    Carries the same unrelated defect as the test above, and for the same reason:
+    without it the single-finding assertion measures only that a truncated part
+    yields nothing downstream, which is true with or without the short circuit.
     """
     run, parts = _seeded(tmp_path)
+    marker = _independent_defect(run, parts)
+    assert any(marker in f.message for f in refs.check_all(run))
+
     subject_id = next(iter(parts["contradictions"]))
     path = run.contradiction_part(subject_id)
     path.write_text('{"schema_version": "0.1", "subject', encoding="utf-8")
@@ -197,6 +349,7 @@ def test_a_malformed_contradictions_part_is_named_and_short_circuits(tmp_path):
 
     assert len(findings) == 1, [str(f) for f in findings]
     assert findings[0].artifact == path
+    assert not any(marker in f.message for f in findings)
 
 
 # -- the additions to the brief's list -------------------------------------

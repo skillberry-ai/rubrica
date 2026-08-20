@@ -779,6 +779,16 @@ def check_contradiction_parts(run: RunPaths) -> list[Finding]:
     the field is the slice it believed it was working on. A mismatch means one
     member wrote a sibling's slice, which is the failure the fourth dispatch
     argument exists to prevent and which no schema can see.
+
+    Both sides of every recorded contradiction must also be claims the part's own
+    subject names -- rb-reconcile-contradict's invariant 3, and until this clause
+    existed nothing enforced it: the two claim ids were resolved against the whole
+    run, so a member reaching outside its slice was clean. A member is handed one
+    subject and no sibling's claims, so a contradiction spanning two subjects is
+    one it could not have found from what it read, and the finding belongs on the
+    part. This stays a **reference** check, in layer 2's remit: does this id
+    appear in that subject's claim list. Whether the two claims genuinely
+    contradict is semantic, and nothing here judges it.
     """
     cover = _load(run.subjects)
     if cover is None or not run.contradictions_dir.is_dir():
@@ -828,6 +838,15 @@ def check_contradiction_parts(run: RunPaths) -> list[Finding]:
             )
         )
 
+    # Keyed only on string ids, so an id-less or non-string-id subject simply has
+    # no entry and the own-subject clause below skips its part rather than
+    # resolving against a claim list it cannot address.
+    covered_by = {
+        s["id"]: {c for c in _as_list(s.get("claims")) if isinstance(c, str)}
+        for s in _as_list(cover.get("subjects"))
+        if isinstance(s, dict) and isinstance(s.get("id"), str)
+    }
+
     known = _claim_ids(run)
     seen: list[str] = []
     for path in list_json(run.contradictions_dir):
@@ -850,10 +869,22 @@ def check_contradiction_parts(run: RunPaths) -> list[Finding]:
                     f"declares subject_id {field!r} but is the part for {path.stem!r}",
                 )
             )
+        # The claim list of the subject this file *is* the part for, or None when
+        # the cover does not declare that subject at all -- already reported above
+        # as an undeclared part, so the clause below stays quiet rather than adding
+        # a second finding derived from the same absence.
+        own = covered_by.get(path.stem)
         for i, contradiction in enumerate(_as_list(part.get("contradictions"))):
             if not isinstance(contradiction, dict):
                 continue
-            seen.append(str(contradiction.get("id")))
+            # _str_or_none, not str(): str(None) produced the literal id 'None',
+            # so an id-less contradiction in two parts drew "duplicate
+            # contradiction id 'None' across parts" and sent the one bounded
+            # repair after an id that exists nowhere. The real defect -- a missing
+            # required `id` -- is contradictions-part-0.1.json's, at layer 1.
+            contradiction_id = _str_or_none(contradiction.get("id"))
+            if contradiction_id is not None:
+                seen.append(contradiction_id)
             for side in ("claim_a", "claim_b"):
                 claim_id = contradiction.get(side)
                 if claim_id not in known:
@@ -863,6 +894,21 @@ def check_contradiction_parts(run: RunPaths) -> list[Finding]:
                             "refs",
                             f"/contradictions/{i}/{side}",
                             f"no such claim: {claim_id}",
+                        )
+                    )
+                elif own is not None and claim_id not in own:
+                    # Reached only after `claim_id in known` succeeded, so the
+                    # value is hashable here and this set membership cannot raise
+                    # TypeError on a list- or dict-valued side.
+                    out.append(
+                        Finding(
+                            path,
+                            "refs",
+                            f"/contradictions/{i}/{side}",
+                            f"claim {claim_id} is not one subject {path.stem!r} names; both "
+                            "sides of a contradiction must be claims this subject covers, "
+                            "since the member that wrote this part saw no other subject's "
+                            "claims",
                         )
                     )
     for dupe in _dupes(seen):
