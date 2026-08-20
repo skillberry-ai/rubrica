@@ -167,20 +167,39 @@ the assembled model gets.
 
 **It assembles; it does not check.** Cross-artifact checking is layer 2, so run
 `rubrica check-refs` afterwards. What this command does report is the narrow class
-where assembly cannot faithfully represent what it was handed — a partial absent,
-unparseable, or carrying no payload key; a declared capability with no outcome
-classes; an outcome record naming a capability nobody declared; two outcome
-records for one capability — and it **writes nothing at all** when it reports any
-of them, because a half-assembled world model would clear layer 1 for the
-collections it did manage to fill.
+where assembly cannot faithfully represent what it was handed, and it is exactly
+four items long:
 
-The last two of those overlap layer 2's `check_outcomes` on purpose. That check
-owns the after-the-fact report and runs over any run, including one that was never
-sealed; the branches here exist to stop a **silent omission**, because assembly is
-perfectly possible in both cases — the entry is simply dropped, and the world
-model then reaches gate 1 missing cells an artifact declared, agreeing with its own
-recomputed `denominator` and reading as coherent. Refusing before the write is
-what keeps that drop observable.
+1. an artifact absent, unparseable, or not a JSON object carrying its payload keys
+   (`capabilities`, `outcomes`, `entities`, `actors` and `goals`, `gaps`,
+   `contradictions`, and `target` for the manifest);
+2. a declared capability with no outcome classes;
+3. an outcome record naming a capability nobody declared;
+4. two outcome records for one capability.
+
+It **writes nothing at all** when it reports any of them, because a half-assembled
+world model would clear layer 1 for the collections it did manage to fill.
+
+Presence, parseability and payload-key presence are the whole of item 1 — not the
+*type* of what a payload key holds. `{"capabilities": 5}` still reaches the
+assembly and raises out of it, by design: layer 1 is the rejection point for a
+wrong-typed value (`rubrica validate --stage reconcile`, one schema per partial),
+and duplicating that here would put one rule in two places with two messages.
+
+Items 2 and 3 overlap layer 2's `check_outcomes` on purpose — item 2 is its first
+clause (every declared capability has a record), item 3 its second (every record
+names a declared capability). That check owns the after-the-fact report and runs
+over any run, including one that was never sealed; the branches here refuse
+**before the write**, because assembly is perfectly possible in both cases: the
+entry is simply dropped, and the world model then reaches gate 1 missing cells an
+artifact declared, agreeing with its own recomputed `denominator` and reading as
+coherent.
+
+Item 4 overlaps **nothing**, in any layer, which is the strongest of the four
+reasons to refuse rather than drop: `check_outcomes` compares *sets* of capability
+ids, so two records for one capability collapse to one member and neither
+direction of that comparison sees anything. The seal is the only place a duplicate
+outcomes record is ever caught.
 
 Exits 0 clean, 1 with one finding per line on stdout, or 2 if the run directory
 itself cannot be read. A missing **singleton** partial is a repairable stage defect

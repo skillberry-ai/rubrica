@@ -174,13 +174,22 @@ def test_several_missing_partials_name_the_earliest_pass_first(tmp_path):
     "attribute",
     ["capabilities_part", "outcomes_part", "entities_part", "goals_part", "gaps_part"],
 )
-# Three shapes, because they take three different code paths. `{}` is an object
-# with the key absent; `[]` answers `key not in document` correctly and lands on
-# the same missing-key branch; `5` is the one that *cannot* answer it -- measured,
-# `"gaps" not in 5` raises TypeError -- so only the third reaches the isinstance
-# guard, and dropping the guard leaves this test green without it.
+# Four shapes, and only two code paths -- the grid is not one shape per branch.
+# `{}` is the missing-key branch. The other three are all the non-object branch,
+# because `isinstance([], dict)` is False just as `isinstance(5, dict)` is, and
+# each is here for a measured reason rather than for symmetry: `5` is what makes
+# the isinstance guard load-bearing (without it, `"gaps" not in 5` raises
+# TypeError, so removing the guard turns the scalar params red and leaves the
+# array params green); `null` is the shape that reproduced this whole class a
+# second time after the first fix, because read_json returns None for it and None
+# was also _read_part's read-failure sentinel; `[]` is the control that pins the
+# guard as shape-general rather than scalar-only -- it answers `key not in
+# document` correctly, so it would still be reported if the guard were narrowed to
+# scalars, and a grid without it could not tell a general guard from a narrow one.
 @pytest.mark.parametrize(
-    "payload", ["{}", "[]", "5"], ids=["object-without-the-key", "array", "scalar"]
+    "payload",
+    ["{}", "[]", "5", "null"],
+    ids=["object-without-the-key", "array", "scalar", "null"],
 )
 def test_a_partial_with_no_payload_key_is_a_finding_naming_that_partial(
     tmp_path, capsys, attribute, payload
@@ -192,9 +201,16 @@ def test_a_partial_with_no_payload_key_is_a_finding_naming_that_partial(
     `[internal]` finding against the *run root*. Exit code right, stdout non-empty,
     and the third rule of the exit-code contract broken -- the one this repo learned
     when check-refs fabricated four `no such claim` findings against a correct world
-    model. `[]` and `5` are the same defect two shapes over: neither carries a
+    model. `[]`, `5` and `null` are the same defect three shapes over: none carries a
     payload key, and `"gaps" not in 5` raises TypeError rather than answering the
     question -- the shape refs._as_list exists for, one layer up.
+
+    `null` reproduced the class a second time after the first fix, which is why it
+    is measured here rather than argued about: read_json legitimately *returns* None
+    for a `null` document, and None was also _read_part's read-failure sentinel, so
+    the payload-key check was skipped and the assembly raised `KeyError:
+    'gaps_part'` -- reported against the run root, naming a RunPaths attribute
+    rather than any artifact.
     """
     from rubrica.cli import main
 
@@ -217,6 +233,80 @@ def test_a_partial_with_no_payload_key_is_a_finding_naming_that_partial(
     out = capsys.readouterr().out
     assert target.name in out
     assert "[internal]" not in out, "a named partial, not the catch-all against the run root"
+    # The shape is named in JSON's vocabulary, not Python's: this finding is read
+    # next to the file it names, where `null` and `[...]` are what a repairer sees.
+    # `{}` is the missing-key branch and says nothing about shape, hence the guard.
+    if payload != "{}":
+        assert {"[]": "array", "5": "number", "null": "null"}[payload] in out
+
+
+@pytest.mark.parametrize("payload", ["{}", "null"], ids=["object-without-the-key", "null"])
+def test_a_payload_less_contradiction_part_is_a_finding_naming_that_part(tmp_path, payload):
+    """A contradiction part comes through the same door as the singletons, because
+    the same shapes reached `part.get(...)` and raised AttributeError there against
+    the run root. The empty *array* is a real record -- it says a fan-out member
+    swept its subject and found no disagreement -- but an absent key is not that
+    record, and the two must not become one spelling."""
+    run = build_toy_run(tmp_path, upto="extract")
+    _write_parts(run, split_world_model())
+    part = run.contradiction_part("sub-cap-get-ticket")
+    assert part.is_file(), "the fixture must actually place a part at this path"
+    part.write_text(payload, encoding="utf-8")
+
+    path, findings = reconcile.seal(run)
+
+    assert path is None
+    assert {f.artifact for f in findings} == {part}
+    assert all(f.message for f in findings)
+    assert not run.world_model.is_file()
+
+
+def test_an_empty_contradiction_part_is_not_a_finding(tmp_path):
+    """The other direction, and the one that keeps the check above honest: a part
+    whose `contradictions` array is empty is the record that a member swept its
+    subject, so it seals clean and contributes nothing."""
+    run = build_toy_run(tmp_path, upto="extract")
+    parts = split_world_model()
+    for subject_id in parts["contradictions"]:
+        parts["contradictions"][subject_id] = {
+            "schema_version": "0.1",
+            "subject_id": subject_id,
+            "contradictions": [],
+        }
+    _write_parts(run, parts)
+
+    path, findings = reconcile.seal(run)
+
+    assert findings == []
+    assert path == run.world_model
+    assert read_json(run.world_model)["contradictions"] == []
+
+
+@pytest.mark.parametrize(
+    "payload", ["{}", "[]", "5", "null"], ids=["object-without-target", "array", "scalar", "null"]
+)
+def test_a_manifest_with_no_target_is_a_finding_naming_the_manifest(tmp_path, capsys, payload):
+    """The manifest comes through the same door as the partials because it shares
+    the same failure: `target` is the one key the seal reads out of it, and a
+    manifest that is `null` or carries no `target` reached `manifest["target"]` and
+    raised there, against the run root."""
+    from rubrica.cli import main
+
+    run = build_toy_run(tmp_path, upto="extract")
+    _write_parts(run, split_world_model())
+    run.manifest.write_text(payload, encoding="utf-8")
+
+    path, findings = reconcile.seal(run)
+
+    assert path is None
+    assert {f.artifact for f in findings} == {run.manifest}
+    assert all(f.message for f in findings)
+    assert not run.world_model.is_file()
+
+    assert main(["reconcile-seal", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert "manifest.json" in out
+    assert "[internal]" not in out
 
 
 def test_a_duplicate_outcomes_record_is_a_finding_not_a_silent_drop(tmp_path):
