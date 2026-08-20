@@ -291,7 +291,7 @@ def test_validate_stage_walks_every_claims_file(tmp_path):
 
 
 def test_validate_stage_reports_a_stage_that_produced_nothing(tmp_path):
-    findings = validate_stage(RunPaths(tmp_path), "reconcile")
+    findings = validate_stage(RunPaths(tmp_path), "reconcile-seal")
     assert len(findings) == 1
     assert "produced no world-model artifact" in findings[0].message
 

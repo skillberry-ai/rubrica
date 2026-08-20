@@ -206,8 +206,8 @@ Write `supported`, and `recommended_objective` if you disagree.
 **Step 4 — rule on every candidate.** Prefer behavioural evidence over prose
 about behaviour: a trace records what the target *did*, prose records what
 someone intended. Both are legitimate, and when they conflict that conflict is
-itself worth admitting rather than resolving — `rb-reconcile` records
-contradictions and is better placed to.
+itself worth admitting rather than resolving — `rb-reconcile-contradict`
+records contradictions and is better placed to.
 
 For near-duplicates, admit the one with the most distinct shape rather than the
 largest or the newest. On the 2026-08-13 corpus, seven traces of 130 were kept

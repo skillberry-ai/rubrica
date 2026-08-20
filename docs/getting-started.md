@@ -337,7 +337,7 @@ that drives a whole run once a manifest exists. Point an agent at it with a
 run directory and it dispatches one subagent per stage from `extract`
 through `emit`, gates every artifact before the next stage sees it, holds the
 round loop between propose and score, holds the three human gates after
-reconcile, score, and challenge, spends at most one repair attempt per stage
+the reconcile seal, score, and challenge, spends at most one repair attempt per stage
 failure, and records what it did — the model, the skill's hash, and every
 branch it took — so the run explains itself afterward. It never runs
 `survey`, never dispatches `rb-triage`, and never holds gate 0: all three are

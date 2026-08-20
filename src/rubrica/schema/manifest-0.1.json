@@ -74,8 +74,11 @@
       "type": "object",
       "propertyNames": {
         "enum": [
-          "survey", "triage", "intake", "extract", "reconcile", "propose", "score",
-          "instantiate", "challenge", "emit", "smoke"
+          "survey", "triage", "intake", "extract",
+          "reconcile-subjects", "reconcile-contradict", "reconcile-capabilities",
+          "reconcile-outcomes", "reconcile-entities", "reconcile-goals",
+          "reconcile-gaps", "reconcile-seal",
+          "propose", "score", "instantiate", "challenge", "emit", "smoke"
         ]
       },
       "additionalProperties": {

@@ -37,7 +37,7 @@ SKILL_FILENAME = "SKILL.md"
 # Every other stage in STAGES has a skill, and expected_skill_names derives
 # the list rather than restating it -- so adding a stage demands a skill
 # without anyone remembering to edit a constant.
-CODE_ONLY_STAGES: frozenset[str] = frozenset({"intake", "smoke", "survey"})
+CODE_ONLY_STAGES: frozenset[str] = frozenset({"intake", "smoke", "survey", "reconcile-seal"})
 
 # One home for the skill-directory prefix. It appeared in three places
 # before the Rubrica rename -- ORCHESTRATOR, expected_skill_names, and the

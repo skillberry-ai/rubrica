@@ -190,8 +190,17 @@ def minimal_manifest(**over: Any) -> dict[str, Any]:
                 "bytes": len(MINIMAL_INPUT_BYTES),
             }
         ],
+        # A real member of paths.STAGES, and a prompt one: manifest.stages records
+        # the model, effort and skill digest of a *dispatched* stage, so keying
+        # this on a code stage would describe an entry no run can produce. It was
+        # keyed on "reconcile" until that stage became a family, which is the drift
+        # the schema's propertyNames enum exists to catch.
         "stages": {
-            "reconcile": {"model": "claude-opus-5", "effort": "high", "skill_sha256": "b" * 64}
+            "reconcile-subjects": {
+                "model": "claude-opus-5",
+                "effort": "high",
+                "skill_sha256": "b" * 64,
+            }
         },
         "limits": {"max_rounds": 2, "max_scenarios": 8},
     }

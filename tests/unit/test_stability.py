@@ -30,7 +30,7 @@ def _pair(tmp_path, state="emit"):
 
 
 def test_capability_ids_come_from_the_world_model(tmp_path):
-    run = build_state(tmp_path, "reconcile")
+    run = build_state(tmp_path, "reconcile-seal")
     assert capability_ids(run) == frozenset({"cap-find-jobs"})
 
 
@@ -92,16 +92,17 @@ def test_a_stage_run_under_a_different_model_makes_the_runs_incomparable(tmp_pat
     """Design spec section 291: two runs are comparable only if these match."""
     a, b = _pair(tmp_path)
     manifest = read_json(b.manifest)
-    manifest["stages"]["reconcile"]["model"] = "claude-sonnet-5"
+    manifest["stages"]["reconcile-subjects"]["model"] = "claude-sonnet-5"
     write_json(b.manifest, manifest)
-    assert any("reconcile" in reason and "model" in reason for reason in comparability(a, b))
+    reasons = comparability(a, b)
+    assert any("reconcile-subjects" in reason and "model" in reason for reason in reasons)
 
 
 def test_a_stage_run_under_a_different_effort_or_skill_hash_is_caught(tmp_path):
     a, b = _pair(tmp_path)
     manifest = read_json(b.manifest)
-    manifest["stages"]["reconcile"]["effort"] = "low"
-    manifest["stages"]["reconcile"]["skill_sha256"] = "c" * 64
+    manifest["stages"]["reconcile-subjects"]["effort"] = "low"
+    manifest["stages"]["reconcile-subjects"]["skill_sha256"] = "c" * 64
     write_json(b.manifest, manifest)
     reasons = " ".join(comparability(a, b))
     assert "effort" in reasons and "skill_sha256" in reasons

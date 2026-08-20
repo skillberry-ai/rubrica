@@ -111,10 +111,10 @@ def test_skill_sha256_is_the_digest_of_the_whole_file(tmp_path):
 
 
 def test_discover_finds_every_skill_directory_sorted(tmp_path):
-    write_skill(tmp_path, "rb-reconcile")
+    write_skill(tmp_path, "rb-reconcile-subjects")
     write_skill(tmp_path, "rb-extract")
     (tmp_path / "not-a-skill").mkdir()
-    assert [s.name for s in discover(tmp_path)] == ["rb-extract", "rb-reconcile"]
+    assert [s.name for s in discover(tmp_path)] == ["rb-extract", "rb-reconcile-subjects"]
 
 
 def test_a_directory_without_a_skill_file_is_not_discovered(tmp_path):
@@ -297,10 +297,10 @@ def test_an_impostor_toml_fence_before_contract_is_ignored(tmp_path):
             "for every key a real contract would need:",
             "",
             "```toml",
-            'stage = "reconcile"',
+            'stage = "reconcile-subjects"',
             'reads = ["manifest"]',
-            'writes = ["reconciled"]',
-            'schemas = ["reconciled"]',
+            'writes = ["subjects"]',
+            'schemas = ["subjects"]',
             'invokes = ["validate"]',
             "```",
             "",

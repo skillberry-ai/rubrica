@@ -309,7 +309,7 @@ def test_gate_brief_covers_gates_two_and_three_without_raising(tmp_path):
     """Gates 2 and 3 render what already exists (the coverage verdict, the
     verdict tallies) -- exercised here on a run that has reached neither stage,
     which must still render cleanly rather than raise."""
-    run = build_toy_run(tmp_path / "runs", upto="reconcile")
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "2"]) == 0
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "3"]) == 0
 
@@ -379,7 +379,7 @@ def test_gate_one_does_not_raise_on_a_present_but_malformed_world_model(tmp_path
     gate_brief -- ArtifactError on bad JSON -- turning a report into exit 2.
     Exercised through cli.main, the actual promise gate-brief makes, not just
     the library function directly."""
-    run = build_toy_run(tmp_path / "runs", upto="reconcile")
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     run.world_model.write_text("{not valid json", encoding="utf-8")
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
 

@@ -7,8 +7,8 @@ description: Judge this round's scenarios -- folding the pairs that are one test
 
 You are dispatched once per round, after `rb-propose` has appended this
 round's scenarios and before the orchestrator decides whether to run another
-round. You are the second of this pipeline's two barrier stages: like
-`rb-reconcile` you run alone, with every scenario in the run visible in one
+round. You are the second of this pipeline's two barriers: like
+`rb-reconcile-subjects` you run alone, with every scenario in the run visible in one
 context at once, because the two judgments this stage exists to make -- is
 this pair of scenarios the same test, and is this row of the denominator
 actually covered -- cannot be made from any single scenario's slice.
@@ -51,7 +51,7 @@ two scenarios are the same test is inherently cross-scenario work, and a
 stage restricted to one slice could not do it at all. **That licence stops
 at the scenarios.** It does not extend to `01-claims/`: the claims files are
 not in your `reads`, and being a barrier does not make them yours the way it
-makes them `rb-reconcile`'s. Reconciliation is the one stage that reads
+makes them the reconcile passes'. Reconciliation is the one step that reads
 claims, and everything that survived it is in the world model in front of
 you. If you find yourself wanting to consult a claim -- to check what an
 outcome class really means, to see whether a scenario's fact is supported --
@@ -124,7 +124,7 @@ claim about what the target already has. Do not fold, reject, or reopen a
 scenario because a value in its fact looks invented, and do not treat two
 scenarios as distinct merely because they picked different concrete values
 for the same cell: decide on what the test asks the agent to determine. No
-stage downstream of `rb-reconcile` can ground a value, and pretending
+stage downstream of the reconcile passes can ground a value, and pretending
 otherwise would have you making rulings on evidence you do not have.
 
 ## 2. Output

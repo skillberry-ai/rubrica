@@ -64,8 +64,8 @@ this, never the prose criterion, which stays a human's call).
 - **Schema:** `src/rubrica/schema/manifest-0.1.json`
 - **Written by:** `intake` (code); amended by `rb-orchestrate`'s
   `record-stage` and `set-limit` calls
-- **Read by:** `rb-extract`, `rb-reconcile`, `rb-propose`, `rb-score`,
-  `rb-orchestrate`
+- **Read by:** `rb-extract`, every `rb-reconcile-*` pass, `reconcile-seal`
+  (code), `rb-propose`, `rb-score`, `rb-orchestrate`
 - **Path:** `manifest.json`
 
 The run's identity: `run_id`, `target` (name and interface), the registered
@@ -94,7 +94,9 @@ the skill was edited after that stage ran — the hook working, not a defect.
 
 - **Schema:** `src/rubrica/schema/claims-0.1.json`
 - **Written by:** `extract`, run as `rb-extract` (fan-out, one file per input)
-- **Read by:** `rb-reconcile`
+- **Read by:** every `rb-reconcile-*` pass — all of them read all of
+  `01-claims/`, because the family is split on output, not on claims;
+  `check-refs`
 - **Path:** `01-claims/<artifact_id>.json`
 
 One atomic, evidence-backed statement per claim, extracted from exactly one
@@ -114,19 +116,15 @@ so a claim with no way to find where it came from cannot exist).
 The seven entries below are one logical step — building the world model —
 engineered as bounded passes, each writing its own slice into the `01-` band
 and none of them reading `01-world-model.json`. `reconcile-seal` assembles all
-seven into that file, which is unchanged: nothing downstream of `reconcile`
-knows the partials exist.
+seven into that file, which is unchanged: nothing downstream of the seal knows
+the partials exist. Each pass is a stage in `paths.STAGES`, so
+`rubrica validate --stage reconcile-<pass>` gates exactly one of these kinds.
 
 Every one of these schemas resolves its element definitions against
 `world-model-0.1.json#/$defs/...` through `validate._schema_registry`, rather
 than restating them — a duplicated `$defs/entity` that fell behind would make a
 partial accept an element the sealed world model then rejects.
 `capabilities-part` is the single exception and says so in its own entry.
-
-> **Note.** The passes named as writers below are not in `paths.STAGES` yet: the
-> artifact kinds, schemas and paths land ahead of the stages that fill them, so
-> the contract exists before anything writes to it. Until the passes are
-> registered, `rubrica validate --stage` cannot name these kinds.
 
 ## `subjects`
 
@@ -291,13 +289,15 @@ named honestly rather than narrowly, and never left empty to avoid a halt).
 ## `world-model`
 
 - **Schema:** `src/rubrica/schema/world-model-0.1.json`
-- **Written by:** `reconcile`, run as `rb-reconcile`
+- **Written by:** `reconcile-seal` (code), via `rubrica reconcile-seal`, from
+  the seven partials above
 - **Read by:** `rb-propose`, `rb-score`, `rb-instantiate`, `emit` (code),
   `rb-orchestrate`; `check-refs`
 - **Path:** `01-world-model.json`
 
-The single reconciled picture of the target system, built from every claim
-`rb-extract` produced: `capabilities`, `entities`, `actors`, `goals`, recorded
+The single reconciled picture of the target system, assembled from the seven
+partials the `reconcile-*` passes wrote out of every claim `rb-extract`
+produced: `capabilities`, `entities`, `actors`, `goals`, recorded
 `contradictions` (disagreements carried forward rather than silently
 resolved), recorded `gaps` (things no input says anything about, each naming
 which later stages it `blocks`), and a `denominator` frozen at a `version` for
@@ -309,7 +309,7 @@ that support it.
 false` on both — a param must additionally state whether it is `required`,
 and a field cannot state that at all — and neither has anywhere in the schema
 to record that a field's value must be, say, one of three enumerated strings.
-So every concrete value anywhere downstream of `reconcile` is a prescription
+So every concrete value anywhere downstream of the seal is a prescription
 `rb-instantiate` invents, never an assertion grounded in a claim. See
 [`docs/design/limitations.md`](../design/limitations.md) for what this rules
 out checking.

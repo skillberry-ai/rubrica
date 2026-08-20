@@ -170,7 +170,7 @@ def test_a_stage_that_disagrees_with_the_directory_name_is_reported(tmp_path):
 
 
 def test_the_orchestrator_may_not_declare_a_stage(tmp_path):
-    contract = dict(CONTRACTS[ORCHESTRATOR], stage="reconcile")
+    contract = dict(CONTRACTS[ORCHESTRATOR], stage="reconcile-subjects")
     findings = check_contract(load(write_skill(tmp_path, ORCHESTRATOR, contract)))
     assert [f.pointer for f in findings] == ["/stage"]
 

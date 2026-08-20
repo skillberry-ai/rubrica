@@ -96,8 +96,9 @@ manifest. It does not see what any other extract member concluded, because
 there is no file boundary through which it could. That means when a design
 document says an endpoint returns 404 and a trace shows it returning an empty
 list, no single subagent ever holds both facts at once and has to pick a
-winner. Each writes what its own input actually shows; `rb-reconcile`, reading
-both claim sets afterward, is where the disagreement first becomes visible —
+winner. Each writes what its own input actually shows;
+`rb-reconcile-contradict`, reading every claim in its own subject across both
+claim sets afterward, is where the disagreement first becomes visible —
 and it is recorded as a contradiction in the world model, not silently
 resolved by whichever file happened to load last into the same context. The
 same logic runs through instantiate and challenge: an instantiate member

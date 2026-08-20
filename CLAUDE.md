@@ -68,7 +68,14 @@ finding's clothes.
 | — | triage | `rb-triage` | validate · check-refs · **human gate 0** |
 | `00` | intake | code | validate |
 | `01a` | extract | `rb-extract` — fan-out, one per input | validate |
-| `01b` | reconcile | `rb-reconcile` — barrier | validate · check-refs · **human gate 1** |
+| `01b` | reconcile-subjects | `rb-reconcile-subjects` — barrier | validate · check-refs |
+| `01c` | reconcile-contradict | `rb-reconcile-contradict` — fan-out, one per subject | validate · check-refs |
+| `01d` | reconcile-capabilities | `rb-reconcile-capabilities` | validate · check-refs |
+| `01e` | reconcile-outcomes | `rb-reconcile-outcomes` | validate · check-refs |
+| `01f` | reconcile-entities | `rb-reconcile-entities` | validate · check-refs |
+| `01g` | reconcile-goals | `rb-reconcile-goals` | validate · check-refs |
+| `01h` | reconcile-gaps | `rb-reconcile-gaps` | validate · check-refs |
+| `01i` | reconcile-seal | code — `rubrica reconcile-seal` assembles the partials | validate · check-refs · **human gate 1** |
 | `02` | propose | `rb-propose` | validate |
 | `03` | score | `rb-score` — barrier | validate · check-refs · **human gate 2** |
 | `04` | instantiate | `rb-instantiate` — fan-out, one per active scenario | validate · check-refs |
@@ -76,11 +83,24 @@ finding's clothes.
 | `06` | emit | `rb-emit` — thin wrapper over `rubrica emit` | validate · check-refs |
 | `07` | smoke | code | validate · check-refs |
 
-Challenge's `check-refs` runs **only once every member has finished**:
-`refs.check_verdicts` reports every instance without a verdict from the moment
-`05-verdicts/` exists, so mid-fan-out most of them are missing by construction.
-`refs.check_all` runs every checker the run has inputs for, so there is no such
-thing as a stage-scoped `check-refs`.
+Rows `01b` through `01i` are **one logical step engineered as substeps.** Every
+pass reads all of `01-claims/` — the split is on *output*, not on claims, so the
+barrier property is untouched and a contradiction between two inputs is still
+visible to the pass that records it. They are separate stages rather than one
+skill branching on a slice id because `check-skills` binds one skill file to one
+stage name and `manifest.stages` records model, effort and skill digest per
+stage, which is what lets a think-heavy pass carry a different budget from a
+mechanical one. `reconcile-seal` is code for the reason `emit` is: two runs with
+identical partials must produce a byte-identical world model.
+`01-world-model.json` keeps its path, schema and byte shape, so nothing below
+the seal can tell it was assembled by eight passes rather than written by one.
+
+Challenge's and reconcile-contradict's `check-refs` run **only once every member
+has finished**: `refs.check_verdicts` and `refs.check_contradiction_parts` each
+report every missing slice from the moment their directory exists, so
+mid-fan-out most of them are missing by construction. `refs.check_all` runs
+every checker the run has inputs for, so there is no such thing as a
+stage-scoped `check-refs`.
 
 `survey` and `triage` have no `0N` directory prefix of their own: `survey`
 writes `00-catalogue.json` and `triage` writes `00-triage.json`, both ahead of
@@ -106,8 +126,8 @@ gates 1 through 3, and writes `decisions.md`. It never runs `survey`, never
 dispatches `rb-triage`, and never holds gate 0 — all three are finished before it
 is ever dispatched.
 
-`intake`, `smoke`, and `survey` are code, so they have no skill and no
-`manifest.stages` entry. Their absence there is not a finding.
+`intake`, `smoke`, `survey`, and `reconcile-seal` are code, so they have no
+skill and no `manifest.stages` entry. Their absence there is not a finding.
 
 ## The exit-code contract — load-bearing, do not weaken
 

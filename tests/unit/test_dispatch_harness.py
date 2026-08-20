@@ -307,7 +307,7 @@ def test_a_reseed_notice_for_a_non_reseed_verdict_is_a_usage_error(
 
 def test_a_reseed_notice_to_a_stage_that_takes_none_is_a_usage_error(tmp_path):
     run = _run_with_verdict(tmp_path)
-    proc = _dispatch(tmp_path, "reconcile", str(run), run=run, RUBRICA_RESEED="1")
+    proc = _dispatch(tmp_path, "reconcile-subjects", str(run), run=run, RUBRICA_RESEED="1")
     assert proc.returncode == 2
     assert "only to instantiate" in proc.stderr
 

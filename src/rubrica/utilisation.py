@@ -4,7 +4,8 @@ One function in its own module, for `metrics.py`'s stated reason -- the gate in
 `refs.py` and the `claim-utilisation` subcommand must never come to disagree
 about what utilisation means, and duplicating the arithmetic is how they would.
 
-Utilisation rate is a fact about the *input*, not about rb-reconcile's diligence.
+Utilisation rate is a fact about the *input*, not about the diligence of the
+reconcile passes that cite it.
 Measured on run-20260812-130056: the ten trajectory slices ran 64-92% while
 agent-server-py ran 8% (2 of 25), and the 23 dropped claims were A2A plumbing
 rb-reconcile was right to discard. So this module reports and never judges;
@@ -20,7 +21,7 @@ FORMAT = "rubrica-utilisation/1"
 
 
 def claim_utilisation(run: RunPaths) -> dict:
-    """Per-artifact cited/total counts, or an empty report before reconcile.
+    """Per-artifact cited/total counts, or an empty report before the seal.
 
     An absent or unreadable world model yields no artifacts rather than every
     claim counted as uncited: `check-refs` runs at every stage gate, and a run

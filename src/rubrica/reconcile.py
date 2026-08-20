@@ -25,8 +25,8 @@ Presence, parseability and payload-key presence are the whole of what item 1
 checks -- not the *type* of what a payload key holds. `{"capabilities": 5}` and
 `{"outcomes": [5]}` still reach the assembly and raise out of it, and that is by
 design: layer 1 is the rejection point for a wrong-typed value (`rubrica validate
---stage reconcile`, one schema per partial), and duplicating it here would put the
-same rule in two places with two messages.
+--stage reconcile-<pass>`, one schema per partial), and duplicating it here would
+put the same rule in two places with two messages.
 
 Items 2 and 3 overlap layer 2's refs.check_outcomes deliberately, and the overlap
 is not an accident to be tidied away later. Item 2 is that check's first clause

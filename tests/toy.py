@@ -1129,7 +1129,14 @@ def toy_verdict(scenario_id: str, **over: Any) -> dict[str, Any]:
 _UPTO_STAGES: tuple[str, ...] = (
     "intake",
     "extract",
-    "reconcile",
+    # Two checkpoints for the reconcile family rather than eight: "reconcile-gaps"
+    # is every partial written with no world model yet -- the state the seal and
+    # the layer-2 part checkers are tested against -- and "reconcile-seal" is the
+    # assembled world model every later stage reads. The intermediate states
+    # between passes have no consumer, and a checkpoint nobody stops at is a
+    # helper this module already has too many requests for.
+    "reconcile-gaps",
+    "reconcile-seal",
     "propose",
     "score",
     "instantiate",
@@ -1149,8 +1156,9 @@ def build_toy_run(runs_dir: Path, *, upto: str | None = None, **intake_kwargs: A
 
     `upto` stops the run after one named stage, so a later task can hand a
     skill a run populated up to but not past the stage under test: handing
-    rb-reconcile a run that already contains 01-world-model.json tests
-    nothing. `upto=None` (the default) writes everything this fixture knows how
+    rb-propose a run that does not yet contain 01-world-model.json tests
+    nothing, and handing a reconcile pass one that already does tests nothing
+    either. `upto=None` (the default) writes everything this fixture knows how
     to write, through challenge.
 
     `upto="propose"` is the one stage whose content differs from the
@@ -1186,10 +1194,30 @@ def build_toy_run(runs_dir: Path, *, upto: str | None = None, **intake_kwargs: A
 
     for artifact_id in ARTIFACT_IDS:
         write_json(run.claims(artifact_id), toy_claims(artifact_id))
-    if stop < _UPTO_INDEX["reconcile"]:
+    if stop < _UPTO_INDEX["reconcile-gaps"]:
         return run
 
-    write_json(run.world_model, toy_world_model())
+    parts = split_world_model()
+    write_json(run.subjects, parts["subjects"])
+    for subject_id, part in parts["contradictions"].items():
+        write_json(run.contradiction_part(subject_id), part)
+    write_json(run.capabilities_part, parts["capabilities"])
+    write_json(run.outcomes_part, parts["outcomes"])
+    write_json(run.entities_part, parts["entities"])
+    write_json(run.goals_part, parts["goals"])
+    write_json(run.gaps_part, parts["gaps"])
+    if stop < _UPTO_INDEX["reconcile-seal"]:
+        return run
+
+    # Sealed by the real seal, not by writing toy_world_model() here. Same reason
+    # intake is real in this builder: the artifact every later stage reads is
+    # produced by the code that produces it in a real run, so a defect in the
+    # join or the denominator cannot hide behind a hand-written answer.
+    from rubrica.reconcile import seal
+
+    sealed, findings = seal(run)
+    assert not findings, f"the toy partials must seal cleanly: {findings}"
+    assert sealed == run.world_model
     if stop < _UPTO_INDEX["propose"]:
         return run
     if stop == _UPTO_INDEX["propose"]:

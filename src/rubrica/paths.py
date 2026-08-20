@@ -18,7 +18,21 @@ STAGES = (
     "triage",
     "intake",
     "extract",
-    "reconcile",
+    # One logical step, engineered as substeps. Separate stages rather than one
+    # skill branching on a slice id, for two reasons that are both load-bearing:
+    # check-skills binds one skill file to one stage name, and manifest.stages
+    # records model, effort and skill digest per stage -- which is what lets a
+    # think-heavy pass carry a different budget from a mechanical one. The name
+    # prefix keeps the family legible here, where the ordering is the pipeline's
+    # documentation.
+    "reconcile-subjects",
+    "reconcile-contradict",
+    "reconcile-capabilities",
+    "reconcile-outcomes",
+    "reconcile-entities",
+    "reconcile-goals",
+    "reconcile-gaps",
+    "reconcile-seal",
     "propose",
     "score",
     "instantiate",

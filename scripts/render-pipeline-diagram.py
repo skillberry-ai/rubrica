@@ -111,12 +111,76 @@ ROWS: list[dict] = [
     dict(
         kind="stage",
         dir="01b",
-        name="reconcile",
-        runs="rb-reconcile",
-        art=["01-world-model.json"],
+        name="reconcile-subjects",
+        runs="rb-reconcile-subjects",
+        art=["01-subjects.json"],
         gates=["validate", "check-refs"],
         barrier="barrier · every extract member has finished",
-        note="",
+        note="every claim, assigned to one or more subjects; a cover, not a partition",
+    ),
+    dict(
+        kind="stage",
+        dir="01c",
+        name="reconcile-contradict",
+        runs="rb-reconcile-contradict",
+        art=["01-contradictions/<subject_id>.json"],
+        gates=["validate", "check-refs"],
+        fan="fan-out · one member per subject, at most three at a time",
+        note="claim vs claim, across every input; resolutions bind every pass below",
+    ),
+    dict(
+        kind="stage",
+        dir="01d",
+        name="reconcile-capabilities",
+        runs="rb-reconcile-capabilities",
+        art=["01-capabilities.json"],
+        gates=["validate", "check-refs"],
+        note="identity, params and binding; outcome classes are the next pass's",
+    ),
+    dict(
+        kind="stage",
+        dir="01e",
+        name="reconcile-outcomes",
+        runs="rb-reconcile-outcomes",
+        art=["01-outcomes.json"],
+        gates=["validate", "check-refs"],
+        note="quantified over the capability list on disk, not over the claims",
+    ),
+    dict(
+        kind="stage",
+        dir="01f",
+        name="reconcile-entities",
+        runs="rb-reconcile-entities",
+        art=["01-entities.json"],
+        gates=["validate", "check-refs"],
+        note="machine: only where a form fits; prose: with the inference stated",
+    ),
+    dict(
+        kind="stage",
+        dir="01g",
+        name="reconcile-goals",
+        runs="rb-reconcile-goals",
+        art=["01-goals.json"],
+        gates=["validate", "check-refs"],
+        note="half the denominator, frozen here; an amendment costs a decision",
+    ),
+    dict(
+        kind="stage",
+        dir="01h",
+        name="reconcile-gaps",
+        runs="rb-reconcile-gaps",
+        art=["01-gaps.json"],
+        gates=["validate", "check-refs"],
+        note="what no input says, and an audit of every partial above",
+    ),
+    dict(
+        kind="stage",
+        dir="01i",
+        name="reconcile-seal",
+        runs="code · assembles the partials",
+        art=["01-world-model.json"],
+        gates=["validate", "check-refs"],
+        note="joins outcome classes into capabilities; counts the denominator once",
     ),
     dict(
         kind="band",
@@ -297,7 +361,7 @@ def hero() -> str:
         f'<svg viewBox="0 0 {W} {HEIGHT}" class="dia hero" role="img" '
         'aria-label="Every stage of a Rubrica run in order, each with what it runs as, '
         "the artifact it writes into the run directory, and the deterministic gates that "
-        "follow it. The human gates sit as full-width bands after triage, reconcile, score "
+        "follow it. The human gates sit as full-width bands after triage, the seal, score "
         'and challenge.">'
     )
     a(
@@ -472,13 +536,13 @@ comes from an artifact on disk. There is no edge at all between one stage and th
 
   <rect x="372" y="94" width="196" height="62" rx="2" class="box-prompt"/>
   <rect x="372" y="94" width="4.5" height="62" class="prompt-edge"/>
-  <text x="388" y="120" class="st-name" font-size="14">reconcile</text>
-  <text x="388" y="139" class="st-runs" font-size="10">rb-reconcile</text>
+<text x="388" y="120" class="st-name" font-size="13">reconcile-capabilities</text>
+<text x="388" y="139" class="st-runs" font-size="10">rb-reconcile-capabilities</text>
 
   <rect x="372" y="236" width="196" height="62" rx="2" class="box-prompt"/>
   <rect x="372" y="236" width="4.5" height="62" class="prompt-edge"/>
-  <text x="388" y="262" class="st-name" font-size="14">propose</text>
-  <text x="388" y="281" class="st-runs" font-size="10">rb-propose</text>
+  <text x="388" y="262" class="st-name" font-size="13">reconcile-outcomes</text>
+<text x="388" y="281" class="st-runs" font-size="10">rb-reconcile-outcomes</text>
 
   <line x1="470" y1="160" x2="470" y2="232" class="edge cut"/>
   <line x1="452" y1="212" x2="488" y2="182" class="cut-x"/>
@@ -491,11 +555,11 @@ comes from an artifact on disk. There is no edge at all between one stage and th
   <rect x="700" y="94" width="224" height="26" rx="2" class="artifact"/>
   <text x="712" y="111" class="art-t" font-size="10">01-claims/&lt;artifact_id&gt;.json</text>
   <rect x="700" y="156" width="224" height="26" rx="2" class="artifact hi"/>
-  <text x="712" y="173" class="art-t" font-size="10">01-world-model.json</text>
+  <text x="712" y="173" class="art-t" font-size="10">01-capabilities.json</text>
   <rect x="700" y="240" width="224" height="26" rx="2" class="artifact"/>
-  <text x="712" y="257" class="art-t" font-size="10">02-scenarios.json</text>
+  <text x="712" y="257" class="art-t" font-size="10">01-outcomes.json</text>
   <rect x="700" y="276" width="224" height="26" rx="2" class="artifact"/>
-  <text x="712" y="293" class="art-t" font-size="10">03-coverage/latest.json</text>
+  <text x="712" y="293" class="art-t" font-size="10">01-contradictions/</text>
 
   <line x1="696" y1="71" x2="574" y2="108" class="edge" marker-end="url(#c-ar)"/>
   <line x1="696" y1="107" x2="574" y2="118" class="edge" marker-end="url(#c-ar)"/>
@@ -508,9 +572,8 @@ comes from an artifact on disk. There is no edge at all between one stage and th
   <line x1="696" y1="289" x2="574" y2="278" class="edge" marker-end="url(#c-ar)"/>
   <text x="628" y="228" class="edge-t" text-anchor="middle" font-size="9">reads</text>
 
-  <line x1="574" y1="264" x2="696" y2="252" class="edge" marker-start="url(#c-ar-s)"
-    marker-end="url(#c-ar)"/>
-  <text x="636" y="272" class="edge-t" text-anchor="middle" font-size="9">reads + appends</text>
+  <line x1="574" y1="264" x2="696" y2="252" class="edge" marker-end="url(#c-ar)"/>
+  <text x="636" y="272" class="edge-t" text-anchor="middle" font-size="9">writes</text>
 
   <line x1="16" y1="330" x2="924" y2="330" class="rule-hair"/>
 <text x="16" y="352" class="g-note" font-size="10.5">The orchestrator may append exactly two things
@@ -914,11 +977,13 @@ skill file path. If a stage needs a fact, it reads it from an artifact, or it do
 
   <figure>
     <div class="plate">{fig_channel()}</div>
-    <figcaption><b>Fig. 2</b> — The missing edge is the point. <code>propose</code> never hears
-    from <code>reconcile</code>; it reads <code>01-world-model.json</code>. Fan-out members get a
-    fourth thing — the id of their own slice — and never a sibling's. One read edge is left out to
-    keep the rest legible: <code>propose</code> also reads <code>manifest.json</code>, for the
-    limits it must respect.</figcaption>
+    <figcaption><b>Fig. 2</b> — The missing edge is the point.
+    <code>reconcile-outcomes</code> never hears from <code>reconcile-capabilities</code>; it reads
+    <code>01-capabilities.json</code>, which is exactly why that list is a file rather than a
+    memory of having just written one. Fan-out members get a fourth thing — the id of their own
+    slice — and never a sibling's. Two read edges are left out to keep the rest legible: both
+    passes also read <code>manifest.json</code> and every file under
+    <code>01-claims/</code>.</figcaption>
   </figure>
 
   <p>The cost of that rule is real: no stage can lean on a fact it was not handed a file for. The
@@ -1008,7 +1073,8 @@ skill file path. If a stage needs a fact, it reads it from an artifact, or it do
         <td>The objective verdict and the grouped declines. A candidate <code>rb-triage</code>
         declined is gone as completely as if the corpus never contained it, so this is the only
         moment the run's evidence base is negotiable.</td></tr>
-      <tr><td><span class="n">1</span> the world model</td><td>reconcile</td><td>rb-orchestrate</td>
+      <tr><td><span class="n">1</span> the world model</td><td>reconcile-seal</td>
+        <td>rb-orchestrate</td>
         <td>Claim utilisation per input and the implied suite size. An input the world model cites
         nothing from is exactly the fact this gate exists to surface.</td></tr>
 <tr><td><span class="n">2</span> scenarios and coverage</td><td>the round

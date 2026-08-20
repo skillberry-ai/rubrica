@@ -105,8 +105,8 @@ run "respected isolation" that is not backed by a transcript is an assumption**.
 enumeration, a format, an example, or a real observed value.
 
 **The consequence is the important part: every seed value in this pipeline is
-synthetic by construction.** A concrete value anywhere downstream of
-`rb-reconcile` — a ticket id in a seed, a queue name in an oracle — is a
+synthetic by construction.** A concrete value anywhere downstream of the
+reconcile passes — a ticket id in a seed, a queue name in an oracle — is a
 *prescription* to `rb-instantiate` about the world it should build. It is never
 an assertion about the target system, because no artifact in the run carries
 the information that would make it one.
@@ -118,8 +118,8 @@ to invent; the schema is why.
 
 Parked rather than fixed because adding a value domain is a schema change with
 a long tail: `rb-extract` would have to decide when an observed value is
-evidence of a domain rather than a single sample, `rb-reconcile` would have to
-reconcile two claims that disagree about a domain, and layer 2 would then be
+evidence of a domain rather than a single sample, the reconcile passes would
+have to reconcile two claims that disagree about a domain, and layer 2 would then be
 able — and therefore obliged — to check seeds against it. That is a design
 increment, not a patch. See
 [`docs/concepts/glossary.md`](../concepts/glossary.md) under the world model
@@ -223,10 +223,11 @@ observed cases, and the one-sentence extension to cover the report is a change
 to a prompt whose predicates are measured, so it goes with the next deliberate
 re-record of that skill rather than as a drive-by edit.
 
-### `rb-reconcile`'s corroboration test never says what "independent" excludes
+### The corroboration test never says what "independent" excludes
 
-The skill asks whether "a second, independent claim" supports one side of a
-contradiction. Its worked example contributes exactly one claim per artifact,
+`rb-reconcile-contradict` asks whether "a second, independent claim" supports
+one side of a contradiction — prose carried unchanged from the single-pass
+`rb-reconcile` this observation was made against, so the gap came with it. Its worked example contributes exactly one claim per artifact,
 so nothing in the text rules out counting **two claims from the same document**
 as independent corroboration — which would make a self-contradicting document
 look like two agreeing sources.
@@ -342,9 +343,9 @@ $2 ceiling, and `rubrica validate --stage extract` exited 0 over both sets.
 
 Why this one hurts more than a count normally would: `tools-list-json` is the
 input `rb-triage` ranked priority 1, on the grounds that it is "the only
-candidate that declares what a tool returns" — and `rb-reconcile` builds its
-coverage denominator from `outcome_class` claims, so how many of them arrive
-bounds the width of the test matrix downstream.
+candidate that declares what a tool returns" — and `rb-reconcile-outcomes` builds the
+coverage denominator by reading those claims, so how many of them arrive bounds
+the width of the test matrix downstream.
 
 **The confound, stated plainly.** The prompt was not byte-identical between the
 two runs: Method step 3 gained the capture-instant paragraph. That paragraph is

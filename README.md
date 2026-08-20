@@ -22,7 +22,8 @@ happens until you do.
          alt="Left to right: the artifacts you bring, then five phases — select,
               understand, cover, build, compile — then the runnable test suite that
               comes out. A numbered marker between two phases is a gate a human
-              holds, and each phase lists the stages it covers.">
+              holds, and each phase lists the stages it covers; a starred line is
+              one logical step engineered as substeps.">
   </picture>
 </p>
 

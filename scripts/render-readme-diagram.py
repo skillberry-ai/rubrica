@@ -4,9 +4,9 @@
 docs/concepts/pipeline-diagram.html is the detailed counterpart, and it is the
 wrong drawing for a README: it gives every stage its own row with the artifact it
 writes and the gates that follow, which is exactly the detail someone deciding
-whether to read further does not want yet. So this page collapses the eleven
-stages of paths.STAGES into five phases, keeps the human gates because they are
-what a reader is signing up for, and drops everything else.
+whether to read further does not want yet. So this page collapses
+paths.STAGES into five phases, keeps the human gates because they are what a
+reader is signing up for, and drops everything else.
 
 Two files, not one. GitHub's dark theme is chosen independently of the OS
 `prefers-color-scheme` that an <img>-referenced SVG resolves against, so a single
@@ -63,7 +63,18 @@ PHASES: list[dict] = [
     dict(
         verb="understand",
         note=["one world model", "of claims"],
-        stages=["intake", "extract", "reconcile"],
+        stages=[
+            "intake",
+            "extract",
+            "reconcile-subjects",
+            "reconcile-contradict",
+            "reconcile-capabilities",
+            "reconcile-outcomes",
+            "reconcile-entities",
+            "reconcile-goals",
+            "reconcile-gaps",
+            "reconcile-seal",
+        ],
         gate=1,
     ),
     dict(

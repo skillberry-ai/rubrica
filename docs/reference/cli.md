@@ -100,13 +100,15 @@ rubrica adopt-projection --run runs/run-20260806-123005 \
 Layer 1: schema-validates one stage's output.
 
 Required: `--run RUN`, `--stage`, one of `survey`, `triage`, `intake`,
-`extract`, `reconcile`, `propose`, `score`, `instantiate`, `challenge`,
-`emit`, `smoke`.
+`extract`, `reconcile-subjects`, `reconcile-contradict`,
+`reconcile-capabilities`, `reconcile-outcomes`, `reconcile-entities`,
+`reconcile-goals`, `reconcile-gaps`, `reconcile-seal`, `propose`, `score`,
+`instantiate`, `challenge`, `emit`, `smoke` — `paths.STAGES`, in order.
 
 Exits 0 clean, or 1 with one finding per line on stdout.
 
 ```bash
-rubrica validate --run runs/run-20260806-123005 --stage reconcile
+rubrica validate --run runs/run-20260806-123005 --stage reconcile-seal
 ```
 
 ### `rubrica check-refs`
@@ -183,7 +185,8 @@ world model would clear layer 1 for the collections it did manage to fill.
 Presence, parseability and payload-key presence are the whole of item 1 — not the
 *type* of what a payload key holds. `{"capabilities": 5}` still reaches the
 assembly and raises out of it, by design: layer 1 is the rejection point for a
-wrong-typed value (`rubrica validate --stage reconcile`, one schema per partial),
+wrong-typed value (`rubrica validate --stage reconcile-<pass>`, one schema per
+partial),
 and duplicating that here would put one rule in two places with two messages.
 
 Items 2 and 3 overlap layer 2's `check_outcomes` on purpose — item 2 is its first

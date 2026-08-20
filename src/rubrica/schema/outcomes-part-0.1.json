@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "outcomes-part-0.1.json",
   "title": "Outcome classes, keyed by capability",
-  "description": "A join table, not a collection: outcome_classes is nested inside the capability object in the world model, so this pass cannot write a sibling array and reconcile-seal folds each entry into its capability. Keeping it a separate pass makes the capability list a file rather than a memory of having just written one -- the quantification the 45% measurement in rb-reconcile's method step 4 rests on.",
+  "description": "A join table, not a collection: outcome_classes is nested inside the capability object in the world model, so this pass cannot write a sibling array and reconcile-seal folds each entry into its capability. Keeping it a separate pass makes the capability list a file rather than a memory of having just written one -- the quantification the 45% measurement in rb-reconcile-outcomes' method rests on.",
   "type": "object",
   "required": ["schema_version", "outcomes"],
   "additionalProperties": false,

@@ -76,7 +76,7 @@ def stage_config(run: RunPaths) -> dict[str, dict[str, Any]]:
 
 
 def capability_ids(run: RunPaths) -> frozenset[str]:
-    """Stage 1b's product: what the reconciled world model says the target can do."""
+    """The reconcile family's product: what the world model says the target can do."""
     world = _load(run.world_model)
     if not isinstance(world, dict):
         return frozenset()

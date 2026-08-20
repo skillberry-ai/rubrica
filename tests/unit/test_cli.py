@@ -63,14 +63,14 @@ def test_a_missing_required_argument_is_still_a_usage_error():
 
 def test_validate_a_clean_stage_exits_zero(tmp_path, capsys):
     run = _seeded_run(tmp_path)
-    assert main(["validate", "--run", str(run.root), "--stage", "reconcile"]) == 0
+    assert main(["validate", "--run", str(run.root), "--stage", "reconcile-seal"]) == 0
     assert capsys.readouterr().out.strip() == ""
 
 
 def test_validate_a_failing_stage_exits_one_and_prints_findings(tmp_path, capsys):
     run = _seeded_run(tmp_path)
     write_json(run.world_model, minimal_world_model(schema_version="0.9"))
-    assert main(["validate", "--run", str(run.root), "--stage", "reconcile"]) == 1
+    assert main(["validate", "--run", str(run.root), "--stage", "reconcile-seal"]) == 1
     assert "[schema]" in capsys.readouterr().out
 
 
@@ -80,7 +80,7 @@ def test_validate_an_unknown_stage_is_a_usage_error(tmp_path):
 
 
 def test_validate_a_missing_run_directory_is_a_usage_error(tmp_path):
-    assert main(["validate", "--run", str(tmp_path / "absent"), "--stage", "reconcile"]) == 2
+    assert main(["validate", "--run", str(tmp_path / "absent"), "--stage", "reconcile-seal"]) == 2
 
 
 def test_check_refs_on_a_clean_run_exits_zero(tmp_path, capsys):
@@ -569,7 +569,7 @@ def _argv_for(command, run, tmp_path):
         return ["diff-runs", "--a", str(run.root), "--b", str(run.root)]
     argv = [command, "--run", str(run.root)]
     if command == "validate":
-        argv += ["--stage", "reconcile"]
+        argv += ["--stage", "reconcile-seal"]
     if command == "smoke":
         argv += ["--agents", str(_write_roster(tmp_path))]
     if command == "compare-gold":

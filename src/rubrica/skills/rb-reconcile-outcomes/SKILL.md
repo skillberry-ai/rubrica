@@ -1,0 +1,213 @@
+---
+name: rb-reconcile-outcomes
+description: For every capability already declared, enumerate its outcome classes -- success, empty, not_found, error, underspecified -- harvested from claims of every kind, not only the ones labelled outcome_class.
+---
+
+# rb-reconcile-outcomes
+
+You are dispatched once, after `rb-reconcile-capabilities` has written the
+capability list and before `rb-reconcile-entities`. You write the other half of
+the coverage denominator's first factor: `reconcile-seal` counts capability x
+outcome-class cells, so a capability you leave at one outcome class has quietly
+shrunk the surface every later percentage is measured against, and a run can
+reach high coverage that way without ever testing anything hard.
+
+Your output is a join table, not a collection. `outcome_classes` lives nested
+inside the capability object in the world model, so you write one entry per
+capability id and `reconcile-seal` folds each entry into its capability.
+
+## Contract
+
+```toml
+stage = "reconcile-outcomes"
+reads = ["manifest", "claims_dir", "contradictions_dir", "capabilities_part"]
+writes = ["outcomes_part"]
+schemas = ["outcomes-part"]
+invokes = ["validate", "check-refs"]
+```
+
+## 1. Inputs
+
+You read the four things this skill's contract names under `reads`:
+`manifest.json`, every file under `01-claims/` (`claims_dir`) -- not one of
+them, all of them -- every file under `01-contradictions/`
+(`contradictions_dir`), and `01-capabilities.json` (`capabilities_part`). Every
+pass in this family reads all of the claims; the family is split on *output*,
+not on claims, which is what keeps the barrier property the single-dispatch
+stage had.
+
+`01-capabilities.json` is the list you quantify over, and reading it as a file
+rather than remembering having written it is the point of splitting the two
+passes: §3 opens with "for each capability in `01-capabilities.json`", and that
+quantification is measurable. The contradictions are a constraint, not
+background: a disagreement recorded `unresolved` may not be settled by which
+outcome classes you enumerate. If the two claims disagree about whether a bad
+id errors or returns empty, that is not a licence to pick one -- it is a reason
+to enumerate both classes, or to record neither and leave the silence to
+`rb-reconcile-gaps`.
+
+Nothing else on disk is yours to read. In particular, no pass reads
+`01-world-model.json`: it does not exist yet when you run, and on a re-run of
+this family it is an answer some earlier run assembled rather than evidence
+about the target. A later pass reading an earlier pass's partial *is* the
+design here -- that is what each pass's `reads` list is for -- but a
+re-dispatched pass does not read its own previous output: a repair hands you
+findings about the artifact you wrote, not permission to reread it instead of
+the claims. You are dispatched with no memory of any conversation that came
+before you, and nothing you write here carries forward as memory either:
+whatever you need to do this job has to be in the manifest, in the claims, in
+the contradictions, in the capability list, or in this document.
+
+Seeing every claim at once means you legitimately see more than any single
+`rb-extract` subagent did, and that is not a leak -- it is the design. Merging
+claim sets is inherently cross-artifact work; a pass forbidden from seeing
+every claim could not merge them at all. The boundary that still holds here is
+not about which *files* you may open -- you may open all of them -- it is
+about which *knowledge* you may bring to bear while reading them. A resolution
+may rest only on what the claims themselves establish: that one claim's
+evidence is stronger, that a second independent claims file corroborates one
+side, that a claim's own `derivation` marks it as a guess. It may never rest on
+what a system "like this" usually does, because no claim said that -- you
+inferred it from experience the claims do not contain. Concretely: if
+`notes.md`'s claims say `get_ticket` on an unknown id is an error and
+`trace.json`'s claims show it returning `{}`, the wrong move is "APIs
+conventionally error on bad ids, so the notes must be right" -- that is a
+convention standing in for evidence, and it would have produced the same
+resolution even if `notes.md` had never been extracted at all. The honest move
+is to look at what actually corroborates each side inside the claim set you
+were given: does a second, independent claim support one of them, does one
+claim's `derivation` mark it `reverse_engineered` from a single trace span
+while the other is `stated` in a document describing the current contract? If
+you catch yourself resolving a disagreement because one side "sounds like" the
+normal, expected, or textbook answer rather than because some other claim in
+front of you actually supports it, stop -- enumerate what the claims support
+and let `underspecified` or a gap carry the rest. §5 gives the concrete
+refusal condition this paragraph is the reasoning behind.
+
+## 2. Output
+
+One `outcomes-part-0.1.json`-shaped document, written to `01-outcomes.json`
+(`outcomes_part`). It carries `schema_version: "0.1"` and an `outcomes` array;
+each entry is one `capability_id` and the `outcome_classes` for it, each class
+with an `id`, a `kind` from `success`, `empty`, `not_found`, `error` and
+`underspecified`, and a `description`.
+
+**One entry per capability, and exactly one.** `refs.check_outcomes` reports
+any declared capability with no entry -- an unswept capability shrinks the
+denominator, and nothing checked that while both halves lived in one turn. It
+also reports an entry naming a capability nobody declared. Two entries for the
+same capability it cannot see at all, because it compares sets of capability
+ids and two entries collapse to one member; `reconcile-seal` refuses to write a
+world model in that case, and it is the only place a duplicate is ever caught.
+
+## 3. Method
+
+1. **For each capability in `01-capabilities.json`, enumerate its outcome
+   classes: `success`, `empty`, `not_found`, `error`, `underspecified`.** Ask,
+   for every capability in that file, what happens on the success path, what
+   happens when the result set is legitimately empty, what happens when the
+   target of a lookup does not exist, what happens on a bad or missing
+   argument, and whether any of those is simply never addressed by anything
+   you read (`underspecified`, not silence).
+
+   The quantification is over the capability list, deliberately, and not over
+   claims. Measured: "for every capability" produced every outcome-class cell
+   a real run needed, while an unquantified instruction to "group claims"
+   dropped 45% of them. A pass can check itself against five capabilities it
+   can reread in a file; it cannot check itself against every statement in a
+   document.
+
+2. **Do not expect this information to arrive labelled `kind:
+   outcome_class`.** A real run of `rb-extract` filed "`get_ticket` errors when
+   called with an id no ticket has" correctly as `outcome_class` from one input
+   artifact, and filed the identical fact as `invariant`, twice, from another
+   -- because a claim about what an operation *returns for a class of input*
+   and a claim about a *data rule the store maintains* look similar out of
+   context, and nothing in the claims schema forces the right label. Harvest
+   outcome-class information from claims of every `kind`, not only the ones
+   already tagged `outcome_class`: read an `invariant` claim, a `capability`
+   claim, even an `actor` or `goal` claim, for whether it is actually
+   describing what an operation does for some class of input, and if it is, it
+   feeds this enumeration regardless of the `kind` its author chose. The two
+   conflicting `kind` labels for the same underlying fact are themselves worth
+   folding into one outcome class citing both claims, not two outcome classes
+   and not a contradiction -- they agree on the fact and disagree only on a
+   bookkeeping label that is `rb-extract`'s mistake to have made, not a real
+   disagreement about the target.
+
+3. **Write `underspecified` where nothing addresses a class at all.** It is a
+   real outcome class with a real cell in the denominator, and it is the
+   honest record that this behaviour is unknown. Leaving the class out
+   entirely says the opposite -- that the capability has no such case -- and
+   nothing downstream can tell the two apart.
+
+## 4. Invariants
+
+1. Every capability declared in `01-capabilities.json` has exactly one entry
+   here. `refs.check_outcomes` reports each one that does not, and names the
+   reason: the coverage denominator counts capability x outcome-class cells,
+   so a capability left unswept shrinks the surface every later percentage is
+   measured against.
+
+2. No entry names a capability `01-capabilities.json` does not declare.
+   `check_outcomes` reports that direction too, and `reconcile-seal` refuses
+   to assemble a world model at all rather than dropping the entry, because a
+   dropped entry produces a coherent-looking world model missing cells an
+   artifact declared.
+
+3. No capability has two entries. Neither layer sees this -- `check_outcomes`
+   compares sets -- so `reconcile-seal`'s refusal is the only thing between a
+   duplicate and a silently halved outcome list.
+
+4. Outcome-class `id`s are unique within their capability, and stable: every
+   coverage cell downstream is named `cell:<capability_id>/<outcome_class_id>`,
+   and `rb-propose` targets holes by that name.
+
+Before you report done, run
+`rubrica validate --stage reconcile-outcomes --run <run>` and then
+`rubrica check-refs --run <run>`, where `<run>` is the run directory you were
+dispatched with. `--run` is required on both: without it the command exits 2
+on a usage error and tells you nothing about your artifact. `check-refs` runs
+every checker the run has inputs for, so it may also name an artifact an
+earlier pass wrote; the findings that are yours name `01-outcomes.json`, and
+those are your own defect to fix rather than findings to pass along. Repair the
+artifact and run both again; report success only once both exit clean.
+
+## 5. Refusal conditions
+
+Every condition below is one where the honest enumeration looks less complete,
+or less confident, than one you could have written. The failure this pass is
+most exposed to is the opposite of a missing cell: a full five-class
+enumeration for a capability the claims describe in one sentence, every
+description plausible and none of it stated anywhere.
+
+- **A capability's error or empty behaviour is described nowhere.** Write the
+  class with `kind: underspecified` and say in the `description` that no input
+  addresses it. Do not invent the behaviour, and do not silently omit the
+  class: the first is a fact nobody stated, the second is a claim that the
+  case does not exist. If the missing semantics would stop `rb-propose` from
+  designing a meaningful scenario against that capability, that is a gap for
+  `rb-reconcile-gaps` to record with `propose` in its `blocks` list -- you
+  read the same claims it does, but you have nowhere to write a gap.
+
+- **Two claims disagree about what a class of input returns, and
+  `01-contradictions/` records the disagreement `unresolved`.** Enumerate both
+  classes and say in each `description` which claim it rests on, or write
+  `underspecified` if you cannot state either honestly. Do not pick the side
+  you find more convincing: `rb-reconcile-contradict` was accountable for that
+  decision and recorded that the claims did not settle it, and an outcome
+  class has no `rationale` field in which you could disagree on the record.
+
+- **You are about to fill a silence because one answer matches what a system
+  like this usually does.** Stop. That reasoning is convention knowledge
+  standing in for evidence the claims do not contain, and it would produce the
+  same answer whether or not the input had ever been extracted at all -- which
+  is the tell that nothing in front of you settled it. `underspecified` is the
+  honest class, and its `description` should say plainly that no claim
+  addressed the case.
+
+- **A capability in `01-capabilities.json` is one you would not have
+  declared.** Write its entry anyway. Skipping it is a finding
+  `refs.check_outcomes` reports against your artifact, and it is not the
+  channel for disagreeing with the previous pass: a capability with no
+  supporting claim is a gap `rb-reconcile-gaps` audits for and records.

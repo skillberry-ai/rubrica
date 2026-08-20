@@ -1014,8 +1014,8 @@ def check_claim_utilisation(run: RunPaths) -> list[Finding]:
     were uncited and almost all of those drops were correct, so a threshold would
     have failed a run whose rb-reconcile was behaving. Zero is indefensible under
     every reading -- a human registered that input through intake, so either
-    rb-extract produced nothing usable from it or rb-reconcile ignored a whole
-    artifact.
+    rb-extract produced nothing usable from it or the reconcile passes ignored a
+    whole artifact.
     """
     out: list[Finding] = []
     for entry in claim_utilisation(run)["artifacts"]:
