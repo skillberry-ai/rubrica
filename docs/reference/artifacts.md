@@ -73,16 +73,17 @@ The run's identity: `run_id`, `target` (name and interface), the registered
 `sha256`, `kind`, and `bytes`), the current `limits` (`max_rounds`,
 `max_scenarios`), and `stages` — one entry per stage that has actually run,
 recording the `model`, `effort`, and `skill_sha256` `record-stage` computed
-from the skill file used. `stages` gains entries for the seven skill-run stages
+from the skill file used. `stages` gains one entry per prompt stage
 between `extract` and `emit`, plus `triage` — which is recorded **after** gate
 0 rather than when it ran, because a run minted by `survey` has no manifest to
 merge into until `intake --run` writes one
 ([`docs/guides/running-a-stage-by-hand.md`](../guides/running-a-stage-by-hand.md)
-§4 has the command). `intake`, `smoke`, and `survey` are code: they have no
-skill file for `record-stage` to hash, so they never appear there, and their
-absence is not a finding. The schema's `propertyNames` enum permits all eleven
-stage names — it constrains the vocabulary, not which of them a real run
-records.
+§4 has the command). `intake`, `smoke`, `survey`, and `reconcile-seal` are
+code: they have no skill file for `record-stage` to hash, so they never appear
+there, and their absence is not a finding. The schema's `propertyNames` enum
+permits exactly `paths.STAGES` — `tests/unit/test_manifest_stages.py` holds the
+two equal, in order — so it constrains the vocabulary, not which of them a real
+run records.
 
 Fields worth knowing: `inputs[].provenance` (present only for an input that
 came from inside a container file or from a projection — `container_sha256`

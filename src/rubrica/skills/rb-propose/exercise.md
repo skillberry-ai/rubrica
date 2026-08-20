@@ -18,6 +18,14 @@ upto="reconcile")`. This leaves `01-world-model.json` on disk and nothing
 under `02-scenarios.json` or `03-coverage/` -- round 1 from a blank page,
 with `coverage_latest` legitimately absent.
 
+> **Editorial note, added when `reconcile` became the `reconcile-*` family.** The
+> checkpoint above was renamed: `upto="reconcile"` now raises `ValueError`, and
+> the checkpoint that leaves exactly this state on disk is
+> `upto="reconcile-seal"`. The command is left as it was recorded because this
+> file states what happened, and the run it describes was built with the name
+> above. Nothing else about the state changed -- `01-world-model.json` keeps its
+> path, schema and byte shape across the split.
+
 One dispatch, given the run directory, the stage name, and this skill's
 path -- no `coverage_latest` to hand it, since none exists yet, and no
 memory of any other stage's run.

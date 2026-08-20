@@ -168,7 +168,7 @@ from §3) for the stage you dispatched:
 
 ```bash
 RUN=<the run directory from step 3>
-STAGE=<stage>  # e.g. triage, extract, reconcile-subjects, propose, score, instantiate, emit
+STAGE=<stage>  # e.g. triage, extract, reconcile-subjects, propose, score, instantiate, challenge, emit
 
 uv run rubrica validate --run "$RUN" --stage "$STAGE"   # expect 0
 uv run rubrica check-refs --run "$RUN"                  # expect 0
@@ -292,8 +292,12 @@ RUN=$(PYTHONPATH=. uv run python /tmp/toy-run-to.py /tmp/rubrica-lab/runs extrac
 ./scripts/dispatch-stage.sh reconcile-subjects "$RUN"
 
 # the contradiction sweep is a fan-out over the cover that pass just wrote: one
-# member per subject in 01-subjects.json, each given only its own subject_id
-./scripts/dispatch-stage.sh reconcile-contradict "$RUN" sub-get-ticket
+# member per subject in 01-subjects.json, each given only its own subject_id.
+# Read the ids out of that file: over the toy world the cover's subjects are
+# sub-cap-find-tickets, sub-cap-get-ticket, sub-ent-ticket, sub-ent-comment,
+# sub-actors-and-goals and sub-uncited, and sub-cap-get-ticket is the one whose
+# claims actually disagree -- the interesting member to exercise first
+./scripts/dispatch-stage.sh reconcile-contradict "$RUN" sub-cap-get-ticket
 
 # triage is also a barrier -- no slice id -- and precedes intake, so its run
 # comes from a real `rubrica survey` rather than the toy-run-to.py builder above

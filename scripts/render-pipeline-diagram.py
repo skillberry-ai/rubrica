@@ -536,13 +536,13 @@ comes from an artifact on disk. There is no edge at all between one stage and th
 
   <rect x="372" y="94" width="196" height="62" rx="2" class="box-prompt"/>
   <rect x="372" y="94" width="4.5" height="62" class="prompt-edge"/>
-<text x="388" y="120" class="st-name" font-size="13">reconcile-capabilities</text>
-<text x="388" y="139" class="st-runs" font-size="10">rb-reconcile-capabilities</text>
+  <text x="388" y="120" class="st-name" font-size="13">reconcile-capabilities</text>
+  <text x="388" y="139" class="st-runs" font-size="10">rb-reconcile-capabilities</text>
 
   <rect x="372" y="236" width="196" height="62" rx="2" class="box-prompt"/>
   <rect x="372" y="236" width="4.5" height="62" class="prompt-edge"/>
   <text x="388" y="262" class="st-name" font-size="13">reconcile-outcomes</text>
-<text x="388" y="281" class="st-runs" font-size="10">rb-reconcile-outcomes</text>
+  <text x="388" y="281" class="st-runs" font-size="10">rb-reconcile-outcomes</text>
 
   <line x1="470" y1="160" x2="470" y2="232" class="edge cut"/>
   <line x1="452" y1="212" x2="488" y2="182" class="cut-x"/>
@@ -981,9 +981,11 @@ skill file path. If a stage needs a fact, it reads it from an artifact, or it do
     <code>reconcile-outcomes</code> never hears from <code>reconcile-capabilities</code>; it reads
     <code>01-capabilities.json</code>, which is exactly why that list is a file rather than a
     memory of having just written one. Fan-out members get a fourth thing — the id of their own
-    slice — and never a sibling's. Two read edges are left out to keep the rest legible: both
-    passes also read <code>manifest.json</code> and every file under
-    <code>01-claims/</code>.</figcaption>
+    slice — and never a sibling's. Read edges are left out to keep the rest legible:
+    <code>reconcile-capabilities</code> also reads <code>01-contradictions/</code>, and
+    <code>reconcile-outcomes</code> also reads <code>manifest.json</code> and every file under
+    <code>01-claims/</code> — every pass in the family reads all of the
+    claims.</figcaption>
   </figure>
 
   <p>The cost of that rule is real: no stage can lean on a fact it was not handed a file for. The

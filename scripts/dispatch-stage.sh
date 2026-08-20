@@ -15,7 +15,7 @@
 #   scripts/dispatch-stage.sh <stage> <run-dir> [slice-id]
 #
 #   scripts/dispatch-stage.sh extract   "$RUN" api-json
-#   scripts/dispatch-stage.sh reconcile-contradict "$RUN" sub-get-ticket
+#   scripts/dispatch-stage.sh reconcile-contradict "$RUN" sub-cap-get-ticket
 #
 # Environment:
 #   RUBRICA_LAB          scratch dir for settings and transcripts
@@ -155,10 +155,14 @@ export PATH="$REPO/.venv/bin:$PATH"
 #   measurement/    recall.json/.md and review/sample.json/packet.md -- the
 #                   human review surface, which is scored *against* the stages.
 #
-# Derived, not guessed: the union of every skill's `reads` is claims_dir,
-# coverage_latest, expected, input_file, manifest, scenarios, seed, verdict and
-# world_model. Neither of these two is in it -- and, per the block below, neither
-# is read by check-refs, which is the constraint that actually bounds this list.
+# Derived, not guessed: the union of every skill's `reads` is capabilities_part,
+# catalogue, claims_dir, contradictions_dir, coverage_latest, entities_part,
+# expected, goals_part, input_file, manifest, outcomes_part, scenarios, seed,
+# subjects, verdict and world_model. Neither of these two is in it -- and, per
+# the block below, neither is read by check-refs, which is the constraint that
+# actually bounds this list. Re-derive rather than trust this line:
+#   uv run python -c "from rubrica.skills import discover; print(sorted(
+#     {n for s in discover() for n in s.contract.get('reads', [])}))"
 RUN_DENY=("$RUN/decisions.md" "$RUN/measurement")
 
 # ---------------------------------------------------------------------------

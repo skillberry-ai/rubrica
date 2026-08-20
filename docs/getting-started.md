@@ -329,7 +329,7 @@ straight from the three `--input` files named on the command line.
 
 No command in this repository dispatches a model. `survey`, `intake`,
 `validate`, `check-refs`, and every other subcommand above are code — the
-dispatch of `rb-triage`, and of the seven stages from `extract` through
+dispatch of `rb-triage`, and of the prompt stages from `extract` through
 `emit`, happens by pointing an agent at a skill file and a run directory.
 
 `rb-orchestrate` — `src/rubrica/skills/rb-orchestrate/SKILL.md` — is the skill

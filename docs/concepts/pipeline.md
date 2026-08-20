@@ -31,9 +31,9 @@ contract, not a diagram convention.
 | `01b` | `reconcile-subjects` | `rb-reconcile-subjects` — barrier | the manifest and every claims file | `01-subjects.json` | validate · check-refs |
 | `01c` | `reconcile-contradict` | `rb-reconcile-contradict` — fan-out, one per subject | the manifest, every claims file, `01-subjects.json` | `01-contradictions/<subject-id>.json` | validate · check-refs |
 | `01d` | `reconcile-capabilities` | `rb-reconcile-capabilities` | the manifest, every claims file, `01-contradictions/` | `01-capabilities.json` | validate · check-refs |
-| `01e` | `reconcile-outcomes` | `rb-reconcile-outcomes` | the above, plus `01-capabilities.json` | `01-outcomes.json` | validate · check-refs |
-| `01f` | `reconcile-entities` | `rb-reconcile-entities` | the above, plus `01-capabilities.json` | `01-entities.json` | validate · check-refs |
-| `01g` | `reconcile-goals` | `rb-reconcile-goals` | the above, plus `01-capabilities.json` and `01-entities.json` | `01-goals.json` | validate · check-refs |
+| `01e` | `reconcile-outcomes` | `rb-reconcile-outcomes` | `01d`'s reads, plus `01-capabilities.json` | `01-outcomes.json` | validate · check-refs |
+| `01f` | `reconcile-entities` | `rb-reconcile-entities` | `01d`'s reads, plus `01-capabilities.json` — **not** `01-outcomes.json` | `01-entities.json` | validate · check-refs |
+| `01g` | `reconcile-goals` | `rb-reconcile-goals` | `01d`'s reads, plus `01-capabilities.json` and `01-entities.json` | `01-goals.json` | validate · check-refs |
 | `01h` | `reconcile-gaps` | `rb-reconcile-gaps` | the manifest, every claims file, and every partial above | `01-gaps.json` | validate · check-refs |
 | `01i` | `reconcile-seal` | code — `rubrica reconcile-seal` | the manifest and all seven partials | `01-world-model.json` | validate · check-refs · human gate 1 |
 | `02` | `propose` | `rb-propose` | `manifest.json`, `01-world-model.json`, `02-scenarios.json`, `03-coverage/latest.json` | `02-scenarios.json` (appends this round) | validate |

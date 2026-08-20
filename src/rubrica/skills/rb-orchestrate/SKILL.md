@@ -144,9 +144,9 @@ failed, the answer is the halt in refusal condition 2, not the artifact.
 
 ## 3. Method
 
-**This pipeline has eleven stages and nine skills; you dispatch seven of the
-nine yourself.** The other two skills bracket you rather than sitting inside
-your walk. Before you exist at all, `rubrica survey` walks a corpus and mints
+**You dispatch the prompt stages from `extract` through `emit`, and no
+others.** The two skills you do not dispatch bracket your walk rather than
+sitting inside it. Before you exist at all, `rubrica survey` walks a corpus and mints
 this run, writing `00-catalogue.json` -- one bounded digest per candidate,
 never the candidate's own bytes. `rb-triage` reads only that catalogue and
 rules on every candidate -- `admit`, `decline`, or `needs_projection` --
@@ -241,8 +241,8 @@ leak of step A1, dressed as efficiency.
 
 ### A. The dispatch protocol
 
-Every one of the seven prompt stages is dispatched the same way. Get this
-right once and the walk in section B is bookkeeping.
+Every prompt stage you dispatch is dispatched the same way. Get this right
+once and the walk in section B is bookkeeping.
 
 **A1. A dispatch carries exactly three things:** the **run directory** path,
 the **stage name**, and the path to its **skill**. Nothing else. No summary of

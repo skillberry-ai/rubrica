@@ -298,8 +298,8 @@ rule. They go with a deliberate re-record of those two skills.
 
 ### One exercise is one sample
 
-Eight of the pipeline's nine skills carry an `exercise.md` beside their
-`SKILL.md`, each recording what **one** measured dispatch actually did. That is
+The skills that carry an `exercise.md` beside their `SKILL.md` each record
+what **one** measured dispatch actually did. That is
 the only behavioural evidence this project has, and one sample is one sample: a
 prompt that refused correctly once, or built a sound world model once, has not
 thereby been shown to do so reliably.

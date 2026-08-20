@@ -288,13 +288,24 @@ so running them is free; *producing* a recording dispatches a model and costs
 money. They are not part of `make test`, and the skip message names the command
 that runs them.
 
-Most skills also carry an `exercise.md` beside the `SKILL.md`, recording what
-**one** real dispatch measurably did — the only behavioural evidence this project
-has, and one sample is one sample. `rb-triage` is the exception and carries
-none, which is **not** explained by never having been dispatched; see
+Some skills carry an `exercise.md` beside the `SKILL.md`, recording what **one**
+real dispatch measurably did — the only behavioural evidence this project has,
+and one sample is one sample. The `reconcile-*` passes carry none yet, because
+they are new. `rb-triage` carries none for a different reason, which is **not**
+that it was never dispatched; see
 [`docs/design/limitations.md`](docs/design/limitations.md) for what those runs
-produced and why the record is not in the repository. Two rules for an exercise
-record:
+produced and why the record is not in the repository.
+
+**Counting `exercise.md` files on disk will not give you the number of skills
+that have one, and that is deliberate.** `src/rubrica/skills/rb-reconcile/` holds
+an `exercise.md` and no `SKILL.md`: it is the record of two real dispatches of
+the single-pass stage the `reconcile-*` family replaced, kept where it was rather
+than relocated into any new pass, because relocating it would assert that a
+dispatch of *that* pass did what the superseded stage actually did. Its
+`SUPERSEDED.md` says so. `skills.discover()` skips the directory, since
+`_skill_dirs` keeps only children with a `SKILL.md`.
+
+Two rules for an exercise record:
 
 - It states what **happened**. A reasoned number presented as an observed one
   corrupts the evidence; one such misattribution shipped and had to be

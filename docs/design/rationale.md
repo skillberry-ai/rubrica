@@ -202,9 +202,9 @@ regression test.
 `tests/unit/test_refusals_live.py` are the assertions that hold those facts;
 they will fail loudly if a fixture stops carrying the defect it was built to
 exercise, or if a re-recorded dispatch stops declining where the earlier one
-did. Eight of the pipeline's nine skills also carry an `exercise.md` beside
-their `SKILL.md`, recording what one measured dispatch actually did — not a
-reasoned estimate of what it should do; `rb-triage` does not yet have one,
+did. Most skills also carry an `exercise.md` beside their `SKILL.md`, recording what
+one measured dispatch actually did — not a reasoned estimate of what it should
+do. `rb-triage` does not yet have one,
 which [`docs/design/limitations.md`](limitations.md) records as a gap in the
 evidence rather than something this document should explain away.
 
@@ -214,7 +214,7 @@ One exercise is one sample. A prompt that refused correctly once, or produced
 a sound world model once, has not thereby been shown to do so reliably —
 `diff-runs` exists specifically to measure whether two runs over the same
 inputs land on the same judgment, and that measurement has not been taken at
-scale. The seven prompt stages this document's reasoning is built around —
+scale. The prompt stages this document's reasoning is built around —
 extract through emit — have not yet been run, end to end, against a real
 target system; the only run of that chain this document can point to is
 against the toy world built to exercise the contract. What changes when the

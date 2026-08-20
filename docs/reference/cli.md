@@ -240,7 +240,7 @@ other writer; `rb-orchestrate` is their only caller in a real run.
 
 Records a stage's model, effort, and skill hash into `manifest.json`.
 
-Required: `--run RUN`, `--stage` (same eleven choices as `validate` above),
+Required: `--run RUN`, `--stage` (the same choices as `validate` above),
 `--model MODEL`, `--effort {low,medium,high,xhigh,max}`, `--skill PATH`.
 
 The digest is computed here from `--skill` rather than accepted as a string —
