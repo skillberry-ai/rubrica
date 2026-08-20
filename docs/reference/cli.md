@@ -308,8 +308,8 @@ swept, 0 contradictions" is a strong claim about the corpus and has to be legibl
 as one rather than rendered as silence. The sweep reports counts, not the
 contradictions themselves, so a non-zero `unresolved` is the cue to open
 `01-contradictions/`. The world model's gaps and triage's open deficiencies
-follow, each listed in full, since pairing them is a human's call and no
-mechanical check exists for it.
+follow, each listed by its id and its prose statement, since pairing them is a
+human's call and no mechanical check exists for it.
 
 Required: `--run RUN`, `--gate {0,1,2,3}`.
 

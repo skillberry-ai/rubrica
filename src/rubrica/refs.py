@@ -783,11 +783,11 @@ def check_contradiction_parts(run: RunPaths) -> list[Finding]:
     Both sides of every recorded contradiction must also be claims the part's own
     subject names -- rb-reconcile-contradict's invariant 3, and until this clause
     existed nothing enforced it: the two claim ids were resolved against the whole
-    run, so a member reaching outside its slice was clean. A member is handed one
-    subject and no sibling's claims, so a contradiction spanning two subjects is
-    one it could not have found from what it read, and the finding belongs on the
-    part. This stays a **reference** check, in layer 2's remit: does this id
-    appear in that subject's claim list. Whether the two claims genuinely
+    run, so a member reaching outside its slice was clean. A claim outside a
+    member's own subject is a sibling member's to sweep, so recording it here
+    would double-count what that sibling already covers, and the finding belongs
+    on the part. This stays a **reference** check, in layer 2's remit: does this
+    id appear in that subject's claim list. Whether the two claims genuinely
     contradict is semantic, and nothing here judges it.
     """
     cover = _load(run.subjects)
@@ -907,8 +907,8 @@ def check_contradiction_parts(run: RunPaths) -> list[Finding]:
                             f"/contradictions/{i}/{side}",
                             f"claim {claim_id} is not one subject {path.stem!r} names; both "
                             "sides of a contradiction must be claims this subject covers, "
-                            "since the member that wrote this part saw no other subject's "
-                            "claims",
+                            "since a claim outside this subject is a sibling member's to "
+                            "sweep, not this one's",
                         )
                     )
     for dupe in _dupes(seen):

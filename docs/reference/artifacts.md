@@ -120,7 +120,8 @@ and none of them reading `01-world-model.json`. `reconcile-seal` assembles them
 into that file, which is unchanged: nothing downstream of the seal knows the
 partials exist. It reads every one of them but `01-subjects.json` — the world
 model has no subjects field, so the cover is an input to the contradiction
-fan-out and to `check-refs`, not to the seal. Each pass is a stage in
+fan-out, to `reconcile-gaps`, and to `check-refs`, not to the seal. Each pass
+is a stage in
 `paths.STAGES`, so `rubrica validate --stage reconcile-<pass>` gates exactly one
 of these kinds.
 

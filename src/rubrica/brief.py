@@ -14,12 +14,13 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   deficiencies -- a pairing that is deliberately *not* a
   mechanical check (matching gap prose to decline prose is semantic, the same
   hole `check-refs` leaves for a claim's support). Both sides of that pairing are
-  printed in full, each gap and each open deficiency, so for that one call this
-  rendering really is the whole instrument. Claim utilisation and the implied
-  suite size are reported alongside it, and the reconcile sweep comes first: how
-  many subjects cover how many claims, how many subjects were swept for
-  contradictions, how many contradictions were recorded, and -- only when that
-  count is non-zero -- the tally by `resolution`, which names `unresolved` at
+  listed, each gap and each open deficiency by its id and its prose statement,
+  so for that one call this rendering really is the whole instrument. Claim
+  utilisation and the implied suite size are reported alongside it, and the
+  reconcile sweep comes first: how many subjects cover how many claims, how
+  many subjects were swept for contradictions, how many contradictions were
+  recorded, and -- only when that count is non-zero -- the tally by
+  `resolution`, which names `unresolved` at
   zero whenever that branch renders at all. The sweep is an **aggregate**, and
   saying so matters: it renders counts, never the contradictions themselves, so
   it is a pointer at `01-contradictions/` rather than a substitute for reading

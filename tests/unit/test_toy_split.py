@@ -95,7 +95,7 @@ def test_each_contradiction_lands_in_a_subject_that_names_both_its_sides():
             for side in ("claim_a", "claim_b"):
                 assert contradiction[side] in covered_by[subject_id], (
                     f"{contradiction['id']}'s {side} reaches outside {subject_id}, which is a "
-                    "contradiction the member could not have found from its own slice"
+                    "claim a sibling member's subject covers, not this one's to sweep"
                 )
 
 
@@ -105,8 +105,8 @@ def test_a_cross_artifact_contradiction_is_findable_inside_one_subject():
     Splitting reconcile is only sound if a disagreement *between two inputs* is
     still visible to the single fan-out member that records it. The golden world's
     one contradiction pits the operator notes against the captured trace, so this
-    checks that both of those claims live in the same subject -- the only way one
-    member, handed one slice and no sibling's claims, could ever have seen it.
+    checks that both of those claims live in the same subject -- the only way a
+    single member's own subject names both sides, which recording it requires.
     """
     parts = split_world_model()
     origin = {

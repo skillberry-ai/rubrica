@@ -488,11 +488,12 @@ def split_world_model(
     #
     # Both sides then join that subject, and that is the load-bearing half.
     # rb-reconcile-contradict's invariant 3 is that both sides of a recorded
-    # contradiction are claims the member's *own* subject names -- a member sees
-    # only its own slice, so a contradiction reaching outside it is one the member
-    # could not have found. Measured before this: sub-cap-get-ticket held
-    # clm-notes-004 but not clm-trace-002, and carried con-missing-semantics
-    # anyway. Since tests/fixtures/toy/ is the model answer a skill imitates, that
+    # contradiction are claims the member's *own* subject names -- a claim
+    # outside that subject is a sibling member's to sweep, so a contradiction
+    # spanning two subjects is not this member's to record. Measured before
+    # this: sub-cap-get-ticket held clm-notes-004 but not clm-trace-002, and
+    # carried con-missing-semantics anyway. Since tests/fixtures/toy/ is the
+    # model answer a skill imitates, that
     # taught the member reaching across subjects was fine, and it left the fixture
     # unable to demonstrate the whole point of the split -- that a cross-artifact
     # contradiction is findable *within* one subject. Over-assigning is legal

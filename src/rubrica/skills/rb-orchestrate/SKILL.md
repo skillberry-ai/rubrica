@@ -495,9 +495,11 @@ Then run the seal, which is code, not a dispatch:
 `01-world-model.json`, folds each capability's outcome classes in, and counts
 the denominator once. It reads the manifest, the five singleton partials and
 every `01-contradictions/*.json` -- and **not** `01-subjects.json`, which has no
-counterpart field in the world model, so a seal that clears its gates says
-nothing about whether the cover was total. `check-refs` is what holds the cover;
-do not read a clean seal as having ratified it. Gate it with
+counterpart field in the world model, so the world model itself carries no
+record of whether the cover was total. `check-refs` is what holds the cover; a
+seal that clears both its gates has had that checked mechanically, but do not
+read a clean seal as having ratified the cover -- mechanical totality is not a
+human's judgment that the subjects themselves are the right ones. Gate it with
 `rubrica validate --stage reconcile-seal --run <run>`, then
 `rubrica check-refs --run <run>`. It writes nothing at all when it reports a
 finding, so a partial that cannot be assembled faithfully is a repair on the

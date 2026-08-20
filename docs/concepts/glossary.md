@@ -321,7 +321,8 @@ capability and counting the `denominator` once
 (`src/rubrica/reconcile.py`, run as `rubrica reconcile-seal`). It reads the
 manifest, the five singleton partials and every `01-contradictions/*.json`, and
 **not** `01-subjects.json`: the world model has no subjects field, so the cover
-is an input to the contradiction fan-out and to `check-refs`, not to the seal.
+is an input to the contradiction fan-out, to `reconcile-gaps`, and to
+`check-refs`, not to the seal.
 Code rather than a prompt for the reason `emit` is code: two runs with identical
 partials must produce a byte-identical world model, or variance stops being
 attributable to the pass that caused it. It writes nothing at all when it
