@@ -325,6 +325,39 @@ def test_the_committed_readme_diagram_matches_a_fresh_render(theme):
     )
 
 
+def test_the_readme_diagram_fold_is_total_in_both_directions():
+    """The fold collapses a stage family into one drawn line. That is a way to
+    make a stage disappear from the drawing, so it is checked both ways: every
+    folded stage is represented by the fold's label, and no stage outside the
+    family is hidden by it. Without this the fold would silently defeat the
+    partition test next door, which is the drift that test exists to catch.
+    """
+    renderer = _readme_renderer()
+    for phase in renderer.PHASES:
+        drawn = renderer.drawn_stages(phase)
+        folded = [s for s in phase["stages"] if s.startswith(renderer.FOLD_PREFIX)]
+        unfolded = [s for s in phase["stages"] if not s.startswith(renderer.FOLD_PREFIX)]
+        assert all(stage in drawn for stage in unfolded), (
+            f"the fold hid a stage outside the {renderer.FOLD_PREFIX!r} family: {drawn}"
+        )
+        assert (renderer.FOLD_LABEL in drawn) == bool(folded), (
+            f"the fold label must appear exactly when the phase holds a folded stage: {drawn}"
+        )
+        assert len(drawn) == len(set(drawn)), f"the fold produced a repeated line: {drawn}"
+
+
+def test_the_readme_diagram_footnote_appears_only_when_something_folds():
+    """A footnote explaining a star that is not drawn is worse than no footnote."""
+    renderer = _readme_renderer()
+    folds = any(
+        stage.startswith(renderer.FOLD_PREFIX)
+        for phase in renderer.PHASES
+        for stage in phase["stages"]
+    )
+    for theme in renderer.OUTPUTS:
+        assert (renderer.FOLD_NOTE in renderer.svg(theme)) is folds
+
+
 def test_the_readme_references_both_diagram_themes():
     """The guard above keeps the files honest; this one keeps them reachable. A
     <picture> that lost its dark <source> still renders, which is exactly why the
