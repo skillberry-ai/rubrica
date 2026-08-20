@@ -136,6 +136,49 @@ Exits 0 clean, or 1 with findings.
 rubrica check-skills
 ```
 
+## Assembling the world model
+
+### `rubrica reconcile-seal`
+
+Assembles the reconcile partials into `01-world-model.json`: it folds
+`01-outcomes.json` back into each capability's `outcome_classes` — the
+capabilities partial omits that property, because a schema cannot express
+"`capability` minus one property" under `additionalProperties: false` — joins the
+per-subject contradiction parts into one list, takes `target` from the manifest
+rather than from any partial, and computes the coverage `denominator`.
+
+Required: `--run RUN`. Optional: `--denominator-version N` (default `1`), passed
+rather than inferred so an amendment to the frozen goal list costs an explicit
+orchestrator decision recorded in `decisions.md` instead of a number the command
+quietly incremented.
+
+Reads `manifest.json`, `01-subjects.json`, every `01-contradictions/*.json`,
+`01-capabilities.json`, `01-outcomes.json`, `01-entities.json`, `01-goals.json`
+and `01-gaps.json`. Writes `01-world-model.json` and prints its path.
+
+Code rather than a prompt, for the reason `emit` is code: two runs with identical
+partials must produce a byte-identical world model, or variance can no longer be
+attributed to a pass. A code step also streams nothing, so it cannot be killed by
+the idle reset that splitting reconcile into passes exists to avoid, however large
+the assembled model gets.
+
+**It assembles; it does not check.** Cross-artifact checking is layer 2, so run
+`rubrica check-refs` afterwards. What this command does report is the narrow class
+that makes assembly impossible — a partial absent or unparseable, a declared
+capability with no outcome classes, an outcome record naming a capability nobody
+declared — and it **writes nothing at all** when it reports any of them, because a
+half-assembled world model would clear layer 1 for the collections it did manage
+to fill.
+
+Exits 0 clean, 1 with one finding per line on stdout, or 2 if the run directory
+itself cannot be read. A missing partial is a repairable stage defect and so is a
+1, naming that partial; several missing partials are listed with the earliest pass
+first, the one a repair should start from.
+
+```bash
+rubrica reconcile-seal --run runs/run-20260806-123005
+```
+
 ## Feeding a stage
 
 ### `rubrica dedupe-candidates`

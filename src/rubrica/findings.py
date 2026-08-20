@@ -13,8 +13,8 @@ class Finding:
     `pointer` is a JSON Pointer into the artifact, or "" for the document
     root. `layer` names the checking layer that produced it, so a reader can
     tell a shape error from a reference error without parsing the message.
-    The layers: "schema" | "refs" | "invariant" | "emit" | "internal" |
-    "recall" | "review" | "skill".
+    The layers: "schema" | "refs" | "invariant" | "emit" | "reconcile" |
+    "internal" | "recall" | "review" | "skill".
 
     "internal" is the layer cli.py uses when a checking layer raised instead of
     returning: the artifact is malformed in a way layer 1 must reject first, and
@@ -22,6 +22,12 @@ class Finding:
     skills.check_contract's and check_all's layer: the artifact is a SKILL.md
     rather than a run artifact, and the check is against the code that owns
     each declared name rather than against a schema.
+
+    "reconcile" is the seal's layer: the artifacts are the world-model partials
+    and the failure is that they cannot be assembled at all -- a partial absent or
+    unparseable, a declared capability with no outcome classes. Distinct from
+    "refs" because refs checks a run someone may still be building, while this
+    names the reason one command produced no output.
     """
 
     artifact: Path
