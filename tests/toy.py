@@ -19,6 +19,7 @@ calls the API once, which is how an all-pass suite happens.
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -416,6 +417,114 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
     }
     payload.update(over)
     return payload
+
+
+def split_world_model(
+    world: dict[str, Any] | None = None,
+    *,
+    claim_ids: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """The golden world model, cut into the partials the reconcile passes write.
+
+    Derived rather than hand-authored beside toy_world_model: tests/fixtures/toy/
+    is the model answer a skill imitates, and a second copy of that answer in
+    partial form would be a second thing to keep correct -- the drift this module
+    already avoids by building every checkpoint from one source. Deriving is also
+    what makes the seal's round trip a *property* (seal(split(w)) == w) rather
+    than a worked example: a hand-authored pair could satisfy it while both
+    drifted together.
+
+    `claim_ids` defaults to every claim the toy run actually contains, because the
+    cover has to be total -- refs.check_subjects reports any claim it omits, and a
+    fixture that could not pass its own gate would be untestable against it.
+
+    The subject assignment is deliberately mechanical (one subject per capability,
+    one per entity, one for the actors and goals, one catch-all): it stands in for
+    a judgment a prompt makes, and a fixture that guessed cleverly here would be
+    claiming more than it can know.
+    """
+    world = toy_world_model() if world is None else world
+    if claim_ids is None:
+        claim_ids = [
+            claim["id"]
+            for artifact_id in ARTIFACT_IDS
+            for claim in toy_claims(artifact_id)["claims"]
+        ]
+    remaining = list(dict.fromkeys(claim_ids))
+
+    subjects: list[dict[str, Any]] = []
+
+    def take(subject_id: str, label: str, cited: list[str]) -> None:
+        """Record one subject, and strike its claims off the catch-all's list.
+
+        Struck rather than left, so a claim cited by two elements lands in both
+        subjects (the cover is a cover) while the catch-all holds only what no
+        element cites at all.
+        """
+        if not cited:
+            return
+        subjects.append({"id": subject_id, "label": label, "claims": list(cited)})
+        for claim_id in cited:
+            if claim_id in remaining:
+                remaining.remove(claim_id)
+
+    for capability in world["capabilities"]:
+        take(f"sub-{capability['id']}", capability["operation"], capability["claims"])
+    for entity in world["entities"]:
+        take(f"sub-{entity['id']}", entity["name"], entity["claims"])
+    take(
+        "sub-actors-and-goals",
+        "who uses the target, and what for",
+        [cid for item in (*world["actors"], *world["goals"]) for cid in item["claims"]],
+    )
+    take("sub-uncited", "claims no element of the world model cites", remaining)
+
+    # Every subject gets a part, empty or not: the file is the record that the
+    # fan-out member visited that subject, which is what
+    # refs.check_contradiction_parts checks and what the single-turn stage could
+    # never show. A contradiction lands under the first subject holding its
+    # claim_a, so the assignment is a function of the cover rather than a second
+    # judgment.
+    by_subject: dict[str, list[dict[str, Any]]] = {s["id"]: [] for s in subjects}
+    for contradiction in world["contradictions"]:
+        owner = next(
+            (s["id"] for s in subjects if contradiction["claim_a"] in s["claims"]),
+            subjects[-1]["id"],
+        )
+        by_subject[owner].append(contradiction)
+
+    return {
+        "subjects": {"schema_version": "0.1", "subjects": subjects},
+        "contradictions": {
+            subject_id: {
+                "schema_version": "0.1",
+                "subject_id": subject_id,
+                "contradictions": found,
+            }
+            for subject_id, found in by_subject.items()
+        },
+        "capabilities": {
+            "schema_version": "0.1",
+            "capabilities": [
+                {k: v for k, v in capability.items() if k != "outcome_classes"}
+                for capability in world["capabilities"]
+            ],
+        },
+        "outcomes": {
+            "schema_version": "0.1",
+            "outcomes": [
+                {"capability_id": c["id"], "outcome_classes": c["outcome_classes"]}
+                for c in world["capabilities"]
+            ],
+        },
+        "entities": {"schema_version": "0.1", "entities": world["entities"]},
+        "goals": {
+            "schema_version": "0.1",
+            "actors": world["actors"],
+            "goals": world["goals"],
+        },
+        "gaps": {"schema_version": "0.1", "gaps": world["gaps"]},
+    }
 
 
 _SCENARIOS: list[dict[str, Any]] = [
