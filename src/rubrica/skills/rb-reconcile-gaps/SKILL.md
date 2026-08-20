@@ -8,8 +8,8 @@ description: Record what no input says and reasoning cannot supply, naming hones
 You are dispatched once, after every other prompt pass in this family and
 before `reconcile-seal` assembles their partials into the world model. Two
 jobs, and the second one is new to this pass: record the gaps, and audit what
-the passes above you wrote. You read all of the claims and all seven earlier
-outputs, which makes you the last pass that reads the claims closely -- after
+the passes above you wrote. You read all of the claims and every partial those
+passes wrote, which makes you the last pass that reads the claims closely -- after
 you, nothing in the pipeline compares the world model against the evidence it
 was supposed to come from.
 

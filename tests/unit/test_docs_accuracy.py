@@ -260,6 +260,22 @@ def test_only_the_docs_index_cites_recorded_history():
     )
 
 
+@pytest.mark.parametrize("doc", sorted((REPO_ROOT / "src").rglob("*.md")), ids=_doc_id)
+def test_no_shipped_markdown_cites_recorded_history(doc):
+    """The same rule, over the prose that ships inside the package.
+
+    _user_facing() covers README/CONTRIBUTING/CLAUDE and docs/, and stops there --
+    which is exactly why rb-reconcile/SUPERSEDED.md kept pointing at a dated design
+    record long after that record's "no implementation yet" heading went false. A
+    SKILL.md is read by a dispatched model and an exercise.md by a reviewer, so a
+    stale pointer in either is read the same way a stale pointer in docs/ is. No
+    file under src/ may cite the tree; there is no index here to exempt.
+    """
+    assert _HISTORY_TREE not in _read(doc), (
+        f"{_doc_id(doc)} cites recorded history; point at current documentation instead"
+    )
+
+
 # The README's own drawing. Same discipline as the detailed page above -- a
 # content table in a script, the committed output compared against a fresh
 # render -- because a README picture is the one drawing a reader sees before they
@@ -359,15 +375,17 @@ def test_the_readme_diagram_footnote_appears_only_when_something_folds():
 
 
 def test_drawn_stages_folds_a_synthetic_reconcile_family():
-    """The two tests above run only against real PHASES, which has no
-    reconcile-* stage yet -- so len(drawn) == len(set(drawn)) can never be
-    driven to fail by any input the committed suite supplies: no real phase
-    folds two stages to the same label. That gap matters because Task 7 is
-    what re-renders and commits the SVGs; whatever the renderer emits at that
-    point becomes the new expected bytes, and the byte-compare test will
-    ratify it without ever having watched a fold regression fail. This test
-    supplies the fold-triggering input itself -- a throwaway spec, never
-    PHASES or paths.STAGES -- so the guard exists before the bytes move.
+    """A fold-triggering input this test owns, rather than the real PHASES.
+
+    Written while PHASES still had no reconcile-* stage, when nothing the
+    committed suite supplied could drive len(drawn) == len(set(drawn)) to fail.
+    That is no longer the case -- the `understand` phase now folds the whole
+    reconcile family to one label -- but the throwaway spec stays, and is the
+    stronger arrangement of the two: it pins the fold against an input that
+    cannot move when PHASES is re-partitioned, so a change to the phase table
+    and a regression in the fold logic stay distinguishable. The real PHASES is
+    held by the two tests above and by the byte-compare, which would otherwise
+    ratify whatever the renderer emitted at the moment the SVGs were committed.
 
     The expected lists are spelled out by hand rather than computed from
     FOLD_PREFIX or any partition of the input spec: recomputing the fold here

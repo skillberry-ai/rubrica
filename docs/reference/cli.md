@@ -295,9 +295,21 @@ is itself a gate: none can turn a readable run into a defect finding.
 ### `rubrica gate-brief`
 
 Composes the existing reports into the reading surface at one of the four
-human gates: the objective verdict and grouped declines at gate 0,
-utilisation and implied size at gate 1, the coverage matrix at gate 2, the
+human gates: the objective verdict and grouped declines at gate 0; the reconcile
+sweep, utilisation and implied size at gate 1; the coverage matrix at gate 2; the
 verdict tally at gate 3.
+
+Gate 1's brief leads with the **reconcile sweep**, and it is an aggregate rather
+than a per-subject listing: how many subjects cover how many claims, how many
+subjects were swept for contradictions, how many contradictions were recorded,
+and — only when that count is non-zero — the tally by `resolution`, `unresolved`
+first and shown even at zero. Both sweep numbers print either way: "12 subjects
+swept, 0 contradictions" is a strong claim about the corpus and has to be legible
+as one rather than rendered as silence. The sweep reports counts, not the
+contradictions themselves, so a non-zero `unresolved` is the cue to open
+`01-contradictions/`. The world model's gaps and triage's open deficiencies
+follow, each listed in full, since pairing them is a human's call and no
+mechanical check exists for it.
 
 Required: `--run RUN`, `--gate {0,1,2,3}`.
 

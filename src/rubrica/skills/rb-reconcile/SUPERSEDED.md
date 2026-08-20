@@ -15,4 +15,8 @@ There is no `SKILL.md` here, and nothing looks for one: `skills._skill_dirs`
 keeps only children that have one, `expected_skill_names` derives from
 `paths.STAGES`, and no code in this repository reads an `exercise.md`.
 
-The design that replaced it: `docs/superpowers/specs/2026-08-19-staged-reconcile-design.md`.
+What replaced it, as it now stands: `docs/concepts/pipeline.md` ("Reconcile is one
+logical step, engineered as substeps") for the shape, and
+`docs/design/limitations.md` for what the split cost and what is still unmeasured.
+The dated design record this file used to point at is superseded history: it was
+headed "no implementation yet", which stopped being true when the family shipped.

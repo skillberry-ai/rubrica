@@ -268,7 +268,8 @@ as its own file: `01-subjects.json`, `01-contradictions/<subject_id>.json`,
 gate, and a later pass reads an earlier pass's partial as a *file* rather than
 as a memory of having written it — which is what lets `rb-reconcile-outcomes`
 quantify over the capability list instead of recalling it. No partial reads
-`01-world-model.json`; the **seal** is what turns the seven into one.
+`01-world-model.json`; the **seal** is what joins them into one — all of them
+except `01-subjects.json`, which the world model has no field for.
 
 ## projection
 
@@ -314,12 +315,15 @@ round history is preserved, not overwritten.
 
 ## seal
 
-`reconcile-seal`: the code step that assembles the seven **partials** into
+`reconcile-seal`: the code step that assembles the **partials** into
 `01-world-model.json`, folding each capability's outcome classes into that
 capability and counting the `denominator` once
-(`src/rubrica/reconcile.py`, run as `rubrica reconcile-seal`). Code rather
-than a prompt for the reason `emit` is code: two runs with identical partials
-must produce a byte-identical world model, or variance stops being
+(`src/rubrica/reconcile.py`, run as `rubrica reconcile-seal`). It reads the
+manifest, the five singleton partials and every `01-contradictions/*.json`, and
+**not** `01-subjects.json`: the world model has no subjects field, so the cover
+is an input to the contradiction fan-out and to `check-refs`, not to the seal.
+Code rather than a prompt for the reason `emit` is code: two runs with identical
+partials must produce a byte-identical world model, or variance stops being
 attributable to the pass that caused it. It writes nothing at all when it
 reports a finding, so a partial it cannot represent faithfully becomes a
 repair rather than a half-assembled world model that clears layer 1.
@@ -394,7 +398,7 @@ must also show the ambiguity it found rather than merely asserting it.
 ## world model
 
 The single reconciled picture of the target system, assembled by
-`reconcile-seal` from the seven **partials** the `reconcile-*` passes wrote out
+`reconcile-seal` from the **partials** the `reconcile-*` passes wrote out
 of every extracted claim: capabilities, entities, actors, goals,
 recorded contradictions, recorded gaps, and the frozen coverage denominator,
 all required by `src/rubrica/schema/world-model-0.1.json`. Every element in it

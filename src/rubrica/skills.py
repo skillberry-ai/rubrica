@@ -35,7 +35,7 @@ SKILL_FILENAME = "SKILL.md"
 # suite; survey mints run ids and timestamps too -- it runs before intake now
 # does, but the same prohibition applies to whichever stage mints them first.
 # reconcile-seal is here for a different reason from the other three: nothing
-# about assembling seven partials is judgment, and two runs with identical
+# about assembling the partials is judgment, and two runs with identical
 # partials must produce a byte-identical world model or variance stops being
 # attributable to the pass that caused it -- the same ruling that makes emit
 # code. See src/rubrica/reconcile.py.

@@ -80,7 +80,7 @@ def _extract(run: RunPaths) -> None:
 
 
 def _reconcile_parts(run: RunPaths) -> None:
-    """Every partial the six prompt passes write, and no world model yet.
+    """Every partial the seven prompt passes write, and no world model yet.
 
     A state the pipeline really passes through, and the reason it is its own
     entry: between the last pass and the seal, check_all sees seven partials with

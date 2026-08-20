@@ -260,10 +260,18 @@ that pastes the world model into an instantiate dispatch has silently removed
 the fan-out isolation this design was chosen for.
 
 **A fan-out member gets one further thing, and it is an address, not
-context:** the `artifact_id` (for `rb-extract`) or `scenario_id` (for
-`rb-instantiate` and `rb-challenge`) naming which slice is its own. Without it
-a member cannot find its work at all. Give it that id and nothing about any
-other slice.
+context:** the `artifact_id` (for `rb-extract`), the `subject_id` (for
+`rb-reconcile-contradict`) or the `scenario_id` (for `rb-instantiate` and
+`rb-challenge`) naming which slice is its own. Without it a member cannot find
+its work at all. Give it that id and nothing about any other slice.
+
+The `subject_id` is the one that most invites over-helping, because a subject is
+a set of claim ids and you can see them in `01-subjects.json`. Pass the id and
+nothing else: the member reads its own subject's claim list out of that file
+itself, and a pasted list is the deleted check of the paragraph above. It narrows
+what the member must *compare*, never what it may *read* -- every pass still
+reads all of `01-claims/`, which is what keeps a contradiction between two inputs
+visible to the member that records it.
 
 **Two named exceptions, both repairs rather than fresh work.** Each appends
 machine-quotable text naming a defect in a named artifact -- never a summary of
@@ -369,12 +377,17 @@ is a record of something this run never ran. Record the stage after its gate
 passes, including after a repair: the second dispatch is the one whose output
 survived, and its skill is what should be on file.
 
-Two stages are code and have no skill to hash: `intake`, which mints the run
-id and the timestamps no skill may invent, and `smoke`, which executes the
-suite. There is no `rb-intake` and no `rb-smoke`, so nothing is recorded for
-them, and that absence is the design rather than a stage you forgot. `emit`
-*does* have a skill -- you dispatch `rb-emit` -- so it is recorded like any
-other.
+The stages implemented in code have no skill to hash, and
+`skills.CODE_ONLY_STAGES` is the one list of them: `intake`, which mints the run
+id and the timestamps no skill may invent; `survey`, which walks a corpus before
+you are ever dispatched; `reconcile-seal`, which you run yourself as `rubrica
+reconcile-seal` at B3; and `smoke`, which executes the suite. There is no
+`rb-intake`, `rb-survey`, `rb-reconcile-seal` or `rb-smoke`, so nothing is
+recorded for any of them, and that absence is the design rather than a stage you
+forgot. Do not reach for `record-stage` after the seal: it would need a skill
+file that does not exist, and `--skill` pointed at anything else records a digest
+of something this run never ran. `emit` *does* have a skill -- you dispatch
+`rb-emit` -- so it is recorded like any other.
 
 **A6. `decide` at every branch.** Every loop round's verdict, every
 denominator amendment, every repair you spend, every halt, every gate you
@@ -478,9 +491,13 @@ every one of those findings is about a member still in flight.
 judges the parts that are already there.
 
 Then run the seal, which is code, not a dispatch:
-`rubrica reconcile-seal --run <run>`. It assembles the seven partials into
+`rubrica reconcile-seal --run <run>`. It assembles the partials into
 `01-world-model.json`, folds each capability's outcome classes in, and counts
-the denominator once. Gate it with
+the denominator once. It reads the manifest, the five singleton partials and
+every `01-contradictions/*.json` -- and **not** `01-subjects.json`, which has no
+counterpart field in the world model, so a seal that clears its gates says
+nothing about whether the cover was total. `check-refs` is what holds the cover;
+do not read a clean seal as having ratified it. Gate it with
 `rubrica validate --stage reconcile-seal --run <run>`, then
 `rubrica check-refs --run <run>`. It writes nothing at all when it reports a
 finding, so a partial that cannot be assembled faithfully is a repair on the
@@ -744,8 +761,10 @@ points at:
    a stage defect.
 
 4. **Every stage you dispatched has a `manifest.stages` entry** with its
-   model, its effort, and the `skill_sha256` of the file it ran. `intake` and
-   `smoke` have no skill and are not recorded.
+   model, its effort, and the `skill_sha256` of the file it ran. The stages in
+   `skills.CODE_ONLY_STAGES` are not among them and are not recorded: you
+   dispatch no subagent for `intake`, `survey`, `reconcile-seal` or `smoke`,
+   because none of the four has a skill.
 
 5. **Every branch is in `decisions.md`**, appended through `rubrica decide`,
    one line each, with the timestamp minted by `decide`.

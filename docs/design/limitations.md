@@ -645,9 +645,22 @@ checked exactly that: a number a prompt wrote, against the model that same promp
 wrote. `reconcile-seal` now computes both fields while assembling the partials,
 and the check still recomputes both — `capability_cells` as
 `len(refs._cells(world))`, `goals` as the length of the model's `goals` array —
-against numbers the same code derived from the same lists. **Both comparisons are
-identities.** They can fail only if `reconcile.seal` and `refs.py` come to
-disagree about the arithmetic, or if somebody hand-edits a sealed world model.
+against numbers the same code derived from the same lists. **For any world model
+this pipeline now produces, both comparisons are identities.** They can fail only
+if `reconcile.seal` and `refs.py` come to disagree about the arithmetic, or if
+somebody hand-edits a sealed world model.
+
+The scope of that sentence is load-bearing, because the tree still holds world
+models the pipeline did not produce. `tests/fixtures/toy-contradiction/recorded/`
+and `tests/fixtures/toy-gap/recorded/` are committed output of the superseded
+single-dispatch `rb-reconcile`, denominators included, and
+`tests/unit/test_refusals_live.py` recomputes the cell count against one of them
+— so over a recording, `check_world_model` and that live assertion are still
+genuine checks of a number a prompt wrote. The check did not become vacuous; it
+became vacuous *for new runs*. Re-recording either fixture against the
+`reconcile-*` family would close the last place this property is measured on a
+prompt, which is a reason to keep the recordings as they are rather than to
+refresh them for tidiness.
 
 One precision, because getting it wrong is how that identity would break in the
 direction nobody notices: `capability_cells` counts **distinct**

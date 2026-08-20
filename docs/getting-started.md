@@ -358,10 +358,12 @@ what an earlier stage concluded, no excerpt of this page or anything else under
 `docs/`, no "by the way" context. If a stage needs a fact, it reads it from an
 artifact its skill's contract lists, or it does not have it.
 
-The three fan-out stages — `extract`, `instantiate`, `challenge` — get a
-fourth thing: the id of their own slice (an `artifact_id` or `scenario_id`).
-That id is an address, never a hint about what a sibling found, and never a
-sibling's own id.
+The fan-out stages — `extract`, `reconcile-contradict`, `instantiate`,
+`challenge` — get a fourth thing: the id of their own slice (an `artifact_id`, a
+`subject_id` or a `scenario_id`). That id is an address, never a hint about what
+a sibling found, never a sibling's own id, and never the slice's contents: a
+`reconcile-contradict` member reads its own subject's claim list out of
+`01-subjects.json` itself.
 
 [`docs/concepts/artifact-contract.md`](concepts/artifact-contract.md) covers
 the rest of this rule — including the two things an orchestrator may append

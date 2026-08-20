@@ -50,7 +50,9 @@ path. No conversational context is threaded through. If a stage needs a fact it
 reads it from an artifact, or it does not have it.
 
 Fan-out members get a fourth thing: the id of their own slice (`artifact_id`,
-`scenario_id`). Never a sibling's.
+`subject_id`, `scenario_id`). Never a sibling's, and never the slice's
+*contents* — `rb-reconcile-contradict` gets a `subject_id` and reads that
+subject's claim list out of `01-subjects.json` itself.
 
 The orchestrator may append exactly two things to a re-dispatch, both verbatim
 machine text, never paraphrased: a repair's gate findings, and a re-seed's
@@ -93,7 +95,8 @@ stage, which is what lets a think-heavy pass carry a different budget from a
 mechanical one. `reconcile-seal` is code for the reason `emit` is: two runs with
 identical partials must produce a byte-identical world model.
 `01-world-model.json` keeps its path, schema and byte shape, so nothing below
-the seal can tell it was assembled by eight passes rather than written by one.
+the seal can tell it was assembled pass by pass rather than written in one
+dispatch.
 
 Challenge's and reconcile-contradict's `check-refs` run **only once every member
 has finished**: `refs.check_verdicts` and `refs.check_contradiction_parts` each
@@ -210,9 +213,12 @@ are judgments rather than list entries:
   cited/total claim count for a human to read at gate 1 — the zero-utilisation
   finding it shares its arithmetic with lives in `check-refs`, never here.
   `gate-brief` composes what already exists into the reading surface at each
-  human gate: the objective verdict and grouped declines at gate 0, utilisation
-  and implied size at gate 1, the coverage matrix at gate 2, the verdict tally
-  at gate 3.
+  human gate: the objective verdict and grouped declines at gate 0; the
+  reconcile sweep plus utilisation and implied size at gate 1; the coverage
+  matrix at gate 2; the verdict tally at gate 3. Gate 1's sweep is an
+  **aggregate, not a per-subject tally** — how many subjects cover how many
+  claims, how many subjects were swept, how many contradictions were recorded,
+  and, only when any were, the tally by `resolution` with `unresolved` first.
 - `survey` is `intake`'s counterpart for the corpus path: it walks a corpus,
   digests each candidate, and mints the run, but writes `00-catalogue.json`
   instead of a manifest — there is nothing to extract from yet, because nothing

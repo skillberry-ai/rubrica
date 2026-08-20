@@ -35,7 +35,7 @@ contract, not a diagram convention.
 | `01f` | `reconcile-entities` | `rb-reconcile-entities` | `01d`'s reads, plus `01-capabilities.json` — **not** `01-outcomes.json` | `01-entities.json` | validate · check-refs |
 | `01g` | `reconcile-goals` | `rb-reconcile-goals` | `01d`'s reads, plus `01-capabilities.json` and `01-entities.json` | `01-goals.json` | validate · check-refs |
 | `01h` | `reconcile-gaps` | `rb-reconcile-gaps` | the manifest, every claims file, and every partial above | `01-gaps.json` | validate · check-refs |
-| `01i` | `reconcile-seal` | code — `rubrica reconcile-seal` | the manifest and all seven partials | `01-world-model.json` | validate · check-refs · human gate 1 |
+| `01i` | `reconcile-seal` | code — `rubrica reconcile-seal` | the manifest, the five singleton partials, and every `01-contradictions/*.json` — **not** `01-subjects.json` | `01-world-model.json` | validate · check-refs · human gate 1 |
 | `02` | `propose` | `rb-propose` | `manifest.json`, `01-world-model.json`, `02-scenarios.json`, `03-coverage/latest.json` | `02-scenarios.json` (appends this round) | validate |
 | `03` | `score` | `rb-score` — barrier | `manifest.json`, `01-world-model.json`, `02-scenarios.json` | `03-coverage/round-N.json`, `03-coverage/latest.json`, `02-scenarios.json` (statuses) | validate · check-refs · human gate 2 |
 | `04` | `instantiate` | `rb-instantiate` — fan-out, one per active scenario | `01-world-model.json`, `02-scenarios.json` | `04-instances/<sid>/{seed.json,expected.json,rationale.md}` | validate · check-refs |
@@ -86,8 +86,8 @@ so a partial it cannot represent faithfully is a repair rather than a
 half-assembled world model that clears layer 1.
 
 `01-world-model.json` keeps its path, schema and shape, so nothing downstream
-of the seal can tell that the file was assembled by eight passes rather than
-written by one.
+of the seal can tell that the file was assembled pass by pass rather than
+written in one dispatch.
 
 ### The human gates
 

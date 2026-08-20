@@ -13,15 +13,20 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
 - **Gate 1** puts the world model's gaps next to the triage record's open
   deficiencies -- a pairing that is deliberately *not* a
   mechanical check (matching gap prose to decline prose is semantic, the same
-  hole `check-refs` leaves for a claim's support), so this rendering is the
-  whole instrument for a human making that call. Claim utilisation and the
-  implied suite size are reported alongside it, and the reconcile sweep --
-  the subject cover's size, how many subjects were swept for contradictions,
-  and the resolution tally, which names `unresolved` at zero whenever the sweep
-  recorded anything at all -- comes first, because cross-pass incoherence has
-  that same shape: a later pass quietly modelling what `rb-reconcile-contradict`
-  recorded `unresolved` is not something layer 2 can see, so a human reading the
-  contradictions beside what was modelled is the only instrument there is.
+  hole `check-refs` leaves for a claim's support). Both sides of that pairing are
+  printed in full, each gap and each open deficiency, so for that one call this
+  rendering really is the whole instrument. Claim utilisation and the implied
+  suite size are reported alongside it, and the reconcile sweep comes first: how
+  many subjects cover how many claims, how many subjects were swept for
+  contradictions, how many contradictions were recorded, and -- only when that
+  count is non-zero -- the tally by `resolution`, which names `unresolved` at
+  zero whenever that branch renders at all. The sweep is an **aggregate**, and
+  saying so matters: it renders counts, never the contradictions themselves, so
+  it is a pointer at `01-contradictions/` rather than a substitute for reading
+  it. That is still worth leading with, because cross-pass incoherence -- a
+  later pass quietly modelling what `rb-reconcile-contradict` recorded
+  `unresolved` -- is not something layer 2 can see, and a non-zero `unresolved`
+  in the tally is the cheapest signal that there is a part worth opening.
 - **Gates 2 and 3** render what already exists: the coverage verdict, and the
   challenge stage's verdict tallies.
 
@@ -265,8 +270,11 @@ def _gate_1(run: RunPaths) -> str:
     # incoherence -- a later pass modelling what rb-reconcile-contradict recorded
     # `unresolved` -- has no mechanical check and must not be given a fake one:
     # whether a claim *supports* an element is semantic, which is the hole layer 2
-    # is forbidden to paper over. This report is the instrument, so it puts the
-    # contradictions in front of the human who is about to read what was modelled.
+    # is forbidden to paper over. What follows is an aggregate: counts and a
+    # resolution tally, not the contradictions themselves. It goes first because a
+    # non-zero `unresolved` is what should send a reader into 01-contradictions/
+    # before reading the world model built on top of it -- this report points at
+    # the parts, it does not reproduce them.
     cover = _mapping(_quietly(run.subjects))
     subjects = _dicts(cover.get("subjects"))
     covered = {

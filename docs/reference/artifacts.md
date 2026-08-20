@@ -116,10 +116,13 @@ so a claim with no way to find where it came from cannot exist).
 
 The seven entries below are one logical step — building the world model —
 engineered as bounded passes, each writing its own slice into the `01-` band
-and none of them reading `01-world-model.json`. `reconcile-seal` assembles all
-seven into that file, which is unchanged: nothing downstream of the seal knows
-the partials exist. Each pass is a stage in `paths.STAGES`, so
-`rubrica validate --stage reconcile-<pass>` gates exactly one of these kinds.
+and none of them reading `01-world-model.json`. `reconcile-seal` assembles them
+into that file, which is unchanged: nothing downstream of the seal knows the
+partials exist. It reads every one of them but `01-subjects.json` — the world
+model has no subjects field, so the cover is an input to the contradiction
+fan-out and to `check-refs`, not to the seal. Each pass is a stage in
+`paths.STAGES`, so `rubrica validate --stage reconcile-<pass>` gates exactly one
+of these kinds.
 
 Every one of these schemas resolves its element definitions against
 `world-model-0.1.json#/$defs/...` through `validate._schema_registry`, rather
@@ -291,12 +294,13 @@ named honestly rather than narrowly, and never left empty to avoid a halt).
 
 - **Schema:** `src/rubrica/schema/world-model-0.1.json`
 - **Written by:** `reconcile-seal` (code), via `rubrica reconcile-seal`, from
-  the seven partials above
+  the partials above — every one of them but `01-subjects.json`, which has no
+  counterpart field here
 - **Read by:** `rb-propose`, `rb-score`, `rb-instantiate`, `emit` (code),
   `rb-orchestrate`; `check-refs`
 - **Path:** `01-world-model.json`
 
-The single reconciled picture of the target system, assembled from the seven
+The single reconciled picture of the target system, assembled from the
 partials the `reconcile-*` passes wrote out of every claim `rb-extract`
 produced: `capabilities`, `entities`, `actors`, `goals`, recorded
 `contradictions` (disagreements carried forward rather than silently
