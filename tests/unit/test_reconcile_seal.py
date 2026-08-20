@@ -148,6 +148,13 @@ def test_a_missing_partial_is_a_finding_and_writes_nothing(tmp_path, attribute):
     assert findings, f"a missing {attribute} must be reported"
     assert not run.world_model.is_file(), "the seal must not write a partial world model"
     assert all(f.message for f in findings), "a finding with an empty message is an empty exit-1"
+    # Absence, specifically -- not the payload-less case below. Measured: with the
+    # read error swallowed into an empty dict, the payload-key check catches the
+    # same file and names it, so exit code and artifact alone no longer tell the two
+    # apart, and they are different repairs (mint the file vs. fix the pass that
+    # wrote an empty one). The phrase is artifacts.read_json's own, already pinned
+    # by tests/unit/test_validate.py for the same reason.
+    assert any("missing artifact" in f.message for f in findings)
 
 
 def test_several_missing_partials_name_the_earliest_pass_first(tmp_path):
@@ -161,6 +168,88 @@ def test_several_missing_partials_name_the_earliest_pass_first(tmp_path):
     _, findings = reconcile.seal(run)
 
     assert [f.artifact for f in findings] == [run.outcomes_part, run.gaps_part]
+
+
+@pytest.mark.parametrize(
+    "attribute",
+    ["capabilities_part", "outcomes_part", "entities_part", "goals_part", "gaps_part"],
+)
+# Three shapes, because they take three different code paths. `{}` is an object
+# with the key absent; `[]` answers `key not in document` correctly and lands on
+# the same missing-key branch; `5` is the one that *cannot* answer it -- measured,
+# `"gaps" not in 5` raises TypeError -- so only the third reaches the isinstance
+# guard, and dropping the guard leaves this test green without it.
+@pytest.mark.parametrize(
+    "payload", ["{}", "[]", "5"], ids=["object-without-the-key", "array", "scalar"]
+)
+def test_a_partial_with_no_payload_key_is_a_finding_naming_that_partial(
+    tmp_path, capsys, attribute, payload
+):
+    """Present, valid JSON, and nothing to assemble from.
+
+    Measured before the fix: `01-gaps.json` rewritten to `{}` reached the assembly
+    and raised KeyError there, which cli.py's catch-all turned into an exit-1
+    `[internal]` finding against the *run root*. Exit code right, stdout non-empty,
+    and the third rule of the exit-code contract broken -- the one this repo learned
+    when check-refs fabricated four `no such claim` findings against a correct world
+    model. `[]` and `5` are the same defect two shapes over: neither carries a
+    payload key, and `"gaps" not in 5` raises TypeError rather than answering the
+    question -- the shape refs._as_list exists for, one layer up.
+    """
+    from rubrica.cli import main
+
+    run = build_toy_run(tmp_path, upto="extract")
+    _write_parts(run, split_world_model())
+    target = getattr(run, attribute)
+    target.write_text(payload, encoding="utf-8")
+
+    path, findings = reconcile.seal(run)
+
+    assert path is None
+    # A set, because 01-goals.json declares two payload keys and `{}` is missing
+    # both: one finding per absent key, every one of them naming this partial.
+    assert findings
+    assert {f.artifact for f in findings} == {target}, "every finding must name this partial"
+    assert all(f.message for f in findings)
+    assert not run.world_model.is_file()
+
+    assert main(["reconcile-seal", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert target.name in out
+    assert "[internal]" not in out, "a named partial, not the catch-all against the run root"
+
+
+def test_a_duplicate_outcomes_record_is_a_finding_not_a_silent_drop(tmp_path):
+    """Two records for one capability are schema-legal and nothing downstream would
+    notice the loss: a dict comprehension keeps the last, and check_world_model
+    recomputes capability_cells from the assembled model, so the denominator agrees
+    with the reduced cell set and the world model reads as coherent at gate 1.
+
+    Same reasoning as the undeclared-capability branch, so this asserts the same two
+    properties: a finding naming the capability, and nothing written."""
+    run = build_toy_run(tmp_path, upto="extract")
+    parts = split_world_model()
+    first = parts["outcomes"]["outcomes"][0]
+    # A *different* set of classes under the same capability_id, so a silent
+    # keep-the-last would visibly change the assembled cells rather than being a
+    # no-op the assertion could not distinguish from correct behaviour.
+    parts["outcomes"]["outcomes"] = [
+        first,
+        {
+            "capability_id": first["capability_id"],
+            "outcome_classes": [{"id": "oc-second", "kind": "error", "description": "a second"}],
+        },
+        *parts["outcomes"]["outcomes"][1:],
+    ]
+    _write_parts(run, parts)
+
+    path, findings = reconcile.seal(run)
+
+    assert path is None
+    assert any(
+        first["capability_id"] in f.message and "more than one" in f.message for f in findings
+    )
+    assert not run.world_model.is_file(), "the refusal must precede the single write"
 
 
 def test_a_capability_with_no_outcome_record_is_a_finding(tmp_path):

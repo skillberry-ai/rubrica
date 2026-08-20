@@ -152,9 +152,12 @@ rather than inferred so an amendment to the frozen goal list costs an explicit
 orchestrator decision recorded in `decisions.md` instead of a number the command
 quietly incremented.
 
-Reads `manifest.json`, `01-subjects.json`, every `01-contradictions/*.json`,
-`01-capabilities.json`, `01-outcomes.json`, `01-entities.json`, `01-goals.json`
-and `01-gaps.json`. Writes `01-world-model.json` and prints its path.
+Reads `manifest.json`, the five singleton partials — `01-capabilities.json`,
+`01-outcomes.json`, `01-entities.json`, `01-goals.json`, `01-gaps.json` — and
+every `01-contradictions/*.json`. It does **not** read `01-subjects.json`: the
+world model has no subjects field, so the cover is an input to the contradiction
+passes and to `check-refs`, not to the seal. Writes `01-world-model.json` and
+prints its path.
 
 Code rather than a prompt, for the reason `emit` is code: two runs with identical
 partials must produce a byte-identical world model, or variance can no longer be
@@ -164,16 +167,30 @@ the assembled model gets.
 
 **It assembles; it does not check.** Cross-artifact checking is layer 2, so run
 `rubrica check-refs` afterwards. What this command does report is the narrow class
-that makes assembly impossible — a partial absent or unparseable, a declared
-capability with no outcome classes, an outcome record naming a capability nobody
-declared — and it **writes nothing at all** when it reports any of them, because a
-half-assembled world model would clear layer 1 for the collections it did manage
-to fill.
+where assembly cannot faithfully represent what it was handed — a partial absent,
+unparseable, or carrying no payload key; a declared capability with no outcome
+classes; an outcome record naming a capability nobody declared; two outcome
+records for one capability — and it **writes nothing at all** when it reports any
+of them, because a half-assembled world model would clear layer 1 for the
+collections it did manage to fill.
+
+The last two of those overlap layer 2's `check_outcomes` on purpose. That check
+owns the after-the-fact report and runs over any run, including one that was never
+sealed; the branches here exist to stop a **silent omission**, because assembly is
+perfectly possible in both cases — the entry is simply dropped, and the world
+model then reaches gate 1 missing cells an artifact declared, agreeing with its own
+recomputed `denominator` and reading as coherent. Refusing before the write is
+what keeps that drop observable.
 
 Exits 0 clean, 1 with one finding per line on stdout, or 2 if the run directory
-itself cannot be read. A missing partial is a repairable stage defect and so is a
-1, naming that partial; several missing partials are listed with the earliest pass
-first, the one a repair should start from.
+itself cannot be read. A missing **singleton** partial is a repairable stage defect
+and so is a 1, naming that partial; several missing ones are listed with the
+earliest pass first, the one a repair should start from. An absent
+`01-contradictions/` directory is *not* reported here — it assembles to an empty
+`contradictions` list and exits 0, because the seal cannot tell "no contradictions
+were found" from "no pass ran". Whether every subject in `01-subjects.json` has a
+part is a question about the cover, which layer 2's `check_contradiction_parts`
+owns — not the seal.
 
 ```bash
 rubrica reconcile-seal --run runs/run-20260806-123005

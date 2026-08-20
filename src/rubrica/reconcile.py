@@ -8,12 +8,26 @@ by the ~300s idle reset that splitting reconcile exists to avoid, however large
 the assembled model gets.
 
 This module assembles; it does not check. Cross-artifact checking is layer 2 and
-lives in refs.py. What it *does* report is the narrow class that makes assembly
-impossible -- a partial that is absent or unparseable, a declared capability with
-no outcome classes, an outcome record naming a capability nobody declared -- and
-it writes nothing at all when it reports any of them. A half-assembled world
-model would be worse than none: it would clear layer 1 for the collections it did
-manage to fill.
+lives in refs.py. What it *does* report is the narrow class where assembly cannot
+faithfully represent what it was handed -- a partial absent, unparseable, or
+carrying no payload key; a declared capability with no outcome classes; an outcome
+record naming a capability nobody declared; two outcome records for one capability
+-- and it writes nothing at all when it reports any of them. A half-assembled
+world model would be worse than none: it would clear layer 1 for the collections
+it did manage to fill.
+
+Two of those four overlap layer 2 deliberately, and the overlap is not an
+accident to be tidied away later. refs.check_outcomes owns the after-the-fact
+report -- it runs over any run, including one the seal never sealed -- while the
+branches here exist to stop a *silent omission* reaching a human at gate 1. An
+outcome record for an undeclared capability, and a second record for a capability
+already carrying one, are both cases where assembly is perfectly possible: the
+dict lookup simply drops the entry, and the world model is then written missing
+cells an artifact declared, looking coherent to the human reading it and to
+check_world_model, which recomputes capability_cells from the assembled model and
+so agrees with the reduced set. Refusing before the write is what keeps that
+judgment observable; a pipeline more likely to produce output at the cost of an
+unobservable drop is a loss, not a win.
 """
 
 from __future__ import annotations
@@ -24,9 +38,10 @@ from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths, list_json
 
-# (RunPaths attribute, the key inside that partial) in the order the passes run,
-# so a run missing several partials names the earliest pass first -- the one a
-# repair should start from, the same ordering _readable_targets uses.
+# (RunPaths attribute, the payload keys inside that partial) in the order the
+# passes run, so a run missing several partials names the earliest pass first --
+# the one a repair should start from, the same ordering _readable_targets uses.
+# The keys are checked, not merely documented: see _payload_keys below.
 _SINGLETON_PARTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("capabilities_part", ("capabilities",)),
     ("outcomes_part", ("outcomes",)),
@@ -50,6 +65,53 @@ def _read_part(path: Path, out: list[Finding]) -> dict | None:
         return None
 
 
+def _payload_keys(path: Path, keys: tuple[str, ...], document: object, out: list[Finding]) -> bool:
+    """Whether `document` carries every key _SINGLETON_PARTS declares for it.
+
+    A partial that is present and valid JSON but has no payload key used to reach
+    the assembly below and raise KeyError there. cli.py's catch-all turned that
+    into an exit-1 `[internal]` finding against the *run root*: two of the three
+    exit-code rules held, and the third -- name the right artifact -- did not. That
+    is the rule this repo learned when check-refs reported four fabricated `no such
+    claim` findings against a world model that was correct, so the keys the table
+    declares are checked here rather than carried and discarded.
+
+    The isinstance guard is part of the same check and not a separate one: a
+    partial whose top level is a list or a number has no payload key either, and
+    `"gaps" not in 5` raises TypeError rather than answering the question -- the
+    shape refs._as_list exists for, one layer up.
+
+    The return value is defensive rather than load-bearing today, and measurably so:
+    returning True unconditionally leaves every test green, because the finding is
+    already recorded and seal() returns before it touches `parts`. It keeps an
+    incomplete document out of `parts` anyway, so a future caller that stops
+    returning early cannot read a payload key this function just reported absent.
+    """
+    if not isinstance(document, dict):
+        out.append(
+            Finding(
+                path,
+                "reconcile",
+                "",
+                f"expected a JSON object with {' and '.join(sorted(keys))}, found "
+                f"{type(document).__name__}",
+            )
+        )
+        return False
+    missing = [key for key in keys if key not in document]
+    for key in missing:
+        out.append(
+            Finding(
+                path,
+                "reconcile",
+                "",
+                f"no {key!r} key; the pass that writes this partial did not record its "
+                "payload, so there is nothing to assemble from it",
+            )
+        )
+    return not missing
+
+
 def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, list[Finding]]:
     """Assemble 01-world-model.json from the partials, or report why it cannot be.
 
@@ -65,9 +127,10 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
     manifest = _read_part(run.manifest, findings)
 
     parts: dict[str, dict] = {}
-    for attribute, _keys in _SINGLETON_PARTS:
-        document = _read_part(getattr(run, attribute), findings)
-        if document is not None:
+    for attribute, keys in _SINGLETON_PARTS:
+        path = getattr(run, attribute)
+        document = _read_part(path, findings)
+        if document is not None and _payload_keys(path, keys, document, findings):
             parts[attribute] = document
 
     contradictions: list[dict] = []
@@ -80,12 +143,43 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
         return None, findings
 
     capabilities = [dict(item) for item in parts["capabilities_part"]["capabilities"]]
-    outcomes = {
-        entry["capability_id"]: entry["outcome_classes"]
-        for entry in parts["outcomes_part"]["outcomes"]
-    }
+
+    # Built with a loop rather than a dict comprehension so a repeated
+    # capability_id is reported instead of silently overwritten. Two records for
+    # one capability are schema-legal -- outcomes-part-0.1.json puts no uniqueItems
+    # on the array -- and a comprehension keeps the last, so the first record's
+    # cells vanish with nothing downstream to notice: check_world_model recomputes
+    # capability_cells from the assembled model, so the denominator agrees with the
+    # reduced cell set and the world model reads as coherent. Same reasoning as the
+    # undeclared-capability branch below: assembly cannot represent what it was
+    # given, so it refuses rather than choosing one record for the reader.
+    outcomes: dict[str, list] = {}
+    repeated: list[str] = []
+    for entry in parts["outcomes_part"]["outcomes"]:
+        capability_id = entry["capability_id"]
+        if capability_id in outcomes:
+            repeated.append(capability_id)
+        else:
+            outcomes[capability_id] = entry["outcome_classes"]
     declared = {capability["id"] for capability in capabilities}
 
+    for capability_id in sorted(set(repeated)):
+        findings.append(
+            Finding(
+                run.outcomes_part,
+                "reconcile",
+                "/outcomes",
+                f"more than one outcomes record for {capability_id}; keeping either one "
+                "would drop the other's cells from the coverage denominator without "
+                "anything downstream reporting the loss",
+            )
+        )
+
+    # Layer 2's refs.check_outcomes carries this same rule, and the overlap is
+    # deliberate rather than pending removal: that check reports after the fact on
+    # any run, while this one refuses *before the write*, because the entry is
+    # otherwise dropped by the lookup above and the world model goes to gate 1
+    # missing cells an artifact declared.
     for capability_id in sorted(set(outcomes) - declared):
         findings.append(
             Finding(
