@@ -149,8 +149,13 @@ def test_a_sibling_schemas_unreadability_is_not_a_stage_defect(tmp_path, monkeyp
 
 def test_an_unreadable_schema_directory_is_not_a_stage_defect(tmp_path, monkeypatch):
     """RUBRICA_SCHEMA_DIR pointing somewhere with no schemas must raise
-    ArtifactError, which cli.py maps to exit 2. A registry built by globbing an
-    empty directory must not silently produce a validator that passes everything.
+    ArtifactError, which cli.py maps to exit 2. This does not reach
+    _schema_registry either: _validator_for's own direct
+    read_json(schema_root / "world-model-0.1.json") raises ArtifactError (via
+    FileNotFoundError, since the directory is empty) before _schema_registry
+    is ever called, so this pins that pre-existing direct read, not the
+    registry's glob. `test_a_sibling_schemas_unreadability_is_not_a_stage_defect`
+    above is the one that reaches the registry's own glob-and-read.
     """
     monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path))
     doc = tmp_path / "probe.json"
