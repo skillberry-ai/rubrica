@@ -122,9 +122,12 @@ is exactly one human gate in this sequence and it is **gate 1, after
 passes decides anything a human could not review better against the assembled
 world model.
 
-Compound names rather than six new verbs: the family stays visible in
-`paths.STAGES`, which is the pipeline's ordering *and* its documentation, and a
-reader can see at a glance that these replace one stage. All partials stay in
+Compound names rather than six new verbs, and this is settled rather than open:
+these are **one logical step, engineered as substeps**, and the names should say
+so. The family stays visible in `paths.STAGES`, which is the pipeline's ordering
+*and* its documentation; a reader sees at a glance that these replace one stage;
+and the README drawing can fold them back into the single line a newcomer should
+read (§9). All partials stay in
 the `01-` band, so the band's meaning — world-model construction — is preserved.
 
 ### 4.1 The subject cover, and why it is a cover
@@ -306,23 +309,70 @@ Every new skill owes an `exercise.md` recording what one real dispatch
 measurably did. Those cannot be written until the passes are dispatched, and
 each must state what happened rather than what was reasoned.
 
-**`rb-reconcile/exercise.md` must be preserved.** It is behavioural evidence, and
-this repository's rule is that evidence belongs in a file beside the skill and
-not only in a ledger, because ledgers get deleted. Deleting the skill directory
-would delete the record of two real dispatches, including the disagreement about
-gap `blocks` that this design's §1 rests on. Where it goes is an open point —
-see §11.
+**Yes, one `exercise.md` per pass, and no merged record.** Each pass is its own
+dispatch with its own observable behaviour, and per-pass observability is the
+entire justification for making these separate stages rather than one skill
+branching on a slice id. A single record covering the family would undercut the
+argument the split rests on.
+
+**`rb-reconcile/exercise.md` stays exactly where it is.** It is behavioural
+evidence — the record of two real dispatches, including the disagreement about
+gap `blocks` that §1 rests on — and this repository's rule is that evidence lives
+beside the skill and not only in a ledger, because ledgers get deleted.
+
+It is *not* relocated into `rb-reconcile-subjects/exercise.md` or any other
+pass's. That file would then assert that one dispatch of `rb-reconcile-subjects`
+did what a dispatch of the superseded single-pass stage actually did, which is
+the misattribution class this project has already shipped once and had to
+retract. An exercise record states what happened, to the skill it sits beside.
+
+So the directory `src/rubrica/skills/rb-reconcile/` survives its `SKILL.md`,
+holding the record and a short note saying which stage it records and that the
+stage no longer exists. This is inert to every tool, verified rather than
+assumed: `skills._skill_dirs` keeps only children where `SKILL.md` `is_file()`
+and, per its own comment, skips a subdirectory without one "rather than
+reported"; `expected_skill_names` derives from `paths.STAGES`, which no longer
+contains `reconcile`, so nothing is reported missing either; and nothing in
+`src/`, `tests/` or `scripts/` reads an `exercise.md` at all.
 
 ## 9. What moves outside `src/rubrica`
 
 - `docs/concepts/pipeline.md` — the stage list and what each does.
 - `docs/reference/cli.md` — a `rubrica reconcile-seal` section.
 - `docs/reference/artifacts.md` — each new kind named as its kind.
+- `docs/concepts/glossary.md` — this design introduces terms the glossary does
+  not carry. At minimum **subject** (what a claim is about, the unit the cover
+  assigns to and the contradiction fan-out slices by), **subject cover** (the
+  total, over-assignable assignment of every claim to one or more subjects, and
+  why it is a cover rather than a partition), **partial** (a stage output that is
+  one part of an artifact rather than an artifact downstream reads), and **seal**
+  (the code step that assembles partials and computes the denominator). The
+  glossary's standing question is what actually produces or consumes a term, so
+  each entry names the pass that writes it.
 - `scripts/render-pipeline-diagram.py` — one `ROWS` entry per new stage; re-render,
   never hand-edit the page.
-- `scripts/render-readme-diagram.py` — the `understand` phase's `stages` list.
-  The phase count does not change; five columns is the width budget, and these
-  stages all belong to `understand`.
+- `scripts/render-readme-diagram.py` — **folded, not enumerated.** Listing eight
+  stage lines in the `understand` box is the wrong altitude for a drawing whose
+  whole job is a newcomer's view, and it does not fit: `phase()` draws one 14px
+  line per entry in `spec["stages"]` from a fixed `BOX_H`, so eight would
+  overflow the box rather than merely crowd it.
+
+  But `stages` is also the coverage claim —
+  `test_the_readme_diagram_covers_every_stage_in_contract_order` asserts that
+  concatenating every phase's `stages` reproduces `paths.STAGES` *exactly*, and
+  that partition is deliberately stronger than a presence check. So the two roles
+  separate: `stages` stays complete, and the renderer **derives** the drawn
+  labels from it by folding a prefix family into one starred line, `reconcile*`,
+  with a footnote in `CAPTIONS` saying that it is one logical step engineered as
+  substeps. One new per-phase key naming the prefix to fold, not a second
+  hand-maintained list of labels — derive, do not restate.
+
+  A test asserts the fold is total in both directions: every `reconcile-` stage
+  in `stages` is covered by the folded label, and no unfolded stage is hidden.
+  Without it the fold becomes a way to drop a stage from the drawing silently,
+  which is the drift the partition test exists to catch.
+
+  The phase count does not change, and none of these stages leaves `understand`.
 - `CLAUDE.md` — the stage table, and the note about which gate brackets what.
 - `tests/toy.py` — `_UPTO_STAGES` gains a checkpoint per new stage, and
   `build_toy_run` writes each partial. Check the module before adding a helper:
@@ -356,16 +406,13 @@ see §11.
 
 ## 11. Open points
 
-- **Where `rb-reconcile/exercise.md` lives** once `rb-reconcile/` is gone. It is
-  provenance for this design, so it cannot simply be deleted, and this history
-  tree is not edited after the fact.
 - **Whether `reconcile-goals` and `reconcile-entities` should be one pass.** Both
   are shallow. They are separate here because `goals` is half the frozen
   denominator and deserves its own artifact and its own gate-1 visibility, while
   `entities` does not. This is editorial and no test can rule on it.
-- **Whether the compound `reconcile-*` names are right**, against six new verbs
-  in the style of `survey`, `triage`, `propose`, `score`. Compound names were
-  chosen to keep the family legible in `paths.STAGES`.
+Two points that were open in the first draft are now decided and recorded where
+they belong rather than here: the compound `reconcile-*` names (§4), and the home
+of `rb-reconcile/exercise.md` together with whether each pass gets its own (§8).
 
 ## 12. Entries owed to `docs/design/limitations.md`
 
