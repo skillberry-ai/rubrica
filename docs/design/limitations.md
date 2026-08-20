@@ -292,6 +292,75 @@ is documented: pinning a prompt sentence produces an assertion satisfiable by
 unrelated content unless the assertion is scoped to the section that owns the
 rule. They go with a deliberate re-record of those two skills.
 
+### Two disagreeing claims filed under different subjects are never compared
+
+`rb-reconcile-contradict` is a fan-out over `01-subjects.json`, one member per
+subject, and a member sweeps only the claims its own subject names — "claims
+outside your subject are not yours to sweep; a sibling member has them." So a
+pair of claims that disagree and share no subject is compared by nobody, and the
+sealed world model reaches gate 1 recording one contradiction fewer than the
+corpus holds.
+
+**Do not defend this with `survey`'s digest.** That is the analogy it invites and
+the analogy is wrong, in kind rather than in degree. Triage's loss is a
+*decision*: the catalogue lists every candidate, a decline names one and carries
+a reason, `rb-triage` has a `digest_insufficient` disposition for the case where
+it knows the digest was not enough to judge, and a human at gate 0 can overrule
+any of it per candidate. A cross-subject pair is an **absence**. Nothing wrote
+the pair down, so no reason attaches to it, no disposition covers it, and there
+is nothing at gate 1 for a person to point at. An argument that treats the two
+costs as interchangeable licenses the pair filter this design rejected, which is
+why the difference is stated before the mitigation.
+
+Why the cover is nevertheless the right shape, in the order the properties do
+work:
+
+- **It is total, and totality is mechanical.** `refs.check_subjects` reports
+  every claim id in `01-claims/` that no subject covers, and says why — the
+  cover must be total, or the contradiction sweep never compares that claim
+  against anything. So the failure that survives is narrow: two claims each
+  covered, and covered *apart*. "A claim nobody swept" is a finding.
+- **Over-assignment is instructed, not merely permitted.** The subjects pass is
+  told to assign a claim to every plausible subject where it is unsure, on the
+  stated asymmetry that over-assignment costs a member a little re-reading while
+  under-assignment costs a contradiction nobody will ever find.
+  `subjects-0.1.json`'s own description records the same rule, where a reader of
+  the schema rather than of the prompt will find it. A cover rather than a
+  partition is what makes the mitigation a dial the pass can turn on exactly the
+  claims it is least sure about.
+- **It is on disk and legible to a human.** Every subject carries a
+  schema-required `label`, and `rubrica gate-brief` reports at gate 1 how many
+  subjects cover how many claims, how many subjects were swept, how many
+  contradictions were recorded, and — whenever any were — the tally by
+  resolution with `unresolved` first. A cover cut too fine is therefore a
+  judgment a person can question before the world model is ratified.
+
+The rejected alternative had none of those three. An earlier draft put a
+deterministic step ahead of contradiction finding: group claims by
+subject/kind/target in code and emit candidate contradiction *neighbourhoods*,
+the way `dedupe-candidates` proposes pairs and never decides. Its unit is a
+**pair**, so the population is of the order of n²/2 — around 174,000 at the claim
+counts real runs here have produced — and only the pairs it proposed would exist
+on disk. Nothing enumerates the pairs it did not propose, the prompt downstream
+cannot know what it was not shown, and a human has nothing to overrule.
+
+The decisive cost is **attribution**, and it compounds with triage rather than
+sitting beside it. A thin contradiction set has four candidate explanations
+today: the corpus genuinely lacks disagreement; triage declined the wrong inputs;
+extract missed the claims; the sweep under-recorded. A pair filter adds a fifth —
+the pair was never proposed — and the fifth is indistinguishable from the first
+and the fourth. Two unattributable losses in series is much worse than one,
+because a thin result can no longer be traced to a stage, and for a project whose
+value is falsifiability that is a bad trade for a gateway timer.
+
+Parked as bounded rather than closed. The residue is real, and its only
+instruments are the subject-size judgment the subjects pass makes and the human
+reading the cover at gate 1. Note the shape any fix would have to take: something
+that compares across subjects at least once, which costs another dispatch holding
+every claim — the shape the pass split exists to avoid — and not a filter that
+decides for the pass. If you are about to propose one, engage the attribution
+argument above rather than the throughput one.
+
 ---
 
 ## Before you trust a number a run reports
@@ -566,6 +635,121 @@ should report when run *a* is internally inconsistent — which is not a
 comparability finding. The cheaper answer is procedural: run `check-refs` on
 each run before you diff them. That answer is only good enough while the person
 diffing knows to do it, which is why this is recorded rather than closed.
+
+### The coverage denominator is arithmetic done by code, so it is no longer a checkable claim about a prompt's output
+
+The single-dispatch `rb-reconcile` computed the frozen denominator itself, and one
+of its stated invariants was that `denominator.capability_cells` equalled the
+capability × outcome-class pairs it had actually written. `refs.check_world_model`
+checked exactly that: a number a prompt wrote, against the model that same prompt
+wrote. `reconcile-seal` now computes both fields while assembling the partials,
+and the check still recomputes both — `capability_cells` as
+`len(refs._cells(world))`, `goals` as the length of the model's `goals` array —
+against numbers the same code derived from the same lists. **Both comparisons are
+identities.** They can fail only if `reconcile.seal` and `refs.py` come to
+disagree about the arithmetic, or if somebody hand-edits a sealed world model.
+
+One precision, because getting it wrong is how that identity would break in the
+direction nobody notices: `capability_cells` counts **distinct**
+`(capability_id, outcome_class_id)` pairs. `refs._cells` is a set comprehension
+and the check compares against its length, so the seal builds the same set. A sum
+of per-capability outcome-class counts agrees with it only until a capability id
+or an outcome-class id repeats, at which point the sum is simply the wrong
+number; the seal carries a comment saying not to "simplify" it back into one. Do
+not describe this field as a total of outcome classes anywhere — the total is the
+spelling that diverges.
+
+The ruling is that this is the right trade, for the reason that makes `emit` code:
+arithmetic is not judgment. Which outcome classes a capability has is judgment and
+belongs to a pass; counting the pairs afterwards is something code does exactly,
+every time, and a prompt asked to do it spends its think on arithmetic instead of
+on the merge — the opposite of what a bounded pass is for.
+
+What was lost is not correctness. It is an **observation**: one of the few places
+where a prompt's output was checkable against a mechanically derivable truth, in a
+design whose whole value is how many such places it has. Recorded here so the loss
+is not rediscovered as a hole in layer 2 and closed by moving the count back into
+a pass. Keeping the identity is deliberate: as an identity it still catches a
+hand-edited world model and a divergence between the two spellings of the count,
+which is worth more than the line it costs.
+
+### Whether the gateway's contended connection pool is per-API-key or global is unknown
+
+`rb-orchestrate` runs the `reconcile-contradict` fan-out **at most three members
+at a time**, and that number is not a judgment about what this machine can drive.
+It is there because envoy in front of the shared gateway returns `upstream connect
+error or disconnect/reset before headers. reset reason: connection timeout`
+intermittently once five or more dispatches are streaming output concurrently,
+while one to three was measured clean. A subject cover is a cover, so this is the
+widest fan-out in the run and the one most likely to reach that boundary.
+
+What the cap cannot tell you is whose problem exceeding it is. If the contended
+pool is per-API-key, a wide fan-out costs this run its own stability and nobody
+else's, and the cap is a robustness setting a later measurement could raise. If
+the pool is global, a wide fan-out degrades other people's runs while they are
+using the same gateway, and the cap is an obligation rather than a tuning
+parameter. The two readings give different answers to "may I raise it?", and
+nothing in this repository distinguishes them.
+
+**Attributed, not confirmed: nobody has read the envoy config.** "Contended
+connection pool" is an inference from a symptom — a stalled stream reported with
+no HTTP status rather than a `429`, and gateway health checks green throughout. It
+is the most plausible account of what was observed; it is not a verified
+mechanism, and it must not be repeated as one. This attribution has the shape that
+gets repeated anyway: it is short, it explains everything it was written to
+explain, and the configuration that would falsify it belongs to somebody else.
+
+Parked because settling it means reading a configuration this codebase does not
+own, and because three is defensible under either reading, so no run is waiting on
+the answer. One thing not to do while it is open: do not reason from the cap to
+the pass split or back. The split addresses one over-long request that returns no
+bytes; the cap addresses several requests generating at once. `rb-orchestrate`
+says so in the same section as the cap, and a reader who "fixes" either by
+reasoning about the other has removed a mitigation and fixed nothing.
+
+### The premise the pass split rests on has not been measured, and neither has the one under the outcomes pass
+
+Two hypotheses, both load-bearing, both stated here as hypotheses because nobody
+has measured either.
+
+**"A bounded pass needs a shallower think, so time to first byte stays under
+300s."** That is the reason `reconcile` is a sequence of passes closed by a code
+seal rather than one dispatch: the gateway closes a streaming connection that has
+produced no bytes at around 300 seconds, and the single-dispatch stage had to plan
+the whole merge before writing anything. **Nothing in this repository measures
+time to first byte.** A manifest stage entry holds `model`, `effort` and
+`skill_sha256` under `additionalProperties: false`, so there is nowhere to record
+a timing even if something took one, and no script here records, extracts or
+reports one. The premise is therefore exactly as strong as the reasoning behind
+it, which is: a smaller job is a shorter think. It has to be measured per pass on
+the first real dispatch of the family, and the number belongs in that pass's own
+`exercise.md` — none of the passes carries one yet.
+
+Know what a negative result would mean, because it is easy to overstate: if a
+pass still stalls, the split has **narrowed** the problem to one pass rather than
+solved it. That is progress — a stall attributable to `reconcile-outcomes` is a
+far smaller thing to fix than a stall attributable to "reconcile" — but it is not
+the claim this design makes, and reporting it as that claim would file a
+hypothesis in this project's evidence as a measurement.
+
+**"Quantifying over a capability list read from a file is at least as strong as
+quantifying over one just written."** `rb-reconcile-outcomes` opens its method
+with "for each capability in `01-capabilities.json`", and cites a measurement for
+the quantifier: "for every capability" produced every outcome-class cell a real
+run needed, while an unquantified instruction to group claims dropped 45% of
+them.
+That measurement was taken **with the capabilities in the same turn** — the
+dispatch had just written them. Reading them from a file instead is the stated
+point of splitting capabilities from outcomes, and it is plausibly the stronger
+arrangement, because a list on disk can be reread and checked against. It is not
+known to be. Re-measure rather than assume the number carries over, and remember
+what the standing rule above says about it: one exercise is one sample, so 45% is
+one dispatch's number even in the arrangement where it was measured.
+
+Parked because both are measurements owed to a real dispatch, and neither can be
+taken from the committed tree. Written down now rather than when somebody runs the
+family, so that the first run's numbers land against a premise already on the
+record instead of quietly becoming the premise.
 
 ### Golden `scn-empty`'s `answer_excludes` marks a correct answer wrong
 
