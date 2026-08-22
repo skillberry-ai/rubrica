@@ -53,6 +53,15 @@ _MAX_NAMES = 64
 # matches it, so a wide dict costs the same whether it has ten entries or a
 # thousand.
 _SKELETON_MAX_CHILDREN = 32
+# Total pointers a skeleton may hold, not just children per node. _SKELETON_DEPTH
+# and _SKELETON_MAX_CHILDREN bound breadth and depth *per node*, which leaves the
+# product unbounded: measured, a 2.7MB pricing table yielded 261 pointers and a
+# 39,162-byte candidate row -- 6.8% of the parsec candidates array in one entry.
+# A slice's byte cap cannot be enforced if a single row can exceed it, so this is
+# a precondition for the fan-out and not a tidying. 128 binds on exactly one of
+# the 209 skeleton digests measured across four real catalogues (that pricing
+# file) and leaves tau2's 69-pointer trajectory digests whole.
+_SKELETON_MAX_NODES = 128
 
 
 # Capture formats that wrap the trace in an envelope, keyed by the envelope's own
@@ -176,7 +185,11 @@ def _json_type_name(value: Any) -> str:
 
 
 def _skeleton(node: Any, pointer: str, depth: int, out: dict) -> None:
-    if depth < 0:
+    # The total-node budget is checked here rather than by the callers because
+    # recursion is where pointers are minted. Stopping mid-walk leaves a
+    # *prefix* of the skeleton, which is why the flag below is written by the
+    # caller: a reader must be able to tell a small object from a clamped one.
+    if depth < 0 or len(out) >= _SKELETON_MAX_NODES:
         return
     if isinstance(node, dict):
         shown = sorted(node)[:_SKELETON_MAX_CHILDREN]
@@ -304,7 +317,10 @@ def digest_for_payload(payload: Any, kind: str, *, body_chars: int) -> dict:
 
     skeleton: dict[str, Any] = {}
     _skeleton(payload, "", _SKELETON_DEPTH, skeleton)
-    return {"skeleton": skeleton}
+    # Stated rather than implied, for the reason keys_truncated is stated: a
+    # truncation a prompt can see is a fact about the digest, and one it cannot
+    # see is a lie about the candidate.
+    return {"skeleton": skeleton, "skeleton_nodes_truncated": len(skeleton) >= _SKELETON_MAX_NODES}
 
 
 def digest_for_path(path: Path, kind: str, *, body_chars: int) -> dict:
