@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "adoptions-0.1.json",
+  "title": "Human-adopted projections",
+  "description": "adopt-projection's own part, appended to rather than edited into 00-triage.json's sealed dispositions and deficiencies directly, so re-sealing stays idempotent and cannot erase a human's gate-0 admission, and a new catalogue candidate does not make an already-packed slice plan stale. Required and may be empty: no human has necessarily adopted anything, and triage-seal folds this file in unconditionally rather than treating its absence as a defect.",
+  "type": "object",
+  "required": ["schema_version", "run_id", "adoptions"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "run_id": {"$ref": "triage-0.1.json#/$defs/id"},
+    "adoptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "disposition", "projection_id", "closed_deficiency_ids"],
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {
+            "$ref": "triage-0.1.json#/$defs/id",
+            "description": "The catalogue candidate this adoption minted for the projection's manufactured artifact -- the same id disposition.candidate_id names, kept at this level too so a reader can find the row without opening the disposition object."
+          },
+          "disposition": {
+            "$ref": "triage-0.1.json#/$defs/disposition",
+            "description": "The admit disposition a human authored at gate 0 (authority: human), structurally indistinguishable from any other disposition except for living in this file rather than a slice's part."
+          },
+          "projection_id": {
+            "$ref": "triage-0.1.json#/$defs/id",
+            "description": "Which 00-audit.json projection this adoption satisfies. triage-seal sets that projection's satisfied_by to candidate_id when it folds this file in."
+          },
+          "closed_deficiency_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "triage-0.1.json#/$defs/id"},
+            "description": "The deficiencies this adoption closes -- normally the projection's own closes list, confirmed by the human rather than merely inherited. triage-seal sets closed_by to projection_id on each one named here."
+          }
+        }
+      }
+    }
+  }
+}

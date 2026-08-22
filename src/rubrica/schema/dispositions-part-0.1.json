@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dispositions-part-0.1.json",
+  "title": "One slice's dispositions",
+  "description": "What one rb-triage-dispositions fan-out member ruled over its own slice. minItems:1 on dispositions because a slice always holds at least one candidate (triage-slices refuses to emit an empty one) and every candidate in it is ruled: an empty part is a member that wrote nothing, not a member with nothing to say. observed_surfaces and deficiency_notes carry no such floor -- a slice can be fully ruled without surfacing anything new or flagging anything insufficient.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "slice_id",
+    "dispositions",
+    "observed_surfaces",
+    "deficiency_notes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "run_id": {"$ref": "triage-0.1.json#/$defs/id"},
+    "slice_id": {
+      "$ref": "triage-0.1.json#/$defs/id",
+      "description": "Which 00-slices.json entry this part rules on. refs.check_disposition_parts holds every slice to exactly one part."
+    },
+    "dispositions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "triage-0.1.json#/$defs/disposition"}
+    },
+    "observed_surfaces": {
+      "type": "array",
+      "items": {"$ref": "triage-0.1.json#/$defs/surface"},
+      "description": "Surfaces this member noticed while ruling its slice that 00-objective.json's prediction did not already name -- the raw material for the design's section 4.1 divergence check, before triage-seal reconciles it against the objective pass's list."
+    },
+    "deficiency_notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "statement"],
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {"$ref": "triage-0.1.json#/$defs/id"},
+          "statement": {"type": "string", "minLength": 1}
+        }
+      },
+      "description": "Raw deficiency observations from this slice, not yet full $defs/deficiency records: rb-triage-audit reads every part's notes, deduplicates across slices, and consolidates them into 00-audit.json's deficiencies, which is where a deficiency_id is minted."
+    }
+  }
+}

@@ -25,6 +25,8 @@ import os
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
+from referencing.jsonschema import DRAFT202012
 
 from rubrica.artifacts import ArtifactError, read_json
 from rubrica.findings import Finding
@@ -44,6 +46,16 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "report": "report-0.1.json",
     "catalogue": "catalogue-0.1.json",
     "triage": "triage-0.1.json",
+    # The triage split's part kinds. Each is one pass's (or, for adoptions,
+    # one code subcommand's) slice of what was once a single triage record,
+    # and every one of them $refs triage-0.1.json's $defs (a disposition, a
+    # surface, a deficiency, a projection) rather than restating them --
+    # spec section 7 of the staged-triage design.
+    "slices": "slices-0.1.json",
+    "objective": "objective-0.1.json",
+    "dispositions-part": "dispositions-part-0.1.json",
+    "audit": "audit-0.1.json",
+    "adoptions": "adoptions-0.1.json",
     # Config kinds. Human-authored inputs, not stage outputs, so they are
     # deliberately absent from STAGE_ARTIFACTS: no stage produces them and
     # `validate --stage X` must never look for them.
@@ -129,6 +141,37 @@ def manifest_stage_efforts() -> tuple[str, ...]:
 
 
 @functools.cache
+def _schema_registry(schema_root: Path) -> Registry:
+    """Every schema in `schema_root`, keyed by filename, for cross-file `$ref`.
+
+    The triage part schemas are made of the *same* elements as the sealed
+    triage record -- a disposition, a surface, a deficiency, a projection --
+    so they `$ref` `triage-0.1.json#/$defs/...` rather than restate the
+    definitions. Restating them is the drift this package already refuses
+    elsewhere ("derive, do not restate"), and a duplicated `$defs/disposition`
+    that fell behind would let a part accept a shape the seal then rejects.
+
+    Keyed on schema_root for the same reason _validator_for is: a plain
+    zero-argument cache would pin the first directory it ever saw, so a test
+    overriding RUBRICA_SCHEMA_DIR would validate against the old one.
+
+    Registered by filename rather than relying on each schema's `$id` alone,
+    even though every shipped schema carries one equal to its filename: a new
+    schema that forgets `$id` then still resolves, instead of failing only for
+    the file that refs it.
+    """
+    return Registry().with_resources(
+        [
+            (
+                path.name,
+                Resource.from_contents(read_json(path), default_specification=DRAFT202012),
+            )
+            for path in sorted(schema_root.glob("*.json"))
+        ]
+    )
+
+
+@functools.cache
 def _validator_for(kind: str, schema_root: Path) -> Draft202012Validator:
     """Compiled validator, cached on (kind, schema_root).
 
@@ -141,7 +184,7 @@ def _validator_for(kind: str, schema_root: Path) -> Draft202012Validator:
         raise KeyError(f"no schema registered for artifact kind {kind!r}") from exc
     schema = read_json(schema_root / filename)
     Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema)
+    return Draft202012Validator(schema, registry=_schema_registry(schema_root))
 
 
 def _pointer(parts) -> str:

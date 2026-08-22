@@ -199,6 +199,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema" },
+    { name = "referencing" },
     { name = "tomli-w" },
 ]
 
@@ -212,6 +213,7 @@ dev = [
 requires-dist = [
     { name = "jsonschema", specifier = ">=4.23" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
+    { name = "referencing", specifier = ">=0.35" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8,<0.17" },
     { name = "tomli-w", specifier = ">=1.1" },
 ]

@@ -16,6 +16,10 @@ classifiers = [
 ]
 dependencies = [
     "jsonschema>=4.23",
+    # Transitive through jsonschema today, but validate.py imports it directly
+    # (Registry, Resource, DRAFT202012) to resolve the part schemas' cross-file
+    # $refs, so it earns its own declaration rather than riding jsonschema's.
+    "referencing>=0.35",
     "tomli-w>=1.1",
 ]
 

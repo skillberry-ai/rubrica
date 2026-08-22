@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "objective-0.1.json",
+  "title": "Objective review",
+  "description": "rb-triage-objective's output, ruled ahead of any per-slice disposition: a slice member needs to know which surfaces the run is chasing before it can decide whether a candidate serves them. triage-seal copies objective_review into the sealed record's own field of the same name verbatim -- it is not transformed downstream -- so this restates triage-0.1.json's inline objective_review shape (not a promoted $def; triage.py never grew one for it) rather than $ref-ing it.",
+  "type": "object",
+  "required": ["schema_version", "run_id", "objective_review", "predicted_surface_count"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "run_id": {"$ref": "triage-0.1.json#/$defs/id"},
+    "predicted_surface_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many surfaces this pass expects the dispositions fan-out to observe, for the design's section 4.1 divergence check: a member reporting far fewer or more than this is a signal the slicing or the objective missed something, not proof of it on its own."
+    },
+    "objective_review": {
+      "type": "object",
+      "required": ["declared_objective", "supported", "surfaces"],
+      "additionalProperties": false,
+      "properties": {
+        "declared_objective": {"enum": ["breadth", "depth"]},
+        "supported": {
+          "type": "boolean",
+          "description": "Whether the catalogue's candidates can actually support the declared objective, independent of whether they should have been -- a breadth run over a corpus with one surface is unsupported even when breadth was the right call to make."
+        },
+        "notes": {"type": "string", "minLength": 1},
+        "recommended_objective": {
+          "type": "object",
+          "required": ["objective", "reason"],
+          "additionalProperties": false,
+          "properties": {
+            "objective": {"enum": ["breadth", "depth"]},
+            "reason": {"type": "string", "minLength": 1}
+          }
+        },
+        "surfaces": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "triage-0.1.json#/$defs/surface"}
+        }
+      }
+    }
+  }
+}
