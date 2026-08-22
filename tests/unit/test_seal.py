@@ -257,6 +257,48 @@ def test_a_single_part_declining_everything_is_not_refused(tmp_path):
     assert findings == []
 
 
+def test_a_digest_insufficient_decline_with_no_deficiency_is_refused(tmp_path):
+    """Item 5, limb 1 -- the weak form, ported unchanged from check_triage:
+    the check is "does any deficiency exist at all", never "does one name
+    this candidate", because triage-0.1.json's deficiencies[] carries no
+    candidate-reference field for a stronger check to key on (see
+    check_triage's identical comment). Isolated by re-labelling the
+    fixture's one decline and clearing the deficiency list wholesale --
+    nothing else seal.py reads treats "deficiencies" as anything but this
+    one set, so emptying it cannot trip a second check.
+    """
+    run = _staged_run(tmp_path)
+    part = run.disposition_part("s03")
+    doc = read_json(part)
+    doc["dispositions"][0]["reason_code"] = "digest_insufficient"
+    write_json(part, doc)
+    audit = read_json(run.audit)
+    audit["deficiencies"] = []
+    write_json(run.audit, audit)
+    _, findings = seal.seal(run)
+    assert len(findings) == 1
+    assert "digest_insufficient" in findings[0].message
+    assert "trace-json" in findings[0].message
+
+
+def test_a_needs_projection_decline_with_no_projection_is_refused(tmp_path):
+    """Item 5, limb 2 -- the strong form: projections[].sources[] does name a
+    candidate, so this checks the decline's *own* candidate is sourced, not
+    merely that some projection exists for something else. Isolated by
+    re-pointing the fixture's one projection's one source away from
+    trace-json -- projected_candidate_ids is built from exactly that field
+    and nothing else, so no other check can notice the change.
+    """
+    run = _staged_run(tmp_path)
+    audit = read_json(run.audit)
+    audit["projections"][0]["sources"][0]["candidate_id"] = "notes-md"
+    write_json(run.audit, audit)
+    _, findings = seal.seal(run)
+    assert len(findings) == 1
+    assert "needs_projection" in findings[0].message
+    assert "trace-json" in findings[0].message
+
+
 def test_a_null_part_is_one_finding_not_a_key_error(tmp_path):
     run = _staged_run(tmp_path)
     run.audit.write_text("null\n", encoding="utf-8")

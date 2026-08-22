@@ -14,7 +14,14 @@ class Finding:
     root. `layer` names the checking layer that produced it, so a reader can
     tell a shape error from a reference error without parsing the message.
     The layers: "schema" | "refs" | "invariant" | "emit" | "internal" |
-    "recall" | "review" | "skill".
+    "recall" | "review" | "skill" | "seal".
+
+    "seal" is triage_seal's own layer: seal.py assembles rather than checks,
+    but reports a narrow refusal class where assembly cannot faithfully
+    represent what it was handed (see that module's docstring), and those
+    findings need a layer name distinct from "refs" precisely because they
+    fire *before* the record refs.check_triage would otherwise check exists
+    at all.
 
     "internal" is the layer cli.py uses when a checking layer raised instead of
     returning: the artifact is malformed in a way layer 1 must reject first, and
