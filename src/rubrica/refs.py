@@ -329,7 +329,13 @@ def check_slices(run: RunPaths) -> list[Finding]:
     else:
         known_ids = None
 
-    coverage: dict[str, list[str]] = {}
+    # A set, not a list: what check 1 below asks is "how many *distinct*
+    # slice ids cover this candidate", not "how many entries do". A slice id
+    # duplicated across two entries (check 3's own defect) would otherwise
+    # make every candidate the duplicate shares look doubly-covered even
+    # when both entries name the same slice -- an artifact of counting
+    # entries, not of the candidate actually crossing a slice boundary.
+    coverage: dict[str, set[str]] = {}
 
     for index, entry in enumerate(slice_entries):
         if not isinstance(entry, dict):
@@ -343,7 +349,7 @@ def check_slices(run: RunPaths) -> list[Finding]:
                 if cid not in known_ids:
                     report(f"{pointer}/candidate_ids/{j}", f"no such candidate {cid!r}")
                 elif sid is not None:
-                    coverage.setdefault(cid, []).append(sid)
+                    coverage.setdefault(cid, set()).add(sid)
 
         declared_bytes = entry.get("bytes")
         if (
@@ -409,7 +415,7 @@ def check_slices(run: RunPaths) -> list[Finding]:
     # Check 1: every catalogue candidate lands in exactly one slice.
     if known_ids is not None:
         for cid in sorted(known_ids):
-            covering = coverage.get(cid, [])
+            covering = coverage.get(cid, set())
             if not covering:
                 report("", f"no slice covers {cid!r}")
             elif len(covering) > 1:
