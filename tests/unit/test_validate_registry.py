@@ -15,13 +15,122 @@ import pytest
 
 from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.validate import ARTIFACT_SCHEMAS, schema_dir, validate_artifact
-from tests.builders import minimal_audit, minimal_dispositions_part
+from tests.builders import (
+    minimal_adoptions,
+    minimal_audit,
+    minimal_dispositions_part,
+    minimal_objective,
+)
 
 # The five kinds this task adds. A literal tuple rather than a slice of
 # ARTIFACT_SCHEMAS: the point of several tests below is to notice if one of
 # these stopped existing, which a set difference computed from the same
 # dict under test could not do.
 PART_KINDS = ("slices", "objective", "dispositions-part", "audit", "adoptions")
+
+
+# Every *substantive* cross-file $ref site among the five part schemas -- one
+# row per place a part schema points at one of triage-0.1.json's $defs rather
+# than restating it. `slices` is absent: every $ref it carries points at
+# $defs/id, which every other site's id fields already exercise too, and the
+# id pattern is already covered by test_schemas_instance's ref-following
+# anchor check.
+#
+# Each row's `mutate` drops a field that exists *only* in the shared $def's
+# `required` list -- never a constraint the part schema also states locally
+# (additionalProperties: false would reject an unknown field regardless of
+# what $ref pointed where, which proves nothing about the $ref itself). A
+# missing-`weight`/`statement`/`acceptance`/`authority` document is invalid
+# *only* because the $ref resolved to a $def that says so.
+def _full_projection(**over):
+    payload = {
+        "projection_id": "prj-1",
+        "closes": ["def-1"],
+        "sources": [{"candidate_id": "aap2-api", "digest_note": "n"}],
+        "wanted": {"kind": "other", "statement": "s", "why": "w"},
+        "method": {"confidence": "high", "steps": ["look"]},
+        "acceptance": {"classifies_as": "other", "prose": "p"},
+        "boundary": "b",
+    }
+    payload.update(over)
+    return payload
+
+
+def _full_adoption(**over):
+    payload = {
+        "candidate_id": "aap2-api",
+        "disposition": {
+            "candidate_id": "aap2-api",
+            "disposition": "admit",
+            "reason": "a human overrode triage's decline at gate 0",
+            "authority": "human",
+        },
+        "projection_id": "prj-1",
+        "closed_deficiency_ids": ["def-1"],
+    }
+    payload.update(over)
+    return payload
+
+
+REF_SITES = [
+    {
+        "id": "dispositions-part.dispositions[]->disposition",
+        "kind": "dispositions-part",
+        "path": ("properties", "dispositions", "items"),
+        "build": lambda: minimal_dispositions_part(),
+        "mutate": lambda doc: doc["dispositions"][0].pop("authority"),
+        "dropped_field": "authority",
+    },
+    {
+        "id": "objective.surfaces[]->surface",
+        "kind": "objective",
+        "path": ("properties", "objective_review", "properties", "surfaces", "items"),
+        "build": lambda: minimal_objective(),
+        "mutate": lambda doc: doc["objective_review"]["surfaces"][0].pop("weight"),
+        "dropped_field": "weight",
+    },
+    {
+        "id": "audit.deficiencies[]->deficiency",
+        "kind": "audit",
+        "path": ("properties", "deficiencies", "items"),
+        "build": lambda: minimal_audit(
+            deficiencies=[{"deficiency_id": "def-1", "subject": "s", "statement": "st"}]
+        ),
+        "mutate": lambda doc: doc["deficiencies"][0].pop("statement"),
+        "dropped_field": "statement",
+    },
+    {
+        "id": "audit.projections[]->projection",
+        "kind": "audit",
+        "path": ("properties", "projections", "items"),
+        "build": lambda: minimal_audit(projections=[_full_projection()]),
+        "mutate": lambda doc: doc["projections"][0].pop("acceptance"),
+        "dropped_field": "acceptance",
+    },
+    {
+        "id": "adoptions.adoptions[].disposition->disposition",
+        "kind": "adoptions",
+        "path": ("properties", "adoptions", "items", "properties", "disposition"),
+        "build": lambda: minimal_adoptions(adoptions=[_full_adoption()]),
+        "mutate": lambda doc: doc["adoptions"][0]["disposition"].pop("authority"),
+        "dropped_field": "authority",
+    },
+]
+
+
+def _invalid_document_for(site):
+    """The site's minimal valid document, with its one shared-$def-only field dropped."""
+    doc = site["build"]()
+    site["mutate"](doc)
+    return doc
+
+
+def _set_at(schema, path, value):
+    """schema[path[0]][path[1]]...[path[-1]] = value, in place."""
+    node = schema
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = value
 
 
 def _copy_schemas_to(target):
@@ -51,54 +160,61 @@ def test_a_part_schema_resolves_its_cross_file_ref_without_network(tmp_path):
     assert validate_artifact(path, "dispositions-part") == []
 
 
-def test_a_part_schema_rejects_a_disposition_the_shared_def_rejects(tmp_path):
-    """The other half: the $ref is load-bearing, not merely resolvable.
+@pytest.mark.parametrize("site", REF_SITES, ids=[s["id"] for s in REF_SITES])
+def test_a_ref_site_rejects_what_its_shared_def_requires(site, tmp_path):
+    """The $ref is load-bearing at every site, not merely at dispositions-part's.
 
-    triage-0.1.json#/$defs/disposition requires authority. Dropping it here
-    must fail for exactly the reason it would fail inside a sealed
-    00-triage.json -- the two are validated against the same $def, not two
-    copies of a shape that could drift apart.
+    Each site's document is invalid *only* because the field dropped in
+    `mutate` is required by the $def the $ref points at -- nothing else in
+    the part schema states that requirement. A refactor that pointed a site
+    at the wrong $def (audit's projection slot aimed at #/$defs/deficiency,
+    say) would still resolve cleanly and would still reject *some* malformed
+    document, but not this one: it would reject a document missing
+    `deficiency_id`, not one missing `acceptance`. Asserting the dropped
+    field's name appears in the finding, not just that findings is non-empty,
+    is what tells the two apart.
     """
-    payload = minimal_dispositions_part()
-    del payload["dispositions"][0]["authority"]
-    path = tmp_path / "dispositions-part.json"
-    write_json(path, payload)
-    findings = validate_artifact(path, "dispositions-part")
-    assert findings
-    assert any("'authority' is a required property" in f.message for f in findings), [
-        f.message for f in findings
-    ]
+    path = tmp_path / "doc.json"
+    write_json(path, _invalid_document_for(site))
+    findings = validate_artifact(path, site["kind"])
+    assert findings, f"{site['id']}: dropping {site['dropped_field']!r} was wrongly accepted"
+    field = site["dropped_field"]
+    assert any(f"'{field}' is a required property" in f.message for f in findings), (
+        f"{site['id']}: expected a finding naming {field!r}, got "
+        f"{[f.message for f in findings]} -- findings being non-empty is not enough, since a "
+        "$ref aimed at the wrong $def would also produce findings, just not this one"
+    )
 
 
-def test_a_permissive_cross_file_ref_would_wrongly_accept_the_missing_authority(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("site", REF_SITES, ids=[s["id"] for s in REF_SITES])
+def test_a_permissive_stand_in_at_each_ref_site_would_wrongly_accept_the_document(
+    site, tmp_path, monkeypatch
 ):
-    """Evidence the $ref above is load-bearing, not decorative.
+    """Evidence every site's $ref is load-bearing, not decorative.
 
-    Swap dispositions-part-0.1.json's items $ref for a permissive
-    {"type": "object"} -- the shape an unchecked $ref would functionally be
-    -- and rerun the exact document the previous test correctly rejects. If
-    it now passes, the previous test's rejection really was coming from
-    triage-0.1.json#/$defs/disposition's `required: [..., "authority"]`, and
-    not from some other constraint (additionalProperties, minItems, ...)
-    that would have rejected it regardless of what the $ref pointed at.
+    Swap *that one site's* $ref for a permissive {"type": "object"} -- the
+    shape an unchecked $ref would functionally be -- and rerun the exact
+    document the test above correctly rejects for this site. If it now
+    passes, the earlier rejection really was coming from the $ref target's
+    `required` list, and not from some other constraint (additionalProperties,
+    minItems, ...) on the part schema that would have rejected the document
+    regardless of what the $ref pointed at.
     """
     _copy_schemas_to(tmp_path)
-    part_schema = read_json(tmp_path / ARTIFACT_SCHEMAS["dispositions-part"])
-    part_schema["properties"]["dispositions"]["items"] = {"type": "object"}
-    write_json(tmp_path / ARTIFACT_SCHEMAS["dispositions-part"], part_schema)
+    filename = ARTIFACT_SCHEMAS[site["kind"]]
+    schema = read_json(tmp_path / filename)
+    _set_at(schema, site["path"], {"type": "object"})
+    write_json(tmp_path / filename, schema)
 
-    payload = minimal_dispositions_part()
-    del payload["dispositions"][0]["authority"]
-    doc_path = tmp_path / "dispositions-part.json"
-    write_json(doc_path, payload)
+    doc_path = tmp_path / "doc.json"
+    write_json(doc_path, _invalid_document_for(site))
 
     monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path))
-    findings = validate_artifact(doc_path, "dispositions-part")
+    findings = validate_artifact(doc_path, site["kind"])
     assert findings == [], (
-        "the permissive stand-in should have wrongly accepted the missing-authority "
-        f"document; got {[f.message for f in findings]} instead, which means the earlier "
-        "rejection was not actually coming from the $ref target"
+        f"{site['id']}: the permissive stand-in should have wrongly accepted the "
+        f"{site['dropped_field']!r}-missing document; got {[f.message for f in findings]} "
+        "instead, so this site's earlier rejection was not actually coming from the $ref"
     )
 
 
