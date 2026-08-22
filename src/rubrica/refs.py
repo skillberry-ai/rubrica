@@ -556,12 +556,14 @@ def check_disposition_parts(run: RunPaths) -> list[Finding]:
     # into the same rulings map. Required-and-may-be-empty per
     # adoptions-0.1.json's own description: absence is not a defect, but a
     # present-and-broken file is, same self-guard as every other part above.
+    adoptions_unreadable = False
     if run.adoptions.is_file():
         try:
             adoptions_doc = read_json(run.adoptions)
         except ArtifactError as exc:
             out.append(Finding(run.adoptions, "refs", "", str(exc)))
             adoptions_doc = None
+            adoptions_unreadable = True
         if isinstance(adoptions_doc, dict):
             for adoption in _as_list(adoptions_doc.get("adoptions")):
                 if not isinstance(adoption, dict):
@@ -597,6 +599,19 @@ def check_disposition_parts(run: RunPaths) -> list[Finding]:
             uncheckable |= slice_candidates.get(sid, set())
         for sid in have_parts - readable_sids:
             uncheckable |= slice_candidates.get(sid, set())
+        if adoptions_unreadable:
+            # The content of a broken 00-adoptions.json is unknowable, so
+            # its actual scope cannot be folded in the way a broken part's
+            # can (that scope comes from the plan, not from the part
+            # itself). What *can* be bounded is which candidates an
+            # adoption could ever have been responsible for: adoptions
+            # bypass slicing entirely (spec 8.1), so every candidate no
+            # slice covers is exactly that population, and is excluded
+            # rather than guessed at. A slice-covered candidate stays
+            # checkable -- a broken adoptions file cannot explain away a
+            # candidate that was never adoption-eligible to begin with.
+            slice_covered = {cid for ids in slice_candidates.values() for cid in ids}
+            uncheckable |= catalogue_ids - slice_covered
         checkable = catalogue_ids - uncheckable
         for cid in sorted(checkable - set(rulings)):
             out.append(
@@ -692,6 +707,13 @@ def check_objective(run: RunPaths) -> list[Finding]:
             continue
         distinct = set(evidence)
         recomputed_candidates = len(distinct)
+        # bytes sums each candidate's own catalogue `bytes` field (the
+        # source file's size), never row_bytes' serialized-row size. Task 1
+        # clamps triage-slices' skeleton at 128 nodes, so a 2.7MB source and
+        # a 20KB one can serialize to nearly the same row -- a metric that
+        # saturates under that cap is not a weight metric, it stops
+        # discriminating between candidates of very different evidential
+        # size right where this pass needs it to.
         recomputed_bytes = sum(
             b for cid in distinct if isinstance(b := candidates_by_id[cid].get("bytes"), int)
         )

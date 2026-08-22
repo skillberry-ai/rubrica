@@ -54,12 +54,12 @@ def _staged_run(tmp_path):
                     {
                         "name": "tool calls",
                         "evidence": ["api-json"],
-                        "weight": {"candidates": 1, "bytes": 2381},
+                        "weight": {"candidates": 1, "bytes": 1231},
                     },
                     {
                         "name": "narrative notes",
                         "evidence": ["notes-md"],
-                        "weight": {"candidates": 1, "bytes": 1303},
+                        "weight": {"candidates": 1, "bytes": 898},
                     },
                 ],
             },

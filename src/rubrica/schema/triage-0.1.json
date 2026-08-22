@@ -74,8 +74,16 @@
           "required": ["candidates", "bytes"],
           "additionalProperties": false,
           "properties": {
-            "candidates": {"type": "integer", "minimum": 1},
-            "bytes": {"type": "integer", "minimum": 0}
+            "candidates": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "The count of distinct catalogue candidate_ids named in this surface's own evidence -- refs.check_objective recomputes this from evidence, so it must agree."
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The sum of each evidence candidate's own catalogue `bytes` field (source file size) -- never row_bytes' serialized-row size. triage-slices' skeleton clamp (Task 1, capped at 128 nodes) makes row size saturate: a 2.7MB source and a 20KB one can serialize to nearly the same row, so a row-size weight would stop discriminating between candidates of very different evidential size right where this pass needs it to. refs.check_objective recomputes this from the catalogue, so it must agree."
+            }
           }
         }
       }

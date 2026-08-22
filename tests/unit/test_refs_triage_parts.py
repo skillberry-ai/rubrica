@@ -19,27 +19,6 @@ from tests.unit.test_seal import _staged_run
 # ---------------------------------------------------------------------------
 
 
-def _staged_run_with_correct_weights(tmp_path):
-    """_staged_run's hand-written objective hardcodes weight.bytes against
-    byte counts that do not match the toy fixture's actual candidates
-    (measured here: notes-md=898, api-json=1231, trace-json=318, not the
-    1303/2381/418 test_seal.py's own comment claims). seal.py never checks
-    weight arithmetic -- it copies objective_review verbatim -- so that
-    mismatch was invisible until check_objective existed to notice it.
-    Corrected here, in this module, rather than in test_seal.py's own copy:
-    Task 9's fixture and its tests are not mine to change, and this task's
-    "clean run reports nothing" baseline needs a run that is actually clean
-    by the arithmetic this checker recomputes.
-    """
-    run = _staged_run(tmp_path)
-    catalogue = {c["candidate_id"]: c for c in read_json(run.catalogue)["candidates"]}
-    doc = read_json(run.objective)
-    for surface in doc["objective_review"]["surfaces"]:
-        surface["weight"]["bytes"] = sum(catalogue[cid]["bytes"] for cid in surface["evidence"])
-    write_json(run.objective, doc)
-    return run
-
-
 def test_a_clean_staged_run_reports_nothing_for_disposition_parts(tmp_path):
     assert refs.check_disposition_parts(_staged_run(tmp_path)) == []
 
@@ -178,13 +157,58 @@ def test_an_unreadable_adoptions_file_is_one_finding(tmp_path):
     assert findings[0].artifact == run.adoptions
 
 
+def test_a_malformed_adoptions_file_does_not_fabricate_a_second_finding(tmp_path):
+    """A genuinely-adopted orphan candidate, plus a later-corrupted
+    00-adoptions.json, must report only the corruption -- never also accuse
+    the human's own admission of not existing. Clause 4 cannot know the
+    broken file's actual content, so it must exclude every candidate no
+    slice covers (exactly the population an adoption could have named) from
+    "no disposition anywhere", not just the ones a readable file would have
+    named. This is the module docstring's `01-claims/` incident again, one
+    level further from the read failure: continuing past it must not
+    fabricate a finding against a candidate this checker never got to see."""
+    run = _staged_run(tmp_path)
+    catalogue = read_json(run.catalogue)
+    catalogue["candidates"].append(
+        {"candidate_id": "orphan-cand", "origin": "projection", "admissible": True}
+    )
+    write_json(run.catalogue, catalogue)
+    write_json(
+        run.adoptions,
+        {
+            "schema_version": "0.1",
+            "run_id": catalogue["run_id"],
+            "adoptions": [
+                {
+                    "candidate_id": "orphan-cand",
+                    "disposition": {
+                        "candidate_id": "orphan-cand",
+                        "disposition": "admit",
+                        "reason": "structural acceptance passed",
+                        "authority": "human",
+                    },
+                    "projection_id": "prj-1",
+                    "closed_deficiency_ids": ["def-1"],
+                }
+            ],
+        },
+    )
+    # Corrupt the file *after* writing it, so the fixture proves a human did
+    # validly adopt this candidate before the corruption happened -- the
+    # scenario is "a valid admission, later damaged", not "never admitted".
+    run.adoptions.write_text("{not json", encoding="utf-8")
+    findings = refs.check_disposition_parts(run)
+    assert len(findings) == 1
+    assert findings[0].artifact == run.adoptions
+
+
 # ---------------------------------------------------------------------------
 # check_objective
 # ---------------------------------------------------------------------------
 
 
 def test_a_clean_staged_run_reports_nothing_for_objective(tmp_path):
-    assert refs.check_objective(_staged_run_with_correct_weights(tmp_path)) == []
+    assert refs.check_objective(_staged_run(tmp_path)) == []
 
 
 def test_an_absent_objective_reports_nothing(tmp_path):
@@ -205,7 +229,7 @@ def test_an_evidence_id_that_does_not_resolve_is_reported(tmp_path):
     """Weight is skipped once evidence fails to resolve (Lessons: isolate the
     mutation to one invariant) -- the weight of a broken evidence list is not
     a second, independent defect."""
-    run = _staged_run_with_correct_weights(tmp_path)
+    run = _staged_run(tmp_path)
     doc = read_json(run.objective)
     doc["objective_review"]["surfaces"][0]["evidence"] = ["ghost"]
     write_json(run.objective, doc)
@@ -215,7 +239,7 @@ def test_an_evidence_id_that_does_not_resolve_is_reported(tmp_path):
 
 
 def test_a_surface_weight_that_is_not_arithmetic_is_reported(tmp_path):
-    run = _staged_run_with_correct_weights(tmp_path)
+    run = _staged_run(tmp_path)
     doc = read_json(run.objective)
     doc["objective_review"]["surfaces"][0]["weight"]["candidates"] += 3
     write_json(run.objective, doc)
@@ -227,7 +251,7 @@ def test_a_surface_weight_that_is_not_arithmetic_is_reported(tmp_path):
 def test_a_surface_bytes_that_are_not_arithmetic_is_reported(tmp_path):
     """The other half of clause 2 -- bytes mutated alone, candidates left
     correct, isolating the bytes arithmetic from the candidates arithmetic."""
-    run = _staged_run_with_correct_weights(tmp_path)
+    run = _staged_run(tmp_path)
     doc = read_json(run.objective)
     doc["objective_review"]["surfaces"][0]["weight"]["bytes"] += 100
     write_json(run.objective, doc)
