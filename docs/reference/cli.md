@@ -99,9 +99,9 @@ rubrica adopt-projection --run runs/run-20260806-123005 \
 
 Layer 1: schema-validates one stage's output.
 
-Required: `--run RUN`, `--stage`, one of `survey`, `triage`, `intake`,
-`extract`, `reconcile`, `propose`, `score`, `instantiate`, `challenge`,
-`emit`, `smoke`.
+Required: `--run RUN`, `--stage`, one of `survey`, `triage`, `triage-slices`,
+`intake`, `extract`, `reconcile`, `propose`, `score`, `instantiate`,
+`challenge`, `emit`, `smoke`.
 
 Exits 0 clean, or 1 with one finding per line on stdout.
 
@@ -138,6 +138,31 @@ rubrica check-skills
 
 ## Feeding a stage
 
+### `rubrica triage-slices`
+
+Partitions a catalogue's admissible candidates into byte-bounded slices — a
+reading unit, never a decision unit, so nothing here overrules a candidate a
+human can still act on at gate 0. Every shard carries the run's `request` and
+`policy` verbatim alongside that slice's own candidates, so a later dispatch
+reading its own slice never has to seek across the catalogue for a head field.
+
+Required: `--run RUN`.
+
+Reports no findings, so it never exits 1: a catalogue with no admissible
+candidates, or one that cannot be read at all, is exit 2 — a survey defect or
+a broken run, not a repairable stage output. A single candidate too large for
+any slice is exit 2 for the same reason: no splitter here can shrink one row.
+Re-running replans and removes any shard the new plan no longer names, so a
+human adopting a projection at gate 0 can re-mint the plan safely.
+
+Prints one line per slice — id, byte size, candidate count, label — then
+exits 0.
+
+```bash
+rubrica triage-slices --run runs/run-20260806-123005
+# s01  61234  42  corpus:0:src/handlers (42 candidates)
+```
+
 ### `rubrica dedupe-candidates`
 
 Proposes candidate duplicate scenario pairs as JSON for the scoring stage to
@@ -158,7 +183,7 @@ other writer; `rb-orchestrate` is their only caller in a real run.
 
 Records a stage's model, effort, and skill hash into `manifest.json`.
 
-Required: `--run RUN`, `--stage` (same eleven choices as `validate` above),
+Required: `--run RUN`, `--stage` (same choices as `validate` above),
 `--model MODEL`, `--effort {low,medium,high,xhigh,max}`, `--skill PATH`.
 
 The digest is computed here from `--skill` rather than accepted as a string —

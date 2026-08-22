@@ -1,6 +1,9 @@
+from pathlib import Path
+
 import pytest
 
-from rubrica import slices
+from rubrica import slices, survey, validate
+from rubrica.artifacts import canonical_bytes, read_json
 
 
 def _cand(cid, *, path=None, kind="source_code", root=0, container=None, pad=1000, sig=None):
@@ -252,3 +255,59 @@ def test_every_corpus_shape_partitions_within_the_cap(name):
             sum(slices.row_bytes(by_id[cid]) for cid in s.candidate_ids)
             <= slices.DEFAULT_SLICE_BYTES
         )
+
+
+def _toy_run(tmp_path):
+    return survey.survey(
+        corpus_roots=[Path("tests/fixtures/toy")],
+        runs_dir=tmp_path / "runs",
+        target_name="toy",
+        target_interface="http",
+        objective="breadth",
+        max_rounds=2,
+        max_scenarios=128,
+    )
+
+
+def test_writing_slices_produces_one_shard_per_slice_each_readable_whole(tmp_path):
+    run = _toy_run(tmp_path)
+    # cap=2048 (the brief's own "small cap: forces several") is smaller than
+    # this fixture's own api-json candidate (2381B), which oversized_rows
+    # correctly refuses -- 2500 is the smallest cap over every single row that
+    # still splits the toy fixture's ~4.1KB of candidates into more than one
+    # slice.
+    path, plan = slices.write_slices(run, cap=2500)
+    assert path == run.slices
+    assert len(plan) > 1
+    for s in plan:
+        shard = read_json(run.slice_shard(s.id))
+        assert shard["slice_id"] == s.id
+        assert shard["run_id"] == read_json(run.catalogue)["run_id"]
+        # The head fields every member needs, in every shard, by construction.
+        assert shard["request"] == read_json(run.catalogue)["request"]
+        assert shard["policy"] == read_json(run.catalogue)["policy"]
+        assert [c["candidate_id"] for c in shard["candidates"]] == list(s.candidate_ids)
+        assert len(canonical_bytes(shard)) < 256 * 1024  # one Read
+    assert validate.validate_stage(run, "triage-slices") == []
+
+
+def test_writing_slices_is_idempotent(tmp_path):
+    """Re-runnable, because a later task's adoption path re-mints the plan
+    after a human admits a projection."""
+    run = _toy_run(tmp_path)
+    slices.write_slices(run)
+    first = run.slices.read_bytes()
+    shards_first = sorted(p.name for p in run.slices_dir.iterdir())
+    slices.write_slices(run)
+    assert run.slices.read_bytes() == first
+    assert sorted(p.name for p in run.slices_dir.iterdir()) == shards_first
+
+
+def test_a_stale_shard_from_a_previous_plan_is_removed(tmp_path):
+    """Otherwise a re-plan leaves an orphan shard on disk that a later
+    check_slices would report against a plan that no longer names it."""
+    run = _toy_run(tmp_path)
+    slices.write_slices(run)
+    (run.slices_dir / "s99.json").write_text("{}", encoding="utf-8")
+    slices.write_slices(run)
+    assert not (run.slices_dir / "s99.json").exists()

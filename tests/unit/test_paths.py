@@ -25,6 +25,7 @@ def test_stages_are_in_pipeline_order():
     assert STAGES == (
         "survey",
         "triage",
+        "triage-slices",
         "intake",
         "extract",
         "reconcile",
@@ -40,10 +41,12 @@ def test_stages_are_in_pipeline_order():
 def test_survey_and_triage_lead_the_stage_ordering():
     """STAGES is the pipeline order and the on-disk numbering.
 
-    survey and triage are 00a and 00b, so they precede intake -- which is 00c
-    and no longer the first thing that happens in a run.
+    survey, triage and triage-slices are all 00-family, so they precede
+    intake -- which is no longer the first thing that happens in a run.
+    triage stays alongside triage-slices for now (see paths.py's own
+    comment); it is removed only once the three-pass triage redesign lands.
     """
-    assert paths.STAGES[:3] == ("survey", "triage", "intake")
+    assert paths.STAGES[:4] == ("survey", "triage", "triage-slices", "intake")
 
 
 def test_the_catalogue_and_triage_record_are_run_paths(tmp_path):

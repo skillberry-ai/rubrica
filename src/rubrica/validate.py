@@ -77,6 +77,7 @@ CONFIG_KINDS: frozenset[str] = frozenset({"agents", "gold"})
 STAGE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "survey": ("catalogue",),
     "triage": ("triage",),
+    "triage-slices": ("slices",),
     "intake": ("manifest",),
     "extract": ("claims",),
     "reconcile": ("world-model",),
@@ -217,6 +218,12 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         return [run.catalogue]
     if kind == "triage":
         return [run.triage] if run.triage.is_file() else []
+    if kind == "slices":
+        # Returned even when absent, for the same reason as catalogue above:
+        # read_json's ArtifactError names 00-slices.json itself, so a
+        # triage-slices that wrote nothing is reported by path rather than
+        # passing because a bare is_file() gate found no expected file to check.
+        return [run.slices]
     if kind == "manifest":
         return [run.manifest] if run.manifest.is_file() else []
     if kind == "world-model":

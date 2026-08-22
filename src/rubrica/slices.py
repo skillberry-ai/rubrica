@@ -42,8 +42,11 @@ from __future__ import annotations
 import posixpath
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
+from pathlib import Path
 
-from rubrica.artifacts import canonical_bytes
+from rubrica.artifacts import canonical_bytes, read_json, write_json
+from rubrica.errors import UsageError
+from rubrica.paths import RunPaths, list_json
 
 # The harness refuses a whole-file Read at 256KB, and a member's shard must be
 # one Read. 64KB leaves room for the request/policy head every shard carries
@@ -493,3 +496,85 @@ def plan_slices(candidates: list[dict], *, cap: int = DEFAULT_SLICE_BYTES) -> li
             )
         )
     return plan
+
+
+def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path, list[Slice]]:
+    """Partition the run's catalogue into slices and write the plan plus one shard each.
+
+    Two failure modes are refused before planning even starts, both exit 2 at
+    the CLI rather than a finding: a catalogue with no candidates (nothing for
+    a slice to hold -- a survey defect, not a triage-slices one) and any
+    candidate over `cap` on its own (oversized_rows is what reports that; no
+    splitter here can shrink a single row).
+
+    Every shard carries the run's `request` and `policy` verbatim alongside
+    its own slice's full candidate records, rather than each member re-reading
+    00-catalogue.json for them. That duplication is deliberate: on the
+    595KB/351-candidate corpus that motivated this whole module,
+    canonical_bytes's sorted keys put `run_id` 608KB into the file, so a
+    dispatch reading only its own slice range still had to seek across the
+    catalogue for two small top-level fields -- exactly the chunk-reading cost
+    this module exists to eliminate. Paying a few duplicated bytes per shard
+    is cheaper than one extra seek per member, every time.
+
+    Idempotent and safe to re-run: a human adopting a projection at gate 0
+    changes the catalogue, and the plan must be mintable again from scratch.
+    Every shard the new plan does not name is deleted, so a slice id that
+    existed under the old plan but not the new one does not linger as a
+    stale, unreferenced file a later stage could mistakenly read.
+    """
+    catalogue = read_json(run.catalogue)
+    candidates = catalogue.get("candidates", [])
+    if not candidates:
+        raise UsageError(f"{run.catalogue} has no candidates to slice")
+    oversized = oversized_rows(candidates, cap=cap)
+    if oversized:
+        raise UsageError(
+            f"{run.catalogue} has candidates too large for any {cap}-byte slice: {oversized}"
+        )
+    plan = plan_slices(candidates, cap=cap)
+
+    candidates_by_id = {c["candidate_id"]: c for c in candidates}
+    document = {
+        "schema_version": "0.1",
+        "run_id": catalogue["run_id"],
+        "cap_bytes": cap,
+        "slices": [
+            {
+                "id": s.id,
+                "label": s.label,
+                "groups": list(s.groups),
+                "bytes": sum(row_bytes(candidates_by_id[cid]) for cid in s.candidate_ids),
+                "candidate_ids": list(s.candidate_ids),
+                "provenance": [dict(p) for p in s.provenance],
+            }
+            for s in plan
+        ],
+    }
+    write_json(run.slices, document)
+
+    run.slices_dir.mkdir(parents=True, exist_ok=True)
+    written_names: set[str] = set()
+    for s in plan:
+        shard = {
+            "schema_version": "0.1",
+            "run_id": catalogue["run_id"],
+            "slice_id": s.id,
+            "request": catalogue["request"],
+            "policy": catalogue["policy"],
+            "provenance": [dict(p) for p in s.provenance],
+            "candidates": [candidates_by_id[cid] for cid in s.candidate_ids],
+        }
+        shard_path = run.slice_shard(s.id)
+        write_json(shard_path, shard)
+        written_names.add(shard_path.name)
+
+    # Stale-shard removal: a re-run's plan is the only source of truth for
+    # what should exist under 00-slices/, so anything else there is left over
+    # from a plan this run no longer has -- see the docstring's idempotence
+    # paragraph for why that situation is expected, not a defect.
+    for existing in list_json(run.slices_dir):
+        if existing.name not in written_names:
+            existing.unlink()
+
+    return run.slices, plan

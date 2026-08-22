@@ -144,17 +144,21 @@ failed, the answer is the halt in refusal condition 2, not the artifact.
 
 ## 3. Method
 
-**This pipeline has eleven stages and nine skills; you dispatch seven of the
+**This pipeline has twelve stages and nine skills; you dispatch seven of the
 nine yourself.** The other two skills bracket you rather than sitting inside
 your walk. Before you exist at all, `rubrica survey` walks a corpus and mints
 this run, writing `00-catalogue.json` -- one bounded digest per candidate,
 never the candidate's own bytes. `rb-triage` reads only that catalogue and
 rules on every candidate -- `admit`, `decline`, or `needs_projection` --
-writing `00-triage.json`. Then **HUMAN GATE 0** holds on that record, and only
-once it has passed does `rubrica intake --run <run>` materialise the admitted
-candidates into `manifest.json`, the file B1 tells you to verify rather than
-produce. You never run `rubrica survey`, never dispatch `rb-triage`, and never
-hold gate 0 -- all three are finished before you are ever dispatched.
+writing `00-triage.json`. A code stage, `triage-slices`, also sits in this
+bracket -- it partitions the catalogue into byte-bounded shards for a triage
+redesign still in progress, and nothing downstream reads its output yet, so
+treat its presence in the stage order as scaffolding rather than a step your
+own loop depends on. Then **HUMAN GATE 0** holds on the triage record, and
+only once it has passed does `rubrica intake --run <run>` materialise the
+admitted candidates into `manifest.json`, the file B1 tells you to verify
+rather than produce. You never run `rubrica survey`, never dispatch
+`rb-triage` or `triage-slices`, and never hold gate 0 -- none of it is yours.
 
 **Gate 0 is different in kind from the three gates you do hold (B5, B7, B10),
 and the difference is worth carrying with you rather than filing as one more

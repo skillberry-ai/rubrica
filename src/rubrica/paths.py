@@ -16,6 +16,7 @@ from rubrica.errors import UsageError
 STAGES = (
     "survey",
     "triage",
+    "triage-slices",
     "intake",
     "extract",
     "reconcile",

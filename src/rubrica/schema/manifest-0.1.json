@@ -74,8 +74,8 @@
       "type": "object",
       "propertyNames": {
         "enum": [
-          "survey", "triage", "intake", "extract", "reconcile", "propose", "score",
-          "instantiate", "challenge", "emit", "smoke"
+          "survey", "triage", "triage-slices", "intake", "extract", "reconcile", "propose",
+          "score", "instantiate", "challenge", "emit", "smoke"
         ]
       },
       "additionalProperties": {

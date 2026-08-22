@@ -83,6 +83,15 @@ ROWS: list[dict] = [
         note="admit / decline, one disposition per candidate",
     ),
     dict(
+        kind="stage",
+        dir="—",
+        name="triage-slices",
+        runs="code · partitions the catalogue into shards",
+        art=["00-slices.json", "00-slices/<id>.json"],
+        gates=["validate"],
+        note="a reading unit, not a decision unit",
+    ),
+    dict(
         kind="band",
         n="0",
         title="Human gate 0 — the triage record",

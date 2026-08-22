@@ -60,7 +60,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from rubrica import brief, refs, skills, survey, triage
+from rubrica import brief, refs, skills, slices, survey, triage
 from rubrica.artifacts import ArtifactError, read_json
 from rubrica.dedupe import candidate_pairs
 from rubrica.emit import emit_run
@@ -89,6 +89,7 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("survey", "inventory a corpus into a catalogue of candidates and mint a run"),
     ("intake", "register inputs and mint a run"),
     ("adopt-projection", "admit a manufactured projection into the catalogue, structurally"),
+    ("triage-slices", "partition a catalogue into byte-bounded slices a dispatch can read"),
     ("validate", "schema-validate one stage's output"),
     ("check-refs", "cross-artifact and reachability checks"),
     ("dedupe-candidates", "propose candidate duplicate scenario pairs as JSON"),
@@ -169,6 +170,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_adopt.add_argument("--projection", required=True, metavar="ID")
     p_adopt.add_argument("--file", required=True, metavar="PATH")
     p_adopt.add_argument("--check-only", action="store_true")
+
+    p_slices = parsers["triage-slices"]
+    p_slices.add_argument("--run", required=True)
 
     p_validate = parsers["validate"]
     p_validate.add_argument("--run", required=True)
@@ -423,6 +427,25 @@ def main(argv: list[str] | None = None) -> int:
         return CLEAN
 
     try:
+        if args.command == "triage-slices":
+            # Modeled on validate/check-refs just below, not on survey above:
+            # this is a code stage over an existing run's artifact, not a
+            # minter of one. write_slices reports no findings -- it either
+            # produces a plan or it does not -- so this block has no _report
+            # call and cannot exit FINDINGS. Its only two exits are CLEAN
+            # here and USAGE via the shared except below (a catalogue with no
+            # candidates, or one that cannot be read at all, both raise
+            # UsageError/ArtifactError there). That asymmetry is deliberate:
+            # this repository has shipped a stage defect surfacing as exit 2
+            # and a `1` with empty stdout before, both from an exit path that
+            # assumed a case it did not have.
+            run = _run_dir(args.run)
+            _, plan = slices.write_slices(run)
+            for s in plan:
+                size = run.slice_shard(s.id).stat().st_size
+                print(f"{s.id}  {size}  {len(s.candidate_ids)}  {s.label}")
+            return CLEAN
+
         if args.command == "validate":
             return _report(validate_stage(_run_dir(args.run), args.stage))
 

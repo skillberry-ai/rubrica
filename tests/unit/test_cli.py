@@ -7,6 +7,7 @@ import pytest
 
 import rubrica.cli
 import rubrica.validate
+from rubrica import survey
 from rubrica.artifacts import read_json, write_json
 from rubrica.cli import main, subcommand_names
 from rubrica.paths import RunPaths
@@ -842,3 +843,49 @@ def test_check_skills_on_an_unparseable_skill_is_exit_2(tmp_path, capsys):
     (tmp_path / "rb-extract" / "SKILL.md").write_text("# no contract\n", encoding="utf-8")
     assert main(["check-skills", "--skills-dir", str(tmp_path)]) == 2
     assert capsys.readouterr().err.startswith("error: ")
+
+
+def _toy_survey_run(tmp_path):
+    return survey.survey(
+        corpus_roots=[Path("tests/fixtures/toy")],
+        runs_dir=tmp_path / "runs",
+        target_name="toy",
+        target_interface="http",
+        objective="breadth",
+        max_rounds=2,
+        max_scenarios=128,
+    )
+
+
+def test_triage_slices_exits_two_on_a_catalogue_with_no_candidates(tmp_path):
+    """Spec 10.2: a refusal condition that moves from the prompt to code. It is
+    a survey defect or a broken run, and code detects it without a dispatch."""
+    run = RunPaths(tmp_path / "run-1")
+    run.root.mkdir(parents=True)
+    write_json(
+        run.catalogue,
+        {
+            "schema_version": "0.1",
+            "run_id": "run-1",
+            "created_utc": "z",
+            "request": {},
+            "policy": {},
+            "candidates": [],
+            "excluded": [],
+        },
+    )
+    assert main(["triage-slices", "--run", str(run.root)]) == 2
+
+
+def test_triage_slices_exits_two_on_an_unreadable_catalogue(tmp_path):
+    run = RunPaths(tmp_path / "run-1")
+    run.root.mkdir(parents=True)
+    run.catalogue.write_text("{not json", encoding="utf-8")
+    assert main(["triage-slices", "--run", str(run.root)]) == 2
+
+
+def test_triage_slices_exits_zero_and_prints_the_plan(tmp_path, capsys):
+    run = _toy_survey_run(tmp_path)
+    assert main(["triage-slices", "--run", str(run.root)]) == 0
+    out = capsys.readouterr().out
+    assert "s01" in out

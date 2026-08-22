@@ -26,6 +26,7 @@ contract, not a diagram convention.
 |---|---|---|---|---|---|
 | — | `survey` | code — walks a corpus and mints the run | the corpus roots you name, plus target name, interface, objective | `00-catalogue.json` | validate |
 | — | `triage` | `rb-triage` | `00-catalogue.json` only | `00-triage.json` | validate · check-refs · human gate 0 |
+| — | `triage-slices` | code — partitions the catalogue into byte-bounded slices | `00-catalogue.json` only | `00-slices.json`, `00-slices/<id>.json` | validate |
 | `00` | `intake` | code | the input files you name, plus target name, interface, limits — or, on the survey path, an already-admitted `00-triage.json` | `manifest.json`, `00-inputs/<stored_as>` | validate |
 | `01a` | `extract` | `rb-extract` — fan-out, one per input | the manifest, and its own one file under `00-inputs/` — never a sibling's | `01-claims/<artifact-id>.json` | validate |
 | `01b` | `reconcile` | `rb-reconcile` — barrier | the manifest and every claims file | `01-world-model.json` | validate · check-refs · human gate 1 |
@@ -36,13 +37,14 @@ contract, not a diagram convention.
 | `06` | `emit` | `rb-emit` — wraps code | `02-scenarios.json`, `05-verdicts/`, `04-instances/*/expected.json`, `01-world-model.json` | `06-suite/<sid>/` task packages | validate · check-refs |
 | `07` | `smoke` | code | the emitted suite and the agent roster | `07-report.json` | validate · check-refs |
 
-`survey` and `triage` carry no `0N` prefix of their own. They write
-`00-catalogue.json` and `00-triage.json` ahead of the `manifest.json` and
+`survey`, `triage`, and `triage-slices` carry no `0N` prefix of their own.
+They write `00-catalogue.json`, `00-triage.json`, and `00-slices.json` (plus
+its `00-slices/<id>.json` shards) ahead of the `manifest.json` and
 `00-inputs/` that `intake` mints once gate 0 has passed, so the numbering
-stays intake's — `intake` is what fixes the run's identity, and neither
-`survey` nor `triage` has minted one yet. `intake --input` still works
-unchanged for anyone who would rather hand-pick the inputs directly, with no
-corpus, no catalogue, no triage record, and no gate 0.
+stays intake's — `intake` is what fixes the run's identity, and none of the
+three has minted one yet. `intake --input` still works unchanged for anyone
+who would rather hand-pick the inputs directly, with no corpus, no catalogue,
+no triage record, no slices, and no gate 0.
 
 ### The human gates
 
@@ -107,5 +109,6 @@ artifacts.
 | `rb-emit` | A deliberately thin entry point over `rubrica emit`; writes nothing itself. `emit` is code, not a prompt, because two runs with identical stage-4 and stage-5 artifacts must produce identical suites — otherwise variance can no longer be attributed to a stage. |
 | `rb-orchestrate` | The loop itself: dispatch each stage, validate, allow one bounded repair, hold gates 1 through 3, record each stage's model and skill hash, append every decision to the run's lab notebook. **Not a stage** — it declares no `stage` and no `schemas`. It dispatches `extract` through `emit` only: it never runs `survey`, never dispatches `rb-triage`, and never holds gate 0. |
 
-`intake`, `smoke`, and `survey` are code, not skills. They have no `SKILL.md`
-and no entry in `manifest.stages` — their absence there is not a defect.
+`intake`, `smoke`, `survey`, and `triage-slices` are code, not skills. They
+have no `SKILL.md` and no entry in `manifest.stages` — their absence there is
+not a defect.

@@ -59,6 +59,33 @@ free text); `projections[].closes` (the `deficiency_id`s a projection is
 supposed to resolve — `adopt-projection` checks structural acceptance against
 this, never the prose criterion, which stays a human's call).
 
+## `slices`
+
+- **Schema:** `src/rubrica/schema/slices-0.1.json`
+- **Written by:** `triage-slices` (code)
+- **Read by:** nothing yet — the prompt passes this stage feeds are a later
+  addition
+- **Path:** `00-slices.json`, one shard per slice at `00-slices/<id>.json`
+
+The catalogue's admissible candidates packed into byte-bounded slices, so a
+single dispatch can hold one slice whole: the fix for a real 595KB/351
+candidate catalogue that killed three dispatches before this module existed,
+one in context compaction and one by exhausting its whole dollar budget.
+`00-slices.json` is the plan — one entry per slice, its `groups`,
+`candidate_ids`, and `provenance` — and is schema-validated. The shard at
+`00-slices/<id>.json` is not: instead it carries the run's `request` and
+`policy` verbatim alongside that slice's own full candidate records, so a
+member's entire input is one `Read` under the harness's 256KB refusal, with
+no chunk-reading seek for a head field the way `run_id` sitting 608KB into a
+sorted-keys catalogue once forced. A slice is a reading unit, never a decision
+unit — every candidate it holds still reaches a member and is still
+overrulable by a human at gate 0.
+
+Fields worth knowing: `slices[].bytes` (the slice's total digest bytes,
+recomputed from the shard by a later reference check so a slice cannot
+silently drift from its own header); `slices[].provenance[].other_slices`
+(empty exactly when the group it names was not split across slices).
+
 ## `manifest`
 
 - **Schema:** `src/rubrica/schema/manifest-0.1.json`
