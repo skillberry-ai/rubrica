@@ -58,6 +58,29 @@ def test_two_roots_with_the_same_directory_do_not_merge():
         assert len(roots) == 1, f"slice {s.id} mixes roots {roots}"
 
 
+def test_two_roots_do_not_share_a_slice_even_when_both_would_fit_together():
+    # test_two_roots_with_the_same_directory_do_not_merge uses cap=200, which
+    # is smaller than a single row's own cost -- every unit gets its own
+    # slice regardless of any root boundary, so that test cannot tell the
+    # `_pack_adjacent` root guard apart from its absence. This one uses small
+    # rows and a cap generous enough that both roots' whole contribution would
+    # comfortably pack into ONE slice if nothing stopped it -- the sanity
+    # assertion below confirms that's really true of these numbers, so a
+    # passing root-separation assertion after it means the guard did the work.
+    root0 = [_cand(f"a{i}", path=f"src/m{i}.py", root=0, pad=50) for i in range(5)]
+    root1 = [_cand(f"b{i}", path=f"src/m{i}.py", root=1, pad=50) for i in range(5)]
+    cands = root0 + root1
+    cap = 4000
+    assert sum(slices.row_bytes(c) for c in cands) <= cap
+    plan = slices.plan_slices(cands, cap=cap)
+    for s in plan:
+        roots = {
+            next(c for c in cands if c["candidate_id"] == cid)["root_index"]
+            for cid in s.candidate_ids
+        }
+        assert len(roots) == 1, f"slice {s.id} mixes roots {roots}"
+
+
 def test_slice_labels_are_unique():
     cands = [_cand(f"a{i}", path=f"m{i}.py", root=0) for i in range(3)] + [
         _cand(f"b{i}", path=f"m{i}.py", root=1) for i in range(3)
@@ -169,6 +192,20 @@ def test_planning_is_deterministic():
     first = slices.plan_slices(cands, cap=8192)
     second = slices.plan_slices(list(reversed(cands)), cap=8192)
     assert [(s.id, s.candidate_ids) for s in first] == [(s.id, s.candidate_ids) for s in second]
+
+
+def test_one_200kb_row_is_reported_not_partitioned():
+    # Spec §5.3's tenth shape, absent from the code block the task brief
+    # gave verbatim: one row too large for any slice to hold, plus a handful
+    # of ordinary candidates. It cannot go in SHAPES -- no partition of it
+    # can satisfy test_every_corpus_shape_partitions_within_the_cap's cap
+    # assertion, by construction -- so it gets its own test, asserting
+    # oversized_rows reports exactly the one row Task 3 is what refuses.
+    huge = _cand("huge", path="d/huge.json", kind="other", pad=200_000)
+    normal = [_cand(f"c{i}", path=f"d/c{i}.py") for i in range(5)]
+    cands = [huge, *normal]
+    assert slices.row_bytes(huge) > slices.DEFAULT_SLICE_BYTES
+    assert slices.oversized_rows(cands) == [("huge", slices.row_bytes(huge))]
 
 
 SHAPES = {
