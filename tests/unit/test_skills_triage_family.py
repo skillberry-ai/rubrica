@@ -6,6 +6,25 @@ Roughly nineteen assertions in this repo were measured satisfiable by
 unrelated content before that convention existed. Task 11's brief measured
 each of these in both directions; a predicate nobody has watched fail is not
 a guard.
+
+**Window margin convention.** Every `_window_around`/`_window_after` call in
+this module carries a `radius` sized to at least 2x the measured
+anchor-to-token distance for whichever required token sits farthest from the
+anchor (the nearer of an OR-group's alternatives, the farther of an
+AND-group's requirements). A tighter window is a length pin in disguise: it
+passes today against the real prose, but an honest, meaning-preserving
+lengthening anywhere between the anchor and the token -- a clause added, a
+sentence reworded longer -- pushes the token outside the window and fails
+the test against a *correct* skill. Deletion-only probing (confirming the
+predicate goes red when the claim is removed) cannot detect this, because a
+tight-but-adequate window and a tight-and-fragile one both pass that probe
+identically; only measuring the actual distance and comparing it to the
+radius reveals the fragility. Three windows in this file were found below
+the floor by that measurement alone, well after their own deletion probes
+had already passed -- see this file's git history for the fix. When adding
+a new windowed predicate, measure the anchor-to-token distance with the
+same method (an ad hoc script against `skills.section_body`, not a guess)
+and size the radius from it; do not pick a round number first and hope.
 """
 
 from __future__ import annotations
@@ -174,11 +193,15 @@ def test_the_objective_pass_forbids_acting_on_a_recommended_objective_in_invaria
     Checking only that both words appear anywhere in Invariants is close to
     tautological, since the field's own name contains "recommend" -- a
     reword keeping the field name while dropping the prohibition ("reflects
-    one path you could take") would still have passed the old assertion."""
+    one path you could take") would still have passed the old assertion.
+
+    radius=300 against a measured anchor-to-token distance of 142 chars to
+    the nearest prohibition word ("never") -- margin ~2.1x, per this
+    module's floor (see the module docstring)."""
     body = _norm(skills.section_body(_objective(), "4. Invariants"))
     index = body.find("recommended_objective")
     assert index != -1
-    window = _window_after(body, index)
+    window = _window_after(body, index, radius=300)
     prohibition = ("may not", "must not", "never", "not permitted", "is not yours")
     assert any(p in window for p in prohibition)
 
@@ -303,13 +326,20 @@ def test_the_rule_pass_gives_both_arguments_against_opening_a_candidate():
     "fact" three times and "clamped" once of its own accord. Anchored on
     the claim's own wording ("in fact" / "comparable") and windowed forward
     to where "clamp" actually appears (374 characters away in the real
-    prose) instead."""
+    prose) instead.
+
+    radius=800 against that measured 374-character distance -- margin
+    ~2.1x. The original radius=450 (margin ~1.2x) was demonstrated to break
+    against a correct skill under an honest 87-character meaning-preserving
+    lengthening of the intervening prose; widened here per this module's 2x
+    floor (see the module docstring) once this task's own concurrent edits
+    to this file were done."""
     body = _norm(skills.section_body(_rule(), "1. Inputs"))
     assert "cost" in body
     assert "comparable" in body
     anchor = _first_index(body, ("in fact", "comparable"))
     assert anchor != -1
-    window = _window_after(body, anchor, radius=450)
+    window = _window_after(body, anchor, radius=800)
     assert "clamp" in window
 
 
@@ -319,11 +349,16 @@ def test_the_rule_pass_names_the_repeated_signal_warning():
     together is one fact stated twice. `status` and `error_markers` must
     co-occur with the "one fact" conclusion, not merely both appear somewhere
     in Inputs -- a reword that named the two fields without ever saying they
-    can double-count would still satisfy a bag-of-tokens check."""
+    can double-count would still satisfy a bag-of-tokens check.
+
+    radius=650 against measured distances of 121 ("status") and 289 (the
+    nearest of the "one fact" / "stated twice" / "twice" alternatives) --
+    the controlling margin is ~2.2x on the 289-character token, per this
+    module's floor (see the module docstring)."""
     body = _norm(skills.section_body(_rule(), "1. Inputs"))
     anchor = _first_index(body, ("error_markers",))
     assert anchor != -1
-    window = _window_around(body, anchor, radius=400)
+    window = _window_around(body, anchor, radius=650)
     assert "status" in window
     assert "one fact" in window or "stated twice" in window or "twice" in window
 
@@ -371,11 +406,17 @@ def test_the_rule_pass_admits_conflicts_rather_than_resolving_them():
     this branch; the sibling staged-reconcile branch's rb-reconcile-contradict
     does not exist here). The anchor here is the conflict language itself,
     and the resolution-naming text has to follow it, not merely appear
-    somewhere else in Method."""
+    somewhere else in Method.
+
+    radius=550 against a measured 235-character distance to "rb-reconcile"
+    -- margin ~2.3x, per this module's floor (see the module docstring).
+    `rb-reconcile-contradict` does not occur anywhere in this file, so
+    widening this window carries no risk of the negative assertion below
+    ever tripping."""
     body = _norm(skills.section_body(_rule(), "3. Method"))
     anchor = _first_index(body, ("conflict", "behavioural evidence"))
     assert anchor != -1
-    window = _window_around(body, anchor, radius=400)
+    window = _window_around(body, anchor, radius=550)
     assert "rb-reconcile" in window
     assert "rb-reconcile-contradict" not in window
 
@@ -384,11 +425,15 @@ def test_the_rule_pass_scopes_the_provenance_note_to_a_split_group():
     """New-to-this-pass item 2: where provenance shows a group was split
     across slices, the reason has to say so rather than imply a comparison
     against the whole group. `other_slices` (or "split") has to sit near the
-    provenance/near_duplicate claim, not merely appear in the section."""
+    provenance/near_duplicate claim, not merely appear in the section.
+
+    radius=650 against a measured 298-character distance to the nearer of
+    "split" / "other_slices" -- margin ~2.2x, per this module's floor (see
+    the module docstring)."""
     body = _norm(skills.section_body(_rule(), "3. Method"))
     anchor = _first_index(body, ("provenance",))
     assert anchor != -1
-    window = _window_around(body, anchor, radius=500)
+    window = _window_around(body, anchor, radius=650)
     assert "split" in window or "other_slices" in window
 
 
@@ -441,11 +486,16 @@ def test_the_audit_pass_explains_why_the_return_question_is_semantic():
     Anchored on "semantic" itself and windowed forward, since the intro's
     surrounding prose is dense with unrelated words ("code", "record") that
     would satisfy a bag-of-tokens check without ever tying them to this
-    specific claim."""
+    specific claim.
+
+    radius=500 against measured distances of 153 ("code") and 214 ("coverage
+    denominator" -- the hyphenated spelling does not occur in this file at
+    all) -- the controlling margin is ~2.3x on the 214-character token, per
+    this module's floor (see the module docstring)."""
     body = _norm(_audit().body)
     anchor = _first_index(body, ("semantic",))
     assert anchor != -1
-    window = _window_after(body, anchor, radius=300)
+    window = _window_after(body, anchor, radius=500)
     assert "code" in window
     assert "coverage-denominator" in window or "coverage denominator" in window
 
@@ -468,11 +518,16 @@ def test_the_audit_pass_says_it_mints_the_deficiency_id_not_the_members():
     statement of who does the minting, not merely both be mentioned
     somewhere in Output -- a reword that dropped the division of labour
     while keeping both field names would still satisfy a bag-of-tokens
-    check."""
+    check.
+
+    radius=500 against measured distances of 190 ("deficiency_id") and 208
+    (the nearer of "your job" / "nobody else") -- the controlling margin is
+    ~2.4x on the 208-character token, per this module's floor (see the
+    module docstring)."""
     body = _norm(skills.section_body(_audit(), "2. Output"))
     anchor = _first_index(body, ("deficiency_notes",))
     assert anchor != -1
-    window = _window_after(body, anchor, radius=400)
+    window = _window_after(body, anchor, radius=500)
     assert "deficiency_id" in window
     assert "your job" in window or "nobody else" in window
 
@@ -533,11 +588,21 @@ def test_the_audit_pass_routes_a_surface_shortfall_to_deficiencies_and_a_surplus
     field to hold it, so it is reported in prose instead. Both halves of the
     routing have to be anchored on the actual comparison, not merely present
     anywhere in Output -- a reword that kept "loss" and "prose" as
-    unconnected asides would still pass a bag-of-tokens check."""
+    unconnected asides would still pass a bag-of-tokens check.
+
+    radius=2400 against measured distances of 390 ("loss") and 1097
+    ("prose") -- the controlling margin is ~2.2x on the 1097-character
+    token, per this module's floor (see the module docstring). The original
+    radius=1200 (margin ~1.09x) was flagged in review as breaking against a
+    correct skill under a plausible honest lengthening of the divergence
+    paragraph; this widened window was re-verified in both directions --
+    still red against a probe with the "prose" sentence's own claim
+    removed, and still green against a ~150-character meaning-preserving
+    insertion into the intervening prose."""
     body = _norm(skills.section_body(_audit(), "2. Output"))
     anchor = _first_index(body, ("predicted_surface_count",))
     assert anchor != -1
-    window = _window_after(body, anchor, radius=1200)
+    window = _window_after(body, anchor, radius=2400)
     assert "loss" in window
     assert "prose" in window
 
@@ -556,12 +621,18 @@ def test_the_audit_pass_does_not_refuse_over_fan_out_completeness_it_cannot_see(
     explicit "do not refuse" instruction, not merely mentioned as a fact --
     a reword that described the limitation without ever forbidding a refusal
     over it would leave a model free to refuse on exactly the case §5 exists
-    to rule out."""
+    to rule out.
+
+    radius=500 against a measured 206-character distance to "check-refs"
+    (the OR-alternative "slice" sits much closer, at 53, but the floor is
+    sized off the tighter alternative rather than relying on the looser one
+    to carry the margin) -- margin ~2.4x, per this module's floor (see the
+    module docstring)."""
     body = _norm(skills.section_body(_audit(), "5. Refusal conditions"))
     assert "do not refuse" in body
     anchor = _first_index(body, ("do not refuse",))
     assert anchor != -1
-    window = _window_after(body, anchor, radius=300)
+    window = _window_after(body, anchor, radius=500)
     assert "slice" in window or "check-refs" in window
 
 
@@ -574,9 +645,14 @@ def test_the_audit_pass_does_not_refuse_when_the_absence_walk_finds_nothing():
     `"do not refuse" in body and "clean sweep" in body` check is satisfied by
     that coincidence alone; anchoring on "turns up nothing," unique to the
     Step 4 sentence, ties both tokens to the one paragraph that actually
-    states this rule."""
+    states this rule.
+
+    radius=350 against a measured 143-character distance to "clean sweep"
+    (the closer of the two required tokens; "do not refuse" itself sits at
+    38) -- margin ~2.4x, per this module's floor (see the module
+    docstring)."""
     body = _norm(skills.section_body(_audit(), "5. Refusal conditions"))
     anchor = _first_index(body, ("turns up nothing",))
     assert anchor != -1
-    window = _window_around(body, anchor, radius=250)
+    window = _window_around(body, anchor, radius=350)
     assert "do not refuse" in window and "clean sweep" in window
