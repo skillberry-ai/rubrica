@@ -189,3 +189,78 @@ def test_a_disposition_missing_authority_still_fails(tmp_path):
     write_json(run.triage, record)
     findings = validate.validate_stage(run, "triage")
     assert findings, "a disposition without authority must still fail layer 1"
+
+
+# The four defs promoted in this task, and the `required` list each one had
+# *before* the move -- pinned here so a later edit to a def four part schemas
+# will `$ref` cannot silently drop a field or loosen `additionalProperties`
+# without a test noticing. Data-driven so a fifth promoted def is one line,
+# not four hand-written blocks.
+_PROMOTED_DEFS_REQUIRED = {
+    "disposition": ["candidate_id", "disposition", "reason", "authority"],
+    "surface": ["name", "evidence", "weight"],
+    "deficiency": ["deficiency_id", "subject", "statement"],
+    "projection": [
+        "projection_id",
+        "closes",
+        "sources",
+        "wanted",
+        "method",
+        "acceptance",
+        "boundary",
+    ],
+}
+
+
+@pytest.mark.parametrize("name", sorted(_PROMOTED_DEFS_REQUIRED))
+def test_a_promoted_def_pins_its_required_fields_and_closed_shape(name):
+    """The equivalence test above only checks $ref shape and three of the four
+    required lists -- surface had none. Pin all four here, plus
+    additionalProperties, since the next task makes four part schemas $ref
+    these defs: a silently dropped constraint would degrade all four at once
+    with nothing here to catch it."""
+    schema = json.loads((validate.schema_dir() / "triage-0.1.json").read_text(encoding="utf-8"))
+    definition = schema["$defs"][name]
+    assert definition["required"] == _PROMOTED_DEFS_REQUIRED[name]
+    assert definition["additionalProperties"] is False
+
+
+def test_the_disposition_enum_is_exactly_admit_or_decline():
+    """The field that decides admit-versus-decline is worth pinning to its
+    exact permitted set, not merely confirming an enum exists."""
+    schema = json.loads((validate.schema_dir() / "triage-0.1.json").read_text(encoding="utf-8"))
+    assert schema["$defs"]["disposition"]["properties"]["disposition"]["enum"] == [
+        "admit",
+        "decline",
+    ]
+
+
+def test_a_surface_missing_weight_still_fails(tmp_path):
+    """Same evidence as the authority case above, for the surface def promoted
+    alongside it: dropping a required field must still fail layer 1."""
+    review = _triage()["objective_review"]
+    del review["surfaces"][0]["weight"]
+    assert validate.validate_stage(_write(tmp_path, _triage(objective_review=review)), "triage")
+
+
+def test_a_deficiency_missing_statement_still_fails(tmp_path):
+    """Same evidence as the authority case above, for the deficiency def."""
+    deficiencies = [_triage()["deficiencies"][0]]
+    del deficiencies[0]["statement"]
+    assert validate.validate_stage(_write(tmp_path, _triage(deficiencies=deficiencies)), "triage")
+
+
+def test_a_projection_missing_acceptance_still_fails(tmp_path):
+    """Same evidence as the authority case above, for the projection def."""
+    projections = [_triage()["projections"][0]]
+    del projections[0]["acceptance"]
+    assert validate.validate_stage(_write(tmp_path, _triage(projections=projections)), "triage")
+
+
+def test_a_disposition_with_an_unknown_key_still_fails(tmp_path):
+    """additionalProperties: false on a promoted def is a claim about what
+    validation enforces, not just what the schema text says -- distinct
+    claims, so this needs its own case rather than riding on the required-list
+    assertion above."""
+    dispositions = [_triage()["dispositions"][0] | {"unexpected_field": "surprise"}]
+    assert validate.validate_stage(_write(tmp_path, _triage(dispositions=dispositions)), "triage")
