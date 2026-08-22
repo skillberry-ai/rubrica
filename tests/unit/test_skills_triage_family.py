@@ -289,11 +289,24 @@ def test_the_rule_pass_states_the_measured_failure_header():
 def test_the_rule_pass_gives_both_arguments_against_opening_a_candidate():
     """rb-triage's §1 carried forward: cost and comparability, both, plus the
     new point that the widths are comparable *in fact* now that the digest is
-    clamped, not merely by assumption."""
+    clamped, not merely by assumption.
+
+    The clamp/fact conjunct was measured vacuous: `fact` occurs nine times
+    and `clamp` twice across this section, so a bare `"clamp" in body and
+    "fact" in body` check still passed with the §10.1 sentence tying them
+    together deleted -- both tokens survived via the unrelated
+    `skeleton_nodes_truncated` paragraph a few lines below, which uses
+    "fact" three times and "clamped" once of its own accord. Anchored on
+    the claim's own wording ("in fact" / "comparable") and windowed forward
+    to where "clamp" actually appears (374 characters away in the real
+    prose) instead."""
     body = _norm(skills.section_body(_rule(), "1. Inputs"))
     assert "cost" in body
     assert "comparable" in body
-    assert "clamp" in body and "fact" in body
+    anchor = _first_index(body, ("in fact", "comparable"))
+    assert anchor != -1
+    window = _window_after(body, anchor, radius=450)
+    assert "clamp" in window
 
 
 def test_the_rule_pass_names_the_repeated_signal_warning():

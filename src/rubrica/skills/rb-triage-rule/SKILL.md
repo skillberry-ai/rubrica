@@ -110,7 +110,7 @@ Your shard's `provenance` says, for every group your slice draws from, how
 many of that group's candidates landed here versus how many exist across the
 whole corpus, and which other slice ids hold the rest. This is what lets you
 tell a near-duplicate you can actually judge from one your shard cannot see
-the other half of -- see §3 Step 4.
+the other half of -- see §3 Step 2.
 
 `00-objective.json` carries `rb-triage-objective`'s ruling: `declared_objective`,
 whether it is `supported`, `predicted_surface_count`, and the `surfaces` that
