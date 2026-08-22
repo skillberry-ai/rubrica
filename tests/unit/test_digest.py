@@ -339,3 +339,17 @@ def test_trace_digests_carry_no_skeleton_key_at_all():
     result = digest.digest_for_payload({"trace_id": "t", "spans": []}, "trace", body_chars=2000)
     assert "skeleton" not in result
     assert "skeleton_nodes_truncated" not in result
+
+
+def test_a_skeleton_landing_exactly_on_the_node_cap_is_not_truncated():
+    # A payload whose natural, uncapped skeleton has exactly 128 nodes: 8
+    # top-level keys, each holding 15 leaves, is 8 + 8*15 == 128. Nothing about
+    # this walk is ever refused by the budget guard -- the count only reaches
+    # 128 on the very last write -- so comparing the final length to the cap
+    # (as an earlier version of this flag did) falsely reports truncation here.
+    # This is the exact boundary a length-based proxy cannot distinguish from a
+    # walk that was actually cut off.
+    payload = {f"t{i}": {f"k{j}": 1 for j in range(15)} for i in range(8)}
+    result = digest.digest_for_payload(payload, "other", body_chars=2000)
+    assert len(result["skeleton"]) == 128
+    assert result["skeleton_nodes_truncated"] is False

@@ -184,12 +184,29 @@ def _json_type_name(value: Any) -> str:
     return type(value).__name__
 
 
-def _skeleton(node: Any, pointer: str, depth: int, out: dict) -> None:
+def _skeleton(node: Any, pointer: str, depth: int, out: dict, truncated: list[bool]) -> None:
     # The total-node budget is checked here rather than by the callers because
     # recursion is where pointers are minted. Stopping mid-walk leaves a
     # *prefix* of the skeleton, which is why the flag below is written by the
     # caller: a reader must be able to tell a small object from a clamped one.
-    if depth < 0 or len(out) >= _SKELETON_MAX_NODES:
+    #
+    # depth < 0 and the node-budget check below are NOT the same event and must
+    # not share a flag. depth < 0 is the ordinary per-node depth bound reaching
+    # its own floor -- ordinary shape, not truncation -- so it returns quietly.
+    # Only the budget branch means the walk was turned away from a node it would
+    # otherwise have visited: that is what truncation *is*, so it is the only
+    # branch that marks `truncated`. Recording it here, at the moment a visit is
+    # refused, rather than inferring it afterward by comparing the final
+    # `len(out)` to the cap, is what keeps a skeleton whose *natural* size lands
+    # exactly on the cap from being falsely marked truncated -- measured: 8 keys
+    # of 15 leaves each is exactly 8 + 8*15 = 128 nodes, and no visit is ever
+    # refused while producing it, since the guard is checked before each write
+    # and the count only reaches 128 on the last one. A length comparison alone
+    # cannot tell "exactly full" apart from "cut off"; this can.
+    if depth < 0:
+        return
+    if len(out) >= _SKELETON_MAX_NODES:
+        truncated[0] = True
         return
     if isinstance(node, dict):
         shown = sorted(node)[:_SKELETON_MAX_CHILDREN]
@@ -210,11 +227,11 @@ def _skeleton(node: Any, pointer: str, depth: int, out: dict) -> None:
         # _SKELETON_MAX_CHILDREN. A key omitted from `keys` would be a fact the
         # skeleton can't cite anyway, so descending into it buys nothing.
         for key in shown:
-            _skeleton(node[key], f"{pointer}/{key}", depth - 1, out)
+            _skeleton(node[key], f"{pointer}/{key}", depth - 1, out, truncated)
     elif isinstance(node, list):
         out[pointer or "/"] = {"type": "array", "length": len(node)}
         if node:
-            _skeleton(node[0], f"{pointer}/0", depth - 1, out)
+            _skeleton(node[0], f"{pointer}/0", depth - 1, out, truncated)
     else:
         out[pointer or "/"] = {"type": _json_type_name(node)}
 
@@ -316,11 +333,19 @@ def digest_for_payload(payload: Any, kind: str, *, body_chars: int) -> dict:
         return result
 
     skeleton: dict[str, Any] = {}
-    _skeleton(payload, "", _SKELETON_DEPTH, skeleton)
+    truncated = [False]
+    _skeleton(payload, "", _SKELETON_DEPTH, skeleton, truncated)
     # Stated rather than implied, for the reason keys_truncated is stated: a
     # truncation a prompt can see is a fact about the digest, and one it cannot
-    # see is a lie about the candidate.
-    return {"skeleton": skeleton, "skeleton_nodes_truncated": len(skeleton) >= _SKELETON_MAX_NODES}
+    # see is a lie about the candidate. Read from `truncated`, not re-derived
+    # from `len(skeleton) >= _SKELETON_MAX_NODES`: that comparison was measured
+    # to false-positive on a skeleton whose natural, uncapped size lands exactly
+    # on the cap (8 keys of 15 leaves each is exactly 128 nodes) -- nothing was
+    # cut off, but the length check alone cannot tell that from a walk that was.
+    # `truncated[0]` is set only at the moment `_skeleton`'s budget guard actually
+    # refuses a node, which is the same "record the real event, not a proxy for
+    # it" precedent `keys_truncated` above already sets for the breadth cap.
+    return {"skeleton": skeleton, "skeleton_nodes_truncated": truncated[0]}
 
 
 def digest_for_path(path: Path, kind: str, *, body_chars: int) -> dict:
