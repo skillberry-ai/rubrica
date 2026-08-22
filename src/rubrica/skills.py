@@ -36,10 +36,17 @@ SKILL_FILENAME = "SKILL.md"
 # does, but the same prohibition applies to whichever stage mints them first.
 # triage-slices partitions a catalogue by byte budget alone -- a packing
 # problem, not a judgment call, so a skill has nothing to decide there either.
+# triage-seal assembles the staged parts the triage-family prompt passes
+# write into 00-triage.json and refuses on a fixed, narrow class of assembly
+# failures -- the same "code, not a prompt" reasoning reconcile-seal's own
+# entry here would carry on the staged-reconcile branch, for the identical
+# byte-identical-output reason emit is code.
 # Every other stage in STAGES has a skill, and expected_skill_names derives
 # the list rather than restating it -- so adding a stage demands a skill
 # without anyone remembering to edit a constant.
-CODE_ONLY_STAGES: frozenset[str] = frozenset({"intake", "smoke", "survey", "triage-slices"})
+CODE_ONLY_STAGES: frozenset[str] = frozenset(
+    {"intake", "smoke", "survey", "triage-slices", "triage-seal"}
+)
 
 # One home for the skill-directory prefix. It appeared in three places
 # before the Rubrica rename -- ORCHESTRATOR, expected_skill_names, and the

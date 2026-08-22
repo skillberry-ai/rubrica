@@ -154,18 +154,17 @@ def test_a_file_meeting_every_structural_criterion_is_adopted(tmp_path):
     adopted = next(c for c in catalogue["candidates"] if c["origin"] == "projection")
     assert adopted["provenance"]["projection_id"] == "prj-tools"
     assert adopted["kind"] == "mcp_tool_schema"
-    record = read_json(run.triage)
-    disposition = next(
-        d for d in record["dispositions"] if d["candidate_id"] == adopted["candidate_id"]
-    )
-    assert disposition["disposition"] == "admit"
+    # 00-adoptions.json, not 00-triage.json: this call's disposition is
+    # triage-seal's to fold into the sealed record, the next time it runs --
+    # see test_an_adoption_survives_a_re_seal in test_seal.py for that half.
+    adoptions = read_json(run.adoptions)
+    entry = next(a for a in adoptions["adoptions"] if a["candidate_id"] == adopted["candidate_id"])
+    assert entry["disposition"]["disposition"] == "admit"
     # The human's authority, not triage's -- and recorded as such, so a reader can
     # tell which admissions the gate authored.
-    assert disposition["authority"] == "human"
-    assert (
-        next(d for d in record["deficiencies"] if d["deficiency_id"] == "def-shapes")["closed_by"]
-        == "prj-tools"
-    )
+    assert entry["disposition"]["authority"] == "human"
+    assert entry["projection_id"] == "prj-tools"
+    assert entry["closed_deficiency_ids"] == ["def-shapes"]
 
 
 def test_the_adopted_candidates_digest_is_computed_not_empty(tmp_path):
@@ -202,13 +201,34 @@ def test_the_adopted_run_still_passes_check_all(tmp_path):
     closes/satisfied_by mismatch would pass every assertion above while still
     leaving the run referentially broken. check_all is the guard that would
     catch what the named-field assertions cannot.
+
+    check_all right after adopt_projection alone, with no seal in between,
+    would correctly report the adopted candidate as having no disposition --
+    that gap is real and expected until triage-seal next folds
+    00-adoptions.json in (see test_seal.py's own coverage of that fold). This
+    fixture hand-writes an already-"sealed" 00-triage.json rather than
+    staging through survey/triage-slices/triage-seal, so there is no seal to
+    run here either -- the fold-in is done by hand instead, exactly what
+    seal.py's own fold-in step does, so this test still pins what it always
+    pinned: check_all over a *sealed* record that has folded this adoption in.
     """
     run = _run_with_projection(tmp_path)
     assert triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path)) == []
-    assert refs.check_all(run) == []
     catalogue = read_json(run.catalogue)
     adopted = next(c for c in catalogue["candidates"] if c["origin"] == "projection")
+    adoption = read_json(run.adoptions)["adoptions"][0]
+
     record = read_json(run.triage)
+    record["dispositions"].append(adoption["disposition"])
+    for projection in record["projections"]:
+        if projection["projection_id"] == adoption["projection_id"]:
+            projection["satisfied_by"] = adoption["candidate_id"]
+    for deficiency in record["deficiencies"]:
+        if deficiency["deficiency_id"] in adoption["closed_deficiency_ids"]:
+            deficiency["closed_by"] = adoption["projection_id"]
+    write_json(run.triage, record)
+
+    assert refs.check_all(run) == []
     projection = next(p for p in record["projections"] if p["projection_id"] == "prj-tools")
     assert projection["satisfied_by"] == adopted["candidate_id"]
 

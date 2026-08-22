@@ -38,7 +38,9 @@ admissible and still be declined).
 ## `triage`
 
 - **Schema:** `src/rubrica/schema/triage-0.1.json`
-- **Written by:** `triage`, run as `rb-triage`
+- **Written by:** `triage`, run as `rb-triage`, or `triage-seal` (code) — both
+  resolve to the identical physical file; the sealed record's shape does not
+  change, only which code produces it
 - **Read by:** `intake` (the `--run` path)
 - **Path:** `00-triage.json`
 
@@ -52,6 +54,14 @@ a `method`, an `acceptance` criterion, and a `boundary` statement of what it
 does not cover). Gate 0 reads this record, never the corpus again — a
 candidate declined here is gone as completely as if the corpus never
 contained it, because nothing downstream of `intake` re-reads the corpus.
+
+Once the staged-triage redesign's remaining prompt passes land, this file
+becomes purely derived: `triage-seal` assembles it from `00-objective.json`,
+`00-slices.json`, every `00-dispositions/<slice>.json` part, `00-audit.json`,
+and `00-adoptions.json`, and re-running it re-derives the identical record
+from the same parts. `adopt-projection` no longer writes here at all — it
+appends to `00-adoptions.json` instead, because editing this record directly
+would be erased the next time `triage-seal` runs.
 
 Fields worth knowing: `dispositions[].reason_code` (`off_objective`,
 `near_duplicate`, `needs_projection`, and five more — a fixed vocabulary, not

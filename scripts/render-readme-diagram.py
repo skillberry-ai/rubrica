@@ -57,7 +57,7 @@ PHASES: list[dict] = [
     dict(
         verb="select",
         note=["choose what is", "worth reading"],
-        stages=["survey", "triage", "triage-slices"],
+        stages=["survey", "triage", "triage-slices", "triage-seal"],
         gate=0,
     ),
     dict(

@@ -92,6 +92,15 @@ ROWS: list[dict] = [
         note="a reading unit, not a decision unit",
     ),
     dict(
+        kind="stage",
+        dir="—",
+        name="triage-seal",
+        runs="code · assembles the staged parts",
+        art=["00-triage.json"],
+        gates=["validate"],
+        note="sorts last in the triage family; writes what triage above still writes directly",
+    ),
+    dict(
         kind="band",
         n="0",
         title="Human gate 0 — the triage record",

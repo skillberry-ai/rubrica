@@ -78,6 +78,11 @@ STAGE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "survey": ("catalogue",),
     "triage": ("triage",),
     "triage-slices": ("slices",),
+    # triage-seal writes the same "triage" kind the bare triage stage above
+    # does -- both resolve to the identical physical 00-triage.json, which is
+    # exactly why triage-0.1.json needed no revision for the split: the
+    # sealed record's shape does not change, only which code produces it.
+    "triage-seal": ("triage",),
     "intake": ("manifest",),
     "extract": ("claims",),
     "reconcile": ("world-model",),

@@ -60,7 +60,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from rubrica import brief, refs, skills, slices, survey, triage
+from rubrica import brief, refs, seal, skills, slices, survey, triage
 from rubrica.artifacts import ArtifactError, read_json
 from rubrica.dedupe import candidate_pairs
 from rubrica.emit import emit_run
@@ -90,6 +90,7 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("intake", "register inputs and mint a run"),
     ("adopt-projection", "admit a manufactured projection into the catalogue, structurally"),
     ("triage-slices", "partition a catalogue into byte-bounded slices a dispatch can read"),
+    ("triage-seal", "assemble the triage record from the staged parts"),
     ("validate", "schema-validate one stage's output"),
     ("check-refs", "cross-artifact and reachability checks"),
     ("dedupe-candidates", "propose candidate duplicate scenario pairs as JSON"),
@@ -173,6 +174,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_slices = parsers["triage-slices"]
     p_slices.add_argument("--run", required=True)
+
+    p_seal = parsers["triage-seal"]
+    p_seal.add_argument("--run", required=True)
 
     p_validate = parsers["validate"]
     p_validate.add_argument("--run", required=True)
@@ -453,6 +457,19 @@ def main(argv: list[str] | None = None) -> int:
                 size = run.slice_shard(s.id).stat().st_size
                 print(f"{s.id}  {size}  {len(s.candidate_ids)}  {s.label}")
             return CLEAN
+
+        if args.command == "triage-seal":
+            # seal.seal raises nothing at all -- every failure mode, including
+            # an unreadable run artifact, comes back as a Finding -- so this
+            # block's only two exits are CLEAN/FINDINGS via _report below and
+            # USAGE via the shared except, for the same reason triage-slices'
+            # block above has none of its own: an unsafe run root or the like,
+            # never a stage defect the seal itself could have reported.
+            run = _run_dir(args.run)
+            path, findings = seal.seal(run)
+            if path is not None:
+                print(path)
+            return _report(findings)
 
         if args.command == "validate":
             return _report(validate_stage(_run_dir(args.run), args.stage))

@@ -22,7 +22,7 @@ import json
 from pathlib import Path
 
 from rubrica import digest as digest_module
-from rubrica.artifacts import read_json, sha256_of, write_json
+from rubrica.artifacts import ArtifactError, read_json, sha256_of, write_json
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
 from rubrica.intake import _unique_artifact_id, classify
@@ -172,12 +172,16 @@ def adopt_projection(
     Copies nothing: unlike `intake.materialise`, the file stays exactly where
     the human left it. The catalogue gains a candidate whose `path` is the
     absolute source path (no `root_index` -- a projection is not relative to
-    any corpus root survey walked). `00-triage.json` gains an `admit`
-    disposition with `authority: "human"`, so a reader can always tell an
-    admission the gate authored from one a human made at this later gate;
-    every deficiency the projection's `closes` names gets `closed_by` set to
-    the projection_id, and the projection itself gets `satisfied_by` set to
-    the new candidate_id.
+    any corpus root survey walked). `00-adoptions.json` gains one entry
+    carrying an `admit` disposition with `authority: "human"` -- not
+    `00-triage.json`, which this function only reads: that record is
+    triage-seal's own derived output, and editing it here would be erased the
+    next time triage-seal runs (spec 8.1). The entry also names which
+    projection it satisfies and which deficiencies it closes; triage-seal is
+    what sets `satisfied_by` and `closed_by` from those two fields when it
+    next folds this file in, so a reader can always tell an admission the
+    gate authored from one a human made at this later gate by which artifact
+    it came from, not by a flag on the disposition itself.
 
     Returns findings and writes nothing when `check_acceptance` finds anything
     to report -- the worker reads and retries against them, same as any other
@@ -261,6 +265,35 @@ def adopt_projection(
             "already-satisfied projection"
         )
 
+    # The other half of the same guard, now that satisfied_by is set only by
+    # triage-seal's fold-in: two adopt-projection calls with no seal in
+    # between would both see an unsatisfied projection above and duplicate
+    # the admission exactly as the comment there describes. 00-adoptions.json
+    # is this function's own append target, so it already carries every
+    # earlier call's projection_id -- a peek here catches the repeat without
+    # waiting for a seal that may never run before the second call does.
+    # Best-effort by design: this is not the container-shape validation the
+    # write path below performs (and that check_only intentionally never
+    # reaches) -- an absent or malformed adoptions file reads as "no prior
+    # adoption" here, so this pre-check cannot itself turn a shape defect
+    # into a UsageError, or surface one to check_only callers who are not
+    # supposed to see it.
+    if run.adoptions.is_file():
+        try:
+            existing_adoptions = read_json(run.adoptions)
+        except ArtifactError:
+            existing_adoptions = None
+        if isinstance(existing_adoptions, dict) and isinstance(
+            existing_adoptions.get("adoptions"), list
+        ):
+            for entry in existing_adoptions["adoptions"]:
+                if isinstance(entry, dict) and entry.get("projection_id") == projection_id:
+                    raise UsageError(
+                        f"projection {projection_id!r} is already satisfied by candidate "
+                        f"{entry.get('candidate_id')!r}; adopt-projection does not re-admit "
+                        "an already-satisfied projection"
+                    )
+
     # projection["acceptance"] would raise KeyError on an unvalidated triage
     # record -- and because adopt-projection's cli.py dispatch block catches
     # only (UsageError, ArtifactError, OSError), an uncaught KeyError would
@@ -307,17 +340,44 @@ def adopt_projection(
                 "the adopted candidate to it",
             )
         ]
-    raw_dispositions = triage_record.get("dispositions")
-    if raw_dispositions is not None and not isinstance(raw_dispositions, list):
-        return [
-            Finding(
-                run.triage,
-                "internal",
-                "/dispositions",
-                f"dispositions is {raw_dispositions!r}, not a list; adopt-projection cannot "
-                "append the human's admit to it",
-            )
-        ]
+    # 00-adoptions.json, not 00-triage.json: this is the container this
+    # function actually appends to now, so it gets the identical
+    # read-before-write treatment the catalogue check above already gets --
+    # a malformed container found *after* the catalogue write would leave the
+    # pair inconsistent, same reasoning as the comment above.
+    if run.adoptions.is_file():
+        try:
+            adoptions_record = read_json(run.adoptions)
+        except ArtifactError as exc:
+            return [Finding(run.adoptions, "internal", "", str(exc))]
+        if not isinstance(adoptions_record, dict):
+            return [
+                Finding(
+                    run.adoptions,
+                    "internal",
+                    "",
+                    f"expected a JSON object, found {adoptions_record!r}; adopt-projection "
+                    "cannot append this adoption to it",
+                )
+            ]
+        raw_adoptions = adoptions_record.get("adoptions")
+        if raw_adoptions is not None and not isinstance(raw_adoptions, list):
+            return [
+                Finding(
+                    run.adoptions,
+                    "internal",
+                    "/adoptions",
+                    f"adoptions is {raw_adoptions!r}, not a list; adopt-projection cannot "
+                    "append this adoption to it",
+                )
+            ]
+        adoptions_list = raw_adoptions or []
+    else:
+        # No human has adopted anything in this run yet -- adoptions-0.1.json's
+        # own description says this is not a defect, so there is nothing to
+        # read a Finding out of; a fresh part is minted instead.
+        adoptions_record = {"schema_version": "0.1", "run_id": triage_record.get("run_id")}
+        adoptions_list = []
     candidates = raw_candidates or []
     # `isinstance(..., str)` rather than the `"candidate_id" in c` this replaced:
     # a candidate_id that is not a string need not even be *hashable*, and a
@@ -408,34 +468,47 @@ def adopt_projection(
     candidates.append(candidate)
     catalogue["candidates"] = candidates
 
-    dispositions = raw_dispositions or []
-    dispositions.append(
+    # Only the *hashable* members, and only from a real list -- the same
+    # defensive shape check this replaced when the fold-in still happened
+    # here: `set(...)` over a `closes` carrying a list raises
+    # `TypeError: unhashable type: 'list'`, and a truthy non-list `closes`
+    # (a string) would build a set of its characters. `closed_deficiency_ids`
+    # needs at least one entry (adoptions-0.1.json's own minItems:1, "the
+    # projection's own closes list, confirmed by the human"), so an empty or
+    # malformed `closes` is reported here rather than written as an adoption
+    # triage-seal's own item-1 door would then have to reject anyway --
+    # naming the projection, not the adoption this call has not yet made.
+    raw_closes = projection.get("closes")
+    if isinstance(raw_closes, list):
+        closes = sorted({c for c in raw_closes if isinstance(c, str)})
+    else:
+        closes = []
+    if not closes:
+        return [
+            Finding(
+                run.triage,
+                "internal",
+                f"/projections/{projection_index}/closes",
+                f"projection {projection_id!r} has no closes entries that are strings; "
+                "adopt-projection cannot record which deficiencies this adoption closes",
+            )
+        ]
+
+    adoptions_list.append(
         {
             "candidate_id": candidate_id,
-            "disposition": "admit",
-            "reason": f"structural acceptance passed for projection {projection_id!r}",
-            "authority": "human",
+            "disposition": {
+                "candidate_id": candidate_id,
+                "disposition": "admit",
+                "reason": f"structural acceptance passed for projection {projection_id!r}",
+                "authority": "human",
+            },
+            "projection_id": projection_id,
+            "closed_deficiency_ids": closes,
         }
     )
-    triage_record["dispositions"] = dispositions
-
-    # Only the *hashable* members, and only from a real list. `set(...)` over a
-    # `closes` carrying a list raised `TypeError: unhashable type: 'list'` out
-    # of main(); a truthy non-list `closes` (a string) would have built a set of
-    # its characters and closed nothing. A deficiency_id that is not a string
-    # cannot match one that is, so restricting to strings changes no correct
-    # outcome, and check_triage already reports a `closes` entry that resolves
-    # to no deficiency.
-    raw_closes = projection.get("closes")
-    closes = (
-        {c for c in raw_closes if isinstance(c, str)} if isinstance(raw_closes, list) else set()
-    )
-    raw_deficiencies = triage_record.get("deficiencies")
-    for deficiency in raw_deficiencies if isinstance(raw_deficiencies, list) else []:
-        if isinstance(deficiency, dict) and deficiency.get("deficiency_id") in closes:
-            deficiency["closed_by"] = projection_id
-    projection["satisfied_by"] = candidate_id
+    adoptions_record["adoptions"] = adoptions_list
 
     write_json(run.catalogue, catalogue)
-    write_json(run.triage, triage_record)
+    write_json(run.adoptions, adoptions_record)
     return []

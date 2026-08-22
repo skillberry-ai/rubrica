@@ -17,6 +17,18 @@ STAGES = (
     "survey",
     "triage",
     "triage-slices",
+    # triage-objective, triage-rule and triage-audit belong here too, each
+    # inserted immediately before triage-seal as its own task adds it -- the
+    # three prompt passes staged-triage's design splits the old monolithic
+    # triage stage into, giving the eventual order
+    # survey, triage, triage-slices, triage-objective, triage-rule,
+    # triage-audit, triage-seal, intake. triage-seal has to sort last in the
+    # family regardless of which of those has landed yet: it is the pass that
+    # seals every one of their outputs into 00-triage.json, and this tuple is
+    # both the on-disk numbering and the documentation of that ordering --
+    # placing it any earlier would draw both generated diagrams with the seal
+    # running before the passes it seals.
+    "triage-seal",
     "intake",
     "extract",
     "reconcile",
