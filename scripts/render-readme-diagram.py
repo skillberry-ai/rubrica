@@ -63,6 +63,7 @@ PHASES: list[dict] = [
             "triage-slices",
             "triage-objective",
             "triage-rule",
+            "triage-audit",
             "triage-seal",
         ],
         gate=0,

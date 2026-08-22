@@ -113,6 +113,15 @@ ROWS: list[dict] = [
     dict(
         kind="stage",
         dir="—",
+        name="triage-audit",
+        runs="rb-triage-audit",
+        art=["00-audit.json"],
+        gates=["validate", "check-refs"],
+        note="consolidates every member's obligations plus its own reading of the whole set",
+    ),
+    dict(
+        kind="stage",
+        dir="—",
         name="triage-seal",
         runs="code · assembles the staged parts",
         art=["00-triage.json"],

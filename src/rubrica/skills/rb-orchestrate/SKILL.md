@@ -160,17 +160,21 @@ map -- writing `00-objective.json` from `00-slices.json` and
 `00-catalogue.json` alone, never a candidate digest -- `rb-triage-rule` (a
 fan-out prompt pass, one dispatch per slice) rules on every candidate in its
 own slice against that objective, admitting or declining with a reason and
-writing `00-dispositions/<slice_id>.json` -- and `triage-seal` (code) will
-assemble `00-triage.json` from that redesign's staged parts once every prompt
-pass that writes one exists. None of them has anything downstream depending
-on its output yet -- `rb-triage` still writes `00-triage.json` directly -- so
-treat their presence in the stage order as scaffolding rather than a step
-your own loop depends on. Then **HUMAN GATE 0** holds on the triage record,
-and only once it has passed does `rubrica intake --run <run>` materialise
-the admitted candidates into `manifest.json`, the file B1 tells you to
-verify rather than produce. You never run `rubrica survey`, never dispatch
-`rb-triage`, `triage-slices`, `rb-triage-objective`, `rb-triage-rule`, or
-`triage-seal`, and never hold gate 0 -- none of it is yours.
+writing `00-dispositions/<slice_id>.json` -- `rb-triage-audit` (a prompt pass,
+dispatched once every `rb-triage-rule` member has landed) reads that objective
+and every part, consolidating their raw obligations plus its own reading of
+the whole admitted set into `00-audit.json`'s `deficiencies[]` and
+`projections[]` -- and `triage-seal` (code) will assemble `00-triage.json`
+from that redesign's staged parts once every prompt pass that writes one
+exists. None of them has anything downstream depending on its output yet --
+`rb-triage` still writes `00-triage.json` directly -- so treat their presence
+in the stage order as scaffolding rather than a step your own loop depends
+on. Then **HUMAN GATE 0** holds on the triage record, and only once it has
+passed does `rubrica intake --run <run>` materialise the admitted candidates
+into `manifest.json`, the file B1 tells you to verify rather than produce.
+You never run `rubrica survey`, never dispatch `rb-triage`, `triage-slices`,
+`rb-triage-objective`, `rb-triage-rule`, `rb-triage-audit`, or `triage-seal`,
+and never hold gate 0 -- none of it is yours.
 
 **Gate 0 is different in kind from the three gates you do hold (B5, B7, B10),
 and the difference is worth carrying with you rather than filing as one more

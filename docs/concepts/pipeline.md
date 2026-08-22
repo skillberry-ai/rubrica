@@ -29,6 +29,7 @@ contract, not a diagram convention.
 | — | `triage-slices` | code — partitions the catalogue into byte-bounded slices | `00-catalogue.json` only | `00-slices.json`, `00-slices/<id>.json` | validate |
 | — | `triage-objective` | `rb-triage-objective` | `00-slices.json`, `00-catalogue.json` — never a candidate digest | `00-objective.json` | validate |
 | — | `triage-rule` | `rb-triage-rule` — fan-out, one per slice | its own `00-slices/<slice_id>.json` shard, and `00-objective.json` — never a sibling's shard | `00-dispositions/<slice_id>.json` | validate |
+| — | `triage-audit` | `rb-triage-audit` — dispatched once every `triage-rule` member has landed | `00-objective.json`, every file in `00-dispositions/` — never a shard, never a candidate | `00-audit.json` | validate · check-refs |
 | — | `triage-seal` | code — assembles the triage record from the staged parts | `00-objective.json`, `00-slices.json`, `00-dispositions/<slice>.json`, `00-audit.json`, `00-adoptions.json` (optional) | `00-triage.json` | validate |
 | `00` | `intake` | code | the input files you name, plus target name, interface, limits — or, on the survey path, an already-admitted `00-triage.json` | `manifest.json`, `00-inputs/<stored_as>` | validate |
 | `01a` | `extract` | `rb-extract` — fan-out, one per input | the manifest, and its own one file under `00-inputs/` — never a sibling's | `01-claims/<artifact-id>.json` | validate |
@@ -40,18 +41,18 @@ contract, not a diagram convention.
 | `06` | `emit` | `rb-emit` — wraps code | `02-scenarios.json`, `05-verdicts/`, `04-instances/*/expected.json`, `01-world-model.json` | `06-suite/<sid>/` task packages | validate · check-refs |
 | `07` | `smoke` | code | the emitted suite and the agent roster | `07-report.json` | validate · check-refs |
 
-`survey`, `triage`, `triage-slices`, `triage-objective`, `triage-rule`, and
-`triage-seal` carry no `0N` prefix of their own. They write
-`00-catalogue.json`, `00-triage.json` (`triage` and `triage-seal` both
+`survey`, `triage`, `triage-slices`, `triage-objective`, `triage-rule`,
+`triage-audit`, and `triage-seal` carry no `0N` prefix of their own. They
+write `00-catalogue.json`, `00-triage.json` (`triage` and `triage-seal` both
 resolve to the identical physical file — the sealed record's shape does not
 change, only which code produces it), `00-slices.json` (plus its
-`00-slices/<id>.json` shards), `00-objective.json`, and
-`00-dispositions/<slice_id>.json` ahead of the `manifest.json` and
-`00-inputs/` that `intake` mints once gate 0 has passed, so the numbering
-stays intake's — `intake` is what fixes the run's identity, and none of the
-six has minted one yet. `intake --input` still works unchanged for anyone who
-would rather hand-pick the inputs directly, with no corpus, no catalogue, no
-triage record, no slices, and no gate 0.
+`00-slices/<id>.json` shards), `00-objective.json`,
+`00-dispositions/<slice_id>.json`, and `00-audit.json` ahead of the
+`manifest.json` and `00-inputs/` that `intake` mints once gate 0 has passed,
+so the numbering stays intake's — `intake` is what fixes the run's identity,
+and none of the seven has minted one yet. `intake --input` still works
+unchanged for anyone who would rather hand-pick the inputs directly, with no
+corpus, no catalogue, no triage record, no slices, and no gate 0.
 
 ### The human gates
 
@@ -109,6 +110,7 @@ artifacts.
 | `rb-triage` | Rules on every candidate in the catalogue against the declared objective — admit, or decline with a reason — and states what the admitted set cannot cover. Every decline is a fact about the target that no later stage can recover, since nothing downstream reads the corpus. |
 | `rb-triage-objective` | The first of the staged-triage family's prompt passes: rules whether the declared objective is supported by the corpus map — slice labels, groups, and byte/candidate counts — before any per-slice member reads a single candidate digest, and before that fan-out is ever dispatched. |
 | `rb-triage-rule` | The staged-triage family's fan-out member: one dispatch per slice, ruling on every candidate in it against the declared objective — admit, or decline with a reason — the way the monolithic `rb-triage` used to over the whole catalogue at once. A slice that is all declines still writes its part; only `triage-seal`, once every slice has reported, can say the corpus, objective, or scope itself is wrong. |
+| `rb-triage-audit` | The last of the staged-triage family's prompt passes: dispatched once every `rb-triage-rule` member has landed, it consolidates their raw `deficiency_notes` and `needs_projection` declines into real `deficiencies[]` and `projections[]`, plus its own reading of the admitted set as a whole — the union no single member could see — into `00-audit.json`. |
 | `rb-extract` | Turns one input artifact into atomic, evidence-backed claims. Every claim carries a locator and an honest `derivation` — *stated*, *inferred*, or *reverse_engineered* — so "the spec says this" and "I guessed from one trace" never look alike downstream. |
 | `rb-reconcile` | Merges every extractor's claims into one world model, *recording* contradictions and gaps rather than resolving them, and freezes the coverage denominator exactly once. |
 | `rb-propose` | Reads the world model and latest coverage report, then appends scenarios targeting real, closable holes — never rewriting or renumbering what an earlier round proposed. |

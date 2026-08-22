@@ -19,17 +19,19 @@ STAGES = (
     "triage-slices",
     "triage-objective",
     "triage-rule",
-    # triage-audit belongs here too, inserted immediately before triage-seal
-    # once its own task adds it -- the last of the prompt passes
-    # staged-triage's design splits the old monolithic triage stage into,
-    # giving the eventual order
-    # survey, triage, triage-slices, triage-objective, triage-rule,
-    # triage-audit, triage-seal, intake. triage-seal has to sort last in the
-    # family regardless of which of those has landed yet: it is the pass that
-    # seals every one of their outputs into 00-triage.json, and this tuple is
-    # both the on-disk numbering and the documentation of that ordering --
-    # placing it any earlier would draw both generated diagrams with the seal
-    # running before the passes it seals.
+    # The last of the staged-triage family's prompt passes: the self-audit,
+    # reading every triage-rule part plus 00-objective.json and writing what
+    # the admitted set cannot cover. It has to sort immediately before
+    # triage-seal: it cannot start until every fan-out member has finished
+    # (the same barrier reconcile and score hold for their own fan-outs), and
+    # triage-seal folds its 00-audit.json into the sealed record right after.
+    "triage-audit",
+    # triage-seal has to sort last in the family regardless of which of the
+    # above has landed yet: it is the pass that seals every one of their
+    # outputs into 00-triage.json, and this tuple is both the on-disk
+    # numbering and the documentation of that ordering -- placing it any
+    # earlier would draw both generated diagrams with the seal running
+    # before the passes it seals.
     "triage-seal",
     "intake",
     "extract",

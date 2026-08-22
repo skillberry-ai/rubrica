@@ -129,9 +129,9 @@ count is a fact about this map's adequacy, not proof either reading erred).
 - **Written by:** `triage-rule`, run as `rb-triage-rule` — fan-out, one file
   per slice
 - **Read by:** `triage-seal` (code, assembles every part into
-  `00-triage.json`); `rb-triage-audit` — a later addition, reading each
-  part's `deficiency_notes` and `needs_projection` declines' `reason` prose
-  to consolidate into `00-audit.json`
+  `00-triage.json`); `rb-triage-audit`, dispatched once every part has
+  landed, reading each part's `deficiency_notes` and `needs_projection`
+  declines' `reason` prose to consolidate into `00-audit.json`
 - **Path:** `00-dispositions/<slice_id>.json`, one file per slice
 
 The staged-triage family's ruling: one dispatch per slice, admitting or
@@ -155,6 +155,44 @@ one of eight values — `off_objective`, `out_of_scope`, `near_duplicate`,
 `candidate_id` must also appear in this same part's own `deficiency_notes`,
 or `check-refs` rejects the record — the pairing is checked against the
 part that wrote it, not the consolidated audit.
+
+## `audit`
+
+- **Schema:** `src/rubrica/schema/audit-0.1.json`
+- **Written by:** `triage-audit`, run as `rb-triage-audit` — dispatched once
+  every `triage-rule` member has landed
+- **Read by:** `triage-seal` (code), which folds both blocks into
+  `00-triage.json`'s own `deficiencies`/`projections`
+- **Path:** `00-audit.json`
+
+The last of the staged-triage family's prompt passes: the one reading that
+reaches every part at once, rather than one slice of the admitted set at a
+time. `deficiencies[]` and `projections[]` are both required even when
+empty — an empty `deficiencies` is itself a claim that the admitted set
+covers everything the objective needs, not the absence of one. Both blocks'
+`$defs` are `$ref`s into `triage-0.1.json` rather than restated here, the
+same reason `slices-0.1.json` and `dispositions-part-0.1.json` `$ref` that
+file's other `$defs`: a duplicated definition that fell behind would let this
+part accept a shape the seal then rejects.
+
+Two obligations feed `deficiencies[]` and `projections[]` respectively, and
+`check-refs` rejects the record if either is missing: every
+`digest_insufficient` decline in any `00-dispositions/<slice_id>.json` part
+must be referenced by exactly one `deficiencies[]` entry, and every
+`needs_projection` decline by exactly one `projections[]` entry's `sources[]`.
+Turning a member's raw `deficiency_notes` into a minted `deficiency_id`, and a
+member's `reason` on a `needs_projection` decline into a full seven-field
+projection brief, is this pass's job and nobody else's — no single
+`triage-rule` member could deduplicate across slices, because none of them
+ever sees a sibling's part.
+
+Fields worth knowing: `projections[].method.confidence` (`high`, `medium`, or
+`unknown` — `unknown` is an honest value here, since this pass is one further
+remove from the candidate than the member who declined it in the first
+place); `projections[].acceptance` (`classifies_as`, `pointers_required`,
+`must_contain`, `must_not_contain` are checked mechanically by `rubrica
+adopt-projection`, but are necessary and never sufficient — `prose` is where
+*correct* actually gets defined).
 
 ## `manifest`
 

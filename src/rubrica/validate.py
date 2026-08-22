@@ -80,6 +80,10 @@ STAGE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "triage-slices": ("slices",),
     "triage-objective": ("objective",),
     "triage-rule": ("dispositions-part",),
+    # The self-audit, dispatched once every triage-rule part has landed. It
+    # writes the same "audit" kind check_audit already reads and rejects on
+    # a missing digest_insufficient/needs_projection pairing.
+    "triage-audit": ("audit",),
     # triage-seal writes the same "triage" kind the bare triage stage above
     # does -- both resolve to the identical physical 00-triage.json, which is
     # exactly why triage-0.1.json needed no revision for the split: the
@@ -227,6 +231,8 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         return [run.triage] if run.triage.is_file() else []
     if kind == "objective":
         return [run.objective] if run.objective.is_file() else []
+    if kind == "audit":
+        return [run.audit] if run.audit.is_file() else []
     if kind == "slices":
         # Returned even when absent, for the same reason as catalogue above:
         # read_json's ArtifactError names 00-slices.json itself, so a

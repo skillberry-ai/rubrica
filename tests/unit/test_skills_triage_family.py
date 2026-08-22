@@ -31,6 +31,10 @@ def _rule() -> skills.Skill:
     return _skill("rb-triage-rule")
 
 
+def _audit() -> skills.Skill:
+    return _skill("rb-triage-audit")
+
+
 def _norm(text: str) -> str:
     """Whitespace-normalised, so a reflow does not break a phrase pin.
 
@@ -386,3 +390,193 @@ def test_the_rule_pass_scopes_the_provenance_note_to_a_split_group():
     assert anchor != -1
     window = _window_around(body, anchor, radius=500)
     assert "split" in window or "other_slices" in window
+
+
+# --- rb-triage-audit --------------------------------------------------------
+#
+# Task 13's self-audit: the last of the staged-triage prompt passes, reading
+# every rb-triage-rule part plus 00-objective.json and writing what the
+# admitted set cannot cover -- deficiencies[] and projections[] in
+# 00-audit.json. It never reads a candidate or a shard; the four tests below
+# are the brief's own Step 1, verbatim in substance.
+
+
+def test_the_audit_pass_declares_its_exact_contract():
+    """The brief's contract, verbatim: the parts and the objective pass's
+    ruling, never a shard, never the candidates, never 00-slices.json."""
+    skill = _audit()
+    assert skill.contract["stage"] == "triage-audit"
+    assert skill.contract["reads"] == ["objective", "dispositions_dir"]
+    assert skill.contract["writes"] == ["audit"]
+    assert skill.contract["schemas"] == ["audit"]
+    assert skill.contract["invokes"] == ["validate", "check-refs"]
+
+
+def test_the_audit_pass_reads_the_parts_and_not_the_candidates():
+    skill = _audit()
+    assert skill.contract["reads"] == ["objective", "dispositions_dir"]
+
+
+def test_the_audit_pass_asks_the_result_shape_question_directly():
+    body = skills.section_body(_audit(), "3. Method").lower()
+    assert "result shape" in body or "what it returns" in body
+    assert "capabilit" in body
+
+
+def test_the_audit_pass_writes_both_blocks_even_when_empty():
+    body = skills.section_body(_audit(), "2. Output").lower()
+    assert "empty" in body and "still" in body
+    assert "is also a claim" in body or "is itself a claim" in body
+
+
+def test_the_audit_pass_owns_the_members_obligations():
+    body = skills.section_body(_audit(), "4. Invariants").lower()
+    assert "digest_insufficient" in body and "needs_projection" in body
+
+
+def test_the_audit_pass_explains_why_the_return_question_is_semantic():
+    """The design spec's §4.2 reasoning, carried in force: code answering
+    "does the admitted set declare what a capability returns" would be the
+    coverage-denominator mistake rb-reconcile was already designed to avoid.
+    Anchored on "semantic" itself and windowed forward, since the intro's
+    surrounding prose is dense with unrelated words ("code", "record") that
+    would satisfy a bag-of-tokens check without ever tying them to this
+    specific claim."""
+    body = _norm(_audit().body)
+    anchor = _first_index(body, ("semantic",))
+    assert anchor != -1
+    window = _window_after(body, anchor, radius=300)
+    assert "code" in window
+    assert "coverage-denominator" in window or "coverage denominator" in window
+
+
+def test_the_audit_pass_states_the_measured_failure_header():
+    """The incident every pass in this family carries, restated here because
+    this pass is the one whose whole existence is the fix for it: the
+    deficiency that was never written down. Both halves -- the numbers and
+    the reason the information was unrecoverable -- have to survive
+    together, the same shape test_the_rule_pass_states_the_measured_failure_
+    header already holds rb-triage-rule to."""
+    body = _norm(_audit().body)
+    assert "sixteen" in body and "thirteen" in body
+    assert "deficienc" in body
+
+
+def test_the_audit_pass_says_it_mints_the_deficiency_id_not_the_members():
+    """A co-occurrence claim: `deficiency_notes` (the raw material) and
+    `deficiency_id` (what only this pass mints) must sit together with a
+    statement of who does the minting, not merely both be mentioned
+    somewhere in Output -- a reword that dropped the division of labour
+    while keeping both field names would still satisfy a bag-of-tokens
+    check."""
+    body = _norm(skills.section_body(_audit(), "2. Output"))
+    anchor = _first_index(body, ("deficiency_notes",))
+    assert anchor != -1
+    window = _window_after(body, anchor, radius=400)
+    assert "deficiency_id" in window
+    assert "your job" in window or "nobody else" in window
+
+
+def test_the_audit_pass_lists_all_seven_projection_fields():
+    """Each field has to appear as its own bulleted definition (`` - `field` ``),
+    not merely as a bare token: `closes`, `sources`, `method` and `boundary`
+    each recur once more in this section as an ordinary English word (a
+    projection that "closes nothing", "two sources feed this block", an
+    "extraction method", "the scope boundary" describing a *different*
+    field) -- measured by deleting each field's actual bullet in a probe copy
+    and finding the bare-token check still passed on that coincidental
+    second mention. Anchoring on the markdown bullet syntax the list itself
+    uses ties the check to the actual definition, not to the word."""
+    body = skills.section_body(_audit(), "2. Output")
+    for field in (
+        "projection_id",
+        "closes",
+        "sources",
+        "wanted",
+        "method",
+        "acceptance",
+        "boundary",
+    ):
+        assert f"- `{field}`" in body
+
+
+def test_the_audit_pass_calls_unknown_confidence_honest():
+    """A co-occurrence claim on `confidence`'s `unknown` value: the field
+    name and the word "honest" have to sit close enough to be the same
+    statement, not merely both appear somewhere in a section this dense with
+    other prose."""
+    body = _norm(skills.section_body(_audit(), "2. Output"))
+    anchor = _first_index(body, ("confidence",))
+    assert anchor != -1
+    window = _window_after(body, anchor, radius=400)
+    assert "unknown" in window and "honest" in window
+
+
+def test_the_audit_pass_says_the_structural_fields_are_necessary_never_sufficient():
+    """rb-triage's own acceptance-block ruling, carried forward: the four
+    structural fields are checked mechanically, and `prose` is where
+    *correct* actually gets defined. "necessary" and "sufficient" have to
+    occur together with `prose`, not as two adjectives that happen to
+    describe something else in the same section."""
+    body = _norm(skills.section_body(_audit(), "2. Output"))
+    anchor = _first_index(body, ("necessary",))
+    assert anchor != -1
+    window = _window_around(body, anchor, radius=300)
+    assert "sufficient" in window
+    assert "prose" in window
+
+
+def test_the_audit_pass_routes_a_surface_shortfall_to_deficiencies_and_a_surplus_to_prose():
+    """The design's §4.1 divergence, assigned to this pass by the brief: a
+    lower observed count than predicted_surface_count is a loss and belongs
+    in deficiencies[]; a higher one is not a loss, and audit-0.1.json has no
+    field to hold it, so it is reported in prose instead. Both halves of the
+    routing have to be anchored on the actual comparison, not merely present
+    anywhere in Output -- a reword that kept "loss" and "prose" as
+    unconnected asides would still pass a bag-of-tokens check."""
+    body = _norm(skills.section_body(_audit(), "2. Output"))
+    anchor = _first_index(body, ("predicted_surface_count",))
+    assert anchor != -1
+    window = _window_after(body, anchor, radius=1200)
+    assert "loss" in window
+    assert "prose" in window
+
+
+def test_the_audit_pass_refuses_on_an_empty_dispositions_dir():
+    body = _norm(skills.section_body(_audit(), "5. Refusal conditions"))
+    anchor = _first_index(body, ("00-dispositions",))
+    assert anchor != -1
+    window = _window_after(body, anchor, radius=250)
+    assert "missing" in window or "no parts" in window or "nothing" in window
+
+
+def test_the_audit_pass_does_not_refuse_over_fan_out_completeness_it_cannot_see():
+    """This pass's own honest limitation (its `reads` has no `slices` entry,
+    so it cannot count how many parts should exist) has to be tied to an
+    explicit "do not refuse" instruction, not merely mentioned as a fact --
+    a reword that described the limitation without ever forbidding a refusal
+    over it would leave a model free to refuse on exactly the case §5 exists
+    to rule out."""
+    body = _norm(skills.section_body(_audit(), "5. Refusal conditions"))
+    assert "do not refuse" in body
+    anchor = _first_index(body, ("do not refuse",))
+    assert anchor != -1
+    window = _window_after(body, anchor, radius=300)
+    assert "slice" in window or "check-refs" in window
+
+
+def test_the_audit_pass_does_not_refuse_when_the_absence_walk_finds_nothing():
+    """A co-occurrence claim, not two independent mentions: `do not refuse`
+    and `clean sweep` each appear in this section twice, from two different
+    paragraphs -- the other `do not refuse` covers fan-out completeness, and
+    the other `clean sweep` sits in the missing-`00-dispositions/` refusal,
+    which is the opposite instruction (refuse there). An unwindowed
+    `"do not refuse" in body and "clean sweep" in body` check is satisfied by
+    that coincidence alone; anchoring on "turns up nothing," unique to the
+    Step 4 sentence, ties both tokens to the one paragraph that actually
+    states this rule."""
+    body = _norm(skills.section_body(_audit(), "5. Refusal conditions"))
+    anchor = _first_index(body, ("turns up nothing",))
+    assert anchor != -1
+    window = _window_around(body, anchor, radius=250)
+    assert "do not refuse" in window and "clean sweep" in window
