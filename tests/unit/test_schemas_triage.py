@@ -13,7 +13,9 @@ import json
 import pytest
 
 from rubrica import validate
+from rubrica.artifacts import read_json, write_json
 from rubrica.paths import RunPaths
+from tests.toy import build_toy_catalogue_and_triage, build_toy_run
 
 
 def _triage(**over):
@@ -144,3 +146,46 @@ def test_deficiencies_and_projections_may_be_empty(tmp_path, kind):
     against."""
     run = _write(tmp_path, _triage(**{kind: []}))
     assert validate.validate_stage(run, "triage") == []
+
+
+def test_promoting_definitions_did_not_change_what_triage_accepts():
+    """The refactor's whole claim. A document that validated before must
+    validate now, and one that failed must still fail for the same reason."""
+    schema = json.loads((validate.schema_dir() / "triage-0.1.json").read_text(encoding="utf-8"))
+    assert set(schema["$defs"]) >= {"disposition", "surface", "deficiency", "projection"}
+    # The four properties now reference rather than restate.
+    assert schema["properties"]["dispositions"]["items"] == {"$ref": "#/$defs/disposition"}
+    assert schema["properties"]["deficiencies"]["items"] == {"$ref": "#/$defs/deficiency"}
+    assert schema["properties"]["projections"]["items"] == {"$ref": "#/$defs/projection"}
+    assert schema["properties"]["objective_review"]["properties"]["surfaces"]["items"] == {
+        "$ref": "#/$defs/surface"
+    }
+    # And the definitions kept their contracts.
+    assert schema["$defs"]["disposition"]["required"] == [
+        "candidate_id",
+        "disposition",
+        "reason",
+        "authority",
+    ]
+    assert schema["$defs"]["deficiency"]["required"] == ["deficiency_id", "subject", "statement"]
+    assert schema["$defs"]["projection"]["required"] == [
+        "projection_id",
+        "closes",
+        "sources",
+        "wanted",
+        "method",
+        "acceptance",
+        "boundary",
+    ]
+
+
+def test_a_disposition_missing_authority_still_fails(tmp_path):
+    """The strongest evidence that the move was semantic-free is a negative
+    case: promote-and-forget-a-constraint validates everything."""
+    run = build_toy_run(tmp_path / "runs")
+    build_toy_catalogue_and_triage(run)
+    record = read_json(run.triage)
+    del record["dispositions"][0]["authority"]
+    write_json(run.triage, record)
+    findings = validate.validate_stage(run, "triage")
+    assert findings, "a disposition without authority must still fail layer 1"
