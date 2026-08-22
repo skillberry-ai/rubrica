@@ -1,0 +1,217 @@
+import pytest
+
+from rubrica import slices
+
+
+def _cand(cid, *, path=None, kind="source_code", root=0, container=None, pad=1000, sig=None):
+    """One catalogue candidate, padded to a known byte cost."""
+    row = {
+        "candidate_id": cid,
+        "kind": kind,
+        "bytes": pad,
+        "sha256": "0" * 64,
+        "admissible": True,
+    }
+    if container:
+        row |= {
+            "origin": "container_element",
+            "container": {"candidate_id": container, "json_pointer": f"/{cid}"},
+        }
+    else:
+        row |= {"origin": "corpus", "path": path, "root_index": root}
+    digest = {"_pad": "p" * pad}
+    if sig:
+        digest |= {"heuristics_fired": sig[0], "names": sig[1]}
+    row["digest"] = digest
+    return row
+
+
+def test_every_candidate_lands_in_exactly_one_slice():
+    cands = [_cand(f"c{i}", path=f"src/m{i}.py") for i in range(80)]
+    plan = slices.plan_slices(cands, cap=16384)
+    seen = [cid for s in plan for cid in s.candidate_ids]
+    assert sorted(seen) == sorted(c["candidate_id"] for c in cands)
+    assert len(seen) == len(set(seen))
+
+
+def test_no_slice_exceeds_the_cap():
+    cands = [_cand(f"c{i}", path=f"src/a/b/m{i}.py") for i in range(200)]
+    plan = slices.plan_slices(cands, cap=16384)
+    by_id = {c["candidate_id"]: c for c in cands}
+    for s in plan:
+        assert sum(slices.row_bytes(by_id[cid]) for cid in s.candidate_ids) <= 16384
+
+
+def test_two_roots_with_the_same_directory_do_not_merge():
+    # The bug real data caught: every measured catalogue is single-root, so a
+    # key on `path` alone would merge two corpora's src/ and nothing on disk
+    # would show it.
+    cands = [_cand(f"a{i}", path=f"src/m{i}.py", root=0) for i in range(4)] + [
+        _cand(f"b{i}", path=f"src/m{i}.py", root=1) for i in range(4)
+    ]
+    plan = slices.plan_slices(cands, cap=200)  # small cap: forces separate slices
+    for s in plan:
+        roots = {
+            next(c for c in cands if c["candidate_id"] == cid)["root_index"]
+            for cid in s.candidate_ids
+        }
+        assert len(roots) == 1, f"slice {s.id} mixes roots {roots}"
+
+
+def test_slice_labels_are_unique():
+    cands = [_cand(f"a{i}", path=f"m{i}.py", root=0) for i in range(3)] + [
+        _cand(f"b{i}", path=f"m{i}.py", root=1) for i in range(3)
+    ]
+    plan = slices.plan_slices(cands, cap=200)
+    labels = [s.label for s in plan]
+    assert len(labels) == len(set(labels)), labels
+
+
+def test_slice_ids_are_safe_path_segments_in_order():
+    from rubrica.paths import safe_segment
+
+    plan = slices.plan_slices([_cand(f"c{i}", path=f"src/m{i}.py") for i in range(40)], cap=8192)
+    assert [s.id for s in plan] == [f"s{i:02d}" for i in range(1, len(plan) + 1)]
+    for s in plan:
+        assert safe_segment(s.id) == s.id
+
+
+def _signature_of(candidate):
+    """The §5 step-5 clustering key, computed independently of `slices._signature`
+    so this test exercises observable behaviour rather than the private helper."""
+    digest = candidate.get("digest") or {}
+    fired = digest.get("heuristics_fired") or []
+    names = digest.get("names") or []
+    return (tuple(sorted(fired)), tuple(sorted(names[:6])))
+
+
+def test_a_signature_family_that_fits_is_never_split_across_slices():
+    # Two equal-sized families in one container, ids interleaved (e00 is
+    # family A, e01 is family B, e02 is family A, ...) so that a splitter
+    # ignoring signature and simply chunking by candidate_id would scatter
+    # both families across every chunk. Each family alone fits the cap; the
+    # two together do not, so the container must still be split -- the
+    # question is whether the split respects signature or candidate_id.
+    #
+    # This replaces test_a_container_clusters_near_duplicates_into_one_slice
+    # from the task brief: that test's assertion carried an `or` that could
+    # pass even if the family were scattered, as long as *a* fragment shared
+    # the odd element's slice -- not a guard, because nothing distinguishing
+    # scattered-but-technically-true from actually-clustered was ever checked.
+    fam_a = [
+        _cand(f"e{2 * i:02d}", kind="trace", container="cap", sig=(["names"], ["op_a"]), pad=200)
+        for i in range(10)
+    ]
+    fam_b = [
+        _cand(
+            f"e{2 * i + 1:02d}", kind="trace", container="cap", sig=(["names"], ["op_b"]), pad=200
+        )
+        for i in range(10)
+    ]
+    cands = fam_a + fam_b
+    cap = 6000  # each family (~5900B) fits alone; both together (~11800B) do not
+    plan = slices.plan_slices(cands, cap=cap)
+
+    by_id = {c["candidate_id"]: c for c in cands}
+    slice_of = {cid: s.id for s in plan for cid in s.candidate_ids}
+
+    families: dict[tuple, list[str]] = {}
+    for c in cands:
+        families.setdefault(_signature_of(c), []).append(c["candidate_id"])
+
+    for signature, member_ids in families.items():
+        total = sum(slices.row_bytes(by_id[cid]) for cid in member_ids)
+        holding_slices = {slice_of[cid] for cid in member_ids}
+        if total <= cap:
+            assert len(holding_slices) == 1, (
+                f"signature {signature} fits the cap ({total}B <= {cap}B) but its members "
+                f"landed in {sorted(holding_slices)} instead of one slice"
+            )
+        else:
+            assert len(holding_slices) > 1, (
+                f"signature {signature} exceeds the cap ({total}B > {cap}B) but was not split"
+            )
+
+
+def test_provenance_states_how_much_of_a_group_a_slice_holds():
+    # The homogeneous worst case: a member holding part of an identical family
+    # cannot otherwise know it. Code knows; stating it takes no judgment away.
+    cands = [
+        _cand(f"h{i}", kind="trace", container="big", sig=(["names"], ["same"]), pad=900)
+        for i in range(60)
+    ]
+    plan = slices.plan_slices(cands, cap=8192)
+    assert len(plan) > 1
+    for s in plan:
+        entry = next(p for p in s.provenance if p["group"].startswith("container:big"))
+        assert entry["in_this_slice"] == len(s.candidate_ids)
+        assert entry["in_group_total"] == 60
+        assert entry["other_slices"]
+        assert s.id not in entry["other_slices"]
+
+
+def test_a_flat_corpus_falls_through_to_kind_then_bytes():
+    cands = [_cand(f"c{i}", path=f"all/f{i}.py") for i in range(120)]
+    plan = slices.plan_slices(cands, cap=8192)
+    assert len(plan) > 1
+    assert sum(len(s.candidate_ids) for s in plan) == 120
+
+
+def test_a_single_row_over_cap_is_reported_not_silently_split():
+    big = _cand("mega", path="d/mega.json", kind="other", pad=40000)
+    small = [_cand(f"n{i}", path="d/n.py") for i in range(3)]
+    assert slices.oversized_rows([big] + small, cap=8192) == [("mega", slices.row_bytes(big))]
+    assert slices.oversized_rows(small, cap=8192) == []
+
+
+def test_planning_is_deterministic():
+    cands = [_cand(f"c{i}", path=f"src/x{i % 7}/m{i}.py") for i in range(90)]
+    first = slices.plan_slices(cands, cap=8192)
+    second = slices.plan_slices(list(reversed(cands)), cap=8192)
+    assert [(s.id, s.candidate_ids) for s in first] == [(s.id, s.candidate_ids) for s in second]
+
+
+SHAPES = {
+    "flat": lambda: [_cand(f"c{i}", path=f"all/f{i}.py") for i in range(400)],
+    "dominant_subtree": lambda: (
+        [_cand(f"d{i}", path=f"src/a/b/c/d{i}.py") for i in range(380)]
+        + [_cand(f"t{i}", path=f"t{i}.md", kind="design_doc") for i in range(20)]
+    ),
+    "deep_narrow": lambda: [
+        _cand(f"n{i}", path="/".join(f"l{j}" for j in range(12)) + f"/n{i}.py") for i in range(300)
+    ],
+    "many_containers": lambda: [
+        _cand(f"c{c}e{e}", kind="trace", container=f"cont{c}", sig=(["names"], [f"op{c}"]))
+        for c in range(40)
+        for e in range(15)
+    ],
+    "homogeneous_container": lambda: [
+        _cand(f"h{i}", kind="trace", container="big", sig=(["names"], ["same"])) for i in range(500)
+    ],
+    "unique_signatures": lambda: [
+        _cand(f"u{i}", kind="trace", container="big", sig=(["names"], [f"u{i}"]))
+        for i in range(500)
+    ],
+    "multi_root": lambda: (
+        [_cand(f"r{r}s{i}", path=f"src/m{i}.py", root=r) for r in range(3) for i in range(60)]
+        + [_cand(f"r{r}t{i}", path=f"tests/t{i}.py", root=r) for r in range(3) for i in range(40)]
+    ),
+    "few_huge_rows": lambda: [
+        _cand(f"g{i}", path=f"d/g{i}.json", kind="other", pad=30000) for i in range(20)
+    ],
+    "tiny": lambda: [_cand(f"s{i}", path=f"s{i}.md", kind="design_doc") for i in range(5)],
+}
+
+
+@pytest.mark.parametrize("name", sorted(SHAPES))
+def test_every_corpus_shape_partitions_within_the_cap(name):
+    cands = SHAPES[name]()
+    plan = slices.plan_slices(cands, cap=slices.DEFAULT_SLICE_BYTES)
+    seen = [cid for s in plan for cid in s.candidate_ids]
+    assert sorted(seen) == sorted(c["candidate_id"] for c in cands)
+    by_id = {c["candidate_id"]: c for c in cands}
+    for s in plan:
+        assert (
+            sum(slices.row_bytes(by_id[cid]) for cid in s.candidate_ids)
+            <= slices.DEFAULT_SLICE_BYTES
+        )
