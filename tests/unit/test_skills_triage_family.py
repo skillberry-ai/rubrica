@@ -350,14 +350,17 @@ def test_the_rule_pass_keeps_the_digest_insufficient_refusal_rule():
 
 def test_the_rule_pass_admits_conflicts_rather_than_resolving_them():
     """§3 Step 4's judgment rule: a trace/spec conflict is worth admitting,
-    not resolving -- rb-reconcile-contradict is better placed to. The
-    anchor here is the conflict language itself, and the resolution-naming
-    text has to follow it, not merely appear somewhere else in Method."""
+    not resolving -- rb-reconcile is better placed to (the real stage on
+    this branch; the sibling staged-reconcile branch's rb-reconcile-contradict
+    does not exist here). The anchor here is the conflict language itself,
+    and the resolution-naming text has to follow it, not merely appear
+    somewhere else in Method."""
     body = _norm(skills.section_body(_rule(), "3. Method"))
     anchor = _first_index(body, ("conflict", "behavioural evidence"))
     assert anchor != -1
     window = _window_around(body, anchor, radius=400)
-    assert "rb-reconcile-contradict" in window
+    assert "rb-reconcile" in window
+    assert "rb-reconcile-contradict" not in window
 
 
 def test_the_rule_pass_scopes_the_provenance_note_to_a_split_group():

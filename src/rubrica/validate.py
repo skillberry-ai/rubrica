@@ -225,6 +225,8 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         return [run.catalogue]
     if kind == "triage":
         return [run.triage] if run.triage.is_file() else []
+    if kind == "objective":
+        return [run.objective] if run.objective.is_file() else []
     if kind == "slices":
         # Returned even when absent, for the same reason as catalogue above:
         # read_json's ArtifactError names 00-slices.json itself, so a

@@ -307,6 +307,35 @@ def test_validate_stage_reports_a_stage_that_produced_nothing(tmp_path):
     assert "produced no world-model artifact" in findings[0].message
 
 
+@pytest.mark.parametrize("stage", sorted(STAGE_ARTIFACTS))
+def test_every_stage_reports_findings_without_raising_on_a_bare_run(stage, tmp_path):
+    """Systemic guard against a missing `_artifact_paths` branch.
+
+    Two artifact kinds have now shipped with no matching branch in
+    `_artifact_paths` -- `dispositions-part` (fixed before this test existed)
+    and `objective` (fixed alongside this test). Both failures had the same
+    shape: `validate_stage` calls `_artifact_paths(run, kind)`, which falls
+    through to `raise KeyError(f"unknown artifact kind {kind!r}")` -- an
+    exception `validate_stage` does not catch, so it escapes past the
+    findings-or-clean contract this module exists to hold. A member whose own
+    `invokes = ["validate"]` step hits this does not get a repairable finding
+    naming its own artifact; it gets a raw crash that, wrapped by whatever
+    dispatched it, can surface as a fabricated finding blaming the run for a
+    defect that lives here instead.
+
+    A bare run -- no artifacts written at all -- is deliberately the
+    strictest input: every kind's `_artifact_paths` branch must both exist
+    and return cleanly (typically `[]` or a path list) rather than raise, so
+    `validate_stage` can turn "nothing produced" into an honest finding
+    instead of an unhandled exception. The next kind added to
+    `STAGE_ARTIFACTS` without a matching branch fails here, by the stage's
+    own name, rather than three stages later as a mystery crash.
+    """
+    findings = validate_stage(RunPaths(tmp_path), stage)
+    assert isinstance(findings, list)
+    assert findings, f"stage {stage!r} reported nothing at all for a bare run"
+
+
 def test_validate_stage_rejects_an_unknown_stage(tmp_path):
     with pytest.raises(UnknownStage):
         validate_stage(RunPaths(tmp_path), "reconsile")
