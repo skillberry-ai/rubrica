@@ -36,6 +36,38 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text.lower())
 
 
+def _first_index(body: str, tokens: tuple[str, ...]) -> int:
+    """The lowest index at which any of `tokens` occurs, or -1 if none do."""
+    indices = [body.find(t) for t in tokens]
+    indices = [i for i in indices if i != -1]
+    return min(indices) if indices else -1
+
+
+def _window_around(body: str, index: int, radius: int = 250) -> str:
+    """The text around `index`, sized like the window
+    test_the_objective_pass_reads_request_before_the_corpus_map already
+    uses below. A claim is two things holding *together* -- an ordering word
+    next to a fan-out word -- not two tokens each satisfied somewhere in a
+    section that never actually joins them."""
+    return body[max(0, index - radius) : index + radius]
+
+
+def _window_after(body: str, index: int, radius: int = 250) -> str:
+    """The text starting at `index`, forward only.
+
+    A symmetric window around `recommended_objective` inside a numbered
+    Invariants list reached backward into the *previous* item's own
+    "never" -- item 2's "never over a slice's ... serialized size" -- and
+    passed a probe that had actually deleted item 3's prohibition. In both
+    places this predicate reads, the field name is stated first and the
+    prohibition follows it in the same sentence or the next one, so a
+    forward-only window states the claim this test actually means: a
+    prohibition that follows naming the field, not a prohibition word
+    floating anywhere nearby.
+    """
+    return body[index : index + radius]
+
+
 def test_the_objective_pass_declares_its_exact_contract():
     """The brief's contract, verbatim: slices and catalogue, never the
     shards or a per-slice dispositions part."""
@@ -82,9 +114,20 @@ def test_the_objective_pass_states_which_bytes_weight_sums():
 
 
 def test_the_objective_pass_states_that_it_may_not_act_on_its_recommendation():
+    """A prohibition claim: `recommended_objective` and a prohibition word
+    must occur *together*, not as two tokens each satisfiable anywhere in
+    the section. A phrase pin on the exact wording ("may not act on") once
+    sat here and failed a good-faith reword ("acting on that recommendation
+    yourself is not permitted") that keeps the same meaning in different
+    words -- the reword was the honest one; the pin was what was wrong, and
+    fixing it means widening the accepted prohibition vocabulary and
+    checking proximity instead of an exact phrase."""
     body = _norm(skills.section_body(_objective(), "2. Output"))
-    assert "recommended_objective" in body
-    assert "may not act" in body or "not act on" in body
+    index = body.find("recommended_objective")
+    assert index != -1
+    window = _window_after(body, index)
+    prohibition = ("may not", "must not", "never", "not permitted", "is not yours")
+    assert any(p in window for p in prohibition)
 
 
 def test_the_objective_pass_explains_predicted_surface_count_is_a_prediction():
@@ -104,23 +147,54 @@ def test_the_objective_pass_refuses_on_an_absent_objective_and_not_on_an_unsuppo
 
 
 def test_the_objective_pass_refuses_before_the_fanout_is_dispatched():
-    """Refusing here is the point of running first -- the same authority the
-    monolithic rb-triage had, narrowed to this pass's own slice of it."""
+    """An ordering claim, not a mention: refusal has to land *before* the
+    fan-out is dispatched, so an ordering word must co-occur with a
+    fan-out/dispatch word. Mentioning the fan-out alone would also be
+    satisfied by prose that describes the fan-out re-checking this later --
+    the opposite ordering -- which is why a bare presence check used to pass
+    here without ever reading which way the sentence pointed."""
     body = _norm(skills.section_body(_objective(), "5. Refusal conditions"))
-    assert "fan-out" in body or "fan out" in body
+    anchor = _first_index(body, ("fan-out", "fan out", "dispatch", "members"))
+    assert anchor != -1, "no mention of the fan-out or its dispatch at all"
+    window = _window_around(body, anchor)
+    assert any(o in window for o in ("before", "ahead of", "prior to"))
 
 
 def test_the_objective_pass_forbids_acting_on_a_recommended_objective_in_invariants():
+    """A prohibition claim, same shape as the Output-section one above:
+    `recommended_objective` and a prohibition word have to sit together.
+    Checking only that both words appear anywhere in Invariants is close to
+    tautological, since the field's own name contains "recommend" -- a
+    reword keeping the field name while dropping the prohibition ("reflects
+    one path you could take") would still have passed the old assertion."""
     body = _norm(skills.section_body(_objective(), "4. Invariants"))
-    assert "recommended_objective" in body
-    assert "recommendation" in body
+    index = body.find("recommended_objective")
+    assert index != -1
+    window = _window_after(body, index)
+    prohibition = ("may not", "must not", "never", "not permitted", "is not yours")
+    assert any(p in window for p in prohibition)
 
 
-def test_the_objective_pass_names_the_audit_pass_for_a_mechanical_exclusion_concern():
-    """rb-triage's `excluded` instruction, carried: a mechanical exclusion you
-    believe was wrong is a fact worth recording. This pass writes no
-    deficiencies[] (not a field objective-0.1.json has), so it names
-    rb-triage-audit as the pass that turns the concern into a real one."""
-    body = _norm(_objective().body)
+def test_the_objective_pass_names_the_audit_pass_in_inputs():
+    """rb-triage's `excluded` instruction, carried into Inputs: a mechanical
+    exclusion you believe was wrong is a fact worth recording. This pass
+    writes no deficiencies[] (not a field objective-0.1.json has), so it
+    names rb-triage-audit as the pass that turns the concern into a real
+    one. Scoped to Inputs, not the whole file, so a reword that dropped this
+    from Inputs specifically -- while the Method section still carried its
+    own mention -- would still be caught here rather than passing on the
+    other section's coincidental survival."""
+    body = _norm(skills.section_body(_objective(), "1. Inputs"))
+    assert "excluded" in body
+    assert "rb-triage-audit" in body
+
+
+def test_the_objective_pass_names_the_audit_pass_in_method():
+    """The same instruction restated as Method's own step: name
+    rb-triage-audit as the pass that turns a real gap into a recorded
+    deficiency, once the slices have reported what they actually saw --
+    never a decision this pass makes in its place. Scoped to Method for the
+    same reason the Inputs test above is scoped to Inputs."""
+    body = _norm(skills.section_body(_objective(), "3. Method"))
     assert "excluded" in body
     assert "rb-triage-audit" in body
