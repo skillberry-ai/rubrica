@@ -27,6 +27,7 @@ contract, not a diagram convention.
 | — | `survey` | code — walks a corpus and mints the run | the corpus roots you name, plus target name, interface, objective | `00-catalogue.json` | validate |
 | — | `triage` | `rb-triage` | `00-catalogue.json` only | `00-triage.json` | validate · check-refs · human gate 0 |
 | — | `triage-slices` | code — partitions the catalogue into byte-bounded slices | `00-catalogue.json` only | `00-slices.json`, `00-slices/<id>.json` | validate |
+| — | `triage-objective` | `rb-triage-objective` | `00-slices.json`, `00-catalogue.json` — never a candidate digest | `00-objective.json` | validate |
 | — | `triage-seal` | code — assembles the triage record from the staged parts | `00-objective.json`, `00-slices.json`, `00-dispositions/<slice>.json`, `00-audit.json`, `00-adoptions.json` (optional) | `00-triage.json` | validate |
 | `00` | `intake` | code | the input files you name, plus target name, interface, limits — or, on the survey path, an already-admitted `00-triage.json` | `manifest.json`, `00-inputs/<stored_as>` | validate |
 | `01a` | `extract` | `rb-extract` — fan-out, one per input | the manifest, and its own one file under `00-inputs/` — never a sibling's | `01-claims/<artifact-id>.json` | validate |
@@ -38,16 +39,17 @@ contract, not a diagram convention.
 | `06` | `emit` | `rb-emit` — wraps code | `02-scenarios.json`, `05-verdicts/`, `04-instances/*/expected.json`, `01-world-model.json` | `06-suite/<sid>/` task packages | validate · check-refs |
 | `07` | `smoke` | code | the emitted suite and the agent roster | `07-report.json` | validate · check-refs |
 
-`survey`, `triage`, `triage-slices`, and `triage-seal` carry no `0N` prefix of
-their own. They write `00-catalogue.json`, `00-triage.json` (`triage` and
-`triage-seal` both resolve to the identical physical file — the sealed
-record's shape does not change, only which code produces it), and
-`00-slices.json` (plus its `00-slices/<id>.json` shards) ahead of the
-`manifest.json` and `00-inputs/` that `intake` mints once gate 0 has passed,
-so the numbering stays intake's — `intake` is what fixes the run's identity,
-and none of the four has minted one yet. `intake --input` still works
-unchanged for anyone who would rather hand-pick the inputs directly, with no
-corpus, no catalogue, no triage record, no slices, and no gate 0.
+`survey`, `triage`, `triage-slices`, `triage-objective`, and `triage-seal`
+carry no `0N` prefix of their own. They write `00-catalogue.json`,
+`00-triage.json` (`triage` and `triage-seal` both resolve to the identical
+physical file — the sealed record's shape does not change, only which code
+produces it), `00-slices.json` (plus its `00-slices/<id>.json` shards), and
+`00-objective.json` ahead of the `manifest.json` and `00-inputs/` that
+`intake` mints once gate 0 has passed, so the numbering stays intake's —
+`intake` is what fixes the run's identity, and none of the five has minted
+one yet. `intake --input` still works unchanged for anyone who would rather
+hand-pick the inputs directly, with no corpus, no catalogue, no triage
+record, no slices, and no gate 0.
 
 ### The human gates
 
@@ -103,6 +105,7 @@ artifacts.
 | Skill | Job |
 |---|---|
 | `rb-triage` | Rules on every candidate in the catalogue against the declared objective — admit, or decline with a reason — and states what the admitted set cannot cover. Every decline is a fact about the target that no later stage can recover, since nothing downstream reads the corpus. |
+| `rb-triage-objective` | The first of the staged-triage family's prompt passes: rules whether the declared objective is supported by the corpus map — slice labels, groups, and byte/candidate counts — before any per-slice member reads a single candidate digest, and before that fan-out is ever dispatched. |
 | `rb-extract` | Turns one input artifact into atomic, evidence-backed claims. Every claim carries a locator and an honest `derivation` — *stated*, *inferred*, or *reverse_engineered* — so "the spec says this" and "I guessed from one trace" never look alike downstream. |
 | `rb-reconcile` | Merges every extractor's claims into one world model, *recording* contradictions and gaps rather than resolving them, and freezes the coverage denominator exactly once. |
 | `rb-propose` | Reads the world model and latest coverage report, then appends scenarios targeting real, closable holes — never rewriting or renumbering what an earlier round proposed. |

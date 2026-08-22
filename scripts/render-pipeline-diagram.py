@@ -94,6 +94,15 @@ ROWS: list[dict] = [
     dict(
         kind="stage",
         dir="—",
+        name="triage-objective",
+        runs="rb-triage-objective",
+        art=["00-objective.json"],
+        gates=["validate"],
+        note="rules the objective from the corpus map, before any candidate digest is read",
+    ),
+    dict(
+        kind="stage",
+        dir="—",
         name="triage-seal",
         runs="code · assembles the staged parts",
         art=["00-triage.json"],

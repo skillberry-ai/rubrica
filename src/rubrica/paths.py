@@ -17,10 +17,11 @@ STAGES = (
     "survey",
     "triage",
     "triage-slices",
-    # triage-objective, triage-rule and triage-audit belong here too, each
-    # inserted immediately before triage-seal as its own task adds it -- the
-    # three prompt passes staged-triage's design splits the old monolithic
-    # triage stage into, giving the eventual order
+    "triage-objective",
+    # triage-rule and triage-audit belong here too, each inserted immediately
+    # before triage-seal as its own task adds it -- the three prompt passes
+    # staged-triage's design splits the old monolithic triage stage into,
+    # giving the eventual order
     # survey, triage, triage-slices, triage-objective, triage-rule,
     # triage-audit, triage-seal, intake. triage-seal has to sort last in the
     # family regardless of which of those has landed yet: it is the pass that

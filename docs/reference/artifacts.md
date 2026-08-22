@@ -16,8 +16,9 @@ that writes them.
 
 - **Schema:** `src/rubrica/schema/catalogue-0.1.json`
 - **Written by:** `survey` (code)
-- **Read by:** `rb-triage`; `intake` (the `--run` path, admitting whatever
-  triage already ruled on)
+- **Read by:** `rb-triage`; `rb-triage-objective` (`request`, `policy`,
+  `excluded`, and `candidates[].bytes` — never a `digest`); `intake` (the
+  `--run` path, admitting whatever triage already ruled on)
 - **Path:** `00-catalogue.json`
 
 Every candidate a survey found in a corpus, each with a bounded digest rather
@@ -73,8 +74,10 @@ this, never the prose criterion, which stays a human's call).
 
 - **Schema:** `src/rubrica/schema/slices-0.1.json`
 - **Written by:** `triage-slices` (code)
-- **Read by:** nothing yet — the prompt passes this stage feeds are a later
-  addition
+- **Read by:** `rb-triage-objective` (the header only — `slices[]`'s labels,
+  groups and counts, never a shard's candidate digests); the remaining
+  per-slice dispositions members are a later addition, and will read each
+  `00-slices/<id>.json` shard whole
 - **Path:** `00-slices.json`, one shard per slice at `00-slices/<id>.json`
 
 The catalogue's admissible candidates packed into byte-bounded slices, so a
@@ -95,6 +98,30 @@ Fields worth knowing: `slices[].bytes` (the slice's total digest bytes,
 recomputed from the shard by a later reference check so a slice cannot
 silently drift from its own header); `slices[].provenance[].other_slices`
 (empty exactly when the group it names was not split across slices).
+
+## `objective`
+
+- **Schema:** `src/rubrica/schema/objective-0.1.json`
+- **Written by:** `triage-objective`, run as `rb-triage-objective`
+- **Read by:** `triage-seal` (code), which copies `objective_review` into
+  `00-triage.json`'s own field of the same name verbatim
+- **Path:** `00-objective.json`
+
+The first staged-triage prompt pass's whole output, written before any
+per-slice dispositions member has read a candidate digest: `objective_review`
+(the surfaces the corpus map shows, whether the declared `breadth`/`depth`
+objective is `supported`, and an optional `recommended_objective` the pass may
+not act on itself) and `predicted_surface_count`, a prediction against what
+the digest-reading members will later observe. It is built from
+`00-slices.json` and `00-catalogue.json` alone — never a candidate `digest` —
+so this pass's dispatch is sized to the corpus map, not to the corpus.
+
+Fields worth knowing: `objective_review.surfaces[].weight.bytes` (the sum of
+each evidence candidate's own catalogue `bytes` field — the source file's
+size — never a slice's or a serialized row's size, which saturates once
+`triage-slices`' digest skeleton hits its 128-node cap); `predicted_surface_count`
+(a prediction, not a report — a later member observing a different surface
+count is a fact about this map's adequacy, not proof either reading erred).
 
 ## `manifest`
 
