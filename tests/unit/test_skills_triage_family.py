@@ -27,6 +27,10 @@ def _objective() -> skills.Skill:
     return _skill("rb-triage-objective")
 
 
+def _rule() -> skills.Skill:
+    return _skill("rb-triage-rule")
+
+
 def _norm(text: str) -> str:
     """Whitespace-normalised, so a reflow does not break a phrase pin.
 
@@ -198,3 +202,171 @@ def test_the_objective_pass_names_the_audit_pass_in_method():
     body = _norm(skills.section_body(_objective(), "3. Method"))
     assert "excluded" in body
     assert "rb-triage-audit" in body
+
+
+# --- rb-triage-rule --------------------------------------------------------
+#
+# Task 12's fan-out member: one per slice, the pass that actually declines
+# things. Most of the superseded monolithic rb-triage's material lands here,
+# so these predicates are the closest kin to test_skills_triage.py's own.
+
+
+def test_the_rule_pass_declares_its_exact_contract():
+    """The brief's contract, verbatim: a member reads its own shard and the
+    objective pass's ruling, never the catalogue or the plan directly -- the
+    shard already carries `request` and `policy`."""
+    skill = _rule()
+    assert skill.contract["stage"] == "triage-rule"
+    assert skill.contract["reads"] == ["slice_shard", "objective"]
+    assert skill.contract["writes"] == ["disposition_part"]
+    assert skill.contract["schemas"] == ["dispositions-part"]
+    assert skill.contract["invokes"] == ["validate"]
+
+
+def test_the_rule_pass_reads_only_its_own_shard():
+    skill = _rule()
+    assert skill.contract["reads"] == ["slice_shard", "objective"]
+    inputs = skills.section_body(skill, "1. Inputs").lower()
+    assert "sibling" in inputs or "another member" in inputs
+
+
+def test_the_rule_pass_inverts_the_decline_everything_refusal():
+    body = skills.section_body(_rule(), "5. Refusal conditions").lower()
+    assert "write the part" in body
+    assert "seal" in body  # names who owns the union judgment
+
+
+def test_the_rule_pass_ties_provenance_to_the_near_duplicate_judgment():
+    """A co-occurrence claim, not two independent mentions: both tokens
+    appearing anywhere in Method, unlinked, would also be satisfied by two
+    unrelated sentences that never actually tie provenance to the
+    near_duplicate judgment -- measured true on this file's own second,
+    unrelated `provenance` mention in Step 4."""
+    body = _norm(skills.section_body(_rule(), "3. Method"))
+    anchor = _first_index(body, ("provenance",))
+    assert anchor != -1
+    window = _window_after(body, anchor, radius=300)
+    assert "near_duplicate" in window
+
+
+def test_the_rule_pass_keeps_the_failing_trace_rule():
+    body = skills.section_body(_rule(), "3. Method").lower()
+    assert "failing trace" in body and "near-duplicate" in body
+
+
+def test_the_rule_pass_names_all_three_digest_truncation_facts():
+    body = skills.section_body(_rule(), "1. Inputs")
+    for field in ("heuristics_fired", "keys_truncated", "skeleton_nodes_truncated"):
+        assert field in body
+
+
+def test_the_rule_pass_says_priority_is_within_the_slice():
+    """A co-occurrence claim: the within-slice scoping language has to sit
+    near `priority` itself, not merely appear somewhere in Output --
+    `near_duplicate`'s own unrelated *in this slice* wording, in the
+    reason_code table, would otherwise satisfy this with zero mention of
+    priority's own scope."""
+    body = _norm(skills.section_body(_rule(), "2. Output"))
+    anchor = _first_index(body, ("priority",))
+    assert anchor != -1
+    window = _window_after(body, anchor, radius=300)
+    assert "within" in window or "in this slice" in window or "in your slice" in window
+
+
+def test_the_rule_pass_states_the_measured_failure_header():
+    """The incident this whole family exists to prevent, and the reason this
+    particular pass carries it in full: it is the one that does the
+    declining. The numbers and the vanished-conversation detail have to
+    survive together -- a reword that kept the numbers but dropped what was
+    lost would still leave a reader with no idea why every candidate needs a
+    reason, so this checks both halves of the same story rather than either
+    alone."""
+    body = _norm(_rule().body)
+    assert "sixteen" in body and "thirteen" in body
+    assert "conversation" in body and ("no longer exists" in body or "vanished" in body)
+
+
+def test_the_rule_pass_gives_both_arguments_against_opening_a_candidate():
+    """rb-triage's §1 carried forward: cost and comparability, both, plus the
+    new point that the widths are comparable *in fact* now that the digest is
+    clamped, not merely by assumption."""
+    body = _norm(skills.section_body(_rule(), "1. Inputs"))
+    assert "cost" in body
+    assert "comparable" in body
+    assert "clamp" in body and "fact" in body
+
+
+def test_the_rule_pass_names_the_repeated_signal_warning():
+    """Measured on a real 130-element trace capture: error_markers fired once
+    and resolved through the value already under status, so the two firing
+    together is one fact stated twice. `status` and `error_markers` must
+    co-occur with the "one fact" conclusion, not merely both appear somewhere
+    in Inputs -- a reword that named the two fields without ever saying they
+    can double-count would still satisfy a bag-of-tokens check."""
+    body = _norm(skills.section_body(_rule(), "1. Inputs"))
+    anchor = _first_index(body, ("error_markers",))
+    assert anchor != -1
+    window = _window_around(body, anchor, radius=400)
+    assert "status" in window
+    assert "one fact" in window or "stated twice" in window or "twice" in window
+
+
+def test_the_rule_pass_lists_all_eight_reason_codes():
+    body = skills.section_body(_rule(), "2. Output")
+    for code in (
+        "off_objective",
+        "out_of_scope",
+        "near_duplicate",
+        "superseded",
+        "implementation_detail",
+        "no_evidence_value",
+        "digest_insufficient",
+        "needs_projection",
+    ):
+        assert code in body
+
+
+def test_the_rule_pass_states_authority_is_triage_on_every_disposition():
+    """A co-occurrence claim: `authority` and the literal value `"triage"`
+    have to sit close enough together to be the same statement, not just both
+    be present somewhere in Output."""
+    body = skills.section_body(_rule(), "2. Output")
+    index = body.find("authority")
+    assert index != -1
+    window = _window_after(body, index, radius=200)
+    assert "triage" in window
+
+
+def test_the_rule_pass_keeps_the_digest_insufficient_refusal_rule():
+    """§5 unchanged in force: a candidate you cannot judge is a decline, not a
+    refusal, and the deficiency it obliges is rb-triage-audit's to write from
+    this pass's own deficiency_notes."""
+    body = _norm(skills.section_body(_rule(), "5. Refusal conditions"))
+    assert "digest_insufficient" in body
+    assert "rb-triage-audit" in body
+    assert "deficiency_notes" in body
+    assert "check-refs" in body and "reject" in body
+
+
+def test_the_rule_pass_admits_conflicts_rather_than_resolving_them():
+    """§3 Step 4's judgment rule: a trace/spec conflict is worth admitting,
+    not resolving -- rb-reconcile-contradict is better placed to. The
+    anchor here is the conflict language itself, and the resolution-naming
+    text has to follow it, not merely appear somewhere else in Method."""
+    body = _norm(skills.section_body(_rule(), "3. Method"))
+    anchor = _first_index(body, ("conflict", "behavioural evidence"))
+    assert anchor != -1
+    window = _window_around(body, anchor, radius=400)
+    assert "rb-reconcile-contradict" in window
+
+
+def test_the_rule_pass_scopes_the_provenance_note_to_a_split_group():
+    """New-to-this-pass item 2: where provenance shows a group was split
+    across slices, the reason has to say so rather than imply a comparison
+    against the whole group. `other_slices` (or "split") has to sit near the
+    provenance/near_duplicate claim, not merely appear in the section."""
+    body = _norm(skills.section_body(_rule(), "3. Method"))
+    anchor = _first_index(body, ("provenance",))
+    assert anchor != -1
+    window = _window_around(body, anchor, radius=500)
+    assert "split" in window or "other_slices" in window

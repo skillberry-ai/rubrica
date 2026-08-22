@@ -194,6 +194,16 @@ def test_the_triage_dispatch_denies_the_decisions_log(tmp_path):
     assert any("decisions.md" in rule for rule in perms["permissions"]["deny"])
 
 
+def test_dispatch_hands_a_rule_member_its_slice_id():
+    """triage-rule is a fan-out stage like extract and instantiate/challenge,
+    so its dispatch case must hand the member its own slice id -- the shard
+    filename `slice_shard` resolves against -- the same way extract hands an
+    artifact_id and instantiate/challenge hand a scenario_id."""
+    script = SCRIPT.read_text()
+    assert "triage-rule)" in script
+    assert "Your slice_id" in script
+
+
 def test_the_triage_dispatch_does_not_deny_the_catalogue_it_must_read(tmp_path):
     """The mirror of the rule that cost two wrong denies: 2f93726 measured that
     denying a path check-refs reads makes a stage's own gate fabricate findings.

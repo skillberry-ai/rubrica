@@ -71,6 +71,7 @@ if [ -n "$SLICE" ]; then
   case "$STAGE" in
     extract)               SLICE_LINE="Your artifact_id:  $SLICE" ;;
     instantiate|challenge) SLICE_LINE="Your scenario_id:  $SLICE" ;;
+    triage-rule)           SLICE_LINE="Your slice_id:     $SLICE" ;;
     *) echo "$STAGE is a single dispatch over everything; it takes no slice id" >&2; exit 2 ;;
   esac
 fi

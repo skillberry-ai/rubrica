@@ -18,8 +18,9 @@ STAGES = (
     "triage",
     "triage-slices",
     "triage-objective",
-    # triage-rule and triage-audit belong here too, each inserted immediately
-    # before triage-seal as its own task adds it -- the three prompt passes
+    "triage-rule",
+    # triage-audit belongs here too, inserted immediately before triage-seal
+    # once its own task adds it -- the last of the prompt passes
     # staged-triage's design splits the old monolithic triage stage into,
     # giving the eventual order
     # survey, triage, triage-slices, triage-objective, triage-rule,

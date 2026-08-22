@@ -75,9 +75,9 @@ this, never the prose criterion, which stays a human's call).
 - **Schema:** `src/rubrica/schema/slices-0.1.json`
 - **Written by:** `triage-slices` (code)
 - **Read by:** `rb-triage-objective` (the header only — `slices[]`'s labels,
-  groups and counts, never a shard's candidate digests); the remaining
-  per-slice dispositions members are a later addition, and will read each
-  `00-slices/<id>.json` shard whole
+  groups and counts, never a shard's candidate digests); `rb-triage-rule`
+  (one dispatch per slice, each reading only its own `00-slices/<id>.json`
+  shard whole — never a sibling's)
 - **Path:** `00-slices.json`, one shard per slice at `00-slices/<id>.json`
 
 The catalogue's admissible candidates packed into byte-bounded slices, so a
@@ -123,6 +123,39 @@ size — never a slice's or a serialized row's size, which saturates once
 (a prediction, not a report — a later member observing a different surface
 count is a fact about this map's adequacy, not proof either reading erred).
 
+## `dispositions-part`
+
+- **Schema:** `src/rubrica/schema/dispositions-part-0.1.json`
+- **Written by:** `triage-rule`, run as `rb-triage-rule` — fan-out, one file
+  per slice
+- **Read by:** `triage-seal` (code, assembles every part into
+  `00-triage.json`); `rb-triage-audit` — a later addition, reading each
+  part's `deficiency_notes` and `needs_projection` declines' `reason` prose
+  to consolidate into `00-audit.json`
+- **Path:** `00-dispositions/<slice_id>.json`, one file per slice
+
+The staged-triage family's ruling: one dispatch per slice, admitting or
+declining every candidate the slice's own `00-slices/<slice_id>.json` shard
+holds — never a sibling's. `dispositions` carries one entry per candidate in
+that slice, exactly once, including inadmissible container candidates,
+each with `authority: "triage"`; an `admit` carries a `reason` and a
+`priority` ranked within the slice only, never a global rank the member
+cannot see. A slice that would decline every candidate in it still writes
+its part — only `triage-seal`, once every slice has reported, is positioned
+to say the corpus, objective, or scope itself is wrong. `observed_surfaces`
+names surfaces the member noticed that `00-objective.json`'s prediction did
+not already name; `deficiency_notes` are the raw material `rb-triage-audit`
+later mints real `deficiency_id`s from — this pass writes neither a
+`deficiency_id` nor a projection object itself.
+
+Fields worth knowing: `dispositions[].reason_code` (optional on a decline,
+one of eight values — `off_objective`, `out_of_scope`, `near_duplicate`,
+`superseded`, `implementation_detail`, `no_evidence_value`,
+`digest_insufficient`, `needs_projection`); a `digest_insufficient` decline's
+`candidate_id` must also appear in this same part's own `deficiency_notes`,
+or `check-refs` rejects the record — the pairing is checked against the
+part that wrote it, not the consolidated audit.
+
 ## `manifest`
 
 - **Schema:** `src/rubrica/schema/manifest-0.1.json`
@@ -144,8 +177,8 @@ merge into until `intake --run` writes one
 ([`docs/guides/running-a-stage-by-hand.md`](../guides/running-a-stage-by-hand.md)
 §4 has the command). `intake`, `smoke`, and `survey` are code: they have no
 skill file for `record-stage` to hash, so they never appear there, and their
-absence is not a finding. The schema's `propertyNames` enum permits all eleven
-stage names — it constrains the vocabulary, not which of them a real run
+absence is not a finding. The schema's `propertyNames` enum permits every
+stage name — it constrains the vocabulary, not which of them a real run
 records.
 
 Fields worth knowing: `inputs[].provenance` (present only for an input that

@@ -286,6 +286,21 @@ def test_validate_stage_walks_every_claims_file(tmp_path):
     assert findings[0].artifact == run.claims("bad")
 
 
+def test_validate_stage_walks_every_disposition_part(tmp_path):
+    """Same shape as extract's claims check above, one directory over: a
+    triage-rule dispatch's own `invokes = ["validate"]` runs `rubrica validate
+    --stage triage-rule`, which has to resolve `dispositions-part` to
+    `00-dispositions/*.json` or that gate cannot run at all."""
+    run = RunPaths(tmp_path)
+    write_json(run.disposition_part("s01"), minimal_dispositions_part(slice_id="s01"))
+    bad = minimal_dispositions_part(slice_id="s02")
+    bad["dispositions"][0]["authority"] = "not-a-real-authority"
+    write_json(run.disposition_part("s02"), bad)
+    findings = validate_stage(run, "triage-rule")
+    assert len(findings) == 1
+    assert findings[0].artifact == run.disposition_part("s02")
+
+
 def test_validate_stage_reports_a_stage_that_produced_nothing(tmp_path):
     findings = validate_stage(RunPaths(tmp_path), "reconcile")
     assert len(findings) == 1

@@ -79,6 +79,7 @@ STAGE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "triage": ("triage",),
     "triage-slices": ("slices",),
     "triage-objective": ("objective",),
+    "triage-rule": ("dispositions-part",),
     # triage-seal writes the same "triage" kind the bare triage stage above
     # does -- both resolve to the identical physical 00-triage.json, which is
     # exactly why triage-0.1.json needed no revision for the split: the
@@ -238,6 +239,11 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         return [run.scenarios] if run.scenarios.is_file() else []
     if kind == "claims":
         return list_json(run.claims_dir)
+    if kind == "dispositions-part":
+        # Same shape as claims above: one file per fan-out member, named by
+        # its own id, in a directory that does not exist until the first
+        # member has written to it.
+        return list_json(run.dispositions_dir)
     if kind == "coverage":
         # latest.json is a singleton artifact that happens to live in a
         # directory of round files, so it is required the way manifest.json and

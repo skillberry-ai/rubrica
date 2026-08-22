@@ -103,6 +103,16 @@ ROWS: list[dict] = [
     dict(
         kind="stage",
         dir="—",
+        name="triage-rule",
+        runs="rb-triage-rule",
+        art=["00-dispositions/<slice_id>.json"],
+        gates=["validate"],
+        fan="fan-out · one member per slice",
+        note="rules on every candidate in one slice -- admit, or decline with a reason",
+    ),
+    dict(
+        kind="stage",
+        dir="—",
         name="triage-seal",
         runs="code · assembles the staged parts",
         art=["00-triage.json"],
