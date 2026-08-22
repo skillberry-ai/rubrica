@@ -433,12 +433,20 @@ def main(argv: list[str] | None = None) -> int:
             # minter of one. write_slices reports no findings -- it either
             # produces a plan or it does not -- so this block has no _report
             # call and cannot exit FINDINGS. Its only two exits are CLEAN
-            # here and USAGE via the shared except below (a catalogue with no
-            # candidates, or one that cannot be read at all, both raise
-            # UsageError/ArtifactError there). That asymmetry is deliberate:
-            # this repository has shipped a stage defect surfacing as exit 2
-            # and a `1` with empty stdout before, both from an exit path that
-            # assumed a case it did not have.
+            # here and USAGE via the shared except below: an unreadable
+            # catalogue, no candidates, a candidate over cap, or -- guarded
+            # inside write_slices itself, before any bare dict[...] read of
+            # untrusted catalogue content -- a catalogue missing run_id,
+            # request, or policy, or a candidate missing candidate_id. That
+            # last guard is load-bearing, not decorative: a bare KeyError
+            # from any of those falls through to the generic `except
+            # Exception` below this try block, which fabricates a `1`
+            # blaming this stage for a defect that actually lives in the
+            # catalogue -- exactly wrong, since a malformed catalogue cannot
+            # be fixed by the one retry a `1` earns it, and this repository
+            # has shipped both that failure shape and a `1` with empty
+            # stdout before, from an exit path that assumed a case it did
+            # not have.
             run = _run_dir(args.run)
             _, plan = slices.write_slices(run)
             for s in plan:

@@ -884,8 +884,83 @@ def test_triage_slices_exits_two_on_an_unreadable_catalogue(tmp_path):
     assert main(["triage-slices", "--run", str(run.root)]) == 2
 
 
+def _minimal_catalogue(**over):
+    """A schema-shaped catalogue with one candidate, for the four field-drop
+    cases below -- each removes exactly one key a bare `dict[...]` read
+    relies on, rather than reaching for an intentionally-malformed document
+    the way test_triage_slices_exits_two_on_an_unreadable_catalogue does."""
+    document = {
+        "schema_version": "0.1",
+        "run_id": "run-1",
+        "created_utc": "z",
+        "request": {},
+        "policy": {},
+        "candidates": [
+            {
+                "candidate_id": "c1",
+                "origin": "corpus",
+                "bytes": 1,
+                "sha256": "a" * 64,
+                "kind": "text",
+                "admissible": True,
+                "digest": {},
+            }
+        ],
+        "excluded": [],
+    }
+    document.update(over)
+    return document
+
+
+@pytest.mark.parametrize("missing_field", ["run_id", "request", "policy"])
+def test_triage_slices_exits_two_on_a_catalogue_missing_a_head_field(
+    tmp_path, capsys, missing_field
+):
+    """The Critical this covers: run_id/request/policy are read with a bare
+    catalogue[...], never catalogue.get(...), because every shard carries
+    them verbatim. A syntactically valid catalogue missing one of them must
+    raise UsageError (exit 2) before that bare read ever happens -- not fall
+    through as a bare KeyError, which cli.py's generic handler turns into a
+    fabricated exit-1 finding blaming the stage rather than the catalogue.
+
+    Asserted through main(), not slices.write_slices directly: the defect
+    this guards is precisely how main() maps the exception, so a
+    pytest.raises(UsageError) test would stay green through a regression in
+    cli.py's catch."""
+    run = RunPaths(tmp_path / "run-1")
+    run.root.mkdir(parents=True)
+    write_json(run.catalogue, _minimal_catalogue())
+    document = read_json(run.catalogue)
+    del document[missing_field]
+    write_json(run.catalogue, document)
+
+    assert main(["triage-slices", "--run", str(run.root)]) == 2
+    out, err = capsys.readouterr()
+    assert out == ""  # a 2 must never carry a fabricated finding on stdout
+    assert str(run.catalogue) in err
+    assert missing_field in err
+
+
+def test_triage_slices_exits_two_on_a_candidate_missing_candidate_id(tmp_path, capsys):
+    """candidate_id is read bare by oversized_rows and by every grouping and
+    sort step plan_slices runs -- the KeyError the review reproduced came
+    from exactly this field, at the first sort in _top_level_groups."""
+    run = RunPaths(tmp_path / "run-1")
+    run.root.mkdir(parents=True)
+    document = _minimal_catalogue()
+    del document["candidates"][0]["candidate_id"]
+    write_json(run.catalogue, document)
+
+    assert main(["triage-slices", "--run", str(run.root)]) == 2
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert str(run.catalogue) in err
+    assert "candidate_id" in err
+
+
 def test_triage_slices_exits_zero_and_prints_the_plan(tmp_path, capsys):
     run = _toy_survey_run(tmp_path)
     assert main(["triage-slices", "--run", str(run.root)]) == 0
-    out = capsys.readouterr().out
+    out, err = capsys.readouterr()
     assert "s01" in out
+    assert err == ""

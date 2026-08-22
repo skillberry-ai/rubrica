@@ -501,11 +501,24 @@ def plan_slices(candidates: list[dict], *, cap: int = DEFAULT_SLICE_BYTES) -> li
 def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path, list[Slice]]:
     """Partition the run's catalogue into slices and write the plan plus one shard each.
 
-    Two failure modes are refused before planning even starts, both exit 2 at
-    the CLI rather than a finding: a catalogue with no candidates (nothing for
-    a slice to hold -- a survey defect, not a triage-slices one) and any
-    candidate over `cap` on its own (oversized_rows is what reports that; no
-    splitter here can shrink a single row).
+    Four failure modes are refused before planning even starts, all exit 2 at
+    the CLI rather than a finding: the catalogue missing `run_id`, `request`,
+    or `policy` (the three fields this function and every shard read
+    verbatim), a candidate missing `candidate_id` (read bare, by every
+    grouping and sort step `plan_slices` runs), a catalogue with no
+    candidates at all (nothing for a slice to hold -- a survey defect, not a
+    triage-slices one), and any candidate over `cap` on its own
+    (oversized_rows is what reports that; no splitter here can shrink a
+    single row). The first two guard fields this module reads with a bare
+    `[...]` rather than `.get(...)` -- deliberately, so a genuine `KeyError`
+    elsewhere in this module (a real defect in this stage) still surfaces as
+    the exit 1 a stage defect should be, rather than every KeyError being
+    swallowed into exit 2 by a broadened catch in `cli.py`. A malformed
+    catalogue cannot be fixed by retrying the stage, so it must reach the
+    orchestrator as exit 2, never the exit 1 that spends the run's one
+    repair attempt on something no retry can fix -- and the message below
+    names the catalogue, not this stage, because the defect is in the
+    artifact `triage-slices` was handed, not in what it did with it.
 
     Every shard carries the run's `request` and `policy` verbatim alongside
     its own slice's full candidate records, rather than each member re-reading
@@ -524,9 +537,17 @@ def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path
     stale, unreferenced file a later stage could mistakenly read.
     """
     catalogue = read_json(run.catalogue)
+    missing_top = [key for key in ("run_id", "request", "policy") if key not in catalogue]
+    if missing_top:
+        raise UsageError(f"{run.catalogue} is missing required field(s): {missing_top}")
     candidates = catalogue.get("candidates", [])
     if not candidates:
         raise UsageError(f"{run.catalogue} has no candidates to slice")
+    missing_id_at = [i for i, c in enumerate(candidates) if "candidate_id" not in c]
+    if missing_id_at:
+        raise UsageError(
+            f"{run.catalogue} has candidate(s) missing candidate_id at index {missing_id_at}"
+        )
     oversized = oversized_rows(candidates, cap=cap)
     if oversized:
         raise UsageError(
