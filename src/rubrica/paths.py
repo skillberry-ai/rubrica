@@ -136,6 +136,43 @@ class RunPaths:
         return self.root / "00-triage.json"
 
     @property
+    def slices(self) -> Path:
+        """The catalogue partitioned into fixed-size slices for triage's passes.
+
+        Still in the 00 band: the band means "what this run will be allowed to
+        know," a property of the whole survey/triage/intake family rather than
+        of the catalogue alone, and the 00-numbering stays intake's -- 00a/00b/00c
+        -- no matter how many artifacts triage now writes on the way to its
+        sealed record. Splitting triage into a slicer, three prompt passes and a
+        seal turns one logical step into bounded substeps engineered for scale;
+        every substep's own artifact still belongs where the single triage
+        artifact used to sit, because the substep boundary is an engineering
+        choice about *how* triage decides, not a new thing this run is allowed
+        to know.
+        """
+        return self.root / "00-slices.json"
+
+    @property
+    def slices_dir(self) -> Path:
+        return self.root / "00-slices"
+
+    @property
+    def objective(self) -> Path:
+        return self.root / "00-objective.json"
+
+    @property
+    def dispositions_dir(self) -> Path:
+        return self.root / "00-dispositions"
+
+    @property
+    def audit(self) -> Path:
+        return self.root / "00-audit.json"
+
+    @property
+    def adoptions(self) -> Path:
+        return self.root / "00-adoptions.json"
+
+    @property
     def claims_dir(self) -> Path:
         return self.root / "01-claims"
 
@@ -188,6 +225,12 @@ class RunPaths:
 
     def claims(self, artifact_id: str) -> Path:
         return self.claims_dir / f"{safe_segment(artifact_id)}.json"
+
+    def slice_shard(self, slice_id: str) -> Path:
+        return self.slices_dir / f"{safe_segment(slice_id)}.json"
+
+    def disposition_part(self, slice_id: str) -> Path:
+        return self.dispositions_dir / f"{safe_segment(slice_id)}.json"
 
     def coverage_round(self, round_n: int) -> Path:
         if round_n < 1:
@@ -307,6 +350,20 @@ class RunPaths:
             # Same narrow shape _instance_dir_names catches: a listable but not
             # traversable directory, where `p.is_dir()` on a child is the raise.
             raise UsageError(f"cannot read run directory: {self.suite_dir} ({exc})") from exc
+
+    def slice_ids_with_parts(self) -> list[str]:
+        """Slice ids that have a written disposition part on disk, sorted.
+
+        Mirrors scenario_ids_with_tasks's shape but over files rather than
+        directories: list_json already converts an unreadable dispositions_dir
+        into a UsageError (both the EACCES-at-listing and the
+        not-stat-able-child shapes), so this only has to filter, not re-guard
+        the listing. Names that are not safe path segments are excluded rather
+        than returned, since returning one would make the next
+        disposition_part() call raise UnsafeSegment at a call site that cannot
+        report it usefully.
+        """
+        return sorted(p.stem for p in list_json(self.dispositions_dir) if is_safe_segment(p.stem))
 
     def unsafe_instance_dir_names(self) -> list[str]:
         """Instance directory names that are not safe path segments, sorted.
