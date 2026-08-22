@@ -31,6 +31,7 @@ from rubrica.findings import Finding
 from rubrica.invariants import InvariantForm
 from rubrica.invariants import evaluate as evaluate_invariant
 from rubrica.paths import RunPaths, is_safe_segment, list_json
+from rubrica.slices import row_bytes
 from rubrica.suite.verify import DATA_KINDS, TRAJECTORY_KINDS
 from rubrica.utilisation import claim_utilisation
 
@@ -246,6 +247,189 @@ def check_catalogue(run: RunPaths) -> list[Finding]:
                 f"{pointer}/provenance",
                 "an adopted projection must record the projection_id it satisfies",
             )
+    return out
+
+
+def _and_join(items: list[str]) -> str:
+    """ "a and b" for two items, "a, b, and c" for more -- never a bare comma list.
+
+    Only ever called on candidate coverage overlaps, which are rare enough
+    (a hand-edited plan, not a normal `write_slices` output) that this exists
+    purely so the message reads as English rather than "a, b" for the common
+    two-item case.
+    """
+    if len(items) <= 1:
+        return ", ".join(items)
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
+def check_slices(run: RunPaths) -> list[Finding]:
+    """00-slices.json against 00-catalogue.json: same partition, or a finding.
+
+    Absent is not a finding: a run before `triage-slices` has run has nothing
+    to check here, same ruling as check_catalogue's for a run minted through
+    `intake --input` -- check_all runs every checker the run has inputs for,
+    so a pre-slicing run must report nothing.
+
+    A *present* plan that is not parseable JSON is exactly one finding naming
+    00-slices.json, returned immediately. This is the module docstring's
+    `01-claims/` incident again: continuing past an unreadable plan to resolve
+    candidate_ids that were never actually parsed would fabricate a `no such
+    candidate` finding for every id the read failed on, blaming a catalogue
+    that is fine for a plan that is broken.
+
+    `_readable_targets` does not cover 00-slices.json or its shards -- the
+    plan is minted well after the artifacts that list enumerates -- so
+    `check_readable`'s short-circuit never fires for this artifact and this
+    checker must guard the unreadable case for itself.
+    """
+    if not run.slices.is_file():
+        return []
+    try:
+        plan = read_json(run.slices)
+    except ArtifactError as exc:
+        return [Finding(run.slices, "refs", "", str(exc))]
+    if not isinstance(plan, dict):
+        return []
+    slice_entries = plan.get("slices")
+    if not isinstance(slice_entries, list):
+        return []
+
+    out: list[Finding] = []
+
+    def report(pointer: str, message: str) -> None:
+        out.append(Finding(run.slices, "refs", pointer, message))
+
+    cap_bytes = plan.get("cap_bytes")
+
+    # Check 3: slice ids unique. Duplicate ids are reported once here rather
+    # than left to corrupt every check below that addresses a shard by id --
+    # two entries sharing one id would otherwise both resolve to the same
+    # shard file and their shard/bytes findings would look like agreement.
+    raw_ids = [s.get("id") for s in slice_entries if isinstance(s, dict)]
+    for dup in _dupes([i for i in raw_ids if isinstance(i, str)]):
+        report("/slices", f"slice id {dup!r} is used by more than one slice")
+
+    # Checks 1 & 2 resolve candidate_ids against the catalogue's own ids. A
+    # catalogue that is absent, unreadable, or missing a candidates array
+    # cannot support that resolution -- reported already by check_catalogue,
+    # or not yet a defect if triage has not run -- so known_ids is None and
+    # this checker skips 1 & 2 rather than treating every id as unresolvable.
+    catalogue = _load(run.catalogue)
+    catalogue_candidates = catalogue.get("candidates") if isinstance(catalogue, dict) else None
+    known_ids: set[str] | None
+    if isinstance(catalogue_candidates, list):
+        known_ids = {
+            cid
+            for c in catalogue_candidates
+            if isinstance(c, dict) and isinstance(cid := c.get("candidate_id"), str)
+        }
+    else:
+        known_ids = None
+
+    coverage: dict[str, list[str]] = {}
+
+    for index, entry in enumerate(slice_entries):
+        if not isinstance(entry, dict):
+            continue
+        pointer = f"/slices/{index}"
+        sid = _str_or_none(entry.get("id"))
+        candidate_ids = [c for c in _as_list(entry.get("candidate_ids")) if isinstance(c, str)]
+
+        if known_ids is not None:
+            for j, cid in enumerate(candidate_ids):
+                if cid not in known_ids:
+                    report(f"{pointer}/candidate_ids/{j}", f"no such candidate {cid!r}")
+                elif sid is not None:
+                    coverage.setdefault(cid, []).append(sid)
+
+        declared_bytes = entry.get("bytes")
+        if (
+            isinstance(cap_bytes, int)
+            and isinstance(declared_bytes, int)
+            and declared_bytes > cap_bytes
+        ):
+            report(
+                f"{pointer}/bytes",
+                f"slice {sid!r} is {declared_bytes} bytes, over the {cap_bytes}-byte cap "
+                "this plan was packed against",
+            )
+
+        if sid is None:
+            continue  # nothing safe to join into a shard path
+
+        # Check 4 (missing half): a shard this slice claims must exist on
+        # disk. Named at slices_dir, not the nonexistent shard path, mirroring
+        # check_verdicts' Finding(run.instance_dir(sid), ...) for a missing
+        # verdict -- point at the thing that does exist and should hold it.
+        shard_path = run.slice_shard(sid)
+        if not shard_path.is_file():
+            out.append(Finding(run.slices_dir, "refs", "", f"slice {sid} has no shard on disk"))
+            continue
+        try:
+            shard = read_json(shard_path)
+        except ArtifactError as exc:
+            out.append(Finding(shard_path, "refs", "", str(exc)))
+            continue
+        if not isinstance(shard, dict):
+            continue
+
+        shard_candidates = [c for c in _as_list(shard.get("candidates")) if isinstance(c, dict)]
+
+        # Check 6: shard candidates match candidate_ids, in order -- the same
+        # ids in the same sequence, not merely the same set.
+        shard_ids = [c.get("candidate_id") for c in shard_candidates]
+        if shard_ids != candidate_ids:
+            out.append(
+                Finding(
+                    shard_path,
+                    "refs",
+                    "/candidates",
+                    f"shard candidates do not match slice {sid}'s candidate_ids, in order",
+                )
+            )
+
+        # Check 5: bytes is arithmetic, not testimony -- recomputed from the
+        # shard's own candidates via slices.row_bytes, the same function
+        # write_slices used to produce the number in the first place.
+        recomputed = sum(row_bytes(c) for c in shard_candidates)
+        if isinstance(declared_bytes, int) and declared_bytes != recomputed:
+            out.append(
+                Finding(
+                    run.slices,
+                    "refs",
+                    f"{pointer}/bytes",
+                    f"slice {sid} declares bytes={declared_bytes} but its shard's candidates "
+                    f"sum to {recomputed}",
+                )
+            )
+
+    # Check 1: every catalogue candidate lands in exactly one slice.
+    if known_ids is not None:
+        for cid in sorted(known_ids):
+            covering = coverage.get(cid, [])
+            if not covering:
+                report("", f"no slice covers {cid!r}")
+            elif len(covering) > 1:
+                report("", f"{cid!r} is in slices {_and_join(sorted(covering))}")
+
+    # Check 4 (orphan half): every shard on disk is named by the plan.
+    # Mirrors check_verdicts' orphan-verdict scan just as directly as the
+    # missing-shard branch above mirrors its missing-verdict one.
+    plan_shard_ids = {i for i in raw_ids if isinstance(i, str)}
+    for shard_path in list_json(run.slices_dir):
+        if shard_path.stem not in plan_shard_ids:
+            out.append(
+                Finding(
+                    shard_path,
+                    "refs",
+                    "",
+                    f"{shard_path.name} is a shard on disk that no slice in the plan names",
+                )
+            )
+
     return out
 
 
@@ -1714,6 +1898,7 @@ def check_all(run: RunPaths) -> list[Finding]:
         return unreadable
     findings: list[Finding] = []
     findings.extend(check_catalogue(run))
+    findings.extend(check_slices(run))
     findings.extend(check_triage(run))
     findings.extend(check_manifest(run))
     findings.extend(check_inputs(run))
