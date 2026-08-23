@@ -146,6 +146,13 @@ The same convention leak has other faces, all of them the same mistake:
 One file: `05-verdicts/<scenario_id>.json` (`verdict`), and no file anywhere
 else in the run.
 
+**`05-verdicts/` does not exist when you are dispatched, and creating it is
+not your job.** Nothing in `src/rubrica/` mkdirs it -- your `Write` creates
+it, parents and all, and a sibling member's `Write` may have created it
+already. **Do not reach for `mkdir`.** This project's dispatch allows
+`rubrica *` through Bash and nothing else, so the command lands on an
+approval prompt that `claude -p` cannot answer.
+
 `schema_version: "0.1"`, `scenario_id` (your own, matching the instance
 directory you judged and the filename you write), `uniquely_determined`,
 `derivable_without_guessing`, `minimum_tool_calls_found`, `verdict` and

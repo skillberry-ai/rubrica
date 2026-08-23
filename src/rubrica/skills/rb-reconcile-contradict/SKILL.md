@@ -90,6 +90,16 @@ you were dispatched with, and a `contradictions` array; each entry has an
 `id`, `claim_a`, `claim_b`, a `nature`, one of the four `resolution` values,
 and a `rationale`.
 
+**`01-contradictions/` does not exist when you are dispatched, and creating
+it is not your job.** `01-claims/`, which you read, does exist -- an earlier
+fan-out's `Write` created it, not any code path -- and nothing in
+`src/rubrica/` mkdirs either one. Your `Write` creates yours, parents and
+all. **Do not reach for `mkdir`.** This project's dispatch allows
+`rubrica *` through Bash and nothing else, so the command lands on an
+approval prompt that `claude -p` cannot answer. The triage family's fan-out
+measurably lost turns to exactly that mistake, which is why this paragraph
+exists.
+
 **Write the part even when you found nothing.** An empty `contradictions`
 array is not a non-answer -- it is the record that this subject was swept, and
 the schema carries no `minItems` for exactly that reason.

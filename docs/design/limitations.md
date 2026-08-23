@@ -361,6 +361,68 @@ every claim — the shape the pass split exists to avoid — and not a filter th
 decides for the pass. If you are about to propose one, engage the attribution
 argument above rather than the throughput one.
 
+### Every directory a fan-out writes into is created by a member's `Write`, and until 2026-08-23 nothing told the member so
+
+`grep -rn mkdir src/rubrica/` creates exactly three of a run's directories:
+`run.root`, `inputs_dir` and `slices_dir`. Every other one exists only as a side
+effect of a dispatched member's `Write`, which creates parents — `01-claims/`,
+`03-coverage/`, `04-instances/`, `05-verdicts/`, and, in the staged families,
+`00-dispositions/` and `01-contradictions/`. That is a consistent design, and
+`validate.py` states it plainly for one of them: "a directory that does not exist
+until the first member has written to it". The sentence sits in a module no
+member reads, and every `SKILL.md` was silent on it.
+
+**Measured 2026-08-23, on a reservation-service run of the staged-triage
+family.** An `rb-triage-rule` member dispatched into a run whose
+`00-dispositions/` did not exist spent roughly seven turns and one
+`dangerouslyDisableSandbox` escalation attempt trying to `mkdir` it, then named
+`Write` as the way round. `mkdir` is not on the dispatch's Bash allowlist —
+`scripts/dispatch-stage.sh` allows `rubrica *` and nothing else — so under
+`claude -p` the command lands on an approval prompt that cannot be answered. The
+dispatch was killed during the stall that followed, so whether it would have
+recovered on its next turn is **not** known; what was measured is turns, budget
+and an escalation attempt, not a dead run.
+
+Of them all, `00-dispositions/` is where the wrong inference is most inviting:
+`triage-slices` mkdirs `00-slices/` — the shard the member has just read — one
+line above the fan-out that writes the sibling directory nothing mkdirs.
+`01-contradictions/` is the same shape one family down, and its member reads a
+*directory* (`01-claims/`) rather than a file, so directories-already-exist is
+its ambient experience too. That second exposure is reasoned, not measured: no
+`rb-reconcile-contradict` dispatch has ever run, and no run in `runs/` has ever
+held either directory.
+
+**The fix is a paragraph in each affected Output section, and the reason it is
+not code is measured.** The cheaper-looking alternative — one line beside the
+existing mkdir in `slices.py` — buys the triage family a directory and costs
+`check-refs` a signal. All three checkers over these fan-outs key on `.is_dir()`
+to tell "fan-out not started" from "fan-out in progress"
+(`refs.check_disposition_parts`, `refs.check_triage_audit`,
+`refs.check_contradiction_parts`). On the toy run, pre-creating
+`00-dispositions/` turns `check-refs` from 0 findings to 1 (`slice s01 has no
+disposition part on disk`); pre-creating `01-contradictions/` turns 0 into 6, one
+per subject, and a real run has far more subjects than slices. It would also
+falsify `refs.py`'s own comment that an absent `dispositions_dir` at the audit
+check "means a hand-assembled or manufactured audit artifact rather than a
+mid-fan-out one". And it has no counterpart for the reconcile family in any case:
+the pass above `reconcile-contradict` is itself a prompt pass, so there is no
+code pass to hang the mkdir on nearer than `intake`, three stages earlier.
+
+**Parked because only the prose half is enforceable, and it is the weaker half.**
+`tests/unit/test_skills_output_dirs.py` pins both directions of the statement —
+that the directory really is absent at the checkpoint before its writer, and that
+each skill's Output section keeps the rule in one paragraph naming `mkdir`, the
+directory and `Write`. Neither predicate can reach the thing that actually
+failed: whether a dispatched member *reads and obeys* the paragraph. That is what
+an `exercise.md` would show, and neither staged family's fan-out has one. Until
+one exists, "the prose fixes it" is a reasonable expectation and not an
+observation.
+
+One narrower thing this does not park: **widening the Bash allowlist is not the
+fix.** It would grant every dispatched stage broader shell access to solve a
+problem `Write` already solves, against the isolation entry at the top of this
+file, which records how wide the reachable surface already is.
+
 ---
 
 ## Before you trust a number a run reports
