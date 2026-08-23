@@ -615,3 +615,44 @@ def test_an_absent_projections_block_is_still_a_usage_error(tmp_path):
 
     with pytest.raises(UsageError, match="no projection"):
         triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path))
+
+
+# The four JSON documents that are not objects. `null` is the one that was
+# measured escaping main() as exit 1 with empty stdout and a raw
+# AttributeError, but all four take the same `.get` and adopt-projection is one
+# of the three cli.py blocks that return before the catch-all's try begins, so
+# none of them had anything downstream to turn them into a finding.
+_NOT_OBJECTS = ["null", "7", '"hi"', "[]"]
+
+
+@pytest.mark.parametrize("document", _NOT_OBJECTS)
+def test_a_triage_record_that_is_not_an_object_is_a_finding_not_a_traceback(tmp_path, document):
+    run = _run_with_projection(tmp_path)
+    run.triage.write_text(f"{document}\n", encoding="utf-8")
+    findings = triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path))
+    # Three separate halves of the exit-code contract, and the reason each is
+    # asserted rather than just the first: a finding at all (so this is a 1,
+    # not a traceback), a non-empty message (a 1 with empty stdout sends an
+    # orchestrator to retry blind), and the offending artifact rather than the
+    # run root (a 1 that names the wrong artifact once produced four
+    # fabricated findings against a correct world model).
+    assert findings, "a non-object triage record produced no finding at all"
+    assert all(f.message for f in findings)
+    assert [f.artifact for f in findings] == [run.triage]
+
+
+@pytest.mark.parametrize("document", _NOT_OBJECTS)
+def test_a_catalogue_that_is_not_an_object_is_a_finding_not_a_traceback(tmp_path, document):
+    """The second door, reached only once acceptance has already passed.
+
+    check_acceptance and the --check-only short-circuit both return ahead of
+    the catalogue read, so this guard is not the triage record's guard again
+    from a different angle: a run can hold a perfectly good triage record and
+    still meet a catalogue it cannot append to.
+    """
+    run = _run_with_projection(tmp_path)
+    run.catalogue.write_text(f"{document}\n", encoding="utf-8")
+    findings = triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path))
+    assert findings, "a non-object catalogue produced no finding at all"
+    assert all(f.message for f in findings)
+    assert [f.artifact for f in findings] == [run.catalogue]

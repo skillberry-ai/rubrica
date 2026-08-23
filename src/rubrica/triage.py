@@ -205,6 +205,25 @@ def adopt_projection(
         raise UsageError(f"no catalogue at {run.catalogue}; this run was not minted by survey")
 
     triage_record = read_json(run.triage)
+    # The door before every `.get` below, and the reason it is separate from
+    # the `projections` check that follows: `null` is a legitimate JSON
+    # document, so read_json returns None for it and `.get` raised
+    # AttributeError straight out of main() -- exit 1 with EMPTY STDOUT and a
+    # raw traceback, the one mode the exit-code contract names outright, and
+    # measured on all four non-object shapes (`null`, `7`, `"hi"`, `[]`), not
+    # only the `null` one. adopt-projection is one of the three cli.py blocks
+    # that return before the catch-all's `try` begins, so nothing downstream
+    # would have turned that into a finding.
+    if not isinstance(triage_record, dict):
+        return [
+            Finding(
+                run.triage,
+                "internal",
+                "",
+                f"expected a JSON object, found {triage_record!r}; adopt-projection cannot "
+                "find the projection it was asked to adopt",
+            )
+        ]
     # A *present but not a list* `projections` is a malformed record, which is
     # exit 1 with a finding -- not the "no projection X" UsageError below at
     # exit 2, which is where `"projections": "nope"` was measured to land it.
@@ -322,6 +341,22 @@ def adopt_projection(
         return []
 
     catalogue = read_json(run.catalogue)
+    # The catalogue's own top-level door, identical in kind to the triage
+    # record's above and measured on the same four shapes: `catalogue.get`
+    # below raised AttributeError out of main() at exit 1 with empty stdout.
+    # Reached only past check_acceptance and the check_only short-circuit,
+    # which is why the neighbouring `/candidates` guard did not already cover
+    # it -- that one indexes a document this had already assumed was one.
+    if not isinstance(catalogue, dict):
+        return [
+            Finding(
+                run.catalogue,
+                "internal",
+                "",
+                f"expected a JSON object, found {catalogue!r}; adopt-projection cannot append "
+                "the adopted candidate to it",
+            )
+        ]
     # Both containers this function *appends to* are checked before it does,
     # and for a sharper reason than the read-only guards above: `"nope".append`
     # raises AttributeError, which escaped main() as exit 1 with empty stdout

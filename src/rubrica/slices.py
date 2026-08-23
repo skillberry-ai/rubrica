@@ -501,15 +501,16 @@ def plan_slices(candidates: list[dict], *, cap: int = DEFAULT_SLICE_BYTES) -> li
 def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path, list[Slice]]:
     """Partition the run's catalogue into slices and write the plan plus one shard each.
 
-    Four failure modes are refused before planning even starts, all exit 2 at
-    the CLI rather than a finding: the catalogue missing `run_id`, `request`,
-    or `policy` (the three fields this function and every shard read
-    verbatim), a candidate missing `candidate_id` (read bare, by every
-    grouping and sort step `plan_slices` runs), a catalogue with no
-    candidates at all (nothing for a slice to hold -- a survey defect, not a
-    triage-slices one), and any candidate over `cap` on its own
-    (oversized_rows is what reports that; no splitter here can shrink a
-    single row). The first two guard fields this module reads with a bare
+    Several failure modes are refused before planning even starts, all exit 2
+    at the CLI rather than a finding: a catalogue that is not a JSON object at
+    all, or that is one but is missing `run_id`, `request`, or `policy` (the
+    three fields this function and every shard read verbatim); a `candidates`
+    that is not an array, or an empty one (nothing for a slice to hold -- a
+    survey defect, not a triage-slices one); a candidate that is not an object
+    carrying a *string* `candidate_id` (read bare, and sorted on, by every
+    grouping step `plan_slices` runs); and any candidate over `cap` on its own
+    (oversized_rows is what reports that; no splitter here can shrink a single
+    row). Those guards stand in front of fields this module reads with a bare
     `[...]` rather than `.get(...)` -- deliberately, so a genuine `KeyError`
     elsewhere in this module (a real defect in this stage) still surfaces as
     the exit 1 a stage defect should be, rather than every KeyError being
@@ -537,16 +538,51 @@ def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path
     stale, unreferenced file a later stage could mistakenly read.
     """
     catalogue = read_json(run.catalogue)
+    # The container door, and the same one seal._payload_keys' docstring
+    # describes: two of the four wrong top-level shapes (`[]`, `"hi"`) answer
+    # `key not in catalogue` correctly and reach the exit-2 refusal below,
+    # while `null` and `7` raised TypeError -- an `[internal]` finding at exit 1
+    # naming the RUN ROOT rather than the catalogue, which is the exit-code
+    # contract's third rule breached. The guard is what makes all four the same
+    # refusal instead of two refusals and two tracebacks.
+    if not isinstance(catalogue, dict):
+        raise UsageError(
+            f"{run.catalogue} is not a JSON object: found {catalogue!r}; there is no catalogue "
+            "here to partition"
+        )
     missing_top = [key for key in ("run_id", "request", "policy") if key not in catalogue]
     if missing_top:
         raise UsageError(f"{run.catalogue} is missing required field(s): {missing_top}")
     candidates = catalogue.get("candidates", [])
+    # `candidates` of the wrong container shape, for the same reason: a number
+    # raised TypeError out of `enumerate`, and a *string* passed every guard
+    # below only because `"candidate_id" not in "a"` happens to be a substring
+    # test that answers True -- correct exit code by coincidence, which is not
+    # the same as a checked one.
+    if not isinstance(candidates, list):
+        raise UsageError(
+            f"{run.catalogue}'s candidates is not an array: found {candidates!r}; there is "
+            "nothing here to partition"
+        )
     if not candidates:
         raise UsageError(f"{run.catalogue} has no candidates to slice")
-    missing_id_at = [i for i, c in enumerate(candidates) if "candidate_id" not in c]
-    if missing_id_at:
+    # Presence was not enough, and both halves were measured. A candidate that
+    # is not an object at all raised TypeError from the `in` below; and a
+    # candidate_id present but not a string reached `sorted`, where a single
+    # non-string id sorts alone and passes while *two* ids of different types
+    # raise TypeError comparing them -- so the defect was invisible on the
+    # one-candidate case and fatal on the realistic one. `_top_key` and
+    # `_group_key` both read the id bare and both sort on it, so a string id
+    # is a precondition of planning rather than a tidiness check.
+    unshaped_at = [
+        i
+        for i, c in enumerate(candidates)
+        if not isinstance(c, dict) or not isinstance(c.get("candidate_id"), str)
+    ]
+    if unshaped_at:
         raise UsageError(
-            f"{run.catalogue} has candidate(s) missing candidate_id at index {missing_id_at}"
+            f"{run.catalogue} has candidate(s) that are not an object with a string "
+            f"candidate_id at index {unshaped_at}"
         )
     oversized = oversized_rows(candidates, cap=cap)
     if oversized:

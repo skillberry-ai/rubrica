@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from rubrica import seal, survey, triage, validate
 from rubrica.artifacts import read_json, write_json
 from rubrica.slices import write_slices
@@ -346,3 +348,68 @@ def test_adopt_projection_does_not_write_the_sealed_record(tmp_path):
     source.write_text(json.dumps({"tools": [{"name": "t", "result_shape": {}}]}), encoding="utf-8")
     triage.adopt_projection(run, projection_id="prj-1", source=source)
     assert run.triage.read_bytes() == before, "the seal owns 00-triage.json"
+
+
+# One case per container this module indexes with a bare `[...]`, each edited
+# in the part its own defect lives in. Every one of these was measured taking a
+# KeyError or TypeError out of seal(), reaching cli.py's catch-all as an
+# [internal] finding naming the RUN ROOT -- the exit-code contract's "a 1 must
+# name the right artifact" breached, and the outcome _read_part's docstring
+# cites as the thing to avoid one level up.
+_NESTED_DEFECTS = [
+    ("slices", lambda d: d.__setitem__("slices", "nope")),
+    ("slices", lambda d: d["slices"][0].pop("id")),
+    ("slices", lambda d: d["slices"][0].__setitem__("candidate_ids", 7)),
+    ("audit", lambda d: d["deficiencies"][0].pop("deficiency_id")),
+    ("audit", lambda d: d["projections"][0].__setitem__("sources", 5)),
+    ("audit", lambda d: d["projections"][0]["sources"][0].pop("candidate_id")),
+    ("objective", lambda d: d["objective_review"].__setitem__("surfaces", "nope")),
+]
+
+
+@pytest.mark.parametrize("attribute,break_it", _NESTED_DEFECTS, ids=range(len(_NESTED_DEFECTS)))
+def test_a_nested_container_of_the_wrong_shape_names_its_own_part(tmp_path, attribute, break_it):
+    run = _staged_run(tmp_path)
+    path = getattr(run, attribute)
+    document = read_json(path)
+    break_it(document)
+    write_json(path, document)
+    sealed, findings = seal.seal(run)
+    assert findings, "a nested shape defect produced no finding at all"
+    assert all(f.message for f in findings), "a finding with no message is a 1 with empty stdout"
+    # The part, not the run root. This is the half that was actually broken:
+    # the old behaviour reported a finding, but against run.root.
+    assert {f.artifact for f in findings} == {path}
+    # And a pointer into it, so a reader lands on the field rather than
+    # searching the document.
+    assert all(f.pointer for f in findings)
+    assert sealed is None, "a part this seal cannot index must not produce a sealed record"
+
+
+def test_a_disposition_part_missing_a_candidate_id_names_the_shard(tmp_path):
+    """The fan-out half, which is per-slice rather than a singleton part."""
+    run = _staged_run(tmp_path)
+    slice_id = next(iter(run.slice_ids_with_parts()))
+    path = run.disposition_part(slice_id)
+    document = read_json(path)
+    document["dispositions"][0].pop("candidate_id")
+    write_json(path, document)
+    sealed, findings = seal.seal(run)
+    assert findings and all(f.message for f in findings)
+    assert {f.artifact for f in findings} == {path}
+    assert sealed is None
+
+
+def test_one_broken_container_is_one_finding_not_one_per_field_beneath_it(tmp_path):
+    """Why _nested_shape recurses instead of walking a flat list of read sites.
+
+    A `slices` that is a string is a single defect; reporting it once per field
+    the seal would have read underneath it turns one broken part into a wall of
+    findings an operator has to read to discover they all say the same thing.
+    """
+    run = _staged_run(tmp_path)
+    document = read_json(run.slices)
+    document["slices"] = "nope"
+    write_json(run.slices, document)
+    _, findings = seal.seal(run)
+    assert len(findings) == 1

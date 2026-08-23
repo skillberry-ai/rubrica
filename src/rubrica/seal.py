@@ -3,9 +3,10 @@
 Code rather than a prompt, for the reason emit is code: two runs with
 identical parts must produce a byte-identical triage record, or variance
 stops being attributable to the pass that caused it. There is a second
-reason here, the same one `reconcile.seal` (the sibling seal for stage 1)
-names: a code step streams nothing, so it cannot be killed by the gateway's
-idle reset, however large the assembled record gets.
+reason here, the same one the sibling seal for stage 1 -- `reconcile.seal`,
+on the staged-reconcile branch -- names: a code step streams nothing, so it
+cannot be killed by the gateway's idle reset, however large the assembled
+record gets.
 
 This module assembles; it does not check. Cross-artifact checking is layer 2
 and lives in refs.py (`check_triage`, which runs over the sealed record after
@@ -43,7 +44,7 @@ record would be worse than none: it would clear layer 1 for the fields it did
 manage to fill, and read as a complete triage decision to a human at gate 0.
 
 Items 2, 4 and 5 overlap `refs.check_triage` deliberately, for the reason
-`reconcile.seal`'s own docstring gives for its analogous overlaps:
+the staged-reconcile branch's own seal gives for its analogous overlaps:
 `check_triage` reports *after* the fact, over any triage record including one
 this seal never sealed, while the branches here refuse *before the write*,
 because assembly is otherwise perfectly possible in every one of these
@@ -62,15 +63,26 @@ the merged list, with nothing left in the sealed record to tell it apart from
 one that was scoped correctly. The seal is the only place either half of that
 defect is ever checked against the plan that scoped it.
 
-Presence, parseability and payload-key presence are the whole of what item 1
-checks -- not the *type* of what a payload key holds, exactly as
-`reconcile.seal`'s own docstring states and for the identical reason: layer 1
-(one schema per staged artifact, all already shipped) is the rejection point
-for a wrong-typed value, and duplicating that here would put the same rule in
-two places with two messages. The code below indexes nested fields
-(`candidate_id`, `disposition`, `sources[].candidate_id`, ...) directly, the
-same way `reconcile.seal` indexes `entry["capability_id"]` -- a wrongly-typed
-nested field still raises out of it, by design.
+Presence, parseability, payload-key presence and *container* shape are the
+whole of what item 1 checks -- never the type of a scalar a payload key
+holds, for the reason the seal on the staged-reconcile branch gives for its
+own identical door: layer 1 (one schema per staged artifact, all already
+shipped) is the rejection point for a wrong-typed value, and duplicating that
+here would put the same rule in two places with two messages.
+
+Container shape is in that list because it is not layer 1's rule but this
+module's own precondition. The code below indexes nested fields
+(`slices[].id`, `dispositions[].candidate_id`, `adoptions[].disposition`,
+`projections[].sources[].candidate_id`, ...) with a bare `[...]`, and it was
+MEASURED that twenty distinct nested-shape defects each took a KeyError or
+TypeError out of this function -- reaching cli.py's catch-all as an
+`[internal]` finding naming the RUN ROOT rather than the offending part and
+pointer, which is the exit-code contract's third rule breached and the exact
+outcome `_read_part`'s docstring and `_UNREADABLE`'s comment each cite as the
+thing to avoid one level up. `_NESTED_READS` declares only the fields this
+module reads, so it stays a statement of what assembly needs rather than a
+second copy of the schema: an id that is present but numeric is still layer
+1's to reject, and still does.
 """
 
 from __future__ import annotations
@@ -86,7 +98,8 @@ from rubrica.paths import RunPaths
 # predates triage entirely, and the audit pass consolidates every part's
 # deficiency_notes last. (RunPaths attribute, the payload keys this module
 # actually reads from it) -- the keys are checked, not merely documented, by
-# _payload_keys below, mirroring reconcile._SINGLETON_PARTS exactly.
+# _payload_keys below, mirroring the same table in the staged-reconcile
+# branch's seal exactly.
 _SINGLETON_PARTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("objective", ("run_id", "objective_review")),
     ("slices", ("slices",)),
@@ -96,7 +109,8 @@ _SINGLETON_PARTS: tuple[tuple[str, tuple[str, ...]], ...] = (
 # The read-failure sentinel, and specifically *not* None -- `null` is a
 # legitimate JSON document and read_json returns None for it, which would
 # make `document is not None` mean two different things at once. Measured on
-# the sibling reconcile seal: a `null` part skipped the payload-key check
+# the sibling seal on the staged-reconcile branch: a `null` part skipped
+# the payload-key check
 # below and reached a bare dict index, raising a KeyError that cli.py's
 # catch-all then reported against the run root rather than the broken
 # artifact. An object() cannot be read off disk.
@@ -144,7 +158,8 @@ def _json_type(document: object) -> str:
 def _payload_keys(path: Path, keys: tuple[str, ...], document: object, out: list[Finding]) -> bool:
     """Whether `document` is an object carrying every key declared for it.
 
-    Mirrors reconcile._payload_keys precisely, including the isinstance guard
+    Mirrors the staged-reconcile branch's equivalent precisely, including the
+    isinstance guard
     doing double duty: a document that is not a dict has no payload key
     either, and two of the wrong shapes (a list, a string) would otherwise
     answer `key not in document` correctly while the other two (`None`, an
@@ -176,18 +191,111 @@ def _payload_keys(path: Path, keys: tuple[str, ...], document: object, out: list
     return not missing
 
 
-def _read_checked(path: Path, keys: tuple[str, ...], out: list[Finding]) -> dict | None:
-    """One artifact that is readable *and* carries its payload keys, else None.
+# The marker for "every element of the array here", as a spec key. An object()
+# rather than a string so it can never collide with a JSON key name a part
+# might legitimately carry.
+_EACH = object()
+
+# Every field *below* a payload key that this module indexes with a bare
+# `[...]`, one spec per artifact, keyed by the same attribute name
+# _SINGLETON_PARTS uses. A spec maps a key to the spec for its value, or to
+# None when presence is the whole requirement; a spec carrying _EACH describes
+# the elements of an array rather than the keys of an object, and _EACH mapped
+# to None asserts array-ness alone (which is what `set(...)`, `in` and a `for`
+# over the value each need before they can run).
+#
+# One tree per artifact rather than one walk per read site, so a `slices` that
+# is a number is one finding instead of one per field read underneath it.
+# Every key here is already `required` in that artifact's shipped schema, so no
+# document layer 1 accepts can be refused by this door -- it fires only where
+# the seal was reached without a clean layer 1, which the gate order forbids
+# but `refs.check_all` by hand and the orchestrator's repair loop both reach.
+_NESTED_READS: dict[str, dict] = {
+    "objective": {"objective_review": {"surfaces": {_EACH: {"evidence": {_EACH: None}}}}},
+    "slices": {"slices": {_EACH: {"id": None, "candidate_ids": {_EACH: None}}}},
+    "audit": {
+        "deficiencies": {_EACH: {"deficiency_id": None}},
+        "projections": {_EACH: {"projection_id": None, "sources": {_EACH: {"candidate_id": None}}}},
+    },
+    "adoptions": {
+        "adoptions": {
+            _EACH: {
+                "projection_id": None,
+                "candidate_id": None,
+                "closed_deficiency_ids": {_EACH: None},
+                "disposition": {"candidate_id": None},
+            }
+        }
+    },
+    "dispositions_part": {"dispositions": {_EACH: {"candidate_id": None}}},
+}
+
+
+def _nested_shape(
+    path: Path, document: object, spec: dict, pointer: str, out: list[Finding]
+) -> None:
+    """Report every nested container shape `spec` declares and `document` breaks.
+
+    Recursive rather than a flat list of walks so a defect high in the tree is
+    reported once, at the pointer where it lives, instead of once per leaf the
+    seal would have read beneath it.
+    """
+    if _EACH in spec:
+        if not isinstance(document, list):
+            out.append(
+                Finding(path, "seal", pointer, f"expected an array, found {_json_type(document)}")
+            )
+            return
+        element_spec = spec[_EACH]
+        if element_spec is None:
+            return
+        for index, element in enumerate(document):
+            _nested_shape(path, element, element_spec, f"{pointer}/{index}", out)
+        return
+    if not isinstance(document, dict):
+        out.append(
+            Finding(path, "seal", pointer, f"expected a JSON object, found {_json_type(document)}")
+        )
+        return
+    for key, child in spec.items():
+        if key not in document:
+            out.append(
+                Finding(
+                    path,
+                    "seal",
+                    f"{pointer}/{key}",
+                    f"no {key!r} key; this seal indexes it directly and cannot assemble "
+                    "a record without it",
+                )
+            )
+            continue
+        if child is not None:
+            _nested_shape(path, document[key], child, f"{pointer}/{key}", out)
+
+
+def _read_checked(
+    path: Path, keys: tuple[str, ...], out: list[Finding], nested: dict | None = None
+) -> dict | None:
+    """One artifact that is readable, carries its payload keys, and holds the
+    nested containers this module indexes -- else None.
 
     The one door every artifact this seal reads comes through, so a read
-    failure and a document missing a payload key are different findings but
-    the same outcome for the caller -- exactly the shape a `null` part
-    exploited before this existed.
+    failure, a document missing a payload key and a nested container of the
+    wrong shape are different findings but the same outcome for the caller --
+    exactly the shape a `null` part exploited at the top level before this
+    existed, and that twenty nested defects exploited one level down.
     """
     document = _read_part(path, out)
     if document is _UNREADABLE:
         return None
-    return document if _payload_keys(path, keys, document, out) else None
+    if not _payload_keys(path, keys, document, out):
+        return None
+    if nested is not None:
+        before = len(out)
+        _nested_shape(path, document, nested, "", out)
+        if len(out) > before:
+            return None
+    return document
 
 
 def _member_priority(entry: dict) -> int:
@@ -218,7 +326,7 @@ def seal(run: RunPaths) -> tuple[Path | None, list[Finding]]:
 
     documents: dict[str, dict] = {}
     for attribute, keys in _SINGLETON_PARTS:
-        document = _read_checked(getattr(run, attribute), keys, findings)
+        document = _read_checked(getattr(run, attribute), keys, findings, _NESTED_READS[attribute])
         if document is not None:
             documents[attribute] = document
 
@@ -227,7 +335,9 @@ def seal(run: RunPaths) -> tuple[Path | None, list[Finding]]:
     # description. A file that exists but is broken is still reported through
     # the identical door as every other part; only its *absence* is silent.
     if run.adoptions.is_file():
-        adoptions_document = _read_checked(run.adoptions, ("adoptions",), findings)
+        adoptions_document = _read_checked(
+            run.adoptions, ("adoptions",), findings, _NESTED_READS["adoptions"]
+        )
     else:
         adoptions_document = {"adoptions": []}
     if adoptions_document is not None:
@@ -239,7 +349,12 @@ def seal(run: RunPaths) -> tuple[Path | None, list[Finding]]:
     # payload-key presence left to check, exactly like every other part above.
     parts: dict[str, dict] = {}
     for slice_id in run.slice_ids_with_parts():
-        part = _read_checked(run.disposition_part(slice_id), ("dispositions",), findings)
+        part = _read_checked(
+            run.disposition_part(slice_id),
+            ("dispositions",),
+            findings,
+            _NESTED_READS["dispositions_part"],
+        )
         if part is not None:
             parts[slice_id] = part
 

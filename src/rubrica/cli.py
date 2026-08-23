@@ -440,9 +440,10 @@ def main(argv: list[str] | None = None) -> int:
             # here and USAGE via the shared except below: an unreadable
             # catalogue, no candidates, a candidate over cap, or -- guarded
             # inside write_slices itself, before any bare dict[...] read of
-            # untrusted catalogue content -- a catalogue missing run_id,
-            # request, or policy, or a candidate missing candidate_id. That
-            # last guard is load-bearing, not decorative: a bare KeyError
+            # untrusted catalogue content -- a catalogue that is not a JSON
+            # object, one missing run_id, request, or policy, or a candidate
+            # that is not an object carrying a string candidate_id. Those
+            # guards are load-bearing, not decorative: a bare KeyError
             # from any of those falls through to the generic `except
             # Exception` below this try block, which fabricates a `1`
             # blaming this stage for a defect that actually lives in the

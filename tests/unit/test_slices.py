@@ -1,9 +1,11 @@
+import json
 from pathlib import Path
 
 import pytest
 
 from rubrica import slices, survey, validate
-from rubrica.artifacts import canonical_bytes, read_json
+from rubrica.artifacts import canonical_bytes, read_json, write_json
+from rubrica.errors import UsageError
 
 
 def _cand(cid, *, path=None, kind="source_code", root=0, container=None, pad=1000, sig=None):
@@ -311,3 +313,66 @@ def test_a_stale_shard_from_a_previous_plan_is_removed(tmp_path):
     (run.slices_dir / "s99.json").write_text("{}", encoding="utf-8")
     slices.write_slices(run)
     assert not (run.slices_dir / "s99.json").exists()
+
+
+# Two of these four were already refused correctly and two were not, which is
+# why all four are here rather than only the broken pair: `[]` and `"hi"`
+# answer `key not in catalogue` (the second by substring test, which is a
+# coincidence rather than a check), while `null` and `7` raised TypeError and
+# surfaced as an [internal] finding at exit 1 naming the run root -- a
+# filesystem-shaped problem reported as a stage defect, against the wrong
+# artifact. The guard's job is to make all four the same refusal.
+@pytest.mark.parametrize("document", ["null", "7", '"hi"', "[]"])
+def test_a_catalogue_that_is_not_an_object_is_refused_not_partitioned(tmp_path, document):
+    run = _toy_run(tmp_path)
+    run.catalogue.write_text(f"{document}\n", encoding="utf-8")
+    with pytest.raises(UsageError) as caught:
+        slices.write_slices(run, cap=2500)
+    # The message must name the catalogue, because the operator's next move is
+    # to look at it; a UsageError naming the run root sends them to a directory.
+    assert str(run.catalogue) in str(caught.value)
+
+
+@pytest.mark.parametrize("candidates", ["7", '"hi"', "{}"])
+def test_a_candidates_that_is_not_an_array_is_refused(tmp_path, candidates):
+    """A string `candidates` passed the old guards by coincidence.
+
+    `"candidate_id" not in "abc"` is a substring test that answers True, so a
+    string reached planning with the right exit code for the wrong reason. A
+    number raised TypeError out of `enumerate`. Neither was checked.
+    """
+    run = _toy_run(tmp_path)
+    catalogue = read_json(run.catalogue)
+    catalogue["candidates"] = json.loads(candidates)
+    write_json(run.catalogue, catalogue)
+    with pytest.raises(UsageError):
+        slices.write_slices(run, cap=2500)
+
+
+def test_a_candidate_that_is_not_an_object_is_refused(tmp_path):
+    run = _toy_run(tmp_path)
+    catalogue = read_json(run.catalogue)
+    catalogue["candidates"] = [catalogue["candidates"][0], 7]
+    write_json(run.catalogue, catalogue)
+    with pytest.raises(UsageError) as caught:
+        slices.write_slices(run, cap=2500)
+    # The index, because a catalogue of 351 candidates is not one an operator
+    # reads end to end looking for the broken row.
+    assert "1" in str(caught.value)
+
+
+def test_a_candidate_id_that_is_present_but_not_a_string_is_refused(tmp_path):
+    """Presence was not enough, and the defect hid on the one-candidate case.
+
+    A single non-string id sorts alone and passed; two ids of different types
+    raise TypeError comparing them. So the old guard was measurably fine on a
+    one-row catalogue and fatal on any realistic one -- `_top_key` and
+    `_group_key` both read the id bare and both sort on it, which makes a
+    string id a precondition of planning rather than a tidiness check.
+    """
+    run = _toy_run(tmp_path)
+    catalogue = read_json(run.catalogue)
+    catalogue["candidates"][0]["candidate_id"] = 7
+    write_json(run.catalogue, catalogue)
+    with pytest.raises(UsageError):
+        slices.write_slices(run, cap=2500)
