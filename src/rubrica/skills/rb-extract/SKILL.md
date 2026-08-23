@@ -101,6 +101,13 @@ claims filename and the `artifact_id` declared inside it must agree,
 because that agreement is how every other stage and every downstream check
 finds you by name.
 
+**`01-claims/` does not exist when the first member is dispatched, and
+creating it is not your job.** Nothing in `src/rubrica/` mkdirs it -- your
+`Write` creates it, parents and all, and a sibling member's `Write` may have
+created it already. **Do not reach for `mkdir`.** This project's dispatch
+allows `rubrica *` through Bash and nothing else, so the command lands on an
+approval prompt that `claude -p` cannot answer.
+
 Each entry in `claims` is an object with `id`, `kind`, `statement`,
 `evidence`, `confidence`, and `derivation`. All six are required by the
 schema; do not drop one for a particular claim because it seems unimportant
