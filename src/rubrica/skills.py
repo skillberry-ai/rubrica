@@ -34,10 +34,15 @@ SKILL_FILENAME = "SKILL.md"
 # which a skill must never invent; smoke executes the
 # suite; survey mints run ids and timestamps too -- it runs before intake now
 # does, but the same prohibition applies to whichever stage mints them first.
+# reconcile-seal is here for a different reason from the other three: nothing
+# about assembling the partials is judgment, and two runs with identical
+# partials must produce a byte-identical world model or variance stops being
+# attributable to the pass that caused it -- the same ruling that makes emit
+# code. See src/rubrica/reconcile.py.
 # Every other stage in STAGES has a skill, and expected_skill_names derives
 # the list rather than restating it -- so adding a stage demands a skill
 # without anyone remembering to edit a constant.
-CODE_ONLY_STAGES: frozenset[str] = frozenset({"intake", "smoke", "survey"})
+CODE_ONLY_STAGES: frozenset[str] = frozenset({"intake", "smoke", "survey", "reconcile-seal"})
 
 # One home for the skill-directory prefix. It appeared in three places
 # before the Rubrica rename -- ORCHESTRATOR, expected_skill_names, and the

@@ -97,9 +97,24 @@ def _readable_targets(run: RunPaths) -> list[Path]:
     the one a repair should start from. tests/unit/test_refs_readable.py breaks
     each of these in turn, which is what keeps the list complete: an artifact
     missing here is one whose truncation still misdirects the repair.
+
+    Three reconcile partials -- entities, goals, gaps -- are listed although no
+    layer-2 check reads them, so this is slightly wider than its first line: they
+    are inputs to reconcile-seal, and a truncated one left unnamed here is a
+    check-refs that came back clean over a run the seal is about to choke on.
+    tests/unit/test_refs_reconcile_parts.py breaks each of the partials in turn.
     """
     targets = [run.catalogue, run.triage, run.manifest]
     targets += list_json(run.claims_dir)
+    targets += [run.subjects]
+    targets += list_json(run.contradictions_dir)
+    targets += [
+        run.capabilities_part,
+        run.outcomes_part,
+        run.entities_part,
+        run.goals_part,
+        run.gaps_part,
+    ]
     targets += [run.world_model, run.scenarios]
     targets += list_json(run.coverage_dir)
     for sid in run.scenario_ids_with_instances():
@@ -704,6 +719,264 @@ def check_limits(run: RunPaths) -> list[Finding]:
     return out
 
 
+def check_subjects(run: RunPaths) -> list[Finding]:
+    """The claim subject cover, and its totality.
+
+    Totality is the whole reason a subject cover is acceptable where a
+    code-proposed pair filter was not. A filter drops one of ~n^2/2 pairs that
+    appear nowhere on disk, so nothing can report the omission and no human can
+    overrule it; a cover names every claim, so a claim it misses is a finding
+    here. That difference is why the cover exists in this shape, and this checker
+    is the half of it that is mechanical.
+
+    The design's other clause for this checker -- every subject has at least one
+    claim -- is not here because layer 1 already has it: subjects-0.1.json
+    reaches world-model-0.1.json#/$defs/claim_refs, which carries minItems 1. A
+    property a deterministic gate already enforces belongs to that gate.
+    """
+    cover = _load(run.subjects)
+    if cover is None:
+        return []
+    out: list[Finding] = []
+
+    def report(pointer: str, message: str) -> None:
+        out.append(Finding(run.subjects, "refs", pointer, message))
+
+    subjects = _as_list(cover.get("subjects"))
+    for dupe in _dupes([s["id"] for s in subjects if isinstance(s, dict)]):
+        report("/subjects", f"duplicate subject id {dupe!r}")
+
+    known = _claim_ids(run)
+    covered: set[str] = set()
+    for i, subject in enumerate(subjects):
+        if not isinstance(subject, dict):
+            continue
+        for j, claim_id in enumerate(_as_list(subject.get("claims"))):
+            covered.add(claim_id)
+            if claim_id not in known:
+                report(f"/subjects/{i}/claims/{j}", f"no such claim: {claim_id}")
+
+    for claim_id in sorted(known - covered):
+        report(
+            "/subjects",
+            f"no subject covers claim {claim_id}; the cover must be total, or the "
+            "contradiction sweep never compares that claim against anything",
+        )
+    return out
+
+
+def check_contradiction_parts(run: RunPaths) -> list[Finding]:
+    """One contradictions part per subject in the cover, and its references.
+
+    **Meaningful only once every fan-out member has finished.** This reports every
+    subject without a part from the moment 01-contradictions/ exists, so mid-
+    fan-out most of them are missing by construction -- exactly the caveat
+    check_verdicts carries, and for the same reason. There is no stage-scoped
+    check-refs: check_all runs every checker the run has inputs for.
+
+    The subject_id *field* is checked against the *filename* because they answer
+    different questions: the filename is the slice the member was dispatched with,
+    the field is the slice it believed it was working on. A mismatch means one
+    member wrote a sibling's slice, which is the failure the fourth dispatch
+    argument exists to prevent and which no schema can see.
+
+    Both sides of every recorded contradiction must also be claims the part's own
+    subject names -- rb-reconcile-contradict's invariant 3, and until this clause
+    existed nothing enforced it: the two claim ids were resolved against the whole
+    run, so a member reaching outside its slice was clean. A claim outside a
+    member's own subject is a sibling member's to sweep, so recording it here
+    would double-count what that sibling already covers, and the finding belongs
+    on the part. This stays a **reference** check, in layer 2's remit: does this
+    id appear in that subject's claim list. Whether the two claims genuinely
+    contradict is semantic, and nothing here judges it.
+    """
+    cover = _load(run.subjects)
+    if cover is None or not run.contradictions_dir.is_dir():
+        return []
+    out: list[Finding] = []
+    declared = {
+        s["id"] for s in _as_list(cover.get("subjects")) if isinstance(s, dict) and "id" in s
+    }
+    on_disk = set(run.subject_part_ids())
+
+    # A part filename that is not a safe path segment cannot be a subject id, so
+    # it is not in on_disk and contradiction_part() cannot be asked for it. Same
+    # treatment as check_instances gives an unsafe instance directory name: a
+    # repairable defect in the pass that wrote it, so an ordinary finding at exit
+    # 1 rather than an UnsafeSegment reaching cli.py as exit 2 and taking every
+    # other finding in the run with it.
+    for name in run.unsafe_contradiction_part_names():
+        out.append(
+            Finding(
+                run.contradictions_dir,
+                "refs",
+                "",
+                f"contradictions part {name!r} is not a usable subject id: a subject id must "
+                "start with a letter or digit and contain only letters, digits, dots, dashes, "
+                "and underscores",
+            )
+        )
+
+    for subject_id in sorted(declared - on_disk):
+        out.append(
+            Finding(
+                run.contradictions_dir,
+                "refs",
+                "",
+                f"no contradictions part for subject {subject_id}; every subject needs one, "
+                "even one recording that no disagreement was found there",
+            )
+        )
+    for subject_id in sorted(on_disk - declared):
+        out.append(
+            Finding(
+                run.contradiction_part(subject_id),
+                "refs",
+                "",
+                f"contradictions part for subject {subject_id}, which 01-subjects.json does "
+                "not declare",
+            )
+        )
+
+    # Keyed only on string ids, so an id-less or non-string-id subject simply has
+    # no entry and the own-subject clause below skips its part rather than
+    # resolving against a claim list it cannot address.
+    covered_by = {
+        s["id"]: {c for c in _as_list(s.get("claims")) if isinstance(c, str)}
+        for s in _as_list(cover.get("subjects"))
+        if isinstance(s, dict) and isinstance(s.get("id"), str)
+    }
+
+    known = _claim_ids(run)
+    seen: list[str] = []
+    for path in list_json(run.contradictions_dir):
+        part = _load(path)
+        if part is None:
+            continue
+        field = _str_or_none(part.get("subject_id"))
+        # The filename/field comparison is skipped for an unsafe stem, already
+        # reported above. Its message would otherwise read "is the part for
+        # 'subject 1'", asserting that an unusable stem is the subject this file
+        # belongs to -- a second finding restating the first, and doing it with a
+        # false clause. The contents are still checked below: nothing here joins
+        # a path, so an unsafe name is no hazard once list_json has handed it over.
+        if field is not None and field != path.stem and is_safe_segment(path.stem):
+            out.append(
+                Finding(
+                    path,
+                    "refs",
+                    "/subject_id",
+                    f"declares subject_id {field!r} but is the part for {path.stem!r}",
+                )
+            )
+        # The claim list of the subject this file *is* the part for, or None when
+        # the cover does not declare that subject at all -- already reported above
+        # as an undeclared part, so the clause below stays quiet rather than adding
+        # a second finding derived from the same absence.
+        own = covered_by.get(path.stem)
+        for i, contradiction in enumerate(_as_list(part.get("contradictions"))):
+            if not isinstance(contradiction, dict):
+                continue
+            # _str_or_none, not str(): str(None) produced the literal id 'None',
+            # so an id-less contradiction in two parts drew "duplicate
+            # contradiction id 'None' across parts" and sent the one bounded
+            # repair after an id that exists nowhere. The real defect -- a missing
+            # required `id` -- is contradictions-part-0.1.json's, at layer 1.
+            contradiction_id = _str_or_none(contradiction.get("id"))
+            if contradiction_id is not None:
+                seen.append(contradiction_id)
+            for side in ("claim_a", "claim_b"):
+                claim_id = contradiction.get(side)
+                if claim_id not in known:
+                    out.append(
+                        Finding(
+                            path,
+                            "refs",
+                            f"/contradictions/{i}/{side}",
+                            f"no such claim: {claim_id}",
+                        )
+                    )
+                elif own is not None and claim_id not in own:
+                    # Reached only after `claim_id in known` succeeded, so the
+                    # value is hashable here and this set membership cannot raise
+                    # TypeError on a list- or dict-valued side.
+                    out.append(
+                        Finding(
+                            path,
+                            "refs",
+                            f"/contradictions/{i}/{side}",
+                            f"claim {claim_id} is not one subject {path.stem!r} names; both "
+                            "sides of a contradiction must be claims this subject covers, "
+                            "since a claim outside this subject is a sibling member's to "
+                            "sweep, not this one's",
+                        )
+                    )
+    for dupe in _dupes(seen):
+        out.append(
+            Finding(
+                run.contradictions_dir,
+                "refs",
+                "",
+                f"duplicate contradiction id {dupe!r} across parts",
+            )
+        )
+    return out
+
+
+def check_outcomes(run: RunPaths) -> list[Finding]:
+    """Every declared capability has outcome classes, and no others do.
+
+    The completeness half is what splitting the outcomes pass out bought: an
+    unswept capability shrinks the coverage denominator, and a run can reach high
+    coverage that way without ever testing anything hard. Nothing checked it while
+    both lived in one turn.
+
+    Both clauses overlap a branch of reconcile.seal's refusal, deliberately: the
+    layers fire at different times. The seal refuses before writing a world model;
+    this reports on a run at any stage, including one that is never sealed. What
+    neither clause can see is *two outcome records for one capability*: the
+    `recorded` set comprehension below collapses them to one member, so neither
+    direction of its comparison reports anything and the seal stays the only place
+    a duplicate outcomes record is ever caught.
+    """
+    capabilities = _load(run.capabilities_part)
+    outcomes = _load(run.outcomes_part)
+    if capabilities is None or outcomes is None:
+        return []
+    out: list[Finding] = []
+    declared = [
+        c["id"]
+        for c in _as_list(capabilities.get("capabilities"))
+        if isinstance(c, dict) and "id" in c
+    ]
+    recorded = {
+        e["capability_id"]
+        for e in _as_list(outcomes.get("outcomes"))
+        if isinstance(e, dict) and "capability_id" in e
+    }
+    for capability_id in sorted(set(declared) - recorded):
+        out.append(
+            Finding(
+                run.outcomes_part,
+                "refs",
+                "/outcomes",
+                f"no outcome classes for declared capability {capability_id}; the coverage "
+                "denominator counts capability x outcome-class cells, so a capability left "
+                "unswept shrinks the surface every later percentage is measured against",
+            )
+        )
+    for capability_id in sorted(recorded - set(declared)):
+        out.append(
+            Finding(
+                run.outcomes_part,
+                "refs",
+                "/outcomes",
+                f"outcome classes for {capability_id}, which 01-capabilities.json does not declare",
+            )
+        )
+    return out
+
+
 def check_world_model(run: RunPaths) -> list[Finding]:
     """Internal consistency of the world model, including the denominator."""
     world = _load(run.world_model)
@@ -787,8 +1060,8 @@ def check_claim_utilisation(run: RunPaths) -> list[Finding]:
     were uncited and almost all of those drops were correct, so a threshold would
     have failed a run whose rb-reconcile was behaving. Zero is indefensible under
     every reading -- a human registered that input through intake, so either
-    rb-extract produced nothing usable from it or rb-reconcile ignored a whole
-    artifact.
+    rb-extract produced nothing usable from it or the reconcile passes ignored a
+    whole artifact.
     """
     out: list[Finding] = []
     for entry in claim_utilisation(run)["artifacts"]:
@@ -1719,6 +1992,9 @@ def check_all(run: RunPaths) -> list[Finding]:
     findings.extend(check_inputs(run))
     findings.extend(check_admitted_inputs(run))
     findings.extend(check_limits(run))
+    findings.extend(check_subjects(run))
+    findings.extend(check_contradiction_parts(run))
+    findings.extend(check_outcomes(run))
     findings.extend(check_world_model(run))
     findings.extend(check_claim_utilisation(run))
     findings.extend(check_scenarios(run))

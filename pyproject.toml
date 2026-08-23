@@ -16,6 +16,15 @@ classifiers = [
 ]
 dependencies = [
     "jsonschema>=4.23",
+    # Declared although jsonschema already pulls it in: validate.py imports
+    # Registry, Resource, DRAFT202012 and Unresolvable directly, and every
+    # partial schema's cross-file `$ref` resolves through that registry. An
+    # undeclared direct import survives only while some other dependency happens
+    # to keep it installed. The floor is not a tightening: jsonschema>=4.23
+    # already requires referencing>=0.28.4 (checked against the installed
+    # metadata), so this line records a dependency that was always there rather
+    # than adding a constraint.
+    "referencing>=0.28.4",
     "tomli-w>=1.1",
 ]
 

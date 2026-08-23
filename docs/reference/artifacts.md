@@ -64,8 +64,8 @@ this, never the prose criterion, which stays a human's call).
 - **Schema:** `src/rubrica/schema/manifest-0.1.json`
 - **Written by:** `intake` (code); amended by `rb-orchestrate`'s
   `record-stage` and `set-limit` calls
-- **Read by:** `rb-extract`, `rb-reconcile`, `rb-propose`, `rb-score`,
-  `rb-orchestrate`
+- **Read by:** `rb-extract`, every `rb-reconcile-*` pass, `reconcile-seal`
+  (code), `rb-propose`, `rb-score`, `rb-orchestrate`
 - **Path:** `manifest.json`
 
 The run's identity: `run_id`, `target` (name and interface), the registered
@@ -73,16 +73,17 @@ The run's identity: `run_id`, `target` (name and interface), the registered
 `sha256`, `kind`, and `bytes`), the current `limits` (`max_rounds`,
 `max_scenarios`), and `stages` — one entry per stage that has actually run,
 recording the `model`, `effort`, and `skill_sha256` `record-stage` computed
-from the skill file used. `stages` gains entries for the seven skill-run stages
+from the skill file used. `stages` gains one entry per prompt stage
 between `extract` and `emit`, plus `triage` — which is recorded **after** gate
 0 rather than when it ran, because a run minted by `survey` has no manifest to
 merge into until `intake --run` writes one
 ([`docs/guides/running-a-stage-by-hand.md`](../guides/running-a-stage-by-hand.md)
-§4 has the command). `intake`, `smoke`, and `survey` are code: they have no
-skill file for `record-stage` to hash, so they never appear there, and their
-absence is not a finding. The schema's `propertyNames` enum permits all eleven
-stage names — it constrains the vocabulary, not which of them a real run
-records.
+§4 has the command). `intake`, `smoke`, `survey`, and `reconcile-seal` are
+code: they have no skill file for `record-stage` to hash, so they never appear
+there, and their absence is not a finding. The schema's `propertyNames` enum
+permits exactly `paths.STAGES` — `tests/unit/test_manifest_stages.py` holds the
+two equal, in order — so it constrains the vocabulary, not which of them a real
+run records.
 
 Fields worth knowing: `inputs[].provenance` (present only for an input that
 came from inside a container file or from a projection — `container_sha256`
@@ -94,7 +95,9 @@ the skill was edited after that stage ran — the hook working, not a defect.
 
 - **Schema:** `src/rubrica/schema/claims-0.1.json`
 - **Written by:** `extract`, run as `rb-extract` (fan-out, one file per input)
-- **Read by:** `rb-reconcile`
+- **Read by:** every `rb-reconcile-*` pass — all of them read all of
+  `01-claims/`, because the family is split on output, not on claims;
+  `check-refs`
 - **Path:** `01-claims/<artifact_id>.json`
 
 One atomic, evidence-backed statement per claim, extracted from exactly one
@@ -109,16 +112,198 @@ Fields worth knowing: `claims[].kind` (`capability`, `entity`, `invariant`,
 into the world model); `claims[].evidence[].locator` (required on every claim,
 so a claim with no way to find where it came from cannot exist).
 
+## The reconcile partials
+
+The seven entries below are one logical step — building the world model —
+engineered as bounded passes, each writing its own slice into the `01-` band
+and none of them reading `01-world-model.json`. `reconcile-seal` assembles them
+into that file, which is unchanged: nothing downstream of the seal knows the
+partials exist. It reads every one of them but `01-subjects.json` — the world
+model has no subjects field, so the cover is an input to the contradiction
+fan-out, to `reconcile-gaps`, and to `check-refs`, not to the seal. Each pass
+is a stage in
+`paths.STAGES`, so `rubrica validate --stage reconcile-<pass>` gates exactly one
+of these kinds.
+
+Every one of these schemas resolves its element definitions against
+`world-model-0.1.json#/$defs/...` through `validate._schema_registry`, rather
+than restating them — a duplicated `$defs/entity` that fell behind would make a
+partial accept an element the sealed world model then rejects.
+`capabilities-part` is the single exception and says so in its own entry.
+
+## `subjects`
+
+- **Schema:** `src/rubrica/schema/subjects-0.1.json`
+- **Written by:** `reconcile-subjects`, run as `rb-reconcile-subjects`
+- **Read by:** `rb-reconcile-contradict` (which is fanned out over it),
+  `rb-reconcile-gaps`; `check-refs`
+- **Path:** `01-subjects.json`
+
+A cover of every claim in `01-claims/`, grouping them into subjects so the
+contradiction sweep can be fanned out without any member losing sight of a
+claim it needs to compare against. A **cover, not a partition**: a claim may
+appear under several subjects, and the pass is instructed to over-assign when
+the subject is unclear, because a claim in no subject is never compared against
+anything. That is what a heuristic pair filter could not give — `check-refs`
+holds the cover to totality, so every claim id in the run appears here.
+
+Fields worth knowing: `subjects[].claims` (a `claim_refs` array, so it can
+never be empty); `subjects[].note` (optional, for why a claim was assigned
+where a reader would not expect it).
+
+## `contradictions-part`
+
+- **Schema:** `src/rubrica/schema/contradictions-part-0.1.json`
+- **Written by:** `reconcile-contradict`, run as `rb-reconcile-contradict`
+  (fan-out, one file per subject)
+- **Read by:** `rb-reconcile-capabilities`, `rb-reconcile-outcomes`,
+  `rb-reconcile-entities`, `rb-reconcile-goals`, `rb-reconcile-gaps`,
+  `reconcile-seal` (code); `check-refs`
+- **Path:** `01-contradictions/<subject_id>.json`
+
+What one fan-out member found within its own subject, reading every claim in
+that subject **across all input files** — which is what preserves
+cross-artifact contradiction detection through the fan-out. Each part names the
+`subject_id` it was dispatched with, and a member never sees a sibling's file.
+
+An **empty `contradictions` array is a real record**, not a missing one: it
+says this member swept this subject and found no disagreement. That is why the
+array carries no `minItems`, and why the layer-2 check requires a file per
+subject rather than a non-empty one. The contradictions recorded here are a
+constraint on every later pass — a disagreement recorded `unresolved` may not
+be quietly settled by how a later pass chooses to model the thing.
+
+Fields worth knowing: `contradictions[]` is
+`world-model-0.1.json#/$defs/contradiction` itself, so `resolution` is the same
+four-value enum (`unresolved`, `preferred_a`, `preferred_b`, `both_possible`)
+the sealed world model carries.
+
+## `capabilities-part`
+
+- **Schema:** `src/rubrica/schema/capabilities-part-0.1.json`
+- **Written by:** `reconcile-capabilities`, run as `rb-reconcile-capabilities`
+- **Read by:** `rb-reconcile-outcomes`, `rb-reconcile-entities`,
+  `rb-reconcile-goals`, `rb-reconcile-gaps`, `reconcile-seal` (code)
+- **Path:** `01-capabilities.json`
+
+Each capability's identity, `operation`, `params` and `binding` — and **no
+`outcome_classes`**, which are the next pass's output. Writing the capability
+list to a file is the point of splitting the two: `rb-reconcile-outcomes` then
+quantifies over a list it can read, rather than over a memory of having just
+written one.
+
+The one place in this family where a definition is restated rather than
+`$ref`'d. `$defs/capability_core` is `world-model-0.1.json#/$defs/capability`
+minus `outcome_classes`, and JSON Schema cannot express that subtraction while
+`additionalProperties: false` holds — a `$ref` plus an override does not
+compose under it. Four of `capability_core`'s properties (`id`, `binding`,
+`params`, `claims`) still `$ref` the world model and cannot drift; `operation`
+and `confidence` are genuinely copied.
+`tests/unit/test_schema_part_sharing.py` is the compensating control, and it
+compares the two definitions **element for element** — every property shape
+with refs normalised, plus the `required` list — not just their names, because a
+fourth value added to the world model's `confidence` enum would pass a name
+check while making `capabilities-part` reject a document `reconcile-seal`
+accepts. Measured red in both directions, so the duplication cannot drift
+silently.
+
+Fields worth knowing: `capabilities[].binding` (optional in the schema and
+required by `emit`, which reports a finding for an accepted scenario whose
+capability has none — so a capability without one is a defect deferred, not
+avoided).
+
+## `outcomes-part`
+
+- **Schema:** `src/rubrica/schema/outcomes-part-0.1.json`
+- **Written by:** `reconcile-outcomes`, run as `rb-reconcile-outcomes`
+- **Read by:** `rb-reconcile-gaps`, `reconcile-seal` (code); `check-refs`
+- **Path:** `01-outcomes.json`
+
+A **join table, not a collection**: `outcome_classes` is nested inside the
+capability object in the world model, so this pass cannot write a sibling
+array. Each entry names a `capability_id` from `01-capabilities.json` and the
+outcome classes for it, and `reconcile-seal` folds each entry into its
+capability.
+
+Fields worth knowing: `outcomes[].outcome_classes[].kind` (the same five-value
+enum the world model uses — `success`, `empty`, `not_found`, `error`,
+`underspecified`; `underspecified` is the one that records "nothing addresses
+this", which is not the same as silence, and dropping it costs the coverage
+denominator a column for every capability).
+
+## `entities-part`
+
+- **Schema:** `src/rubrica/schema/entities-part-0.1.json`
+- **Written by:** `reconcile-entities`, run as `rb-reconcile-entities`
+- **Read by:** `rb-reconcile-goals`, `rb-reconcile-gaps`, `reconcile-seal`
+  (code)
+- **Path:** `01-entities.json`
+
+The entities, with their fields, relations and invariants, quantified over the
+capabilities already declared in `01-capabilities.json`: if a claim spells out
+the shape a capability returns, that shape becomes an entity here. Elements are
+`world-model-0.1.json#/$defs/entity`, so the sealed world model accepts exactly
+what this file carries.
+
+Fields worth knowing: `entities[].invariants[].machine` versus `.prose` — the
+same distinction the `world-model` entry describes, and the same consequence:
+`prose` leaves the reachability gate nothing to evaluate, while a `machine`
+invariant promoted from an inference fails every seed that is actually correct.
+
+## `goals-part`
+
+- **Schema:** `src/rubrica/schema/goals-part-0.1.json`
+- **Written by:** `reconcile-goals`, run as `rb-reconcile-goals`
+- **Read by:** `rb-reconcile-gaps`, `reconcile-seal` (code)
+- **Path:** `01-goals.json`
+
+Actors and the goals they hold. Its own pass rather than folded into entities
+because goals are half the frozen denominator: `reconcile-seal` counts them,
+`rb-propose` designs against exactly this list, and a later stage may only
+*request* an amendment — which costs an explicit orchestrator decision and a
+`denominator_version` bump. Actors travel with goals in the same file because
+every goal needs a real `actor_id` to resolve.
+
+Fields worth knowing: `goals[].expected_hop_depths` (as in the world model, the
+multi-hop depths a goal is expected to be tested at); both arrays lack
+`minItems`, because a corpus that establishes no actor is a fact for
+`rb-reconcile-gaps` to record rather than one for the schema to forbid.
+
+## `gaps-part`
+
+- **Schema:** `src/rubrica/schema/gaps-part-0.1.json`
+- **Written by:** `reconcile-gaps`, run as `rb-reconcile-gaps`
+- **Read by:** `reconcile-seal` (code)
+- **Path:** `01-gaps.json`
+
+Last of the prompt passes on purpose. It reads every prior partial as well as
+every claim, because the refusal conditions of every pass before it resolve to
+"record a gap instead" — so the pass that writes gaps is the one positioned to
+audit what its predecessors declared: a capability with no supporting claim, an
+invariant promoted to `machine` on an inference, an outcome class nothing
+states.
+
+An empty `gaps` array is legal and is a strong claim: a world model with no
+gaps, built from claims that leave things unstated, has erased the silence
+rather than recorded it.
+
+Fields worth knowing: `gaps[].blocks` (the later stages a gap makes
+unsafe — a gap blocking `propose` is what makes the orchestrator halt, so it is
+named honestly rather than narrowly, and never left empty to avoid a halt).
+
 ## `world-model`
 
 - **Schema:** `src/rubrica/schema/world-model-0.1.json`
-- **Written by:** `reconcile`, run as `rb-reconcile`
+- **Written by:** `reconcile-seal` (code), via `rubrica reconcile-seal`, from
+  the partials above — every one of them but `01-subjects.json`, which has no
+  counterpart field here
 - **Read by:** `rb-propose`, `rb-score`, `rb-instantiate`, `emit` (code),
   `rb-orchestrate`; `check-refs`
 - **Path:** `01-world-model.json`
 
-The single reconciled picture of the target system, built from every claim
-`rb-extract` produced: `capabilities`, `entities`, `actors`, `goals`, recorded
+The single reconciled picture of the target system, assembled from the
+partials the `reconcile-*` passes wrote out of every claim `rb-extract`
+produced: `capabilities`, `entities`, `actors`, `goals`, recorded
 `contradictions` (disagreements carried forward rather than silently
 resolved), recorded `gaps` (things no input says anything about, each naming
 which later stages it `blocks`), and a `denominator` frozen at a `version` for
@@ -130,7 +315,7 @@ that support it.
 false` on both — a param must additionally state whether it is `required`,
 and a field cannot state that at all — and neither has anywhere in the schema
 to record that a field's value must be, say, one of three enumerated strings.
-So every concrete value anywhere downstream of `reconcile` is a prescription
+So every concrete value anywhere downstream of the seal is a prescription
 `rb-instantiate` invents, never an assertion grounded in a claim. See
 [`docs/design/limitations.md`](../design/limitations.md) for what this rules
 out checking.

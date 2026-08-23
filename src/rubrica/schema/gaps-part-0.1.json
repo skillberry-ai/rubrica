@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gaps-part-0.1.json",
+  "title": "Gaps, and the cross-pass audit",
+  "description": "Last of the prompt passes on purpose: it reads every prior partial as well as every claim, because the refusal conditions of every pass before it resolve to 'record a gap instead', so the pass that writes gaps is the one positioned to audit what its predecessors declared. An empty gaps array is legal and is a strong claim -- a world model with no gaps, built from claims that leave things unstated, has erased the silence rather than recorded it.",
+  "type": "object",
+  "required": ["schema_version", "gaps"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "gaps": {
+      "type": "array",
+      "items": {"$ref": "world-model-0.1.json#/$defs/gap"}
+    }
+  }
+}

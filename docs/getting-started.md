@@ -329,7 +329,7 @@ straight from the three `--input` files named on the command line.
 
 No command in this repository dispatches a model. `survey`, `intake`,
 `validate`, `check-refs`, and every other subcommand above are code — the
-dispatch of `rb-triage`, and of the seven stages from `extract` through
+dispatch of `rb-triage`, and of the prompt stages from `extract` through
 `emit`, happens by pointing an agent at a skill file and a run directory.
 
 `rb-orchestrate` — `src/rubrica/skills/rb-orchestrate/SKILL.md` — is the skill
@@ -337,7 +337,7 @@ that drives a whole run once a manifest exists. Point an agent at it with a
 run directory and it dispatches one subagent per stage from `extract`
 through `emit`, gates every artifact before the next stage sees it, holds the
 round loop between propose and score, holds the three human gates after
-reconcile, score, and challenge, spends at most one repair attempt per stage
+the reconcile seal, score, and challenge, spends at most one repair attempt per stage
 failure, and records what it did — the model, the skill's hash, and every
 branch it took — so the run explains itself afterward. It never runs
 `survey`, never dispatches `rb-triage`, and never holds gate 0: all three are
@@ -358,10 +358,12 @@ what an earlier stage concluded, no excerpt of this page or anything else under
 `docs/`, no "by the way" context. If a stage needs a fact, it reads it from an
 artifact its skill's contract lists, or it does not have it.
 
-The three fan-out stages — `extract`, `instantiate`, `challenge` — get a
-fourth thing: the id of their own slice (an `artifact_id` or `scenario_id`).
-That id is an address, never a hint about what a sibling found, and never a
-sibling's own id.
+The fan-out stages — `extract`, `reconcile-contradict`, `instantiate`,
+`challenge` — get a fourth thing: the id of their own slice (an `artifact_id`, a
+`subject_id` or a `scenario_id`). That id is an address, never a hint about what
+a sibling found, never a sibling's own id, and never the slice's contents: a
+`reconcile-contradict` member reads its own subject's claim list out of
+`01-subjects.json` itself.
 
 [`docs/concepts/artifact-contract.md`](concepts/artifact-contract.md) covers
 the rest of this rule — including the two things an orchestrator may append

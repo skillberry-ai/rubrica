@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from rubrica.paths import RunPaths
 from rubrica.refs import check_all, check_readable
+from tests.builders import minimal_subjects
 from tests.unit.test_refs_states import build_state
 
 
@@ -60,6 +61,18 @@ def test_every_artifact_kind_layer_two_reads_is_covered(tmp_path):
     for path in (
         run.manifest,
         run.claims("aap2-api"),
+        # The seven reconcile partials, each proved covered individually. Three of
+        # them -- entities, goals, gaps -- have no layer-2 checker reading them at
+        # all; they are listed in _readable_targets because they are the seal's
+        # inputs, and a truncated one left unnamed is a check-refs that came back
+        # clean over a run the seal is about to choke on.
+        run.subjects,
+        run.contradiction_part(minimal_subjects()["subjects"][0]["id"]),
+        run.capabilities_part,
+        run.outcomes_part,
+        run.entities_part,
+        run.goals_part,
+        run.gaps_part,
         run.world_model,
         run.scenarios,
         run.coverage_latest,

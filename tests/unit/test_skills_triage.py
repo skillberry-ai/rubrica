@@ -220,8 +220,9 @@ def test_the_refusal_section_forbids_refusing_over_one_bad_digest():
 
 
 def test_the_output_section_names_schema_version_and_the_run_id_it_reads():
-    """Every other stage skill states its `schema_version` (rb-extract,
-    rb-reconcile, rb-propose, rb-score, rb-challenge, rb-instantiate); rb-triage
+    """Every other stage skill states its `schema_version` (rb-extract, the
+    rb-reconcile-* passes, rb-propose, rb-score, rb-challenge, rb-instantiate);
+    rb-triage
     named neither it nor `run_id`, and `triage-0.1.json` requires both at the
     document root. Nothing pinned it, which is the same defect the task review
     caught one level up for `authority`.

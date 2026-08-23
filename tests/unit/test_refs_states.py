@@ -39,14 +39,21 @@ from rubrica.review import sample_run
 from tests.builders import (
     MINIMAL_INPUT_BYTES,
     MINIMAL_INPUT_NAME,
+    minimal_capabilities_part,
     minimal_claims,
+    minimal_contradictions_part,
     minimal_coverage,
+    minimal_entities_part,
     minimal_expected,
+    minimal_gaps_part,
+    minimal_goals_part,
     minimal_gold,
     minimal_manifest,
+    minimal_outcomes_part,
     minimal_report,
     minimal_scenarios,
     minimal_seed,
+    minimal_subjects,
     minimal_verdict,
     minimal_world_model,
 )
@@ -72,7 +79,35 @@ def _extract(run: RunPaths) -> None:
     write_json(run.claims("aap2-api"), minimal_claims())
 
 
-def _reconcile(run: RunPaths) -> None:
+def _reconcile_parts(run: RunPaths) -> None:
+    """Every partial the seven prompt passes write, and no world model yet.
+
+    A state the pipeline really passes through, and the reason it is its own
+    entry: between the last pass and the seal, check_all sees seven partials with
+    nothing assembled from them. check_subjects, check_contradiction_parts and
+    check_outcomes all run here, so each of the builders' mutual-consistency
+    properties -- a total cover, a part per subject, one outcomes record per
+    declared capability -- is being asserted as clean rather than assumed.
+    """
+    write_json(run.subjects, minimal_subjects())
+    part = minimal_contradictions_part()
+    write_json(run.contradiction_part(part["subject_id"]), part)
+    write_json(run.capabilities_part, minimal_capabilities_part())
+    write_json(run.outcomes_part, minimal_outcomes_part())
+    write_json(run.entities_part, minimal_entities_part())
+    write_json(run.goals_part, minimal_goals_part())
+    write_json(run.gaps_part, minimal_gaps_part())
+
+
+def _reconcile_seal(run: RunPaths) -> None:
+    """The assembled world model.
+
+    minimal_world_model() rather than reconcile.seal(run), unlike tests/toy.py's
+    builder: the payloads here are the *smallest* each schema accepts and exist to
+    be mutated one key at a time, so the state has to be writable without also
+    being sealable. The seal's own round trip over the partials is pinned in
+    tests/unit/test_reconcile_seal.py, against the golden world model.
+    """
     write_json(run.world_model, minimal_world_model())
 
 
@@ -190,7 +225,8 @@ STATES: list[tuple[str, Callable[[RunPaths], None] | None]] = [
     ("empty", None),
     ("intake", _intake),
     ("extract", _extract),
-    ("reconcile", _reconcile),
+    ("reconcile-gaps", _reconcile_parts),
+    ("reconcile-seal", _reconcile_seal),
     ("propose", _propose),
     ("score", _score),
     ("instantiate", _instantiate),

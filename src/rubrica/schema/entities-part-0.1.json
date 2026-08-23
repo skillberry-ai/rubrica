@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "entities-part-0.1.json",
+  "title": "Entities, with their invariants and relations",
+  "description": "rb-reconcile-entities' output, quantified over the capabilities already declared in 01-capabilities.json: if a claim spells out the shape a capability returns, that shape becomes an entity here.",
+  "type": "object",
+  "required": ["schema_version", "entities"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "entities": {
+      "type": "array",
+      "items": {"$ref": "world-model-0.1.json#/$defs/entity"}
+    }
+  }
+}

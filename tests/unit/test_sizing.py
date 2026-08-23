@@ -94,7 +94,7 @@ def test_the_formula_is_pinned_on_synthetic_numbers(tmp_path):
     ceil(11 / 0.75) = 15, now under the same ceiling -- ceiling_binding false,
     exercising both directions of that flag from one fixture.
     """
-    run = build_toy_run(tmp_path / "runs", upto="reconcile", max_scenarios=16)
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal", max_scenarios=16)
     world = {
         "schema_version": "0.1",
         "target": {"name": "synthetic", "interface": "mcp"},
@@ -192,7 +192,7 @@ def test_implied_size_is_none_on_a_present_but_malformed_world_model(tmp_path):
     defect (validate's finding to raise, not this diagnostic's) -- guards the
     review finding that `read_json`'s ArtifactError reached gate-brief
     unguarded and turned a report into exit 2."""
-    run = build_toy_run(tmp_path / "runs", upto="reconcile")
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     run.world_model.write_text("{not valid json", encoding="utf-8")
     assert sizing.implied_size(run) is None
 
@@ -201,7 +201,7 @@ def test_implied_size_is_none_when_denominator_is_missing(tmp_path):
     """A schema-shaped document with no `denominator` key at all raises
     KeyError out of `world["denominator"]["capability_cells"]` -- a malformed
     artifact, not this function's to surface as an exception."""
-    run = build_toy_run(tmp_path / "runs", upto="reconcile")
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     world = read_json(run.world_model)
     del world["denominator"]
     write_json(run.world_model, world)

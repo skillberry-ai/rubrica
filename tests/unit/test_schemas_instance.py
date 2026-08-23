@@ -155,20 +155,47 @@ def test_no_schema_pattern_uses_a_caret_dollar_anchor(kind, tmp_path):
     """
     text = (schema_dir() / ARTIFACT_SCHEMAS[kind]).read_text(encoding="utf-8")
     schema = json.loads(text)
+    seen: set[tuple[str, str]] = set()
 
-    def patterns(node):
-        """Every string value of a "pattern" key, at any depth."""
+    def resolve(ref: str, home: str) -> tuple[dict, str]:
+        """The subschema `ref` points at, plus the file it now lives in.
+
+        Refs are followed rather than stopped at, because the reconcile partials
+        own no `pattern` of their own: their ids are
+        `world-model-0.1.json#/$defs/id`, resolved at validation time through
+        validate._schema_registry. Stopping at the ref would make `found` empty
+        for all seven of them, and the `assert found` guard below -- which is
+        what stops this test passing vacuously -- would have to be dropped. This
+        way it keeps its teeth, and gains some: a partial that pointed at a
+        definition anchored with ^ or $ is now caught here too.
+        """
+        filename, _, pointer = ref.partition("#")
+        filename = filename or home
+        node = json.loads((schema_dir() / filename).read_text(encoding="utf-8"))
+        for part in pointer.lstrip("/").split("/"):
+            if part:
+                node = node[part.replace("~1", "/").replace("~0", "~")]
+        return node, filename
+
+    def patterns(node, home: str):
+        """Every string value of a "pattern" key, at any depth, refs followed."""
         if isinstance(node, dict):
             for key, value in node.items():
                 if key == "pattern" and isinstance(value, str):
                     yield value
+                elif key == "$ref" and isinstance(value, str):
+                    if (home, value) in seen:
+                        continue  # $defs/machine and friends are self-recursive.
+                    seen.add((home, value))
+                    target, target_home = resolve(value, home)
+                    yield from patterns(target, target_home)
                 else:
-                    yield from patterns(value)
+                    yield from patterns(value, home)
         elif isinstance(node, list):
             for item in node:
-                yield from patterns(item)
+                yield from patterns(item, home)
 
-    found = list(patterns(schema))
+    found = list(patterns(schema, ARTIFACT_SCHEMAS[kind]))
     assert found, f"{kind} declares no patterns; the table in the plan says it should"
     for pattern in found:
         assert not pattern.startswith("^"), f"{kind}: {pattern!r} still uses ^"

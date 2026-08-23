@@ -60,7 +60,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from rubrica import brief, refs, skills, survey, triage
+from rubrica import brief, reconcile, refs, skills, survey, triage
 from rubrica.artifacts import ArtifactError, read_json
 from rubrica.dedupe import candidate_pairs
 from rubrica.emit import emit_run
@@ -91,6 +91,7 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("adopt-projection", "admit a manufactured projection into the catalogue, structurally"),
     ("validate", "schema-validate one stage's output"),
     ("check-refs", "cross-artifact and reachability checks"),
+    ("reconcile-seal", "assemble the reconcile partials into one world model"),
     ("dedupe-candidates", "propose candidate duplicate scenario pairs as JSON"),
     ("emit", "compile accepted instances into Harbor packages"),
     ("smoke", "run the emitted suite against the agent roster"),
@@ -182,6 +183,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_emit = parsers["emit"]
     p_emit.add_argument("--run", required=True)
+
+    p_seal = parsers["reconcile-seal"]
+    p_seal.add_argument("--run", required=True)
+    # Passed rather than inferred: an amendment to the frozen goal list costs an
+    # explicit orchestrator decision, and a seal that incremented a version it
+    # found on disk would let the denominator move without one on the record.
+    p_seal.add_argument("--denominator-version", type=int, default=1)
 
     p_smoke = parsers["smoke"]
     p_smoke.add_argument("--run", required=True)
@@ -446,6 +454,13 @@ def main(argv: list[str] | None = None) -> int:
             emitted, findings = emit_run(run)
             for sid in emitted:
                 print(run.task_dir(sid))
+            return _report(findings)
+
+        if args.command == "reconcile-seal":
+            run = _run_dir(args.run)
+            world, findings = reconcile.seal(run, denominator_version=args.denominator_version)
+            if world is not None:
+                print(world)
             return _report(findings)
 
         if args.command == "smoke":

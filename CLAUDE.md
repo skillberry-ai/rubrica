@@ -50,7 +50,9 @@ path. No conversational context is threaded through. If a stage needs a fact it
 reads it from an artifact, or it does not have it.
 
 Fan-out members get a fourth thing: the id of their own slice (`artifact_id`,
-`scenario_id`). Never a sibling's.
+`subject_id`, `scenario_id`). Never a sibling's, and never the slice's
+*contents* — `rb-reconcile-contradict` gets a `subject_id` and reads that
+subject's claim list out of `01-subjects.json` itself.
 
 The orchestrator may append exactly two things to a re-dispatch, both verbatim
 machine text, never paraphrased: a repair's gate findings, and a re-seed's
@@ -68,7 +70,14 @@ finding's clothes.
 | — | triage | `rb-triage` | validate · check-refs · **human gate 0** |
 | `00` | intake | code | validate |
 | `01a` | extract | `rb-extract` — fan-out, one per input | validate |
-| `01b` | reconcile | `rb-reconcile` — barrier | validate · check-refs · **human gate 1** |
+| `01b` | reconcile-subjects | `rb-reconcile-subjects` — barrier | validate · check-refs |
+| `01c` | reconcile-contradict | `rb-reconcile-contradict` — fan-out, one per subject | validate · check-refs |
+| `01d` | reconcile-capabilities | `rb-reconcile-capabilities` | validate · check-refs |
+| `01e` | reconcile-outcomes | `rb-reconcile-outcomes` | validate · check-refs |
+| `01f` | reconcile-entities | `rb-reconcile-entities` | validate · check-refs |
+| `01g` | reconcile-goals | `rb-reconcile-goals` | validate · check-refs |
+| `01h` | reconcile-gaps | `rb-reconcile-gaps` | validate · check-refs |
+| `01i` | reconcile-seal | code — `rubrica reconcile-seal` assembles the partials | validate · check-refs · **human gate 1** |
 | `02` | propose | `rb-propose` | validate |
 | `03` | score | `rb-score` — barrier | validate · check-refs · **human gate 2** |
 | `04` | instantiate | `rb-instantiate` — fan-out, one per active scenario | validate · check-refs |
@@ -76,11 +85,25 @@ finding's clothes.
 | `06` | emit | `rb-emit` — thin wrapper over `rubrica emit` | validate · check-refs |
 | `07` | smoke | code | validate · check-refs |
 
-Challenge's `check-refs` runs **only once every member has finished**:
-`refs.check_verdicts` reports every instance without a verdict from the moment
-`05-verdicts/` exists, so mid-fan-out most of them are missing by construction.
-`refs.check_all` runs every checker the run has inputs for, so there is no such
-thing as a stage-scoped `check-refs`.
+Rows `01b` through `01i` are **one logical step engineered as substeps.** Every
+pass reads all of `01-claims/` — the split is on *output*, not on claims, so the
+barrier property is untouched and a contradiction between two inputs is still
+visible to the pass that records it. They are separate stages rather than one
+skill branching on a slice id because `check-skills` binds one skill file to one
+stage name and `manifest.stages` records model, effort and skill digest per
+stage, which is what lets a think-heavy pass carry a different budget from a
+mechanical one. `reconcile-seal` is code for the reason `emit` is: two runs with
+identical partials must produce a byte-identical world model.
+`01-world-model.json` keeps its path, schema and byte shape, so nothing below
+the seal can tell it was assembled pass by pass rather than written in one
+dispatch.
+
+Challenge's and reconcile-contradict's `check-refs` run **only once every member
+has finished**: `refs.check_verdicts` and `refs.check_contradiction_parts` each
+report every missing slice from the moment their directory exists, so
+mid-fan-out most of them are missing by construction. `refs.check_all` runs
+every checker the run has inputs for, so there is no such thing as a
+stage-scoped `check-refs`.
 
 `survey` and `triage` have no `0N` directory prefix of their own: `survey`
 writes `00-catalogue.json` and `triage` writes `00-triage.json`, both ahead of
@@ -106,8 +129,8 @@ gates 1 through 3, and writes `decisions.md`. It never runs `survey`, never
 dispatches `rb-triage`, and never holds gate 0 — all three are finished before it
 is ever dispatched.
 
-`intake`, `smoke`, and `survey` are code, so they have no skill and no
-`manifest.stages` entry. Their absence there is not a finding.
+`intake`, `smoke`, `survey`, and `reconcile-seal` are code, so they have no
+skill and no `manifest.stages` entry. Their absence there is not a finding.
 
 ## The exit-code contract — load-bearing, do not weaken
 
@@ -190,9 +213,12 @@ are judgments rather than list entries:
   cited/total claim count for a human to read at gate 1 — the zero-utilisation
   finding it shares its arithmetic with lives in `check-refs`, never here.
   `gate-brief` composes what already exists into the reading surface at each
-  human gate: the objective verdict and grouped declines at gate 0, utilisation
-  and implied size at gate 1, the coverage matrix at gate 2, the verdict tally
-  at gate 3.
+  human gate: the objective verdict and grouped declines at gate 0; the
+  reconcile sweep plus utilisation and implied size at gate 1; the coverage
+  matrix at gate 2; the verdict tally at gate 3. Gate 1's sweep is an
+  **aggregate, not a per-subject tally** — how many subjects cover how many
+  claims, how many subjects were swept, how many contradictions were recorded,
+  and, only when any were, the tally by `resolution` with `unresolved` first.
 - `survey` is `intake`'s counterpart for the corpus path: it walks a corpus,
   digests each candidate, and mints the run, but writes `00-catalogue.json`
   instead of a manifest — there is nothing to extract from yet, because nothing
@@ -268,13 +294,24 @@ so running them is free; *producing* a recording dispatches a model and costs
 money. They are not part of `make test`, and the skip message names the command
 that runs them.
 
-Most skills also carry an `exercise.md` beside the `SKILL.md`, recording what
-**one** real dispatch measurably did — the only behavioural evidence this project
-has, and one sample is one sample. `rb-triage` is the exception and carries
-none, which is **not** explained by never having been dispatched; see
+Some skills carry an `exercise.md` beside the `SKILL.md`, recording what **one**
+real dispatch measurably did — the only behavioural evidence this project has,
+and one sample is one sample. The `reconcile-*` passes carry none yet, because
+they are new. `rb-triage` carries none for a different reason, which is **not**
+that it was never dispatched; see
 [`docs/design/limitations.md`](docs/design/limitations.md) for what those runs
-produced and why the record is not in the repository. Two rules for an exercise
-record:
+produced and why the record is not in the repository.
+
+**Counting `exercise.md` files on disk will not give you the number of skills
+that have one, and that is deliberate.** `src/rubrica/skills/rb-reconcile/` holds
+an `exercise.md` and no `SKILL.md`: it is the record of two real dispatches of
+the single-pass stage the `reconcile-*` family replaced, kept where it was rather
+than relocated into any new pass, because relocating it would assert that a
+dispatch of *that* pass did what the superseded stage actually did. Its
+`SUPERSEDED.md` says so. `skills.discover()` skips the directory, since
+`_skill_dirs` keeps only children with a `SKILL.md`.
+
+Two rules for an exercise record:
 
 - It states what **happened**. A reasoned number presented as an observed one
   corrupts the evidence; one such misattribution shipped and had to be

@@ -130,13 +130,13 @@ def test_manifest_rejects_an_unsafe_stored_as(tmp_path):
 
 def test_manifest_rejects_an_unknown_stage_name(tmp_path):
     payload = minimal_manifest()
-    payload["stages"]["reconsile"] = payload["stages"].pop("reconcile")
+    payload["stages"]["reconsile"] = payload["stages"].pop("reconcile-subjects")
     assert _findings(tmp_path, "manifest", payload)
 
 
 def test_manifest_stage_entry_needs_the_full_comparability_triple(tmp_path):
     payload = minimal_manifest()
-    del payload["stages"]["reconcile"]["skill_sha256"]
+    del payload["stages"]["reconcile-subjects"]["skill_sha256"]
     assert _findings(tmp_path, "manifest", payload)
 
 

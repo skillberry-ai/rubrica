@@ -18,7 +18,21 @@ STAGES = (
     "triage",
     "intake",
     "extract",
-    "reconcile",
+    # One logical step, engineered as substeps. Separate stages rather than one
+    # skill branching on a slice id, for two reasons that are both load-bearing:
+    # check-skills binds one skill file to one stage name, and manifest.stages
+    # records model, effort and skill digest per stage -- which is what lets a
+    # think-heavy pass carry a different budget from a mechanical one. The name
+    # prefix keeps the family legible here, where the ordering is the pipeline's
+    # documentation.
+    "reconcile-subjects",
+    "reconcile-contradict",
+    "reconcile-capabilities",
+    "reconcile-outcomes",
+    "reconcile-entities",
+    "reconcile-goals",
+    "reconcile-gaps",
+    "reconcile-seal",
     "propose",
     "score",
     "instantiate",
@@ -140,6 +154,41 @@ class RunPaths:
         return self.root / "01-claims"
 
     @property
+    def subjects(self) -> Path:
+        """The claim subject cover: every claim, assigned to one or more subjects.
+
+        In the 01 family with the rest of world-model construction, because that
+        is what the band means -- the numbering stays intake's, and everything
+        between 01-claims/ and 01-world-model.json is one logical step engineered
+        as substeps.
+        """
+        return self.root / "01-subjects.json"
+
+    @property
+    def contradictions_dir(self) -> Path:
+        return self.root / "01-contradictions"
+
+    @property
+    def capabilities_part(self) -> Path:
+        return self.root / "01-capabilities.json"
+
+    @property
+    def outcomes_part(self) -> Path:
+        return self.root / "01-outcomes.json"
+
+    @property
+    def entities_part(self) -> Path:
+        return self.root / "01-entities.json"
+
+    @property
+    def goals_part(self) -> Path:
+        return self.root / "01-goals.json"
+
+    @property
+    def gaps_part(self) -> Path:
+        return self.root / "01-gaps.json"
+
+    @property
     def world_model(self) -> Path:
         return self.root / "01-world-model.json"
 
@@ -188,6 +237,52 @@ class RunPaths:
 
     def claims(self, artifact_id: str) -> Path:
         return self.claims_dir / f"{safe_segment(artifact_id)}.json"
+
+    def contradiction_part(self, subject_id: str) -> Path:
+        return self.contradictions_dir / f"{safe_segment(subject_id)}.json"
+
+    def _contradiction_part_stems(self) -> list[str]:
+        """Every contradictions part filename on disk, without its suffix, sorted.
+
+        The shared half of the two listings below, the way _instance_dir_names is
+        for scenario_ids_with_instances and unsafe_instance_dir_names: one read of
+        the directory, partitioned twice, so the two can never disagree about what
+        is there.
+        """
+        return [path.stem for path in list_json(self.contradictions_dir)]
+
+    def subject_part_ids(self) -> list[str]:
+        """Subject ids that have a contradictions part on disk, from the filenames.
+
+        Derived from the directory rather than from 01-subjects.json on purpose:
+        this is what the fan-out actually produced, and comparing it against the
+        cover is exactly the check refs.check_contradiction_parts performs. A
+        helper that read the cover instead could never report a part nobody
+        asked for.
+
+        Names that are not safe path segments are excluded and surfaced by
+        unsafe_contradiction_part_names() instead, for the reason
+        scenario_ids_with_instances records further down this file -- an incident,
+        not a precaution: every caller joins these back onto a path, here through
+        contradiction_part(), and returning an unsafe one made the later call
+        raise UnsafeSegment, which cli.py mapped to exit 2, so one badly-named
+        entry both misreported a repairable stage defect as a misconfigured
+        harness and discarded every other finding in the run. A fan-out member
+        told to write `01-contradictions/<subject_id>.json` can emit
+        `01-contradictions/subject 1.json`, and this listing is what
+        refs.check_contradiction_parts consumes.
+        """
+        return [name for name in self._contradiction_part_stems() if is_safe_segment(name)]
+
+    def unsafe_contradiction_part_names(self) -> list[str]:
+        """Contradictions part names that are not safe path segments, sorted.
+
+        What unsafe_instance_dir_names is to the instances directory:
+        refs.check_contradiction_parts turns each into an ordinary finding, so a
+        pass that wrote a badly-named part is reported at exit 1 alongside
+        everything else rather than being silently dropped by the listing above.
+        """
+        return [name for name in self._contradiction_part_stems() if not is_safe_segment(name)]
 
     def coverage_round(self, round_n: int) -> Path:
         if round_n < 1:

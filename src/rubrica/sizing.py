@@ -39,7 +39,7 @@ def implied_size(run: RunPaths) -> dict | None:
     None rather than raising, in two different situations that share the same
     return value on purpose:
 
-    - a run stopped before reconcile legitimately has no world model yet, and
+    - a run stopped before `reconcile-seal` legitimately has no world model yet, and
       `gate-brief` (which calls this) must never fail on a readable run that
       simply has not reached that stage -- the same ruling `claim_utilisation`
       already makes for the same absence; and

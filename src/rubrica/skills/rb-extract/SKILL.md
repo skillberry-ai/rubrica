@@ -130,12 +130,13 @@ there -- an incomplete claim is a validation failure, not a smaller claim.
    anchor or a line reference for prose.
 
    `invariant` and `outcome_class` are the pair most often swapped, and the
-   swap is invisible downstream: `rb-reconcile` builds its coverage
-   denominator -- every operation crossed with its outcome classes -- only
-   from `outcome_class` claims, so a genuine error behaviour filed as
-   `invariant` does not feed that enumeration, and a column of the test
-   matrix goes missing with no schema, no `check-refs`, and no validation
-   error ever naming it. Tell the two apart by what the statement is
+   swap is invisible downstream: `rb-reconcile-outcomes` enumerates the
+   coverage denominator -- every operation crossed with its outcome classes --
+   and although it is instructed to harvest from claims of every `kind`
+   precisely because this swap happens, it is reading for a fact the wrong
+   label hides. So a genuine error behaviour filed as `invariant` can still
+   miss that enumeration, and a column of the test matrix goes missing with no
+   schema, no `check-refs`, and no validation error ever naming it. Tell the two apart by what the statement is
    *about*: a statement about what an operation returns or raises for some
    class of input is an `outcome_class`; a statement about a data or state
    rule the store maintains regardless of any call is an `invariant`. Two
@@ -160,8 +161,8 @@ there -- an incomplete claim is a validation failure, not a smaller claim.
    to a claim about a declared contract, a capability or an argument schema,
    where the moment of capture means nothing.
 
-   You are the only stage that reads this artifact. `rb-reconcile` sees claims
-   and never a trace, so an instant you leave out is one no later stage can
+   You are the only stage that reads this artifact. Every reconcile pass sees
+   claims and never a trace, so an instant you leave out is one no later stage can
    recover. Measured on a real run: two traces listing the same user's
    reservations, either side of a cancellation, produced two claims that read
    as a flat contradiction, and reconcile could only record it unresolved
@@ -176,9 +177,10 @@ there -- an incomplete claim is a validation failure, not a smaller claim.
    than off any description of intended behaviour. These three words are
    not interchangeable and not a formality: "the spec states this" and "I
    guessed from one trace" must never collapse into a claim that looks the
-   same downstream. This is what makes gap reporting at `rb-reconcile`
-   honest -- it can only weigh a claim by where it actually came from if
-   you recorded that truthfully. If you are unsure which of the three
+   same downstream. This is what makes resolution at
+   `rb-reconcile-contradict` and gap reporting at `rb-reconcile-gaps` honest --
+   neither can weigh a claim by where it actually came from unless you recorded
+   that truthfully. If you are unsure which of the three
    applies, that uncertainty belongs in `confidence`, not in quietly
    picking whichever `derivation` feels safest to write.
 
@@ -241,8 +243,8 @@ fix. Repair the artifact and validate again; report success only once
 Every condition below is one where the correct output is not a claim -- it
 is a statement that you could not honestly produce one, or that you produced
 one carrying an explicit caveat. Writing that statement is success, not
-failure: a refusal recorded here becomes a gap `rb-reconcile` can reason
-about and a hole `rb-score` can count against the denominator. An invented
+failure: a refusal recorded here becomes a gap `rb-reconcile-gaps` can
+reason about and a hole `rb-score` can count against the denominator. An invented
 answer in its place is not a rescue, it is exactly the confabulation this
 stage exists to prevent. You default to being helpful; every trigger below
 is a case where the helpful-looking move is the wrong one, and refusing
@@ -263,8 +265,8 @@ loudly is the one that is actually correct.
 - **The artifact contradicts itself.** Record both sides as separate
   claims, each with `confidence: low`. Do not pick the side that sounds
   more authoritative, average them into one hedged claim, or otherwise
-  reconcile them -- that reconciliation is `rb-reconcile`'s job, one stage
-  downstream. Doing it here is how a contradiction stops being a recorded
+  reconcile them -- that reconciliation is `rb-reconcile-contradict`'s job, a
+  few stages downstream. Doing it here is how a contradiction stops being a recorded
   fact and becomes something silently smoothed over before anyone else gets
   to see it.
 
@@ -273,7 +275,7 @@ loudly is the one that is actually correct.
   returns a list of tickets but never says what happens when the queue
   name is wrong, do not write a claim about what probably happens on a bad
   queue name -- record only what is actually there. A missing error class
-  is a gap for `rb-reconcile` to surface and a hole for `rb-score` to
+  is a gap for `rb-reconcile-gaps` to surface and a hole for `rb-score` to
   count; recording your own guess in its place erases the gap and hands
   every downstream stage a fact that nobody ever actually stated.
 
@@ -291,6 +293,6 @@ loudly is the one that is actually correct.
   other span establishes as valid" -- full stop. Appending "which is
   unusual, since APIs typically error on an unrecognized id" is the same
   observation with an unstated premise bolted on. Whether that premise is
-  true is `rb-reconcile`'s question, to be answered by comparing your claim
-  against whatever a sibling claims file independently says; it is not
+  true is `rb-reconcile-contradict`'s question, to be answered by comparing your
+  claim against whatever a sibling claims file independently says; it is not
   yours to pre-answer by assuming the convention holds here.

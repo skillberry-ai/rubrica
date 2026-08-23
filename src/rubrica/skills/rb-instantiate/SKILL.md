@@ -561,7 +561,7 @@ label costs the whole suite its credibility.
 
 - **A world-model invariant makes the seed you need impossible.** Do not
   violate the invariant to get the seed you want. Report the conflict:
-  either the invariant is wrong, which is a `rb-reconcile` defect, or the
+  either the invariant is wrong, which is a `rb-reconcile-entities` defect, or the
   scenario is, which is a `rb-propose` defect, and both are above your pay
   grade. Silently violating it is the worst available option, because a
   simulation backend recomputes the field and the label breaks at run time

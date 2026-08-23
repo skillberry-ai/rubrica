@@ -190,8 +190,17 @@ def minimal_manifest(**over: Any) -> dict[str, Any]:
                 "bytes": len(MINIMAL_INPUT_BYTES),
             }
         ],
+        # A real member of paths.STAGES, and a prompt one: manifest.stages records
+        # the model, effort and skill digest of a *dispatched* stage, so keying
+        # this on a code stage would describe an entry no run can produce. It was
+        # keyed on "reconcile" until that stage became a family, which is the drift
+        # the schema's propertyNames enum exists to catch.
         "stages": {
-            "reconcile": {"model": "claude-opus-5", "effort": "high", "skill_sha256": "b" * 64}
+            "reconcile-subjects": {
+                "model": "claude-opus-5",
+                "effort": "high",
+                "skill_sha256": "b" * 64,
+            }
         },
         "limits": {"max_rounds": 2, "max_scenarios": 8},
     }
@@ -455,6 +464,95 @@ def minimal_catalogue(**over: Any) -> dict[str, Any]:
         },
         "candidates": [],
         "excluded": [],
+    }
+    payload.update(over)
+    return payload
+
+
+# The reconcile partials. Each is *sliced out of* minimal_world_model rather
+# than restated, for the same reason the partial schemas $ref the world model's
+# $defs: reconcile-seal has to assemble these seven files into exactly that
+# document, so a builder that drifted from it would let a test pass against a
+# world model the seal could never produce.
+def minimal_subjects(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "subjects": [
+            {
+                "id": "sub-jobs",
+                "label": "jobs and their query surface",
+                # Total over minimal_claims by construction, which is what
+                # refs.check_subjects will demand of a real cover.
+                "claims": [claim["id"] for claim in minimal_claims()["claims"]],
+            }
+        ],
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_contradictions_part(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "subject_id": minimal_subjects()["subjects"][0]["id"],
+        # Empty, like minimal_world_model's contradictions: a member that swept
+        # its subject and found no disagreement is the ordinary case, and the
+        # schema has no minItems precisely so it can say so.
+        "contradictions": minimal_world_model()["contradictions"],
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_capabilities_part(**over: Any) -> dict[str, Any]:
+    capability = minimal_world_model()["capabilities"][0]
+    # The one subtraction that defines this artifact: outcome classes are the
+    # next pass's output, so capability_core forbids them here.
+    del capability["outcome_classes"]
+    payload: dict[str, Any] = {"schema_version": "0.1", "capabilities": [capability]}
+    payload.update(over)
+    return payload
+
+
+def minimal_outcomes_part(**over: Any) -> dict[str, Any]:
+    capability = minimal_world_model()["capabilities"][0]
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "outcomes": [
+            {
+                "capability_id": capability["id"],
+                "outcome_classes": capability["outcome_classes"],
+            }
+        ],
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_entities_part(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "entities": minimal_world_model()["entities"],
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_goals_part(**over: Any) -> dict[str, Any]:
+    world = minimal_world_model()
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "actors": world["actors"],
+        "goals": world["goals"],
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_gaps_part(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "gaps": minimal_world_model()["gaps"],
     }
     payload.update(over)
     return payload

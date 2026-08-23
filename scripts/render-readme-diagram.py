@@ -4,9 +4,9 @@
 docs/concepts/pipeline-diagram.html is the detailed counterpart, and it is the
 wrong drawing for a README: it gives every stage its own row with the artifact it
 writes and the gates that follow, which is exactly the detail someone deciding
-whether to read further does not want yet. So this page collapses the eleven
-stages of paths.STAGES into five phases, keeps the human gates because they are
-what a reader is signing up for, and drops everything else.
+whether to read further does not want yet. So this page collapses
+paths.STAGES into five phases, keeps the human gates because they are what a
+reader is signing up for, and drops everything else.
 
 Two files, not one. GitHub's dark theme is chosen independently of the OS
 `prefers-color-scheme` that an <img>-referenced SVG resolves against, so a single
@@ -63,7 +63,18 @@ PHASES: list[dict] = [
     dict(
         verb="understand",
         note=["one world model", "of claims"],
-        stages=["intake", "extract", "reconcile"],
+        stages=[
+            "intake",
+            "extract",
+            "reconcile-subjects",
+            "reconcile-contradict",
+            "reconcile-capabilities",
+            "reconcile-outcomes",
+            "reconcile-entities",
+            "reconcile-goals",
+            "reconcile-gaps",
+            "reconcile-seal",
+        ],
         gate=1,
     ),
     dict(
@@ -87,6 +98,35 @@ PHASES: list[dict] = [
     ),
 ]
 
+# A stage family drawn as one line. paths.STAGES holds each reconcile pass
+# separately -- it has to, because check-skills binds one skill to one stage and
+# manifest.stages records model, effort and digest per stage -- but they are one
+# logical step engineered as substeps, and this drawing is the newcomer's
+# altitude. Listing them all would also not fit: phase() draws one line per entry
+# from a fixed BOX_H, so the family would overflow its box rather than crowd it.
+#
+# PHASES["stages"] stays complete, because it is also the coverage claim
+# test_the_readme_diagram_covers_every_stage_in_contract_order asserts against
+# paths.STAGES. The drawn labels are derived from it, never restated beside it.
+FOLD_PREFIX = "reconcile-"
+FOLD_LABEL = "reconcile*"
+FOLD_NOTE = "* one logical step, engineered as substeps"
+
+
+def drawn_stages(spec: dict) -> list[str]:
+    """The stage lines one phase draws: its stages, with the family folded once."""
+    drawn: list[str] = []
+    for stage in spec["stages"]:
+        label = FOLD_LABEL if stage.startswith(FOLD_PREFIX) else stage
+        if label not in drawn:
+            drawn.append(label)
+    return drawn
+
+
+def any_folded() -> bool:
+    return any(stage.startswith(FOLD_PREFIX) for phase in PHASES for stage in phase["stages"])
+
+
 PLATE_IN = dict(label="you bring", items=["specs", "traces", "source"])
 PLATE_OUT = dict(label="you get", items=["a runnable", "test suite"])
 
@@ -99,7 +139,10 @@ N = len(PHASES)
 BOX_Y = PAD + LOOP
 MID = BOX_Y + BOX_H / 2
 CAP_Y = BOX_Y + BOX_H + CAP_GAP
-H = CAP_Y + 16
+# The footnote sits on its own line under the captions, and only when something
+# folds -- so a run of this script before the reconcile family exists produces
+# byte-identical output to the committed pair.
+H = CAP_Y + 16 + (15 if any_folded() else 0)
 W = 2 * PAD + 2 * PLATE_W + 2 * CONN + N * BOX_W + (N - 1) * GCONN
 
 
@@ -205,7 +248,7 @@ def phase(i: int, spec: dict) -> str:
         f'<line x1="{x + 11}" y1="{BOX_Y + 66}" x2="{x + BOX_W - 11}" y2="{BOX_Y + 66}" '
         'class="hair"/>'
     )
-    for n, stage in enumerate(spec["stages"]):
+    for n, stage in enumerate(drawn_stages(spec)):
         out.append(txt(x + 11, BOX_Y + 82 + n * 14, stage, "stage", 11.5))
     if spec.get("loop"):
         out.append(loop_arc(x, spec["loop"]))
@@ -274,13 +317,21 @@ def svg(theme: str) -> str:
     body.append(connector(box_x(N - 1) + BOX_W, PLATE_OUT_X))
     body.append(plate(PLATE_OUT_X, PLATE_OUT))
     body.append(captions())
+    if any_folded():
+        body.append(txt(PAD + 2, CAP_Y + 15, FOLD_NOTE, "cap", 11.5))
 
     phases = ", then ".join(p["verb"] for p in PHASES)
+    covers = (
+        "Each phase lists the stages it covers; a starred line is one logical step "
+        "engineered as substeps."
+        if any_folded()
+        else "Each phase lists the stages it covers."
+    )
     desc = (
         f"Left to right: the artifacts you bring, five phases -- {phases} -- and the "
         "runnable test suite that comes out. A numbered marker between phases is a gate "
         "a human holds; the phase that proposes and scores scenarios loops until "
-        "coverage stops improving. Each phase lists the stages it covers."
+        f"coverage stops improving. {covers}"
     )
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" '

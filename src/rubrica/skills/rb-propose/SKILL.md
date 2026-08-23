@@ -5,8 +5,8 @@ description: Read the reconciled world model and the latest coverage report, the
 
 # rb-propose
 
-You are dispatched once per round, after `rb-reconcile` has produced a world
-model (round 1) or after `rb-score` has produced a coverage report against
+You are dispatched once per round, after the `reconcile-*` passes and
+`rubrica reconcile-seal` have produced a world model (round 1) or after `rb-score` has produced a coverage report against
 the scenarios already on file (round 2 and later). Your job is narrow: find
 the holes in that coverage report that proposing a scenario can actually
 close, and write one new scenario per hole you target. You are not the stage

@@ -26,7 +26,18 @@ from tests.toy import ARTIFACT_IDS, SIDS, build_toy_run, toy_roster
 AUTHORED_STAGES = (
     "intake",
     "extract",
-    "reconcile",
+    # All eight reconcile passes, because the fixture writes every partial and
+    # then seals: layer 1 is one schema per pass, so parametrizing over the
+    # family is what proves each partial the builder writes satisfies its own
+    # gate rather than only the assembled world model satisfying its.
+    "reconcile-subjects",
+    "reconcile-contradict",
+    "reconcile-capabilities",
+    "reconcile-outcomes",
+    "reconcile-entities",
+    "reconcile-goals",
+    "reconcile-gaps",
+    "reconcile-seal",
     "propose",
     "score",
     "instantiate",

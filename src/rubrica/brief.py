@@ -13,9 +13,21 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
 - **Gate 1** puts the world model's gaps next to the triage record's open
   deficiencies -- a pairing that is deliberately *not* a
   mechanical check (matching gap prose to decline prose is semantic, the same
-  hole `check-refs` leaves for a claim's support), so this rendering is the
-  whole instrument for a human making that call. Claim utilisation and the
-  implied suite size are reported alongside it.
+  hole `check-refs` leaves for a claim's support). Both sides of that pairing are
+  listed, each gap and each open deficiency by its id and its prose statement,
+  so for that one call this rendering really is the whole instrument. Claim
+  utilisation and the implied suite size are reported alongside it, and the
+  reconcile sweep comes first: how many subjects cover how many claims, how
+  many subjects were swept for contradictions, how many contradictions were
+  recorded, and -- only when that count is non-zero -- the tally by
+  `resolution`, which names `unresolved` at
+  zero whenever that branch renders at all. The sweep is an **aggregate**, and
+  saying so matters: it renders counts, never the contradictions themselves, so
+  it is a pointer at `01-contradictions/` rather than a substitute for reading
+  it. That is still worth leading with, because cross-pass incoherence -- a
+  later pass quietly modelling what `rb-reconcile-contradict` recorded
+  `unresolved` -- is not something layer 2 can see, and a non-zero `unresolved`
+  in the tally is the cheapest signal that there is a part worth opening.
 - **Gates 2 and 3** render what already exists: the coverage verdict, and the
   challenge stage's verdict tallies.
 
@@ -34,6 +46,14 @@ from rubrica.artifacts import read_json
 from rubrica.errors import UsageError
 from rubrica.intake import admit_sort_key
 from rubrica.paths import RunPaths, list_json
+
+# Imported rather than re-spelled, private name and all: `_as_list` is the one
+# definition of "a list or nothing" in this build, and its docstring carries the
+# measurement (`value or []` lets a truthy non-list reach a bare `for` and raise
+# TypeError). A local copy beside `_dicts` and `_mapping` would be a second
+# spelling of that guard, and half-a-module's-worth of inconsistent isinstance
+# checks is the defect `_dicts` exists to have fixed.
+from rubrica.refs import _as_list
 from rubrica.sizing import implied_size
 from rubrica.utilisation import claim_utilisation
 
@@ -245,7 +265,68 @@ def _gate_0(run: RunPaths) -> str:
 
 
 def _gate_1(run: RunPaths) -> str:
-    lines = [f"GATE 1 -- {run.root}", "", "Claim utilisation, per input"]
+    lines = [f"GATE 1 -- {run.root}", ""]
+
+    # The reconcile sweep, read before anything derived from it. Cross-pass
+    # incoherence -- a later pass modelling what rb-reconcile-contradict recorded
+    # `unresolved` -- has no mechanical check and must not be given a fake one:
+    # whether a claim *supports* an element is semantic, which is the hole layer 2
+    # is forbidden to paper over. What follows is an aggregate: counts and a
+    # resolution tally, not the contradictions themselves. It goes first because a
+    # non-zero `unresolved` is what should send a reader into 01-contradictions/
+    # before reading the world model built on top of it -- this report points at
+    # the parts, it does not reproduce them.
+    cover = _mapping(_quietly(run.subjects))
+    subjects = _dicts(cover.get("subjects"))
+    covered = {
+        cid
+        for subject in subjects
+        # isinstance rather than a truthiness check, and for the same reason gate
+        # 0's candidate map above carries one: this builds a *set*, so an
+        # unhashable member -- `"claims": [["c-1"]]`, `[{"id": "c-1"}]`, both
+        # readable JSON and both what a hand-edit at this gate produces -- raises
+        # `TypeError: unhashable type` out of the comprehension. Measured at exit
+        # 1 with a fabricated `[internal]` finding, which is the third instance in
+        # this module of the shape adopt_projection's `used` map was measured
+        # raising. `_as_list` guards the container; only this guards the members,
+        # and a truthy element can still be a dict.
+        for cid in _as_list(subject.get("claims"))
+        if isinstance(cid, str)
+    }
+    lines.append("Reconcile sweep")
+    if subjects:
+        lines.append(f"  {len(subjects)} subjects over {len(covered)} claims")
+    else:
+        lines.append("  (no subject cover yet; nothing to report)")
+
+    swept, found = 0, []
+    for path in list_json(run.contradictions_dir):
+        part = _mapping(_quietly(path))
+        swept += 1
+        found.extend(_dicts(part.get("contradictions")))
+    # Both numbers, always. "12 subjects swept, 0 contradictions" is a strong
+    # claim about the corpus and has to be legible as one -- a brief that printed
+    # only a non-empty list would render a sweep that found nothing anywhere as
+    # silence, which is the reading this stage most needs a human to question.
+    lines.append(f"  {swept} subjects swept, {len(found)} contradictions recorded")
+    if found:
+        tally: dict[str, int] = {}
+        for contradiction in found:
+            resolution = contradiction.get("resolution")
+            key = resolution if isinstance(resolution, str) else "(no resolution)"
+            tally[key] = tally.get(key, 0) + 1
+        # unresolved first, and shown as a zero whenever this branch renders at
+        # all: it is the value under the most pressure to be dropped by a pass
+        # that wants to look decisive, so a sweep that recorded contradictions and
+        # resolved every one should be visibly odd rather than merely unremarked.
+        # Scoped to the branch on purpose -- a run with *no* contradictions at all
+        # never reaches here, and its reading is the "0 contradictions recorded"
+        # line above, which is the stronger claim of the two anyway.
+        ordered = ["unresolved", *sorted(k for k in tally if k != "unresolved")]
+        lines.append("  " + ", ".join(f"{key}: {tally.get(key, 0)}" for key in ordered))
+    lines.append("")
+
+    lines.append("Claim utilisation, per input")
     utilisation = claim_utilisation(run)
     if utilisation["artifacts"]:
         for entry in utilisation["artifacts"]:

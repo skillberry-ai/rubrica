@@ -50,11 +50,12 @@ When you are done, report only: the paths you wrote, and any refusal
 condition you hit.
 ```
 
-**The slice line is for the three fan-out stages, and it is an address rather
-than context.** A member of a fan-out has to be told which slice is its own or
-it cannot find its work at all: `rb-extract` needs `Your artifact_id:`, and
-`rb-instantiate` and `rb-challenge` each need `Your scenario_id:`. Omit the
-line entirely for `rb-reconcile`, `rb-score` and `rb-emit`, which are single
+**The slice line is for the fan-out stages, and it is an address rather than
+context.** A member of a fan-out has to be told which slice is its own or it
+cannot find its work at all: `rb-extract` needs `Your artifact_id:`,
+`rb-reconcile-contradict` needs `Your subject_id:`, and `rb-instantiate` and
+`rb-challenge` each need `Your scenario_id:`. Omit the line entirely for the
+other `rb-reconcile-*` passes, `rb-score` and `rb-emit`, which are single
 dispatches over everything. Give the member its own id and nothing about any
 other slice — a sibling's id, or a hint about what a sibling found, is the
 context leak §1 forbids. `rb-orchestrate`'s own §3 A1 states the same rule from
@@ -65,15 +66,16 @@ four fan-out exercises run so far had to add it by hand.
 
 `tests/toy.py`'s `build_toy_run(runs_dir, upto=...)` mints a run with real
 `intake` and then writes every hand-authored artifact up to and including the
-named checkpoint — never past it. Handing `rb-reconcile` a run that already
-contains `01-world-model.json` would test nothing, so the checkpoint you build
-to is always the stage *before* the one you are exercising:
+named checkpoint — never past it. Handing `rb-reconcile-subjects` a run that
+already contains `01-subjects.json` would test nothing, so the checkpoint you
+build to is always the stage *before* the one you are exercising:
 
 | Stage under test | `upto=` (the checkpoint just before it) | What the dispatched skill should write |
 |---|---|---|
 | `rb-extract`     | `"intake"`      | `01-claims/<artifact-id>.json` for the one input artifact you pointed it at |
-| `rb-reconcile`   | `"extract"`     | `01-world-model.json` |
-| `rb-propose`     | `"reconcile"`   | `02-scenarios.json` (a new round) |
+| `rb-reconcile-subjects` | `"extract"` | `01-subjects.json` |
+| any later `rb-reconcile-*` pass | `"extract"`, plus the partials that pass *reads* — see below | that pass's own partial, per [`../reference/artifacts.md`](../reference/artifacts.md). `rb-reconcile-contradict` is a fan-out: give it one `subject_id` |
+| `rb-propose`     | `"reconcile-seal"` | `02-scenarios.json` (a new round) |
 | `rb-score`       | `"propose"`     | `03-coverage/round-N.json` and `latest.json` |
 | `rb-instantiate` | `"score"`       | `04-instances/<sid>/{seed.json,expected.json,rationale.md}` |
 | `rb-challenge`   | `"instantiate"` | `05-verdicts/<sid>.json` |
@@ -102,6 +104,29 @@ the checkpoint `rb-triage` needs, since the catalogue is its only input.
 should make it refuse (conditions 1 and 2 of its §5); copying either one over a
 freshly-minted run's `00-catalogue.json` exercises those refusals without a
 corpus at all.
+
+**The reconcile family has two checkpoints, not eight.** `"reconcile-gaps"` is
+every partial written with no world model yet, and `"reconcile-seal"` is the
+assembled world model — the states the seal and the later stages are tested
+against. Neither is the checkpoint a *middle* pass needs, because both include
+that pass's own output. So to exercise one middle pass, build to `"extract"` and
+write only the partials it declares under `reads`, taking them from
+`tests/toy.py`'s `split_world_model()`, which cuts the golden world model into
+exactly those files:
+
+```python
+from rubrica.artifacts import write_json
+from tests.toy import build_toy_run, split_world_model
+
+run = build_toy_run(runs_dir, upto="extract")
+parts = split_world_model()
+write_json(run.subjects, parts["subjects"])            # what -contradict reads
+write_json(run.capabilities_part, parts["capabilities"])  # what -outcomes reads
+```
+
+Writing a partial the pass under test is supposed to produce is the same
+mistake as building one checkpoint too far: it tests nothing, and layer 1 will
+pass either way.
 
 `upto=None` (the default, i.e. omitting the keyword) writes everything the
 fixture knows how to write, through `challenge` — exactly the checkpoint
@@ -143,7 +168,7 @@ from §3) for the stage you dispatched:
 
 ```bash
 RUN=<the run directory from step 3>
-STAGE=<stage>  # e.g. triage, extract, reconcile, propose, score, instantiate, challenge, emit
+STAGE=<stage>  # e.g. triage, extract, reconcile-subjects, propose, score, instantiate, challenge, emit
 
 uv run rubrica validate --run "$RUN" --stage "$STAGE"   # expect 0
 uv run rubrica check-refs --run "$RUN"                  # expect 0
@@ -262,9 +287,17 @@ RUN=$(PYTHONPATH=. uv run python /tmp/toy-run-to.py /tmp/rubrica-lab/runs intake
 ./scripts/dispatch-stage.sh extract "$RUN" api-json     # fan-out: own slice id
 ./scripts/audit-reads.sh /tmp/rubrica-lab/transcripts/extract-api-json.jsonl
 
-# a barrier stage takes no slice id, and needs a run built one checkpoint later
+# the barrier takes no slice id, and needs a run built one checkpoint later
 RUN=$(PYTHONPATH=. uv run python /tmp/toy-run-to.py /tmp/rubrica-lab/runs extract)
-./scripts/dispatch-stage.sh reconcile "$RUN"
+./scripts/dispatch-stage.sh reconcile-subjects "$RUN"
+
+# the contradiction sweep is a fan-out over the cover that pass just wrote: one
+# member per subject in 01-subjects.json, each given only its own subject_id.
+# Read the ids out of that file: over the toy world the cover's subjects are
+# sub-cap-find-tickets, sub-cap-get-ticket, sub-ent-ticket, sub-ent-comment,
+# sub-actors-and-goals and sub-uncited, and sub-cap-get-ticket is the one whose
+# claims actually disagree -- the interesting member to exercise first
+./scripts/dispatch-stage.sh reconcile-contradict "$RUN" sub-cap-get-ticket
 
 # triage is also a barrier -- no slice id -- and precedes intake, so its run
 # comes from a real `rubrica survey` rather than the toy-run-to.py builder above
@@ -445,9 +478,9 @@ character device — so `check-refs` saw no verdicts and reported ten fabricated
 sandbox exited 0. Same failure this repository already records for an unreadable
 `01-claims/`.
 
-**The rule that came out of it:** never deny a run path `check-refs` reads. Four
-skills invoke it (`reconcile`, `instantiate`, `score`, `emit`), so in practice the
-harness can only deny what `refs.py` never looks at — `decisions.md` and
+**The rule that came out of it:** never deny a run path `check-refs` reads. Most
+skills invoke it (every `reconcile-*` pass, `instantiate`, `score`, `emit`), so in
+practice the harness can only deny what `refs.py` never looks at — `decisions.md` and
 `measurement/`. Whether a member *should* read `05-verdicts/` is a prompt-level
 obligation, and the transcript audit is what checks it.
 

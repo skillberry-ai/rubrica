@@ -12,10 +12,15 @@ dispatched with exactly three things: the run directory, the stage name, and
 the path to its skill file. No conversational context is threaded through. If
 a stage needs a fact, it reads it from an artifact, or it does not have it.
 
-Fan-out members — extract, instantiate, challenge — get a fourth thing: the id
-of their own slice (`artifact_id`, `scenario_id`). That id is an address, not
-context: it tells a member which file to open, never what a sibling
-concluded. It is never a sibling's id.
+Fan-out members — extract, reconcile-contradict, instantiate, challenge — get a
+fourth thing: the id of their own slice (`artifact_id`, `subject_id`,
+`scenario_id`). That id is an address, not context: it tells a member which
+file to open, never what a sibling concluded. It is never a sibling's id.
+
+`reconcile-contradict`'s slice shows what "address" means most sharply: its
+`subject_id` narrows what it must *compare*, not what it may *read*. Inside its
+own subject it reads every claim from every input file, because comparing two
+inputs is the one thing no input-scoped member could do at all.
 
 ### What the orchestrator may append to a re-dispatch
 
@@ -111,7 +116,8 @@ property a reference check can compute, so this document does not pretend one
 exists. Do not invent a mechanical check for it. Two real defects lived under
 exactly that hole in the golden fixture itself, and **neither check layer ever
 objected to either of them** — that is the load-bearing part. What surfaced both
-was a live `rb-reconcile` dispatch, which reported one of them — a capability
+was a live dispatch of the single-pass `rb-reconcile` that the `reconcile-*`
+family replaced, which reported one of them — a capability
 whose described behaviour no claim in the set supports — as a *gap*; both were
 then confirmed by a human reading `tests/toy.py`. A prompt noticing and a person
 reading, in other words, and no check in between.
@@ -188,10 +194,13 @@ label can never assert something true only of a different scenario's world —
 it cannot reach another scenario's seed at all.
 
 **The denominator check.** `denominator.capability_cells`, frozen once by
-`rb-reconcile`, must equal the real number of capability × outcome-class
+`reconcile-seal`, must equal the real number of capability × outcome-class
 pairs the world model declares. A miscount here corrupts every coverage
 percentage computed downstream, and nothing else in the pipeline would
 notice — the numbers would simply be confidently wrong from that point on.
+Now that the count is arithmetic done by code rather than a claim a prompt
+made about its own output, this check is closer to an identity than it was;
+`docs/design/limitations.md` records what that costs.
 
 ## The skill contract
 

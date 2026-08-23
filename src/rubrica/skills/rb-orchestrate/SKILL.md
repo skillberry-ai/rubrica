@@ -144,9 +144,9 @@ failed, the answer is the halt in refusal condition 2, not the artifact.
 
 ## 3. Method
 
-**This pipeline has eleven stages and nine skills; you dispatch seven of the
-nine yourself.** The other two skills bracket you rather than sitting inside
-your walk. Before you exist at all, `rubrica survey` walks a corpus and mints
+**You dispatch the prompt stages from `extract` through `emit`, and no
+others.** The two skills you do not dispatch bracket your walk rather than
+sitting inside it. Before you exist at all, `rubrica survey` walks a corpus and mints
 this run, writing `00-catalogue.json` -- one bounded digest per candidate,
 never the candidate's own bytes. `rb-triage` reads only that catalogue and
 rules on every candidate -- `admit`, `decline`, or `needs_projection` --
@@ -171,7 +171,7 @@ selection: a triage that also rules on its own admission would make the whole
 run unfalsifiable, because no stage after it could ever surface a candidate it
 was wrong to exclude. You inherit the consequence of that gate rather than its
 judgment -- every blocking gap you halt on at B4 and every claim
-`rb-reconcile` never had a chance to see traces back to what gate 0 let
+the `reconcile-*` passes never had a chance to see traces back to what gate 0 let
 through.
 
 The whole run, in one block, picking up where gate 0 left off. `→` reads
@@ -192,7 +192,16 @@ rubrica intake --run <run>                    # admits it into manifest.json -- 
 rubrica check-skills                          # before anything: a bad skill is not a stage defect
 verify manifest.json                          # `rubrica intake` is the operator's, never yours
 fan out rb-extract, one per input artifact   → validate --stage extract
-rb-reconcile                                 → validate --stage reconcile → check-refs
+rb-reconcile-subjects                        → validate --stage reconcile-subjects → check-refs
+fan out rb-reconcile-contradict, one per subject → validate --stage reconcile-contradict
+    at most 3 members concurrently           → check-refs (after all members finish)
+rb-reconcile-capabilities                    → validate --stage reconcile-capabilities → check-refs
+rb-reconcile-outcomes                        → validate --stage reconcile-outcomes → check-refs
+rb-reconcile-entities                        → validate --stage reconcile-entities → check-refs
+rb-reconcile-goals                           → validate --stage reconcile-goals → check-refs
+rb-reconcile-gaps                            → validate --stage reconcile-gaps → check-refs
+rubrica reconcile-seal --run <run>            # code: assembles the partials into the world model
+                                             → validate --stage reconcile-seal → check-refs
 if any gap blocks a stage still to come      → HALT, report the gap, request the missing artifact
                                              → HUMAN GATE 1: the world model
 loop (round = 1..K):                           # K = manifest.limits.max_rounds
@@ -232,8 +241,8 @@ leak of step A1, dressed as efficiency.
 
 ### A. The dispatch protocol
 
-Every one of the seven prompt stages is dispatched the same way. Get this
-right once and the walk in section B is bookkeeping.
+Every prompt stage you dispatch is dispatched the same way. Get this right
+once and the walk in section B is bookkeeping.
 
 **A1. A dispatch carries exactly three things:** the **run directory** path,
 the **stage name**, and the path to its **skill**. Nothing else. No summary of
@@ -251,10 +260,18 @@ that pastes the world model into an instantiate dispatch has silently removed
 the fan-out isolation this design was chosen for.
 
 **A fan-out member gets one further thing, and it is an address, not
-context:** the `artifact_id` (for `rb-extract`) or `scenario_id` (for
-`rb-instantiate` and `rb-challenge`) naming which slice is its own. Without it
-a member cannot find its work at all. Give it that id and nothing about any
-other slice.
+context:** the `artifact_id` (for `rb-extract`), the `subject_id` (for
+`rb-reconcile-contradict`) or the `scenario_id` (for `rb-instantiate` and
+`rb-challenge`) naming which slice is its own. Without it a member cannot find
+its work at all. Give it that id and nothing about any other slice.
+
+The `subject_id` is the one that most invites over-helping, because a subject is
+a set of claim ids and you can see them in `01-subjects.json`. Pass the id and
+nothing else: the member reads its own subject's claim list out of that file
+itself, and a pasted list is the deleted check of the paragraph above. It narrows
+what the member must *compare*, never what it may *read* -- every pass still
+reads all of `01-claims/`, which is what keeps a contradiction between two inputs
+visible to the member that records it.
 
 **Two named exceptions, both repairs rather than fresh work.** Each appends
 machine-quotable text naming a defect in a named artifact -- never a summary of
@@ -360,12 +377,17 @@ is a record of something this run never ran. Record the stage after its gate
 passes, including after a repair: the second dispatch is the one whose output
 survived, and its skill is what should be on file.
 
-Two stages are code and have no skill to hash: `intake`, which mints the run
-id and the timestamps no skill may invent, and `smoke`, which executes the
-suite. There is no `rb-intake` and no `rb-smoke`, so nothing is recorded for
-them, and that absence is the design rather than a stage you forgot. `emit`
-*does* have a skill -- you dispatch `rb-emit` -- so it is recorded like any
-other.
+The stages implemented in code have no skill to hash, and
+`skills.CODE_ONLY_STAGES` is the one list of them: `intake`, which mints the run
+id and the timestamps no skill may invent; `survey`, which walks a corpus before
+you are ever dispatched; `reconcile-seal`, which you run yourself as `rubrica
+reconcile-seal` at B3; and `smoke`, which executes the suite. There is no
+`rb-intake`, `rb-survey`, `rb-reconcile-seal` or `rb-smoke`, so nothing is
+recorded for any of them, and that absence is the design rather than a stage you
+forgot. Do not reach for `record-stage` after the seal: it would need a skill
+file that does not exist, and `--skill` pointed at anything else records a digest
+of something this run never ran. `emit` *does* have a skill -- you dispatch
+`rb-emit` -- so it is recorded like any other.
 
 **A6. `decide` at every branch.** Every loop round's verdict, every
 denominator amendment, every repair you spend, every halt, every gate you
@@ -381,7 +403,7 @@ coverage went from 40% to 71% between rounds and whose notebook says nothing
 about either round is a run nobody can read, including you an hour later.
 
 **A7. What a human gate is, and what `--no-gate` does.** The walk below places
-three of them: gate 1 at **B5**, after B3's reconcile and after B4's
+three of them: gate 1 at **B5**, after B3's seal and after B4's
 blocking-gap check; gate 2 at **B7**, after the round loop; and gate 3 at
 **B10**, after the verdicts. At each one, stop, present the artifact, and
 wait. Do not proceed on the assumption
@@ -424,11 +446,72 @@ given its own `artifact_id`. Then `rubrica validate --stage extract --run <run>`
 once, after all members are done. `record-stage --stage extract --run <run>`
 with the skill you dispatched.
 
-**B3. `rb-reconcile`, a single dispatch.** It is a barrier: it needs every
-claims file in one context, because contradiction detection is exactly the
-cross-artifact work no fan-out member can do. Gate with
-`rubrica validate --stage reconcile --run <run>`, then
-`rubrica check-refs --run <run>`.
+**B3. The `reconcile-*` passes, in order, then the seal.** One logical step
+engineered as substeps, because a single dispatch had to hold every claim, plan
+an eight-collection merge, and only then start writing -- the shape most exposed
+to the gateway's idle reset. Every pass still reads all of `01-claims/`, so the
+barrier property is untouched: the split is on output, not on claims, and
+contradiction detection still sees every input at once.
+
+Dispatch `rb-reconcile-subjects`, then fan out `rb-reconcile-contradict` with
+one `subject_id` per subject in `01-subjects.json`, then
+`rb-reconcile-capabilities`, `rb-reconcile-outcomes`,
+`rb-reconcile-entities`, `rb-reconcile-goals` and `rb-reconcile-gaps`, each a
+single dispatch in that order. Gate each with
+`rubrica validate --stage <the pass's stage name> --run <run>` and then
+`rubrica check-refs --run <run>`, and `record-stage` each one -- the entry is
+per stage, which is what lets a think-heavy pass carry a different model or
+effort from a mechanical one.
+
+**Run at most three `rb-reconcile-contradict` members at a time.** The gateway
+is shared, and envoy returns `upstream connect error or disconnect/reset before
+headers. reset reason: connection timeout` intermittently once five or more
+dispatches are streaming output concurrently; one to three was measured clean.
+A subject cover is a cover, so this fan-out is the widest one in the run, and
+draining it as a queue three at a time is the whole mitigation -- never a reason
+to ask `rb-reconcile-subjects` for fewer subjects, which would trade a
+throughput problem for a coverage one.
+
+**That is a different failure from the one the pass split addresses**, and the
+two must not be reasoned about interchangeably. The split exists because a
+single dispatch holding every claim and planning the whole merge draws the
+gateway's idle reset -- one over-long request, zero bytes back. The cap exists
+because several requests generating at once exhaust something upstream of any
+one of them. Capping concurrency does not shorten a dispatch, and shortening a
+dispatch does not make the gateway tolerate more of them at once, so a reader
+who "fixes" one by reasoning about the other has fixed nothing and removed a
+mitigation.
+
+Gate the fan-out with `check-refs` **only after every member has finished**,
+exactly as at B9. `refs.check_contradiction_parts` reports every subject in
+`01-subjects.json` that has no part in `01-contradictions/` from the moment that
+directory exists, so mid-fan-out most subjects are missing by construction and
+every one of those findings is about a member still in flight.
+`validate --stage reconcile-contradict` is safe at any point, because it only
+judges the parts that are already there.
+
+Then run the seal, which is code, not a dispatch:
+`rubrica reconcile-seal --run <run>`. It assembles the partials into
+`01-world-model.json`, folds each capability's outcome classes in, and counts
+the denominator once. It reads the manifest, the five singleton partials and
+every `01-contradictions/*.json` -- and **not** `01-subjects.json`, which has no
+counterpart field in the world model, so the world model itself carries no
+record of whether the cover was total. `check-refs` is what holds the cover; a
+seal that clears both its gates has had that checked mechanically, but do not
+read a clean seal as having ratified the cover -- mechanical totality is not a
+human's judgment that the subjects themselves are the right ones. Gate it with
+`rubrica validate --stage reconcile-seal --run <run>`, then
+`rubrica check-refs --run <run>`. It writes nothing at all when it reports a
+finding, so a partial that cannot be assembled faithfully is a repair on the
+pass that wrote it rather than a half-built world model reaching gate 1.
+
+`--denominator-version` is **not** part of that invocation. Pass it only when
+you have decided an amendment and recorded that decision in `decisions.md` --
+the rule stated under B6 -- and never on a run's first seal, where there is no
+earlier denominator to amend. The seal takes the number rather than inferring
+it precisely so that the version cannot move without a decision behind it, and
+an orchestrator that passes the flag by habit hands back the silent bump the
+rule exists to prevent.
 
 **B4. Halt on a blocking gap.** Read the world model's `gaps`. Each one
 carries `blocks`, an array of stage names drawn from `propose`, `score`,
@@ -455,7 +538,8 @@ What resumes such a run: a new input artifact, registered by the operator
 through a fresh `intake`, or that human's ruling that the gap does not block
 after all -- recorded with `decide` in the words they gave you, and, if the
 world model itself has to change, carried out by a re-dispatch of
-`rb-reconcile`, which owns that file. What does not resume it: you editing
+the `reconcile-*` pass that owns the collection in question, followed by
+`rubrica reconcile-seal` again -- no pass writes `01-world-model.json` itself. What does not resume it: you editing
 `blocks`, you deciding the gap is probably fine, or `--no-gate`. **`--no-gate`
 skips the human review; it does not overrule a blocking gap** -- with no human
 in the run there is nobody to make the ruling that lifting the halt requires,
@@ -482,7 +566,7 @@ human is already deciding whether the input set was right.
    `validate --stage propose`. In round 1 there is no coverage document and
    that is normal -- `rb-propose` treats every cell and goal as an open hole.
 2. **`rb-score`, a single dispatch** -- the second barrier, for the same
-   reason `rb-reconcile` is the first. Gate with `validate --stage score`,
+   reason `rb-reconcile-subjects` is the first. Gate with `validate --stage score`,
    then `check-refs`.
 3. **Record the round's decision, before you branch on it:**
    `decide --note "round N: <verdict>, <covered>/<total> cells"`. Do it in
@@ -508,8 +592,12 @@ human is already deciding whether the input set was right.
 but never silently.** If `rb-propose` or `rb-score` reports that the world
 model's goals or capabilities are missing something a scenario needs, that is
 an amendment *request*, and it costs: an explicit decision from you, recorded
-in `decisions.md`; a re-dispatch of `rb-reconcile`, the only stage that may
-write the world model, which bumps `denominator.version`; and a re-score
+in `decisions.md`; a re-dispatch of the `reconcile-*` pass that owns the
+collection -- `rb-reconcile-goals` for a goal, `rb-reconcile-capabilities` and
+`rb-reconcile-outcomes` for a cell -- and then
+`rubrica reconcile-seal --run <run> --denominator-version <n+1>`, which is the
+only thing that writes the world model and the only thing that bumps
+`denominator.version`; and a re-score
 against the new version, since `rb-score`'s coverage document must carry a
 `denominator_version` equal to the world model's. Never a silent edit, and
 never a later stage inventing a goal for itself -- a denominator any stage can
@@ -654,7 +742,7 @@ points at:
 | Coverage verdict `continue` | `round++`, dispatch `rb-propose` again -- unless the round was `K` | B6.4 |
 | Coverage verdict `converged` | Leave the loop; go to gate 2 | B6.4 |
 | Coverage verdict `halted_no_progress` or `halted_round_cap` | Leave the loop; go to gate 2. The run continues | B6.4 |
-| A stage requests a denominator amendment | Decide, re-dispatch `rb-reconcile`, re-score | B6 |
+| A stage requests a denominator amendment | Decide, re-dispatch the owning `reconcile-*` pass, re-seal with a bumped `--denominator-version`, re-score | B6 |
 | Verdict `re-seed`, first time | Re-dispatch `rb-instantiate` once, alternatives appended, then re-challenge | B9 |
 | Verdict `re-seed`, second time | Treat as a rejection | B9 |
 | Verdict `reject` | Re-dispatch `rb-score` to mark it and recompute; do not return to `rb-propose` | B9 |
@@ -675,8 +763,10 @@ points at:
    a stage defect.
 
 4. **Every stage you dispatched has a `manifest.stages` entry** with its
-   model, its effort, and the `skill_sha256` of the file it ran. `intake` and
-   `smoke` have no skill and are not recorded.
+   model, its effort, and the `skill_sha256` of the file it ran. The stages in
+   `skills.CODE_ONLY_STAGES` are not among them and are not recorded: you
+   dispatch no subagent for `intake`, `survey`, `reconcile-seal` or `smoke`,
+   because none of the four has a skill.
 
 5. **Every branch is in `decisions.md`**, appended through `rubrica decide`,
    one line each, with the timestamp minted by `decide`.

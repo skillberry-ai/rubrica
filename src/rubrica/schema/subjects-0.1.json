@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "subjects-0.1.json",
+  "title": "The claim subject cover",
+  "description": "Every claim in 01-claims/, assigned to one or more subjects. A cover rather than a partition: a claim may appear under several subjects, and rb-reconcile-subjects is instructed to over-assign when the subject is unclear, because over-assignment is the safe direction. refs.check_subjects holds it to totality -- every claim id in the run appears here -- which is the property a heuristic pair filter could never have had.",
+  "type": "object",
+  "required": ["schema_version", "subjects"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "subjects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "claims"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"$ref": "world-model-0.1.json#/$defs/id"},
+          "label": {"type": "string", "minLength": 1},
+          "note": {"type": "string", "minLength": 1},
+          "claims": {"$ref": "world-model-0.1.json#/$defs/claim_refs"}
+        }
+      }
+    }
+  }
+}

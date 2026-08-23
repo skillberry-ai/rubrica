@@ -42,13 +42,16 @@ input it came from; nothing later fabricates a claim without a locator.
 
 ## contradiction
 
-Two claims that cannot both hold, recorded rather than resolved.
-`rb-reconcile` writes one entry per contradiction it finds, naming `claim_a`,
+Two claims that cannot both hold, recorded rather than resolved. One
+`rb-reconcile-contradict` member sweeps one **subject** and writes one entry
+per contradiction it finds there, naming `claim_a`,
 `claim_b`, the `nature` of the conflict, a `resolution`
 (`unresolved`, `preferred_a`, `preferred_b`, or `both_possible`), and a
 `rationale` (`src/rubrica/schema/world-model-0.1.json`'s `contradiction`
 definition). The world model carries the disagreement forward instead of
-quietly picking a side.
+quietly picking a side, and every reconcile pass below the sweep is held to
+that: a disagreement recorded `unresolved` is not one they may settle by how
+they choose to model the thing.
 
 ## corpus
 
@@ -75,13 +78,13 @@ Something the admitted set does not cover that the objective needs, recorded by
 selection cannot do, which is why an empty `deficiencies` array is a claim
 rather than an absence: it says the admitted candidates cover everything the
 objective needs, and a human at gate 0 will read it as that. Distinct from a
-`gap`, which `rb-reconcile` records later about the *target* rather than about
-the corpus.
+`gap`, which `rb-reconcile-gaps` records later about the *target* rather than
+about the corpus.
 
 ## denominator
 
-The coverage denominator, computed once by `rb-reconcile` and frozen at a
-`version` for the rest of the run. `denominator.capability_cells` counts
+The coverage denominator, computed once by `reconcile-seal` — code, not a
+prompt — and frozen at a `version` for the rest of the run. `denominator.capability_cells` counts
 capability × outcome-class pairs, and `denominator.goals` counts goals
 (`src/rubrica/schema/world-model-0.1.json`). Every later coverage report
 carries the same `denominator_version` it was computed against, so a round
@@ -140,8 +143,8 @@ near-misses that would make the test hard to fake.
 
 ## gap
 
-Something no input artifact says anything about, recorded by `rb-reconcile`
-with a `subject`, an `unknown`, `why_it_matters`, and a `blocks` list naming
+Something no input artifact says anything about, recorded by
+`rb-reconcile-gaps` with a `subject`, an `unknown`, `why_it_matters`, and a `blocks` list naming
 which later stages it prevents (`src/rubrica/schema/world-model-0.1.json`'s
 `gap` definition; the enum is `propose`, `score`, `instantiate`, `challenge`,
 `emit`, `smoke`). A gap that blocks nothing is informational; a gap naming
@@ -256,6 +259,18 @@ the answer second is what keeps the oracle honest about what the seed
 actually contains, including every distractor placed to defeat a
 fabricating agent.
 
+## partial
+
+One `reconcile-*` pass's slice of the world model, written into the `01-` band
+as its own file: `01-subjects.json`, `01-contradictions/<subject_id>.json`,
+`01-capabilities.json`, `01-outcomes.json`, `01-entities.json`,
+`01-goals.json`, `01-gaps.json`. Each has its own schema and its own layer-1
+gate, and a later pass reads an earlier pass's partial as a *file* rather than
+as a memory of having written it — which is what lets `rb-reconcile-outcomes`
+quantify over the capability list instead of recalling it. No partial reads
+`01-world-model.json`; the **seal** is what joins them into one — all of them
+except `01-subjects.json`, which the world model has no field for.
+
 ## projection
 
 A manufactured artifact standing in for something the corpus lacks, admitted
@@ -298,6 +313,22 @@ that motivated it (`src/rubrica/schema/scenarios-0.1.json`). A scenario's `id`
 is permanent even if a later round marks it `duplicate` or `rejected` — the
 round history is preserved, not overwritten.
 
+## seal
+
+`reconcile-seal`: the code step that assembles the **partials** into
+`01-world-model.json`, folding each capability's outcome classes into that
+capability and counting the `denominator` once
+(`src/rubrica/reconcile.py`, run as `rubrica reconcile-seal`). It reads the
+manifest, the five singleton partials and every `01-contradictions/*.json`, and
+**not** `01-subjects.json`: the world model has no subjects field, so the cover
+is an input to the contradiction fan-out, to `reconcile-gaps`, and to
+`check-refs`, not to the seal.
+Code rather than a prompt for the reason `emit` is code: two runs with identical
+partials must produce a byte-identical world model, or variance stops being
+attributable to the pass that caused it. It writes nothing at all when it
+reports a finding, so a partial it cannot represent faithfully becomes a
+repair rather than a half-assembled world model that clears layer 1.
+
 ## seed
 
 The concrete world one scenario's test runs against, including its
@@ -311,9 +342,32 @@ representation for a field's *value domain* — `capability.params` and
 false` on both — a param must additionally state whether it is `required`,
 and a field cannot state that at all
 (`src/rubrica/schema/world-model-0.1.json`) — so a concrete value anywhere
-downstream of reconcile is a prescription to `rb-instantiate`, never an
+downstream of the seal is a prescription to `rb-instantiate`, never an
 assertion about the target system. See `docs/design/limitations.md` for the
 consequences this has for what a seed can and cannot be checked against.
+
+## subject
+
+A topic two claims could disagree inside — one operation, one entity, one rule
+the store maintains — used as the fan-out slice for the contradiction sweep.
+`rb-reconcile-subjects` names them and assigns claims to them; one
+`rb-reconcile-contradict` member is dispatched per subject with that
+`subject_id` and nothing about a sibling's, and writes
+`01-contradictions/<subject_id>.json` — empty array included, because the file
+is the record that the subject was swept
+(`src/rubrica/schema/subjects-0.1.json`).
+
+## subject cover
+
+The whole of `01-subjects.json`: every claim in `01-claims/` assigned to at
+least one subject. A **cover, not a partition** — a claim may appear under
+several subjects, and `rb-reconcile-subjects` is instructed to over-assign
+when the subject is unclear, because over-assignment costs a member some
+re-reading while under-assignment costs a contradiction nobody ever finds.
+`refs.check_subjects` holds it to totality: a claim no subject covers is a
+finding, which is the property a heuristic pair filter could never have had.
+What stays unchecked is a disagreement whose two claims land under *different*
+subjects — see `docs/design/limitations.md`.
 
 ## surface
 
@@ -344,8 +398,9 @@ must also show the ambiguity it found rather than merely asserting it.
 
 ## world model
 
-The single reconciled picture of the target system that `rb-reconcile`
-produces from every extracted claim: capabilities, entities, actors, goals,
+The single reconciled picture of the target system, assembled by
+`reconcile-seal` from the **partials** the `reconcile-*` passes wrote out
+of every extracted claim: capabilities, entities, actors, goals,
 recorded contradictions, recorded gaps, and the frozen coverage denominator,
 all required by `src/rubrica/schema/world-model-0.1.json`. Every element in it
 — a capability, an entity, a goal — carries a `claims` array pointing back to

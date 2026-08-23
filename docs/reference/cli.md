@@ -100,13 +100,15 @@ rubrica adopt-projection --run runs/run-20260806-123005 \
 Layer 1: schema-validates one stage's output.
 
 Required: `--run RUN`, `--stage`, one of `survey`, `triage`, `intake`,
-`extract`, `reconcile`, `propose`, `score`, `instantiate`, `challenge`,
-`emit`, `smoke`.
+`extract`, `reconcile-subjects`, `reconcile-contradict`,
+`reconcile-capabilities`, `reconcile-outcomes`, `reconcile-entities`,
+`reconcile-goals`, `reconcile-gaps`, `reconcile-seal`, `propose`, `score`,
+`instantiate`, `challenge`, `emit`, `smoke` — `paths.STAGES`, in order.
 
 Exits 0 clean, or 1 with one finding per line on stdout.
 
 ```bash
-rubrica validate --run runs/run-20260806-123005 --stage reconcile
+rubrica validate --run runs/run-20260806-123005 --stage reconcile-seal
 ```
 
 ### `rubrica check-refs`
@@ -136,6 +138,86 @@ Exits 0 clean, or 1 with findings.
 rubrica check-skills
 ```
 
+## Assembling the world model
+
+### `rubrica reconcile-seal`
+
+Assembles the reconcile partials into `01-world-model.json`: it folds
+`01-outcomes.json` back into each capability's `outcome_classes` — the
+capabilities partial omits that property, because a schema cannot express
+"`capability` minus one property" under `additionalProperties: false` — joins the
+per-subject contradiction parts into one list, takes `target` from the manifest
+rather than from any partial, and computes the coverage `denominator`.
+
+Required: `--run RUN`. Optional: `--denominator-version N` (default `1`), passed
+rather than inferred so an amendment to the frozen goal list costs an explicit
+orchestrator decision recorded in `decisions.md` instead of a number the command
+quietly incremented.
+
+Reads `manifest.json`, the five singleton partials — `01-capabilities.json`,
+`01-outcomes.json`, `01-entities.json`, `01-goals.json`, `01-gaps.json` — and
+every `01-contradictions/*.json`. It does **not** read `01-subjects.json`: the
+world model has no subjects field, so the cover is an input to the contradiction
+passes and to `check-refs`, not to the seal. Writes `01-world-model.json` and
+prints its path.
+
+Code rather than a prompt, for the reason `emit` is code: two runs with identical
+partials must produce a byte-identical world model, or variance can no longer be
+attributed to a pass. A code step also streams nothing, so it cannot be killed by
+the idle reset that splitting reconcile into passes exists to avoid, however large
+the assembled model gets.
+
+**It assembles; it does not check.** Cross-artifact checking is layer 2, so run
+`rubrica check-refs` afterwards. What this command does report is the narrow class
+where assembly cannot faithfully represent what it was handed, and it is exactly
+four items long:
+
+1. an artifact absent, unparseable, or not a JSON object carrying its payload keys
+   (`capabilities`, `outcomes`, `entities`, `actors` and `goals`, `gaps`,
+   `contradictions`, and `target` for the manifest);
+2. a declared capability with no outcome classes;
+3. an outcome record naming a capability nobody declared;
+4. two outcome records for one capability.
+
+It **writes nothing at all** when it reports any of them, because a half-assembled
+world model would clear layer 1 for the collections it did manage to fill.
+
+Presence, parseability and payload-key presence are the whole of item 1 — not the
+*type* of what a payload key holds. `{"capabilities": 5}` still reaches the
+assembly and raises out of it, by design: layer 1 is the rejection point for a
+wrong-typed value (`rubrica validate --stage reconcile-<pass>`, one schema per
+partial),
+and duplicating that here would put one rule in two places with two messages.
+
+Items 2 and 3 overlap layer 2's `check_outcomes` on purpose — item 2 is its first
+clause (every declared capability has a record), item 3 its second (every record
+names a declared capability). That check owns the after-the-fact report and runs
+over any run, including one that was never sealed; the branches here refuse
+**before the write**, because assembly is perfectly possible in both cases: the
+entry is simply dropped, and the world model then reaches gate 1 missing cells an
+artifact declared, agreeing with its own recomputed `denominator` and reading as
+coherent.
+
+Item 4 overlaps **nothing**, in any layer, which is the strongest of the four
+reasons to refuse rather than drop: `check_outcomes` compares *sets* of capability
+ids, so two records for one capability collapse to one member and neither
+direction of that comparison sees anything. The seal is the only place a duplicate
+outcomes record is ever caught.
+
+Exits 0 clean, 1 with one finding per line on stdout, or 2 if the run directory
+itself cannot be read. A missing **singleton** partial is a repairable stage defect
+and so is a 1, naming that partial; several missing ones are listed with the
+earliest pass first, the one a repair should start from. An absent
+`01-contradictions/` directory is *not* reported here — it assembles to an empty
+`contradictions` list and exits 0, because the seal cannot tell "no contradictions
+were found" from "no pass ran". Whether every subject in `01-subjects.json` has a
+part is a question about the cover, which layer 2's `check_contradiction_parts`
+owns — not the seal.
+
+```bash
+rubrica reconcile-seal --run runs/run-20260806-123005
+```
+
 ## Feeding a stage
 
 ### `rubrica dedupe-candidates`
@@ -158,7 +240,7 @@ other writer; `rb-orchestrate` is their only caller in a real run.
 
 Records a stage's model, effort, and skill hash into `manifest.json`.
 
-Required: `--run RUN`, `--stage` (same eleven choices as `validate` above),
+Required: `--run RUN`, `--stage` (the same choices as `validate` above),
 `--model MODEL`, `--effort {low,medium,high,xhigh,max}`, `--skill PATH`.
 
 The digest is computed here from `--skill` rather than accepted as a string —
@@ -213,9 +295,21 @@ is itself a gate: none can turn a readable run into a defect finding.
 ### `rubrica gate-brief`
 
 Composes the existing reports into the reading surface at one of the four
-human gates: the objective verdict and grouped declines at gate 0,
-utilisation and implied size at gate 1, the coverage matrix at gate 2, the
+human gates: the objective verdict and grouped declines at gate 0; the reconcile
+sweep, utilisation and implied size at gate 1; the coverage matrix at gate 2; the
 verdict tally at gate 3.
+
+Gate 1's brief leads with the **reconcile sweep**, and it is an aggregate rather
+than a per-subject listing: how many subjects cover how many claims, how many
+subjects were swept for contradictions, how many contradictions were recorded,
+and — only when that count is non-zero — the tally by `resolution`, `unresolved`
+first and shown even at zero. Both sweep numbers print either way: "12 subjects
+swept, 0 contradictions" is a strong claim about the corpus and has to be legible
+as one rather than rendered as silence. The sweep reports counts, not the
+contradictions themselves, so a non-zero `unresolved` is the cue to open
+`01-contradictions/`. The world model's gaps and triage's open deficiencies
+follow, each listed by its id and its prose statement, since pairing them is a
+human's call and no mechanical check exists for it.
 
 Required: `--run RUN`, `--gate {0,1,2,3}`.
 

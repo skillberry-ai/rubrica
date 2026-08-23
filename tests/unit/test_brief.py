@@ -15,7 +15,7 @@ import pytest
 
 from rubrica import brief, cli, survey
 from rubrica.artifacts import read_json, write_json
-from rubrica.paths import RunPaths
+from rubrica.paths import RunPaths, list_json
 from tests.toy import build_toy_catalogue_and_triage, build_toy_run
 
 CORPUS = Path(__file__).parent.parent / "fixtures" / "corpus-toy"
@@ -309,7 +309,7 @@ def test_gate_brief_covers_gates_two_and_three_without_raising(tmp_path):
     """Gates 2 and 3 render what already exists (the coverage verdict, the
     verdict tallies) -- exercised here on a run that has reached neither stage,
     which must still render cleanly rather than raise."""
-    run = build_toy_run(tmp_path / "runs", upto="reconcile")
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "2"]) == 0
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "3"]) == 0
 
@@ -379,7 +379,7 @@ def test_gate_one_does_not_raise_on_a_present_but_malformed_world_model(tmp_path
     gate_brief -- ArtifactError on bad JSON -- turning a report into exit 2.
     Exercised through cli.main, the actual promise gate-brief makes, not just
     the library function directly."""
-    run = build_toy_run(tmp_path / "runs", upto="reconcile")
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     run.world_model.write_text("{not valid json", encoding="utf-8")
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
 
@@ -474,3 +474,116 @@ def test_a_run_with_neither_catalogue_nor_triage_still_names_intake_input(tmp_pa
 
     assert "intake --input" in text
     assert "rb-triage" not in text
+
+
+def test_gate_one_shows_the_cover_and_the_contradiction_tally(tmp_path):
+    """Gate 1 is where a human sees the contradictions beside what was modelled.
+    That reading is the only instrument for cross-pass incoherence -- a later pass
+    quietly settling what an earlier one recorded unresolved -- because whether a
+    claim *supports* an element is semantic and layer 2 is forbidden to guess.
+    """
+    from rubrica.brief import gate_brief
+
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    text = gate_brief(run, 1)
+
+    assert "subjects" in text.lower()
+    assert "unresolved" in text.lower()
+
+
+def test_gate_one_still_reads_on_a_run_with_no_partials(tmp_path):
+    """A report always exits clean on a readable run. gate-brief is a report, not
+    a gate, and a missing partial must not make it raise."""
+    from rubrica.brief import gate_brief
+
+    run = build_toy_run(tmp_path, upto="extract")
+    assert gate_brief(run, 1)
+
+
+def test_the_gate_one_sweep_counts_the_cover_and_the_parts_on_disk(tmp_path):
+    """The two assertions above are satisfied by the word "subjects" appearing
+    anywhere, so this is the real oracle for the sweep: every number is derived
+    from the artifacts on disk, keyed by the name the *schema* gives it, so a
+    rendering that read the wrong key, dropped a part or mis-summed the tally
+    goes red while a reflow of the surrounding prose does not.
+
+    `unresolved: 0` is asserted literally, and it is the load-bearing half: the
+    toy world records one contradiction and resolves it, so a tally that only
+    printed the resolutions it found would render this run with no mention of
+    `unresolved` at all -- which is precisely the reading gate 1 exists to stop a
+    human accepting without noticing.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    cover = read_json(run.subjects)["subjects"]
+    claims = {cid for subject in cover for cid in subject["claims"]}
+    parts = list_json(run.contradictions_dir)
+    recorded = [c for part in parts for c in read_json(part)["contradictions"]]
+
+    text = brief.gate_brief(run, 1)
+
+    assert f"{len(cover)} subjects over {len(claims)} claims" in text
+    assert f"{len(parts)} subjects swept, {len(recorded)} contradictions recorded" in text
+    assert "unresolved: 0" in text, "unresolved is shown even when the sweep found none"
+    for contradiction in recorded:
+        assert f"{contradiction['resolution']}: " in text
+    # And it comes first. Everything below it at gate 1 is derived from the world
+    # model the sweep produced, so a human who reads the utilisation percentages
+    # before the contradictions has already started trusting the merge.
+    assert text.index("Reconcile sweep") < text.index("Claim utilisation")
+
+
+def test_gate_one_does_not_raise_on_hand_edited_reconcile_partials(tmp_path):
+    """A human at gate 1 hand-editing a partial before re-reading the brief is a
+    supported thing to do, not an error, so every shape that edit can produce has
+    to render rather than raise. `gate-brief` is a report and always exits 0 on a
+    readable run; a fabricated `[internal]` finding at exit 1 is the failure this
+    pins, and it is the exact failure `_dicts` and `_mapping` were added for at
+    gate 0.
+
+    One shape per guard, and no count of them here -- the enumeration is the
+    list, and a number beside a list that grows is the first thing to go stale: a
+    truthy non-list collection (`_mapping`/`_dicts`), a bare string where a dict
+    belongs (`_dicts`), a `claims` value that is not a list (`_as_list`), a
+    `claims` list holding unhashable members (the isinstance in the `covered` set
+    comprehension), a non-string `resolution` that would otherwise be a dict key
+    (the isinstance in the tally), and a part that is not JSON at all
+    (`_quietly`). Asserted through cli.main, because the exit code is the
+    promise, not the return value.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    write_json(
+        run.subjects,
+        {
+            "schema_version": "0.1",
+            "subjects": [
+                # No `claims` at all, so the read is None -- the shape that raises
+                # `TypeError: 'NoneType' object is not iterable` from a bare `for`.
+                {"id": "sub-a", "label": "a"},
+                {"id": "sub-b", "label": "b", "claims": "not-a-list"},
+                # A real list holding unhashable elements. `_as_list` guards the
+                # container and nothing guarded the members, so these two reached
+                # a *set* comprehension: measured `TypeError: unhashable type:
+                # 'dict'` and `... 'list'` at exit 1 with a fabricated
+                # `[internal]` finding, on a readable run.
+                {"id": "sub-c", "label": "c", "claims": [{"id": "clm-notes-001"}, ["clm-x"]]},
+                "not-a-dict-at-all",
+            ],
+        },
+    )
+    parts = list_json(run.contradictions_dir)
+    write_json(parts[0], {"schema_version": "0.1", "contradictions": "not-a-list"})
+    write_json(parts[1], {"schema_version": "0.1", "contradictions": ["not-a-dict"]})
+    write_json(
+        parts[2],
+        {"schema_version": "0.1", "contradictions": [{"id": "con-x", "resolution": 7}]},
+    )
+    parts[3].write_text("{not valid json", encoding="utf-8")
+
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+    text = brief.gate_brief(run, 1)
+    # Every part still counted as swept, including the unreadable one: the file is
+    # the record that the member visited the subject, and a sweep count that
+    # silently shrank when one part became unreadable would understate what the
+    # fan-out covered at exactly the moment a human is judging its coverage.
+    assert f"{len(parts)} subjects swept, 1 contradictions recorded" in text
+    assert "(no resolution): 1" in text

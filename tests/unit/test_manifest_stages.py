@@ -97,7 +97,8 @@ def test_the_recorded_digest_is_of_the_file_that_was_passed(tmp_path):
 def test_record_stage_merges_rather_than_replacing_the_map(tmp_path):
     """A stage re-dispatched after a repair must not erase its siblings."""
     run = _run(
-        tmp_path, stages={"reconcile": {"model": "m", "effort": "high", "skill_sha256": "b" * 64}}
+        tmp_path,
+        stages={"reconcile-subjects": {"model": "m", "effort": "high", "skill_sha256": "b" * 64}},
     )
     assert (
         main(
@@ -117,13 +118,19 @@ def test_record_stage_merges_rather_than_replacing_the_map(tmp_path):
         )
         == 0
     )
-    assert set(read_json(run.manifest)["stages"]) == {"reconcile", "extract"}
+    assert set(read_json(run.manifest)["stages"]) == {"reconcile-subjects", "extract"}
 
 
 def test_recording_the_same_stage_twice_overwrites_only_that_entry(tmp_path):
     run = _run(
         tmp_path,
-        stages={"reconcile": {"model": "keep-me", "effort": "high", "skill_sha256": "b" * 64}},
+        stages={
+            "reconcile-subjects": {
+                "model": "keep-me",
+                "effort": "high",
+                "skill_sha256": "b" * 64,
+            }
+        },
     )
     skill = _skill(tmp_path)
     for effort in ("low", "max"):
@@ -134,7 +141,7 @@ def test_recording_the_same_stage_twice_overwrites_only_that_entry(tmp_path):
                     "--run",
                     str(run.root),
                     "--stage",
-                    "reconcile",
+                    "reconcile-subjects",
                     "--model",
                     "changed",
                     "--effort",
@@ -146,7 +153,7 @@ def test_recording_the_same_stage_twice_overwrites_only_that_entry(tmp_path):
             == 0
         )
     stages = read_json(run.manifest)["stages"]
-    assert stages["reconcile"] == {
+    assert stages["reconcile-subjects"] == {
         "model": "changed",
         "effort": "max",
         "skill_sha256": skill_sha256(skill),
@@ -407,7 +414,7 @@ def test_recording_over_a_malformed_sibling_entry_leaves_it_untouched(tmp_path):
     malformed (not an object) must not stop a different stage's recording,
     and must survive unchanged rather than being "fixed" or dropped.
     """
-    run = _run(tmp_path, stages={"reconcile": "not-an-object"})
+    run = _run(tmp_path, stages={"reconcile-subjects": "not-an-object"})
     assert (
         main(
             [
@@ -427,7 +434,7 @@ def test_recording_over_a_malformed_sibling_entry_leaves_it_untouched(tmp_path):
         == 0
     )
     stages = read_json(run.manifest)["stages"]
-    assert stages["reconcile"] == "not-an-object"
+    assert stages["reconcile-subjects"] == "not-an-object"
     assert stages["extract"]["model"] == "m"
 
 

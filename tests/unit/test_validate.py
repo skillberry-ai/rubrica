@@ -14,15 +14,22 @@ from rubrica.validate import (
 )
 from tests.builders import (
     minimal_agents,
+    minimal_capabilities_part,
     minimal_catalogue,
     minimal_claims,
+    minimal_contradictions_part,
     minimal_coverage,
+    minimal_entities_part,
     minimal_expected,
+    minimal_gaps_part,
+    minimal_goals_part,
     minimal_gold,
     minimal_manifest,
+    minimal_outcomes_part,
     minimal_report,
     minimal_scenarios,
     minimal_seed,
+    minimal_subjects,
     minimal_suite_expected,
     minimal_triage,
     minimal_verdict,
@@ -76,6 +83,13 @@ def test_the_schema_directory_env_override_wins(monkeypatch, tmp_path):
 MINIMAL_BUILDERS = {
     "catalogue": minimal_catalogue,
     "triage": minimal_triage,
+    "subjects": minimal_subjects,
+    "contradictions-part": minimal_contradictions_part,
+    "capabilities-part": minimal_capabilities_part,
+    "outcomes-part": minimal_outcomes_part,
+    "entities-part": minimal_entities_part,
+    "goals-part": minimal_goals_part,
+    "gaps-part": minimal_gaps_part,
     "manifest": minimal_manifest,
     "claims": minimal_claims,
     "world-model": minimal_world_model,
@@ -277,7 +291,7 @@ def test_validate_stage_walks_every_claims_file(tmp_path):
 
 
 def test_validate_stage_reports_a_stage_that_produced_nothing(tmp_path):
-    findings = validate_stage(RunPaths(tmp_path), "reconcile")
+    findings = validate_stage(RunPaths(tmp_path), "reconcile-seal")
     assert len(findings) == 1
     assert "produced no world-model artifact" in findings[0].message
 
