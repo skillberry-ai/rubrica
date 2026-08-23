@@ -180,9 +180,11 @@ def test_the_run_artifacts_a_stage_must_read_are_not_denied(settings):
 
 # --- triage --------------------------------------------------------------------
 #
-# triage is a barrier stage (no slice id) reading only 00-catalogue.json, so
-# unlike `settings` above these two dispatch it directly rather than through the
-# `propose`-shaped fixture.
+# triage-objective is a barrier pass (no slice id) reading only
+# 00-catalogue.json, so unlike `settings` above these two dispatch it directly
+# rather than through the `propose`-shaped fixture. It stands in for the family
+# here because it is the pass whose input the family's own gate also reads,
+# which is what the second test needs.
 
 
 def test_the_triage_dispatch_denies_the_decisions_log(tmp_path):
@@ -190,17 +192,28 @@ def test_the_triage_dispatch_denies_the_decisions_log(tmp_path):
     measured one Read from the run's answer key on 2026-08-13."""
     run = tmp_path / "run"
     run.mkdir()
-    perms, _, _ = _paths(_dispatch(tmp_path, "triage", str(run), run=run))
+    perms, _, _ = _paths(_dispatch(tmp_path, "triage-objective", str(run), run=run))
     assert any("decisions.md" in rule for rule in perms["permissions"]["deny"])
+
+
+def test_dispatch_hands_a_rule_member_its_slice_id():
+    """triage-rule is a fan-out stage like extract and instantiate/challenge,
+    so its dispatch case must hand the member its own slice id -- the shard
+    filename `slice_shard` resolves against -- the same way extract hands an
+    artifact_id and instantiate/challenge hand a scenario_id."""
+    script = SCRIPT.read_text()
+    assert "triage-rule)" in script
+    assert "Your slice_id" in script
 
 
 def test_the_triage_dispatch_does_not_deny_the_catalogue_it_must_read(tmp_path):
     """The mirror of the rule that cost two wrong denies: 2f93726 measured that
     denying a path check-refs reads makes a stage's own gate fabricate findings.
-    The catalogue is both triage's only input and a path check_catalogue reads."""
+    The catalogue is both triage-objective's only input and a path
+    check_catalogue reads."""
     run = tmp_path / "run"
     run.mkdir()
-    perms, sandbox, _ = _paths(_dispatch(tmp_path, "triage", str(run), run=run))
+    perms, sandbox, _ = _paths(_dispatch(tmp_path, "triage-objective", str(run), run=run))
     denied = set(perms["permissions"]["deny"]) | {
         f"Read(/{p})" for p in sandbox["sandbox"]["filesystem"]["denyRead"]
     }

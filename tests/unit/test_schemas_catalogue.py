@@ -1,7 +1,7 @@
 """Layer-1 shape checks for the catalogue.
 
 The negative cases matter more than the positive one: this schema is the
-contract rb-triage reads, so a document that is wrong in a way layer 1 accepts
+contract the triage family reads, so a document that is wrong in a way layer 1 accepts
 becomes a prompt's problem instead of a gate's.
 """
 

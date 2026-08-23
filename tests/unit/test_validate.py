@@ -13,22 +13,27 @@ from rubrica.validate import (
     validate_stage,
 )
 from tests.builders import (
+    minimal_adoptions,
     minimal_agents,
+    minimal_audit,
     minimal_capabilities_part,
     minimal_catalogue,
     minimal_claims,
     minimal_contradictions_part,
     minimal_coverage,
+    minimal_dispositions_part,
     minimal_entities_part,
     minimal_expected,
     minimal_gaps_part,
     minimal_goals_part,
     minimal_gold,
     minimal_manifest,
+    minimal_objective,
     minimal_outcomes_part,
     minimal_report,
     minimal_scenarios,
     minimal_seed,
+    minimal_slices,
     minimal_subjects,
     minimal_suite_expected,
     minimal_triage,
@@ -90,6 +95,11 @@ MINIMAL_BUILDERS = {
     "entities-part": minimal_entities_part,
     "goals-part": minimal_goals_part,
     "gaps-part": minimal_gaps_part,
+    "slices": minimal_slices,
+    "objective": minimal_objective,
+    "dispositions-part": minimal_dispositions_part,
+    "audit": minimal_audit,
+    "adoptions": minimal_adoptions,
     "manifest": minimal_manifest,
     "claims": minimal_claims,
     "world-model": minimal_world_model,
@@ -290,10 +300,54 @@ def test_validate_stage_walks_every_claims_file(tmp_path):
     assert findings[0].artifact == run.claims("bad")
 
 
+def test_validate_stage_walks_every_disposition_part(tmp_path):
+    """Same shape as extract's claims check above, one directory over: a
+    triage-rule dispatch's own `invokes = ["validate"]` runs `rubrica validate
+    --stage triage-rule`, which has to resolve `dispositions-part` to
+    `00-dispositions/*.json` or that gate cannot run at all."""
+    run = RunPaths(tmp_path)
+    write_json(run.disposition_part("s01"), minimal_dispositions_part(slice_id="s01"))
+    bad = minimal_dispositions_part(slice_id="s02")
+    bad["dispositions"][0]["authority"] = "not-a-real-authority"
+    write_json(run.disposition_part("s02"), bad)
+    findings = validate_stage(run, "triage-rule")
+    assert len(findings) == 1
+    assert findings[0].artifact == run.disposition_part("s02")
+
+
 def test_validate_stage_reports_a_stage_that_produced_nothing(tmp_path):
     findings = validate_stage(RunPaths(tmp_path), "reconcile-seal")
     assert len(findings) == 1
     assert "produced no world-model artifact" in findings[0].message
+
+
+@pytest.mark.parametrize("stage", sorted(STAGE_ARTIFACTS))
+def test_every_stage_reports_findings_without_raising_on_a_bare_run(stage, tmp_path):
+    """Systemic guard against a missing `_artifact_paths` branch.
+
+    Two artifact kinds have now shipped with no matching branch in
+    `_artifact_paths` -- `dispositions-part` (fixed before this test existed)
+    and `objective` (fixed alongside this test). Both failures had the same
+    shape: `validate_stage` calls `_artifact_paths(run, kind)`, which falls
+    through to `raise KeyError(f"unknown artifact kind {kind!r}")` -- an
+    exception `validate_stage` does not catch, so it escapes past the
+    findings-or-clean contract this module exists to hold. A member whose own
+    `invokes = ["validate"]` step hits this does not get a repairable finding
+    naming its own artifact; it gets a raw crash that, wrapped by whatever
+    dispatched it, can surface as a fabricated finding blaming the run for a
+    defect that lives here instead.
+
+    A bare run -- no artifacts written at all -- is deliberately the
+    strictest input: every kind's `_artifact_paths` branch must both exist
+    and return cleanly (typically `[]` or a path list) rather than raise, so
+    `validate_stage` can turn "nothing produced" into an honest finding
+    instead of an unhandled exception. The next kind added to
+    `STAGE_ARTIFACTS` without a matching branch fails here, by the stage's
+    own name, rather than three stages later as a mystery crash.
+    """
+    findings = validate_stage(RunPaths(tmp_path), stage)
+    assert isinstance(findings, list)
+    assert findings, f"stage {stage!r} reported nothing at all for a bare run"
 
 
 def test_validate_stage_rejects_an_unknown_stage(tmp_path):
@@ -574,3 +628,38 @@ def test_manifest_stage_efforts_tracks_a_schema_override(tmp_path, monkeypatch):
     write_json(tmp_path / ARTIFACT_SCHEMAS["manifest"], original)
     monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path))
     assert manifest_stage_efforts() == ("low", "ludicrous")
+
+
+def test_a_structurally_invalid_schema_is_a_usage_error_not_a_finding(tmp_path, monkeypatch):
+    """A readable-but-invalid schema file is a misconfigured run: exit 2, not 1.
+
+    It is the same class as a schema file that is *absent*, which read_json one
+    line above already turns into ArtifactError and cli.py already exits 2 for.
+    Measured before this door existed, against a copied schema/ whose
+    slices-0.1.json was replaced by {"type": 7}: exit 1, nine stdout lines, and
+    an [internal] finding anchored on the run directory -- three violations of
+    the exit-code contract at once, the last of them naming an artifact that was
+    not the broken one and in fact was not broken at all.
+    """
+    from jsonschema.exceptions import SchemaError
+
+    from rubrica.artifacts import read_json
+    from rubrica.errors import UsageError
+    from rubrica.validate import ARTIFACT_SCHEMAS, _validator_for, schema_dir
+
+    for filename in ARTIFACT_SCHEMAS.values():
+        write_json(tmp_path / filename, read_json(schema_dir() / filename))
+    write_json(tmp_path / ARTIFACT_SCHEMAS["slices"], {"type": 7})
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path))
+
+    with pytest.raises(UsageError) as caught:
+        _validator_for("slices", tmp_path)
+    # The path, so the operator knows which file to fix -- the [internal]
+    # finding this replaced named the run root instead.
+    assert str(tmp_path / ARTIFACT_SCHEMAS["slices"]) in str(caught.value)
+    # UsageError, not SchemaError: what escapes decides the exit code, and
+    # SchemaError is neither in cli.py's usage tuple nor a subclass of anything
+    # in it, so it would reach the catch-all and become a 1 again.
+    assert not isinstance(caught.value, SchemaError)
+    # One line. SchemaError's own str is eleven, dumping the metaschema branch.
+    assert "\n" not in str(caught.value)

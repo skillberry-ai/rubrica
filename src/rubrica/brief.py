@@ -8,8 +8,16 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   holdable at all. It leads with the objective verdict -- supported or not --
   because that is the single fact most likely to make a tired reader overturn
   the whole triage record, and a reader who stops after ten lines must have
-  seen it. Admits by priority, declines grouped by reason code, and every open
-  deficiency beside the projection that would close it follow.
+  seen it. The predicted-vs-observed surface divergence follows immediately,
+  because it is the one available measure of how well the corpus map the
+  objective pass ruled from actually described the corpus. Admits by priority,
+  declines grouped by reason code, and every open deficiency beside the
+  projection that would close it come next. The slice table and the summary of
+  every group split across more than one slice close the brief: they are the
+  mechanics of *how* the fan-out read the corpus rather than *what* it ruled,
+  so a reader who only wants the ruling never has to scroll past them, and a
+  reader weighing a `near_duplicate` decline has the split that produced the
+  residue on the same page.
 - **Gate 1** puts the world model's gaps next to the triage record's open
   deficiencies -- a pairing that is deliberately *not* a
   mechanical check (matching gap prose to decline prose is semantic, the same
@@ -58,6 +66,13 @@ from rubrica.sizing import implied_size
 from rubrica.utilisation import claim_utilisation
 
 GATES = (0, 1, 2, 3)
+
+# Gate 0's three staged-triage section headers, named once. Each is the anchor a
+# reader -- and a test -- scopes to, so a rewording that only lands in one of
+# two places would silently unscope an assertion to the whole document.
+DIVERGENCE_HEADER = "Surface divergence (predicted vs observed)"
+SLICES_HEADER = "Slices the triage family read"
+SPLIT_HEADER = "Groups split across more than one slice"
 
 
 def gate_brief(run: RunPaths, gate: int) -> str:
@@ -120,6 +135,239 @@ def _mapping(value) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _strings(value) -> list[str]:
+    """The string members of `value`, or `[]` if it is not a list at all.
+
+    `_dicts`' sibling, for the fields whose elements are ids rather than
+    objects -- `candidate_ids`, `other_slices`, a surface's `evidence`. The
+    same measured failure applies: a hand-edited `"other_slices": "s02"` is a
+    string, iterating it yields characters, and every one of them would be
+    counted as a slice holding the group.
+    """
+    if not isinstance(value, list):
+        return []
+    return [member for member in value if isinstance(member, str)]
+
+
+def _disposition_parts(run: RunPaths) -> tuple[list[dict], list[str]]:
+    """Every readable `00-dispositions/<slice>.json`, and the slice ids whose
+    part is present but could not be read.
+
+    The parts are the only place the surfaces the fan-out *observed* exist:
+    `triage-seal` copies `objective_review` from `00-objective.json` and the
+    deficiencies from `00-audit.json`, and carries neither
+    `predicted_surface_count` nor any part's `observed_surfaces` into the
+    sealed record. So section 4.1's divergence can only be rendered by reading
+    back what the members wrote, which is why gate 0's brief reads a staged
+    artifact at all.
+
+    The *directory* listing is deliberately not guarded: `list_json` raises
+    `UsageError` on an unreadable directory and `cli.py` maps that to exit 2,
+    which is this module's docstring's own line between "a readable run's
+    content" (always exit 0, absence stated) and "a run directory that cannot
+    be read at all". `claim_utilisation` over `01-claims/` and `_gate_3` over
+    `05-verdicts/` are the two existing reports doing exactly this, and a third
+    spelling of the same decision is how one of them would eventually get it
+    wrong. An individual unreadable part *file* is the tolerated case, and it
+    is the one a real run produces.
+    """
+    unreadable: list[str] = []
+    parts: list[dict] = []
+    for path in list_json(run.dispositions_dir):
+        document = _quietly(path)
+        if isinstance(document, dict):
+            parts.append(document)
+        else:
+            unreadable.append(path.stem)
+    return parts, unreadable
+
+
+def _divergence_lines(run: RunPaths) -> list[str]:
+    """Section 4.1's predicted-vs-observed surface divergence.
+
+    The observed total is computed the way `rb-triage-audit`'s Method computes
+    it -- every predicted surface with at least one admitted candidate anywhere
+    in the parts, plus every distinct `observed_surfaces` entry any part
+    reported. Deliberately not a simpler count: a human reading a shortfall
+    here and then reading the audit's deficiencies must see the same
+    arithmetic, and two definitions of "observed" in one gate's reading surface
+    would make the brief and the record it summarises disagree about a number
+    that is supposed to be the same number.
+    """
+    lines = [DIVERGENCE_HEADER]
+    objective = _mapping(_quietly(run.objective))
+    parts, unreadable_parts = _disposition_parts(run)
+
+    admitted: set[str] = set()
+    for part in parts:
+        for entry in _dicts(part.get("dispositions")):
+            candidate_id = entry.get("candidate_id")
+            if entry.get("disposition") == "admit" and isinstance(candidate_id, str):
+                admitted.add(candidate_id)
+
+    # A surface's name is what a human reads it by, so an unnamed one renders
+    # as "?" rather than being dropped: dropping it would silently lower the
+    # predicted total the reader is asked to compare against.
+    predicted_names: list[str] = []
+    confirmed: list[str] = []
+    unconfirmed: list[str] = []
+    for surface in _dicts(_mapping(objective.get("objective_review")).get("surfaces")):
+        name = surface.get("name")
+        name = name if isinstance(name, str) else "?"
+        predicted_names.append(name)
+        evidence = _strings(surface.get("evidence"))
+        (confirmed if any(cid in admitted for cid in evidence) else unconfirmed).append(name)
+
+    # Names already predicted are not counted twice. `observed_surfaces` is
+    # specified as what a member saw that the prediction did *not* name, but a
+    # member that restates a predicted surface is schema-legal, and counting it
+    # would manufacture a surplus out of agreement.
+    seen = set(predicted_names)
+    surplus: list[str] = []
+    for part in parts:
+        for surface in _dicts(part.get("observed_surfaces")):
+            name = surface.get("name")
+            name = name if isinstance(name, str) else "?"
+            if name not in seen:
+                seen.add(name)
+                surplus.append(name)
+
+    predicted_count = objective.get("predicted_surface_count")
+    # The document's own number, not len(predicted_names): they are supposed to
+    # agree, `refs.check_objective` is what says so, and rendering the recorded
+    # value is what lets a human see them disagree.
+    shown = predicted_count if isinstance(predicted_count, int) else "?"
+    observed = len(confirmed) + len(surplus)
+    lines.append(f"  predicted by the objective pass from the corpus map: {shown}")
+    lines.append(
+        f"  observed by the fan-out across {len(parts)} disposition "
+        f"part{'s' if len(parts) != 1 else ''}: {observed}"
+    )
+    lines.append(
+        f"  predicted, but confirmed by no admitted candidate in any part ({len(unconfirmed)}): "
+        + (", ".join(unconfirmed) if unconfirmed else "(none)")
+    )
+    lines.append(
+        f"  observed in a slice and never predicted ({len(surplus)}): "
+        + (", ".join(surplus) if surplus else "(none)")
+    )
+    lines.append(
+        "  A shortfall is a loss -- a surface the map expected that nothing any slice ruled "
+        "on confirmed -- and `rb-triage-audit` records it as a deficiency. A surplus is not: "
+        "`predicted_surface_count` was a prediction against exactly this comparison, never a "
+        "target the fan-out was meant to hit, so a surplus reads as how well the map described "
+        "the corpus."
+    )
+    if not run.objective.is_file():
+        lines.append(
+            "  (00-objective.json is absent -- `triage-objective` has not run for this run, "
+            "so there is no prediction to compare against)"
+        )
+    elif not objective:
+        lines.append(
+            "  (00-objective.json is present but could not be read -- "
+            "`rubrica validate --stage triage-objective` names the defect)"
+        )
+    if not parts and not unreadable_parts:
+        lines.append(
+            "  (no disposition parts on disk -- `triage-rule` has not run, or the parts have "
+            "been cleared away since; the observed total above is over nothing)"
+        )
+    if unreadable_parts:
+        lines.append(
+            "  (could not read the disposition part for: "
+            + ", ".join(unreadable_parts)
+            + " -- their surfaces and admits are missing from the totals above)"
+        )
+    return lines
+
+
+def _slice_lines(run: RunPaths) -> list[str]:
+    """The slice table and the split-group summary, from `00-slices.json`.
+
+    One reader for both because they are one document, and reading it twice
+    would let the two sections disagree about it.
+    """
+    document = _mapping(_quietly(run.slices))
+    entries = _dicts(document.get("slices"))
+
+    cap = document.get("cap_bytes")
+    cap_note = f", cap {cap} bytes each" if isinstance(cap, int) else ""
+    table = [f"{SLICES_HEADER} ({len(entries)}{cap_note})"]
+    for entry in entries:
+        slice_id = entry.get("id")
+        slice_id = slice_id if isinstance(slice_id, str) else "?"
+        candidate_count = len(_strings(entry.get("candidate_ids")))
+        table.append(
+            f"  {slice_id}: {candidate_count} candidate"
+            f"{'s' if candidate_count != 1 else ''}, {entry.get('bytes', '?')} bytes"
+            f" -- {entry.get('label', '')}"
+        )
+    if not run.slices.is_file():
+        table.append(
+            "  (00-slices.json is absent -- `triage-slices` has not run for this run, or the "
+            "slice plan has been cleared away since)"
+        )
+    elif not entries:
+        table.append(
+            "  (00-slices.json is present but could not be read, or lists no slices -- "
+            "`rubrica validate --stage triage-slices` names the defect)"
+        )
+
+    # Every group with a member outside the slice being read, and every slice
+    # that holds part of it. Accumulated across the whole plan rather than
+    # reported per slice: "held by 4 slices" is the fact a human acts on, and
+    # a per-slice rendering would state it four times, once from each side.
+    holders: dict[str, set[str]] = {}
+    totals: dict[str, object] = {}
+    for entry in entries:
+        slice_id = entry.get("id")
+        for provenance in _dicts(entry.get("provenance")):
+            others = _strings(provenance.get("other_slices"))
+            if not others:
+                continue
+            group = provenance.get("group")
+            # str() on the key for the reason gate 0's reason_code key is
+            # coerced: this is grouped on and then sorted, and a non-string one
+            # both risks being unhashable and makes the sort compare str to int.
+            group = str(group) if group else "?"
+            held = holders.setdefault(group, set())
+            if isinstance(slice_id, str):
+                held.add(slice_id)
+            held.update(others)
+            totals.setdefault(group, provenance.get("in_group_total"))
+
+    split = [f"{SPLIT_HEADER} ({len(holders)})"]
+    if holders:
+        for group in sorted(holders):
+            slice_ids = sorted(holders[group])
+            split.append(
+                f"  {group}: {totals.get(group, '?')} candidates across {len(slice_ids)} "
+                f"slices ({', '.join(slice_ids)})"
+            )
+        split.append(
+            "  No member of a split group saw the whole group, so a near-duplicate spanning "
+            "the split could be admitted twice or declined against a sibling that is not "
+            "there. Gate 0 is the only place that residue can be acted on -- nothing "
+            "downstream of `intake` reads the corpus again."
+        )
+    elif entries:
+        split.append("  (none -- every group the slicer found fits inside one slice)")
+    else:
+        # Not "(none)": with no readable slice plan this section knows nothing
+        # about how the groups were partitioned, and "every group fits inside
+        # one slice" would be an announcement of absence made because the input
+        # could not be read -- the exact shape `paths.list_dir` exists to stop
+        # `check-refs` and `validate` doing, stated as a fact to the one human
+        # who can act on a split.
+        split.append(
+            "  (unknown -- see the note above for why 00-slices.json was not read; without "
+            "a slice plan, whether any group was split across slices is not established "
+            "either way)"
+        )
+    return table + [""] + split
+
+
 def _gate_0(run: RunPaths) -> str:
     if not run.triage.is_file():
         # A ruling held by the report as well as by
@@ -138,9 +386,9 @@ def _gate_0(run: RunPaths) -> str:
                 f"GATE 0 -- {run.root}\n\n"
                 "No triage record for this run yet (00-triage.json is absent), but "
                 "00-catalogue.json is present: this run was minted by `survey` and the "
-                "triage stage has not run, or has not written its record. Dispatch "
-                "`rb-triage` and read this brief again -- there is nothing to review "
-                "at gate 0 until it lands.\n"
+                "triage family has not run, or has not reached `triage-seal`. Run the "
+                "family through to `triage-seal` and read this brief again -- there is "
+                "nothing to review at gate 0 until it lands.\n"
             )
         return (
             f"GATE 0 -- {run.root}\n\n"
@@ -175,6 +423,11 @@ def _gate_0(run: RunPaths) -> str:
             f"  recommended objective instead: {recommended.get('objective')} -- "
             f"{recommended.get('reason')}"
         )
+    lines.append("")
+
+    # Immediately after the verdict, because it is the only measure of the
+    # corpus map that verdict was ruled from -- see section 4.1.
+    lines.extend(_divergence_lines(run))
     lines.append("")
 
     dispositions = _dicts(triage.get("dispositions"))
@@ -260,6 +513,10 @@ def _gate_0(run: RunPaths) -> str:
                 )
     else:
         lines.append("  (none)")
+    lines.append("")
+
+    # Last: how the fan-out read the corpus, rather than what it ruled.
+    lines.extend(_slice_lines(run))
 
     return "\n".join(lines) + "\n"
 

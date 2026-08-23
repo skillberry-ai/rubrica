@@ -556,3 +556,90 @@ def minimal_gaps_part(**over: Any) -> dict[str, Any]:
     }
     payload.update(over)
     return payload
+
+
+# The triage split's part kinds. Each is *sliced out of* minimal_triage rather
+# than restated, for the same reason the part schemas $ref triage-0.1.json's
+# $defs: triage-seal has to assemble these into exactly that record, so a
+# builder that drifted from it would let a test pass against a triage record
+# the seal could never produce.
+def minimal_slices(**over: Any) -> dict[str, Any]:
+    candidate_id = minimal_triage()["dispositions"][0]["candidate_id"]
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "run_id": minimal_triage()["run_id"],
+        "cap_bytes": 1_048_576,
+        "slices": [
+            {
+                "id": "s01",
+                "label": "everything",
+                "groups": ["root"],
+                "bytes": 37,
+                "candidate_ids": [candidate_id],
+                "provenance": [
+                    {
+                        "group": "root",
+                        "in_this_slice": 1,
+                        "in_group_total": 1,
+                        "other_slices": [],
+                    }
+                ],
+            }
+        ],
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_objective(**over: Any) -> dict[str, Any]:
+    triage = minimal_triage()
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "run_id": triage["run_id"],
+        "objective_review": triage["objective_review"],
+        "predicted_surface_count": len(triage["objective_review"]["surfaces"]),
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_dispositions_part(**over: Any) -> dict[str, Any]:
+    triage = minimal_triage()
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "run_id": triage["run_id"],
+        "slice_id": minimal_slices()["slices"][0]["id"],
+        "dispositions": triage["dispositions"],
+        "observed_surfaces": [],
+        "deficiency_notes": [],
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_audit(**over: Any) -> dict[str, Any]:
+    triage = minimal_triage()
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "run_id": triage["run_id"],
+        # Empty, like minimal_triage's own: a run that swept every slice and
+        # found nothing worth projecting is the ordinary case, and both
+        # schemas leave these array-less of a minItems for exactly that reason.
+        "deficiencies": triage["deficiencies"],
+        "projections": triage["projections"],
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_adoptions(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "run_id": minimal_triage()["run_id"],
+        # Empty: no human has necessarily adopted anything, and triage-seal
+        # folds this file in unconditionally rather than treating an empty
+        # list as a defect.
+        "adoptions": [],
+    }
+    payload.update(over)
+    return payload

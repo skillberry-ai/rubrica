@@ -1,0 +1,227 @@
+---
+name: rb-triage-objective
+description: Rule on whether the declared objective is supported by the corpus map -- before any candidate is judged, and before the per-slice dispositions fan-out is ever dispatched.
+---
+
+# rb-triage-objective
+
+You run first in the staged-triage family, ahead of every per-slice
+dispositions member. Your question is narrower than the monolithic `rb-triage`
+this pass was split out of ever asked in one breath: not *which candidates
+survive*, but *can the corpus this survey found even carry the objective it
+was told to chase* -- `breadth` across many surfaces, or `depth` on one. That
+question does not need a single candidate's digest to answer, and answering
+it before the fan-out is dispatched is the reason this pass exists as its own
+stage rather than as a first paragraph inside a bigger one.
+
+The failure this whole family exists to prevent has been measured, and it is
+still the standard you are held to even though your slice of it is narrower:
+on 2026-08-13 a run selected sixteen inputs by hand and excluded the files
+that declared what each of the target's thirteen tools returns. Six scenarios
+later died because no artifact carried those shapes. Your part of preventing
+a repeat is naming, before anything else runs, whether the objective the run
+was told to chase can be met from what the corpus actually holds -- and
+handing a human the surfaces to look at if it cannot.
+
+## Contract
+
+```toml
+stage = "triage-objective"
+reads = ["slices", "catalogue"]
+writes = ["objective"]
+schemas = ["objective"]
+invokes = ["validate"]
+```
+
+## 1. Inputs
+
+You read exactly two files: `00-slices.json` and `00-catalogue.json`. **Not a
+single candidate `digest`, from either one.**
+
+`00-slices.json` is the corpus map: every slice's `label`, the `groups` it
+draws from, its total `bytes` and `candidate_ids`, and each group's
+`provenance` -- how many of that group's candidates landed in this slice
+versus how many exist in total, and which other slices hold the rest. This is
+what lets you see the corpus's shape -- how many coherent regions it falls
+into, and roughly how much evidence backs each one -- without opening what any
+one candidate contains.
+
+`00-catalogue.json` gives you `request` (the target's name and interface, the
+declared `objective`, and optionally an `objective_note` and a `scope_note`),
+`policy` (the rules that shaped the set), `excluded` (what `survey` dropped
+mechanically and why), and the `candidates[]` array itself -- but you read
+`candidates[]` only for two scalar fields, `candidate_id` and `bytes`, never
+for `digest`. `bytes` is the source file's own size on disk; it is what lets
+`weight.bytes` (§2) be arithmetic over real evidential weight rather than a
+guess.
+
+**The prohibition is on opening a digest, not on what you would have taken
+from it**, and the reason stands on its own: a pass that reads the corpus to
+size the corpus grows with it.
+Reading a slice's or a candidate's digest to firm up a surface judgment is
+how a pass sized to run in one bounded dispatch, ahead of the fan-out, grows
+with the corpus it was supposed to let the fan-out grow with instead. A
+dispatch that scales with what the *map* says, not with what the corpus
+*contains*, is the entire reason this pass runs before the members that do
+open digests, rather than folded into one of them.
+
+`request` carries what the run is being asked for; read it before anything
+else (§3, Step 1). `excluded` is worth reading for the same reason it always
+was: a mechanical exclusion you believe was wrong is a fact worth recording.
+This pass does not write `deficiencies[]` -- that block does not exist in
+`objective-0.1.json`, because closing a corpus gap is `rb-triage-audit`'s job,
+run after every slice has reported what it actually observed. What you can do
+here is name the concern in `objective_review.notes` and say plainly that
+`rb-triage-audit` should look at it -- a pointer forward, not a decision you
+are making in its place.
+
+**The honest limitation, stated because a pass that does not know its own
+blind spot cannot flag it:** `supported` is ruled from a map of labels, groups
+and counts, never from a reading of the digests those counts summarize. A map
+can be wrong in ways a reading of the digests would not have been -- a slice
+labelled by one group name can still hold candidates that, read individually,
+turn out to describe nothing the objective needs, or a corpus that looks
+thin by candidate count can turn out to carry one enormous file that alone
+answers the objective. This pass's `supported` verdict inherits that
+blindness; §2's `predicted_surface_count` exists in part to give the members
+that *do* read digests something concrete to check your map against.
+
+You are dispatched with no memory of any conversation before you, and nothing
+you write carries forward as memory. What you need is in these two files.
+
+## 2. Output
+
+One file: `00-objective.json`, validating against `objective-0.1.json`. It
+carries `schema_version: "0.1"`, the `run_id` of the run you are working in
+(read it from `00-catalogue.json`'s `run_id` -- never invent it, and never
+derive it from the directory name), `predicted_surface_count`, and
+`objective_review`.
+
+**`objective_review`** -- the surfaces the corpus map shows, and whether the
+objective the run was given is supported by them. It has the same shape
+`rb-triage`'s monolithic record once carried inline, restated here as this
+pass's whole output rather than one section of a larger one.
+
+A *surface* is a coherent region of the target's behaviour that a suite could
+be built about: a persona, an API area, a workflow, a subsystem. At this
+stage you are grouping the corpus map's own groups and slice labels by what
+they appear to be evidence *about* -- one surface can span several of
+`00-slices.json`'s `groups`, and one group can be a surface on its own. For
+each surface: a `name`, the `evidence` (every `candidate_id` the map assigns
+to it, gathered across every slice that group appears in via `provenance`),
+and a `weight` of `{candidates, bytes}`.
+
+**`weight.bytes` sums each evidence candidate's own catalogue `bytes` field --
+the source file's size on disk -- and never a slice's or a serialized row's
+size.** The reason is that `triage-slices`' digest skeleton is clamped at 128
+nodes, so row size saturates: a source file many times the size of another
+can serialize to a nearly identical row once both are past the cap, and a
+metric that saturates cannot express which of two surfaces actually carries
+more evidence. `bytes`, read straight from the catalogue, does not saturate.
+`refs.check_objective` recomputes both `weight.candidates` and `weight.bytes`
+from the catalogue and rejects a value that does not match, so treat this as
+arithmetic to get right rather than an impression to estimate.
+
+`declared_objective` echoes `request.objective`. `supported` is your judgment
+on whether the corpus map, read this coarsely, can carry it: `depth` on a
+corpus map that shows one thin surface is not supported, and neither is
+`breadth` when most of the map's surfaces show only a handful of candidates
+each. If you would have chosen differently, say so in `recommended_objective`
+with a `reason`. **You may not act on that recommendation.** You rule against
+the objective you were given regardless of what you would have picked, and a
+human at gate 0 decides whether to change it -- a re-scope this pass performed
+itself would be invisible, and it would produce a selection that looks
+coherent while answering a question the run was never actually given.
+
+**`predicted_surface_count` is a prediction, not a report.** It is how many
+surfaces you expect the later per-slice dispositions members to observe once
+they read every candidate's digest, made from the map alone before any of
+them has run. A member reporting far fewer or far more surfaces than this
+number is a fact about how well this map-level pass predicted the corpus a
+digest-level reading actually finds -- **not, on its own, proof that either
+reading was wrong.** The map and the digests are different instruments looking
+at the same corpus; treat a divergence as a signal worth a human's attention
+at the gate, not as an error to silently reconcile in either direction.
+
+## 3. Method
+
+**Step 1 -- read `request` first, before either file's candidates.** The
+objective decides every subsequent call, and a reading that starts from the
+corpus map's groups and slices and arrives at a scope only afterward
+rationalises the objective to fit what it already found, rather than judging
+the map against what it was actually asked for.
+
+**Step 2 -- read the corpus map.** Walk `00-slices.json`'s `slices[]`: their
+`label`s, their `groups`, and each group's `provenance` across every slice it
+appears in. This is the whole shape of the corpus available to you -- how many
+distinct regions it falls into, and how each region's evidence is
+distributed.
+
+**Step 3 -- group the map's groups into surfaces.** A surface can be one
+group or several, judged by what they are evidence *about* rather than by
+where `survey` happened to draw a boundary. Every `candidate_id` the map
+assigns to a group you fold into a surface becomes that surface's evidence.
+
+**Step 4 -- weigh each surface and rule on the objective.** For each surface,
+sum `weight.candidates` (distinct evidence ids) and `weight.bytes` (each
+evidence candidate's own catalogue `bytes` field, per §2). Then answer: can
+the declared objective be met from a corpus shaped like this? Write
+`supported`, and `recommended_objective` if you disagree -- see §2's
+invariant on acting on it.
+
+**Step 5 -- predict how many surfaces a digest-level reading will find.**
+Write `predicted_surface_count` from the surfaces you just built. It is a
+prediction against a later, finer-grained reading, not a claim that your
+count is the true one -- see §2.
+
+**Step 6 -- note any mechanical-exclusion concern for the audit.** If
+`excluded` dropped something you believe should have stayed, say so in
+`objective_review.notes` and name `rb-triage-audit` as the pass that will
+turn a real gap into a recorded deficiency once the slices have reported
+what they actually saw.
+
+**Step 7 -- run your gate.** `rubrica validate --stage triage-objective --run
+<RUN>`. Fix what it reports and run it again.
+
+## 4. Invariants
+
+1. **You read `00-slices.json` and `00-catalogue.json`, and nothing else.**
+   No candidate digest, no shard under `00-slices/`, no `00-dispositions/`
+   part, no `decisions.md`, no artifact from another run.
+2. **`weight` is arithmetic over the catalogue's `bytes` field**, never over a
+   slice's or a row's serialized size, and never an impression. A reader
+   recomputes it from `candidates[].bytes`.
+3. **`recommended_objective` is a recommendation.** Your `supported` verdict
+   and every surface you write judge `request.objective` as declared; you
+   never substitute a different objective for the one you were given.
+4. **`predicted_surface_count` is a prediction, not a report.** A later
+   member's divergent, digest-level surface count is a fact about this map's
+   adequacy, not evidence that either reading made an error.
+5. **`run_id` is read from `00-catalogue.json`, never invented and never
+   derived from the run directory's name.**
+
+## 5. Refusal conditions
+
+Each of these means: write no `00-objective.json`, and report what you found
+and why you stopped.
+
+**Refuse if `request.objective` is absent, or contradicts `scope_note`.** A
+pass with no declared objective to check has nothing to rule on, and this
+stage exists specifically to catch that before the dispositions fan-out is
+ever dispatched -- refusing here is the whole point of running first. If the
+objective says `breadth` and `scope_note` confines the run to one surface,
+those are two different runs; say so and stop, rather than letting every
+downstream slice inherit a contradiction nobody named.
+
+**Do not refuse when the declared objective is unsupported.** Write the
+record, set `objective_review.supported` to `false`, explain why in
+`objective_review.notes`, and let the human at gate 0 rule. Refusing here
+would leave the human with nothing to rule *on*, which is the opposite of the
+help an unsupported-objective finding is supposed to give them -- the same
+reasoning `rb-triage` itself was held to before it split into passes.
+
+**Refuse if `00-slices.json` or `00-catalogue.json` is missing, empty of
+candidates, or not readable as its schema describes.** That is a `survey` or
+`triage-slices` defect or a broken run, and producing an objective ruling
+against it would attribute a scoping decision to a pass that never actually
+read a corpus.

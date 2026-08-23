@@ -25,7 +25,11 @@ contract, not a diagram convention.
 | Dir | Stage | Runs as | Reads | Writes | Gate |
 |---|---|---|---|---|---|
 | — | `survey` | code — walks a corpus and mints the run | the corpus roots you name, plus target name, interface, objective | `00-catalogue.json` | validate |
-| — | `triage` | `rb-triage` | `00-catalogue.json` only | `00-triage.json` | validate · check-refs · human gate 0 |
+| — | `triage-slices` | code — partitions the catalogue into byte-bounded slices | `00-catalogue.json` only | `00-slices.json`, `00-slices/<id>.json` | validate |
+| — | `triage-objective` | `rb-triage-objective` | `00-slices.json`, `00-catalogue.json` — never a candidate digest | `00-objective.json` | validate |
+| — | `triage-rule` | `rb-triage-rule` — fan-out, one per slice | its own `00-slices/<slice_id>.json` shard, and `00-objective.json` — never a sibling's shard | `00-dispositions/<slice_id>.json` | validate |
+| — | `triage-audit` | `rb-triage-audit` — dispatched once every `triage-rule` member has landed | `00-objective.json`, every file in `00-dispositions/` — never a shard, never a candidate | `00-audit.json` | validate · check-refs |
+| — | `triage-seal` | code — assembles the triage record from the staged parts | `00-objective.json`, `00-slices.json`, `00-dispositions/<slice>.json`, `00-audit.json`, `00-adoptions.json` (optional) | `00-triage.json` | validate · human gate 0 |
 | `00` | `intake` | code | the input files you name, plus target name, interface, limits — or, on the survey path, an already-admitted `00-triage.json` | `manifest.json`, `00-inputs/<stored_as>` | validate |
 | `01a` | `extract` | `rb-extract` — fan-out, one per input | the manifest, and its own one file under `00-inputs/` — never a sibling's | `01-claims/<artifact-id>.json` | validate |
 | `01b` | `reconcile-subjects` | `rb-reconcile-subjects` — barrier | the manifest and every claims file | `01-subjects.json` | validate · check-refs |
@@ -43,13 +47,17 @@ contract, not a diagram convention.
 | `06` | `emit` | `rb-emit` — wraps code | `02-scenarios.json`, `05-verdicts/`, `04-instances/*/expected.json`, `01-world-model.json` | `06-suite/<sid>/` task packages | validate · check-refs |
 | `07` | `smoke` | code | the emitted suite and the agent roster | `07-report.json` | validate · check-refs |
 
-`survey` and `triage` carry no `0N` prefix of their own. They write
-`00-catalogue.json` and `00-triage.json` ahead of the `manifest.json` and
-`00-inputs/` that `intake` mints once gate 0 has passed, so the numbering
-stays intake's — `intake` is what fixes the run's identity, and neither
-`survey` nor `triage` has minted one yet. `intake --input` still works
+`survey` and every stage of the `triage-*` family carry no `0N` prefix of
+their own. They write `00-catalogue.json`, `00-slices.json` (plus its
+`00-slices/<id>.json` shards), `00-objective.json`,
+`00-dispositions/<slice_id>.json`, `00-audit.json`, and — from `triage-seal`,
+the pass that assembles the record the rest of the family produces in parts —
+`00-triage.json`, all of it ahead of the `manifest.json` and `00-inputs/` that
+`intake` mints once gate 0 has passed, so the numbering stays intake's —
+`intake` is what fixes the run's identity, and none of them has minted one
+yet. `intake --input` still works
 unchanged for anyone who would rather hand-pick the inputs directly, with no
-corpus, no catalogue, no triage record, and no gate 0.
+corpus, no catalogue, no triage record, no slices, and no gate 0.
 
 ### Reconcile is one logical step, engineered as substeps
 
@@ -104,8 +112,8 @@ written in one dispatch.
 judgment made from evidence already in the run, so a human overturning one of
 them corrects an inference about the target. Gate 0 decides what the run can
 ever know: nothing downstream of `intake` reads the corpus again, so a
-candidate `rb-triage` declines is gone as completely as if the corpus never
-contained it. That is why triage cannot also hold its own gate — the same
+candidate the triage family declines is gone as completely as if the corpus
+never contained it. That is why triage cannot also hold its own gate — the same
 party selecting the inputs and ratifying the selection would make the whole
 run unfalsifiable.
 
@@ -146,7 +154,9 @@ artifacts.
 
 | Skill | Job |
 |---|---|
-| `rb-triage` | Rules on every candidate in the catalogue against the declared objective — admit, or decline with a reason — and states what the admitted set cannot cover. Every decline is a fact about the target that no later stage can recover, since nothing downstream reads the corpus. |
+| `rb-triage-objective` | The first of the staged-triage family's prompt passes: rules whether the declared objective is supported by the corpus map — slice labels, groups, and byte/candidate counts — before any per-slice member reads a single candidate digest, and before that fan-out is ever dispatched. |
+| `rb-triage-rule` | The staged-triage family's fan-out member: one dispatch per slice, ruling on every candidate in it against the declared objective — admit, or decline with a reason — the way the monolithic `rb-triage` used to over the whole catalogue at once. A slice that is all declines still writes its part; only `triage-seal`, once every slice has reported, can say the corpus, objective, or scope itself is wrong. |
+| `rb-triage-audit` | The last of the staged-triage family's prompt passes: dispatched once every `rb-triage-rule` member has landed, it consolidates their raw `deficiency_notes` and `needs_projection` declines into real `deficiencies[]` and `projections[]`, plus its own reading of the admitted set as a whole — the union no single member could see — into `00-audit.json`. |
 | `rb-extract` | Turns one input artifact into atomic, evidence-backed claims. Every claim carries a locator and an honest `derivation` — *stated*, *inferred*, or *reverse_engineered* — so "the spec says this" and "I guessed from one trace" never look alike downstream. |
 | `rb-reconcile-subjects` | Cuts the claim set into subjects — every claim assigned to one or more of them — so the contradiction sweep has a slice to fan out over. A cover, not a partition: over-assignment is instructed, because a claim in no subject is never compared against anything. |
 | `rb-reconcile-contradict` | One member per subject. Compares claim against claim inside its own subject, across every input file, and records what disagrees — `unresolved` where nothing in the claims breaks the tie. Every resolution binds the passes below it. |
@@ -160,7 +170,8 @@ artifacts.
 | `rb-instantiate` | Builds one scenario's seed world — **distractors first**, so no agent can pass by reading back the only matching record — then derives the oracle from that seed rather than the other way round, and records which near-misses exist so a reviewer can judge fairness. |
 | `rb-challenge` | The adversary. Verifies one instance is a fair, discriminating test, reading the oracle *last* — an adversary who sees the answer first confirms almost anything. |
 | `rb-emit` | A deliberately thin entry point over `rubrica emit`; writes nothing itself. `emit` is code, not a prompt, because two runs with identical stage-4 and stage-5 artifacts must produce identical suites — otherwise variance can no longer be attributed to a stage. |
-| `rb-orchestrate` | The loop itself: dispatch each stage, validate, allow one bounded repair, hold gates 1 through 3, record each stage's model and skill hash, append every decision to the run's lab notebook. **Not a stage** — it declares no `stage` and no `schemas`. It dispatches `extract` through `emit` only: it never runs `survey`, never dispatches `rb-triage`, and never holds gate 0. |
+| `rb-orchestrate` | The loop itself: dispatch each stage, validate, allow one bounded repair, hold gates 1 through 3, record each stage's model and skill hash, append every decision to the run's lab notebook. **Not a stage** — it declares no `stage` and no `schemas`. It dispatches `extract` through `emit` only: it never runs `survey`, never dispatches any pass of the triage family, and never holds gate 0. |
 
-`intake`, `smoke`, `survey`, and `reconcile-seal` are code, not skills. They have no `SKILL.md`
-and no entry in `manifest.stages` — their absence there is not a defect.
+`intake`, `smoke`, `survey`, `triage-slices`, `triage-seal`, and
+`reconcile-seal` are code, not skills. They have no `SKILL.md` and no entry in
+`manifest.stages` — their absence there is not a defect.

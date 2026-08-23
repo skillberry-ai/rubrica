@@ -31,6 +31,7 @@ from rubrica.findings import Finding
 from rubrica.invariants import InvariantForm
 from rubrica.invariants import evaluate as evaluate_invariant
 from rubrica.paths import RunPaths, is_safe_segment, list_json
+from rubrica.slices import row_bytes
 from rubrica.suite.verify import DATA_KINDS, TRAJECTORY_KINDS
 from rubrica.utilisation import claim_utilisation
 
@@ -261,6 +262,623 @@ def check_catalogue(run: RunPaths) -> list[Finding]:
                 f"{pointer}/provenance",
                 "an adopted projection must record the projection_id it satisfies",
             )
+    return out
+
+
+def _and_join(items: list[str]) -> str:
+    """ "a and b" for two items, "a, b, and c" for more -- never a bare comma list.
+
+    Only ever called on candidate coverage overlaps, which are rare enough
+    (a hand-edited plan, not a normal `write_slices` output) that this exists
+    purely so the message reads as English rather than "a, b" for the common
+    two-item case.
+    """
+    if len(items) <= 1:
+        return ", ".join(items)
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
+def check_slices(run: RunPaths) -> list[Finding]:
+    """00-slices.json against 00-catalogue.json: same partition, or a finding.
+
+    Absent is not a finding: a run before `triage-slices` has run has nothing
+    to check here, same ruling as check_catalogue's for a run minted through
+    `intake --input` -- check_all runs every checker the run has inputs for,
+    so a pre-slicing run must report nothing.
+
+    A *present* plan that is not parseable JSON is exactly one finding naming
+    00-slices.json, returned immediately. This is the module docstring's
+    `01-claims/` incident again: continuing past an unreadable plan to resolve
+    candidate_ids that were never actually parsed would fabricate a `no such
+    candidate` finding for every id the read failed on, blaming a catalogue
+    that is fine for a plan that is broken.
+
+    `_readable_targets` does not cover 00-slices.json or its shards -- the
+    plan is minted well after the artifacts that list enumerates -- so
+    `check_readable`'s short-circuit never fires for this artifact and this
+    checker must guard the unreadable case for itself.
+    """
+    if not run.slices.is_file():
+        return []
+    try:
+        plan = read_json(run.slices)
+    except ArtifactError as exc:
+        return [Finding(run.slices, "refs", "", str(exc))]
+    if not isinstance(plan, dict):
+        return []
+    slice_entries = plan.get("slices")
+    if not isinstance(slice_entries, list):
+        return []
+
+    out: list[Finding] = []
+
+    def report(pointer: str, message: str) -> None:
+        out.append(Finding(run.slices, "refs", pointer, message))
+
+    cap_bytes = plan.get("cap_bytes")
+
+    # Check 3: slice ids unique. Duplicate ids are reported once here rather
+    # than left to corrupt every check below that addresses a shard by id --
+    # two entries sharing one id would otherwise both resolve to the same
+    # shard file and their shard/bytes findings would look like agreement.
+    raw_ids = [s.get("id") for s in slice_entries if isinstance(s, dict)]
+    for dup in _dupes([i for i in raw_ids if isinstance(i, str)]):
+        report("/slices", f"slice id {dup!r} is used by more than one slice")
+
+    # Checks 1 & 2 resolve candidate_ids against the catalogue's own ids. A
+    # catalogue that is absent, unreadable, or missing a candidates array
+    # cannot support that resolution -- reported already by check_catalogue,
+    # or not yet a defect if triage has not run -- so known_ids is None and
+    # this checker skips 1 & 2 rather than treating every id as unresolvable.
+    catalogue = _load(run.catalogue)
+    catalogue_candidates = catalogue.get("candidates") if isinstance(catalogue, dict) else None
+    known_ids: set[str] | None
+    if isinstance(catalogue_candidates, list):
+        known_ids = {
+            cid
+            for c in catalogue_candidates
+            if isinstance(c, dict) and isinstance(cid := c.get("candidate_id"), str)
+        }
+    else:
+        known_ids = None
+
+    # A set, not a list: what check 1 below asks is "how many *distinct*
+    # slice ids cover this candidate", not "how many entries do". A slice id
+    # duplicated across two entries (check 3's own defect) would otherwise
+    # make every candidate the duplicate shares look doubly-covered even
+    # when both entries name the same slice -- an artifact of counting
+    # entries, not of the candidate actually crossing a slice boundary.
+    coverage: dict[str, set[str]] = {}
+
+    for index, entry in enumerate(slice_entries):
+        if not isinstance(entry, dict):
+            continue
+        pointer = f"/slices/{index}"
+        sid = _str_or_none(entry.get("id"))
+        candidate_ids = [c for c in _as_list(entry.get("candidate_ids")) if isinstance(c, str)]
+
+        if known_ids is not None:
+            for j, cid in enumerate(candidate_ids):
+                if cid not in known_ids:
+                    report(f"{pointer}/candidate_ids/{j}", f"no such candidate {cid!r}")
+                elif sid is not None:
+                    coverage.setdefault(cid, set()).add(sid)
+
+        declared_bytes = entry.get("bytes")
+        if (
+            isinstance(cap_bytes, int)
+            and isinstance(declared_bytes, int)
+            and declared_bytes > cap_bytes
+        ):
+            report(
+                f"{pointer}/bytes",
+                f"slice {sid!r} is {declared_bytes} bytes, over the {cap_bytes}-byte cap "
+                "this plan was packed against",
+            )
+
+        if sid is None:
+            continue  # nothing safe to join into a shard path
+
+        # Check 4 (missing half): a shard this slice claims must exist on
+        # disk. Named at slices_dir, not the nonexistent shard path, mirroring
+        # check_verdicts' Finding(run.instance_dir(sid), ...) for a missing
+        # verdict -- point at the thing that does exist and should hold it.
+        shard_path = run.slice_shard(sid)
+        if not shard_path.is_file():
+            out.append(Finding(run.slices_dir, "refs", "", f"slice {sid} has no shard on disk"))
+            continue
+        try:
+            shard = read_json(shard_path)
+        except ArtifactError as exc:
+            out.append(Finding(shard_path, "refs", "", str(exc)))
+            continue
+        if not isinstance(shard, dict):
+            continue
+
+        shard_candidates = [c for c in _as_list(shard.get("candidates")) if isinstance(c, dict)]
+
+        # Check 6: shard candidates match candidate_ids, in order -- the same
+        # ids in the same sequence, not merely the same set.
+        shard_ids = [c.get("candidate_id") for c in shard_candidates]
+        if shard_ids != candidate_ids:
+            out.append(
+                Finding(
+                    shard_path,
+                    "refs",
+                    "/candidates",
+                    f"shard candidates do not match slice {sid}'s candidate_ids, in order",
+                )
+            )
+
+        # Check 5: bytes is arithmetic, not testimony -- recomputed from the
+        # shard's own candidates via slices.row_bytes, the same function
+        # write_slices used to produce the number in the first place.
+        recomputed = sum(row_bytes(c) for c in shard_candidates)
+        if isinstance(declared_bytes, int) and declared_bytes != recomputed:
+            out.append(
+                Finding(
+                    run.slices,
+                    "refs",
+                    f"{pointer}/bytes",
+                    f"slice {sid} declares bytes={declared_bytes} but its shard's candidates "
+                    f"sum to {recomputed}",
+                )
+            )
+
+    # Check 1: every catalogue candidate lands in exactly one slice.
+    if known_ids is not None:
+        for cid in sorted(known_ids):
+            covering = coverage.get(cid, set())
+            if not covering:
+                report("", f"no slice covers {cid!r}")
+            elif len(covering) > 1:
+                report("", f"{cid!r} is in slices {_and_join(sorted(covering))}")
+
+    # Check 4 (orphan half): every shard on disk is named by the plan.
+    # Mirrors check_verdicts' orphan-verdict scan just as directly as the
+    # missing-shard branch above mirrors its missing-verdict one.
+    plan_shard_ids = {i for i in raw_ids if isinstance(i, str)}
+    for shard_path in list_json(run.slices_dir):
+        if shard_path.stem not in plan_shard_ids:
+            out.append(
+                Finding(
+                    shard_path,
+                    "refs",
+                    "",
+                    f"{shard_path.name} is a shard on disk that no slice in the plan names",
+                )
+            )
+
+    return out
+
+
+def check_disposition_parts(run: RunPaths) -> list[Finding]:
+    """One part per slice, and the union of parts and adoptions covers the catalogue.
+
+    Returns nothing until 00-dispositions/ exists: with no dispositions
+    directory at all the run has not reached the dispositions fan-out, and
+    reporting every slice as unruled there would spend the orchestrator's
+    single repair attempt on a phantom.
+
+    Note what that does *not* tolerate. Once the directory exists -- i.e. once
+    the first part has landed -- every slice without one is reported. The
+    dispositions fan-out window, where some members have finished and others
+    are still in flight, is therefore *not* tolerated; the guard is `is_dir()`,
+    not a count. That is deliberate: check-refs is dispatched after the
+    fan-out completes, so a missing part at that point is real -- there is no
+    such thing as a stage-scoped check-refs.
+
+    Nothing here is semantic: every check below is "does this reference
+    resolve", never "does this disposition make sense for this candidate".
+
+    `_readable_targets` does not cover 00-slices.json, any disposition part,
+    or 00-adoptions.json -- all three are minted well after the artifacts
+    that list enumerates -- so this checker self-guards each of them exactly
+    as check_slices does for the plan.
+    """
+    if not run.dispositions_dir.is_dir():
+        return []
+    if not run.slices.is_file():
+        return []
+    try:
+        plan = read_json(run.slices)
+    except ArtifactError as exc:
+        return [Finding(run.slices, "refs", "", str(exc))]
+    if not isinstance(plan, dict):
+        return []
+    slice_entries = plan.get("slices")
+    if not isinstance(slice_entries, list):
+        return []
+
+    # Slice id -> the candidate_ids the plan says belong to it, the same
+    # population check_slices already holds every plan entry to -- reading
+    # it here rather than importing that check's own tables keeps this
+    # checker independent of check_slices' internal shape.
+    slice_candidates: dict[str, set[str]] = {}
+    for entry in slice_entries:
+        if not isinstance(entry, dict):
+            continue
+        sid = _str_or_none(entry.get("id"))
+        if sid is not None:
+            slice_candidates[sid] = {
+                c for c in _as_list(entry.get("candidate_ids")) if isinstance(c, str)
+            }
+
+    have_parts = set(run.slice_ids_with_parts())
+    out: list[Finding] = []
+
+    # Clause 1: every slice the plan declares has a part written for it.
+    missing_slices = sorted(set(slice_candidates) - have_parts)
+    for sid in missing_slices:
+        out.append(
+            Finding(
+                run.dispositions_dir,
+                "refs",
+                "",
+                f"slice {sid} has no disposition part on disk",
+            )
+        )
+
+    # Every present part is read exactly once, here, and an unreadable one is
+    # its own finding excluded from every check below -- continuing past a
+    # parse failure would fabricate findings against candidates the failed
+    # part never actually let this checker see, the module docstring's
+    # `01-claims/` incident again.
+    parts: dict[str, dict] = {}
+    readable_sids: set[str] = set()
+    for sid in sorted(have_parts):
+        path = run.disposition_part(sid)
+        try:
+            doc = read_json(path)
+        except ArtifactError as exc:
+            out.append(Finding(path, "refs", "", str(exc)))
+            continue
+        if not isinstance(doc, dict):
+            continue
+        readable_sids.add(sid)
+        parts[sid] = doc
+
+    # Clause 2: every disposition names a candidate that belongs to the slice
+    # its own part rules on -- the same defect seal.py's item 3 refuses
+    # before the write, reported here after the fact over any run's staged
+    # parts, including one the seal never sealed.
+    rulings: dict[str, list[tuple[Path, dict]]] = {}
+    for sid, doc in parts.items():
+        allowed = slice_candidates.get(sid, set())
+        path = run.disposition_part(sid)
+        for index, entry in enumerate(_as_list(doc.get("dispositions"))):
+            if not isinstance(entry, dict):
+                continue
+            cid = _str_or_none(entry.get("candidate_id"))
+            if cid is None:
+                continue
+            if cid not in allowed:
+                out.append(
+                    Finding(
+                        path,
+                        "refs",
+                        f"/dispositions/{index}/candidate_id",
+                        f"candidate {entry.get('candidate_id')!r} is not in slice {sid!r}, "
+                        "which this part rules on",
+                    )
+                )
+            rulings.setdefault(cid, []).append((path, entry))
+
+    # Adoptions bypass slicing entirely (spec 8.1: an adopted candidate needs
+    # no slice member to rule on it since a human already did), so they fold
+    # into the same rulings map. Required-and-may-be-empty per
+    # adoptions-0.1.json's own description: absence is not a defect, but a
+    # present-and-broken file is, same self-guard as every other part above.
+    adoptions_unreadable = False
+    if run.adoptions.is_file():
+        try:
+            adoptions_doc = read_json(run.adoptions)
+        except ArtifactError as exc:
+            out.append(Finding(run.adoptions, "refs", "", str(exc)))
+            adoptions_doc = None
+            adoptions_unreadable = True
+        if isinstance(adoptions_doc, dict):
+            for adoption in _as_list(adoptions_doc.get("adoptions")):
+                if not isinstance(adoption, dict):
+                    continue
+                cid = _str_or_none(adoption.get("candidate_id"))
+                if cid is not None:
+                    rulings.setdefault(cid, []).append((run.adoptions, adoption))
+
+    # Clause 3: no candidate ruled twice across parts and adoptions.
+    for cid in sorted(cid for cid, entries in rulings.items() if len(entries) > 1):
+        out.append(
+            Finding(
+                rulings[cid][0][0],
+                "refs",
+                "",
+                f"candidate {cid!r} has more than one disposition across the staged parts",
+            )
+        )
+
+    # Clause 4: the union of parts and adoptions covers the catalogue --
+    # scoped to exclude candidates whose owning slice was already reported
+    # missing or unreadable above, so one broken slice does not also report
+    # every one of its own candidates as separately uncovered.
+    catalogue = _load(run.catalogue)
+    if isinstance(catalogue, dict):
+        catalogue_ids = {
+            cid
+            for c in _as_list(catalogue.get("candidates"))
+            if isinstance(c, dict) and isinstance(cid := c.get("candidate_id"), str)
+        }
+        uncheckable: set[str] = set()
+        for sid in missing_slices:
+            uncheckable |= slice_candidates.get(sid, set())
+        for sid in have_parts - readable_sids:
+            uncheckable |= slice_candidates.get(sid, set())
+        if adoptions_unreadable:
+            # The content of a broken 00-adoptions.json is unknowable, so
+            # its actual scope cannot be folded in the way a broken part's
+            # can (that scope comes from the plan, not from the part
+            # itself). What *can* be bounded is which candidates an
+            # adoption could ever have been responsible for: adoptions
+            # bypass slicing entirely (spec 8.1), so every candidate no
+            # slice covers is exactly that population, and is excluded
+            # rather than guessed at. A slice-covered candidate stays
+            # checkable -- a broken adoptions file cannot explain away a
+            # candidate that was never adoption-eligible to begin with.
+            slice_covered = {cid for ids in slice_candidates.values() for cid in ids}
+            uncheckable |= catalogue_ids - slice_covered
+        checkable = catalogue_ids - uncheckable
+        for cid in sorted(checkable - set(rulings)):
+            out.append(
+                Finding(
+                    run.dispositions_dir,
+                    "refs",
+                    "",
+                    f"candidate {cid!r} has no disposition in any staged part or adoption",
+                )
+            )
+
+    return out
+
+
+def check_objective(run: RunPaths) -> list[Finding]:
+    """Reference checks over 00-objective.json. Nothing here is semantic.
+
+    Unlike check_disposition_parts, this reads one file written whole by one
+    pass -- there is no fan-out window where "some surfaces resolved, some
+    have not landed yet" is a normal, in-progress state to tolerate. A
+    present-but-broken 00-objective.json is a defect from the moment it
+    exists, so this carries no check_verdicts-style caveat.
+
+    `_readable_targets` does not cover 00-objective.json -- it is minted well
+    after the artifacts that list enumerates -- so this checker self-guards
+    its own read exactly as check_slices does for the plan.
+    """
+    if not run.objective.is_file():
+        return []
+    try:
+        objective = read_json(run.objective)
+    except ArtifactError as exc:
+        return [Finding(run.objective, "refs", "", str(exc))]
+    if not isinstance(objective, dict):
+        return []
+
+    # The catalogue is already covered by check_readable/_readable_targets,
+    # so an unreadable one is check_readable's finding, not this checker's to
+    # repeat -- reading it through _load, silently None on failure, matches
+    # check_triage's identical treatment of the same artifact.
+    catalogue = _load(run.catalogue)
+    candidates_by_id: dict[str, dict] = {}
+    if isinstance(catalogue, dict):
+        candidates_by_id = {
+            cid: c
+            for c in _as_list(catalogue.get("candidates"))
+            if isinstance(c, dict) and isinstance(cid := c.get("candidate_id"), str)
+        }
+
+    review = objective.get("objective_review")
+    if not isinstance(review, dict):
+        return []
+    surfaces = _as_list(review.get("surfaces"))
+    out: list[Finding] = []
+
+    for index, surface in enumerate(surfaces):
+        if not isinstance(surface, dict):
+            continue
+        pointer = f"/objective_review/surfaces/{index}"
+        evidence = [e for e in _as_list(surface.get("evidence")) if isinstance(e, str)]
+
+        # Clause 1: every evidence id resolves to a real catalogue candidate.
+        # Skipped (like check_slices' known_ids is None branch) when the
+        # catalogue itself could not be read, rather than treating every id
+        # as unresolvable.
+        unresolved = False
+        if candidates_by_id:
+            for position, cid in enumerate(evidence):
+                if cid not in candidates_by_id:
+                    out.append(
+                        Finding(
+                            run.objective,
+                            "refs",
+                            f"{pointer}/evidence/{position}",
+                            f"no such candidate {cid!r}",
+                        )
+                    )
+                    unresolved = True
+
+        # Clause 2: weight is arithmetic over the catalogue, recomputed from
+        # evidence rather than compared against itself -- a surface cannot
+        # certify its own count (lesson from earlier tasks: "weight is
+        # arithmetic a reader recomputes"). Distinct evidence ids, not raw
+        # count: evidence carries no uniqueItems constraint, and a candidate
+        # named twice in one surface is still one physical candidate.
+        # Skipped when evidence did not fully resolve above, or the
+        # catalogue could not be read -- the weight of a broken evidence list
+        # is not a second, independent defect to report.
+        if unresolved or not candidates_by_id:
+            continue
+        weight = surface.get("weight")
+        if not isinstance(weight, dict):
+            continue
+        distinct = set(evidence)
+        recomputed_candidates = len(distinct)
+        # bytes sums each candidate's own catalogue `bytes` field (the
+        # source file's size), never row_bytes' serialized-row size. digest.py
+        # clamps the digest skeleton at 128 nodes, so a 2.7MB source and
+        # a 20KB one can serialize to nearly the same row -- a metric that
+        # saturates under that cap is not a weight metric, it stops
+        # discriminating between candidates of very different evidential
+        # size right where this pass needs it to.
+        recomputed_bytes = sum(
+            b for cid in distinct if isinstance(b := candidates_by_id[cid].get("bytes"), int)
+        )
+        declared_candidates = weight.get("candidates")
+        declared_bytes = weight.get("bytes")
+        if declared_candidates != recomputed_candidates:
+            out.append(
+                Finding(
+                    run.objective,
+                    "refs",
+                    f"{pointer}/weight/candidates",
+                    f"declares weight.candidates={declared_candidates!r} but its evidence "
+                    f"names {recomputed_candidates} distinct candidate(s)",
+                )
+            )
+        if declared_bytes != recomputed_bytes:
+            out.append(
+                Finding(
+                    run.objective,
+                    "refs",
+                    f"{pointer}/weight/bytes",
+                    f"declares weight.bytes={declared_bytes!r} but its evidence candidates "
+                    f"sum to {recomputed_bytes}",
+                )
+            )
+    return out
+
+
+def check_audit(run: RunPaths) -> list[Finding]:
+    """Reference checks over 00-audit.json against the staged dispositions.
+
+    00-audit.json is written once, by the pass that runs last among the
+    staged-triage prompts precisely because it consolidates every disposition
+    part's deficiency_notes -- rb-triage-audit cannot even start until every
+    dispositions fan-out member has finished, the same barrier reconcile and
+    score hold for their own fan-outs. So unlike check_disposition_parts, this
+    checker never has to tolerate a mid-fan-out 00-dispositions/: by the time
+    00-audit.json exists to be checked at all, the barrier it was written
+    behind has already closed, and it carries no check_verdicts-style caveat.
+    Nothing here is semantic.
+
+    `_readable_targets` does not cover 00-audit.json or any disposition part
+    -- both are minted well after the artifacts that list enumerates -- so
+    this checker self-guards each of them exactly as check_slices does for
+    the plan.
+    """
+    if not run.audit.is_file():
+        return []
+    try:
+        audit = read_json(run.audit)
+    except ArtifactError as exc:
+        return [Finding(run.audit, "refs", "", str(exc))]
+    if not isinstance(audit, dict):
+        return []
+
+    out: list[Finding] = []
+    deficiency_ids = {
+        _str_or_none(d.get("deficiency_id"))
+        for d in _as_list(audit.get("deficiencies"))
+        if isinstance(d, dict)
+    } - {None}
+    projections = _as_list(audit.get("projections"))
+    # Strong, exactly like check_triage's own needs_projection check:
+    # projections[].sources[] does name a candidate, so this checks the
+    # decline's own candidate is sourced, not merely that some projection
+    # exists for something else.
+    projected_candidate_ids = {
+        _str_or_none(source.get("candidate_id"))
+        for projection in projections
+        if isinstance(projection, dict)
+        for source in _as_list(projection.get("sources"))
+        if isinstance(source, dict)
+    } - {None}
+
+    # Clause 3: every projection's closes names a real deficiency.
+    for index, projection in enumerate(projections):
+        if not isinstance(projection, dict):
+            continue
+        pointer = f"/projections/{index}/closes"
+        for position, closes in enumerate(_as_list(projection.get("closes"))):
+            if _str_or_none(closes) not in deficiency_ids:
+                out.append(
+                    Finding(
+                        run.audit,
+                        "refs",
+                        f"{pointer}/{position}",
+                        f"no such deficiency {closes!r}",
+                    )
+                )
+
+    # Clauses 1 & 2 read every staged part's own declines. An absent
+    # dispositions_dir here means a hand-assembled or manufactured audit
+    # artifact rather than a mid-fan-out one (see the docstring for why that
+    # distinction holds), so it is skipped rather than guessed at.
+    if not run.dispositions_dir.is_dir():
+        return out
+
+    for slice_id in run.slice_ids_with_parts():
+        part_path = run.disposition_part(slice_id)
+        try:
+            part = read_json(part_path)
+        except ArtifactError as exc:
+            out.append(Finding(part_path, "refs", "", str(exc)))
+            continue
+        if not isinstance(part, dict):
+            continue
+
+        # Strong for digest_insufficient too, unlike check_triage/seal's weak
+        # form: those read the *consolidated* triage record, where
+        # deficiencies[] carries no candidate-reference field to key a
+        # stronger check on. One level upstream, before consolidation,
+        # deficiency_notes[].candidate_id is exactly that field -- this is
+        # not re-implementing rb-triage-audit's consolidation (which dedupes
+        # notes across slices and mints deficiency_id), only checking whether
+        # the consolidation the pass already performed covers what this part
+        # flagged before it ran.
+        noted_candidate_ids = {
+            _str_or_none(note.get("candidate_id"))
+            for note in _as_list(part.get("deficiency_notes"))
+            if isinstance(note, dict)
+        } - {None}
+
+        for index, entry in enumerate(_as_list(part.get("dispositions"))):
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("disposition") != "decline":
+                continue
+            cid = _str_or_none(entry.get("candidate_id"))
+            code = entry.get("reason_code")
+            pointer = f"/dispositions/{index}/reason_code"
+            if code == "digest_insufficient" and cid not in noted_candidate_ids:
+                out.append(
+                    Finding(
+                        part_path,
+                        "refs",
+                        pointer,
+                        f"a digest_insufficient decline for {entry.get('candidate_id')!r} is "
+                        "not referenced by any deficiency_notes entry in this part",
+                    )
+                )
+            elif code == "needs_projection" and cid not in projected_candidate_ids:
+                out.append(
+                    Finding(
+                        part_path,
+                        "refs",
+                        pointer,
+                        f"a needs_projection decline for {entry.get('candidate_id')!r} has no "
+                        f"projection in {run.audit.name} sourcing it",
+                    )
+                )
     return out
 
 
@@ -1987,6 +2605,10 @@ def check_all(run: RunPaths) -> list[Finding]:
         return unreadable
     findings: list[Finding] = []
     findings.extend(check_catalogue(run))
+    findings.extend(check_slices(run))
+    findings.extend(check_disposition_parts(run))
+    findings.extend(check_objective(run))
+    findings.extend(check_audit(run))
     findings.extend(check_triage(run))
     findings.extend(check_manifest(run))
     findings.extend(check_inputs(run))

@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "slices-0.1.json",
+  "title": "Corpus slices",
+  "description": "triage-slices' (code) output: the catalogue's admissible candidates, packed into byte-bounded slices ahead of the dispositions fan-out. One shard on disk per slice (00-slices/<id>.json) mirrors this array's candidate_ids; refs.check_slices holds the two to the same partition of the catalogue.",
+  "type": "object",
+  "required": ["schema_version", "run_id", "slices", "cap_bytes"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "run_id": {"$ref": "triage-0.1.json#/$defs/id"},
+    "cap_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The byte budget every slice was packed against. Echoed here (rather than only in the catalogue's policy) so a reader auditing one slice's bytes against the cap does not have to open a second file."
+    },
+    "slices": {
+      "type": "array",
+      "minItems": 1,
+      "description": "A catalogue with admissible candidates always yields at least one slice; zero here is a slicer defect, not a judgment call.",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "groups", "bytes", "candidate_ids", "provenance"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "triage-0.1.json#/$defs/id",
+            "description": "Code-minted (s01, s02, ...), short and stable, because it is a path segment: 00-slices/<id>.json and 00-dispositions/<id>.json both join it through safe_segment. The human-readable name belongs in label, not here -- concatenating group names into the id itself produced unreadable strings."
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Human-readable name for this slice, carrying the prose the id deliberately does not."
+          },
+          "groups": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "description": "The catalogue groups (signature clusters, directory subtrees, ...) this slice draws candidates from, named in the same vocabulary as provenance[].group."
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total digest bytes of this slice's candidates. refs.check_slices recomputes this from the shard and checks it matches, so a slice cannot silently drift from its own header."
+          },
+          "candidate_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "triage-0.1.json#/$defs/id"},
+            "description": "Every candidate this slice owns. A slice with no candidates would have nothing for a dispositions-part member to rule on, so this floor mirrors the outer slices array's."
+          },
+          "provenance": {
+            "type": "array",
+            "description": "One entry per group this slice draws from, recording how that group's candidates split across every slice -- so a human at gate 0 can tell a slice boundary that fell mid-cluster from one that did not.",
+            "items": {
+              "type": "object",
+              "required": ["group", "in_this_slice", "in_group_total", "other_slices"],
+              "additionalProperties": false,
+              "properties": {
+                "group": {"type": "string", "minLength": 1},
+                "in_this_slice": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "How many of this group's candidates landed in this slice."
+                },
+                "in_group_total": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "How many of this group's candidates exist across every slice, so in_this_slice can be read as a fraction without opening the siblings."
+                },
+                "other_slices": {
+                  "type": "array",
+                  "items": {"$ref": "triage-0.1.json#/$defs/id"},
+                  "description": "The other slice ids holding the rest of this group's candidates. Empty when in_this_slice equals in_group_total -- the group did not get split."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

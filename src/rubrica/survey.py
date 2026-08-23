@@ -2,7 +2,7 @@
 
 The phase this module opens was performed by hand on every run before
 2026-08-14, in the orchestrator's own conversation, and recorded nowhere the
-pipeline could read. Its output exists so that rb-triage's judgment is
+pipeline could read. Its output exists so that triage's judgment is
 affordable: one bounded digest per candidate rather than the corpus itself,
 which is what keeps triage's cost O(candidates) instead of O(corpus bytes).
 
@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from rubrica import digest as digest_module
+from rubrica import slices as slices_module
 from rubrica.artifacts import canonical_bytes, sha256_of, write_json
 from rubrica.errors import UsageError
 from rubrica.intake import _unique_artifact_id, classify, slug
@@ -466,6 +467,21 @@ def survey(
             f"corpus yields {len(candidates)} candidates, over max_candidates={max_candidates}; "
             "narrow --corpus or raise the cap -- a catalogue this large does not fit one "
             "triage dispatch's context"
+        )
+
+    # Before the byte cap, because this one is not about the catalogue's total:
+    # a candidate row larger than one slice cannot be partitioned at all, and
+    # no repair prompt can shrink it. `triage-slices` would have to either
+    # exceed its cap or drop the candidate, and dropping one silently is the
+    # failure this whole stage exists to prevent.
+    oversized = slices_module.oversized_rows(candidates)
+    if oversized:
+        named = ", ".join(f"{cid} at {size} bytes" for cid, size in oversized[:5])
+        raise UsageError(
+            f"{len(oversized)} candidate row(s) exceed one slice of "
+            f"{slices_module.DEFAULT_SLICE_BYTES} bytes: {named}; narrow --corpus or "
+            "--exclude these files -- a row this large cannot be sliced, so triage "
+            "could never be dispatched over it"
         )
 
     run_id = f"run-{stamp:%Y%m%d-%H%M%S}"

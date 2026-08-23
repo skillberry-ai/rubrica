@@ -367,11 +367,13 @@ argument above rather than the throughput one.
 
 ### One exercise is one sample
 
-The skills that carry an `exercise.md` beside their `SKILL.md` each record
-what **one** measured dispatch actually did. That is
-the only behavioural evidence this project has, and one sample is one sample: a
-prompt that refused correctly once, or built a sound world model once, has not
-thereby been shown to do so reliably.
+Most of the pipeline's skills carry an `exercise.md` beside their `SKILL.md`,
+each recording what **one** measured dispatch actually did. The prompt passes of
+the `triage-*` and `reconcile-*` families are the exception, and the entries
+below say what that costs. An exercise record is the only behavioural evidence
+this project has, and one sample is one sample: a prompt that refused correctly
+once, or built a sound world model once, has not thereby been shown to do so
+reliably.
 
 `rubrica diff-runs` exists for exactly this measurement — per-stage stability
 across two runs — and the measurement has not been taken. The two real-target
@@ -481,11 +483,14 @@ verdict on what is answerable.** It is one dispatch's judgment about one claim
 set, and B4 is strict enough that on a real corpus the question is usually which
 stage halts rather than whether one does.
 
-### `rb-triage` carries no `exercise.md`, and the evidence it would hold is not in the repository
+### No pass of the triage family carries an `exercise.md`, and what the stage it replaced produced is not in the repository
 
-`rb-triage` is the skill without one — and **not** because it has never been
-dispatched. It has been dispatched at least twice against a real, non-toy
-target. One of those runs catalogued 351
+`rb-triage-objective`, `rb-triage-rule` and `rb-triage-audit` are the skills
+without one. For them the explanation is that none has ever been dispatched,
+which is the entry directly below this one. For the single `rb-triage` stage
+this family replaced it was **not** that: that stage was dispatched at least
+twice
+against a real, non-toy target. One of those runs catalogued 351
 candidates and admitted 130 of them, and its `decisions.md` records a genuine
 human gate-0 ruling: an operator accepting the triage record with no
 disposition overrides, accepting the risks named in all twelve of the
@@ -499,15 +504,17 @@ gitignored, so those records exist on one machine and nowhere else. This
 project's own rule is that an exercise record states what *happened*, and that
 results belong in that file rather than only in a ledger somewhere else,
 because ledgers get deleted. A gitignored run directory is a ledger with a
-shorter life than most.
+shorter life than most — and the skill those dispatches exercised has since been
+deleted, so what survives of them is a catalogue and a ruling on one disk, plus
+the numbers quoted in this file.
 
-It matters more here than it would for another stage, because `rb-triage` is
-the stage that holds **gate 0**, and gate 0 is different in kind from the other
+It matters more here than it would for another stage, because triage is what
+holds **gate 0**, and gate 0 is different in kind from the other
 three. Gates 1 through 3 review a judgment made from evidence already in the
 run; a human overturning one of them corrects an inference. Gate 0 decides what
 the run can ever know — nothing downstream of `intake` reads the corpus again,
 so a candidate triage declines is gone as completely as if the corpus had never
-contained it. The stage with the least recoverable authority in the pipeline is
+contained it. The part of the pipeline with the least recoverable authority is
 the one whose only real-world evidence is the most perishable.
 
 Recorded here rather than quietly fixed because writing the record honestly
@@ -516,7 +523,55 @@ machine that still has it, and an `exercise.md` assembled from reasoning
 instead of transcription is worse than none at all — a reasoned number
 presented as an observed one has corrupted this project's evidence once
 already, and had to be retracted. So the obligation is a transcription job with
-a named owner, not an edit anybody can make from the committed tree.
+a named owner, not an edit anybody can make from the committed tree. And it is
+no longer a transcription that would tell you about the code in this repository:
+it is evidence about a stage that has been deleted, which is why the family that
+replaced it owes its own dispatches separately.
+
+### The staged triage family has never been dispatched, and everything measured about it is arithmetic
+
+One prototype, four real catalogues, ten synthetic shapes, and **no dispatch.**
+
+Every number the staged design was argued from is arithmetic over catalogues
+that already existed. How many slices the 595KB / 351-candidate `parsec`
+catalogue cuts into (11, largest 63KB, against 5 for appworld, 5 for tau2 and 7
+for tau2 plus 200 trajectory files). How many distinct digest signatures a real
+130-element trace capture carries (44). What the packer does to a synthetic
+catalogue of 500 identical signatures, or 500 distinct ones, or one 200KB row
+among 50 normal ones. Not one of those numbers is a model's output, and the
+prototype that produced them was thrown away rather than shipped. No pass of the
+family has been dispatched once, against the toy world or anything else.
+
+**So the claim the whole design rests on is unmeasured.** The design says a
+member dispatched over a 64KB shard produces a *better* record than one
+dispatched over 595KB — better because the input fits, because the member can
+attend to every candidate in it rather than to whatever survived compaction, and
+because a bounded read cannot exhaust a budget before it writes. What is
+actually established is much narrower: the single dispatch **did** die, twice
+and in two different ways, and the slicer **does** produce shards a dispatch can
+hold. That a dispatch which completes produces a better *judgment* than one
+which died does not follow from either fact, and nothing in this repository has
+measured it.
+
+It is entirely possible for every pass to run clean and for the assembled record
+to be worse than the monolithic stage's. Members ruling on scope from a slice
+they cannot situate; an objective pass naming surfaces from directory names and
+byte counts; an audit reasoning over parts whose candidates it never read; a
+near-duplicate admitted twice because no member saw both. Each of those is an
+entry in this file, each is a cost this design took on deliberately, and not one
+of them has been observed in either direction. The gain is a hypothesis of the
+same kind, and it is the one that justified the work.
+
+The test suite cannot close this and is not the instrument for it. It proves the
+partition is total and disjoint, that the shards match the plan, that the seal
+refuses rather than half-assembles, and that each skill's prose says what its
+contract says. What no test can reach is whether a dispatched model followed the
+prompt — which is what the live exercises exist for. The obligation is therefore
+one dispatch per pass against a real target, one `exercise.md` each stating what
+happened rather than what should have happened, and the willingness to correct
+every entry this design added to this file wherever the arithmetic guessed
+wrong. Until that exists, the staged family is a well-tested hypothesis about
+judgment and not a demonstrated improvement in it.
 
 ### The loop's stopping rule is blind to goal-coverage progress
 
@@ -814,9 +869,9 @@ distinction that lives in one sentence of prose and had no other instrument.
 
 ### `objective_review` is prose a model writes about its own compliance
 
-`rb-triage` writes an `objective_review` block asserting whether its selection
-supported the objective it was given. A triage that silently re-scoped and then
-wrote `supported: true` produces an artifact **both gates pass**.
+`rb-triage-objective` writes an `objective_review` block asserting whether the
+selection supported the objective it was given. A triage that silently re-scoped
+and then wrote `supported: true` produces an artifact **both gates pass**.
 
 Nothing mechanical catches it, and nothing can: the claim is about the
 relationship between an instruction and a judgment, which is the same shape as
@@ -827,8 +882,142 @@ Parked because this is a restatement of the design's central bet rather than a
 defect with a fix. The mitigation that exists is structural and worth
 understanding: **triage does not hold its own gate.** The same party selecting
 the inputs and ratifying the selection would make the whole run unfalsifiable,
-which is why gate 0 belongs to a human and not to `rb-triage`, and why
-`rb-orchestrate` never dispatches triage at all.
+which is why gate 0 belongs to a human and not to any pass of the triage family,
+and why `rb-orchestrate` never dispatches one of them at all.
+
+### `supported` is ruled from a corpus map, not from the digests
+
+`rb-triage-objective` runs before any candidate has been ruled on, and its input
+is `request` plus a code-computed corpus map: the directory tree, kind and byte
+counts per subtree, the slice labels and their sizes. It reads no digest at all.
+So `supported`, the surfaces it enumerates, and each surface's weight are ruled
+from directory names and byte counts — and a surface ruling made from that view
+can be wrong in ways a reading of the digests would not have been. Two subtrees
+whose names suggest one surface may hold unrelated behaviour; a subtree whose
+name says nothing may hold the corpus's only failure evidence.
+
+The trade was made deliberately and the reason is worth keeping. The objective
+decides every subsequent call, and a pass that reads the candidates first
+arrives at a scope and then rationalises the objective to fit it — the single
+stage's own prose said so, which is why it read `request` before any candidate.
+Ruling the objective *after* the per-candidate passes would not remove that
+rationalisation; it would move it across a stage boundary, where it is harder to
+see rather than absent. The thin view is what keeps the objective pass's input
+from growing with the corpus at all.
+
+What makes it a recorded cost rather than a regression is a new instrument. The
+objective pass **predicts** a surface count from the map; the members
+**observe** surfaces in their slices; the seal carries both, and `gate-brief`
+renders the divergence at gate 0. "Predicted 7, observed 11" is a statement
+about the corpus map's adequacy that nothing in this pipeline could previously
+make. It does not say which reading was right — only that the thin view and the
+thick view disagreed, which is the point at which a human can look.
+
+### Slice coherence is a code judgment no test can rule on
+
+`triage-slices` cuts the catalogue into byte-bounded slices by descending the
+directory tree only where the cap forces it, clustering a container's elements
+by digest signature before any byte split, and packing adjacent siblings.
+Whether the cut it lands on is *meaningful* — whether `parsec/tests` is one
+surface or
+three — is editorial. `refs.check_slices` verifies that the plan and the shards
+are the same total, disjoint partition of the catalogue, that each slice's
+declared `bytes` recomputes from its own candidates, and that no slice exceeds
+the declared cap. Every one of those holds identically for a partition that cuts
+straight through the middle of a coherent subtree.
+
+It matters because a slice is the unit a member reads, and a member's ruling is
+only as good as the neighbourhood it can see. A slice assembled from three
+unrelated subtrees invites a scoping judgment made against no coherent subject,
+and it is also the configuration in which the near-duplicate residue below is
+most likely.
+
+Parked because the only instrument available is prose a human reads. Every slice
+carries a `label` naming what it drew from, and `gate-brief` renders the slice
+table together with every group the slicer split across more than one slice.
+Measured on the four real catalogues, the labels came out legible —
+`apps/splitwise +spotify +supervisor +todoist +venmo`, `domains +environment
++evaluator +gym`, `voice` — which is evidence that the cut tends to follow
+structure, not proof that it did on any particular run. A mechanical coherence
+check would have to know what the target's surfaces are, and that is the
+judgment the pipeline exists to make rather than a fact it can look up.
+
+### Two near-duplicate candidates in different slices are both admitted
+
+An `rb-triage-rule` member reads one shard and never a sibling's. If two
+candidates say substantially the same thing and the slicer put them in different
+slices, each member rules on its own candidate on that candidate's merits, and
+both are admitted. The single dispatch this family replaced could in principle
+have folded one into the other; no member can, because the comparison it would
+need is the one thing its shard does not contain. This is the residue of
+slicing, and it is the thing slicing costs.
+
+It is **over**-admission, and the difference from an invisible absence is the
+whole reason it is tolerable. Every candidate still reaches a member and still
+gets a reasoned, per-candidate disposition, so the cut drops nothing and causes
+no decline. What it spends is extraction budget: a duplicate admitted twice
+becomes two inputs, two `extract` dispatches, and two claim sets saying the same
+thing. And the spend leaves evidence — `claim-utilisation` reports each input's
+cited/total claim count for a human to read at gate 1, and a redundant input is
+precisely the shape that surfaces there as claims nothing cited.
+
+Resist the argument that this is the same class of loss as the digest's
+blindness. A digest that omits the fact triage needed can make triage *decline*
+something valuable, and that decline is indistinguishable, from every downstream
+artifact, from a corpus that never held it. A slice boundary cannot produce that
+outcome at all: its failure mode is one candidate too many, in the direction
+that leaves a trace. Claiming kinship between the two would launder a recorded
+over-admission into the same bucket as an unrecoverable absence.
+
+Mitigated twice, and neither mitigation eliminates it. A container's elements
+are clustered on their digest signature before any byte split, so near-duplicate
+families land in one member's slice by construction rather than by luck of where
+a byte count fell — that mitigation is conditional, and the entry below states
+the condition. And every slice records provenance: for each group it draws from,
+how many of that group's candidates are in this slice, how many exist in total,
+and which other slices hold the rest. A member holding 42 of 500 elements that
+share one signature can therefore say so in a disposition's `reason` instead of
+ruling as though it held the whole family, and gate 0's brief flags every group
+that was split. That converts an invisible over-admission into a recorded one,
+which is the property a code-side pair filter could not have offered.
+
+### Signature clustering is conditional, and specific to traces
+
+The clustering mitigation above keys on `heuristics_fired` and `names`, and only
+a `trace` digest carries either. Three regimes, and the difference between the
+one that was observed and the two that were constructed matters:
+
+- **Measured, on a real 130-element trace capture.** 44 distinct signatures, and
+  the large clusters are the near-duplicate families a human would have named by
+  hand: 18 AAP2-investigation elements, icinga-streaming variants at 10+9+8+4+4,
+  9+3 babylon, 9 provisions-db. The fact the clustering exists to protect is in
+  the same capture — `error_markers`, the digest's only structural failure
+  signal, fires on **exactly one** of the 130 elements, and that element is the
+  run's only evidence of what the target does when something goes wrong.
+  Clustering makes it a singleton by construction, so it cannot be swallowed as
+  a duplicate by a member that never saw its peers.
+- **Constructed, not observed: 500 identical signatures.** Clustering
+  degenerates to byte-splitting — one cluster larger than any slice, cut where
+  the bytes ran out — and slice provenance is the only thing left saying so.
+- **Constructed, not observed: 500 distinct signatures.** Clustering degenerates
+  to arbitrary packing: every element is its own cluster, and the boundaries
+  fall wherever adjacency and the cap put them.
+
+Those last two are synthetic catalogues built to probe the packer, not corpora
+anybody surveyed. They say what the algorithm does at its limits and nothing
+about how often a real corpus sits there.
+
+On a corpus whose container elements classify as `other` rather than `trace`,
+the mitigation does not apply at all — such elements cluster on skeleton shape
+alone.
+That is not hypothetical. Issue #4 records that OpenAI-style chat trajectories
+neither explode (`EXPLODE_MIN_COMMON_KEYS` is 3, against a `{role, content}`
+intersection of one) nor classify as traces (`classify_payload` wants `spans` or
+`trace_id`), so 200 such files reach triage as 200 skeleton-only rows on which
+every skeleton is identical. The two are in series and this design is the
+prerequisite: fixing #4 first would turn that corpus into roughly 5,425
+candidates and ~2.9MB, past both of `survey`'s caps, so a corpus that triages
+badly would become one that cannot be surveyed.
 
 ### The catalogue digest is the single point of failure for triage
 
@@ -838,18 +1027,58 @@ insufficiency for a given candidate is only visible when triage notices and
 says so.
 
 Mitigated rather than eliminated, in two ways that are both worth knowing at
-gate 0: `rb-triage` has a `digest_insufficient` decline it is expected to use,
-and the catalogue records which heuristics fired for each candidate, so a human
-can see what the decision was made from.
+gate 0: `rb-triage-rule` has a `digest_insufficient` decline it is expected to
+use, and the catalogue records which heuristics fired for each candidate, so a
+human can see what the decision was made from.
 
 Parked because the alternative is triage reading the candidates themselves,
 which is the cost the digest exists to avoid — and at a few hundred candidates
 that is the difference between a barrier a model can hold in context and one it
-cannot. A related bound sits next to it: a barrier over several hundred
-candidates is a large context (roughly 400 bytes of digest each), and
-`--max-candidates` is the only thing holding it. If real corpora routinely
-exceed it, triage needs a clustering pass, and that is a redesign rather than a
-parameter.
+cannot.
+
+**The arithmetic that used to sit here was three times optimistic.** It sized a
+barrier over several hundred candidates at "roughly 400 bytes of digest each".
+Measured on the 595KB / 351-candidate `parsec` catalogue that motivated the
+staged family: the mean candidate row is **1,645 bytes**, the mean digest
+**1,186**, and digests are **72%** of the `candidates` array. So the barrier was
+most of a megabyte of digest, and `--max-candidates` — default 500, against an
+observed death at 351 — was never going to hold it. Do not read those figures
+onto the golden fixture: `tests/fixtures/toy/` is a three-file world whose rows
+are an order of magnitude smaller (2,381 / 1,303 / 418 bytes), and an entry
+citing a three-file fixture as evidence about real corpora would be exactly the
+misattribution this project has had to retract once already.
+
+That correction is also this entry's own prediction coming true. It closed with
+"if real corpora routinely exceed it, triage needs a clustering pass, and that
+is a redesign rather than a parameter." They did, and that redesign is the
+`triage-*` family: a code pass that cuts the catalogue into byte-bounded slices,
+a fan-out that rules one slice each, an audit over the parts, and a code seal
+that assembles the record. The prediction was right about the class of fix. What
+it did not say is that the cut is itself a source of new limitations, which are
+the entries directly above this one.
+
+**The clamp that redesign required is a second truncation.** Boundedness by
+construction depends on no single candidate row exceeding a slice cap — a slice
+holding one candidate is already minimal, so no slicer can rescue an oversized
+row. Measured before the clamp existed: `ec2-pricing-json`, a 2.7MB pricing
+file, produced 261 skeleton nodes and 39,162 bytes in one candidate row, 6.8% of
+the whole `candidates` array in a single entry. `digest.py` therefore caps a
+skeleton's total node count (`_SKELETON_MAX_NODES` is 128) as well as its
+breadth and depth, and `survey` now refuses a catalogue outright, exiting 2,
+when any row exceeds one slice.
+
+A digest can consequently be cut two ways rather than one, and both are recorded
+in the digest itself: `keys_truncated` where breadth bit and
+`skeleton_nodes_truncated` where the node budget did. That is the whole reason
+this is a cost
+rather than a defect — a truncation a prompt can see is a fact about the
+candidate, and one it cannot see is a lie about it. What remains true is that
+this adds a second place where a fact can be lost before any model reads
+anything, in the artifact this entry already calls the single point of failure.
+What it does **not** license: lowering `digest_body_chars` to make catalogues
+smaller. That narrows the single point of failure in order to buy bytes; the
+clamp exists to make a bound enforceable, not to make digests thinner across the
+board.
 
 ---
 
@@ -955,12 +1184,29 @@ So an unexpected exception in one of the three exits 1 with empty stdout — the
 exact mode the net was added to close.
 
 Parked because the crash surface is genuinely small and the placement is
-deliberate. All three read paths a human or an orchestrator supplied rather
-than artifacts a stage wrote, so a failure there really is a usage error or a
-misconfigured harness: there is no stage to send a finding back to. Slug
-generation cannot emit an unsafe segment, and IO raises `OSError`, which is
-caught. This has been re-examined twice and still holds; what would change it
-is a fourth block, or one of these three growing a real content-parsing path.
+deliberate. Slug generation cannot emit an unsafe segment, and IO raises
+`OSError`, which is caught.
+
+**The second of the two triggers this entry named has since fired, for
+`adopt-projection` only.** The reasoning above rested on all three blocks
+reading paths a human or an orchestrator supplied rather than artifacts a stage
+wrote — so a failure there was a usage error, with no stage to send a finding
+back to. That is no longer true of `adopt-projection`: it parses
+`00-triage.json`, `00-catalogue.json` and `00-adoptions.json`, and it now
+returns findings rather than only raising. The two container-shape defects that
+path can reach — a triage record or a catalogue that is readable JSON but not an
+object — were closed where they arise, each returning a `Finding` naming the
+artifact it came from instead of an `AttributeError`; before that, a
+`00-triage.json` holding `null` exited 1 with empty stdout, verbatim the mode the
+net exists to close.
+
+Still live, and still parked, because the *placement* is unchanged: those are
+the two defects that were measured, not a proof that the path has no others, and
+any further unexpected exception inside `adopt-projection` exits 1 with empty
+stdout exactly as before. What would close it is moving the block inside the
+net — which means giving the three a finding-shaped exit for genuine usage errors
+too, a wider change than this entry's cost justifies. The first trigger, a
+fourth block, has not fired: there are still three.
 
 ### The catch-all blames the artifact, and names the wrong run for `diff-runs`
 
@@ -1176,6 +1422,79 @@ with a hazard that measurement showed never occurs in that document.
 All three parked as accuracy residues in tests whose properties hold: the cost
 of each is one misleading docstring, and the benefit of an edit is not worth
 re-measuring predicates that are currently pinned in four directions.
+
+### Fourteen prose predicates in the triage family's test module do not discriminate
+
+`tests/unit/test_skills_triage_family.py` contains two shapes of prose
+predicate. The windowed shape — `_window_after` / `_window_around` around an
+anchor token — constrains what it claims to. The plain `"X" in body and "Y" in
+body` shape does not, and there are **fourteen** of them (`grep -c "in body
+and"`). The section scoping via `skills.section_body` that `CLAUDE.md` requires
+is present in both, so these are not the vacuous-against-the-whole-file case
+that convention already closed; they are vacuous *within a correctly scoped
+section*, because a section that says a thing and a section that says its
+opposite contain the same tokens.
+
+Five were measured, each by **inverting** the claim in a `/tmp` copy under
+`RUBRICA_SKILLS_DIR` — a stronger probe than deletion, because the tokens do not
+vanish and the predicate is handed everything it asks for while the prose now
+says the reverse. Every test in the module stayed green in every case, and
+`rubrica check-skills` exited 0:
+
+| Predicate | Inversion written into the skill |
+|---|---|
+| `:117` `…forbids_reading_candidate_digests` | "you **may** read every field of `candidates[]`, including each candidate's `digest`" |
+| `:122` `…admits_that_a_map_is_thinner_than_the_digests` | "`supported` is a reliable verdict … this pass has no blind spot to flag" |
+| `:139` `…states_which_bytes_weight_sums` | `weight.bytes` sums serialized row size, "never a candidate's own catalogue `bytes`" |
+| `:168` `…explains_predicted_surface_count_is_a_prediction` | the member "has made an error … reconcile the member's count to this prediction" |
+| `:268` `test_the_rule_pass_inverts_the_decline_everything_refusal` | "**Refuse** if you would decline every candidate in your slice" |
+
+The first is the consequential one. `CLAUDE.md`'s stage table describes
+`triage-objective` as the barrier that "reads the corpus map, **never a
+digest**", and that property is the entire reason the pass is bounded — it is
+what makes the staged family survive a corpus the monolithic stage died on.
+Granting the opposite permission in the skill's own Inputs section *and* in
+Invariant 1 left the whole unit suite green. The design's bounding constraint is
+prose that nothing checks.
+
+The five are not equally severe, and the difference is the mirror question
+`CLAUDE.md` asks of any proposed guard. `:139`'s property is already gated
+deterministically: `refs.check_objective` recomputes `weight.bytes` from the
+catalogue, so that predicate is redundant belt-and-braces and its vacuity costs
+nothing. `:168`'s is not gated anywhere — a member that quietly reconciles its
+observed surface count to the prediction erases the divergence from the data,
+and `gate-brief`'s predicted-vs-observed surface at gate 0 then has nothing to
+show. `:268` inverts a **refusal condition**, the do-not-refuse that keeps the
+fan-out from stranding on a legitimately all-declines slice, which
+[`rationale.md`](rationale.md) uses as its worked example of decorativeness.
+
+**The remedy is known because it was measured, in the same file.** Inverting
+`rb-triage-objective`'s primary refusal condition left the unwindowed `:178`
+green and turned the windowed `:184` **red**. Same prose, same file, same
+section: the shape of the predicate is the whole difference. The windowed
+predicates also hold in the other direction — the two tightest were recomputed
+from the shipped prose and their docstrings' stated distances are exact (the
+objective's Invariants anchor sits 142 chars from the nearest prohibition word
+inside a radius-300 forward window, 2.11x; the audit's `deficiency_notes` anchor
+208 chars from `your job` inside radius 500, 2.40x), so the 2x floor holds and no
+window on this branch is a length pin in disguise.
+
+One predicate fails in the opposite direction: `:551` asserts `"is also a claim"
+in body or "is itself a claim" in body`, and rewording the audit's Output prose
+to "is a claim in its own right" — meaning identical — turns it red. The
+module's `_norm` handles whitespace reflow; nothing handles synonym. The
+predicate is the wrong one, not the prose.
+
+**Why it is parked.** Every one of these is a test that fails to constrain, not
+shipped behaviour that is wrong: the prose the predicates were written to guard
+is correct on disk in all fourteen cases, and the two check layers are
+unaffected. Fixing them properly means converting fourteen predicates to the
+windowed co-occurrence form, each conversion requiring its own anchor-to-token
+measurement and its own both-directions probe — real work, and work that is
+worse than useless done in a hurry, because a window sized by guess rather than
+by measurement is the length pin this module's docstring already warns about.
+The branch converted the hardest ones and left the rest in the shape it found
+them. What is owed is the conversion, not a decision.
 
 ### `tests/unit/test_live_marker.py` writes into the tracked tree
 

@@ -6,8 +6,8 @@ skills over a schema-validated contract on disk. This page gets a first-time
 reader from a clone of this repository to a minted run they can inspect.
 Every command below was run against this repository before this page was
 committed; where the output is long, it is shown truncated and said so. One
-step is the exception, and it is called out where it happens: §2 dispatches a
-model, which no command in this repository does, so §§3–5 were run against a
+step is the exception, and it is called out where it happens: §2 dispatches
+models, which no command in this repository does, so §§3–5 were run against a
 triage record hand-authored for this walkthrough rather than one committed
 here.
 
@@ -33,7 +33,7 @@ describes what goes in it), and there are two ways to mint one:
 
 - **`rubrica survey --corpus …`** walks a corpus of files, digests each
   candidate, and writes `00-catalogue.json`. Nothing is admitted yet — the
-  `rb-triage` skill rules on the catalogue next, admitting or declining each
+  `triage-*` family rules on the catalogue next, admitting or declining each
   candidate against the survey's stated objective, and a human holds a gate
   over that ruling before anything downstream ever sees the corpus again.
   This is the path for "here is a pile of files, tell me what's usable."
@@ -151,27 +151,32 @@ elements, not the container.
 
 ### 2. Triage rules on every candidate
 
-`rb-triage` is a prompt, not code — the one thing on this page that does not
-run as a `rubrica` subcommand. It reads `00-catalogue.json` only, rules
-`admit` or `decline` on every candidate against the declared objective, and
-states what the admitted set still cannot cover. Dispatching it is described
-in [`docs/guides/running-a-stage-by-hand.md`](guides/running-a-stage-by-hand.md);
+Triage is not one step but a family of them, and three of the five are prompts
+rather than code — the only things on this page that do not run as a `rubrica`
+subcommand. `rubrica triage-slices` partitions the catalogue into byte-bounded
+shards; `rb-triage-objective` rules on whether the declared objective is
+supported before any candidate digest is read; one `rb-triage-rule` dispatch per
+shard rules `admit` or `decline` on every candidate in it; `rb-triage-audit`
+reads the parts once every member has landed and states what the admitted set
+still cannot cover; and `rubrica triage-seal` assembles the whole thing into
+`00-triage.json`. Dispatching the prompts is described in
+[`docs/guides/running-a-stage-by-hand.md`](guides/running-a-stage-by-hand.md);
 this page does not repeat that runbook, because a dispatch is not a command
 this repository ships.
 
 **This is gate 0, and it is different from every other gate in the
 pipeline.** Nothing downstream of `intake` ever reads the corpus again, so a
-candidate `rb-triage` declines is gone as completely as if the corpus never
+candidate the family declines is gone as completely as if the corpus never
 contained it. A human reviews the ruling before anything is minted — that
 review is what the rest of this section is building toward.
 
-**The next three sections need that dispatch to have happened.** They read
-`00-triage.json`, and nothing in this repository writes it: the record behind
-the output shown below was hand-authored for this walkthrough and is *not*
-committed here, so you cannot reproduce these three blocks by following the
-page alone. Walking on from §1 without dispatching `rb-triage` gives you, in
-order, exit 1 from `validate --stage triage` (`stage 'triage' produced no
-triage artifact`), the absence message from `gate-brief --gate 0`, and exit 2
+**The next three sections need those dispatches to have happened.** They read
+`00-triage.json`, and no prompt in this repository can be run for you: the
+record behind the output shown below was hand-authored for this walkthrough and
+is *not* committed here, so you cannot reproduce these three blocks by following
+the page alone. Walking on from §1 without running the family gives you, in
+order, exit 1 from `validate --stage triage-seal` (`stage 'triage-seal' produced
+no triage artifact`), the absence message from `gate-brief --gate 0`, and exit 2
 from `intake --run` (`no triage record at …`). All three are correct
 behaviour — each command is telling you the stage has not run — not a broken
 page. (§3's `check-refs` does exit 0 on a survey-only run, but vacuously:
@@ -179,11 +184,11 @@ with no triage record there is nothing to resolve against the catalogue.)
 
 ### 3. Check what triage wrote
 
-Once `rb-triage` has written `00-triage.json`, the same two check layers that
+Once `triage-seal` has written `00-triage.json`, the same two check layers that
 gate every other stage apply here too:
 
 ```bash
-rubrica validate --run "$RUN" --stage triage
+rubrica validate --run "$RUN" --stage triage-seal
 echo "exit=$?"
 ```
 
@@ -329,8 +334,9 @@ straight from the three `--input` files named on the command line.
 
 No command in this repository dispatches a model. `survey`, `intake`,
 `validate`, `check-refs`, and every other subcommand above are code — the
-dispatch of `rb-triage`, and of the prompt stages from `extract` through
-`emit`, happens by pointing an agent at a skill file and a run directory.
+dispatch of the triage family's prompt passes, and of the stages from `extract`
+through `emit`, happens by pointing an agent at a skill file and a run
+directory.
 
 `rb-orchestrate` — `src/rubrica/skills/rb-orchestrate/SKILL.md` — is the skill
 that drives a whole run once a manifest exists. Point an agent at it with a
@@ -340,11 +346,12 @@ round loop between propose and score, holds the three human gates after
 the reconcile seal, score, and challenge, spends at most one repair attempt per stage
 failure, and records what it did — the model, the skill's hash, and every
 branch it took — so the run explains itself afterward. It never runs
-`survey`, never dispatches `rb-triage`, and never holds gate 0: all three are
-finished, by the time it is ever handed a run, per the walkthrough above.
+`survey`, never dispatches any pass of the triage family, and never holds
+gate 0: all three are finished, by the time it is ever handed a run, per the
+walkthrough above.
 
-`rb-triage` itself is dispatched the same way, on its own, before a manifest
-exists at all — see
+The family's own passes are dispatched the same way, one at a time, before a
+manifest exists at all — see
 [`docs/guides/running-a-stage-by-hand.md`](guides/running-a-stage-by-hand.md)
 for the exact dispatch prompt and the settings that keep a dispatched
 subagent from reading anything its skill does not list.

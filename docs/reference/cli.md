@@ -18,7 +18,8 @@ restate it.
 Walks a corpus, digests each candidate, and mints a run — `intake`'s
 counterpart for the corpus path. Writes `00-catalogue.json` rather than a
 manifest, because nothing has been admitted yet; there is nothing to extract
-from until `rb-triage` rules on the catalogue and a human holds gate 0.
+from until the `triage-*` family has ruled on the catalogue and a human holds
+gate 0.
 
 Required: `--corpus PATH` (repeatable), `--runs-dir RUNS_DIR`, `--target-name
 TARGET_NAME`, `--target-interface TARGET_INTERFACE`, `--objective
@@ -78,7 +79,10 @@ rubrica intake --run runs/run-20260806-123005
 ### `rubrica adopt-projection`
 
 Admits a manufactured artifact into the catalogue structurally, without
-touching the corpus or the run's identity.
+touching the corpus or the run's identity. Appends the admission to
+`00-adoptions.json` — never to `00-triage.json`, which this command only
+reads: that record is `triage-seal`'s own derived output, and editing it
+here would be erased the next time `triage-seal` runs.
 
 Required: `--run RUN`, `--projection ID`, `--file PATH`. Optional:
 `--check-only` (checks acceptance without writing).
@@ -99,7 +103,8 @@ rubrica adopt-projection --run runs/run-20260806-123005 \
 
 Layer 1: schema-validates one stage's output.
 
-Required: `--run RUN`, `--stage`, one of `survey`, `triage`, `intake`,
+Required: `--run RUN`, `--stage`, one of `survey`, `triage-slices`,
+`triage-objective`, `triage-rule`, `triage-audit`, `triage-seal`, `intake`,
 `extract`, `reconcile-subjects`, `reconcile-contradict`,
 `reconcile-capabilities`, `reconcile-outcomes`, `reconcile-entities`,
 `reconcile-goals`, `reconcile-gaps`, `reconcile-seal`, `propose`, `score`,
@@ -220,6 +225,66 @@ rubrica reconcile-seal --run runs/run-20260806-123005
 
 ## Feeding a stage
 
+### `rubrica triage-slices`
+
+Partitions a catalogue's admissible candidates into byte-bounded slices — a
+reading unit, never a decision unit, so nothing here overrules a candidate a
+human can still act on at gate 0. Every shard carries the run's `request` and
+`policy` verbatim alongside that slice's own candidates, so a later dispatch
+reading its own slice never has to seek across the catalogue for a head field.
+
+Required: `--run RUN`.
+
+Reports no findings, so it never exits 1: a catalogue with no admissible
+candidates, one that cannot be read at all, or one missing `run_id`,
+`request`, `policy`, or a candidate's `candidate_id` — every field this
+command or a shard reads verbatim, checked before that read happens — is exit
+2, a survey defect or a broken run, not a repairable stage output. A single
+candidate too large for any slice is exit 2 for the same reason: no splitter
+here can shrink one row. Re-running replans and removes any shard the new
+plan no longer names, so a human adopting a projection at gate 0 can re-mint
+the plan safely.
+
+Prints one line per slice — id, byte size, candidate count, label — then
+exits 0.
+
+```bash
+rubrica triage-slices --run runs/run-20260806-123005
+# s01  61234  42  corpus:0:src/handlers (42 candidates)
+```
+
+### `rubrica triage-seal`
+
+Assembles `00-triage.json` from the staged parts — `00-objective.json`,
+`00-slices.json`, every `00-dispositions/<slice>.json` part, `00-audit.json`,
+and `00-adoptions.json` (optional; a missing file folds in as no
+adoptions). This module assembles; it does not check — cross-artifact
+checking is layer 2 and lives in `check-refs`, which runs over the sealed
+record after this writes it.
+
+Required: `--run RUN`.
+
+Reports findings rather than raising: a part absent, unparseable, or missing
+its declared payload keys; a candidate with no disposition anywhere or with
+more than one; a disposition naming a candidate outside the slice its own
+part rules on; no `admit` anywhere across every part and adoption; or a
+`digest_insufficient`/`needs_projection` decline referencing nothing
+`00-audit.json` carries. Writes nothing at all when it reports any of
+them — a half-assembled record would clear layer 1 for the fields it did
+manage to fill, and read as a complete triage decision to a human at gate 0.
+
+Re-running is idempotent: nothing this reads is itself the sealed record, so
+sealing an already-sealed run re-derives the identical record from the same
+parts, and an adoption made since the last seal survives the next one.
+
+Prints the path to `00-triage.json` on a clean assembly, then exits 0; on
+findings, exits 1 with one finding per line and writes nothing.
+
+```bash
+rubrica triage-seal --run runs/run-20260806-123005
+# runs/run-20260806-123005/00-triage.json
+```
+
 ### `rubrica dedupe-candidates`
 
 Proposes candidate duplicate scenario pairs as JSON for the scoring stage to
@@ -298,6 +363,17 @@ Composes the existing reports into the reading surface at one of the four
 human gates: the objective verdict and grouped declines at gate 0; the reconcile
 sweep, utilisation and implied size at gate 1; the coverage matrix at gate 2; the
 verdict tally at gate 3.
+
+Gate 0 renders more than the others because it is the one gate held before any
+downstream stage has read the corpus: the objective verdict, then the
+predicted-vs-observed surface divergence (`00-objective.json`'s
+`predicted_surface_count` against the surfaces the disposition parts confirmed
+or added), then admits by priority, declines grouped by reason code, and every
+open deficiency beside the projection that would close it — and last, the
+mechanics of how the fan-out read the corpus: the slice table (candidates and
+bytes per slice) and every group `triage-slices` split across more than one
+slice. That final summary is where the near-duplicate residue lives, and gate 0
+is the only place a human can act on it.
 
 Gate 1's brief leads with the **reconcile sweep**, and it is an aggregate rather
 than a per-subject listing: how many subjects cover how many claims, how many

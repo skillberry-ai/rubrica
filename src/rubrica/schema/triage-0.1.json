@@ -29,129 +29,22 @@
         "surfaces": {
           "type": "array",
           "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": ["name", "evidence", "weight"],
-            "additionalProperties": false,
-            "properties": {
-              "name": {"type": "string", "minLength": 1},
-              "evidence": {
-                "type": "array",
-                "minItems": 1,
-                "items": {"$ref": "#/$defs/id"}
-              },
-              "weight": {
-                "type": "object",
-                "required": ["candidates", "bytes"],
-                "additionalProperties": false,
-                "properties": {
-                  "candidates": {"type": "integer", "minimum": 1},
-                  "bytes": {"type": "integer", "minimum": 0}
-                }
-              }
-            }
-          }
+          "items": {"$ref": "#/$defs/surface"}
         }
       }
     },
     "dispositions": {
       "type": "array",
       "minItems": 1,
-      "items": {
-        "type": "object",
-        "required": ["candidate_id", "disposition", "reason", "authority"],
-        "additionalProperties": false,
-        "properties": {
-          "candidate_id": {"$ref": "#/$defs/id"},
-          "disposition": {"enum": ["admit", "decline"]},
-          "reason_code": {"$ref": "#/$defs/decline_reason"},
-          "reason": {"type": "string", "minLength": 1},
-          "priority": {"type": "integer", "minimum": 1},
-          "authority": {"enum": ["triage", "human"]}
-        }
-      }
+      "items": {"$ref": "#/$defs/disposition"}
     },
     "deficiencies": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["deficiency_id", "subject", "statement"],
-        "additionalProperties": false,
-        "properties": {
-          "deficiency_id": {"$ref": "#/$defs/id"},
-          "subject": {"type": "string", "minLength": 1},
-          "statement": {"type": "string", "minLength": 1},
-          "closed_by": {"$ref": "#/$defs/id"}
-        }
-      }
+      "items": {"$ref": "#/$defs/deficiency"}
     },
     "projections": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["projection_id", "closes", "sources", "wanted", "method",
-                     "acceptance", "boundary"],
-        "additionalProperties": false,
-        "properties": {
-          "projection_id": {"$ref": "#/$defs/id"},
-          "closes": {
-            "type": "array",
-            "minItems": 1,
-            "items": {"$ref": "#/$defs/id"}
-          },
-          "sources": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "object",
-              "required": ["candidate_id", "digest_note"],
-              "additionalProperties": false,
-              "properties": {
-                "candidate_id": {"$ref": "#/$defs/id"},
-                "path": {"type": "string", "minLength": 1},
-                "digest_note": {"type": "string", "minLength": 1}
-              }
-            }
-          },
-          "wanted": {
-            "type": "object",
-            "required": ["kind", "statement", "why"],
-            "additionalProperties": false,
-            "properties": {
-              "kind": {"$ref": "#/$defs/kind"},
-              "statement": {"type": "string", "minLength": 1},
-              "why": {"type": "string", "minLength": 1}
-            }
-          },
-          "method": {
-            "type": "object",
-            "required": ["confidence", "steps"],
-            "additionalProperties": false,
-            "properties": {
-              "confidence": {"enum": ["high", "medium", "unknown"]},
-              "steps": {
-                "type": "array",
-                "minItems": 1,
-                "items": {"type": "string", "minLength": 1}
-              }
-            }
-          },
-          "acceptance": {
-            "type": "object",
-            "required": ["classifies_as", "prose"],
-            "additionalProperties": false,
-            "properties": {
-              "classifies_as": {"$ref": "#/$defs/kind"},
-              "pointers_required": {"type": "array", "items": {"type": "string", "minLength": 1}},
-              "must_contain": {"type": "array", "items": {"type": "string", "minLength": 1}},
-              "must_not_contain": {"type": "array", "items": {"type": "string", "minLength": 1}},
-              "prose": {"type": "string", "minLength": 1}
-            }
-          },
-          "boundary": {"type": "string", "minLength": 1},
-          "satisfied_by": {"type": "string", "minLength": 1}
-        }
-      }
+      "items": {"$ref": "#/$defs/projection"}
     }
   },
   "$defs": {
@@ -164,6 +57,125 @@
       "enum": ["off_objective", "out_of_scope", "near_duplicate", "superseded",
                "implementation_detail", "no_evidence_value", "digest_insufficient",
                "needs_projection"]
+    },
+    "surface": {
+      "type": "object",
+      "required": ["name", "evidence", "weight"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/id"}
+        },
+        "weight": {
+          "type": "object",
+          "required": ["candidates", "bytes"],
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "The count of distinct catalogue candidate_ids named in this surface's own evidence -- refs.check_objective recomputes this from evidence, so it must agree."
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The sum of each evidence candidate's own catalogue `bytes` field (source file size) -- never row_bytes' serialized-row size. the digest skeleton clamp (digest.py, capped at 128 nodes) makes row size saturate: a 2.7MB source and a 20KB one can serialize to nearly the same row, so a row-size weight would stop discriminating between candidates of very different evidential size right where this pass needs it to. refs.check_objective recomputes this from the catalogue, so it must agree."
+            }
+          }
+        }
+      }
+    },
+    "disposition": {
+      "type": "object",
+      "required": ["candidate_id", "disposition", "reason", "authority"],
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": {"$ref": "#/$defs/id"},
+        "disposition": {"enum": ["admit", "decline"]},
+        "reason_code": {"$ref": "#/$defs/decline_reason"},
+        "reason": {"type": "string", "minLength": 1},
+        "priority": {"type": "integer", "minimum": 1},
+        "authority": {"enum": ["triage", "human"]}
+      }
+    },
+    "deficiency": {
+      "type": "object",
+      "required": ["deficiency_id", "subject", "statement"],
+      "additionalProperties": false,
+      "properties": {
+        "deficiency_id": {"$ref": "#/$defs/id"},
+        "subject": {"type": "string", "minLength": 1},
+        "statement": {"type": "string", "minLength": 1},
+        "closed_by": {"$ref": "#/$defs/id"}
+      }
+    },
+    "projection": {
+      "type": "object",
+      "required": ["projection_id", "closes", "sources", "wanted", "method",
+                   "acceptance", "boundary"],
+      "additionalProperties": false,
+      "properties": {
+        "projection_id": {"$ref": "#/$defs/id"},
+        "closes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/id"}
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["candidate_id", "digest_note"],
+            "additionalProperties": false,
+            "properties": {
+              "candidate_id": {"$ref": "#/$defs/id"},
+              "path": {"type": "string", "minLength": 1},
+              "digest_note": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "wanted": {
+          "type": "object",
+          "required": ["kind", "statement", "why"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {"$ref": "#/$defs/kind"},
+            "statement": {"type": "string", "minLength": 1},
+            "why": {"type": "string", "minLength": 1}
+          }
+        },
+        "method": {
+          "type": "object",
+          "required": ["confidence", "steps"],
+          "additionalProperties": false,
+          "properties": {
+            "confidence": {"enum": ["high", "medium", "unknown"]},
+            "steps": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "acceptance": {
+          "type": "object",
+          "required": ["classifies_as", "prose"],
+          "additionalProperties": false,
+          "properties": {
+            "classifies_as": {"$ref": "#/$defs/kind"},
+            "pointers_required": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "must_contain": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "must_not_contain": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "prose": {"type": "string", "minLength": 1}
+          }
+        },
+        "boundary": {"type": "string", "minLength": 1},
+        "satisfied_by": {"type": "string", "minLength": 1}
+      }
     }
   }
 }

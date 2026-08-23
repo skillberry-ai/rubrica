@@ -76,11 +76,48 @@ ROWS: list[dict] = [
     dict(
         kind="stage",
         dir="—",
-        name="triage",
-        runs="rb-triage",
-        art=["00-triage.json"],
+        name="triage-slices",
+        runs="code · partitions the catalogue into shards",
+        art=["00-slices.json", "00-slices/<id>.json"],
+        gates=["validate"],
+        note="a reading unit, not a decision unit",
+    ),
+    dict(
+        kind="stage",
+        dir="—",
+        name="triage-objective",
+        runs="rb-triage-objective",
+        art=["00-objective.json"],
+        gates=["validate"],
+        note="rules the objective from the corpus map, before any candidate digest is read",
+    ),
+    dict(
+        kind="stage",
+        dir="—",
+        name="triage-rule",
+        runs="rb-triage-rule",
+        art=["00-dispositions/<slice_id>.json"],
+        gates=["validate"],
+        fan="fan-out · one member per slice",
+        note="rules on every candidate in one slice -- admit, or decline with a reason",
+    ),
+    dict(
+        kind="stage",
+        dir="—",
+        name="triage-audit",
+        runs="rb-triage-audit",
+        art=["00-audit.json"],
         gates=["validate", "check-refs"],
-        note="admit / decline, one disposition per candidate",
+        note="consolidates every member's obligations plus its own reading of the whole set",
+    ),
+    dict(
+        kind="stage",
+        dir="—",
+        name="triage-seal",
+        runs="code · assembles the staged parts",
+        art=["00-triage.json"],
+        gates=["validate"],
+        note="sorts last in the triage family; the only pass that writes 00-triage.json",
     ),
     dict(
         kind="band",
@@ -1061,7 +1098,7 @@ skill file path. If a stage needs a fact, it reads it from an artifact, or it do
   <h2>The human gates</h2>
   <p class="lede">Gates 1 through 3 review a judgment made from evidence already in the run; a
   human overturning one corrects an inference about the target. Gate 0 decides what the run can
-  ever know — which makes it different in kind, and is why <code>rb-triage</code> cannot also hold
+  ever know — which makes it different in kind, and is why the triage family cannot also hold
   it. The same party selecting the inputs and ratifying the selection would make the whole run
   unfalsifiable.</p>
   <div class="scroll">
@@ -1070,11 +1107,12 @@ skill file path. If a stage needs a fact, it reads it from an artifact, or it do
 <thead><tr><th>Gate</th><th>Sits after</th><th>Held by</th><th>What the human is ruling
       on</th></tr></thead>
     <tbody>
-<tr><td><span class="n">0</span> the triage record</td><td>triage</td><td>the operator — the
+<tr><td><span class="n">0</span> the triage record</td><td>triage-seal</td><td>the operator — the
         orchestrator is not yet dispatched</td>
-        <td>The objective verdict and the grouped declines. A candidate <code>rb-triage</code>
-        declined is gone as completely as if the corpus never contained it, so this is the only
-        moment the run's evidence base is negotiable.</td></tr>
+        <td>The objective verdict, the predicted-vs-observed surface divergence, the grouped
+        declines, and the slice table with every group split across more than one slice. A
+        candidate the triage family declined is gone as completely as if the corpus never
+        contained it, so this is the only moment the run's evidence base is negotiable.</td></tr>
       <tr><td><span class="n">1</span> the world model</td><td>reconcile-seal</td>
         <td>rb-orchestrate</td>
         <td>Claim utilisation per input and the implied suite size. An input the world model cites
@@ -1105,15 +1143,15 @@ reproducibility claim honest; claiming to have gated while skipping is worse tha
       <h3>rb-orchestrate</h3>
       <p>A skill that declares no <code>stage</code> and no <code>schemas</code>. It dispatches
       <code>extract</code> through <code>emit</code>, holds gates 1–3, and writes
-      <code>decisions.md</code>. It never runs <code>survey</code>, never dispatches
-      <code>rb-triage</code>, and never holds gate 0 — all three are finished before it is
+      <code>decisions.md</code>. It never runs <code>survey</code>, never dispatches any pass
+      of the triage family, and never holds gate 0 — all three are finished before it is
       dispatched at all.</p>
     </div>
     <div>
       <h3>The code stages</h3>
-      <p><code>survey</code>, <code>intake</code> and <code>smoke</code> run as code, so they have
-      no skill file and no <code>manifest.stages</code> entry. Their absence there is not a
-      finding.</p>
+      <p><code>survey</code>, <code>triage-slices</code>, <code>triage-seal</code>,
+      <code>intake</code> and <code>smoke</code> run as code, so they have no skill file and no
+      <code>manifest.stages</code> entry. Their absence there is not a finding.</p>
     </div>
     <div>
       <h3>The measurement tools</h3>

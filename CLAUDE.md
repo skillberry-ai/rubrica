@@ -61,13 +61,17 @@ finding's clothes.
 
 ## The stages and their skills
 
-`paths.STAGES` is the ordering and the on-disk numbering. `survey` and
-`triage` precede `intake` and bracket the earliest gate:
+`paths.STAGES` is the ordering and the on-disk numbering. `survey` and the
+`triage-*` family precede `intake` and bracket the earliest gate:
 
 | Dir | Stage | Runs as | Gate |
 |---|---|---|---|
 | — | survey | code — walks a corpus, writes `00-catalogue.json` | validate |
-| — | triage | `rb-triage` | validate · check-refs · **human gate 0** |
+| — | triage-slices | code — partitions the catalogue, writes `00-slices.json` and its shards | validate |
+| — | triage-objective | `rb-triage-objective` — barrier, reads the corpus map, never a digest | validate |
+| — | triage-rule | `rb-triage-rule` — fan-out, one per slice | validate |
+| — | triage-audit | `rb-triage-audit` — barrier, reads the parts, never a candidate | validate · check-refs |
+| — | triage-seal | code — assembles `00-triage.json` from the staged parts | validate · **human gate 0** |
 | `00` | intake | code | validate |
 | `01a` | extract | `rb-extract` — fan-out, one per input | validate |
 | `01b` | reconcile-subjects | `rb-reconcile-subjects` — barrier | validate · check-refs |
@@ -105,11 +109,12 @@ mid-fan-out most of them are missing by construction. `refs.check_all` runs
 every checker the run has inputs for, so there is no such thing as a
 stage-scoped `check-refs`.
 
-`survey` and `triage` have no `0N` directory prefix of their own: `survey`
-writes `00-catalogue.json` and `triage` writes `00-triage.json`, both ahead of
-the `00-inputs/` and `manifest.json` that `intake` mints once gate 0 has
-passed — the numbering stays intake's, not theirs, because intake is still what
-fixes the run's identity.
+`survey` and the `triage-*` family have no `0N` directory prefix of their own:
+`survey` writes `00-catalogue.json`, the family writes its staged parts, and
+`triage-seal` writes the `00-triage.json` those parts assemble into — all of it
+ahead of the `00-inputs/` and `manifest.json` that `intake` mints once gate 0
+has passed. The numbering stays intake's, not theirs, because intake is still
+what fixes the run's identity.
 
 Stages 02 and 03 are a loop bounded by `max_rounds`. Score *computes* the
 coverage verdict (`continue` / `converged` / `halted_no_progress` /
@@ -119,18 +124,20 @@ coverage verdict (`continue` / `converged` / `halted_no_progress` /
 judgment made from evidence already in the run; a human overturning one of them
 corrects an inference about the target. Gate 0 decides what the run can ever
 know — nothing downstream of `intake` reads the corpus again, so a candidate
-`rb-triage` declines is gone as completely as if the corpus never contained it.
-That is why triage cannot also hold its own gate: the same party selecting the
+the triage family declines is gone as completely as if the corpus never
+contained it. That is why triage cannot also hold its own gate: the same party
+selecting the
 inputs and ratifying the selection would make the whole run unfalsifiable.
 
 `rb-orchestrate` is a skill and **is not a stage**: it declares no `stage` and no
 `schemas`. It dispatches the prompt stages from `extract` through `emit`, holds
 gates 1 through 3, and writes `decisions.md`. It never runs `survey`, never
-dispatches `rb-triage`, and never holds gate 0 — all three are finished before it
-is ever dispatched.
+dispatches any pass of the triage family, and never holds gate 0 — all three are
+finished before it is ever dispatched.
 
-`intake`, `smoke`, `survey`, and `reconcile-seal` are code, so they have no
-skill and no `manifest.stages` entry. Their absence there is not a finding.
+`intake`, `smoke`, `survey`, `triage-slices`, `triage-seal`, and `reconcile-seal`
+are code, so they have no skill and no `manifest.stages` entry. Their absence
+there is not a finding.
 
 ## The exit-code contract — load-bearing, do not weaken
 
@@ -213,12 +220,14 @@ are judgments rather than list entries:
   cited/total claim count for a human to read at gate 1 — the zero-utilisation
   finding it shares its arithmetic with lives in `check-refs`, never here.
   `gate-brief` composes what already exists into the reading surface at each
-  human gate: the objective verdict and grouped declines at gate 0; the
-  reconcile sweep plus utilisation and implied size at gate 1; the coverage
-  matrix at gate 2; the verdict tally at gate 3. Gate 1's sweep is an
-  **aggregate, not a per-subject tally** — how many subjects cover how many
-  claims, how many subjects were swept, how many contradictions were recorded,
-  and, only when any were, the tally by `resolution` with `unresolved` first.
+  human gate: at gate 0 the objective verdict, the predicted-vs-observed surface
+  divergence, grouped declines, the slice table and every group the slicer split
+  across more than one slice; the reconcile sweep plus utilisation and implied
+  size at gate 1; the coverage matrix at gate 2; the verdict tally at gate 3.
+  Gate 1's sweep is an **aggregate, not a per-subject tally** — how many subjects
+  cover how many claims, how many subjects were swept, how many contradictions
+  were recorded, and, only when any were, the tally by `resolution` with
+  `unresolved` first.
 - `survey` is `intake`'s counterpart for the corpus path: it walks a corpus,
   digests each candidate, and mints the run, but writes `00-catalogue.json`
   instead of a manifest — there is nothing to extract from yet, because nothing
@@ -294,11 +303,13 @@ so running them is free; *producing* a recording dispatches a model and costs
 money. They are not part of `make test`, and the skip message names the command
 that runs them.
 
-Some skills carry an `exercise.md` beside the `SKILL.md`, recording what **one**
+Most skills carry an `exercise.md` beside the `SKILL.md`, recording what **one**
 real dispatch measurably did — the only behavioural evidence this project has,
-and one sample is one sample. The `reconcile-*` passes carry none yet, because
-they are new. `rb-triage` carries none for a different reason, which is **not**
-that it was never dispatched; see
+and one sample is one sample. No pass of either staged family carries one, which
+leaves both the earliest and the widest fan-out in the pipeline with no
+behavioural evidence beside their skills at all: the `reconcile-*` passes because
+they are new, and the `triage-*` passes for a different reason, which is **not**
+that the monolithic stage they replaced was never dispatched; see
 [`docs/design/limitations.md`](docs/design/limitations.md) for what those runs
 produced and why the record is not in the repository.
 

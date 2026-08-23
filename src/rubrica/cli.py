@@ -60,7 +60,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from rubrica import brief, reconcile, refs, skills, survey, triage
+from rubrica import brief, reconcile, refs, seal, skills, slices, survey, triage
 from rubrica.artifacts import ArtifactError, read_json
 from rubrica.dedupe import candidate_pairs
 from rubrica.emit import emit_run
@@ -89,6 +89,8 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("survey", "inventory a corpus into a catalogue of candidates and mint a run"),
     ("intake", "register inputs and mint a run"),
     ("adopt-projection", "admit a manufactured projection into the catalogue, structurally"),
+    ("triage-slices", "partition a catalogue into byte-bounded slices a dispatch can read"),
+    ("triage-seal", "assemble the triage record from the staged parts"),
     ("validate", "schema-validate one stage's output"),
     ("check-refs", "cross-artifact and reachability checks"),
     ("reconcile-seal", "assemble the reconcile partials into one world model"),
@@ -171,6 +173,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_adopt.add_argument("--file", required=True, metavar="PATH")
     p_adopt.add_argument("--check-only", action="store_true")
 
+    p_slices = parsers["triage-slices"]
+    p_slices.add_argument("--run", required=True)
+
+    p_triage_seal = parsers["triage-seal"]
+    p_triage_seal.add_argument("--run", required=True)
+
     p_validate = parsers["validate"]
     p_validate.add_argument("--run", required=True)
     p_validate.add_argument("--stage", required=True, choices=list(STAGES))
@@ -184,12 +192,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_emit = parsers["emit"]
     p_emit.add_argument("--run", required=True)
 
-    p_seal = parsers["reconcile-seal"]
-    p_seal.add_argument("--run", required=True)
+    p_reconcile_seal = parsers["reconcile-seal"]
+    p_reconcile_seal.add_argument("--run", required=True)
     # Passed rather than inferred: an amendment to the frozen goal list costs an
     # explicit orchestrator decision, and a seal that incremented a version it
     # found on disk would let the denominator move without one on the record.
-    p_seal.add_argument("--denominator-version", type=int, default=1)
+    p_reconcile_seal.add_argument("--denominator-version", type=int, default=1)
 
     p_smoke = parsers["smoke"]
     p_smoke.add_argument("--run", required=True)
@@ -431,6 +439,47 @@ def main(argv: list[str] | None = None) -> int:
         return CLEAN
 
     try:
+        if args.command == "triage-slices":
+            # Modeled on validate/check-refs just below, not on survey above:
+            # this is a code stage over an existing run's artifact, not a
+            # minter of one. write_slices reports no findings -- it either
+            # produces a plan or it does not -- so this block has no _report
+            # call and cannot exit FINDINGS. Its only two exits are CLEAN
+            # here and USAGE via the shared except below: an unreadable
+            # catalogue, no candidates, a candidate over cap, or -- guarded
+            # inside write_slices itself, before any bare dict[...] read of
+            # untrusted catalogue content -- a catalogue that is not a JSON
+            # object, one missing run_id, request, or policy, or a candidate
+            # that is not an object carrying a string candidate_id. Those
+            # guards are load-bearing, not decorative: a bare KeyError
+            # from any of those falls through to the generic `except
+            # Exception` below this try block, which fabricates a `1`
+            # blaming this stage for a defect that actually lives in the
+            # catalogue -- exactly wrong, since a malformed catalogue cannot
+            # be fixed by the one retry a `1` earns it, and this repository
+            # has shipped both that failure shape and a `1` with empty
+            # stdout before, from an exit path that assumed a case it did
+            # not have.
+            run = _run_dir(args.run)
+            _, plan = slices.write_slices(run)
+            for s in plan:
+                size = run.slice_shard(s.id).stat().st_size
+                print(f"{s.id}  {size}  {len(s.candidate_ids)}  {s.label}")
+            return CLEAN
+
+        if args.command == "triage-seal":
+            # seal.seal raises nothing at all -- every failure mode, including
+            # an unreadable run artifact, comes back as a Finding -- so this
+            # block's only two exits are CLEAN/FINDINGS via _report below and
+            # USAGE via the shared except, for the same reason triage-slices'
+            # block above has none of its own: an unsafe run root or the like,
+            # never a stage defect the seal itself could have reported.
+            run = _run_dir(args.run)
+            path, findings = seal.seal(run)
+            if path is not None:
+                print(path)
+            return _report(findings)
+
         if args.command == "validate":
             return _report(validate_stage(_run_dir(args.run), args.stage))
 

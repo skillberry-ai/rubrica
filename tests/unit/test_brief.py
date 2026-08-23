@@ -459,7 +459,10 @@ def test_a_surveyed_but_untriaged_run_is_not_told_it_was_minted_by_intake_input(
 
     assert "intake --input" not in text
     assert "minted by `survey`" in text
-    assert "rb-triage" in text, "and it must say what to do next"
+    # `triage-seal`, not any `rb-triage*` name: the record this command is waiting
+    # for is the sealed one, and a bare "rb-triage" substring would now be
+    # satisfied by any member of the family being named for any reason.
+    assert "triage-seal" in text, "and it must say what to do next"
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "0"]) == 0
 
 
@@ -473,7 +476,7 @@ def test_a_run_with_neither_catalogue_nor_triage_still_names_intake_input(tmp_pa
     text = brief.gate_brief(run, 0)
 
     assert "intake --input" in text
-    assert "rb-triage" not in text
+    assert "triage-seal" not in text
 
 
 def test_gate_one_shows_the_cover_and_the_contradiction_tally(tmp_path):
@@ -587,3 +590,346 @@ def test_gate_one_does_not_raise_on_hand_edited_reconcile_partials(tmp_path):
     # fan-out covered at exactly the moment a human is judging its coverage.
     assert f"{len(parts)} subjects swept, 1 contradictions recorded" in text
     assert "(no resolution): 1" in text
+
+
+# --------------------------------------------------------------------------
+# Task 15: gate 0's three new sections -- the slice table, the
+# predicted-vs-observed surface divergence (spec section 4.1), and the summary
+# of every group split across more than one slice (spec section 5.2).
+# --------------------------------------------------------------------------
+
+# The module's own constants, not a second spelling of them: these three
+# headers are what every assertion below scopes to, and a test that re-typed
+# them would keep passing against a stale spelling by unscoping itself to the
+# whole document -- which is the vacuity the scoping exists to prevent.
+SLICES_HEADER = brief.SLICES_HEADER
+DIVERGENCE_HEADER = brief.DIVERGENCE_HEADER
+SPLIT_HEADER = brief.SPLIT_HEADER
+
+
+def _staged_and_sealed_run(tmp_path) -> RunPaths:
+    """A run carried through the whole triage family to its sealed record, with
+    the golden world partitioned into more than one slice.
+
+    `slice_cap=4096` is not decoration. At `slices.DEFAULT_SLICE_BYTES` the
+    three-row toy catalogue is a single slice (4102 row-bytes against 65536),
+    which is the right default for a real corpus but leaves both the slice
+    table and the split-group summary exercising the degenerate case -- one
+    row, no group spanning anything. 4096 is the smallest round cap above the
+    largest single row (api-json, 2381) and partitions the three candidates
+    across s01/s02 with `provenance.other_slices` populated in both
+    directions, which is the state
+    `test_gate_zero_names_a_group_split_across_slices` asserts it reaches
+    before it asserts anything about the rendering.
+    """
+    return build_toy_run(tmp_path / "runs", upto="triage-seal", slice_cap=4096)
+
+
+def _section(text: str, header: str) -> str:
+    """The body of one named block of the brief, header line included.
+
+    Scoped rather than `in text` for the reason CLAUDE.md gives: a bare
+    substring over the whole document is satisfiable by any other section, and
+    for these three sections it is satisfiable by the *header line* -- the
+    brief opens with `GATE 0 -- <run root>`, and pytest numbers its own tmp
+    directories, so `"99" in text` would start passing on the hundredth
+    `pytest-NN` of a session no matter what the brief rendered.
+    """
+    # A blank header would make the `in text` below trivially true and the
+    # slice that follows meaningless, so the anchor is checked before it is used.
+    assert header.strip(), "a section anchor must be a real header"
+    assert header in text, f"the brief has no {header!r} section"
+    lines = text.split(header, 1)[1].splitlines()
+    body = lines[:1]
+    for line in lines[1:]:
+        # A non-indented, non-empty line is the next section's header. Every
+        # line a section owns is either indented or blank.
+        if line and not line.startswith(" "):
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
+def _row(section: str, prefix: str) -> str:
+    """The one line of `section` that starts with `prefix`.
+
+    Per-row rather than per-section, because a section-wide substring check for
+    a small integer is satisfiable by the section's own furniture: measured, a
+    rendering that dropped the candidate count entirely still passed
+    `str(len(candidate_ids)) in table`, since the counts here are 1 and 2 and
+    the slice ids are `s01` and `s02`.
+    """
+    rows = [line for line in section.splitlines() if line.strip().startswith(prefix)]
+    assert len(rows) == 1, f"expected exactly one row starting {prefix!r}, got {rows}"
+    return rows[0]
+
+
+def _has_number(row: str, value) -> bool:
+    """Whether `row` states `value` as a number, not as digits inside a word.
+
+    The `2` in `s02` and the `1` in `418` are not statements of a count, and an
+    assertion that accepts them is measuring the presence of an id or a byte
+    figure rather than the thing it names.
+    """
+    return re.search(rf"(?<!\w){re.escape(str(value))}(?!\w)", row) is not None
+
+
+def test_gate_zero_reports_the_slice_table(tmp_path):
+    """Spec section 11: how many slices, and how many candidates and bytes each.
+
+    Every id, count and byte figure is read back out of 00-slices.json rather
+    than written here, so the assertion cannot drift from the slicer.
+    """
+    run = _staged_and_sealed_run(tmp_path)
+    entries = read_json(run.slices)["slices"]
+    assert len(entries) > 1, "fixture is a single slice; the slice table is degenerate"
+
+    table = _section(brief.gate_brief(run, 0), SLICES_HEADER)
+    for entry in entries:
+        assert entry["id"] in table
+        # The two figures the spec bullet names, not just the id, and each read
+        # off that slice's own row: a rendering that listed ids alone would
+        # satisfy an id-only check while omitting the whole reason a human reads
+        # this table.
+        row = _row(table, f"{entry['id']}:")
+        assert _has_number(row, len(entry["candidate_ids"])), row
+        assert _has_number(row, entry["bytes"]), row
+
+
+def test_gate_zero_reports_the_surface_divergence(tmp_path):
+    """`predicted_surface_count` reaches the human who can act on it.
+
+    Mutated to a value the fixture cannot produce by accident, and asserted
+    inside the divergence section rather than anywhere in the document.
+    """
+    run = _staged_and_sealed_run(tmp_path)
+    doc = read_json(run.objective)
+    doc["predicted_surface_count"] = 99
+    write_json(run.objective, doc)
+
+    divergence = _section(brief.gate_brief(run, 0), DIVERGENCE_HEADER)
+    assert re.search(r"predicted[^\n]*(?<!\w)99(?!\w)", divergence), divergence
+
+
+def test_gate_zero_counts_the_surfaces_the_parts_actually_observed(tmp_path):
+    """The other half of the divergence, which a `predicted_surface_count`
+    passthrough would satisfy without computing anything.
+
+    A fourth predicted surface whose evidence names a candidate no part
+    admitted must come up unconfirmed -- so observed stays at the three the
+    fan-out ruled on, and the shortfall is named rather than left as a
+    number the reader has to derive.
+    """
+    run = _staged_and_sealed_run(tmp_path)
+    doc = read_json(run.objective)
+    doc["objective_review"]["surfaces"].append(
+        {
+            "name": "admin console",
+            "evidence": ["console-md"],
+            "weight": {"candidates": 1, "bytes": 1},
+        }
+    )
+    doc["predicted_surface_count"] = 4
+    write_json(run.objective, doc)
+
+    divergence = _section(brief.gate_brief(run, 0), DIVERGENCE_HEADER)
+    assert "admin console" in divergence
+    # Three of the four predicted surfaces have an admitted candidate in a
+    # part, so the observed total is 3 against a predicted 4.
+    assert re.search(r"predicted[^\n]*: 4", divergence)
+    assert re.search(r"observed[^\n]*: 3", divergence)
+
+
+def test_gate_zero_reports_a_surface_a_slice_observed_but_the_map_never_predicted(tmp_path):
+    """The surplus direction of section 4.1's divergence.
+
+    `observed_surfaces[]` is by definition what a member saw that the corpus
+    map did not name, so a rendering that only counted predicted surfaces would
+    report "3 observed" here and lose the one fact the field exists to carry.
+    """
+    run = _staged_and_sealed_run(tmp_path)
+    slice_id = run.slice_ids_with_parts()[0]
+    part = read_json(run.disposition_part(slice_id))
+    part["observed_surfaces"] = [
+        {
+            "name": "retry semantics",
+            "evidence": [part["dispositions"][0]["candidate_id"]],
+            "weight": {"candidates": 1, "bytes": 1},
+        }
+    ]
+    write_json(run.disposition_part(slice_id), part)
+
+    divergence = _section(brief.gate_brief(run, 0), DIVERGENCE_HEADER)
+    assert "retry semantics" in divergence
+    assert re.search(r"observed[^\n]*: 4", divergence)
+
+
+def test_gate_zero_names_a_group_split_across_slices(tmp_path):
+    """Spec section 5.2's provenance summary: gate 0 is the only place a human
+    can act on the near-duplicate residue a split group leaves behind."""
+    run = _staged_and_sealed_run(tmp_path)
+    text = brief.gate_brief(run, 0)
+    split = [
+        p for s in read_json(run.slices)["slices"] for p in s["provenance"] if p["other_slices"]
+    ]
+    # Reachability first, behaviour second, and no branch between them. The
+    # brief's `if split:` form is the fixture-cannot-reach weakness shape
+    # CLAUDE.md names: it passes silently the day the fixture stops splitting.
+    assert split, "fixture no longer splits a group across slices; this test is checking nothing"
+
+    summary = _section(text, SPLIT_HEADER)
+    assert split[0]["group"] in summary
+    # And how many slices hold it, which is the fact the bullet asks for --
+    # read off that group's own row, and as a number rather than as digits the
+    # row's own slice-id list would supply anyway (`s02` carries a `2`).
+    holders = set(split[0]["other_slices"])
+    for entry in read_json(run.slices)["slices"]:
+        for provenance in entry["provenance"]:
+            if provenance["group"] == split[0]["group"] and provenance["other_slices"]:
+                holders.add(entry["id"])
+    row = _row(summary, f"{split[0]['group']}:")
+    assert _has_number(row, len(holders)), row
+
+
+def test_gate_zero_still_works_before_the_family_has_run(tmp_path):
+    """A surveyed run has a catalogue and nothing else. The three new sections
+    read three artifacts that do not exist yet, and none of them may crash the
+    report that tells a human triage has not landed."""
+    run = survey.survey(
+        corpus_roots=[CORPUS],
+        runs_dir=tmp_path / "runs",
+        target_name="ticketq",
+        target_interface="mcp",
+        objective="breadth",
+        max_rounds=2,
+        max_scenarios=128,
+    )
+    text = brief.gate_brief(run, 0)
+    assert text
+    assert "triage-seal" in text
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "0"]) == 0
+
+
+def test_gate_zero_states_which_staged_artifacts_it_could_not_read(tmp_path):
+    """A sealed record whose staged parts have been cleared away -- the shape a
+    run archived down to its record has. The record still renders in full, and
+    each new section says what is missing rather than pretending it read a
+    prediction, a slice plan or a fan-out that is not there."""
+    run = _staged_and_sealed_run(tmp_path)
+    run.slices.unlink()
+    run.objective.unlink()
+    for slice_id in run.slice_ids_with_parts():
+        run.disposition_part(slice_id).unlink()
+
+    text = brief.gate_brief(run, 0)
+    # The record's own content is untouched, so the sections that were always
+    # here still render.
+    assert "Objective verdict" in text
+    for header in (SLICES_HEADER, DIVERGENCE_HEADER, SPLIT_HEADER):
+        assert header in text, f"{header!r} must state its absence, not vanish"
+    assert "00-slices.json" in _section(text, SLICES_HEADER)
+    assert "00-objective.json" in _section(text, DIVERGENCE_HEADER)
+    # And the split-group section must not answer a question it cannot answer.
+    # "(none -- every group the slicer found fits inside one slice)" reads as a
+    # finding about the corpus; with no slice plan on disk it would be an
+    # announcement of absence made because the input was not there, which is the
+    # defect class `paths.list_dir`'s docstring exists to record.
+    split = _section(text, SPLIT_HEADER)
+    assert "fits inside one slice" not in split, split
+    assert "00-slices.json" in split
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "0"]) == 0
+
+
+@pytest.mark.parametrize(
+    ("break_it", "label"),
+    [
+        (lambda path: path.write_text("{not json", encoding="utf-8"), "malformed"),
+        (lambda path: path.chmod(0o000), "unreadable"),
+    ],
+)
+def test_gate_zero_does_not_claim_no_group_was_split_when_it_cannot_tell(tmp_path, break_it, label):
+    """The other two ways the slice plan goes unread, alongside the absent case
+    above. A run whose 00-slices.json is malformed or unreadable is the run most
+    likely to have a split nobody noticed, so this is the worst possible place
+    to render "(none)"."""
+    run = _staged_and_sealed_run(tmp_path)
+    # Reachability: the fixture really does have a split to lose, so a passing
+    # assertion below is about the rendering rather than about a plan that never
+    # split anything.
+    assert "fits inside one slice" not in _section(brief.gate_brief(run, 0), SPLIT_HEADER)
+    break_it(run.slices)
+    try:
+        split = _section(brief.gate_brief(run, 0), SPLIT_HEADER)
+        assert "fits inside one slice" not in split, split
+        assert "00-slices.json" in split
+        assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "0"]) == 0
+    finally:
+        run.slices.chmod(0o644)
+
+
+@pytest.mark.parametrize("artifact", ["slices", "objective", "part"])
+def test_gate_zero_does_not_raise_on_a_malformed_staged_artifact(tmp_path, artifact):
+    """Each of the three new reads gets its own case.
+
+    One malformed document per parametrize rather than all three at once: with
+    all three broken, a section that crashed would be masked by whichever
+    raised first, and the case would prove only that *something* was tolerated.
+    """
+    run = _staged_and_sealed_run(tmp_path)
+    target = {
+        "slices": run.slices,
+        "objective": run.objective,
+        "part": run.disposition_part(run.slice_ids_with_parts()[0]),
+    }[artifact]
+    target.write_text("{not json at all", encoding="utf-8")
+
+    text = brief.gate_brief(run, 0)
+    assert "Objective verdict" in text
+    for header in (SLICES_HEADER, DIVERGENCE_HEADER, SPLIT_HEADER):
+        assert header in text
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "0"]) == 0
+
+
+@pytest.mark.parametrize("artifact", ["slices", "objective", "part"])
+@pytest.mark.parametrize("mode", [0o000, 0o444])
+def test_gate_zero_does_not_raise_on_an_unreadable_staged_artifact(tmp_path, artifact, mode):
+    """`chmod 000` is the read this report must survive; `chmod 0444` is the
+    control that proves the 000 case is measuring permission rather than the
+    existence of the file, since a read-only artifact reads perfectly well and
+    must render its content in full."""
+    run = _staged_and_sealed_run(tmp_path)
+    target = {
+        "slices": run.slices,
+        "objective": run.objective,
+        "part": run.disposition_part(run.slice_ids_with_parts()[0]),
+    }[artifact]
+    target.chmod(mode)
+    try:
+        text = brief.gate_brief(run, 0)
+        assert "Objective verdict" in text
+        for header in (SLICES_HEADER, DIVERGENCE_HEADER, SPLIT_HEADER):
+            assert header in text
+        if mode == 0o444:
+            # Readable, so the content must actually be there -- otherwise the
+            # 000 case above would pass on a rendering that never reads at all.
+            assert read_json(run.slices)["slices"][0]["id"] in _section(text, SLICES_HEADER)
+        assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "0"]) == 0
+    finally:
+        target.chmod(0o644)
+
+
+def test_gate_zero_reports_an_unreadable_dispositions_directory_as_a_broken_run(tmp_path):
+    """An unreadable *directory* is not the same failure as an unreadable file,
+    and this module's docstring already draws that line: a run directory that
+    cannot be read at all is the harness pointed at something broken, which is
+    exit 2. `paths.list_dir` exists to make that raise instead of silently
+    yielding nothing, and `claim_utilisation` over `01-claims/` and gate 3 over
+    `05-verdicts/` both already behave this way. Pinned here so the behaviour
+    is a measured decision rather than an accident of which helper was reached.
+    """
+    run = _staged_and_sealed_run(tmp_path)
+    run.dispositions_dir.chmod(0o000)
+    try:
+        assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "0"]) == 2
+    finally:
+        run.dispositions_dir.chmod(0o755)

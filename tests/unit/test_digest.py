@@ -303,3 +303,53 @@ def test_a_non_dict_trace_payload_falls_back_to_the_generic_skeleton():
     silently produce an empty result."""
     result = digest.digest_for_payload(["not", "a", "dict"], "trace", body_chars=2000)
     assert result["skeleton"]["/"] == {"type": "array", "length": 3}
+
+
+def test_skeleton_stops_at_the_node_cap_and_says_so():
+    # A wide, deep payload: 32 keys at each of three levels is 32^3 pointers
+    # if nothing bounds the total, which is the shape that produced a 39KB
+    # candidate row on the real corpus.
+    leaf = {f"k{i}": 1 for i in range(32)}
+    mid = {f"m{i}": dict(leaf) for i in range(32)}
+    payload = {f"t{i}": dict(mid) for i in range(32)}
+    result = digest.digest_for_payload(payload, "other", body_chars=2000)
+    assert len(result["skeleton"]) <= 128
+    assert result["skeleton_nodes_truncated"] is True
+
+
+def test_a_small_skeleton_is_not_marked_truncated():
+    result = digest.digest_for_payload({"a": {"b": 1}}, "other", body_chars=2000)
+    assert result["skeleton_nodes_truncated"] is False
+    assert result["skeleton"]  # and it still has content
+
+
+def test_the_clamp_does_not_touch_a_sixty_nine_node_skeleton():
+    # tau2's results.json digests measure 69 nodes; the cap must not bind on
+    # them, or a real trajectory capture loses shape to a fix aimed at a
+    # pricing table.
+    payload = {f"k{i}": {"a": 1, "b": 2} for i in range(23)}
+    result = digest.digest_for_payload(payload, "other", body_chars=2000)
+    assert result["skeleton_nodes_truncated"] is False
+    assert len(result["skeleton"]) == 69
+
+
+def test_trace_digests_carry_no_skeleton_key_at_all():
+    # The clamp is a skeleton concern. A trace digest has no skeleton, so it
+    # must not grow a truncation flag about one.
+    result = digest.digest_for_payload({"trace_id": "t", "spans": []}, "trace", body_chars=2000)
+    assert "skeleton" not in result
+    assert "skeleton_nodes_truncated" not in result
+
+
+def test_a_skeleton_landing_exactly_on_the_node_cap_is_not_truncated():
+    # A payload whose natural, uncapped skeleton has exactly 128 nodes: 8
+    # top-level keys, each holding 15 leaves, is 8 + 8*15 == 128. Nothing about
+    # this walk is ever refused by the budget guard -- the count only reaches
+    # 128 on the very last write -- so comparing the final length to the cap
+    # (as an earlier version of this flag did) falsely reports truncation here.
+    # This is the exact boundary a length-based proxy cannot distinguish from a
+    # walk that was actually cut off.
+    payload = {f"t{i}": {f"k{j}": 1 for j in range(15)} for i in range(8)}
+    result = digest.digest_for_payload(payload, "other", body_chars=2000)
+    assert len(result["skeleton"]) == 128
+    assert result["skeleton_nodes_truncated"] is False

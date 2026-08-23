@@ -10,7 +10,8 @@ corpus, recorded with a bounded digest and never its own bytes — the
 catalogue schema's `candidates[]` entries carry `sha256`, `bytes`, `kind`, and
 `digest`, but nothing that reproduces the source content
 (`src/rubrica/schema/catalogue-0.1.json`). `rubrica survey` writes one entry
-per candidate; `rb-triage` then rules on each as `admit` or `decline`, with
+per candidate; the `triage-*` family then rules on each as `admit` or `decline`,
+with
 `needs_projection` recorded as a decline reason code when the candidate is
 valuable but not usable as-is (`src/rubrica/schema/triage-0.1.json`'s
 `decline_reason` enum). A candidate also carries `admissible`, and a container
@@ -58,21 +59,24 @@ they choose to model the thing.
 The directory roots `rubrica survey` walks, recorded verbatim in
 `request.corpus_roots` (`src/rubrica/schema/catalogue-0.1.json`). It is the only
 thing a run ever sees of the target's own files, and it is read exactly once:
-`survey` catalogues what it finds, `rb-triage` rules on the catalogue, and
+`survey` catalogues what it finds, the `triage-*` family rules on the
+catalogue, and
 nothing downstream of `intake` opens the corpus again.
 
 A file can fail to reach `extract` two different ways, and the difference is
 load-bearing. `survey` *excludes* it mechanically, recording a `path` and one
 `exclusion_reason` — `gitignored`, `vcs_metadata`, `binary`, `lockfile`,
 `vendored`, `duplicate`, `unreadable`, or `operator_excluded` — and it never
-becomes a candidate at all. `rb-triage` *declines* a candidate as a judgment,
+becomes a candidate at all. `rb-triage-rule` *declines* a candidate as a
+judgment,
 under one of the `decline_reason` codes. An exclusion is arithmetic; a decline
 is the thing gate 0 exists to review.
 
 ## deficiency
 
 Something the admitted set does not cover that the objective needs, recorded by
-`rb-triage` with a `deficiency_id`, a `subject`, a `statement`, and optionally a
+`rb-triage-audit` with a `deficiency_id`, a `subject`, a `statement`, and
+optionally a
 `closed_by` naming the projection that answers it
 (`src/rubrica/schema/triage-0.1.json`). It is triage's own account of what its
 selection cannot do, which is why an empty `deficiencies` array is a claim
@@ -101,7 +105,7 @@ into every scenario that cites it.
 ## digest
 
 The bounded summary of one candidate that `survey` writes into the catalogue,
-and the only thing `rb-triage` ever reads about that candidate — never its
+and the only thing `rb-triage-rule` ever reads about that candidate — never its
 bytes. `policy.digest_body_chars` caps the size and `digest_truncated` records
 when the cap bit (`src/rubrica/schema/catalogue-0.1.json`).
 
@@ -116,7 +120,8 @@ human reads at gate 0 rather than a silent bad selection.
 
 ## disposition
 
-`rb-triage`'s ruling on one candidate: `admit` or `decline`, carrying a prose
+`rb-triage-rule`'s ruling on one candidate: `admit` or `decline`, carrying a
+prose
 `reason`, an `authority`, a `reason_code` from the `decline_reason` enum when it
 declines, and a `priority` when it admits
 (`src/rubrica/schema/triage-0.1.json`). No code acts on `priority` — an integer
@@ -240,13 +245,15 @@ no entry there, and their absence is not a finding.
 
 The survey's stated aim, `breadth` or `depth`, recorded in
 `request.objective` in the catalogue (`src/rubrica/schema/catalogue-0.1.json`)
-and read by `rb-triage` before it rules on any candidate. Triage judges whether
+and read by `rb-triage-objective` before any candidate is ruled on. That pass
+judges whether
 the objective is `supported` against the surfaces it found — `depth` on a surface
 with one candidate is not supported, and neither is `breadth` when almost every
 surface has no behavioural evidence at all. It may record a
 `recommended_objective` if it disagrees, but its contract forbids acting on
 that recommendation — it selects against the objective it was given and lets
-a human decide at gate 0 (`src/rubrica/skills/rb-triage/SKILL.md`).
+a human decide at gate 0
+(`src/rubrica/skills/rb-triage-objective/SKILL.md`).
 
 ## oracle
 
@@ -315,19 +322,43 @@ round history is preserved, not overwritten.
 
 ## seal
 
-`reconcile-seal`: the code step that assembles the **partials** into
-`01-world-model.json`, folding each capability's outcome classes into that
-capability and counting the `denominator` once
-(`src/rubrica/reconcile.py`, run as `rubrica reconcile-seal`). It reads the
-manifest, the five singleton partials and every `01-contradictions/*.json`, and
-**not** `01-subjects.json`: the world model has no subjects field, so the cover
-is an input to the contradiction fan-out, to `reconcile-gaps`, and to
-`check-refs`, not to the seal.
-Code rather than a prompt for the reason `emit` is code: two runs with identical
-partials must produce a byte-identical world model, or variance stops being
-attributable to the pass that caused it. It writes nothing at all when it
-reports a finding, so a partial it cannot represent faithfully becomes a
-repair rather than a half-assembled world model that clears layer 1.
+A code step that assembles one stage's record out of the staged parts a fan-out
+wrote, and writes nothing at all when it cannot assemble faithfully. Code rather
+than a prompt for the reason `emit` is code — two runs with identical parts must
+produce a byte-identical record, or variance stops being attributable to the pass
+that caused it — and for one more: a code step streams nothing, so it cannot be
+killed mid-record by an idle reset however large the assembled record gets.
+
+This pipeline has two. `triage-seal` reads `00-objective.json`,
+`00-slices.json`, every `00-dispositions/<slice_id>.json`, `00-audit.json` and
+`00-adoptions.json`, and writes `00-triage.json` (`src/rubrica/seal.py`).
+`reconcile-seal` reads the manifest, the five singleton partials and every
+`01-contradictions/*.json` — and **not** `01-subjects.json`: the world model has
+no subjects field, so the cover is an input to the contradiction fan-out, to
+`reconcile-gaps`, and to `check-refs`, not to the seal — folds each capability's
+outcome classes into that capability, counts the `denominator` once, and writes
+`01-world-model.json` (`src/rubrica/reconcile.py`, run as
+`rubrica reconcile-seal`).
+
+**A seal assembles; it does not check.** Cross-artifact checking is layer 2 and
+lives in `refs.py`, which runs over the sealed record afterwards on any run,
+including one this seal never sealed. What a seal itself reports is the narrow
+class where assembly cannot faithfully represent what it was handed, and in every
+one of those it writes no record at all — a half-assembled record would clear
+layer 1 for the fields it did manage to fill and read as a complete decision to a
+human at the gate.
+
+For `triage-seal` that class is: a part absent, unparseable, or missing its
+payload key; a candidate with no disposition anywhere across every part and
+adoption, or with more than one; a part ruling on a candidate outside its own
+slice; no `admit` anywhere across the union of every part and adoption; and a
+`digest_insufficient` or `needs_projection` decline whose matching deficiency or
+projection is nowhere in the audit. For `reconcile-seal` it is four items, listed
+under `rubrica reconcile-seal` in [`docs/reference/cli.md`](../reference/cli.md).
+
+Sealing is idempotent: nothing a seal reads is the sealed record, so a re-seal
+after a gate-0 adoption re-derives the record from the parts rather than editing
+what is already there.
 
 ## seed
 
@@ -346,6 +377,64 @@ downstream of the seal is a prescription to `rb-instantiate`, never an
 assertion about the target system. See `docs/design/limitations.md` for the
 consequences this has for what a seed can and cannot be checked against.
 
+## shard
+
+One slice's own file — `00-slices/<slice_id>.json`, written by `triage-slices`
+alongside the plan — and the entire input one `rb-triage-rule` member reads. It
+carries `slice_id`, the run's `request` and `policy` verbatim, that slice's
+provenance, and the full catalogue record of every candidate the slice owns
+(`src/rubrica/slices.py`'s `write_slices`). `refs.check_slices` holds the shards
+and `00-slices.json` to the same partition of the catalogue, so a shard cannot
+drift from the plan that named it.
+
+Two things about it are deliberate. Copying `request` and `policy` into every
+shard is not redundancy for its own sake: `canonical_bytes` sorts keys, so in
+the 595KB catalogue that motivated slicing `run_id` lands some 608KB into the
+file, and a dispatch reading only its own candidates still had to seek across
+the whole catalogue for two small fields. And a shard is sized so that reading
+it is one `Read` call — the default cap is 64KB against the harness's 256KB
+whole-file refusal — because a slice a member had to read in pieces would
+reproduce the cost slicing exists to remove.
+
+## slice
+
+A byte-bounded set of the catalogue's admissible candidates that one dispatch
+can hold, minted by `triage-slices` (code) and recorded in `00-slices.json`
+with an `id`, a human-readable `label`, the catalogue `groups` it draws from,
+its total digest `bytes`, its `candidate_ids` and its provenance
+(`src/rubrica/schema/slices-0.1.json`). One `rb-triage-rule` member is
+dispatched per slice and reads that slice's shard only, never a sibling's.
+
+**A slice is a reading unit, not a decision unit**, and that distinction is what
+makes cutting the catalogue in code acceptable at all. Nothing about the cut
+decides anything: every candidate still reaches a member, still receives a
+reasoned per-candidate disposition, and is still overrulable one at a time by a
+human at gate 0 — where a code-side filter that dropped or merged candidates
+would be deciding. The cut is top-down (descend the directory tree only where
+the cap forces it, cluster a container's elements by digest signature before any
+byte split, pack only adjacent siblings), and `src/rubrica/slices.py` records
+the two
+alternatives that were measured and rejected. What no check can rule on is
+whether a slice is *coherent*; see
+[`docs/design/limitations.md`](../design/limitations.md).
+
+## slice provenance
+
+What a slice says about the groups it is only a part of: one entry per group it
+draws from, naming the `group`, how many of that group's candidates are
+`in_this_slice`, how many exist in `in_group_total`, and the `other_slices`
+holding the rest (`src/rubrica/schema/slices-0.1.json`). An empty `other_slices`
+means the group was not split. It is written by `triage-slices` into both the
+plan and every shard, because the member is the reader who needs it.
+
+It exists for the one thing a member cannot otherwise know. A member holding 42
+of 500 elements that share a digest signature has no way to tell from its shard
+alone that it is holding a twelfth of a near-duplicate family; code knows,
+cheaply and deterministically. Stating it takes no judgment away — it lets the
+member name the situation in a disposition's `reason`, and `rubrica gate-brief`
+renders every group the slicer split across more than one slice for the human at
+gate 0. That is what converts the residue of slicing from an invisible
+over-admission into a recorded one.
 ## subject
 
 A topic two claims could disagree inside — one operation, one entity, one rule
@@ -371,13 +460,19 @@ subjects — see `docs/design/limitations.md`.
 
 ## surface
 
-A coherent region of the target's behaviour that a suite could be built about: a
-persona, an API area, a workflow, a subsystem. `rb-triage` groups every
-candidate into exactly one surface — including the ones it declines — and records
-each with a `name`, the `evidence` candidate ids, and a `weight` of
-`{candidates, bytes}` that is plain arithmetic over the catalogue so a reader can
-check it (`src/rubrica/schema/triage-0.1.json`'s `objective_review.surfaces[]`;
-the term itself is defined in `src/rubrica/skills/rb-triage/SKILL.md`).
+A coherent region of the target's behaviour that a suite could be built about:
+a persona, an API area, a workflow, a subsystem. `rb-triage-objective` groups
+every candidate into exactly one surface — including the ones it declines — and
+records each with a `name`, the `evidence` candidate ids, and a `weight` of
+`{candidates, bytes}` that is plain arithmetic over the catalogue so a reader
+can check it — `refs.check_objective` recomputes both numbers and reports a
+disagreement (`src/rubrica/schema/triage-0.1.json`'s
+`objective_review.surfaces[]`; the term itself is defined in
+`src/rubrica/skills/rb-triage-objective/SKILL.md`). `weight.bytes` sums each
+evidence candidate's own `bytes` — the size of the source file — and never the
+size of its serialised catalogue row. A row is clamped, so row size saturates:
+a 2.7MB source and a 20KB one can serialise to nearly the same row, and a
+weight that saturates stops discriminating exactly where this pass needs it.
 
 A surface is not a guess at the target's internal structure — it groups the
 evidence by what that evidence is *about*. Enumerating them is not a courtesy

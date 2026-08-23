@@ -25,11 +25,13 @@ import os
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 from referencing import Registry, Resource
 from referencing.exceptions import Unresolvable
 from referencing.jsonschema import DRAFT202012
 
 from rubrica.artifacts import ArtifactError, read_json
+from rubrica.errors import UsageError
 from rubrica.findings import Finding
 from rubrica.paths import STAGES, RunPaths, list_json
 
@@ -47,6 +49,16 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "report": "report-0.1.json",
     "catalogue": "catalogue-0.1.json",
     "triage": "triage-0.1.json",
+    # The triage split's part kinds. Each is one pass's (or, for adoptions,
+    # one code subcommand's) slice of what was once a single triage record,
+    # and every one of them $refs triage-0.1.json's $defs (a disposition, a
+    # surface, a deficiency, a projection) rather than restating them --
+    # spec section 7 of the staged-triage design.
+    "slices": "slices-0.1.json",
+    "objective": "objective-0.1.json",
+    "dispositions-part": "dispositions-part-0.1.json",
+    "audit": "audit-0.1.json",
+    "adoptions": "adoptions-0.1.json",
     # The reconcile partials. Each is one pass's slice of what was once a single
     # world model, and every one of them $refs world-model-0.1.json's $defs
     # rather than restating an element definition.
@@ -77,7 +89,18 @@ CONFIG_KINDS: frozenset[str] = frozenset({"agents", "gold"})
 # next stage against an empty or missing output.
 STAGE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "survey": ("catalogue",),
-    "triage": ("triage",),
+    "triage-slices": ("slices",),
+    "triage-objective": ("objective",),
+    "triage-rule": ("dispositions-part",),
+    # The self-audit, dispatched once every triage-rule part has landed. It
+    # writes the same "audit" kind check_audit already reads and rejects on
+    # a missing digest_insufficient/needs_projection pairing.
+    "triage-audit": ("audit",),
+    # triage-seal writes the "triage" kind: the same 00-triage.json the
+    # monolithic triage stage this family replaced used to write directly.
+    # That is exactly why triage-0.1.json needed no revision for the split:
+    # the sealed record's shape does not change, only which code produces it.
+    "triage-seal": ("triage",),
     "intake": ("manifest",),
     "extract": ("claims",),
     "reconcile-subjects": ("subjects",),
@@ -158,6 +181,12 @@ def _schema_registry(schema_root: Path) -> Registry:
     Restating them is the drift this package already refuses elsewhere ("derive,
     do not restate"), and a duplicated `$defs/entity` that fell behind would make
     a partial accept an element the assembled world model then rejects.
+    The triage part schemas are made of the *same* elements as the sealed
+    triage record -- a disposition, a surface, a deficiency, a projection --
+    so they `$ref` `triage-0.1.json#/$defs/...` rather than restate the
+    definitions. Restating them is the drift this package already refuses
+    elsewhere ("derive, do not restate"), and a duplicated `$defs/disposition`
+    that fell behind would let a part accept a shape the seal then rejects.
 
     Keyed on schema_root for the same reason _validator_for is: a plain
     zero-argument cache would pin the first directory it ever saw, so a test
@@ -191,7 +220,25 @@ def _validator_for(kind: str, schema_root: Path) -> Draft202012Validator:
     except KeyError as exc:
         raise KeyError(f"no schema registered for artifact kind {kind!r}") from exc
     schema = read_json(schema_root / filename)
-    Draft202012Validator.check_schema(schema)
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as exc:
+        # A schema file that is readable JSON but not a valid schema is the same
+        # class of problem as one that is absent: the harness was pointed at a
+        # schema directory it cannot work with, and no repair of any *artifact*
+        # can help. UsageError, so cli.py's handler exits 2 naming this file --
+        # matching the ArtifactError read_json raises one line above when the
+        # same file is missing, which already exits 2.
+        #
+        # Measured before this door existed, with a copied schema/ whose
+        # slices-0.1.json was replaced by {"type": 7}: exit 1, nine stdout
+        # lines, and an [internal] finding anchored on the run directory. Three
+        # violations at once -- a misconfigured run reported as a repairable
+        # stage defect, one finding spread over nine lines, and the wrong
+        # artifact named, since nothing was wrong with the run at all.
+        # exc.message, not exc: SchemaError's str dumps the whole metaschema
+        # branch it failed against, eleven lines for one sentence of reason.
+        raise UsageError(f"invalid JSON Schema in {schema_root / filename}: {exc.message}") from exc
     return Draft202012Validator(schema, registry=_schema_registry(schema_root))
 
 
@@ -245,6 +292,16 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         return [run.catalogue]
     if kind == "triage":
         return [run.triage] if run.triage.is_file() else []
+    if kind == "objective":
+        return [run.objective] if run.objective.is_file() else []
+    if kind == "audit":
+        return [run.audit] if run.audit.is_file() else []
+    if kind == "slices":
+        # Returned even when absent, for the same reason as catalogue above:
+        # read_json's ArtifactError names 00-slices.json itself, so a
+        # triage-slices that wrote nothing is reported by path rather than
+        # passing because a bare is_file() gate found no expected file to check.
+        return [run.slices]
     if kind == "manifest":
         return [run.manifest] if run.manifest.is_file() else []
     if kind == "world-model":
@@ -253,6 +310,11 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         return [run.scenarios] if run.scenarios.is_file() else []
     if kind == "claims":
         return list_json(run.claims_dir)
+    if kind == "dispositions-part":
+        # Same shape as claims above: one file per fan-out member, named by
+        # its own id, in a directory that does not exist until the first
+        # member has written to it.
+        return list_json(run.dispositions_dir)
     if kind == "coverage":
         # latest.json is a singleton artifact that happens to live in a
         # directory of round files, so it is required the way manifest.json and

@@ -144,17 +144,38 @@ failed, the answer is the halt in refusal condition 2, not the artifact.
 
 ## 3. Method
 
-**You dispatch the prompt stages from `extract` through `emit`, and no
-others.** The two skills you do not dispatch bracket your walk rather than
-sitting inside it. Before you exist at all, `rubrica survey` walks a corpus and mints
-this run, writing `00-catalogue.json` -- one bounded digest per candidate,
-never the candidate's own bytes. `rb-triage` reads only that catalogue and
-rules on every candidate -- `admit`, `decline`, or `needs_projection` --
-writing `00-triage.json`. Then **HUMAN GATE 0** holds on that record, and only
-once it has passed does `rubrica intake --run <run>` materialise the admitted
-candidates into `manifest.json`, the file B1 tells you to verify rather than
-produce. You never run `rubrica survey`, never dispatch `rb-triage`, and never
-hold gate 0 -- all three are finished before you are ever dispatched.
+**You dispatch the prompt stages from `extract` through `emit`.** Every other
+skill in this pipeline brackets that walk rather than sitting inside it, and
+`rb-orchestrate` -- this skill itself -- is the frame around the walk, not one
+more stage inside it. Everything in the 00-family below finishes before you
+exist at all.
+
+`rubrica survey` walks a corpus and mints this run, writing
+`00-catalogue.json` -- one bounded digest per candidate, never the candidate's
+own bytes. The triage family then rules on every candidate in that catalogue,
+in passes rather than in one dispatch: `triage-slices` (code) partitions the
+catalogue into byte-bounded shards, writing `00-slices.json`;
+`rb-triage-objective` (a prompt pass, not code) rules whether the declared
+objective is supported by the corpus map -- writing `00-objective.json` from
+`00-slices.json` and `00-catalogue.json` alone, never a candidate digest;
+`rb-triage-rule` (a fan-out prompt pass, one dispatch per slice) rules on
+every candidate in its own slice against that objective, admitting or
+declining with a reason and writing `00-dispositions/<slice_id>.json`;
+`rb-triage-audit` (a prompt pass, dispatched once every `rb-triage-rule`
+member has landed) reads that objective and every part, consolidating their
+raw obligations plus its own reading of the whole admitted set into
+`00-audit.json`'s `deficiencies[]` and `projections[]`; and `triage-seal`
+(code) assembles all of those parts into `00-triage.json`, the sealed record
+that is the family's single output. That record is what everything downstream
+reads -- no stage of yours reads any of the staged parts, and none of them is
+a step your own loop depends on.
+
+Then **HUMAN GATE 0** holds on that sealed triage record, and only once it has
+passed does `rubrica intake --run <run>` materialise the admitted candidates
+into `manifest.json`, the file B1 tells you to verify rather than produce.
+You never run `rubrica survey`, never dispatch `triage-slices`,
+`rb-triage-objective`, `rb-triage-rule`, `rb-triage-audit`, or `triage-seal`,
+and never hold gate 0 -- none of it is yours.
 
 **Gate 0 is different in kind from the three gates you do hold (B5, B7, B10),
 and the difference is worth carrying with you rather than filing as one more
@@ -163,14 +184,14 @@ that is already in the run -- a world model, a scenario list, a set of
 verdicts -- so a human overturning one of them is correcting an inference
 about the target. Gate 0 is not that: it decides what the run can ever know,
 because nothing downstream of intake reads the corpus again. `rb-extract`
-reads only what `intake` admitted, never a byte of what `rb-triage` declined,
-and a candidate marked `decline` is not deferred for a later stage to
-reconsider -- it is gone as completely as if the corpus had never contained
-it. That is why the same party cannot both select the inputs and ratify the
-selection: a triage that also rules on its own admission would make the whole
-run unfalsifiable, because no stage after it could ever surface a candidate it
-was wrong to exclude. You inherit the consequence of that gate rather than its
-judgment -- every blocking gap you halt on at B4 and every claim
+reads only what `intake` admitted, never a byte of what the triage family
+declined, and a candidate marked `decline` is not deferred for a later stage
+to reconsider -- it is gone as completely as if the corpus had never
+contained it. That is why the same party cannot both select the inputs and
+ratify the selection: a triage that also rules on its own admission would make
+the whole run unfalsifiable, because no stage after it could ever surface a
+candidate it was wrong to exclude. You inherit the consequence of that gate
+rather than its judgment -- every blocking gap you halt on at B4 and every claim
 the `reconcile-*` passes never had a chance to see traces back to what gate 0 let
 through.
 
@@ -186,7 +207,7 @@ than as a pipeline with an invisible seam:
 
 ```
 rubrica survey --corpus <corpus> ...          # mints the run, writes 00-catalogue.json -- not yours
-rb-triage                                    → validate --stage triage → check-refs
+the triage family, pass by pass              → validate --stage triage-seal → check-refs
                                              → HUMAN GATE 0: the triage record -- not yours
 rubrica intake --run <run>                    # admits it into manifest.json -- not yours
 rubrica check-skills                          # before anything: a bad skill is not a stage defect

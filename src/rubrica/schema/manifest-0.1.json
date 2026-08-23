@@ -74,7 +74,10 @@
       "type": "object",
       "propertyNames": {
         "enum": [
-          "survey", "triage", "intake", "extract",
+          "survey",
+          "triage-slices", "triage-objective", "triage-rule", "triage-audit", "triage-seal",
+          "intake",
+          "extract",
           "reconcile-subjects", "reconcile-contradict", "reconcile-capabilities",
           "reconcile-outcomes", "reconcile-entities", "reconcile-goals",
           "reconcile-gaps", "reconcile-seal",

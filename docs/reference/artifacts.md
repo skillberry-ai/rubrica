@@ -16,8 +16,10 @@ that writes them.
 
 - **Schema:** `src/rubrica/schema/catalogue-0.1.json`
 - **Written by:** `survey` (code)
-- **Read by:** `rb-triage`; `intake` (the `--run` path, admitting whatever
-  triage already ruled on)
+- **Read by:** `triage-slices` (code — the whole file, to partition it);
+  `rb-triage-objective` (`request`, `policy`, `excluded`, and
+  `candidates[].bytes` — never a `digest`); `intake` (the `--run` path,
+  admitting whatever triage already ruled on)
 - **Path:** `00-catalogue.json`
 
 Every candidate a survey found in a corpus, each with a bounded digest rather
@@ -38,7 +40,8 @@ admissible and still be declined).
 ## `triage`
 
 - **Schema:** `src/rubrica/schema/triage-0.1.json`
-- **Written by:** `triage`, run as `rb-triage`
+- **Written by:** `triage-seal` (code), assembling the parts the rest of the
+  `triage-*` family writes
 - **Read by:** `intake` (the `--run` path)
 - **Path:** `00-triage.json`
 
@@ -53,11 +56,142 @@ does not cover). Gate 0 reads this record, never the corpus again — a
 candidate declined here is gone as completely as if the corpus never
 contained it, because nothing downstream of `intake` re-reads the corpus.
 
+This file is purely derived: `triage-seal` assembles it from `00-objective.json`,
+`00-slices.json`, every `00-dispositions/<slice>.json` part, `00-audit.json`,
+and `00-adoptions.json`, and re-running it re-derives the identical record
+from the same parts. `adopt-projection` no longer writes here at all — it
+appends to `00-adoptions.json` instead, because editing this record directly
+would be erased the next time `triage-seal` runs.
+
 Fields worth knowing: `dispositions[].reason_code` (`off_objective`,
 `near_duplicate`, `needs_projection`, and five more — a fixed vocabulary, not
 free text); `projections[].closes` (the `deficiency_id`s a projection is
 supposed to resolve — `adopt-projection` checks structural acceptance against
 this, never the prose criterion, which stays a human's call).
+
+## `slices`
+
+- **Schema:** `src/rubrica/schema/slices-0.1.json`
+- **Written by:** `triage-slices` (code)
+- **Read by:** `rb-triage-objective` (the header only — `slices[]`'s labels,
+  groups and counts, never a shard's candidate digests); `rb-triage-rule`
+  (one dispatch per slice, each reading only its own `00-slices/<id>.json`
+  shard whole — never a sibling's)
+- **Path:** `00-slices.json`, one shard per slice at `00-slices/<id>.json`
+
+The catalogue's admissible candidates packed into byte-bounded slices, so a
+single dispatch can hold one slice whole: the fix for a real 595KB/351
+candidate catalogue that killed three dispatches before this module existed,
+one in context compaction and one by exhausting its whole dollar budget.
+`00-slices.json` is the plan — one entry per slice, its `groups`,
+`candidate_ids`, and `provenance` — and is schema-validated. The shard at
+`00-slices/<id>.json` is not: instead it carries the run's `request` and
+`policy` verbatim alongside that slice's own full candidate records, so a
+member's entire input is one `Read` under the harness's 256KB refusal, with
+no chunk-reading seek for a head field the way `run_id` sitting 608KB into a
+sorted-keys catalogue once forced. A slice is a reading unit, never a decision
+unit — every candidate it holds still reaches a member and is still
+overrulable by a human at gate 0.
+
+Fields worth knowing: `slices[].bytes` (the slice's total digest bytes,
+recomputed from the shard by a later reference check so a slice cannot
+silently drift from its own header); `slices[].provenance[].other_slices`
+(empty exactly when the group it names was not split across slices).
+
+## `objective`
+
+- **Schema:** `src/rubrica/schema/objective-0.1.json`
+- **Written by:** `triage-objective`, run as `rb-triage-objective`
+- **Read by:** `triage-seal` (code), which copies `objective_review` into
+  `00-triage.json`'s own field of the same name verbatim
+- **Path:** `00-objective.json`
+
+The first staged-triage prompt pass's whole output, written before any
+per-slice dispositions member has read a candidate digest: `objective_review`
+(the surfaces the corpus map shows, whether the declared `breadth`/`depth`
+objective is `supported`, and an optional `recommended_objective` the pass may
+not act on itself) and `predicted_surface_count`, a prediction against what
+the digest-reading members will later observe. It is built from
+`00-slices.json` and `00-catalogue.json` alone — never a candidate `digest` —
+so this pass's dispatch is sized to the corpus map, not to the corpus.
+
+Fields worth knowing: `objective_review.surfaces[].weight.bytes` (the sum of
+each evidence candidate's own catalogue `bytes` field — the source file's
+size — never a slice's or a serialized row's size, which saturates once
+the digest skeleton hits its 128-node cap); `predicted_surface_count`
+(a prediction, not a report — a later member observing a different surface
+count is a fact about this map's adequacy, not proof either reading erred).
+
+## `dispositions-part`
+
+- **Schema:** `src/rubrica/schema/dispositions-part-0.1.json`
+- **Written by:** `triage-rule`, run as `rb-triage-rule` — fan-out, one file
+  per slice
+- **Read by:** `triage-seal` (code, assembles every part into
+  `00-triage.json`); `rb-triage-audit`, dispatched once every part has
+  landed, reading each part's `deficiency_notes` and `needs_projection`
+  declines' `reason` prose to consolidate into `00-audit.json`
+- **Path:** `00-dispositions/<slice_id>.json`, one file per slice
+
+The staged-triage family's ruling: one dispatch per slice, admitting or
+declining every candidate the slice's own `00-slices/<slice_id>.json` shard
+holds — never a sibling's. `dispositions` carries one entry per candidate in
+that slice, exactly once, including inadmissible container candidates,
+each with `authority: "triage"`; an `admit` carries a `reason` and a
+`priority` ranked within the slice only, never a global rank the member
+cannot see. A slice that would decline every candidate in it still writes
+its part — only `triage-seal`, once every slice has reported, is positioned
+to say the corpus, objective, or scope itself is wrong. `observed_surfaces`
+names surfaces the member noticed that `00-objective.json`'s prediction did
+not already name; `deficiency_notes` are the raw material `rb-triage-audit`
+later mints real `deficiency_id`s from — this pass writes neither a
+`deficiency_id` nor a projection object itself.
+
+Fields worth knowing: `dispositions[].reason_code` (optional on a decline,
+one of eight values — `off_objective`, `out_of_scope`, `near_duplicate`,
+`superseded`, `implementation_detail`, `no_evidence_value`,
+`digest_insufficient`, `needs_projection`); a `digest_insufficient` decline's
+`candidate_id` must also appear in this same part's own `deficiency_notes`,
+or `check-refs` rejects the record — the pairing is checked against the
+part that wrote it, not the consolidated audit.
+
+## `audit`
+
+- **Schema:** `src/rubrica/schema/audit-0.1.json`
+- **Written by:** `triage-audit`, run as `rb-triage-audit` — dispatched once
+  every `triage-rule` member has landed
+- **Read by:** `triage-seal` (code), which folds both blocks into
+  `00-triage.json`'s own `deficiencies`/`projections`
+- **Path:** `00-audit.json`
+
+The last of the staged-triage family's prompt passes: the one reading that
+reaches every part at once, rather than one slice of the admitted set at a
+time. `deficiencies[]` and `projections[]` are both required even when
+empty — an empty `deficiencies` is itself a claim that the admitted set
+covers everything the objective needs, not the absence of one. Both blocks'
+`$defs` are `$ref`s into `triage-0.1.json` rather than restated here, the
+same reason `slices-0.1.json` and `dispositions-part-0.1.json` `$ref` that
+file's other `$defs`: a duplicated definition that fell behind would let this
+part accept a shape the seal then rejects.
+
+Two obligations feed `deficiencies[]` and `projections[]` respectively, and
+`check-refs` rejects the record if either is missing: every
+`digest_insufficient` decline in any `00-dispositions/<slice_id>.json` part
+must be referenced by exactly one `deficiencies[]` entry, and every
+`needs_projection` decline by exactly one `projections[]` entry's `sources[]`.
+Turning a member's raw `deficiency_notes` into a minted `deficiency_id`, and a
+member's `reason` on a `needs_projection` decline into a full seven-field
+projection brief, is this pass's job and nobody else's — no single
+`triage-rule` member could deduplicate across slices, because none of them
+ever sees a sibling's part.
+
+Fields worth knowing: `projections[].method.confidence` (`high`, `medium`, or
+`unknown` — `unknown` is an honest value here, since this pass is one further
+remove from the candidate than the member who declined it in the first
+place); `projections[].acceptance` (`classifies_as`, `pointers_required`,
+`must_contain`, `must_not_contain` are checked mechanically by `rubrica
+adopt-projection`, but are necessary and never sufficient — `prose` is where
+*correct* actually gets defined).
 
 ## `manifest`
 
@@ -78,12 +212,12 @@ between `extract` and `emit`, plus `triage` — which is recorded **after** gate
 0 rather than when it ran, because a run minted by `survey` has no manifest to
 merge into until `intake --run` writes one
 ([`docs/guides/running-a-stage-by-hand.md`](../guides/running-a-stage-by-hand.md)
-§4 has the command). `intake`, `smoke`, `survey`, and `reconcile-seal` are
-code: they have no skill file for `record-stage` to hash, so they never appear
-there, and their absence is not a finding. The schema's `propertyNames` enum
-permits exactly `paths.STAGES` — `tests/unit/test_manifest_stages.py` holds the
-two equal, in order — so it constrains the vocabulary, not which of them a real
-run records.
+§4 has the command). `intake`, `smoke`, `survey`, `triage-slices`,
+`triage-seal`, and `reconcile-seal` are code: they have no skill file for
+`record-stage` to hash, so they never appear there, and their absence is not a
+finding. The schema's `propertyNames` enum permits exactly `paths.STAGES` —
+`tests/unit/test_manifest_stages.py` holds the two equal, in order — so it
+constrains the vocabulary, not which of them a real run records.
 
 Fields worth knowing: `inputs[].provenance` (present only for an input that
 came from inside a container file or from a projection — `container_sha256`

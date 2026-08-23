@@ -24,7 +24,11 @@ UNSAFE_DIR_NAMES = ("scn 001", ".hidden", "scn:001", "-leading")
 def test_stages_are_in_pipeline_order():
     assert STAGES == (
         "survey",
-        "triage",
+        "triage-slices",
+        "triage-objective",
+        "triage-rule",
+        "triage-audit",
+        "triage-seal",
         "intake",
         "extract",
         "reconcile-subjects",
@@ -47,10 +51,22 @@ def test_stages_are_in_pipeline_order():
 def test_survey_and_triage_lead_the_stage_ordering():
     """STAGES is the pipeline order and the on-disk numbering.
 
-    survey and triage are 00a and 00b, so they precede intake -- which is 00c
-    and no longer the first thing that happens in a run.
+    survey, triage-slices, triage-objective, triage-rule, triage-audit and
+    triage-seal are all 00-family, so they precede intake -- which is no
+    longer the first thing that happens in a run. triage-seal sorts last in
+    the family regardless of how many of the passes between triage-slices and
+    triage-seal have landed (see paths.py's own comment): it is the pass that
+    seals every one of their outputs into 00-triage.json.
     """
-    assert paths.STAGES[:3] == ("survey", "triage", "intake")
+    assert paths.STAGES[:7] == (
+        "survey",
+        "triage-slices",
+        "triage-objective",
+        "triage-rule",
+        "triage-audit",
+        "triage-seal",
+        "intake",
+    )
 
 
 def test_the_catalogue_and_triage_record_are_run_paths(tmp_path):
@@ -252,6 +268,35 @@ def test_the_two_contradiction_listings_partition_every_part_file(tmp_path):
 
 def test_unsafe_contradiction_part_names_is_empty_when_the_pass_has_not_run(tmp_path):
     assert RunPaths(tmp_path).unsafe_contradiction_part_names() == []
+
+
+def test_the_new_triage_paths_sit_in_the_double_zero_band(tmp_path):
+    run = RunPaths(tmp_path / "run-1")
+    assert run.slices.name == "00-slices.json"
+    assert run.slices_dir.name == "00-slices"
+    assert run.objective.name == "00-objective.json"
+    assert run.dispositions_dir.name == "00-dispositions"
+    assert run.audit.name == "00-audit.json"
+    assert run.adoptions.name == "00-adoptions.json"
+
+
+def test_a_slice_id_that_would_escape_the_run_is_refused(tmp_path):
+    run = RunPaths(tmp_path / "run-1")
+    for evil in ("../etc", "a/b", "..", ""):
+        with pytest.raises(UnsafeSegment):
+            run.slice_shard(evil)
+        with pytest.raises(UnsafeSegment):
+            run.disposition_part(evil)
+
+
+def test_slice_ids_with_parts_lists_only_what_is_on_disk(tmp_path):
+    run = RunPaths(tmp_path / "run-1")
+    assert run.slice_ids_with_parts() == []
+    run.dispositions_dir.mkdir(parents=True)
+    (run.dispositions_dir / "s02.json").write_text("{}", encoding="utf-8")
+    (run.dispositions_dir / "s01.json").write_text("{}", encoding="utf-8")
+    (run.dispositions_dir / "notes.txt").write_text("x", encoding="utf-8")
+    assert run.slice_ids_with_parts() == ["s01", "s02"]
 
 
 def test_input_file_resolves_under_the_inputs_directory():

@@ -14,7 +14,7 @@ class Finding:
     root. `layer` names the checking layer that produced it, so a reader can
     tell a shape error from a reference error without parsing the message.
     The layers: "schema" | "refs" | "invariant" | "emit" | "reconcile" |
-    "internal" | "recall" | "review" | "skill".
+    "internal" | "recall" | "review" | "skill" | "seal".
 
     "internal" is the layer cli.py uses when a checking layer raised instead of
     returning: the artifact is malformed in a way layer 1 must reject first, and
@@ -23,11 +23,18 @@ class Finding:
     rather than a run artifact, and the check is against the code that owns
     each declared name rather than against a schema.
 
-    "reconcile" is the seal's layer: the artifacts are the world-model partials
+    "reconcile" is reconcile.seal's layer: the artifacts are the world-model partials
     and the failure is that they cannot be assembled at all -- a partial absent or
     unparseable, a declared capability with no outcome classes. Distinct from
     "refs" because refs checks a run someone may still be building, while this
     names the reason one command produced no output.
+
+    "seal" is triage_seal's own layer: seal.py assembles rather than checks,
+    but reports a narrow refusal class where assembly cannot faithfully
+    represent what it was handed (see that module's docstring), and those
+    findings need a layer name distinct from "refs" precisely because they
+    fire *before* the record refs.check_triage would otherwise check exists
+    at all.
     """
 
     artifact: Path

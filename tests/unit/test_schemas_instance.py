@@ -160,13 +160,14 @@ def test_no_schema_pattern_uses_a_caret_dollar_anchor(kind, tmp_path):
     def resolve(ref: str, home: str) -> tuple[dict, str]:
         """The subschema `ref` points at, plus the file it now lives in.
 
-        Refs are followed rather than stopped at, because the reconcile partials
-        own no `pattern` of their own: their ids are
-        `world-model-0.1.json#/$defs/id`, resolved at validation time through
-        validate._schema_registry. Stopping at the ref would make `found` empty
-        for all seven of them, and the `assert found` guard below -- which is
-        what stops this test passing vacuously -- would have to be dropped. This
-        way it keeps its teeth, and gains some: a partial that pointed at a
+        Refs are followed rather than stopped at, because neither the reconcile
+        partials nor the triage part schemas own a `pattern` of their own: their
+        ids are `world-model-0.1.json#/$defs/id` and `triage-0.1.json#/$defs/id`,
+        resolved at validation time through validate._schema_registry. Stopping
+        at the ref would make `found` empty for every one of them, and the
+        `assert found` guard below -- which is what stops this test passing
+        vacuously -- would have to be dropped. This way it keeps its teeth, and
+        gains some: a part that pointed at a
         definition anchored with ^ or $ is now caught here too.
         """
         filename, _, pointer = ref.partition("#")

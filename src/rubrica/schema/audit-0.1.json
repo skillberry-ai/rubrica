@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "audit-0.1.json",
+  "title": "Deficiencies and projections",
+  "description": "rb-triage-audit's output, run last over every disposition part's deficiency_notes and every digest_insufficient or needs_projection decline: every earlier pass's refusal condition resolves to 'record a deficiency instead', so the pass positioned to consolidate them is the one that runs after all of them. Both arrays are required and may be empty, matching triage-0.1.json's own rule that an empty block is still written, and is itself a claim -- a run with no deficiencies has swept every slice and found nothing worth projecting, not skipped the check.",
+  "type": "object",
+  "required": ["schema_version", "run_id", "deficiencies", "projections"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "run_id": {"$ref": "triage-0.1.json#/$defs/id"},
+    "deficiencies": {
+      "type": "array",
+      "items": {"$ref": "triage-0.1.json#/$defs/deficiency"}
+    },
+    "projections": {
+      "type": "array",
+      "items": {"$ref": "triage-0.1.json#/$defs/projection"}
+    }
+  }
+}

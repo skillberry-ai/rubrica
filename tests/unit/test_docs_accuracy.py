@@ -313,6 +313,51 @@ def test_the_readme_diagram_covers_every_stage_in_contract_order():
     )
 
 
+def test_every_readme_phase_line_accounts_for_exactly_one_stage_and_no_line_for_none():
+    """The fold's guard, asserted in both directions.
+
+    A phase may collapse a family of stages into one drawn line, so the partition
+    test above -- which reads the unfolded `stages` lists -- can no longer see what
+    the drawing actually sets. Two failures are possible and neither is visible in
+    the SVG to anyone who does not already know the pipeline:
+
+    - a stage in `stages` that no drawn line accounts for, which is a stage
+      silently dropped from the drawing;
+    - a drawn line that accounts for no stage, which is a fold prefix matching
+      nothing -- a label standing for a family that is not there.
+
+    Measured red both ways before being kept, one probe per half:
+
+    - `folds=["deploy-"]` on the `compile` phase, a prefix matching none of its
+      stages, failed the second half -- *the 'compile' phase draws a 'deploy*' line
+      that accounts for no stage at all*;
+    - moving `fold_lines`' append inside its `if label not in at` branch, so a fold
+      keeps only the first stage it matches, failed the first -- *the 'select'
+      phase draws lines accounting for ['survey', 'triage-slices'], not for its
+      stages [...]*. The partition test above **passed** under that same mutation,
+      which is the reason this predicate exists: it reads `stages`, and the drawing
+      no longer does.
+
+    Green on the committed table, and green with `folds` deleted from every phase
+    (measured: the legend entry and its whole row fall away with it, and the canvas
+    returns to its one-row height).
+    """
+    renderer = _readme_renderer()
+    for spec in renderer.PHASES:
+        lines = renderer.fold_lines(spec)
+        accounted = [stage for _, stages in lines for stage in stages]
+        assert accounted == list(spec["stages"]), (
+            f"the {spec['verb']!r} phase draws lines accounting for {accounted}, "
+            f"not for its stages {list(spec['stages'])}"
+        )
+        for label, stages in lines:
+            assert stages, (
+                f"the {spec['verb']!r} phase draws a {label!r} line that accounts for no "
+                "stage at all: a fold prefix matching nothing hides whatever it was "
+                "meant to stand for"
+            )
+
+
 def test_the_readme_diagram_marks_every_human_gate():
     """brief.GATES is the code-side source of truth -- `rubrica gate-brief` refuses
     any number outside it -- so the drawing's gates stay derived rather than typed.
@@ -341,70 +386,64 @@ def test_the_committed_readme_diagram_matches_a_fresh_render(theme):
     )
 
 
-def test_the_readme_diagram_fold_is_total_in_both_directions():
-    """The fold collapses a stage family into one drawn line. That is a way to
-    make a stage disappear from the drawing, so it is checked both ways: every
-    folded stage is represented by the fold's label, and no stage outside the
-    family is hidden by it. Without this the fold would silently defeat the
-    partition test next door, which is the drift that test exists to catch.
+def test_the_readme_diagram_fold_legend_appears_only_when_something_folds():
+    """A legend explaining a convention the drawing does not use is worse than no
+    legend. caption_rows() is what drops the fold entry and its whole row, so the
+    check is against the rendered SVG rather than against that helper: a legend
+    kept by a bug in phase() would still be wrong.
+
+    Ported from the footnote guard staged-reconcile wrote for its own fold, which
+    explained the star in a footnote line rather than a legend row. The mechanism
+    changed in the merge; the property it held did not.
     """
     renderer = _readme_renderer()
-    for phase in renderer.PHASES:
-        drawn = renderer.drawn_stages(phase)
-        folded = [s for s in phase["stages"] if s.startswith(renderer.FOLD_PREFIX)]
-        unfolded = [s for s in phase["stages"] if not s.startswith(renderer.FOLD_PREFIX)]
-        assert all(stage in drawn for stage in unfolded), (
-            f"the fold hid a stage outside the {renderer.FOLD_PREFIX!r} family: {drawn}"
-        )
-        assert (renderer.FOLD_LABEL in drawn) == bool(folded), (
-            f"the fold label must appear exactly when the phase holds a folded stage: {drawn}"
-        )
-        assert len(drawn) == len(set(drawn)), f"the fold produced a repeated line: {drawn}"
-
-
-def test_the_readme_diagram_footnote_appears_only_when_something_folds():
-    """A footnote explaining a star that is not drawn is worse than no footnote."""
-    renderer = _readme_renderer()
-    folds = any(
-        stage.startswith(renderer.FOLD_PREFIX)
-        for phase in renderer.PHASES
-        for stage in phase["stages"]
-    )
+    words = "one line standing for a family of stages"
+    folds = bool(renderer.fold_marks())
     for theme in renderer.OUTPUTS:
-        assert (renderer.FOLD_NOTE in renderer.svg(theme)) is folds
+        assert (words in renderer.svg(theme)) is folds, (
+            f"the fold legend must appear exactly when something folds "
+            f"(folds={folds}, marks={renderer.fold_marks()})"
+        )
 
 
-def test_drawn_stages_folds_a_synthetic_reconcile_family():
+def test_fold_lines_folds_a_synthetic_family_this_test_owns():
     """A fold-triggering input this test owns, rather than the real PHASES.
 
-    Written while PHASES still had no reconcile-* stage, when nothing the
-    committed suite supplied could drive len(drawn) == len(set(drawn)) to fail.
-    That is no longer the case -- the `understand` phase now folds the whole
-    reconcile family to one label -- but the throwaway spec stays, and is the
-    stronger arrangement of the two: it pins the fold against an input that
-    cannot move when PHASES is re-partitioned, so a change to the phase table
-    and a regression in the fold logic stay distinguishable. The real PHASES is
-    held by the two tests above and by the byte-compare, which would otherwise
-    ratify whatever the renderer emitted at the moment the SVGs were committed.
+    The real table is held by the two tests above and by the byte-compare, which
+    would otherwise ratify whatever the renderer emitted at the moment the SVGs
+    were committed. This spec cannot move when PHASES is re-partitioned, so a
+    change to the phase table and a regression in the fold logic stay
+    distinguishable.
 
-    The expected lists are spelled out by hand rather than computed from
-    FOLD_PREFIX or any partition of the input spec: recomputing the fold here
-    would be the same logic checking itself and could not catch a regression
-    in that logic (the holds-identically shape).
+    The expected lists are spelled out by hand rather than computed from the
+    prefix or from any partition of the input spec: recomputing the fold here
+    would be the same logic checking itself and could not catch a regression in
+    that logic (the holds-identically shape).
     """
     renderer = _readme_renderer()
     spec = dict(
-        stages=["intake", "reconcile-subjects", "reconcile-merge", "reconcile-seal", "propose"]
+        stages=["intake", "reconcile-subjects", "reconcile-merge", "reconcile-seal", "propose"],
+        folds=["reconcile-"],
     )
-    assert renderer.drawn_stages(spec) == ["intake", "reconcile*", "propose"], (
+    assert renderer.fold_lines(spec) == [
+        ("intake", ["intake"]),
+        ("reconcile*", ["reconcile-subjects", "reconcile-merge", "reconcile-seal"]),
+        ("propose", ["propose"]),
+    ], (
         "three reconcile-* stages should collapse to one line, in the position "
         "the family occupied, with the unfolded stages either side kept in order"
     )
 
     # Edge case sharing the same root cause: a phase where every stage folds.
-    assert renderer.drawn_stages(dict(stages=["reconcile-subjects", "reconcile-merge"])) == [
-        "reconcile*"
-    ]
+    assert renderer.fold_lines(
+        dict(stages=["reconcile-subjects", "reconcile-merge"], folds=["reconcile-"])
+    ) == [("reconcile*", ["reconcile-subjects", "reconcile-merge"])]
+
+    # Two families in one phase, which the superseded single-prefix fold could not
+    # express at all -- and the reason this mechanism is the one that survived.
+    assert renderer.fold_lines(
+        dict(stages=["triage-rule", "intake", "reconcile-gaps"], folds=["triage-", "reconcile-"])
+    ) == [("triage*", ["triage-rule"]), ("intake", ["intake"]), ("reconcile*", ["reconcile-gaps"])]
 
 
 def test_the_readme_references_both_diagram_themes():
@@ -422,4 +461,31 @@ def test_the_readme_references_both_diagram_themes():
     assert "prefers-color-scheme: dark" in source and dark in source, (
         "README.md's <picture> does not offer the dark diagram under a "
         "prefers-color-scheme media query"
+    )
+
+
+def test_the_validate_stage_list_offers_exactly_the_contract_stages():
+    """`validate --stage` takes one of paths.STAGES, so the document that lists
+    the accepted values is either that list or wrong.
+
+    Untested until now, and it drifted the way an untested list does: the
+    staged-triage branch deleted the `triage` stage and added four, and this
+    list kept offering the deleted one while naming only one of the four. A
+    reader following it got exit 2 from a stage that no longer exists, and no
+    hint that four stages they could validate were missing. Both halves are
+    asserted -- every contract stage present, and nothing present that is not a
+    contract stage -- because a list can drift in either direction and only the
+    second half catches a deletion.
+    """
+    text = _read(CLI_REF)
+    section = text[text.index("### `rubrica validate`") :]
+    section = section[: section.index("\n### ")]
+    offered = set(re.findall(r"`([a-z][a-z-]*)`", section))
+    # The prose around the list names the flags and the layer too; only names
+    # that are stages or look like them are the list's business.
+    stage_shaped = {name for name in offered if name in set(paths.STAGES) or "triage" in name}
+    assert stage_shaped == set(paths.STAGES), (
+        "cli.md's validate --stage list disagrees with paths.STAGES: "
+        f"missing {sorted(set(paths.STAGES) - stage_shaped)}, "
+        f"offers non-stages {sorted(stage_shaped - set(paths.STAGES))}"
     )

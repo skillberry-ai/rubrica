@@ -138,25 +138,26 @@ a world model, a scenario list, a set of verdicts. A human overturning one of
 them is correcting an inference about the target system, using the same
 artifacts the stage that made the inference had in front of it.
 
-Gate 0 is not that. `rb-triage` reads a catalogue of candidate inputs and
-rules on each one — admit, decline, or flag for a manufactured projection —
-and nothing downstream of `intake` ever reads the corpus again. `rb-extract`
-sees only what `intake` admitted; a candidate `rb-triage` declined is not
-deferred for some later stage to reconsider, it is gone as completely as if
-the corpus had never contained it. That makes gate 0 a decision about what
-the run can ever know, not a decision about how well the run reasoned from
-what it already had — and it is why triage cannot also hold its own gate.
-If the party selecting which inputs to admit were also the party ratifying
-that selection, no stage after it could ever surface a candidate it was
-wrong to exclude, and the run's account of the target would be unfalsifiable
-in exactly the way the whole project is trying not to be: a bad exclusion
-would look, from every downstream artifact, identical to a corpus that
-simply never contained the excluded fact. A separate human at gate 0 is what
-keeps "we decided not to look at this" a decision someone else can see and
-overturn, rather than a foregone conclusion the run rubber-stamps on its own
-input selection. `rb-orchestrate` — the skill that holds gates 1 through 3 —
-never dispatches `rb-triage` and never holds gate 0; by the time it is ever
-dispatched, triage and gate 0 are both already finished.
+Gate 0 is not that. The `triage-*` family reads a catalogue of candidate
+inputs and rules on each one — admit, decline, or flag for a manufactured
+projection — and nothing downstream of `intake` ever reads the corpus again.
+`rb-extract` sees only what `intake` admitted; a candidate the family
+declined is not deferred for some later stage to reconsider, it is gone as
+completely as if the corpus had never contained it. That makes gate 0 a
+decision about what the run can ever know, not a decision about how well the
+run reasoned from what it already had — and it is why triage cannot also
+hold its own gate. If the party selecting which inputs to admit were also
+the party ratifying that selection, no stage after it could ever surface a
+candidate it was wrong to exclude, and the run's account of the target would
+be unfalsifiable in exactly the way the whole project is trying not to be: a
+bad exclusion would look, from every downstream artifact, identical to a
+corpus that simply never contained the excluded fact. A separate human at
+gate 0 is what keeps "we decided not to look at this" a decision someone
+else can see and overturn, rather than a foregone conclusion the run
+rubber-stamps on its own input selection. `rb-orchestrate` — the skill that
+holds gates 1 through 3 — dispatches no pass of the triage family and never
+holds gate 0; by the time it is ever dispatched, triage and gate 0 are both
+already finished.
 
 ## Why refusal conditions are the most important prompt-level decision
 
@@ -186,6 +187,18 @@ condition a model cannot detect from what it is contracted to read is
 decorative for the same reason a `reads` list matters at all: a stage cannot
 act on evidence it was never given.
 
+The third check has a worked example in the pipeline. Each member of
+`rb-triage-rule` reads one slice of the catalogue, so "every candidate in
+the corpus was declined" — the clearest available signal that the objective
+or the scope itself is wrong — is a condition no member can detect. A member
+drawing a `tests/` subtree with nothing worth admitting would be right to
+decline all of it, and refusing there would strand the run on an answer that
+was correct. Written into the member's prompt the condition would be
+decorative in exactly the third sense, so it is written into `triage-seal`
+instead — the one layer that reads the union of every part. That is the
+usual remedy: a condition a stage cannot detect moves to the layer that can,
+rather than being dropped.
+
 ## What has actually been observed
 
 The pipeline has been run end to end, with a model dispatched at every stage,
@@ -202,10 +215,11 @@ regression test.
 `tests/unit/test_refusals_live.py` are the assertions that hold those facts;
 they will fail loudly if a fixture stops carrying the defect it was built to
 exercise, or if a re-recorded dispatch stops declining where the earlier one
-did. Most skills also carry an `exercise.md` beside their `SKILL.md`, recording what
-one measured dispatch actually did — not a reasoned estimate of what it should
-do. `rb-triage` does not yet have one,
-which [`docs/design/limitations.md`](limitations.md) records as a gap in the
+did. Most of the pipeline's skills also carry an `exercise.md` beside their
+`SKILL.md`, recording what one measured dispatch actually did — not a
+reasoned estimate of what it should do. The prompt passes of the `triage-*` and
+`reconcile-*` families are the exception and have none, which
+[`docs/design/limitations.md`](limitations.md) records as a gap in the
 evidence rather than something this document should explain away.
 
 ## What is not yet known

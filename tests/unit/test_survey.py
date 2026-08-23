@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from rubrica import intake, survey, validate
+from rubrica import intake, slices, survey, validate
 from rubrica.artifacts import canonical_bytes, read_json
 from rubrica.errors import UsageError
 from rubrica.paths import is_safe_segment
@@ -153,6 +153,60 @@ def test_a_catalogue_over_the_byte_budget_is_a_usage_error_not_a_finding(tmp_pat
     with pytest.raises(UsageError, match=r"catalogue.*bytes.*max_catalogue_bytes=64"):
         _survey(tmp_path, runs_dir=runs_dir, max_catalogue_bytes=64)
     assert not runs_dir.exists()
+
+
+def test_survey_refuses_a_corpus_whose_digest_row_exceeds_a_slice(tmp_path):
+    """A file wide and deep enough to survive the Task 1 clamp and still exceed
+    one slice would have to be pathological; construct the condition directly
+    by lowering nothing and raising the corpus instead.
+
+    200 keys of 1200 "k"s each: measured to a 64-node skeleton with
+    skeleton_nodes_truncated False -- Task 1's node clamp bounds node *count*
+    and does not bind here -- and an 83,601-byte row against the 65,536-byte
+    cap. (900 "k"s, tried first, measured at only 64,396 bytes: 1,140 bytes
+    *under* the cap, too small to raise this guard.) The clamp and this guard
+    are independent checks, not redundant ones -- the clamp bounds node count,
+    this guard bounds row width, and this payload proves the first can hold
+    while the second still fires.
+    """
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    payload = {("k" * 1200) + str(i): {"a": 1} for i in range(200)}
+    (corpus / "wide.json").write_text(json.dumps(payload), encoding="utf-8")
+    runs_dir = tmp_path / "runs"
+    with pytest.raises(UsageError) as exc:
+        survey.survey(
+            corpus_roots=[corpus],
+            runs_dir=runs_dir,
+            target_name="t",
+            target_interface="http",
+            objective="breadth",
+            max_rounds=2,
+            max_scenarios=128,
+            now=NOW,
+        )
+    message = str(exc.value)
+    assert "wide-json" in message  # names the candidate
+    assert str(slices.DEFAULT_SLICE_BYTES) in message  # names both numbers
+    assert not runs_dir.exists()  # leaves no directory behind
+
+
+def test_survey_leaves_a_normal_corpus_alone(tmp_path):
+    """The common case this guard must not disturb."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "notes.md").write_text("# A\nprose\n", encoding="utf-8")
+    run = survey.survey(
+        corpus_roots=[corpus],
+        runs_dir=tmp_path / "runs",
+        target_name="t",
+        target_interface="http",
+        objective="breadth",
+        max_rounds=2,
+        max_scenarios=128,
+        now=NOW,
+    )
+    assert run.catalogue.is_file()
 
 
 def test_a_naive_datetime_is_refused(tmp_path):

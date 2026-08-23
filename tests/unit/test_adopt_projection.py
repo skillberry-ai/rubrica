@@ -154,24 +154,23 @@ def test_a_file_meeting_every_structural_criterion_is_adopted(tmp_path):
     adopted = next(c for c in catalogue["candidates"] if c["origin"] == "projection")
     assert adopted["provenance"]["projection_id"] == "prj-tools"
     assert adopted["kind"] == "mcp_tool_schema"
-    record = read_json(run.triage)
-    disposition = next(
-        d for d in record["dispositions"] if d["candidate_id"] == adopted["candidate_id"]
-    )
-    assert disposition["disposition"] == "admit"
+    # 00-adoptions.json, not 00-triage.json: this call's disposition is
+    # triage-seal's to fold into the sealed record, the next time it runs --
+    # see test_an_adoption_survives_a_re_seal in test_seal.py for that half.
+    adoptions = read_json(run.adoptions)
+    entry = next(a for a in adoptions["adoptions"] if a["candidate_id"] == adopted["candidate_id"])
+    assert entry["disposition"]["disposition"] == "admit"
     # The human's authority, not triage's -- and recorded as such, so a reader can
     # tell which admissions the gate authored.
-    assert disposition["authority"] == "human"
-    assert (
-        next(d for d in record["deficiencies"] if d["deficiency_id"] == "def-shapes")["closed_by"]
-        == "prj-tools"
-    )
+    assert entry["disposition"]["authority"] == "human"
+    assert entry["projection_id"] == "prj-tools"
+    assert entry["closed_deficiency_ids"] == ["def-shapes"]
 
 
 def test_the_adopted_candidates_digest_is_computed_not_empty(tmp_path):
     """digest.digest_for_path, not `{}` -- gate-brief (a later stage) renders a
-    candidate's digest for the human at gate 0, and a re-dispatched rb-triage
-    reading the catalogue fresh would be obliged to decline an empty-digest
+    candidate's digest for the human at gate 0, and a re-dispatched rb-triage-rule
+    reading its shard fresh would be obliged to decline an empty-digest
     candidate as digest_insufficient, naming the field it needed, for the very
     file a human just manufactured and admitted. That is the failure this test
     pins.
@@ -202,13 +201,34 @@ def test_the_adopted_run_still_passes_check_all(tmp_path):
     closes/satisfied_by mismatch would pass every assertion above while still
     leaving the run referentially broken. check_all is the guard that would
     catch what the named-field assertions cannot.
+
+    check_all right after adopt_projection alone, with no seal in between,
+    would correctly report the adopted candidate as having no disposition --
+    that gap is real and expected until triage-seal next folds
+    00-adoptions.json in (see test_seal.py's own coverage of that fold). This
+    fixture hand-writes an already-"sealed" 00-triage.json rather than
+    staging through survey/triage-slices/triage-seal, so there is no seal to
+    run here either -- the fold-in is done by hand instead, exactly what
+    seal.py's own fold-in step does, so this test still pins what it always
+    pinned: check_all over a *sealed* record that has folded this adoption in.
     """
     run = _run_with_projection(tmp_path)
     assert triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path)) == []
-    assert refs.check_all(run) == []
     catalogue = read_json(run.catalogue)
     adopted = next(c for c in catalogue["candidates"] if c["origin"] == "projection")
+    adoption = read_json(run.adoptions)["adoptions"][0]
+
     record = read_json(run.triage)
+    record["dispositions"].append(adoption["disposition"])
+    for projection in record["projections"]:
+        if projection["projection_id"] == adoption["projection_id"]:
+            projection["satisfied_by"] = adoption["candidate_id"]
+    for deficiency in record["deficiencies"]:
+        if deficiency["deficiency_id"] in adoption["closed_deficiency_ids"]:
+            deficiency["closed_by"] = adoption["projection_id"]
+    write_json(run.triage, record)
+
+    assert refs.check_all(run) == []
     projection = next(p for p in record["projections"] if p["projection_id"] == "prj-tools")
     assert projection["satisfied_by"] == adopted["candidate_id"]
 
@@ -350,7 +370,7 @@ def test_a_second_call_for_an_already_satisfied_projection_is_a_usage_error(tmp_
 
 def test_a_projection_missing_its_acceptance_object_is_a_finding_not_a_traceback(tmp_path):
     """projection["acceptance"] used to be a bare index -- on an unvalidated
-    triage record (hand-edited, or a future rb-triage bug) that raises
+    triage record (hand-edited, or a future triage-family bug) that raises
     KeyError, and cli.py's adopt-projection dispatch block catches only
     (UsageError, ArtifactError, OSError), so the KeyError would escape
     main() as a traceback: an empty-stdout exit, exactly what the exit-code
@@ -595,3 +615,44 @@ def test_an_absent_projections_block_is_still_a_usage_error(tmp_path):
 
     with pytest.raises(UsageError, match="no projection"):
         triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path))
+
+
+# The four JSON documents that are not objects. `null` is the one that was
+# measured escaping main() as exit 1 with empty stdout and a raw
+# AttributeError, but all four take the same `.get` and adopt-projection is one
+# of the three cli.py blocks that return before the catch-all's try begins, so
+# none of them had anything downstream to turn them into a finding.
+_NOT_OBJECTS = ["null", "7", '"hi"', "[]"]
+
+
+@pytest.mark.parametrize("document", _NOT_OBJECTS)
+def test_a_triage_record_that_is_not_an_object_is_a_finding_not_a_traceback(tmp_path, document):
+    run = _run_with_projection(tmp_path)
+    run.triage.write_text(f"{document}\n", encoding="utf-8")
+    findings = triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path))
+    # Three separate halves of the exit-code contract, and the reason each is
+    # asserted rather than just the first: a finding at all (so this is a 1,
+    # not a traceback), a non-empty message (a 1 with empty stdout sends an
+    # orchestrator to retry blind), and the offending artifact rather than the
+    # run root (a 1 that names the wrong artifact once produced four
+    # fabricated findings against a correct world model).
+    assert findings, "a non-object triage record produced no finding at all"
+    assert all(f.message for f in findings)
+    assert [f.artifact for f in findings] == [run.triage]
+
+
+@pytest.mark.parametrize("document", _NOT_OBJECTS)
+def test_a_catalogue_that_is_not_an_object_is_a_finding_not_a_traceback(tmp_path, document):
+    """The second door, reached only once acceptance has already passed.
+
+    check_acceptance and the --check-only short-circuit both return ahead of
+    the catalogue read, so this guard is not the triage record's guard again
+    from a different angle: a run can hold a perfectly good triage record and
+    still meet a catalogue it cannot append to.
+    """
+    run = _run_with_projection(tmp_path)
+    run.catalogue.write_text(f"{document}\n", encoding="utf-8")
+    findings = triage.adopt_projection(run, projection_id="prj-tools", source=_good(tmp_path))
+    assert findings, "a non-object catalogue produced no finding at all"
+    assert all(f.message for f in findings)
+    assert [f.artifact for f in findings] == [run.catalogue]
