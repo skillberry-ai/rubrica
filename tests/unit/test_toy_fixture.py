@@ -354,13 +354,21 @@ def test_upto_propose_writes_every_scenario_proposed_with_no_duplicate_of(tmp_pa
         assert "duplicate_of" not in scenario, scenario["id"]
 
 
-@pytest.mark.parametrize("bad_upto", ["bogus-stage", "emit"])
+@pytest.mark.parametrize("bad_upto", ["bogus-stage", "emit", "survey"])
 def test_an_unknown_upto_raises_rather_than_silently_building_something_else(tmp_path, bad_upto):
     """Gibberish is the easy case. The plausible mistake is passing a real
     paths.STAGES entry this fixture does not model -- "emit" is a real stage
     but build_toy_run stops at challenge, so silently accepting it (as either
     "everything" or "nothing") would hand a later task's exercise a run one
     stage off from what it asked for, with nothing to say so.
+
+    "survey" is the same mistake at the other end of the pipeline, and it
+    became reachable when the triage-* checkpoints landed: those DO mint
+    through survey(), so the name now looks like it should work. It is still
+    excluded, because a stop right after survey() would add nothing of this
+    fixture's own -- the tests that want a bare catalogue call survey.survey()
+    directly -- and a checkpoint indistinguishable from that call is exactly
+    what _UPTO_STAGES' exclusions prevent.
     """
     with pytest.raises(ValueError):
         build_toy_run(tmp_path / "runs", upto=bad_upto)

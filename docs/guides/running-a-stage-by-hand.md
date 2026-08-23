@@ -64,13 +64,17 @@ four fan-out exercises run so far had to add it by hand.
 ## 3. Building a toy run stopped before the stage under test
 
 `tests/toy.py`'s `build_toy_run(runs_dir, upto=...)` mints a run with real
-`intake` and then writes every hand-authored artifact up to and including the
-named checkpoint — never past it. Handing `rb-reconcile` a run that already
+`intake` — or, for the `triage-*` checkpoints, real `survey` — and then writes
+every hand-authored artifact up to and including the named checkpoint, never
+past it. Handing `rb-reconcile` a run that already
 contains `01-world-model.json` would test nothing, so the checkpoint you build
 to is always the stage *before* the one you are exercising:
 
 | Stage under test | `upto=` (the checkpoint just before it) | What the dispatched skill should write |
 |---|---|---|
+| `rb-triage-objective` | `"triage-slices"`   | `00-objective.json` |
+| `rb-triage-rule`      | `"triage-objective"` | `00-dispositions/<slice-id>.json` for the one shard you pointed it at |
+| `rb-triage-audit`     | `"triage-rule"`      | `00-audit.json` |
 | `rb-extract`     | `"intake"`      | `01-claims/<artifact-id>.json` for the one input artifact you pointed it at |
 | `rb-reconcile`   | `"extract"`     | `01-world-model.json` |
 | `rb-propose`     | `"reconcile"`   | `02-scenarios.json` (a new round) |
@@ -84,11 +88,21 @@ Its live exercise is a whole-pipeline run starting from an `upto="intake"`
 run, not a single-stage check against one checkpoint — see
 `src/rubrica/skills/rb-orchestrate/exercise.md` for its pass criteria.
 
-The `triage-*` family is not in this table either, for a different reason:
-`paths.STAGES` puts every one of its passes *before* `intake`, and
-`build_toy_run` mints its run via a real `intake()` call — there is no toy
-checkpoint that stops short of them. To exercise the family by hand, mint a run
-with a real catalogue instead of a toy one:
+The `triage-*` family's checkpoints are the one part of the table that does not
+go through `intake` at all: `paths.STAGES` puts every one of its passes
+*before* it, so `build_toy_run` mints those runs with a real `survey()` over
+`tests/fixtures/toy/` and returns before a manifest exists. Two consequences
+worth knowing before you use them. The golden world is three files totalling
+about four kilobytes of catalogue rows, so at the default slice cap it is a
+**single slice** — pass `build_toy_run(runs_dir, upto="triage-objective",
+slice_cap=4096)` to get more than one shard, which is what exercising
+`rb-triage-rule` as a real fan-out (rather than as one member) requires. And
+`triage-seal` is code, not a prompt: build to `upto="triage-audit"` and run
+`uv run rubrica triage-seal` against the run directory.
+
+A three-file corpus is also a thin exercise for a pass whose whole job is
+scoping judgment. For a real one, mint a run with a real catalogue instead of a
+toy one:
 
 ```bash
 uv run rubrica survey --corpus <path> --runs-dir /tmp/rubrica-lab/runs \
@@ -117,7 +131,7 @@ The script, in full:
 
 ```python
 # build a toy run stopped before the stage under test.
-# Run as: PYTHONPATH=. uv run python /tmp/toy-run-to.py <runs-dir> <upto-or-None>
+# Run as: PYTHONPATH=. uv run python /tmp/toy-run-to.py <runs-dir> <upto-or-None> [slice-cap]
 #
 # PYTHONPATH=. matters: tests/ is a package (tests/__init__.py) that pytest's
 # rootdir insertion makes importable during a test run, but this script is not
@@ -129,7 +143,10 @@ from tests.toy import build_toy_run
 
 runs_dir = Path(sys.argv[1])
 upto = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] != "None" else None
-run = build_toy_run(runs_dir, upto=upto)
+# The third argument is only accepted for a triage-* checkpoint: build_toy_run
+# raises rather than silently ignoring a cap on a run that has no catalogue.
+extra = {"slice_cap": int(sys.argv[3])} if len(sys.argv) > 3 else {}
+run = build_toy_run(runs_dir, upto=upto, **extra)
 print(run.root)
 ```
 

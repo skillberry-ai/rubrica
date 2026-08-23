@@ -22,9 +22,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from rubrica.artifacts import sha256_of, write_json
+from rubrica.artifacts import read_json, sha256_of, write_json
 from rubrica.intake import classify, intake
 from rubrica.paths import RunPaths
+from rubrica.seal import seal
+from rubrica.slices import write_slices
+from rubrica.survey import survey
 
 TOY_DIR = Path(__file__).resolve().parent / "fixtures" / "toy"
 CONTRADICTION_DIR = Path(__file__).resolve().parent / "fixtures" / "toy-contradiction"
@@ -1010,14 +1013,32 @@ def toy_verdict(scenario_id: str, **over: Any) -> dict[str, Any]:
 # Named checkpoints build_toy_run's `upto` accepts, in pipeline order. Not
 # paths.STAGES verbatim: this fixture writes nothing for "emit" or "smoke" (no
 # suite package, no report), so those two are deliberately absent rather than
-# silently accepted and ignored. "survey" and the "triage-*" family are absent
-# for the same reason: build_toy_run mints exclusively through the `--input`
-# path, which has no catalogue at all, so accepting any of those names here
-# would silently build the same run stopping at "intake" does, with nothing to
-# say the requested checkpoint was never actually reached.
-# build_toy_catalogue_and_triage() below is the separate, explicit helper for a
-# test that needs the catalogue and the sealed triage record present.
+# silently accepted and ignored. "survey" is absent for a related reason: a
+# stop right after survey() would add no hand-authored content of this
+# fixture's own, so the checkpoint would be a pure alias for the one-line
+# survey.survey() call the tests that want a bare catalogue already make --
+# and a checkpoint indistinguishable from an earlier one is the very thing
+# this tuple's exclusions exist to prevent. A name outside the tuple raises;
+# it is never silently accepted.
+#
+# The five "triage-*" names ARE here, and each writes something the one before
+# it does not: the slice plan and its shards, 00-objective.json, one
+# 00-dispositions/ part per slice, 00-audit.json, and the sealed
+# 00-triage.json. They are also the only checkpoints that do not go through
+# intake at all -- the family runs ahead of it, so a triage run is minted by
+# survey over TOY_DIR and stops before the manifest exists (see
+# _build_toy_triage_run). build_toy_catalogue_and_triage() below remains the
+# separate, explicit helper for the other shape: an already-intaken run that a
+# test needs a catalogue and a sealed triage record laid over.
+_TRIAGE_UPTO_STAGES: tuple[str, ...] = (
+    "triage-slices",
+    "triage-objective",
+    "triage-rule",
+    "triage-audit",
+    "triage-seal",
+)
 _UPTO_STAGES: tuple[str, ...] = (
+    *_TRIAGE_UPTO_STAGES,
     "intake",
     "extract",
     "reconcile",
@@ -1029,7 +1050,13 @@ _UPTO_STAGES: tuple[str, ...] = (
 _UPTO_INDEX: dict[str, int] = {name: i for i, name in enumerate(_UPTO_STAGES)}
 
 
-def build_toy_run(runs_dir: Path, *, upto: str | None = None, **intake_kwargs: Any) -> RunPaths:
+def build_toy_run(
+    runs_dir: Path,
+    *,
+    upto: str | None = None,
+    slice_cap: int | None = None,
+    **intake_kwargs: Any,
+) -> RunPaths:
     """Mint a run with real intake, then write every hand-authored artifact
     up to and including the named stage.
 
@@ -1037,6 +1064,15 @@ def build_toy_run(runs_dir: Path, *, upto: str | None = None, **intake_kwargs: A
     the 00-inputs/ copies are produced by the code that produces them in a real
     run -- refs.check_inputs re-hashes those bytes, and a hand-written digest
     would only ever satisfy a check that was not looking.
+
+    A `upto` naming one of the staged-triage passes is minted by survey rather
+    than intake and returns before intake ever runs -- see
+    _build_toy_triage_run, which this delegates to. `slice_cap` is that
+    branch's only extra knob, and it is a named parameter rather than another
+    **intake_kwargs entry precisely because it must never reach intake(), which
+    takes no such argument. Passing it with a post-intake checkpoint raises:
+    there is no catalogue to partition on that path, and a cap silently
+    ignored would leave a caller believing their run was sliced.
 
     `upto` stops the run after one named stage, so a later task can hand a
     skill a run populated up to but not past the stage under test: handing
@@ -1061,6 +1097,14 @@ def build_toy_run(runs_dir: Path, *, upto: str | None = None, **intake_kwargs: A
             f"unknown stage {upto!r} for build_toy_run(upto=...); expected one of "
             f"{_UPTO_STAGES} or None for everything"
         )
+    if slice_cap is not None and upto not in _TRIAGE_UPTO_STAGES:
+        raise ValueError(
+            f"slice_cap is only meaningful for the staged-triage checkpoints "
+            f"{_TRIAGE_UPTO_STAGES}, not for upto={upto!r}: a run minted through intake "
+            "--input has no catalogue to partition"
+        )
+    if upto in _TRIAGE_UPTO_STAGES:
+        return _build_toy_triage_run(runs_dir, upto=upto, slice_cap=slice_cap, **intake_kwargs)
     stop = _UPTO_INDEX[upto] if upto is not None else _UPTO_INDEX["challenge"]
 
     run = intake(
@@ -1108,6 +1152,214 @@ def build_toy_run(runs_dir: Path, *, upto: str | None = None, **intake_kwargs: A
     return run
 
 
+def _build_toy_triage_run(
+    runs_dir: Path, *, upto: str, slice_cap: int | None = None, **survey_kwargs: Any
+) -> RunPaths:
+    """The staged-triage half of build_toy_run: survey the golden world, then
+    write each pass's part up to and including `upto`.
+
+    survey rather than intake, and no intake at all: the family runs *ahead* of
+    intake in paths.STAGES, gate 0 stands between the sealed record and the
+    manifest, and a fixture that minted a manifest here would be a run one gate
+    past where its checkpoint claims to stop.
+
+    Everything structural is written by the code that writes it in a real run
+    -- survey walks TOY_DIR, write_slices partitions the catalogue survey
+    wrote, seal assembles 00-triage.json from the staged parts. The only
+    hand-authored content is the *judgment* each prompt pass supplies: which
+    surfaces the objective names, and how each candidate is ruled. A
+    hand-written plan or a hand-written sealed record would only ever satisfy a
+    check that was not looking.
+    """
+    stop = _UPTO_INDEX[upto]
+    run = survey(
+        corpus_roots=[TOY_DIR],
+        runs_dir=Path(runs_dir),
+        target_name="ticketq",
+        target_interface="mcp",
+        objective="breadth",
+        max_rounds=survey_kwargs.pop("max_rounds", 2),
+        max_scenarios=survey_kwargs.pop("max_scenarios", 8),
+        **survey_kwargs,
+    )
+    # The cap is omitted rather than defaulted when no override was asked for:
+    # slices.DEFAULT_SLICE_BYTES is the one home for that number, and restating
+    # it here would give the fixture a second copy to drift from. At that
+    # default the whole toy catalogue is a single slice (4102 row-bytes against
+    # 65536), which is why slice_cap exists -- 4096 is the smallest round cap
+    # above the largest single row (api-json, 2381) and partitions the three
+    # candidates in two.
+    if slice_cap is None:
+        write_slices(run)
+    else:
+        write_slices(run, cap=slice_cap)
+    if stop < _UPTO_INDEX["triage-objective"]:
+        return run
+
+    _write_toy_objective(run)
+    if stop < _UPTO_INDEX["triage-rule"]:
+        return run
+
+    _write_toy_disposition_parts(run)
+    if stop < _UPTO_INDEX["triage-audit"]:
+        return run
+
+    _write_toy_audit(run)
+    if stop < _UPTO_INDEX["triage-seal"]:
+        return run
+
+    _seal_toy_triage(run)
+    return run
+
+
+# One surface name per catalogue `kind`, for the objective pass's map-level
+# reading. Prose rather than the raw kind string because gate 0's brief renders
+# these for a human to read; the .get fallback keeps a catalogue that grows a
+# fourth kind valid -- surface.name only has to be non-empty -- rather than
+# raising inside a fixture builder.
+_SURFACE_NAMES: dict[str, str] = {
+    "mcp_tool_schema": "tool schema",
+    "design_doc": "operator notes",
+    "trace": "captured trajectory",
+}
+
+
+def _toy_surfaces(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One surface per candidate kind, both weights computed from the catalogue.
+
+    refs.check_objective recomputes weight.candidates from the surface's own
+    distinct evidence ids and weight.bytes by summing each evidence
+    candidate's catalogue `bytes` field, so a literal weight here would be a
+    second copy of the catalogue's arithmetic waiting to disagree with it --
+    which is how the pre-split helper carried `"bytes": 1` unnoticed, back
+    when nothing recomputed it. `bytes` is each source file's own size, never
+    slices.row_bytes' serialized-row size: the skeleton clamp makes a row size
+    saturate, so it stops discriminating exactly where a weight must.
+    """
+    by_kind: dict[str, list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        by_kind.setdefault(candidate["kind"], []).append(candidate)
+    return [
+        {
+            "name": _SURFACE_NAMES.get(kind, kind),
+            "evidence": [candidate["candidate_id"] for candidate in members],
+            "weight": {
+                "candidates": len(members),
+                "bytes": sum(candidate["bytes"] for candidate in members),
+            },
+        }
+        for kind, members in sorted(by_kind.items())
+    ]
+
+
+def _write_toy_objective(run: RunPaths) -> None:
+    """00-objective.json: rb-triage-objective's ruling over the toy catalogue.
+
+    predicted_surface_count equals the number of surfaces named, which is the
+    non-divergent case rb-triage-audit's own comparison expects here: it counts
+    every predicted surface with an admitted candidate anywhere in the parts
+    plus every distinct observed_surfaces entry, and in this fixture every
+    candidate is admitted and no part observes anything the objective missed.
+    """
+    catalogue = read_json(run.catalogue)
+    surfaces = _toy_surfaces(catalogue["candidates"])
+    write_json(
+        run.objective,
+        {
+            "schema_version": "0.1",
+            "run_id": catalogue["run_id"],
+            "predicted_surface_count": len(surfaces),
+            "objective_review": {
+                "declared_objective": "breadth",
+                "supported": True,
+                "surfaces": surfaces,
+            },
+        },
+    )
+
+
+def _write_toy_disposition_parts(run: RunPaths) -> None:
+    """One 00-dispositions/<slice_id>.json per slice the plan declares.
+
+    Membership is read from 00-slices.json rather than from ARTIFACT_IDS, so
+    the parts follow whatever partition the cap in force actually produced: one
+    part at the default cap, two at slice_cap=4096. That is what makes
+    refs.check_disposition_parts' "every slice has a part" clause a real check
+    on the multi-slice fixture rather than a tautology over a single member.
+
+    Every candidate is admitted, matching what build_toy_catalogue_and_triage
+    has always produced: the golden world's three files are exactly the three
+    inputs every downstream toy fixture expects the manifest to carry, so a
+    decline here would put the triage record and that manifest at odds.
+
+    observed_surfaces is [] by rb-triage-rule's own rule -- a member reports
+    only the surfaces 00-objective.json did not already name, and the objective
+    above names one per kind, which is all of them.
+    """
+    plan = read_json(run.slices)
+    for entry in plan["slices"]:
+        write_json(
+            run.disposition_part(entry["id"]),
+            {
+                "schema_version": "0.1",
+                "run_id": plan["run_id"],
+                "slice_id": entry["id"],
+                "dispositions": [
+                    {
+                        "candidate_id": candidate_id,
+                        "disposition": "admit",
+                        "reason": f"{candidate_id} is part of the golden toy world",
+                        # The member's own ranking within its own slice. The
+                        # seal renumbers admits across every part, so this
+                        # exercises its member-priority sort rather than
+                        # dictating the sealed order.
+                        "priority": position,
+                        "authority": "triage",
+                    }
+                    for position, candidate_id in enumerate(entry["candidate_ids"], start=1)
+                ],
+                "observed_surfaces": [],
+                "deficiency_notes": [],
+            },
+        )
+
+
+def _write_toy_audit(run: RunPaths) -> None:
+    """00-audit.json: both arrays empty, which is a claim rather than a gap.
+
+    audit-0.1.json's own description makes that point -- a run with no
+    deficiencies has swept every slice and found nothing worth projecting,
+    rather than skipped the check. The toy world admits everything, so there is
+    no digest_insufficient or needs_projection decline for a deficiency or a
+    projection to answer, and seal.seal's item 5 has nothing to refuse.
+    """
+    write_json(
+        run.audit,
+        {
+            "schema_version": "0.1",
+            "run_id": read_json(run.slices)["run_id"],
+            "deficiencies": [],
+            "projections": [],
+        },
+    )
+
+
+def _seal_toy_triage(run: RunPaths) -> None:
+    """00-triage.json, assembled by seal.seal from the staged parts.
+
+    Raises on a finding rather than returning quietly: seal writes nothing when
+    it reports anything, so a silent return would hand a caller a "sealed"
+    checkpoint with no 00-triage.json in it, and the failure would surface
+    later against whichever artifact read it next instead of here.
+    """
+    _, findings = seal(run)
+    if findings:
+        raise AssertionError(
+            "the toy fixture's staged triage parts do not seal: "
+            + "; ".join(f.message for f in findings)
+        )
+
+
 def build_toy_catalogue_and_triage(run: RunPaths) -> None:
     """Write 00-catalogue.json and 00-triage.json for the toy world's three
     inputs, admitting all of them under their real ARTIFACT_IDS.
@@ -1121,6 +1373,14 @@ def build_toy_catalogue_and_triage(run: RunPaths) -> None:
     manifest, and admits every candidate under its real ARTIFACT_IDS so that
     a manifest written by real intake() lines up with it exactly, with no
     collision suffix in play.
+
+    The catalogue below stays hand-written for exactly that reason -- the
+    candidate ids have to be ARTIFACT_IDS, not whatever a survey of some other
+    directory would slug -- but 00-triage.json no longer is. It is written by
+    seal.seal over the same staged parts a real run seals, laid down here by
+    the same four writers _build_toy_triage_run uses, so the record this helper
+    produces is one the real code assembles rather than a literal that merely
+    resembles one.
     """
     candidates = [
         {
@@ -1159,35 +1419,16 @@ def build_toy_catalogue_and_triage(run: RunPaths) -> None:
             "excluded": [],
         },
     )
-    write_json(
-        run.triage,
-        {
-            "schema_version": "0.1",
-            "run_id": run.root.name,
-            "objective_review": {
-                "declared_objective": "breadth",
-                "supported": True,
-                "surfaces": [
-                    {
-                        "name": "ticketq",
-                        "evidence": list(ARTIFACT_IDS),
-                        "weight": {"candidates": len(ARTIFACT_IDS), "bytes": 1},
-                    }
-                ],
-            },
-            "dispositions": [
-                {
-                    "candidate_id": artifact_id,
-                    "disposition": "admit",
-                    "reason": "part of the golden toy world",
-                    "authority": "triage",
-                }
-                for artifact_id in ARTIFACT_IDS
-            ],
-            "deficiencies": [],
-            "projections": [],
-        },
-    )
+    # The staged parts, then the seal -- the same sequence a real run takes
+    # from triage-slices to triage-seal, over the catalogue just written. No
+    # cap override: this helper's catalogue is one slice at any cap the toy
+    # world can produce, and a caller who needs the fan-out partitioned asks
+    # build_toy_run for it with slice_cap instead.
+    write_slices(run)
+    _write_toy_objective(run)
+    _write_toy_disposition_parts(run)
+    _write_toy_audit(run)
+    _seal_toy_triage(run)
 
 
 # Scripted agents for the golden smoke run. Real subprocesses printing real
