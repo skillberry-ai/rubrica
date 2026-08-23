@@ -1042,9 +1042,10 @@ skill file path. If a stage needs a fact, it reads it from an artifact, or it do
     <tbody>
 <tr><td><span class="n">0</span> the triage record</td><td>triage-seal</td><td>the operator — the
         orchestrator is not yet dispatched</td>
-        <td>The objective verdict and the grouped declines. A candidate the triage family
-        declined is gone as completely as if the corpus never contained it, so this is the only
-        moment the run's evidence base is negotiable.</td></tr>
+        <td>The objective verdict, the predicted-vs-observed surface divergence, the grouped
+        declines, and the slice table with every group split across more than one slice. A
+        candidate the triage family declined is gone as completely as if the corpus never
+        contained it, so this is the only moment the run's evidence base is negotiable.</td></tr>
       <tr><td><span class="n">1</span> the world model</td><td>reconcile</td><td>rb-orchestrate</td>
         <td>Claim utilisation per input and the implied suite size. An input the world model cites
         nothing from is exactly the fact this gate exists to surface.</td></tr>

@@ -277,9 +277,19 @@ is itself a gate: none can turn a readable run into a defect finding.
 ### `rubrica gate-brief`
 
 Composes the existing reports into the reading surface at one of the four
-human gates: the objective verdict and grouped declines at gate 0,
-utilisation and implied size at gate 1, the coverage matrix at gate 2, the
-verdict tally at gate 3.
+human gates: utilisation and implied size at gate 1, the coverage matrix at
+gate 2, the verdict tally at gate 3.
+
+Gate 0 renders more than the others because it is the one gate held before any
+downstream stage has read the corpus: the objective verdict, then the
+predicted-vs-observed surface divergence (`00-objective.json`'s
+`predicted_surface_count` against the surfaces the disposition parts confirmed
+or added), then admits by priority, declines grouped by reason code, and every
+open deficiency beside the projection that would close it — and last, the
+mechanics of how the fan-out read the corpus: the slice table (candidates and
+bytes per slice) and every group `triage-slices` split across more than one
+slice. That final summary is where the near-duplicate residue lives, and gate 0
+is the only place a human can act on it.
 
 Required: `--run RUN`, `--gate {0,1,2,3}`.
 

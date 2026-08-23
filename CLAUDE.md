@@ -197,9 +197,10 @@ are judgments rather than list entries:
   cited/total claim count for a human to read at gate 1 — the zero-utilisation
   finding it shares its arithmetic with lives in `check-refs`, never here.
   `gate-brief` composes what already exists into the reading surface at each
-  human gate: the objective verdict and grouped declines at gate 0, utilisation
-  and implied size at gate 1, the coverage matrix at gate 2, the verdict tally
-  at gate 3.
+  human gate: at gate 0 the objective verdict, the predicted-vs-observed surface
+  divergence, grouped declines, the slice table and every group the slicer split
+  across more than one slice; utilisation and implied size at gate 1, the
+  coverage matrix at gate 2, the verdict tally at gate 3.
 - `survey` is `intake`'s counterpart for the corpus path: it walks a corpus,
   digests each candidate, and mints the run, but writes `00-catalogue.json`
   instead of a manifest — there is nothing to extract from yet, because nothing
