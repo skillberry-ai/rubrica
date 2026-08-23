@@ -123,6 +123,19 @@ including the survey/triage path for a whole corpus, is
 - Design: [`docs/design/rationale.md`](docs/design/rationale.md),
   [`docs/design/limitations.md`](docs/design/limitations.md).
 
+## The name
+
+Latin *rubrica* is red ochre: the pigment a scribe reached for when writing not
+the text itself but the headings around it — the marks that told a reader how to
+use what followed. That word is the direct ancestor of English *rubric*, which
+is still the ordinary term for a scoring guide. Both senses are the job here.
+Rubrica does not write the system under test; it writes the marks by which
+someone else's system is read and judged, and what comes out the far end is a
+rubric in the plain modern sense of the word.
+
+The pigment being red, rather than any of the other colours a scribe had to
+hand, is a coincidence — though not every reader will take it for one.
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the checks a change has to clear
