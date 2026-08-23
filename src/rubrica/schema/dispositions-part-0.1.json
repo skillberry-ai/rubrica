@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "dispositions-part-0.1.json",
   "title": "One slice's dispositions",
-  "description": "What one rb-triage-dispositions fan-out member ruled over its own slice. minItems:1 on dispositions because a slice always holds at least one candidate (triage-slices refuses to emit an empty one) and every candidate in it is ruled: an empty part is a member that wrote nothing, not a member with nothing to say. observed_surfaces and deficiency_notes carry no such floor -- a slice can be fully ruled without surfacing anything new or flagging anything insufficient.",
+  "description": "What one rb-triage-rule fan-out member ruled over its own slice. minItems:1 on dispositions because a slice always holds at least one candidate (triage-slices refuses to emit an empty one) and every candidate in it is ruled: an empty part is a member that wrote nothing, not a member with nothing to say. observed_surfaces and deficiency_notes carry no such floor -- a slice can be fully ruled without surfacing anything new or flagging anything insufficient.",
   "type": "object",
   "required": [
     "schema_version",

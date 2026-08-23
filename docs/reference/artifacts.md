@@ -56,8 +56,7 @@ does not cover). Gate 0 reads this record, never the corpus again — a
 candidate declined here is gone as completely as if the corpus never
 contained it, because nothing downstream of `intake` re-reads the corpus.
 
-Once the staged-triage redesign's remaining prompt passes land, this file
-becomes purely derived: `triage-seal` assembles it from `00-objective.json`,
+This file is purely derived: `triage-seal` assembles it from `00-objective.json`,
 `00-slices.json`, every `00-dispositions/<slice>.json` part, `00-audit.json`,
 and `00-adoptions.json`, and re-running it re-derives the identical record
 from the same parts. `adopt-projection` no longer writes here at all — it
@@ -119,7 +118,7 @@ so this pass's dispatch is sized to the corpus map, not to the corpus.
 Fields worth knowing: `objective_review.surfaces[].weight.bytes` (the sum of
 each evidence candidate's own catalogue `bytes` field — the source file's
 size — never a slice's or a serialized row's size, which saturates once
-`triage-slices`' digest skeleton hits its 128-node cap); `predicted_surface_count`
+the digest skeleton hits its 128-node cap); `predicted_surface_count`
 (a prediction, not a report — a later member observing a different surface
 count is a fact about this map's adequacy, not proof either reading erred).
 

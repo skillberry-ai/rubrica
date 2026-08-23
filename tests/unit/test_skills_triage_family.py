@@ -140,7 +140,7 @@ def test_the_objective_pass_states_which_bytes_weight_sums():
     """The ruling task 11's brief settles: weight.bytes sums each evidence
     candidate's own catalogue `bytes` field (source file size), never a
     slice's or a serialized row's size -- a saturating metric cannot express
-    weight once triage-slices' 128-node skeleton clamp caps row size."""
+    weight once the digest's 128-node skeleton clamp caps row size."""
     body = _norm(skills.section_body(_objective(), "2. Output"))
     assert "weight.bytes" in body or "weight" in body
     assert "bytes" in body

@@ -82,7 +82,7 @@
             "bytes": {
               "type": "integer",
               "minimum": 0,
-              "description": "The sum of each evidence candidate's own catalogue `bytes` field (source file size) -- never row_bytes' serialized-row size. triage-slices' skeleton clamp (Task 1, capped at 128 nodes) makes row size saturate: a 2.7MB source and a 20KB one can serialize to nearly the same row, so a row-size weight would stop discriminating between candidates of very different evidential size right where this pass needs it to. refs.check_objective recomputes this from the catalogue, so it must agree."
+              "description": "The sum of each evidence candidate's own catalogue `bytes` field (source file size) -- never row_bytes' serialized-row size. the digest skeleton clamp (digest.py, capped at 128 nodes) makes row size saturate: a 2.7MB source and a 20KB one can serialize to nearly the same row, so a row-size weight would stop discriminating between candidates of very different evidential size right where this pass needs it to. refs.check_objective recomputes this from the catalogue, so it must agree."
             }
           }
         }

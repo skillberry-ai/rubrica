@@ -386,3 +386,30 @@ def test_the_readme_references_both_diagram_themes():
         "README.md's <picture> does not offer the dark diagram under a "
         "prefers-color-scheme media query"
     )
+
+
+def test_the_validate_stage_list_offers_exactly_the_contract_stages():
+    """`validate --stage` takes one of paths.STAGES, so the document that lists
+    the accepted values is either that list or wrong.
+
+    Untested until now, and it drifted the way an untested list does: the
+    staged-triage branch deleted the `triage` stage and added four, and this
+    list kept offering the deleted one while naming only one of the four. A
+    reader following it got exit 2 from a stage that no longer exists, and no
+    hint that four stages they could validate were missing. Both halves are
+    asserted -- every contract stage present, and nothing present that is not a
+    contract stage -- because a list can drift in either direction and only the
+    second half catches a deletion.
+    """
+    text = _read(CLI_REF)
+    section = text[text.index("### `rubrica validate`") :]
+    section = section[: section.index("\n### ")]
+    offered = set(re.findall(r"`([a-z][a-z-]*)`", section))
+    # The prose around the list names the flags and the layer too; only names
+    # that are stages or look like them are the list's business.
+    stage_shaped = {name for name in offered if name in set(paths.STAGES) or "triage" in name}
+    assert stage_shaped == set(paths.STAGES), (
+        "cli.md's validate --stage list disagrees with paths.STAGES: "
+        f"missing {sorted(set(paths.STAGES) - stage_shaped)}, "
+        f"offers non-stages {sorted(stage_shaped - set(paths.STAGES))}"
+    )

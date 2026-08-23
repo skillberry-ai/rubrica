@@ -103,9 +103,10 @@ rubrica adopt-projection --run runs/run-20260806-123005 \
 
 Layer 1: schema-validates one stage's output.
 
-Required: `--run RUN`, `--stage`, one of `survey`, `triage`, `triage-slices`,
-`intake`, `extract`, `reconcile`, `propose`, `score`, `instantiate`,
-`challenge`, `emit`, `smoke`.
+Required: `--run RUN`, `--stage`, one of `survey`, `triage-slices`,
+`triage-objective`, `triage-rule`, `triage-audit`, `triage-seal`, `intake`,
+`extract`, `reconcile`, `propose`, `score`, `instantiate`, `challenge`,
+`emit`, `smoke` — `paths.STAGES` in order.
 
 Exits 0 clean, or 1 with one finding per line on stdout.
 

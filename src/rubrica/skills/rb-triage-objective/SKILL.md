@@ -56,7 +56,8 @@ for `digest`. `bytes` is the source file's own size on disk; it is what lets
 guess.
 
 **The prohibition is on opening a digest, not on what you would have taken
-from it**, for the same reason `rb-triage` refused to open the corpus itself.
+from it**, and the reason stands on its own: a pass that reads the corpus to
+size the corpus grows with it.
 Reading a slice's or a candidate's digest to firm up a surface judgment is
 how a pass sized to run in one bounded dispatch, ahead of the fan-out, grows
 with the corpus it was supposed to let the fan-out grow with instead. A

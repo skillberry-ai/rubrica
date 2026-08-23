@@ -708,8 +708,8 @@ def check_objective(run: RunPaths) -> list[Finding]:
         distinct = set(evidence)
         recomputed_candidates = len(distinct)
         # bytes sums each candidate's own catalogue `bytes` field (the
-        # source file's size), never row_bytes' serialized-row size. Task 1
-        # clamps triage-slices' skeleton at 128 nodes, so a 2.7MB source and
+        # source file's size), never row_bytes' serialized-row size. digest.py
+        # clamps the digest skeleton at 128 nodes, so a 2.7MB source and
         # a 20KB one can serialize to nearly the same row -- a metric that
         # saturates under that cap is not a weight metric, it stops
         # discriminating between candidates of very different evidential

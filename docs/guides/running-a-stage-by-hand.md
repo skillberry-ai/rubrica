@@ -50,10 +50,11 @@ When you are done, report only: the paths you wrote, and any refusal
 condition you hit.
 ```
 
-**The slice line is for the three fan-out stages, and it is an address rather
+**The slice line is for the fan-out stages, and it is an address rather
 than context.** A member of a fan-out has to be told which slice is its own or
-it cannot find its work at all: `rb-extract` needs `Your artifact_id:`, and
-`rb-instantiate` and `rb-challenge` each need `Your scenario_id:`. Omit the
+it cannot find its work at all: `rb-triage-rule` needs `Your slice_id:`,
+`rb-extract` needs `Your artifact_id:`, and `rb-instantiate` and
+`rb-challenge` each need `Your scenario_id:`. Omit the
 line entirely for `rb-reconcile`, `rb-score` and `rb-emit`, which are single
 dispatches over everything. Give the member its own id and nothing about any
 other slice — a sibling's id, or a hint about what a sibling found, is the
