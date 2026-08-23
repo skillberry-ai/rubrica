@@ -217,6 +217,17 @@ fi
 # opposite rule (more specific path wins), which is why the two lists above and
 # below are built differently from the same intent.
 DENY=("$REPO/docs" "$REPO/tests" "$REPO/CLAUDE.md" "$REPO/README.md" "${RUN_DENY[@]}")
+
+# WebSearch is denied for a reason unrelated to the answer key, and it is not a
+# read path: MEASURED 2026-08-20, a tool named exactly `WebSearch` in the request
+# makes LiteLLM 1.85.5's websearch_interception rewrite stream=True to
+# stream=False, so the whole response is generated before any byte is sent and
+# envoy's ~300s idle timeout kills the turn with zero bytes at 301.0s. Reconcile
+# never completed until this was removed. No stage uses WebSearch. Denying it
+# here strips it from the request's tools array (25 -> 24, verified on the wire),
+# which is what defeats the name match -- a permission-only block would still
+# advertise the tool and still be intercepted.
+WS_DENY=("WebSearch")
 for d in "$REPO"/src/rubrica/skills/rb-*; do
   [ "$d" = "$SKILL_DIR" ] || DENY+=("$d")
 done
@@ -235,8 +246,9 @@ done
 # A "//abs" rule is "/" prepended to a path that already starts with "/".
 SETTINGS_FILE="$LAB/settings-$STAGE${SLICE:+-$SLICE}.json"
 jq -n --arg repo "$REPO" --arg run "$RUN" --arg skilldir "$SKILL_DIR" \
-  --argjson deny "$(printf '%s\n' "${DENY[@]}" \
-      | jq -R '"Read(/" + . + ")", "Read(/" + . + "/**)"' | jq -s .)" \
+  --argjson deny "$( { printf '%s\n' "${DENY[@]}" \
+      | jq -R '"Read(/" + . + ")", "Read(/" + . + "/**)"'; \
+      printf '%s\n' "${WS_DENY[@]}" | jq -R .; } | jq -s .)" \
   '{permissions: {
       deny: $deny,
       allow: ["Read(/" + $skilldir + "/**)", "Read(/" + $run + "/**)",
