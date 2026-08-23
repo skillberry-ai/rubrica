@@ -217,6 +217,13 @@ the field is not.
 Three files, all under your own instance directory
 `04-instances/<scenario_id>/`, and no file anywhere else in the run.
 
+**Neither `04-instances/` nor your own `04-instances/<scenario_id>/` exists
+when you are dispatched, and creating either is not your job.** Nothing in
+`src/rubrica/` mkdirs them -- your `Write` creates both, parents and all.
+**Do not reach for `mkdir`.** This project's dispatch allows `rubrica *`
+through Bash and nothing else, so the command lands on an approval prompt
+that `claude -p` cannot answer.
+
 **`seed.json` (`seed`)** -- the world. `schema_version: "0.1"` and a
 `collections` object mapping a collection name to an array of records. Its
 schema constrains only that envelope on purpose: the real shape of a seed

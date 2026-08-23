@@ -155,6 +155,13 @@ carries `schema_version: "0.1"`, `round`, `denominator_version`,
 all eight required, an incomplete report being a validation failure rather
 than a smaller report.
 
+**`03-coverage/` does not exist on round 1, and creating it is not your
+job.** Nothing in `src/rubrica/` mkdirs it -- your `Write` creates it,
+parents and all, on the first round and re-uses it on every later one. **Do
+not reach for `mkdir`.** This project's dispatch allows `rubrica *` through
+Bash and nothing else, so the command lands on an approval prompt that
+`claude -p` cannot answer.
+
 Note what that document has no room for: every object in the coverage schema
 is `additionalProperties: false`, and the only free-text field anywhere in it
 is a hole's `justification`. So the report cannot carry an essay explaining

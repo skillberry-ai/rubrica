@@ -136,6 +136,18 @@ One file: `00-dispositions/<slice_id>.json`, validating against
 never derive `run_id` from the run directory's name), and three arrays:
 `dispositions`, `observed_surfaces`, and `deficiency_notes`.
 
+**`00-dispositions/` does not exist when you are dispatched, and creating it
+is not your job.** `triage-slices` mkdirs `00-slices/` for the shard you
+just read, which makes the sibling directory look like a precedent; it is
+not one. Nothing in `src/rubrica/` mkdirs yours -- your `Write` creates it,
+parents and all, exactly as every `rb-extract` member's `Write` creates
+`01-claims/`. **Do not reach for `mkdir`.** This project's dispatch allows
+`rubrica *` through Bash and nothing else, so the command lands on an
+approval prompt that `claude -p` cannot answer. MEASURED 2026-08-23: a
+member that tried it spent roughly seven turns and one
+`dangerouslyDisableSandbox` escalation attempt on that one command before
+naming `Write` as the way round it.
+
 **All three are required at the document root, and an empty
 `observed_surfaces` or `deficiency_notes` is still written as `[]`** --
 `dispositions-part-0.1.json` requires every one of them, so a part with
