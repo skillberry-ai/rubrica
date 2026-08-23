@@ -985,12 +985,29 @@ So an unexpected exception in one of the three exits 1 with empty stdout — the
 exact mode the net was added to close.
 
 Parked because the crash surface is genuinely small and the placement is
-deliberate. All three read paths a human or an orchestrator supplied rather
-than artifacts a stage wrote, so a failure there really is a usage error or a
-misconfigured harness: there is no stage to send a finding back to. Slug
-generation cannot emit an unsafe segment, and IO raises `OSError`, which is
-caught. This has been re-examined twice and still holds; what would change it
-is a fourth block, or one of these three growing a real content-parsing path.
+deliberate. Slug generation cannot emit an unsafe segment, and IO raises
+`OSError`, which is caught.
+
+**The second of the two triggers this entry named has since fired, for
+`adopt-projection` only.** The reasoning above rested on all three blocks
+reading paths a human or an orchestrator supplied rather than artifacts a stage
+wrote — so a failure there was a usage error, with no stage to send a finding
+back to. That is no longer true of `adopt-projection`: it parses
+`00-triage.json`, `00-catalogue.json` and `00-adoptions.json`, and it now
+returns findings rather than only raising. The two container-shape defects that
+path can reach — a triage record or a catalogue that is readable JSON but not an
+object — were closed where they arise, each returning a `Finding` naming the
+artifact it came from instead of an `AttributeError`; before that, a
+`00-triage.json` holding `null` exited 1 with empty stdout, verbatim the mode the
+net exists to close.
+
+Still live, and still parked, because the *placement* is unchanged: those are
+the two defects that were measured, not a proof that the path has no others, and
+any further unexpected exception inside `adopt-projection` exits 1 with empty
+stdout exactly as before. What would close it is moving the block inside the
+net — which means giving the three a finding-shaped exit for genuine usage errors
+too, a wider change than this entry's cost justifies. The first trigger, a
+fourth block, has not fired: there are still three.
 
 ### The catch-all blames the artifact, and names the wrong run for `diff-runs`
 
@@ -1206,6 +1223,79 @@ with a hazard that measurement showed never occurs in that document.
 All three parked as accuracy residues in tests whose properties hold: the cost
 of each is one misleading docstring, and the benefit of an edit is not worth
 re-measuring predicates that are currently pinned in four directions.
+
+### Fourteen prose predicates in the triage family's test module do not discriminate
+
+`tests/unit/test_skills_triage_family.py` contains two shapes of prose
+predicate. The windowed shape — `_window_after` / `_window_around` around an
+anchor token — constrains what it claims to. The plain `"X" in body and "Y" in
+body` shape does not, and there are **fourteen** of them (`grep -c "in body
+and"`). The section scoping via `skills.section_body` that `CLAUDE.md` requires
+is present in both, so these are not the vacuous-against-the-whole-file case
+that convention already closed; they are vacuous *within a correctly scoped
+section*, because a section that says a thing and a section that says its
+opposite contain the same tokens.
+
+Five were measured, each by **inverting** the claim in a `/tmp` copy under
+`RUBRICA_SKILLS_DIR` — a stronger probe than deletion, because the tokens do not
+vanish and the predicate is handed everything it asks for while the prose now
+says the reverse. Every test in the module stayed green in every case, and
+`rubrica check-skills` exited 0:
+
+| Predicate | Inversion written into the skill |
+|---|---|
+| `:117` `…forbids_reading_candidate_digests` | "you **may** read every field of `candidates[]`, including each candidate's `digest`" |
+| `:122` `…admits_that_a_map_is_thinner_than_the_digests` | "`supported` is a reliable verdict … this pass has no blind spot to flag" |
+| `:139` `…states_which_bytes_weight_sums` | `weight.bytes` sums serialized row size, "never a candidate's own catalogue `bytes`" |
+| `:168` `…explains_predicted_surface_count_is_a_prediction` | the member "has made an error … reconcile the member's count to this prediction" |
+| `:268` `test_the_rule_pass_inverts_the_decline_everything_refusal` | "**Refuse** if you would decline every candidate in your slice" |
+
+The first is the consequential one. `CLAUDE.md`'s stage table describes
+`triage-objective` as the barrier that "reads the corpus map, **never a
+digest**", and that property is the entire reason the pass is bounded — it is
+what makes the staged family survive a corpus the monolithic stage died on.
+Granting the opposite permission in the skill's own Inputs section *and* in
+Invariant 1 left the whole unit suite green. The design's bounding constraint is
+prose that nothing checks.
+
+The five are not equally severe, and the difference is the mirror question
+`CLAUDE.md` asks of any proposed guard. `:139`'s property is already gated
+deterministically: `refs.check_objective` recomputes `weight.bytes` from the
+catalogue, so that predicate is redundant belt-and-braces and its vacuity costs
+nothing. `:168`'s is not gated anywhere — a member that quietly reconciles its
+observed surface count to the prediction erases the divergence from the data,
+and `gate-brief`'s predicted-vs-observed surface at gate 0 then has nothing to
+show. `:268` inverts a **refusal condition**, the do-not-refuse that keeps the
+fan-out from stranding on a legitimately all-declines slice, which
+[`rationale.md`](rationale.md) uses as its worked example of decorativeness.
+
+**The remedy is known because it was measured, in the same file.** Inverting
+`rb-triage-objective`'s primary refusal condition left the unwindowed `:178`
+green and turned the windowed `:184` **red**. Same prose, same file, same
+section: the shape of the predicate is the whole difference. The windowed
+predicates also hold in the other direction — the two tightest were recomputed
+from the shipped prose and their docstrings' stated distances are exact (the
+objective's Invariants anchor sits 142 chars from the nearest prohibition word
+inside a radius-300 forward window, 2.11x; the audit's `deficiency_notes` anchor
+208 chars from `your job` inside radius 500, 2.40x), so the 2x floor holds and no
+window on this branch is a length pin in disguise.
+
+One predicate fails in the opposite direction: `:551` asserts `"is also a claim"
+in body or "is itself a claim" in body`, and rewording the audit's Output prose
+to "is a claim in its own right" — meaning identical — turns it red. The
+module's `_norm` handles whitespace reflow; nothing handles synonym. The
+predicate is the wrong one, not the prose.
+
+**Why it is parked.** Every one of these is a test that fails to constrain, not
+shipped behaviour that is wrong: the prose the predicates were written to guard
+is correct on disk in all fourteen cases, and the two check layers are
+unaffected. Fixing them properly means converting fourteen predicates to the
+windowed co-occurrence form, each conversion requiring its own anchor-to-token
+measurement and its own both-directions probe — real work, and work that is
+worse than useless done in a hurry, because a window sized by guess rather than
+by measurement is the length pin this module's docstring already warns about.
+The branch converted the hardest ones and left the rest in the shape it found
+them. What is owed is the conversion, not a decision.
 
 ### `tests/unit/test_live_marker.py` writes into the tracked tree
 
