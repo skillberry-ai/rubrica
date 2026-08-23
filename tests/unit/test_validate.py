@@ -614,3 +614,38 @@ def test_manifest_stage_efforts_tracks_a_schema_override(tmp_path, monkeypatch):
     write_json(tmp_path / ARTIFACT_SCHEMAS["manifest"], original)
     monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path))
     assert manifest_stage_efforts() == ("low", "ludicrous")
+
+
+def test_a_structurally_invalid_schema_is_a_usage_error_not_a_finding(tmp_path, monkeypatch):
+    """A readable-but-invalid schema file is a misconfigured run: exit 2, not 1.
+
+    It is the same class as a schema file that is *absent*, which read_json one
+    line above already turns into ArtifactError and cli.py already exits 2 for.
+    Measured before this door existed, against a copied schema/ whose
+    slices-0.1.json was replaced by {"type": 7}: exit 1, nine stdout lines, and
+    an [internal] finding anchored on the run directory -- three violations of
+    the exit-code contract at once, the last of them naming an artifact that was
+    not the broken one and in fact was not broken at all.
+    """
+    from jsonschema.exceptions import SchemaError
+
+    from rubrica.artifacts import read_json
+    from rubrica.errors import UsageError
+    from rubrica.validate import ARTIFACT_SCHEMAS, _validator_for, schema_dir
+
+    for filename in ARTIFACT_SCHEMAS.values():
+        write_json(tmp_path / filename, read_json(schema_dir() / filename))
+    write_json(tmp_path / ARTIFACT_SCHEMAS["slices"], {"type": 7})
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path))
+
+    with pytest.raises(UsageError) as caught:
+        _validator_for("slices", tmp_path)
+    # The path, so the operator knows which file to fix -- the [internal]
+    # finding this replaced named the run root instead.
+    assert str(tmp_path / ARTIFACT_SCHEMAS["slices"]) in str(caught.value)
+    # UsageError, not SchemaError: what escapes decides the exit code, and
+    # SchemaError is neither in cli.py's usage tuple nor a subclass of anything
+    # in it, so it would reach the catch-all and become a 1 again.
+    assert not isinstance(caught.value, SchemaError)
+    # One line. SchemaError's own str is eleven, dumping the metaschema branch.
+    assert "\n" not in str(caught.value)

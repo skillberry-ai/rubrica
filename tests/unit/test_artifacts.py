@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 import pytest
 
@@ -93,3 +94,24 @@ def test_a_failure_after_the_temp_file_exists_cleans_it_up(tmp_path, monkeypatch
 
     assert read_json(path) == {"keep": True}
     assert sorted(p.name for p in tmp_path.iterdir()) == ["a.json"]
+
+
+def test_read_non_utf8_artifact_names_the_path(tmp_path):
+    """Bytes that are not UTF-8 raise ArtifactError, exactly like unparseable JSON.
+
+    Without this door UnicodeDecodeError escaped read_json. It is a ValueError,
+    not an OSError, so nothing between here and cli.py's catch-all knew a path:
+    `validate --stage triage-slices` over such a file exited 1 with an
+    [internal] finding anchored on the *run root* whose advice was to run the
+    very command that had just been run. Both directions were measured -- the
+    same invocation now prints one [schema] line naming 00-slices.json.
+    """
+    path = tmp_path / "a.json"
+    path.write_bytes(b"\xff\xfe\x00bogus")
+    with pytest.raises(ArtifactError, match="not UTF-8 text"):
+        read_json(path)
+    # The path is in the message, which is the half that was missing: the layer
+    # above turns str(exc) into the finding, so a message without the path
+    # produces a finding that cannot be acted on.
+    with pytest.raises(ArtifactError, match=re.escape(str(path))):
+        read_json(path)

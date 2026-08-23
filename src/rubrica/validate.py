@@ -25,10 +25,12 @@ import os
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012
 
 from rubrica.artifacts import ArtifactError, read_json
+from rubrica.errors import UsageError
 from rubrica.findings import Finding
 from rubrica.paths import STAGES, RunPaths, list_json
 
@@ -194,7 +196,25 @@ def _validator_for(kind: str, schema_root: Path) -> Draft202012Validator:
     except KeyError as exc:
         raise KeyError(f"no schema registered for artifact kind {kind!r}") from exc
     schema = read_json(schema_root / filename)
-    Draft202012Validator.check_schema(schema)
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as exc:
+        # A schema file that is readable JSON but not a valid schema is the same
+        # class of problem as one that is absent: the harness was pointed at a
+        # schema directory it cannot work with, and no repair of any *artifact*
+        # can help. UsageError, so cli.py's handler exits 2 naming this file --
+        # matching the ArtifactError read_json raises one line above when the
+        # same file is missing, which already exits 2.
+        #
+        # Measured before this door existed, with a copied schema/ whose
+        # slices-0.1.json was replaced by {"type": 7}: exit 1, nine stdout
+        # lines, and an [internal] finding anchored on the run directory. Three
+        # violations at once -- a misconfigured run reported as a repairable
+        # stage defect, one finding spread over nine lines, and the wrong
+        # artifact named, since nothing was wrong with the run at all.
+        # exc.message, not exc: SchemaError's str dumps the whole metaschema
+        # branch it failed against, eleven lines for one sentence of reason.
+        raise UsageError(f"invalid JSON Schema in {schema_root / filename}: {exc.message}") from exc
     return Draft202012Validator(schema, registry=_schema_registry(schema_root))
 
 

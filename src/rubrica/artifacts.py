@@ -30,6 +30,19 @@ def read_json(path: Path | str) -> Any:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
         raise ArtifactError(f"missing artifact: {path}") from exc
+    except UnicodeDecodeError as exc:
+        # Bytes that are not UTF-8 at all are malformed content, exactly like
+        # JSON that does not parse, and belong in the same ArtifactError so the
+        # finding names *this* path. Measured before this line existed:
+        # `validate --stage triage-slices` over a 00-slices.json holding
+        # b"\xff\xfe\x00bogus" exited 1 with an [internal] finding anchored on
+        # the run root, whose advice was to "run `rubrica validate --stage
+        # <stage>` ... and repair the artifact it names" -- circular, since that
+        # was the command being run, and the one path it needed to name was
+        # already in hand here. UnicodeDecodeError is a ValueError, not an
+        # OSError, so it reached cli.py's catch-all rather than either handler
+        # that knows a path.
+        raise ArtifactError(f"not UTF-8 text: {path}: {exc}") from exc
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:
