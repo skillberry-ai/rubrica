@@ -1010,13 +1010,13 @@ def toy_verdict(scenario_id: str, **over: Any) -> dict[str, Any]:
 # Named checkpoints build_toy_run's `upto` accepts, in pipeline order. Not
 # paths.STAGES verbatim: this fixture writes nothing for "emit" or "smoke" (no
 # suite package, no report), so those two are deliberately absent rather than
-# silently accepted and ignored. "survey" and "triage" are absent for the same
-# reason: build_toy_run mints exclusively through the `--input` path, which has
-# no catalogue at all, so accepting either name here would silently build the
-# same run stopping at "intake" does, with nothing to say the requested
-# checkpoint was never actually reached. build_toy_catalogue_and_triage()
-# below is the separate, explicit helper for a test that needs those two
-# artifacts present.
+# silently accepted and ignored. "survey" and the "triage-*" family are absent
+# for the same reason: build_toy_run mints exclusively through the `--input`
+# path, which has no catalogue at all, so accepting any of those names here
+# would silently build the same run stopping at "intake" does, with nothing to
+# say the requested checkpoint was never actually reached.
+# build_toy_catalogue_and_triage() below is the separate, explicit helper for a
+# test that needs the catalogue and the sealed triage record present.
 _UPTO_STAGES: tuple[str, ...] = (
     "intake",
     "extract",

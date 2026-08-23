@@ -2,7 +2,7 @@
 
 The phase this module opens was performed by hand on every run before
 2026-08-14, in the orchestrator's own conversation, and recorded nowhere the
-pipeline could read. Its output exists so that rb-triage's judgment is
+pipeline could read. Its output exists so that triage's judgment is
 affordable: one bounded digest per candidate rather than the corpus itself,
 which is what keeps triage's cost O(candidates) instead of O(corpus bytes).
 

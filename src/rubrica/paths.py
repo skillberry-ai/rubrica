@@ -15,7 +15,6 @@ from rubrica.errors import UsageError
 # these, and the orchestrator names the stage it is dispatching with them.
 STAGES = (
     "survey",
-    "triage",
     "triage-slices",
     "triage-objective",
     "triage-rule",

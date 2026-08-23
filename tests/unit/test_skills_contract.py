@@ -564,12 +564,26 @@ def test_every_stage_in_STAGES_has_a_schema_entry():
             assert kind in ARTIFACT_SCHEMAS
 
 
-def test_survey_is_code_only_but_triage_is_not():
+def test_survey_is_code_only_but_the_judging_triage_passes_are_not():
     """survey mints run ids and timestamps, exactly like intake -- the design
     spec forbids a skill from inventing either, so survey has no SKILL.md and
-    must never grow one. triage is not in this set: unlike survey, it carries
-    judgment (which candidates matter for the target and objective), so it is
-    a real skill stage and rb-triage arrives in a later task.
+    must never grow one.
+
+    The triage family splits along the same line rather than sitting on one
+    side of it. `triage-slices` partitions the catalogue by byte budget and
+    `triage-seal` assembles parts it does not judge, so both are code; the
+    three passes between them each carry a judgment about the target -- whether
+    the objective is supported, which candidates to admit, what the admitted
+    set cannot cover -- so each is a prompt.
+
+    Task 14 replaced `"triage" not in CODE_ONLY_STAGES` here. That assertion
+    was true before the monolithic stage existed, stayed true while it did,
+    and stayed true after it was removed, so it never distinguished anything;
+    naming the three passes that must stay prompts is the claim it was reaching
+    for.
     """
     assert "survey" in CODE_ONLY_STAGES
-    assert "triage" not in CODE_ONLY_STAGES
+    assert {"triage-slices", "triage-seal"} <= CODE_ONLY_STAGES
+    for judging in ("triage-objective", "triage-rule", "triage-audit"):
+        assert judging in STAGES, f"{judging} is no longer a stage"
+        assert judging not in CODE_ONLY_STAGES, f"{judging} carries judgment; it needs a skill"

@@ -84,24 +84,26 @@ Its live exercise is a whole-pipeline run starting from an `upto="intake"`
 run, not a single-stage check against one checkpoint — see
 `src/rubrica/skills/rb-orchestrate/exercise.md` for its pass criteria.
 
-`rb-triage` is not in this table either, for a different reason: `paths.STAGES`
-puts it *before* `intake`, and `build_toy_run` mints its run via a real
-`intake()` call — there is no toy checkpoint that stops short of it. To
-exercise `rb-triage` by hand, mint a run with a real catalogue instead of a toy
-one:
+The `triage-*` family is not in this table either, for a different reason:
+`paths.STAGES` puts every one of its passes *before* `intake`, and
+`build_toy_run` mints its run via a real `intake()` call — there is no toy
+checkpoint that stops short of them. To exercise the family by hand, mint a run
+with a real catalogue instead of a toy one:
 
 ```bash
 uv run rubrica survey --corpus <path> --runs-dir /tmp/rubrica-lab/runs \
   --target-name ticketq --target-interface mcp --objective breadth
 ```
 
-This writes `00-catalogue.json` and prints the run directory on stdout — exactly
-the checkpoint `rb-triage` needs, since the catalogue is its only input.
+This writes `00-catalogue.json` and prints the run directory on stdout — the
+checkpoint `rubrica triage-slices` needs, and from there the family runs in
+`paths.STAGES` order: `rb-triage-objective` over the slice map, one
+`rb-triage-rule` dispatch per shard, `rb-triage-audit` once every member has
+landed, then `rubrica triage-seal`.
 `tests/fixtures/catalogue-unsupported-objective.json` and
 `tests/fixtures/catalogue-all-declinable.json` are two committed catalogues that
-should make it refuse (conditions 1 and 2 of its §5); copying either one over a
-freshly-minted run's `00-catalogue.json` exercises those refusals without a
-corpus at all.
+should make a pass of it refuse; copying either one over a freshly-minted run's
+`00-catalogue.json` exercises those refusals without a corpus at all.
 
 `upto=None` (the default, i.e. omitting the keyword) writes everything the
 fixture knows how to write, through `challenge` — exactly the checkpoint
@@ -143,7 +145,7 @@ from §3) for the stage you dispatched:
 
 ```bash
 RUN=<the run directory from step 3>
-STAGE=<stage>  # e.g. triage, extract, reconcile, propose, score, instantiate, challenge, emit
+STAGE=<stage>  # e.g. triage-objective, extract, reconcile, propose, score, instantiate, emit
 
 uv run rubrica validate --run "$RUN" --stage "$STAGE"   # expect 0
 uv run rubrica check-refs --run "$RUN"                  # expect 0
@@ -162,19 +164,22 @@ built in §3 — that is expected, since the stage's artifact does not exist yet
 "Expect 0" applies only after the dispatched skill has actually written its
 artifact.
 
-**`triage` is the one stage whose `record-stage` runs late.** `record-stage`
-merges into `manifest.json`, and on a run minted by `survey` there *is* no
-manifest until `intake --run` writes it after gate 0 — so at the moment you
-have just dispatched `rb-triage`, the command above raises `ArtifactError` on
-the absent manifest at exit 2. Run `validate` and `check-refs` for it when the
-brief above says to, then come back and record it **retroactively, after gate
-0**, once the manifest exists:
+**The `triage-*` passes are the ones whose `record-stage` runs late.**
+`record-stage` merges into `manifest.json`, and on a run minted by `survey`
+there *is* no manifest until `intake --run` writes it after gate 0 — so at the
+moment you have just dispatched a triage pass, the command above raises
+`ArtifactError` on the absent manifest at exit 2. Run `validate` and
+`check-refs` for each pass when the brief above says to, then come back and
+record the dispatched ones **retroactively, after gate 0**, once the manifest
+exists:
 
 ```bash
-# after `uv run rubrica intake --run "$RUN"` has minted manifest.json
-uv run rubrica record-stage --run "$RUN" --stage triage \
+# after `uv run rubrica intake --run "$RUN"` has minted manifest.json,
+# once per dispatched pass -- triage-slices and triage-seal are code and have
+# no skill file, so they take no record-stage entry at all
+uv run rubrica record-stage --run "$RUN" --stage triage-objective \
   --model <the model you dispatched> --effort <the effort you used> \
-  --skill src/rubrica/skills/rb-triage/SKILL.md
+  --skill src/rubrica/skills/rb-triage-objective/SKILL.md
 ```
 
 The alternative — having the triage record carry its own provenance — was
@@ -266,22 +271,24 @@ RUN=$(PYTHONPATH=. uv run python /tmp/toy-run-to.py /tmp/rubrica-lab/runs intake
 RUN=$(PYTHONPATH=. uv run python /tmp/toy-run-to.py /tmp/rubrica-lab/runs extract)
 ./scripts/dispatch-stage.sh reconcile "$RUN"
 
-# triage is also a barrier -- no slice id -- and precedes intake, so its run
-# comes from a real `rubrica survey` rather than the toy-run-to.py builder above
+# triage-objective is also a barrier -- no slice id -- and every triage pass
+# precedes intake, so the run comes from a real `rubrica survey` rather than the
+# toy-run-to.py builder above
 RUN=$(uv run rubrica survey --corpus <path> --runs-dir /tmp/rubrica-lab/runs \
   --target-name ticketq --target-interface mcp --objective breadth)
-./scripts/dispatch-stage.sh triage "$RUN"
-uv run rubrica validate --run "$RUN" --stage triage   # the gate: layer 1
-uv run rubrica check-refs --run "$RUN"                # then layer 2
+uv run rubrica triage-slices --run "$RUN"                    # code, not a dispatch
+./scripts/dispatch-stage.sh triage-objective "$RUN"
+uv run rubrica validate --run "$RUN" --stage triage-objective  # the gate: layer 1
+uv run rubrica check-refs --run "$RUN"                         # then layer 2
 ```
 
 `RUBRICA_MODEL`, `RUBRICA_EFFORT` and `RUBRICA_BUDGET` set the dispatch's model,
 effort and hard dollar ceiling (`sonnet`, `medium`, `2`); `RUBRICA_LAB` moves the
 scratch directory that holds the generated settings and the transcripts. The
 model and effort you used are what `record-stage --model/--effort` should then be
-given, per §4 — and for the `triage` dispatch above, note them down: that run has
-no manifest yet, so §4's `record-stage` for it cannot run until `intake --run`
-has minted one after gate 0.
+given, per §4 — and for the `triage-objective` dispatch above, note them down:
+that run has no manifest yet, so §4's `record-stage` for it cannot run until
+`intake --run` has minted one after gate 0.
 
 This one *is* shipped, unlike §3's five-line toy-run builder, and the difference
 is worth stating because the reasoning there was that a mapping table is cheaper

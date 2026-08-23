@@ -76,7 +76,6 @@ CONFIG_KINDS: frozenset[str] = frozenset({"agents", "gold"})
 # next stage against an empty or missing output.
 STAGE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "survey": ("catalogue",),
-    "triage": ("triage",),
     "triage-slices": ("slices",),
     "triage-objective": ("objective",),
     "triage-rule": ("dispositions-part",),
@@ -84,10 +83,10 @@ STAGE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     # writes the same "audit" kind check_audit already reads and rejects on
     # a missing digest_insufficient/needs_projection pairing.
     "triage-audit": ("audit",),
-    # triage-seal writes the same "triage" kind the bare triage stage above
-    # does -- both resolve to the identical physical 00-triage.json, which is
-    # exactly why triage-0.1.json needed no revision for the split: the
-    # sealed record's shape does not change, only which code produces it.
+    # triage-seal writes the "triage" kind: the same 00-triage.json the
+    # monolithic triage stage this family replaced used to write directly.
+    # That is exactly why triage-0.1.json needed no revision for the split:
+    # the sealed record's shape does not change, only which code produces it.
     "triage-seal": ("triage",),
     "intake": ("manifest",),
     "extract": ("claims",),

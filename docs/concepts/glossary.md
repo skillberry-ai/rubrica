@@ -10,7 +10,8 @@ corpus, recorded with a bounded digest and never its own bytes — the
 catalogue schema's `candidates[]` entries carry `sha256`, `bytes`, `kind`, and
 `digest`, but nothing that reproduces the source content
 (`src/rubrica/schema/catalogue-0.1.json`). `rubrica survey` writes one entry
-per candidate; `rb-triage` then rules on each as `admit` or `decline`, with
+per candidate; the `triage-*` family then rules on each as `admit` or `decline`,
+with
 `needs_projection` recorded as a decline reason code when the candidate is
 valuable but not usable as-is (`src/rubrica/schema/triage-0.1.json`'s
 `decline_reason` enum). A candidate also carries `admissible`, and a container
@@ -55,21 +56,24 @@ quietly picking a side.
 The directory roots `rubrica survey` walks, recorded verbatim in
 `request.corpus_roots` (`src/rubrica/schema/catalogue-0.1.json`). It is the only
 thing a run ever sees of the target's own files, and it is read exactly once:
-`survey` catalogues what it finds, `rb-triage` rules on the catalogue, and
+`survey` catalogues what it finds, the `triage-*` family rules on the
+catalogue, and
 nothing downstream of `intake` opens the corpus again.
 
 A file can fail to reach `extract` two different ways, and the difference is
 load-bearing. `survey` *excludes* it mechanically, recording a `path` and one
 `exclusion_reason` — `gitignored`, `vcs_metadata`, `binary`, `lockfile`,
 `vendored`, `duplicate`, `unreadable`, or `operator_excluded` — and it never
-becomes a candidate at all. `rb-triage` *declines* a candidate as a judgment,
+becomes a candidate at all. `rb-triage-rule` *declines* a candidate as a
+judgment,
 under one of the `decline_reason` codes. An exclusion is arithmetic; a decline
 is the thing gate 0 exists to review.
 
 ## deficiency
 
 Something the admitted set does not cover that the objective needs, recorded by
-`rb-triage` with a `deficiency_id`, a `subject`, a `statement`, and optionally a
+`rb-triage-audit` with a `deficiency_id`, a `subject`, a `statement`, and
+optionally a
 `closed_by` naming the projection that answers it
 (`src/rubrica/schema/triage-0.1.json`). It is triage's own account of what its
 selection cannot do, which is why an empty `deficiencies` array is a claim
@@ -98,7 +102,7 @@ into every scenario that cites it.
 ## digest
 
 The bounded summary of one candidate that `survey` writes into the catalogue,
-and the only thing `rb-triage` ever reads about that candidate — never its
+and the only thing `rb-triage-rule` ever reads about that candidate — never its
 bytes. `policy.digest_body_chars` caps the size and `digest_truncated` records
 when the cap bit (`src/rubrica/schema/catalogue-0.1.json`).
 
@@ -113,7 +117,8 @@ human reads at gate 0 rather than a silent bad selection.
 
 ## disposition
 
-`rb-triage`'s ruling on one candidate: `admit` or `decline`, carrying a prose
+`rb-triage-rule`'s ruling on one candidate: `admit` or `decline`, carrying a
+prose
 `reason`, an `authority`, a `reason_code` from the `decline_reason` enum when it
 declines, and a `priority` when it admits
 (`src/rubrica/schema/triage-0.1.json`). No code acts on `priority` — an integer
@@ -237,13 +242,15 @@ no entry there, and their absence is not a finding.
 
 The survey's stated aim, `breadth` or `depth`, recorded in
 `request.objective` in the catalogue (`src/rubrica/schema/catalogue-0.1.json`)
-and read by `rb-triage` before it rules on any candidate. Triage judges whether
+and read by `rb-triage-objective` before any candidate is ruled on. That pass
+judges whether
 the objective is `supported` against the surfaces it found — `depth` on a surface
 with one candidate is not supported, and neither is `breadth` when almost every
 surface has no behavioural evidence at all. It may record a
 `recommended_objective` if it disagrees, but its contract forbids acting on
 that recommendation — it selects against the objective it was given and lets
-a human decide at gate 0 (`src/rubrica/skills/rb-triage/SKILL.md`).
+a human decide at gate 0
+(`src/rubrica/skills/rb-triage-objective/SKILL.md`).
 
 ## oracle
 
@@ -318,12 +325,13 @@ consequences this has for what a seed can and cannot be checked against.
 ## surface
 
 A coherent region of the target's behaviour that a suite could be built about: a
-persona, an API area, a workflow, a subsystem. `rb-triage` groups every
+persona, an API area, a workflow, a subsystem. `rb-triage-objective` groups every
 candidate into exactly one surface — including the ones it declines — and records
 each with a `name`, the `evidence` candidate ids, and a `weight` of
 `{candidates, bytes}` that is plain arithmetic over the catalogue so a reader can
 check it (`src/rubrica/schema/triage-0.1.json`'s `objective_review.surfaces[]`;
-the term itself is defined in `src/rubrica/skills/rb-triage/SKILL.md`).
+the term itself is defined in
+`src/rubrica/skills/rb-triage-objective/SKILL.md`).
 
 A surface is not a guess at the target's internal structure — it groups the
 evidence by what that evidence is *about*. Enumerating them is not a courtesy

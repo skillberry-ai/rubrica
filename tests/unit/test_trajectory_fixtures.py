@@ -124,7 +124,7 @@ def test_trajectories_classify_as_a_trace(path):
 
 def test_every_trace_carries_the_user_turn(any_capture):
     """`info.request_preview` is what `digest.py`'s `request_text` heuristic
-    reads, so a capture missing it hands `rb-triage` a corpus in which no user
+    reads, so a capture missing it hands the triage family a corpus in which no user
     utterance is visible at all -- and triage then cannot judge whether the
     evidence covers the objective it was given.
 

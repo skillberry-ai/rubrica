@@ -35,6 +35,20 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text.lower())
 
 
+def _sentences(text: str) -> list[str]:
+    """Whitespace-normalised text split into sentences.
+
+    A sentence, not a fixed-width character window, for the reason
+    `gate_step` below gives: a window admits whatever the *next* sentence
+    happens to say, and this file's prose is long enough that a 300-character
+    radius reaches two paragraphs. The boundary is a period followed by
+    whitespace, optionally through a closing `**` -- so a bolded lead-in ends
+    a sentence -- which leaves `00-catalogue.json` and `manifest.json` intact
+    because the character after their period is a letter.
+    """
+    return [s for s in re.split(r"\.(?:\*\*)?\s", text) if s.strip()]
+
+
 def method_body() -> str:
     """The `## 3. Method` section only.
 
@@ -142,16 +156,30 @@ def test_it_names_every_stage_it_dispatches():
             assert f"rb-{stage}" in method, f"the loop never dispatches rb-{stage}"
 
 
-def test_the_orchestrator_dispatches_survey_triage_and_holds_gate_zero():
-    """`survey` and `triage` both precede intake, and gate 0 precedes the
-    orchestrator's own dispatch entirely -- the orchestrator never runs
-    `rubrica survey`, never dispatches `rb-triage`, and never holds gate 0
-    itself. But a reader of this file needs the whole pipeline in view, not
-    just the seven stages this skill dispatches, so the Method section must
-    say where its own walk picks up."""
-    body = _norm(method_body())
-    assert "survey" in body and "triage" in body
-    assert "gate 0" in body
+def test_the_orchestrator_disclaims_survey_triage_and_gate_zero():
+    """`survey` and the triage family both precede intake, and gate 0 precedes
+    the orchestrator's own dispatch entirely -- it never runs `rubrica survey`,
+    never dispatches any triage pass, and never holds gate 0 itself. A reader
+    of this file needs the whole pipeline in view, not just the stages this
+    skill dispatches, so the Method section must say where its own walk picks
+    up *and* that none of what precedes it is the orchestrator's.
+
+    Scoped to one sentence, and not by accident. Task 14 removed the
+    monolithic `triage` stage, which made the predecessor's `"triage" in body`
+    vacuous overnight: `triage` is a substring of all five `triage-*` names,
+    and the roster test above already requires every one of them somewhere in
+    this section, so the token could no longer be attributed to the
+    disclaimer. Requiring the disclaiming *sentence* to carry it restores the
+    attribution. Deliberately tolerant of how the family is spelled there --
+    five names, or one "the triage family" -- because that is editorial, while
+    the disclaimer itself is not.
+    """
+    sentences = _sentences(_norm(method_body()))
+    disclaimers = [s for s in sentences if "never" in s or "not yours" in s]
+    assert disclaimers, "the Method section disclaims nothing at all"
+    assert any("rubrica survey" in s and "triage" in s and "gate 0" in s for s in disclaimers), (
+        "no single sentence disclaims survey, the triage family and gate 0 together"
+    )
 
 
 def test_the_orchestrator_knows_gate_zero_decides_what_the_run_can_know():

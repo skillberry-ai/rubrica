@@ -18,7 +18,8 @@ restate it.
 Walks a corpus, digests each candidate, and mints a run — `intake`'s
 counterpart for the corpus path. Writes `00-catalogue.json` rather than a
 manifest, because nothing has been admitted yet; there is nothing to extract
-from until `rb-triage` rules on the catalogue and a human holds gate 0.
+from until the `triage-*` family has ruled on the catalogue and a human holds
+gate 0.
 
 Required: `--corpus PATH` (repeatable), `--runs-dir RUNS_DIR`, `--target-name
 TARGET_NAME`, `--target-interface TARGET_INTERFACE`, `--objective

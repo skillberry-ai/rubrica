@@ -16,9 +16,10 @@ that writes them.
 
 - **Schema:** `src/rubrica/schema/catalogue-0.1.json`
 - **Written by:** `survey` (code)
-- **Read by:** `rb-triage`; `rb-triage-objective` (`request`, `policy`,
-  `excluded`, and `candidates[].bytes` — never a `digest`); `intake` (the
-  `--run` path, admitting whatever triage already ruled on)
+- **Read by:** `triage-slices` (code — the whole file, to partition it);
+  `rb-triage-objective` (`request`, `policy`, `excluded`, and
+  `candidates[].bytes` — never a `digest`); `intake` (the `--run` path,
+  admitting whatever triage already ruled on)
 - **Path:** `00-catalogue.json`
 
 Every candidate a survey found in a corpus, each with a bounded digest rather
@@ -39,9 +40,8 @@ admissible and still be declined).
 ## `triage`
 
 - **Schema:** `src/rubrica/schema/triage-0.1.json`
-- **Written by:** `triage`, run as `rb-triage`, or `triage-seal` (code) — both
-  resolve to the identical physical file; the sealed record's shape does not
-  change, only which code produces it
+- **Written by:** `triage-seal` (code), assembling the parts the rest of the
+  `triage-*` family writes
 - **Read by:** `intake` (the `--run` path)
 - **Path:** `00-triage.json`
 

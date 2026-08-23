@@ -4,9 +4,12 @@
 docs/concepts/pipeline-diagram.html is the detailed counterpart, and it is the
 wrong drawing for a README: it gives every stage its own row with the artifact it
 writes and the gates that follow, which is exactly the detail someone deciding
-whether to read further does not want yet. So this page collapses the eleven
-stages of paths.STAGES into five phases, keeps the human gates because they are
-what a reader is signing up for, and drops everything else.
+whether to read further does not want yet. So this page collapses every stage of
+paths.STAGES into five phases, keeps the human gates because they are what a
+reader is signing up for, and drops everything else. A phase may fold a family of
+stages that share a name prefix into one line as well (`folds`, drawn by
+`fold_lines`) -- a second altitude control, and the one that keeps a box from
+spilling past its own bottom edge when a family grows.
 
 Two files, not one. GitHub's dark theme is chosen independently of the OS
 `prefers-color-scheme` that an <img>-referenced SVG resolves against, so a single
@@ -15,11 +18,12 @@ settings disagree. Rendering a pair and letting the README's <picture> element
 pick is GitHub's own documented mechanism, and it costs one palette argument.
 
 PHASES below is the whole content model. tests/unit/test_docs_accuracy.py holds
-it to paths.STAGES in order and to brief.GATES, and re-renders both files to
-compare against the committed bytes -- so a hand-edited SVG, or a stage added
-without a phase to hold it, fails the suite rather than quietly describing an
-older pipeline. Re-render with `python scripts/render-readme-diagram.py`, or
-verify with `--check`.
+it to paths.STAGES in order, to brief.GATES, and -- since a fold that matched
+nothing would drop a stage silently -- to a drawn line per stage in both
+directions, and re-renders both files to compare against the committed bytes --
+so a hand-edited SVG, or a stage added without a phase to hold it, fails the
+suite rather than quietly describing an older pipeline. Re-render with `python
+scripts/render-readme-diagram.py`, or verify with `--check`.
 
 Type sizes are chosen against the width GitHub actually renders at: the canvas is
 a little over 1000 units and README content is ~880px, so the drawing scales by
@@ -47,6 +51,7 @@ CONN = 16  # plate to first phase, last phase to plate
 GCONN = 40  # between two phases: the gap a gate marker sits in
 GATE_R = 10
 CAP_GAP = 28
+CAP_LINE = 20  # advance between legend rows; the legend wraps (see CAPTIONS)
 
 MONO_W = 0.60  # advance width per em, monospace -- the only font we measure
 
@@ -59,13 +64,20 @@ PHASES: list[dict] = [
         note=["choose what is", "worth reading"],
         stages=[
             "survey",
-            "triage",
             "triage-slices",
             "triage-objective",
             "triage-rule",
             "triage-audit",
             "triage-seal",
         ],
+        # Folded, because this phase would otherwise draw six stage lines out of a
+        # box sized for three and spill past its own bottom edge. The staged-triage
+        # family is one idea at this altitude -- deciding what is worth reading --
+        # and naming its passes here spends the reader's attention on the pipeline's
+        # least newcomer-facing detail. `fold_lines` derives the drawn lines; the
+        # unfolded list above stays complete so the partition test still sees every
+        # stage.
+        folds=["triage-"],
         gate=0,
     ),
     dict(
@@ -98,16 +110,24 @@ PHASES: list[dict] = [
 PLATE_IN = dict(label="you bring", items=["specs", "traces", "source"])
 PLATE_OUT = dict(label="you get", items=["a runnable", "test suite"])
 
-CAPTIONS = [
-    ("gate", "a gate you hold — nothing moves past it until you say so"),
-    ("arrow", "every arrow is a file on disk, never a message between stages"),
+# Rows, not one row. Measured: the two entries below advance to x≈929 on a canvas
+# of W=1032, leaving ~87 units before the right margin -- less than any useful
+# third entry needs, and widening W is not available (see the module docstring:
+# the five columns are the type-size budget, and a wider canvas downscales every
+# label). So the legend wraps to a second row instead.
+CAPTIONS: list[list[tuple[str, str]]] = [
+    [
+        ("gate", "a gate you hold — nothing moves past it until you say so"),
+        ("arrow", "every arrow is a file on disk, never a message between stages"),
+    ],
+    [("fold", "one line standing for a family of stages")],
 ]
 
 N = len(PHASES)
 BOX_Y = PAD + LOOP
 MID = BOX_Y + BOX_H / 2
 CAP_Y = BOX_Y + BOX_H + CAP_GAP
-H = CAP_Y + 16
+H = CAP_Y + 16  # a one-row legend; plate_h() adds the rows it wraps to
 W = 2 * PAD + 2 * PLATE_W + 2 * CONN + N * BOX_W + (N - 1) * GCONN
 
 
@@ -203,6 +223,70 @@ def plate(x: float, spec: dict) -> str:
     return "".join(out)
 
 
+def fold_lines(spec: dict) -> list[tuple[str, list[str]]]:
+    """One phase's drawn stage lines, each paired with the stages it accounts for.
+
+    `folds` is a list of stage-name prefixes. Every stage starting with one
+    collapses into a single `<prefix>*` line, placed where the first such stage
+    sat; every other stage draws its own line and accounts for itself alone.
+
+    A declared prefix that matches no stage still draws its line, with an empty
+    stage list, and that is deliberate rather than sloppy: the alternative --
+    creating a line only once some stage matches -- makes a fold prefix that
+    matches nothing indistinguishable from no fold at all, which is precisely the
+    defect the test is supposed to catch and would leave it unable to reach it.
+    Such a line has no stage position to sit at, so it sorts after the ones that
+    do.
+
+    The two properties the test holds, in both directions: every stage in `stages`
+    is accounted for by exactly one drawn line, and every drawn line accounts for
+    at least one stage.
+    """
+    lines: list[tuple[str, list[str]]] = []
+    at: dict[str, int] = {}
+
+    def label_of(prefix: str) -> str:
+        return f"{prefix.rstrip('-')}*"
+
+    for stage in spec["stages"]:
+        prefix = next((p for p in spec.get("folds", ()) if stage.startswith(p)), None)
+        if prefix is None:
+            lines.append((stage, [stage]))
+            continue
+        label = label_of(prefix)
+        if label not in at:
+            at[label] = len(lines)
+            lines.append((label, []))
+        lines[at[label]][1].append(stage)
+
+    for prefix in spec.get("folds", ()):
+        if label_of(prefix) not in at:
+            lines.append((label_of(prefix), []))
+    return lines
+
+
+def fold_marks() -> list[str]:
+    """Every drawn line that stands for more than one stage, in drawing order --
+    the legend's subject, taken from the drawing rather than typed beside it."""
+    return [label for spec in PHASES for label, stages in fold_lines(spec) if len(stages) > 1]
+
+
+def plate_h() -> float:
+    """The canvas height. H sizes a one-row legend, so this adds a line for every
+    row the legend wraps to -- a constant could not, since the rows are derived
+    from what the drawing actually folds."""
+    return H + (len(caption_rows()) - 1) * CAP_LINE
+
+
+def caption_rows() -> list[list[tuple[str, str]]]:
+    """CAPTIONS with any entry whose mark the drawing does not set dropped, and any
+    row left empty dropped with it -- so unfolding every phase removes the fold
+    legend and its row instead of leaving a legend for a convention no longer used.
+    """
+    rows = [[e for e in row if e[0] != "fold" or fold_marks()] for row in CAPTIONS]
+    return [row for row in rows if row]
+
+
 def phase(i: int, spec: dict) -> str:
     x = box_x(i)
     out = [f'<rect x="{x}" y="{BOX_Y}" width="{BOX_W}" height="{BOX_H}" rx="2" class="box"/>']
@@ -213,8 +297,8 @@ def phase(i: int, spec: dict) -> str:
         f'<line x1="{x + 11}" y1="{BOX_Y + 66}" x2="{x + BOX_W - 11}" y2="{BOX_Y + 66}" '
         'class="hair"/>'
     )
-    for n, stage in enumerate(spec["stages"]):
-        out.append(txt(x + 11, BOX_Y + 82 + n * 14, stage, "stage", 11.5))
+    for n, (label, _) in enumerate(fold_lines(spec)):
+        out.append(txt(x + 11, BOX_Y + 82 + n * 14, label, "stage", 11.5))
     if spec.get("loop"):
         out.append(loop_arc(x, spec["loop"]))
     return "".join(out)
@@ -251,19 +335,29 @@ def gate(i: int, number: int) -> str:
 
 
 def captions() -> str:
-    """Both glyphs are the real mark from the drawing rather than a text stand-in:
-    a legend that redraws its subject can drift from it."""
-    out, x = [], float(PAD + 2)
-    for kind, words in CAPTIONS:
-        if kind == "gate":
-            out.append(f'<circle cx="{x + 5}" cy="{CAP_Y - 4}" r="5" class="gate"/>')
-        else:
-            out.append(
-                f'<line x1="{x}" y1="{CAP_Y - 4}" x2="{x + 11}" y2="{CAP_Y - 4}" '
-                'class="edge" marker-end="url(#ar)"/>'
-            )
-        out.append(txt(x + 18, CAP_Y, words, "cap", 11.5))
-        x += 18 + mono_w(words, 11.5) + 34
+    """Every mark here is the real one from the drawing rather than a text stand-in:
+    a legend that redraws its subject can drift from it. The fold entry's mark is
+    the folded label itself, read out of PHASES, for the same reason."""
+    out = []
+    for row, entries in enumerate(caption_rows()):
+        y = CAP_Y + row * CAP_LINE
+        x = float(PAD + 2)
+        for kind, words in entries:
+            if kind == "gate":
+                out.append(f'<circle cx="{x + 5}" cy="{y - 4}" r="5" class="gate"/>')
+                gap = 18.0
+            elif kind == "arrow":
+                out.append(
+                    f'<line x1="{x}" y1="{y - 4}" x2="{x + 11}" y2="{y - 4}" '
+                    'class="edge" marker-end="url(#ar)"/>'
+                )
+                gap = 18.0
+            else:
+                mark = fold_marks()[0]
+                out.append(txt(x, y, mark, "stage", 11.5))
+                gap = mono_w(mark, 11.5) + 8
+            out.append(txt(x + gap, y, words, "cap", 11.5))
+            x += gap + mono_w(words, 11.5) + 34
     return "".join(out)
 
 
@@ -271,7 +365,7 @@ def svg(theme: str) -> str:
     pal = dict(PALETTES[theme], mono=MONO, serif=SERIF)
     pal["gate_num"] = PALETTES[theme][GATE_NUM_INK[theme]]
     body = [
-        f'<rect width="{W}" height="{H}" class="bg"/>',
+        f'<rect width="{W}" height="{plate_h()}" class="bg"/>',
         plate(PAD, PLATE_IN),
         connector(PAD + PLATE_W, box_x(0)),
     ]
@@ -284,15 +378,23 @@ def svg(theme: str) -> str:
     body.append(captions())
 
     phases = ", then ".join(p["verb"] for p in PHASES)
+    # The folded clause is conditional because desc is the whole drawing for a
+    # screen-reader user: describing a convention the render does not use would be
+    # as wrong as omitting one it does.
+    folded = (
+        " A stage name ending in an asterisk stands for a family of stages drawn as one line."
+        if fold_marks()
+        else ""
+    )
     desc = (
         f"Left to right: the artifacts you bring, five phases -- {phases} -- and the "
         "runnable test suite that comes out. A numbered marker between phases is a gate "
         "a human holds; the phase that proposes and scores scenarios loops until "
-        "coverage stops improving. Each phase lists the stages it covers."
+        f"coverage stops improving. Each phase lists the stages it covers.{folded}"
     )
     return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" '
-        f'height="{H}" role="img" aria-labelledby="t d">'
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {plate_h()}" '
+        f'width="{W}" height="{plate_h()}" role="img" aria-labelledby="t d">'
         '<title id="t">How a Rubrica run gets from your artifacts to a test suite</title>'
         f'<desc id="d">{desc}</desc>'
         f"<style>{CSS.substitute(pal)}</style>"
@@ -319,7 +421,7 @@ def main() -> int:
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(fresh, encoding="utf-8")
-            print(f"wrote {path.relative_to(REPO_ROOT).as_posix()}  {W}x{H}")
+            print(f"wrote {path.relative_to(REPO_ROOT).as_posix()}  {W}x{plate_h()}")
     if stale:
         print("stale or hand-edited: " + ", ".join(stale))
         return 1

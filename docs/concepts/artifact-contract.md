@@ -79,8 +79,8 @@ runs/run-20260810-051723/
 ```
 
 `00-catalogue.json` and `00-triage.json` sit above `manifest.json` because
-they exist before a run has one: `survey` writes the catalogue and `rb-triage`
-writes the triage record before `intake` mints `manifest.json` and
+they exist before a run has one: `survey` writes the catalogue and
+`triage-seal` writes the triage record before `intake` mints `manifest.json` and
 `00-inputs/` — the numbering in the directory names stays intake's regardless,
 since intake is still what fixes the run's identity. A run that skips the
 survey/triage path (`intake --input`, hand-picked files) simply never writes

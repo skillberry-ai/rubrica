@@ -1,4 +1,4 @@
-"""One bounded digest per candidate: the only thing rb-triage reads.
+"""One bounded digest per candidate: the only thing triage ever reads.
 
 This module is the design's single point of failure and is written knowing it.
 Triage's `reads` is the catalogue alone, so a fact absent from a digest is a
@@ -72,7 +72,8 @@ _SKELETON_MAX_NODES = 128
 # MEASURED on the reservation-service corpus, 27 MLflow trace elements: `names`
 # was the only heuristic that fired on any of them, because it is the only one
 # that recurses. `status`, `request_text` and `element_counts` were structurally
-# unable to fire, and rb-triage consequently reported that nothing in the
+# unable to fire, and the triage stage of the day (then a single `rb-triage`
+# dispatch over the whole catalogue) consequently reported that nothing in the
 # catalogue attested a failure -- for a corpus in which nine traces carry an
 # error payload or an empty result. It was reasoning correctly from one signal out
 # of five.

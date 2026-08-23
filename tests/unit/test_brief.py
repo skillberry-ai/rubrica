@@ -459,7 +459,10 @@ def test_a_surveyed_but_untriaged_run_is_not_told_it_was_minted_by_intake_input(
 
     assert "intake --input" not in text
     assert "minted by `survey`" in text
-    assert "rb-triage" in text, "and it must say what to do next"
+    # `triage-seal`, not any `rb-triage*` name: the record this command is waiting
+    # for is the sealed one, and a bare "rb-triage" substring would now be
+    # satisfied by any member of the family being named for any reason.
+    assert "triage-seal" in text, "and it must say what to do next"
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "0"]) == 0
 
 
@@ -473,4 +476,4 @@ def test_a_run_with_neither_catalogue_nor_triage_still_names_intake_input(tmp_pa
     text = brief.gate_brief(run, 0)
 
     assert "intake --input" in text
-    assert "rb-triage" not in text
+    assert "triage-seal" not in text

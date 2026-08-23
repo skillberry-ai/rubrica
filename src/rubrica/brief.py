@@ -118,9 +118,9 @@ def _gate_0(run: RunPaths) -> str:
                 f"GATE 0 -- {run.root}\n\n"
                 "No triage record for this run yet (00-triage.json is absent), but "
                 "00-catalogue.json is present: this run was minted by `survey` and the "
-                "triage stage has not run, or has not written its record. Dispatch "
-                "`rb-triage` and read this brief again -- there is nothing to review "
-                "at gate 0 until it lands.\n"
+                "triage family has not run, or has not reached `triage-seal`. Run the "
+                "family through to `triage-seal` and read this brief again -- there is "
+                "nothing to review at gate 0 until it lands.\n"
             )
         return (
             f"GATE 0 -- {run.root}\n\n"

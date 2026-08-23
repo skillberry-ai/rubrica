@@ -280,7 +280,11 @@ def test_validate_survey_and_triage_never_escape_main(tmp_path, label, capsys):
     """Layer 1 is the layer that is *supposed* to name every mutation above, so
     it is also the one that must not fall over reaching them."""
     run = _run(tmp_path, label)
-    for stage in ("survey", "triage"):
+    # "triage-seal", not "triage": the record's kind is still `triage`, but the
+    # stage that writes 00-triage.json is the family's seal. Naming the retired
+    # stage here would make every iteration an exit-2 usage error, which is in
+    # the accepted set and so would pass while reaching none of layer 1.
+    for stage in ("survey", "triage-seal"):
         code = cli.main(["validate", "--run", str(run.root), "--stage", stage])
         captured = capsys.readouterr()
         assert code in (0, 1, 2), f"{label}/{stage}: main() returned {code!r}"

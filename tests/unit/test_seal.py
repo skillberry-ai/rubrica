@@ -184,7 +184,7 @@ def test_the_seal_assembles_a_record_that_validates(tmp_path):
     path, findings = seal.seal(run)
     assert findings == []
     assert path == run.triage
-    assert validate.validate_stage(run, "triage") == []
+    assert validate.validate_stage(run, "triage-seal") == []
 
 
 def test_the_seal_writes_nothing_when_it_reports_anything(tmp_path):

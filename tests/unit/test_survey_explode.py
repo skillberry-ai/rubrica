@@ -2,7 +2,7 @@
 
 The parsec run's 130-trace MLflow capture was split by hand and seven elements
 picked. This is that split, and only that split: selecting among the elements is
-rb-triage's judgment, not this function's.
+the triage family's judgment, not this function's.
 """
 
 from __future__ import annotations

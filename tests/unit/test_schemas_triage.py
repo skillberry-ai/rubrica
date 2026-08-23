@@ -1,9 +1,14 @@
 """Layer-1 shape checks for the triage record.
 
 The negative cases matter more than the positive one: this schema is the
-contract rb-triage writes and rb-instantiate's admit_from_triage and
+contract `triage-seal` assembles and rb-instantiate's admit_from_triage and
 adopt_projection read, so a document that is wrong in a way layer 1 accepts
 becomes a prompt's problem, or a later stage's, instead of a gate's.
+
+The stage name every `validate_stage` call here passes is `triage-seal`, not
+`triage`: the record's *kind* is still `triage` and still lands at
+`00-triage.json`, but the stage that writes it is the family's seal. The
+monolithic `triage` stage that used to own both no longer exists.
 """
 
 from __future__ import annotations
@@ -86,21 +91,25 @@ def _write(tmp_path, payload):
 
 def test_a_well_formed_triage_record_validates(tmp_path):
     run = _write(tmp_path, _triage())
-    assert validate.validate_stage(run, "triage") == []
+    assert validate.validate_stage(run, "triage-seal") == []
 
 
 def test_a_triage_with_no_surfaces_is_a_finding(tmp_path):
     """Spec §6.1: enumerating the surfaces is the job, not a courtesy. It is
     what would have made parsec's excluded-surface problem visible at gate 0."""
     review = _triage()["objective_review"] | {"surfaces": []}
-    assert validate.validate_stage(_write(tmp_path, _triage(objective_review=review)), "triage")
+    assert validate.validate_stage(
+        _write(tmp_path, _triage(objective_review=review)), "triage-seal"
+    )
 
 
 def test_a_free_text_decline_reason_code_is_a_finding(tmp_path):
     """The codes are an enum so declines can be counted by shape. A free-text
     code makes 'what did this run drop' unanswerable."""
     dispositions = [_triage()["dispositions"][0] | {"reason_code": "seemed_irrelevant"}]
-    assert validate.validate_stage(_write(tmp_path, _triage(dispositions=dispositions)), "triage")
+    assert validate.validate_stage(
+        _write(tmp_path, _triage(dispositions=dispositions)), "triage-seal"
+    )
 
 
 def test_every_decline_reason_code_the_spec_names_is_accepted(tmp_path):
@@ -129,13 +138,15 @@ def test_a_projection_without_acceptance_prose_is_a_finding(tmp_path):
     forbids inventing a mechanical check for support in layer 2."""
     projection = _triage()["projections"][0]
     del projection["acceptance"]["prose"]
-    assert validate.validate_stage(_write(tmp_path, _triage(projections=[projection])), "triage")
+    assert validate.validate_stage(
+        _write(tmp_path, _triage(projections=[projection])), "triage-seal"
+    )
 
 
 def test_a_missing_triage_record_is_itself_a_finding(tmp_path):
     run = RunPaths(tmp_path / "run-20260814-000000")
     run.root.mkdir(parents=True)
-    findings = validate.validate_stage(run, "triage")
+    findings = validate.validate_stage(run, "triage-seal")
     assert findings and "produced no triage artifact" in findings[0].message
 
 
@@ -145,7 +156,7 @@ def test_deficiencies_and_projections_may_be_empty(tmp_path, kind):
     with a clean corpus may have nothing to declare a gap or a projection
     against."""
     run = _write(tmp_path, _triage(**{kind: []}))
-    assert validate.validate_stage(run, "triage") == []
+    assert validate.validate_stage(run, "triage-seal") == []
 
 
 def test_promoting_definitions_did_not_change_what_triage_accepts():
@@ -187,7 +198,7 @@ def test_a_disposition_missing_authority_still_fails(tmp_path):
     record = read_json(run.triage)
     del record["dispositions"][0]["authority"]
     write_json(run.triage, record)
-    findings = validate.validate_stage(run, "triage")
+    findings = validate.validate_stage(run, "triage-seal")
     assert findings, "a disposition without authority must still fail layer 1"
 
 
@@ -240,21 +251,27 @@ def test_a_surface_missing_weight_still_fails(tmp_path):
     alongside it: dropping a required field must still fail layer 1."""
     review = _triage()["objective_review"]
     del review["surfaces"][0]["weight"]
-    assert validate.validate_stage(_write(tmp_path, _triage(objective_review=review)), "triage")
+    assert validate.validate_stage(
+        _write(tmp_path, _triage(objective_review=review)), "triage-seal"
+    )
 
 
 def test_a_deficiency_missing_statement_still_fails(tmp_path):
     """Same evidence as the authority case above, for the deficiency def."""
     deficiencies = [_triage()["deficiencies"][0]]
     del deficiencies[0]["statement"]
-    assert validate.validate_stage(_write(tmp_path, _triage(deficiencies=deficiencies)), "triage")
+    assert validate.validate_stage(
+        _write(tmp_path, _triage(deficiencies=deficiencies)), "triage-seal"
+    )
 
 
 def test_a_projection_missing_acceptance_still_fails(tmp_path):
     """Same evidence as the authority case above, for the projection def."""
     projections = [_triage()["projections"][0]]
     del projections[0]["acceptance"]
-    assert validate.validate_stage(_write(tmp_path, _triage(projections=projections)), "triage")
+    assert validate.validate_stage(
+        _write(tmp_path, _triage(projections=projections)), "triage-seal"
+    )
 
 
 def test_a_disposition_with_an_unknown_key_still_fails(tmp_path):
@@ -263,4 +280,6 @@ def test_a_disposition_with_an_unknown_key_still_fails(tmp_path):
     claims, so this needs its own case rather than riding on the required-list
     assertion above."""
     dispositions = [_triage()["dispositions"][0] | {"unexpected_field": "surprise"}]
-    assert validate.validate_stage(_write(tmp_path, _triage(dispositions=dispositions)), "triage")
+    assert validate.validate_stage(
+        _write(tmp_path, _triage(dispositions=dispositions)), "triage-seal"
+    )

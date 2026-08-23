@@ -1,6 +1,6 @@
 """Gate 0's other half: adopting a manufactured projection back into a run.
 
-`rb-triage` (the ninth skill) writes a projection when a candidate is valuable
+`rb-triage-audit` writes a projection when a candidate is valuable
 but unusable as-is -- a work order for a file nothing in the run has yet. A
 human (or, later, another dispatched member) manufactures that file outside
 the run entirely. This module is how it comes back in: `check_acceptance`
@@ -402,7 +402,7 @@ def adopt_projection(
     # from the catalogue keeps the adopted candidate's digest consistent with
     # every sibling *in this catalogue*, not with whatever today's global
     # default happens to be. An empty digest here would starve two readers: a
-    # human at gate 0 (gate-brief renders it) and a re-dispatched rb-triage,
+    # human at gate 0 (gate-brief renders it) and a re-dispatched `rb-triage-rule`,
     # which would be obliged to decline the very file a human just admitted,
     # via its digest_insufficient refusal path.
     #

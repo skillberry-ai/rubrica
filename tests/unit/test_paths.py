@@ -24,7 +24,6 @@ UNSAFE_DIR_NAMES = ("scn 001", ".hidden", "scn:001", "-leading")
 def test_stages_are_in_pipeline_order():
     assert STAGES == (
         "survey",
-        "triage",
         "triage-slices",
         "triage-objective",
         "triage-rule",
@@ -45,18 +44,15 @@ def test_stages_are_in_pipeline_order():
 def test_survey_and_triage_lead_the_stage_ordering():
     """STAGES is the pipeline order and the on-disk numbering.
 
-    survey, triage, triage-slices, triage-objective, triage-rule,
-    triage-audit and triage-seal are all 00-family, so they precede intake --
-    which is no longer the first thing that happens in a run. triage-seal
-    sorts last in the family regardless of how many of the passes between
-    triage-slices and triage-seal have landed (see paths.py's own comment):
-    it is the pass that seals every one of their outputs into
-    00-triage.json. triage stays alongside triage-slices for now; it is
-    removed only once the three-pass triage redesign lands.
+    survey, triage-slices, triage-objective, triage-rule, triage-audit and
+    triage-seal are all 00-family, so they precede intake -- which is no
+    longer the first thing that happens in a run. triage-seal sorts last in
+    the family regardless of how many of the passes between triage-slices and
+    triage-seal have landed (see paths.py's own comment): it is the pass that
+    seals every one of their outputs into 00-triage.json.
     """
-    assert paths.STAGES[:8] == (
+    assert paths.STAGES[:7] == (
         "survey",
-        "triage",
         "triage-slices",
         "triage-objective",
         "triage-rule",

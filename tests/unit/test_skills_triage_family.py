@@ -1,6 +1,12 @@
 """Prose predicates for the staged-triage prompt passes, each scoped to the
-section that owns the rule -- rb-triage.md's convention (see
-test_skills_triage.py), carried forward for the family Task 11 begins.
+section that owns the rule -- the convention rb-triage's own test module
+established, carried forward for the family Task 11 begins. That module went
+with the monolithic skill in Task 14; every claim of its that no predicate here
+already covered was carried into this file, each re-measured in both directions
+against its new target pass. The rest were either already
+covered by a predicate below or had been taken over by code -- `seal.py` and
+`refs.py` now rule mechanically on the one-disposition-per-candidate
+invariant its Invariants predicate used to pin in prose.
 
 Roughly nineteen assertions in this repo were measured satisfiable by
 unrelated content before that convention existed. Task 11's brief measured
@@ -31,7 +37,9 @@ from __future__ import annotations
 
 import re
 
-from rubrica import skills
+import pytest
+
+from rubrica import digest, skills
 
 
 def _skill(name: str) -> skills.Skill:
@@ -287,6 +295,41 @@ def test_the_rule_pass_names_all_three_digest_truncation_facts():
         assert field in body
 
 
+def test_the_rule_pass_frames_all_three_truncation_flags_as_digest_facts():
+    """Carried from rb-triage's own module (two predicates there, one here):
+    naming the three flags is not the claim -- reading them as facts about the
+    *digest* rather than about the candidate is. A pass that treats a missing
+    `heuristics_fired` entry as evidence the candidate has no errors, or a
+    capped key list as evidence the object is thin, declines exactly the
+    candidates the flags exist to protect.
+
+    Anchored on the framing phrase and requiring all three names inside one
+    window, rather than each name near its own framing phrase. Measured
+    reason: `fact about the digest` occurs three times in this section, and
+    the first two are the per-flag paragraphs, each of which names only one or
+    two of the three -- so a per-name check would pass on a coincidental
+    neighbour while the summary claim that binds all three was gone. Only the
+    summary window satisfies this, which is what makes it discriminating.
+
+    radius=200 against a measured 71-character worst-case distance from the
+    framing phrase to the farthest of the three names -- margin ~2.8x, per
+    this module's floor (see the module docstring).
+
+    `digest.TRACE_HEURISTICS` comes along from the same source module: the
+    prose is only worth pinning while the code's list is non-empty, and
+    enumerating its members in prose would pin digest.py's internals to a
+    document.
+    """
+    assert digest.TRACE_HEURISTICS
+    body = _norm(skills.section_body(_rule(), "1. Inputs"))
+    names = ("heuristics_fired", "keys_truncated", "skeleton_nodes_truncated")
+    framings = [m.start() for m in re.finditer(r"facts? about the digest", body)]
+    assert framings, "the section never frames a flag as a fact about the digest"
+    assert any(all(n in _window_around(body, at, radius=200) for n in names) for at in framings), (
+        "no single digest-fact claim covers all three truncation flags"
+    )
+
+
 def test_the_rule_pass_says_priority_is_within_the_slice():
     """A co-occurrence claim: the within-slice scoping language has to sit
     near `priority` itself, not merely appear somewhere in Output --
@@ -387,6 +430,40 @@ def test_the_rule_pass_states_authority_is_triage_on_every_disposition():
     assert index != -1
     window = _window_after(body, index, radius=200)
     assert "triage" in window
+
+
+def test_the_rule_pass_names_who_writes_the_human_authority():
+    """Carried from rb-triage's own module (its `authority` and
+    human-authority predicates, which this one predicate replaces). The
+    sibling test above pins that this pass writes `authority: "triage"`; what
+    that leaves unpinned is the other enum value. `triage-0.1.json` admits
+    exactly two, and a pass that never learns where `"human"` comes from has
+    no reason not to use it for a candidate it feels strongly about -- which
+    would forge a gate-0 admission inside the record the gate reads.
+
+    `adopt-projection` is the token that cannot be paraphrased away: it is a
+    CLI subcommand name, and the only thing it does is append an admit to an
+    existing record. A section naming it beside `authority` and `"human"` has
+    necessarily identified a writer other than this pass.
+
+    The gate is matched as `gate[ -]0` rather than as the phrase "gate-0
+    override", after measuring that pin fail the mirror direction: the reword
+    "what a person overriding you at gate 0 writes" carries the identical
+    claim and turned the phrase pin red. The hyphen alternation is needed in
+    both directions -- the live prose writes `gate-0`, an ordinary reword
+    writes `gate 0`, and neither spelling is a substring of the other.
+
+    radius=400 against a measured 161-character distance from `authority` to
+    the farthest required token (`adopt-projection`) -- margin ~2.5x, per this
+    module's floor (see the module docstring).
+    """
+    body = _norm(skills.section_body(_rule(), "2. Output"))
+    index = body.find("authority")
+    assert index != -1
+    window = _window_after(body, index, radius=400)
+    assert '"human"' in window
+    assert re.search(r"gate[ -]0", window), "the window names no gate at all"
+    assert "adopt-projection" in window
 
 
 def test_the_rule_pass_keeps_the_digest_insufficient_refusal_rule():
@@ -555,6 +632,37 @@ def test_the_audit_pass_lists_all_seven_projection_fields():
         assert f"- `{field}`" in body
 
 
+def test_the_audit_pass_says_where_a_source_digest_note_comes_from():
+    """Carried from rb-triage's own module and strengthened, because the family
+    changed what the field means.
+
+    `triage-0.1.json` requires `digest_note` on every `projections[].sources`
+    entry alongside `candidate_id`, and the predicate there was one token check
+    over the whole Method section -- enough when the stage that wrote a projection
+    was also the stage holding every digest. This pass holds none: its `reads` is
+    the parts, never a candidate. So the prose owes two things, and a model given
+    only the first would either omit a required key or invent a digest quote it
+    never saw: the field exists, and its content comes from the member's own
+    `reason` prose.
+
+    Scoped to the `sources` bullet, forward only, at a radius measured rather than
+    guessed: `candidate_id` sits +23 from the bullet and `digest_note` +44, but
+    `reason` -- the token that carries the actual claim -- sits +238, so the floor
+    is 476 and this uses 520 (2.2x). Nothing false can enter it: `reason`'s next
+    occurrence in the section is +1817, and `candidate_id` occurs once in the
+    section at all.
+    """
+    body = _norm(skills.section_body(_audit(), "2. Output"))
+    index = body.find("- `sources`")
+    assert index != -1, "the Output section has no `sources` bullet to read"
+    window = _window_after(body, index, radius=520)
+    assert "candidate_id" in window
+    assert "digest_note" in window
+    assert "`reason`" in window, (
+        "the bullet never says where a pass that reads no digest gets the note from"
+    )
+
+
 def test_the_audit_pass_calls_unknown_confidence_honest():
     """A co-occurrence claim on `confidence`'s `unknown` value: the field
     name and the word "honest" have to sit close enough to be the same
@@ -656,3 +764,50 @@ def test_the_audit_pass_does_not_refuse_when_the_absence_walk_finds_nothing():
     assert anchor != -1
     window = _window_around(body, anchor, radius=350)
     assert "do not refuse" in window and "clean sweep" in window
+
+
+# --- the whole family -------------------------------------------------------
+#
+# One rule that holds for all three passes rather than for any one of them.
+
+
+@pytest.mark.parametrize(
+    ("pass_name", "source"),
+    [
+        ("rb-triage-objective", "00-catalogue.json"),
+        ("rb-triage-rule", "shard"),
+        ("rb-triage-audit", "00-objective.json"),
+    ],
+)
+def test_each_pass_states_its_schema_version_and_where_it_reads_run_id(pass_name, source):
+    """Carried from rb-triage's own module, where it was one predicate over one
+    Output section and is now three over three. Every part schema requires
+    `schema_version` and `run_id` at the document root, so a pass that names
+    neither writes a part that fails layer 1 on its first dispatch -- the
+    primary output, not an edge case -- and one that invents a `run_id` writes
+    a part the seal cannot match to the run it came from.
+
+    Pinned through tokens that cannot be paraphrased: three field values a
+    model has to write literally, and the artifact it has to read the id out
+    of. The source predicate's own history is why the wording is not pinned --
+    it began by also pinning `"never invent"`, and the meaning-preserving
+    reword "do not make one up" turned it red. The co-occurrence of `run_id`
+    with its source *is* the read-it-do-not-invent-it rule; there is no other
+    reason for the two to appear together.
+
+    radius=450 against a measured worst-case 53-character distance from
+    `run_id` to its source token across the three passes -- margin ~8.5x,
+    which is well over this module's floor (see the module docstring) and
+    deliberately so. The mirror probe that set it: rewording all three
+    sentences meaning-preservingly, moving the source to the end of the
+    clause, pushed the worst distance to 172 and left only 1.45x at
+    radius=250. Nothing false enters at the wider radius -- `shard`'s next
+    occurrence in the rule pass is at +571 and `00-objective.json`'s in the
+    audit pass at +5261, both outside it.
+    """
+    body = _norm(skills.section_body(_skill(pass_name), "2. Output"))
+    assert "schema_version" in body
+    assert '"0.1"' in body
+    index = body.find("run_id")
+    assert index != -1, "the Output section never names run_id"
+    assert source in _window_after(body, index, radius=450)

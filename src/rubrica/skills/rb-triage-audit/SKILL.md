@@ -25,8 +25,8 @@ not writing it costs six dead scenarios discovered much later, by a stage with
 no way to tell "declined and gone" apart from "never existed."
 
 **Why this is the last pass, and why it is a prompt rather than code.** Every
-refusal condition across this family -- `rb-triage`'s own, and both passes that
-came before you -- resolves to the same instruction: *do not refuse, do not
+refusal condition across this family -- the monolithic pass it replaced, and
+both passes that came before you -- resolves to the same instruction: *do not refuse, do not
 guess, record it and let a human rule.* A `digest_insufficient` decline records
 a note instead of staying quiet about an unreadable digest; an unsupported
 objective gets written down instead of silently refused. You are the pass that

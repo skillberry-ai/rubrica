@@ -169,8 +169,8 @@ def test_a_file_meeting_every_structural_criterion_is_adopted(tmp_path):
 
 def test_the_adopted_candidates_digest_is_computed_not_empty(tmp_path):
     """digest.digest_for_path, not `{}` -- gate-brief (a later stage) renders a
-    candidate's digest for the human at gate 0, and a re-dispatched rb-triage
-    reading the catalogue fresh would be obliged to decline an empty-digest
+    candidate's digest for the human at gate 0, and a re-dispatched rb-triage-rule
+    reading its shard fresh would be obliged to decline an empty-digest
     candidate as digest_insufficient, naming the field it needed, for the very
     file a human just manufactured and admitted. That is the failure this test
     pins.
@@ -370,7 +370,7 @@ def test_a_second_call_for_an_already_satisfied_projection_is_a_usage_error(tmp_
 
 def test_a_projection_missing_its_acceptance_object_is_a_finding_not_a_traceback(tmp_path):
     """projection["acceptance"] used to be a bare index -- on an unvalidated
-    triage record (hand-edited, or a future rb-triage bug) that raises
+    triage record (hand-edited, or a future triage-family bug) that raises
     KeyError, and cli.py's adopt-projection dispatch block catches only
     (UsageError, ArtifactError, OSError), so the KeyError would escape
     main() as a traceback: an empty-stdout exit, exactly what the exit-code

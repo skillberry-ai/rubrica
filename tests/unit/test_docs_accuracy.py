@@ -297,6 +297,51 @@ def test_the_readme_diagram_covers_every_stage_in_contract_order():
     )
 
 
+def test_every_readme_phase_line_accounts_for_exactly_one_stage_and_no_line_for_none():
+    """The fold's guard, asserted in both directions.
+
+    A phase may collapse a family of stages into one drawn line, so the partition
+    test above -- which reads the unfolded `stages` lists -- can no longer see what
+    the drawing actually sets. Two failures are possible and neither is visible in
+    the SVG to anyone who does not already know the pipeline:
+
+    - a stage in `stages` that no drawn line accounts for, which is a stage
+      silently dropped from the drawing;
+    - a drawn line that accounts for no stage, which is a fold prefix matching
+      nothing -- a label standing for a family that is not there.
+
+    Measured red both ways before being kept, one probe per half:
+
+    - `folds=["deploy-"]` on the `compile` phase, a prefix matching none of its
+      stages, failed the second half -- *the 'compile' phase draws a 'deploy*' line
+      that accounts for no stage at all*;
+    - moving `fold_lines`' append inside its `if label not in at` branch, so a fold
+      keeps only the first stage it matches, failed the first -- *the 'select'
+      phase draws lines accounting for ['survey', 'triage-slices'], not for its
+      stages [...]*. The partition test above **passed** under that same mutation,
+      which is the reason this predicate exists: it reads `stages`, and the drawing
+      no longer does.
+
+    Green on the committed table, and green with `folds` deleted from every phase
+    (measured: the legend entry and its whole row fall away with it, and the canvas
+    returns to its one-row height).
+    """
+    renderer = _readme_renderer()
+    for spec in renderer.PHASES:
+        lines = renderer.fold_lines(spec)
+        accounted = [stage for _, stages in lines for stage in stages]
+        assert accounted == list(spec["stages"]), (
+            f"the {spec['verb']!r} phase draws lines accounting for {accounted}, "
+            f"not for its stages {list(spec['stages'])}"
+        )
+        for label, stages in lines:
+            assert stages, (
+                f"the {spec['verb']!r} phase draws a {label!r} line that accounts for no "
+                "stage at all: a fold prefix matching nothing hides whatever it was "
+                "meant to stand for"
+            )
+
+
 def test_the_readme_diagram_marks_every_human_gate():
     """brief.GATES is the code-side source of truth -- `rubrica gate-brief` refuses
     any number outside it -- so the drawing's gates stay derived rather than typed.
