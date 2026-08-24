@@ -217,3 +217,19 @@ def test_the_method_says_why_only_extract_can_carry_the_instant():
     method = " ".join(section_body(load(SKILL), "3. Method").lower().split())
     assert "only stage that reads this artifact" in method
     assert "no later stage can recover" in method
+
+
+def test_the_method_allows_a_prose_instant_where_no_field_carries_one():
+    """Measured on tau2-bench's 200 chat trajectories: zero carry any
+    time-shaped key, while the instant is stated in the opening message's prose
+    ("The current time is 2024-05-15 15:00:00 EST."). Without this clause the
+    rule's worked example points at a field the artifact does not have, and a
+    member reading it literally records no instant at all.
+
+    Scoped to section 3 with section_body for the reason the two predicates above
+    are: skills.load() sets body to the whole file text, so a bare substring
+    check would also be satisfied by the frontmatter or the Contract block.
+    """
+    method = " ".join(section_body(load(SKILL), "3. Method").lower().split())
+    assert "in prose rather than in a field" in method
+    assert "cite the locator of that message" in method
