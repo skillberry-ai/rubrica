@@ -332,7 +332,7 @@ in the file holds an instant. The two observed-state claims are
 
 That is the correct output for this input, and it is why the clause remains
 unexercised rather than validated. The toy `trace-json.json` is 318 bytes,
-`{"spans": [...], "trace_id": "toy-0001"}`: no `info` object, no `request_time`,
+`{"trace_id": "toy-0001", "spans": [...]}`: no `info` object, no `request_time`,
 zero keys matching `time|date|stamp|_at|seq`, and no message list, so no prose
 sentence either. The capture states its instant in **neither** form. A clause
 scoped to "where the capture states the instant in prose" cannot fire against a

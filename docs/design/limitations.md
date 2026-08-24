@@ -1136,6 +1136,49 @@ is unsound in a way no digest change repairs, and the fix — teaching `explode`
 the records-under-a-key envelope — must wait for the row-bytes and
 catalogue-bytes problem it creates.
 
+### A trajectory wrapped in an envelope digests to almost nothing
+
+The shape one key away from the fixed one is unrecorded here: the same
+conversation with an envelope around it. Measured on one conversation of four
+messages — a system policy, a user request, an assistant tool call and a tool
+result:
+
+- As a bare list — `[{"role": ...}, ...]` — the digest carries `element_counts`
+  with the per-role breakdown, `request_text`, and `names` naming the tool the
+  assistant called. `heuristics_fired` lists all three.
+- Wrapped as `{"trace_id": "t", "messages": [...]}`, the same conversation
+  digests to `element_counts: {"messages": 4}` and nothing else. No tool names,
+  no request text, `heuristics_fired` listing `element_counts` alone.
+
+The cause is the one the producer's own comment already documents for why it
+walks each message rather than the list: the dict producer spends its depth
+budget on the envelope, so `tool_calls[].function.name` sits one level out of
+reach. Its counts heuristic still finds `messages`, which is why the wrapped
+digest is not empty — it is worse than empty, because a row that carries a count
+and no names looks like a thin episode rather than like a digest that could not
+see one.
+
+Classification is what routes it there, and it does so correctly. Both
+`intake.classify` and `survey.classify_payload` call the wrapped payload above
+`trace` on its `trace_id`, so the candidate is recognised as the capture it is
+and then handed to the producer that cannot read it. Measured on the same
+conversation with the envelope key dropped, `{"messages": [...]}`: both
+classifiers say `other`, so that one does not reach a trace producer at all — it
+gets the skeleton, which shows `/messages` as `array[4]` and one message's keys.
+Neither outcome carries a tool name.
+
+Parked, not fixed. Ruling: the fix is real and small — have the dict producer
+check each `_lookup_scopes` value for a message list and hand it to the
+message-list producer — and it is out of scope here for the reason that producer
+already gives against widening `_REQUEST_KEYS`. It changes the shared dict
+producer for every capture carrying a message list under a scope key, which
+obliges re-measuring what those digest to, and there is no corpus of wrapped
+trajectories here to measure it against: the trajectory files
+this work was driven by are bare lists, and the envelope shape above is
+constructed rather than observed. A change to the shared producer justified by a
+payload nobody captured is the kind of unfalsifiable widening this register
+exists to catch.
+
 ### The catalogue digest is the single point of failure for triage
 
 Every triage decision rests on the per-candidate digest `rubrica survey`
