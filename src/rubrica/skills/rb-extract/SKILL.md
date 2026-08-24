@@ -164,11 +164,10 @@ there -- an incomplete claim is a validation failure, not a smaller claim.
    in the `statement`, and cite it as a second `evidence` entry: the locator of
    the field it came from (`/info/request_time` in an MLflow trace) with the
    value in `quote`. Where the capture states the instant in prose rather than
-   in a field -- a chat trajectory whose opening message says "The current
-   time is ...", with no timestamped field anywhere in the file -- cite the
-   locator of that message with the sentence in `quote`.
-   The rule is the same and only the locator moves.
-   It rides as evidence because that is what it is, a fact
+   in a field -- a chat trajectory whose opening message says "The current time
+   is ...", with no timestamped field anywhere in the file -- cite the locator
+   of that message with the sentence in `quote`. The rule is the same and only
+   the locator moves. It rides as evidence because that is what it is, a fact
    read off this artifact rather than anything you concluded. Do not attach it
    to a claim about a declared contract, a capability or an argument schema,
    where the moment of capture means nothing.

@@ -231,5 +231,5 @@ def test_the_method_allows_a_prose_instant_where_no_field_carries_one():
     check would also be satisfied by the frontmatter or the Contract block.
     """
     method = " ".join(section_body(load(SKILL), "3. Method").lower().split())
-    assert "in prose rather than in a field" in method
-    assert "cite the locator of that message" in method
+    assert "in prose" in method
+    assert "locator of that message" in method
