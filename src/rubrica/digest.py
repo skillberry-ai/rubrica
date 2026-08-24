@@ -329,49 +329,125 @@ def _source_digest(text: str) -> dict:
     }
 
 
+def _trace_digest_from_dict(payload: dict, *, body_chars: int) -> tuple[dict, list[str]]:
+    """The trace facts a dict-shaped capture carries. Unchanged behaviour; split
+    out only so the message-list producer beside it can share
+    `digest_for_payload`'s single assembly of `heuristics_fired`."""
+    fired: list[str] = []
+    result: dict[str, Any] = {}
+
+    status = _first_scalar(payload, _STATUS_KEYS)
+    if status is not None:
+        result["status"] = status
+        fired.append("status")
+
+    # Same envelope widening as _first_scalar, and first scope wins for the
+    # same reason: MLflow's span list is `data.spans`, not `spans`.
+    counts: dict[str, int] = {}
+    for scope in _lookup_scopes(payload):
+        for key in _COUNT_KEYS:
+            if key not in counts and isinstance(scope.get(key), list):
+                counts[key] = len(scope[key])
+    if counts:
+        result["element_counts"] = counts
+        fired.append("element_counts")
+
+    request = _first_scalar(payload, _REQUEST_KEYS)
+    if isinstance(request, str) and request.strip():
+        # Kept raw and truncated rather than parsed: those captures
+        # store request_preview as a *truncated* JSON string, so json.loads
+        # fails on it while the question text sits in the first 80 chars.
+        result["request_text"] = request[:body_chars]
+        fired.append("request_text")
+
+    names: set[str] = set()
+    _collect_names(payload, _SKELETON_DEPTH, names)
+    if names:
+        result["names"] = sorted(names)
+        fired.append("names")
+
+    if _has_error_marker(payload, status, _SKELETON_DEPTH):
+        result["error_markers"] = True
+        fired.append("error_markers")
+
+    return result, fired
+
+
+def _trace_digest_from_messages(payload: list, *, body_chars: int) -> tuple[dict, list[str]]:
+    """The trace facts a conversation carries, for the shape `is_message_list`
+    admits.
+
+    Reads `content` directly rather than through `_REQUEST_KEYS`: widening that
+    tuple would change every existing dict-shaped trace digest and oblige
+    re-recording the committed fixtures, for a key only this shape uses.
+
+    Two heuristics never fire here, and both absences are measured rather than
+    assumed. `status`: no key in `_STATUS_KEYS` appears in any of tau2's 5,182
+    messages, because a chat trajectory has no terminal status field.
+    `error_markers`: the structural `_has_error_key` fires on 0 of those 200
+    files. A rule matching a tool result whose `content` begins with an error
+    sentinel would have fired on 12 of 200 -- rejected, because that is the value
+    inspection `_has_error_marker` was deliberately narrowed to exclude, and
+    `heuristics_fired` reporting nothing found is the honest record.
+    """
+    fired: list[str] = []
+    result: dict[str, Any] = {}
+
+    # Always fires: a conversation always has messages. The role tally rides
+    # along because it is the cheapest statement of an episode's shape -- how
+    # many turns, how many tool results -- and the predicate's distinct-role cap
+    # is what bounds it.
+    counts: dict[str, int] = {"messages": len(payload)}
+    for message in payload:
+        key = f"role_{message['role']}"
+        counts[key] = counts.get(key, 0) + 1
+    result["element_counts"] = counts
+    fired.append("element_counts")
+
+    # The first *user* turn, with no fallback to the first message of any role:
+    # the system prompt is corpus-wide boilerplate, measured at 118 distinct
+    # user prefixes against 1 distinct system prefix across tau2's 200 files, so
+    # a fallback would return the same bytes for nearly every candidate.
+    for message in payload:
+        content = message.get("content")
+        if message["role"] == "user" and isinstance(content, str) and content.strip():
+            result["request_text"] = content[:body_chars]
+            fired.append("request_text")
+            break
+
+    # Per message rather than over the list, so the depth budget is spent inside
+    # a message: that is what reaches `tool_calls[].function.name`, which is the
+    # field carrying 14 distinct tool names and 68 toolset signatures here.
+    names: set[str] = set()
+    for message in payload:
+        _collect_names(message, _SKELETON_DEPTH, names)
+    if names:
+        result["names"] = sorted(names)
+        fired.append("names")
+
+    if any(_has_error_key(message, _SKELETON_DEPTH) for message in payload):
+        result["error_markers"] = True
+        fired.append("error_markers")
+
+    return result, fired
+
+
 def digest_for_payload(payload: Any, kind: str, *, body_chars: int) -> dict:
     """Digest an already-parsed JSON payload -- a container element, or a file
     survey has read. `heuristics_fired` is the field that matters; see module doc."""
-    if kind == "trace" and isinstance(payload, dict):
-        fired: list[str] = []
-        result: dict[str, Any] = {}
-
-        status = _first_scalar(payload, _STATUS_KEYS)
-        if status is not None:
-            result["status"] = status
-            fired.append("status")
-
-        # Same envelope widening as _first_scalar, and first scope wins for the
-        # same reason: MLflow's span list is `data.spans`, not `spans`.
-        counts: dict[str, int] = {}
-        for scope in _lookup_scopes(payload):
-            for key in _COUNT_KEYS:
-                if key not in counts and isinstance(scope.get(key), list):
-                    counts[key] = len(scope[key])
-        if counts:
-            result["element_counts"] = counts
-            fired.append("element_counts")
-
-        request = _first_scalar(payload, _REQUEST_KEYS)
-        if isinstance(request, str) and request.strip():
-            # Kept raw and truncated rather than parsed: those captures
-            # store request_preview as a *truncated* JSON string, so json.loads
-            # fails on it while the question text sits in the first 80 chars.
-            result["request_text"] = request[:body_chars]
-            fired.append("request_text")
-
-        names: set[str] = set()
-        _collect_names(payload, _SKELETON_DEPTH, names)
-        if names:
-            result["names"] = sorted(names)
-            fired.append("names")
-
-        if _has_error_marker(payload, status, _SKELETON_DEPTH):
-            result["error_markers"] = True
-            fired.append("error_markers")
-
-        result["heuristics_fired"] = [h for h in TRACE_HEURISTICS if h in fired]
-        return result
+    if kind == "trace":
+        produced: tuple[dict, list[str]] | None = None
+        if isinstance(payload, dict):
+            produced = _trace_digest_from_dict(payload, body_chars=body_chars)
+        elif is_message_list(payload):
+            produced = _trace_digest_from_messages(payload, body_chars=body_chars)
+        if produced is not None:
+            result, fired = produced
+            result["heuristics_fired"] = [h for h in TRACE_HEURISTICS if h in fired]
+            return result
+        # Neither shape: fall through to the skeleton. survey.explode can hand a
+        # trace-kind element that is not a dict, and a list of scalars is not a
+        # conversation -- both are one candidate with a structural digest.
 
     skeleton: dict[str, Any] = {}
     truncated = [False]

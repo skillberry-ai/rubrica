@@ -411,3 +411,119 @@ def test_a_list_of_scalars_is_not_a_message_list():
     pins: it must keep reaching the skeleton, which requires failing here."""
     assert digest.is_message_list(["not", "a", "dict"]) is False
     assert digest.is_message_list({"role": "user"}) is False
+
+
+# One trajectory, shaped exactly like tau2-bench's: a system policy stating the
+# instant in prose, a user request, an assistant tool call, and a tool result.
+_TRAJECTORY = [
+    {
+        "role": "system",
+        "content": "# Airline Agent Policy\n\nThe current time is 2024-05-15 15:00:00 EST.",
+    },
+    {"role": "user", "content": "I want to cancel reservation EHGLP3."},
+    {
+        "role": "assistant",
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "get_reservation_details", "arguments": "{}"},
+            }
+        ],
+    },
+    {"role": "tool", "tool_call_id": "call_1", "content": '{"reservation_id": "EHGLP3"}'},
+    {"role": "assistant", "tool_calls": [{"function": {"name": "cancel_reservation"}}]},
+]
+
+
+def test_a_chat_trajectory_digests_to_the_facts_a_triage_decision_needs():
+    """Issue #4: 200 such files reached triage as skeleton-only rows carrying no
+    tool names, no request text and no counts. Measured across that corpus, these
+    three fields yield 14 distinct tool names and 68 distinct toolset signatures
+    over 200 files -- the discrimination a near-duplicate ruling reads."""
+    result = digest.digest_for_payload(_TRAJECTORY, "trace", body_chars=2000)
+    assert result["element_counts"] == {
+        "messages": 5,
+        "role_system": 1,
+        "role_user": 1,
+        "role_assistant": 2,
+        "role_tool": 1,
+    }
+    assert result["names"] == ["cancel_reservation", "get_reservation_details"]
+    assert result["heuristics_fired"] == ["element_counts", "request_text", "names"]
+
+
+def test_request_text_comes_from_the_user_turn_not_the_system_prompt():
+    """The system prompt is corpus-wide boilerplate: measured on tau2, 118
+    distinct first-user-message prefixes against 1 distinct system prefix. A
+    fallback to the first message of any role would return the same bytes for
+    nearly every candidate and destroy the discrimination this field exists for.
+    """
+    result = digest.digest_for_payload(_TRAJECTORY, "trace", body_chars=2000)
+    assert result["request_text"] == "I want to cancel reservation EHGLP3."
+    assert "Airline Agent Policy" not in result["request_text"]
+
+
+def test_a_trajectory_with_no_user_turn_fires_no_request_text():
+    """Honesty over coverage: the field is absent and `heuristics_fired` says so,
+    which is what lets triage decline `digest_insufficient` and name what it
+    needed."""
+    result = digest.digest_for_payload(
+        [
+            {"role": "system", "content": "policy"},
+            {"role": "assistant", "content": "done"},
+        ],
+        "trace",
+        body_chars=2000,
+    )
+    assert "request_text" not in result
+    assert "request_text" not in result["heuristics_fired"]
+
+
+def test_names_reaches_a_tool_call_function_name():
+    """The one field that discriminates on this corpus. `_collect_names` already
+    reaches `tool_calls[].function.name` within its depth budget, so this asserts
+    reuse rather than a second extractor."""
+    result = digest.digest_for_payload(_TRAJECTORY, "trace", body_chars=2000)
+    assert "get_reservation_details" in result["names"]
+
+
+def test_a_chat_trajectory_fires_neither_status_nor_error_markers():
+    """Measured on tau2: no key in _STATUS_KEYS appears in any of the 5,182
+    messages, and the structural `_has_error_key` fires on 0 of the 200 files.
+    Both absences are facts about the digest that `heuristics_fired` records --
+    a value-substring rule that fired on 12 of 200 was rejected as the very
+    inspection this module narrowed out."""
+    result = digest.digest_for_payload(_TRAJECTORY, "trace", body_chars=2000)
+    assert "status" not in result
+    assert "error_markers" not in result
+    assert "status" not in result["heuristics_fired"]
+    assert "error_markers" not in result["heuristics_fired"]
+
+
+def test_a_message_list_trace_digest_carries_no_skeleton_key():
+    """Same rule as the dict producer: a trace digest has no skeleton, so it must
+    not grow a truncation flag about one."""
+    result = digest.digest_for_payload(_TRAJECTORY, "trace", body_chars=2000)
+    assert "skeleton" not in result
+    assert "skeleton_nodes_truncated" not in result
+
+
+def test_request_text_is_truncated_to_body_chars():
+    """The same budget the dict producer honours, for the same reason: a digest
+    that ignores it is how one candidate's row exceeds a slice."""
+    payload = [
+        {"role": "system", "content": "policy"},
+        {"role": "user", "content": "x" * 500},
+    ]
+    result = digest.digest_for_payload(payload, "trace", body_chars=40)
+    assert len(result["request_text"]) == 40
+
+
+def test_a_message_list_classified_other_still_digests_to_a_skeleton():
+    """The producer is reached on `kind == "trace"` only. A message list that some
+    other path classified `other` keeps the skeleton it had, so this change cannot
+    alter a candidate the classifier did not move."""
+    result = digest.digest_for_payload(_TRAJECTORY, "other", body_chars=2000)
+    assert "skeleton" in result
+    assert "heuristics_fired" not in result
