@@ -121,8 +121,10 @@ def is_message_list(payload: Any) -> bool:
     already this module's breadth budget, and a payload with more distinct roles
     than that is not a dialogue. Measured on tau2: 4 roles.
 
-    Precision, measured: 200 of 200 tau2 trajectories, 0 of the 15 JSON fixtures
-    under tests/fixtures/, 0 of the tau2-bench/src/tau2 tree.
+    Precision, measured: 200 of 200 tau2 trajectories and 0 of the 15 JSON
+    fixtures under tests/fixtures/. The wider negative is 0 of the 1,731 other
+    JSON files under tau2-bench -- not the src/tau2 tree an earlier draft cited,
+    which holds no JSON at all and so evidenced nothing.
     """
     if not isinstance(payload, list) or len(payload) < 2:
         return False
