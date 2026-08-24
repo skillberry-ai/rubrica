@@ -229,7 +229,27 @@ def test_the_method_allows_a_prose_instant_where_no_field_carries_one():
     Scoped to section 3 with section_body for the reason the two predicates above
     are: skills.load() sets body to the whole file text, so a bare substring
     check would also be satisfied by the frontmatter or the Contract block.
+
+    Two halves, and neither is pinned as a phrase. `in prose` is the
+    discriminating token -- it occurs once in this skill, inside this clause -- and
+    the second half is that the *message* is what the locator points at, checked as
+    a co-occurrence inside one window rather than as the words "locator of that
+    message". Measured: "the locator of the message carrying it" is a
+    meaning-preserving reword that turns a phrase pin red while leaving the rule
+    intact, which is the failure this repo's conventions name.
+
+    radius=300 either side. Measured distances from the anchor: `message` at 67
+    characters after it, the clause's own `locator` at 166 after -- so 166 is what
+    binds, at a 1.8x margin, and the window has to survive a reword that moves the
+    two rather than merely fit today's sentence. `locator` is also satisfied 140
+    characters *before* the anchor, by the preceding field-locator sentence, which
+    costs nothing: delete this clause and `in prose` leaves section 3 entirely, so
+    the anchor is what discriminates and the window only has to say the rule names
+    a message's locator.
     """
     method = " ".join(section_body(load(SKILL), "3. Method").lower().split())
-    assert "in prose" in method
-    assert "locator of that message" in method
+    at = method.find("in prose")
+    assert at != -1, "section 3 no longer says the instant can be stated in prose"
+    window = method[max(0, at - 300) : at + 300]
+    assert "locator" in window
+    assert "message" in window

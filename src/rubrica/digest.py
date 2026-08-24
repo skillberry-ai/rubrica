@@ -52,6 +52,13 @@ _MAX_NAMES = 64
 # list below was already capped at this width for display; recursion now
 # matches it, so a wide dict costs the same whether it has ten entries or a
 # thousand.
+#
+# Two consumers now, and a tuning for one is a change to the other: the skeleton
+# walk above, and `is_message_list`, where this is the distinct-role ceiling and
+# therefore part of what does and does not classify as a chat trajectory. The
+# boundary test for that ceiling is parameterised by this constant, so it would
+# follow a retune silently rather than object to it -- retuning for digest bytes
+# means re-measuring the classification, not only the digest.
 _SKELETON_MAX_CHILDREN = 32
 # Total pointers a skeleton may hold, not just children per node. _SKELETON_DEPTH
 # and _SKELETON_MAX_CHILDREN bound breadth and depth *per node*, which leaves the
@@ -403,14 +410,25 @@ def _trace_digest_from_messages(payload: list, *, body_chars: int) -> tuple[dict
     tuple would change every existing dict-shaped trace digest and oblige
     re-recording the committed fixtures, for a key only this shape uses.
 
-    Two heuristics never fire here, and both absences are measured rather than
-    assumed. `status`: no key in `_STATUS_KEYS` appears in any of tau2's 5,182
-    messages, because a chat trajectory has no terminal status field.
-    `error_markers`: the structural `_has_error_key` fires on 0 of those 200
-    files. A rule matching a tool result whose `content` begins with an error
-    sentinel would have fired on 12 of 200 -- rejected, because that is the value
-    inspection `_has_error_marker` was deliberately narrowed to exclude, and
-    `heuristics_fired` reporting nothing found is the honest record.
+    Two of the five named heuristics are missing from what this path produced on
+    tau2, for reasons that are different in kind and must not be stated as one.
+
+    `status` is not implemented here at all: this function makes no `_first_scalar`
+    call and no `_STATUS_KEYS` lookup. The measurement -- no key in `_STATUS_KEYS`
+    appears in any of tau2's 5,182 messages, because a chat trajectory has no
+    terminal status field -- is why implementing it was unnecessary, and it cannot
+    also be the reason it does not fire: widen the corpus to trajectories that do
+    carry a status key and this producer still would not read one.
+
+    `error_markers` *is* implemented, by the `_has_error_key` clause at the end of
+    this function, and it does fire: tests/unit/test_digest.py asserts it on a
+    message carrying an error-shaped key, and measured, deleting the clause turns
+    that test red. It fired on 0 of tau2's 200 files, which is a fact about that
+    corpus rather than about the clause. A rule matching a tool result whose
+    `content` begins with an error sentinel would have fired on 12 of 200 --
+    rejected, because that is the value inspection `_has_error_marker` was
+    deliberately narrowed to exclude, and `heuristics_fired` reporting nothing
+    found is the honest record.
     """
     fired: list[str] = []
     result: dict[str, Any] = {}
@@ -485,9 +503,20 @@ def digest_for_payload(payload: Any, kind: str, *, body_chars: int) -> dict:
             result, fired = produced
             result["heuristics_fired"] = [h for h in TRACE_HEURISTICS if h in fired]
             return result
-        # Neither shape: fall through to the skeleton. survey.explode can hand a
-        # trace-kind element that is not a dict, and a list of scalars is not a
-        # conversation -- both are one candidate with a structural digest.
+        # Neither shape: fall through to the skeleton, one candidate with a
+        # structural digest.
+        #
+        # The route that reaches here is `intake.classify`'s list branch, which
+        # decides on `payload[0]` alone: a heterogeneous file such as
+        # `[{"trace_id": "t1", "spans": []}, "scalar", 3]` classifies `trace`,
+        # `survey.explode` returns None because the list is not homogeneous, so
+        # the whole payload -- not an element of it -- arrives here.
+        #
+        # Not `survey.explode`, which cannot produce this two ways over:
+        # `survey._homogeneous` refuses any element list holding a non-dict, so
+        # explode never yields a non-dict element, and `survey.classify_payload`
+        # has no branch outside `isinstance(payload, dict)`, so it could not
+        # return "trace" for one even if it did.
 
     skeleton: dict[str, Any] = {}
     truncated = [False]

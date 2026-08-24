@@ -297,11 +297,20 @@ def test_a_wide_object_skeleton_reports_its_true_key_count_and_truncation():
 
 
 def test_a_non_dict_trace_payload_falls_back_to_the_generic_skeleton():
-    """survey.explode can hand a trace-kind element that is not itself a dict
-    (a heterogeneous or scalar element); digest_for_payload's trace branch
-    dispatches on shape -- a dict to one producer, a message list to another --
-    and a payload that is neither falls through here, so this must not raise and
-    must not silently produce an empty result."""
+    """A reachable route, though not the one this docstring used to name.
+
+    `survey.explode` cannot hand over a non-dict trace element: `_homogeneous`
+    refuses any element list holding a non-dict, and `classify_payload` has no
+    branch outside `isinstance(payload, dict)` so it could not call one "trace"
+    anyway. `intake.classify` is the route -- its list branch decides on
+    `payload[0]` alone, so `[{"trace_id": "t1", "spans": []}, "scalar", 3]`
+    classifies `trace`, `explode` declines it as heterogeneous, and the whole list
+    reaches the digest.
+
+    digest_for_payload's trace branch dispatches on shape -- a dict to one
+    producer, a message list to another -- and a payload that is neither falls
+    through here, so this must not raise and must not silently produce an empty
+    result."""
     result = digest.digest_for_payload(["not", "a", "dict"], "trace", body_chars=2000)
     assert result["skeleton"]["/"] == {"type": "array", "length": 3}
 
@@ -422,6 +431,25 @@ def test_a_list_of_scalars_is_not_a_message_list():
     pins: it must keep reaching the skeleton, which requires failing here."""
     assert digest.is_message_list(["not", "a", "dict"]) is False
     assert digest.is_message_list({"role": "user"}) is False
+    # `None` is the central case, not an exotic one: `intake.classify` calls this
+    # with `_json_or_none(path)`, which returns None for every non-JSON file a
+    # corpus walk keeps -- a Makefile, a CSV, a .env. Without the
+    # `isinstance(payload, list)` clause, `len(None)` raises TypeError inside
+    # `survey`, whose cli.py dispatch block catches only (UsageError,
+    # ArtifactError, OSError) and sits ahead of main()'s catch-all -- measured
+    # end-to-end with the clause removed, it escapes main() as a traceback: exit 1
+    # with empty stdout, the one shape the exit-code contract forbids.
+    #
+    # Measured, three scopes, because the clause was earlier read as unpinned and
+    # that is true of only the narrowest one. Delete it and this module alone still
+    # passed every test it had; the wider unit suite failed 280, including
+    # test_survey.py::test_classify_returns_a_kind_for_a_pathologically_nested_file,
+    # which reaches this predicate down the same `_json_or_none` -> None route. So
+    # the clause was pinned, heavily but only as a side effect of tests about
+    # something else -- and a shape rule that no assertion beside it states is one
+    # a reader will re-triage as unreachable. This line is that assertion, and with
+    # it deleted this is the only test in the module that goes red.
+    assert digest.is_message_list(None) is False
 
 
 # One trajectory, shaped exactly like tau2-bench's: a system policy stating the
@@ -515,11 +543,23 @@ def test_names_reaches_a_tool_call_function_name():
 
 
 def test_a_chat_trajectory_fires_neither_status_nor_error_markers():
-    """Measured on tau2: no key in _STATUS_KEYS appears in any of the 5,182
-    messages, and the structural `_has_error_key` fires on 0 of the 200 files.
-    Both absences are facts about the digest that `heuristics_fired` records --
-    a value-substring rule that fired on 12 of 200 was rejected as the very
-    inspection this module narrowed out."""
+    """Both absent from this digest, for reasons that are different in kind.
+
+    `status` is not implemented on this path at all -- the message-list producer
+    makes no `_first_scalar` call and no `_STATUS_KEYS` lookup. The tau2
+    measurement (no key in `_STATUS_KEYS` in any of the 5,182 messages) is why
+    implementing it was unnecessary, not why it stays quiet: a trajectory that did
+    carry a status key would not fire it either.
+
+    `error_markers` is implemented, by the producer's `_has_error_key` clause, and
+    fires -- see the test below, which is the one that pins it. It found nothing
+    here and on 0 of tau2's 200 files, which is a fact about the corpus. A
+    value-substring rule that fired on 12 of 200 was rejected as the very
+    inspection this module narrowed out.
+
+    So this asserts one absent implementation and one implementation that found
+    nothing, and `heuristics_fired` records both as the same kind of silence.
+    """
     result = digest.digest_for_payload(_TRAJECTORY, "trace", body_chars=2000)
     assert "status" not in result
     assert "error_markers" not in result
