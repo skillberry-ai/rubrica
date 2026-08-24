@@ -62,6 +62,23 @@ _SKELETON_MAX_CHILDREN = 32
 # the 209 skeleton digests measured across four real catalogues (that pricing
 # file) and leaves tau2's 69-pointer trajectory digests whole.
 _SKELETON_MAX_NODES = 128
+# How much of a role name an `element_counts` key may spell.
+# `_SKELETON_MAX_CHILDREN` bounds how *many* role keys a message-list digest can
+# have; nothing bounded how long one is, because the key is built by
+# interpolating the role verbatim. Measured on a payload `is_message_list`
+# admits -- 32 records with 3,000-character `role` values plus a `content` key --
+# the trace digest is 96,514 bytes against 248 for the skeleton the same payload
+# got before this branch, so it clears `slices.DEFAULT_SLICE_BYTES` (65,536) and
+# `survey`'s oversized-row check exits 2 for the whole corpus. A key-count bound
+# is not a byte bound.
+#
+# 64 is measured against the vocabulary rather than against the cap: tau2's 200
+# trajectories use exactly four roles -- `assistant`, `system`, `tool`, `user` --
+# and the longest is `assistant` at 9 characters. 64 therefore never binds on any
+# dialogue this was measured on and still leaves room for a longer convention
+# (a namespaced `agent.planner.tool_result`), while holding the whole field to
+# 33 keys of at most 69 characters.
+_MAX_ROLE_CHARS = 64
 
 
 # Capture formats that wrap the trace in an envelope, keyed by the envelope's own
@@ -116,10 +133,15 @@ def is_message_list(payload: Any) -> bool:
 
     Two elements, not one: a one-element list carrying `role` is a shape common
     in configuration, and digesting it as a dialogue reports a conversation that
-    does not exist. The distinct-role cap bounds `element_counts` by
-    construction rather than by a truncation flag -- `_SKELETON_MAX_CHILDREN` is
-    already this module's breadth budget, and a payload with more distinct roles
-    than that is not a dialogue. Measured on tau2: 4 roles.
+    does not exist.
+
+    The distinct-role cap bounds how many keys `element_counts` can have, and
+    nothing more: `_SKELETON_MAX_CHILDREN` is already this module's breadth
+    budget, so it is borrowed here rather than a second number invented, but a
+    key count is not a byte count and a role string is interpolated into the key.
+    The bytes are bounded separately, by `_MAX_ROLE_CHARS` in the producer, and
+    that truncation is reported as `role_keys_truncated`. Measured on tau2: 4
+    roles.
 
     Precision, measured: 200 of 200 tau2 trajectories and 0 of the 15 JSON
     fixtures under tests/fixtures/. The wider negative is 0 of the 1,731 other
@@ -395,13 +417,31 @@ def _trace_digest_from_messages(payload: list, *, body_chars: int) -> tuple[dict
 
     # Always fires: a conversation always has messages. The role tally rides
     # along because it is the cheapest statement of an episode's shape -- how
-    # many turns, how many tool results -- and the predicate's distinct-role cap
-    # is what bounds it.
+    # many turns, how many tool results.
+    #
+    # Two bounds, because the predicate's distinct-role cap supplies only one of
+    # them: it caps the number of keys at 33, and the role text spelled into each
+    # key is truncated here to cap their width. Measured, before the truncation
+    # existed: 32 records carrying 3,000-character roles digested to 96,514 bytes
+    # against 248 as a skeleton, past a 65,536-byte slice -- one such row makes
+    # `survey`'s oversized-row check refuse the whole corpus.
+    #
+    # And truncating is reported, not silent: two distinct long roles can
+    # truncate to the same key and merge their tallies, which would be a digest
+    # that lies about the candidate rather than one that is merely narrow. Same
+    # convention as `keys_truncated` and `skeleton_nodes_truncated`, unconditional
+    # for the same reason they are -- a flag a reader only sees when it is true
+    # cannot be told apart from a digest written before the flag existed.
     counts: dict[str, int] = {"messages": len(payload)}
+    roles_truncated = False
     for message in payload:
-        key = f"role_{message['role']}"
+        role = message["role"]
+        if len(role) > _MAX_ROLE_CHARS:
+            roles_truncated = True
+        key = f"role_{role[:_MAX_ROLE_CHARS]}"
         counts[key] = counts.get(key, 0) + 1
     result["element_counts"] = counts
+    result["role_keys_truncated"] = roles_truncated
     fired.append("element_counts")
 
     # The first *user* turn, with no fallback to the first message of any role:

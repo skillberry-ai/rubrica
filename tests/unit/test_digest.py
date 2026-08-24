@@ -401,8 +401,10 @@ def test_a_non_string_role_is_not_a_message_list():
 
 
 def test_a_payload_with_more_distinct_roles_than_the_breadth_cap_is_not_a_conversation():
-    """The cap sits in the predicate rather than in a truncation flag, so
-    `element_counts` is bounded by construction. Measured on tau2: 4 roles."""
+    """The cap sits in the predicate, which bounds how many keys `element_counts`
+    can have -- 33 -- and nothing about how wide one is. Their width is bounded
+    separately by `_MAX_ROLE_CHARS`; see the truncation tests below. Measured on
+    tau2: 4 roles."""
     many = [{"role": f"r{i}", "content": "x"} for i in range(digest._SKELETON_MAX_CHILDREN + 1)]
     assert digest.is_message_list(many) is False
 
@@ -556,6 +558,83 @@ def test_request_text_is_truncated_to_body_chars():
     ]
     result = digest.digest_for_payload(payload, "trace", body_chars=40)
     assert len(result["request_text"]) == 40
+
+
+def test_a_long_role_is_truncated_so_element_counts_stays_byte_bounded():
+    """The distinct-role cap bounds the *number* of `element_counts` keys, not
+    their bytes, and the key is built by interpolating the role verbatim.
+
+    Measured on this exact payload before `_MAX_ROLE_CHARS` existed: 96,514 bytes
+    as a trace digest against 248 as the skeleton the same payload got before the
+    trace branch dispatched on shape -- so one row cleared
+    `slices.DEFAULT_SLICE_BYTES` (65,536) and `survey`'s oversized-row check would
+    exit 2 for the whole corpus. 32 distinct roles is exactly the predicate's cap,
+    so this payload is one it admits rather than a shape it rules out.
+    """
+    payload = [{"role": "x" * 3000 + str(i), "content": "hi"} for i in range(32)]
+    assert digest.is_message_list(payload) is True
+    result = digest.digest_for_payload(payload, "trace", body_chars=2000)
+    assert len(json.dumps(result)) < 65536
+    # Every key still spells a role, just a bounded prefix of one.
+    for key in result["element_counts"]:
+        if key != "messages":
+            assert len(key) <= len("role_") + digest._MAX_ROLE_CHARS
+
+
+def test_a_truncated_role_is_reported_rather_than_silently_merged():
+    """Truncation is where two distinct roles can collide into one key and merge
+    their tallies -- a digest that lies about the candidate, not one that is
+    merely narrow. Same convention as `keys_truncated` and
+    `skeleton_nodes_truncated`: the fact is recorded where it happens.
+
+    Both roles here differ only past the cap, so the merge is visible in the
+    counts as well as in the flag.
+    """
+    role_a = "a" * digest._MAX_ROLE_CHARS + "-planner"
+    role_b = "a" * digest._MAX_ROLE_CHARS + "-critic"
+    payload = [{"role": role_a, "content": "x"}, {"role": role_b, "content": "y"}]
+    result = digest.digest_for_payload(payload, "trace", body_chars=2000)
+    assert result["role_keys_truncated"] is True
+    merged = f"role_{'a' * digest._MAX_ROLE_CHARS}"
+    assert result["element_counts"][merged] == 2
+
+
+def test_an_untruncated_role_says_so_rather_than_omitting_the_flag():
+    """Unconditional, for the reason `keys_truncated` is: a flag a reader only
+    sees when it is true cannot be told apart from a digest written before the
+    flag existed. tau2's longest role is `assistant` at 9 characters, so False is
+    what every real trajectory reports."""
+    result = digest.digest_for_payload(_TRAJECTORY, "trace", body_chars=2000)
+    assert result["role_keys_truncated"] is False
+
+
+def test_a_role_exactly_at_the_cap_is_not_reported_truncated():
+    """The comparison is `>`, and a role landing exactly on the cap loses no
+    characters -- so reporting it truncated would be the false positive
+    `skeleton_nodes_truncated` was rewritten to avoid. A negative one character
+    past the cap cannot see an off-by-one edit; this can."""
+    at_cap = "r" * digest._MAX_ROLE_CHARS
+    past_cap = "r" * (digest._MAX_ROLE_CHARS + 1)
+    at = digest.digest_for_payload(
+        [{"role": at_cap, "content": "x"}, {"role": "user", "content": "y"}],
+        "trace",
+        body_chars=2000,
+    )
+    past = digest.digest_for_payload(
+        [{"role": past_cap, "content": "x"}, {"role": "user", "content": "y"}],
+        "trace",
+        body_chars=2000,
+    )
+    assert at["role_keys_truncated"] is False
+    assert past["role_keys_truncated"] is True
+
+
+def test_a_dict_shaped_trace_digest_grows_no_role_flag():
+    """The flag is the message-list producer's own. A dict-shaped capture has no
+    role keys, so it must not grow a truncation flag about ones it cannot have --
+    the same rule that keeps `skeleton_nodes_truncated` off a trace digest."""
+    result = digest.digest_for_payload({"trace_id": "t", "spans": []}, "trace", body_chars=2000)
+    assert "role_keys_truncated" not in result
 
 
 def test_a_message_list_classified_other_still_digests_to_a_skeleton():
