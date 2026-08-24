@@ -1072,14 +1072,66 @@ about how often a real corpus sits there.
 On a corpus whose container elements classify as `other` rather than `trace`,
 the mitigation does not apply at all — such elements cluster on skeleton shape
 alone.
-That is not hypothetical. Issue #4 records that OpenAI-style chat trajectories
-neither explode (`EXPLODE_MIN_COMMON_KEYS` is 3, against a `{role, content}`
-intersection of one) nor classify as traces (`classify_payload` wants `spans` or
-`trace_id`), so 200 such files reach triage as 200 skeleton-only rows on which
-every skeleton is identical. The two are in series and this design is the
-prerequisite: fixing #4 first would turn that corpus into roughly 5,425
-candidates and ~2.9MB, past both of `survey`'s caps, so a corpus that triages
-badly would become one that cannot be surveyed.
+
+Issue #4 was read as an instance of that, and the reading was wrong twice over.
+Measured on the 200 tau2 chat trajectories it reports: their skeleton digests
+are **39 distinct**, largest identical group 18, differing only by message
+count — not identical, as this entry previously said. The conclusion survives on
+firmer ground: clustering keys on `heuristics_fired` and `names`, and a skeleton
+digest carries neither, so clustering is inapplicable however many distinct
+skeletons exist.
+
+The second correction is the ordering. The projection that made #4 look
+downstream of this design — roughly 5,425 candidates and ~2.9MB, past both of
+`survey`'s caps — holds only if chat trajectories *explode* into one candidate
+per message. They should not: a trajectory is one episode, in which message 7 is
+unreadable without 1 through 6, which is the same shape the OpenAPI ruling keeps
+whole. Measured for the file-level digest instead: 443 candidates unchanged, a
+472,799-byte catalogue against a 444,355-byte baseline, 7 slices. Nothing
+approaches a cap, so there is no ordering dependency in either direction.
+
+What does not change is which grouping key those candidates get. They are corpus
+candidates, not container elements, and `slices._signature` clusters only an
+oversized container's elements — so signature clustering still does not reach
+them, and they are grouped by `(root_index, dirname)` exactly as before.
+
+### A chat trajectory cannot say whether it succeeded
+
+`rb-triage-rule` §3 step 2 rules that "a failing trace is almost never a
+near-duplicate of a successful one", and near-duplicate ruling is the dominant
+task on a corpus of 200 trajectories carrying 68 distinct toolset signatures.
+The fact that decides it is not in the file.
+
+Measured on `tau2-bench`. The 200 trajectory files under
+`data/tau2/trajectories` are a projection of the `simulations` records inside
+`data/tau2/results/final/*.json`, and the projection dropped everything that
+scores the episode: each simulation record carries `reward_info` — **`reward` is
+1.0 for 100 records and 0.0 for the other 100** — plus `start_time`, `end_time`,
+`duration`, `task_id` and `trial`, and the trajectory keeps only `messages`.
+
+So the digest's silence here is honest rather than thin: `status` cannot fire
+because no key in `_STATUS_KEYS` appears in any of the 5,182 messages, and
+`error_markers` fires on 0 of the 200 because the structural error-key check
+finds nothing. The only failure signal the file carries at all is a tool result
+whose `content` begins with an error sentinel, present in 12 of the 200 —
+nowhere near the 100 that scored 0.0 — and reading it is the value inspection
+`_has_error_marker` was deliberately narrowed to exclude.
+
+The authoritative artifact is reachable in principle and not admitted in
+practice, for a third independent reason: `results/final/*.json` is
+`{info, simulations, tasks, timestamp}`, so `explode` refuses it — the top-level
+dict's values are not all dicts, and a container whose records sit under one key
+is invisible to explosion. Its existing skeleton digest is unusually good (43
+nodes, untruncated, showing `/simulations` as `array[200]` carrying
+`reward_info`, `messages` and `start_time`), so a triage member could rule on it
+and request a projection. Exploding it is not affordable today regardless: the
+per-record canonical size is **mean 38,723 bytes, max 111,626**, against a
+65,536-byte slice cap, so `survey`'s row check would exit 2.
+
+Parked, not fixed. Ruling: near-duplicate ruling over a chat-trajectory corpus
+is unsound in a way no digest change repairs, and the fix — teaching `explode`
+the records-under-a-key envelope — must wait for the row-bytes and
+catalogue-bytes problem it creates.
 
 ### The catalogue digest is the single point of failure for triage
 
