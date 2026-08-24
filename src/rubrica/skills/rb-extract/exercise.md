@@ -285,10 +285,13 @@ Second, the sample size in this file has been one dispatch per round until now.
 ## Run record: round 5, re-record after the prose-instant clause
 
 Method step 3's capture-instant paragraph gained a clause: where the capture
-states the instant in prose rather than in a field -- a chat trajectory whose
-opening message says "The current time is ..." -- cite the locator of that
-message with the sentence in `quote`. This round re-records against the changed
-prompt, per the obligation to re-record after a skill changes.
+states the instant in prose rather than in a field, and there is no timestamped
+field anywhere in the file -- a chat trajectory whose opening message says "The
+current time is ..." -- cite the locator of that message with the sentence in
+`quote`. The no-field qualifier is part of the clause: it is a fallback for a
+capture with nothing else to cite, not a general alternative to citing a field.
+This round re-records against the changed prompt, per the obligation to
+re-record after a skill changes.
 
 **Read this round beside rounds 3 and 4, not against them.** Those two ran on
 `sonnet`; this one ran on `opus`, set explicitly through `RUBRICA_MODEL` rather
@@ -377,7 +380,12 @@ condition 5's trigger held on the model this round ran on.
 schema path and two `rubrica validate` invocations. No sibling input, no
 `docs/`, no `tests/`, no other skill. That schema is not a run artifact and not
 any member's slice, and round 3 recorded the same lookup by `find`; here the
-member read the file the `find` located.
+member read the file the `find` located. **Nothing out-of-contract** -- and the
+schema read is the part of that ruling worth stating: the contract block declares
+`schemas = ["claims"]`, so the contract names that file itself, and `reads` can
+only ever hold `paths.RunPaths` attribute names, so a packaged schema path could
+not appear there by construction. That rules on this read; it says nothing about
+whether isolation is enforceable in general.
 
 **Two harness facts, neither of which touched the artifact.** The member's
 sandboxed `rubrica validate` failed with `apply-seccomp: unshare(CLONE_NEWUSER):

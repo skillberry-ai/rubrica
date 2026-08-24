@@ -1089,9 +1089,9 @@ downstream of this design — roughly 5,425 candidates and ~2.9MB, past both of
 per message. They should not: a trajectory is one episode, in which message 7 is
 unreadable without 1 through 6, which is the same shape the OpenAPI ruling keeps
 whole. Measured for the file-level digest instead: 443 candidates unchanged, a
-472,799-byte catalogue against a 444,355-byte baseline, 7 slices. Neither
-figure moves toward a cap, so there is no ordering dependency in either
-direction.
+472,799-byte catalogue against a 444,355-byte baseline, 7 slices. The candidate
+count does not change at all and the byte figure barely moves, so there is no
+ordering dependency in either direction.
 
 What does not change is which grouping key those candidates get. They are corpus
 candidates, not container elements, and `slices._signature` clusters only an
