@@ -102,14 +102,24 @@ objective the run was given is supported by them. It has the same shape
 `rb-triage`'s monolithic record once carried inline, restated here as this
 pass's whole output rather than one section of a larger one.
 
+**Its three required keys are `declared_objective`, `supported`, and
+`surfaces`** -- the surface list is the one called `surfaces`, and
+`objective_review` is `additionalProperties: false`, so a synonym for any of
+the three fails layer 1 rather than reading as a near miss. `notes` and
+`recommended_objective` are the two optional ones. That is stated here because
+your own output shape appears nowhere in what you read: `00-slices.json` and
+`00-catalogue.json` carry no `objective_review` to copy, so a key you have to
+infer is a key you can invent, and one such invention downstream cost three
+dispatches and an empty gate-0 ruling at exit 0.
+
 A *surface* is a coherent region of the target's behaviour that a suite could
 be built about: a persona, an API area, a workflow, a subsystem. At this
 stage you are grouping the corpus map's own groups and slice labels by what
 they appear to be evidence *about* -- one surface can span several of
-`00-slices.json`'s `groups`, and one group can be a surface on its own. For
-each surface: a `name`, the `evidence` (every `candidate_id` the map assigns
-to it, gathered across every slice that group appears in via `provenance`),
-and a `weight` of `{candidates, bytes}`.
+`00-slices.json`'s `groups`, and one group can be a surface on its own. Each
+entry in `surfaces` carries a `name`, the `evidence` (every `candidate_id` the
+map assigns to it, gathered across every slice that group appears in via
+`provenance`), and a `weight` of `{candidates, bytes}`.
 
 **`weight.bytes` sums each evidence candidate's own catalogue `bytes` field --
 the source file's size on disk -- and never a slice's or a serialized row's

@@ -103,6 +103,27 @@ def _window_after(body: str, index: int, radius: int = 250) -> str:
     return body[index : index + radius]
 
 
+def _occurrences(body: str, token: str) -> list[int]:
+    """Every index at which `token` occurs, not merely the first.
+
+    `body.find(token)` anchors a co-occurrence claim on the *first* mention,
+    which makes it fail when an unrelated, correct edit introduces an earlier
+    one. Measured: adding a paragraph that names `authority` as one of the four
+    required disposition keys moved that anchor off the sentence stating
+    `authority: "triage"` and turned three predicates in this module red
+    against prose that still carried every claim they test. That is the
+    length-pin failure mode the module docstring describes, wearing a
+    different hat -- the claim was never "the first mention of the token
+    carries it", it was "the section states this somewhere as one statement".
+
+    Returning every index lets a predicate assert exactly that, at the same
+    radius, without admitting a wider window. It does not weaken the guard:
+    deleting the claim still leaves no occurrence that satisfies it, which is
+    the direction each caller below re-measured.
+    """
+    return [m.start() for m in re.finditer(re.escape(token), body)]
+
+
 def test_the_objective_pass_declares_its_exact_contract():
     """The brief's contract, verbatim: slices and catalogue, never the
     shards or a per-slice dispositions part."""
@@ -136,6 +157,38 @@ def test_the_objective_pass_reads_request_before_the_corpus_map():
     assert "request" in window and "first" in window
 
 
+def test_the_objective_pass_names_objective_reviews_three_required_keys():
+    """`surfaces` was the sibling of issue #1's defect, in the same family.
+
+    Found by the sweep that issue asked for -- each skill's prose against the
+    keys its declared schemas `require`. `objective-0.1.json` requires
+    `objective_review` to carry `declared_objective`, `supported` and
+    `surfaces`; this pass names the first two and, before the fix, referred to
+    the third only as prose ("the surfaces the corpus map shows", "group the
+    map's groups into surfaces"). Nothing it reads carries the shape either:
+    `00-slices.json` and `00-catalogue.json` hold no `objective_review` to copy
+    from, so the key was one a member had to invent -- the same position the
+    dispositions pass was in when three dispatches invented `verdict`.
+
+    The reader/writer asymmetry is what makes this worth its own predicate:
+    `rb-triage-rule` names ``00-objective.json``'s `surfaces` in key position
+    because it *reads* the file, while the pass that *writes* it did not. A
+    sweep over the family catches that; reading either skill alone does not.
+
+    Anchored on the key-position mention of `surfaces` rather than on
+    `objective_review`, because the anchor is the thing under test. radius=550
+    against a measured 246-character distance to the farthest required token
+    (`supported`, which precedes the anchor) -- margin ~2.2x, and symmetric
+    because two of the three keys sit on either side of it.
+    """
+    body = _norm(skills.section_body(_objective(), "2. Output"))
+    match = re.search(r'`surfaces`|`surfaces:|"surfaces"', body)
+    assert match is not None, "the section never names the surfaces key in key position"
+    window = _window_around(body, match.start(), radius=550)
+    assert "declared_objective" in window
+    assert "supported" in window
+
+
 def test_the_objective_pass_states_which_bytes_weight_sums():
     """The ruling task 11's brief settles: weight.bytes sums each evidence
     candidate's own catalogue `bytes` field (source file size), never a
@@ -158,11 +211,12 @@ def test_the_objective_pass_states_that_it_may_not_act_on_its_recommendation():
     fixing it means widening the accepted prohibition vocabulary and
     checking proximity instead of an exact phrase."""
     body = _norm(skills.section_body(_objective(), "2. Output"))
-    index = body.find("recommended_objective")
-    assert index != -1
-    window = _window_after(body, index)
+    indices = _occurrences(body, "recommended_objective")
+    assert indices, "the section never names recommended_objective"
     prohibition = ("may not", "must not", "never", "not permitted", "is not yours")
-    assert any(p in window for p in prohibition)
+    assert any(p in _window_after(body, index) for index in indices for p in prohibition), (
+        "no mention of recommended_objective is followed by a prohibition"
+    )
 
 
 def test_the_objective_pass_explains_predicted_surface_count_is_a_prediction():
@@ -426,10 +480,67 @@ def test_the_rule_pass_states_authority_is_triage_on_every_disposition():
     have to sit close enough together to be the same statement, not just both
     be present somewhere in Output."""
     body = skills.section_body(_rule(), "2. Output")
-    index = body.find("authority")
-    assert index != -1
-    window = _window_after(body, index, radius=200)
-    assert "triage" in window
+    indices = _occurrences(body, "authority")
+    assert indices, "the section never names authority"
+    assert any("triage" in _window_after(body, index, radius=200) for index in indices), (
+        'no mention of authority is followed by the value "triage"'
+    )
+
+
+def test_the_rule_pass_names_the_disposition_key_itself():
+    """The key holding `admit`/`decline` has to be *named*, not just described.
+
+    Issue #1: the monolithic stage's prose named `candidate_id`, `authority`,
+    `reason`, `reason_code` and `priority` and described this field at length
+    while never once saying what to call it. Three consecutive dispatches at
+    defaults invented `verdict` for it -- not a stale word copied out of the
+    prose, an invention two dispatches arrived at independently. Every entry
+    then failed layer 1, and because `brief.py:169,184` key off `disposition`,
+    `gate-brief --gate 0` rendered zero admits and zero declines at exit 0: a
+    human handed an empty selection presented as a clean one. The defect
+    survived the split into this family, because the paragraph moved verbatim.
+
+    **The bare word cannot be the predicate.** "Every disposition also carries
+    `authority`" is prose *about* the field and satisfies any `"disposition" in
+    body` check while leaving the key unnamed -- which is precisely the state
+    that shipped. So this asserts a *key-position* mention: backticked alone,
+    backticked with its colon, or quoted. `dispositions[]` and
+    `00-dispositions/<slice_id>.json` do not satisfy it (both are the plural),
+    and neither does any amount of discussion.
+
+    Co-occurrence with both literal values is what makes it one statement
+    rather than two: a section naming the key but only ever showing `admit`
+    has not told a member what a decline looks like.
+
+    radius=300 against a measured 131-character distance from the key-position
+    anchor to the farther required token (`"decline"`) -- margin ~2.3x, per
+    this module's floor (see the module docstring).
+    """
+    body = _norm(skills.section_body(_rule(), "2. Output"))
+    match = re.search(r'`disposition`|`disposition:|"disposition"', body)
+    assert match is not None, "the section never names the key in key position"
+    window = _window_after(body, match.start(), radius=300)
+    assert '"admit"' in window
+    assert '"decline"' in window
+
+
+def test_the_rule_pass_names_all_four_required_disposition_keys():
+    """The schema's `required` list, stated in the section that writes it.
+
+    `triage-0.1.json#/$defs/disposition` requires exactly `candidate_id`,
+    `disposition`, `reason` and `authority`, and is `additionalProperties:
+    false` -- so a synonym for any of the four is a hard validation failure,
+    never a near miss the seal could repair. The sibling predicate above pins
+    the one key that was missing; this one pins the set, so that the next key
+    to go unnamed fails here rather than in a dispatch.
+
+    Deliberately not a window: these four are a *set* the section must state,
+    not a claim two tokens have to hold jointly, and the schema is the
+    authority for the list rather than any phrasing of it.
+    """
+    body = _norm(skills.section_body(_rule(), "2. Output"))
+    for key in ("candidate_id", "disposition", "reason", "authority"):
+        assert re.search(rf"`{key}`|`{key}:|\"{key}\"", body), f"{key} is never named as a key"
 
 
 def test_the_rule_pass_names_who_writes_the_human_authority():
@@ -458,12 +569,20 @@ def test_the_rule_pass_names_who_writes_the_human_authority():
     module's floor (see the module docstring).
     """
     body = _norm(skills.section_body(_rule(), "2. Output"))
-    index = body.find("authority")
-    assert index != -1
-    window = _window_after(body, index, radius=400)
-    assert '"human"' in window
-    assert re.search(r"gate[ -]0", window), "the window names no gate at all"
-    assert "adopt-projection" in window
+    indices = _occurrences(body, "authority")
+    assert indices, "the section never names authority"
+
+    def states_the_other_writer(index: int) -> bool:
+        window = _window_after(body, index, radius=400)
+        return (
+            '"human"' in window
+            and re.search(r"gate[ -]0", window) is not None
+            and "adopt-projection" in window
+        )
+
+    assert any(states_the_other_writer(i) for i in indices), (
+        "no mention of authority is followed by the other writer of the human value"
+    )
 
 
 def test_the_rule_pass_keeps_the_digest_insufficient_refusal_rule():

@@ -162,6 +162,19 @@ exactly once, including the ones you decline and the ones marked
 the real candidates; decline it, and say that is why. Nothing you write may
 name a candidate outside your own shard.
 
+**Every entry carries four required keys: `candidate_id`, `disposition`,
+`reason`, and `authority`** -- and the ruling itself is the one called
+`disposition`, holding exactly `"admit"` or `"decline"`. Nothing here is a
+field you may rename: `dispositions-part-0.1.json` requires all four and is
+`additionalProperties: false`, so a synonym does not read as a near miss, it
+fails layer 1 outright. MEASURED 2026-08-20, on three consecutive dispatches
+of the monolithic stage this pass replaced: all three wrote `verdict` instead,
+which the prose of the day described at length while never once naming, and
+every entry failed validation. Worse than the failure, the consuming code
+keys off `disposition`, so `rubrica gate-brief --gate 0` rendered zero admits
+and zero declines at exit 0 -- a human was handed an empty selection presented
+as a clean one. State the key, not only what it means.
+
 Every disposition also carries `authority: "triage"`. You are the only
 writer of your part, so every disposition you write carries that value --
 `"human"` is what a gate-0 override or `rubrica adopt-projection` carries once
@@ -170,15 +183,16 @@ once `triage-seal` composes every slice's part into `00-triage.json`, a
 reader needs to tell which admissions this pass authored from which a human
 made at the gate, and `authority` is the only field that says so.
 
-An `admit` carries `reason` (prose) and a `priority` -- an integer rank, 1
-for the most valuable, expressing where you would spend the extraction
-budget first. **This rank is within your slice only.** You cannot see any
-other slice's candidates, so you cannot and must not guess at a global rank
--- `triage-seal` is what composes every slice's within-slice priorities with
-a surface-level ranking into the run's actual global order. Rank only against
-the other admits in front of you.
+An `admit` carries `disposition: "admit"`, `reason` (prose) and a `priority`
+-- an integer rank, 1 for the most valuable, expressing where you would spend
+the extraction budget first. **This rank is within your slice only.** You
+cannot see any other slice's candidates, so you cannot and must not guess at a
+global rank -- `triage-seal` is what composes every slice's within-slice
+priorities with a surface-level ranking into the run's actual global order.
+Rank only against the other admits in front of you.
 
-A `decline` carries `reason` (prose) and a `reason_code` from this list:
+A `decline` carries `disposition: "decline"`, `reason` (prose) and a
+`reason_code` from this list:
 
 | Code | Use it when |
 |---|---|

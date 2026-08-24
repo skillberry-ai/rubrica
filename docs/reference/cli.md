@@ -30,6 +30,27 @@ Optional: `--objective-note OBJECTIVE_NOTE`, `--scope-note SCOPE_NOTE`,
 MAX_SCENARIOS`, `--max-candidates MAX_CANDIDATES`, `--max-catalogue-bytes
 MAX_CATALOGUE_BYTES`.
 
+**`--target-interface` is free text: how the target is spoken to, in whatever
+word names that.** Unlike `--objective` beside it, it carries no `choices=` and
+no schema `enum` — the three artifacts that hold it (`00-catalogue.json`,
+`manifest.json`, `01-world-model.json`) all type it as a non-empty string, and
+`survey` rejects only a blank or a non-string. Conventional values in this
+repo are `mcp`, `http`, `http-sse` and `a2a`; a value outside that set is
+accepted, by design, because a target's interface is target-specific.
+
+Its consumers are prompt stages, not code paths. No Python reads
+`target.interface` after writing it — it is copied into the manifest and the
+world model and validated for non-blankness, and nothing branches on its
+value. It reaches models as context: `rb-triage-objective` is told that
+`00-catalogue.json` gives it `request` — "the target's name and interface, the
+declared `objective`" — every `rb-triage-rule` member sees that same `request`
+copied verbatim into its own shard, and the value rides in `manifest.json` and
+`01-world-model.json` for whatever later pass reads them. **So a typo here is
+invisible** — nothing rejects it, and the only reader is a model that will do
+its best with an unfamiliar word.
+Intake is code and no repair prompt can rewrite a manifest, so the value a run
+is minted with is the value it keeps.
+
 Prints the new run directory.
 
 ```bash
@@ -52,6 +73,8 @@ mutually exclusive.
 `--target-name TARGET_NAME`, `--target-interface TARGET_INTERFACE`, and the
 optional `--max-rounds MAX_ROUNDS` / `--max-scenarios MAX_SCENARIOS` (default
 2 and 128). No corpus, no catalogue, no triage record, no gate 0.
+`--target-interface` means what it means under `survey` above, and is
+free text here for the same reason.
 
 `--run PATH` path: mints the manifest from the catalogue and triage record at
 that run instead — the five flags above are illegal alongside it, since the
