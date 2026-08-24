@@ -281,3 +281,107 @@ measure, so the timestamp result above is trusted because it is a
 presence/absence check with a scoping control, not because 546 differs from 639.
 Second, the sample size in this file has been one dispatch per round until now.
 `docs/design/limitations.md` carries the entry this observation motivated.
+
+## Run record: round 5, re-record after the prose-instant clause
+
+Method step 3's capture-instant paragraph gained a clause: where the capture
+states the instant in prose rather than in a field -- a chat trajectory whose
+opening message says "The current time is ..." -- cite the locator of that
+message with the sentence in `quote`. This round re-records against the changed
+prompt, per the obligation to re-record after a skill changes.
+
+**Read this round beside rounds 3 and 4, not against them.** Those two ran on
+`sonnet`; this one ran on `opus`, set explicitly through `RUBRICA_MODEL` rather
+than taking the script's `sonnet` default, because this gateway's allowlist is
+reported to refuse `claude-sonnet-5` and `claude-haiku-4-5` with `403 team not
+allowed to access model`. That refusal was not re-measured here -- what was
+measured is that opus authenticated and completed. A model change is part of what
+happened, so no number in this section is comparable to a number in those, and
+round 4 already found the run-to-run noise floor on this stage larger than most
+effects worth measuring with the model held constant.
+
+Dispatched via `scripts/dispatch-stage.sh extract <run> trace-json` with
+`RUBRICA_MODEL=opus` and `RUBRICA_EFFORT=medium`, isolated instance as in round
+3 (`--safe-mode`, its own `CLAUDE_CONFIG_DIR`, `permissions.deny` over `docs/`,
+`tests/`, `CLAUDE.md`, `README.md` and every sibling skill). One dispatch,
+`artifact_id: trace-json`, against a toy run stopped after `intake`. The
+transcript's `result` event reports `subtype: success`, `canonicalModel:
+claude-opus-5`, 10 turns, 104,950 ms, `total_cost_usd` `0.5768599999999999` --
+well short of the script's default `$2` ceiling, so nothing here is truncation.
+
+`trace-json` was the slice chosen rather than round 3's `api-json` because it is
+the toy fixture's only input of kind `trace`, and the capture-instant rule is
+scoped to a trace. Dispatching any other slice could not have put the rule in
+scope at all.
+
+**Both gates clean:** `rubrica validate --stage extract` and `rubrica check-refs`
+each exited 0 against the written `01-claims/trace-json.json` (10 claims: 3
+`capability`, 3 `entity`, 2 `outcome_class`, 1 `actor`, 1 `goal`).
+
+### The capture instant: not cited, and the new clause is still unexercised
+
+**No claim in this file cites a capture instant, from a field or from prose.**
+Every claim carries exactly one `evidence` entry except `clm-trace-json-001` and
+`clm-trace-json-010`, whose two entries are both span locators; no entry anywhere
+in the file holds an instant. The two observed-state claims are
+`clm-trace-json-007` and `-008`, and their sole evidence locators are
+`#/spans/0/output` and `#/spans/1/output`.
+
+That is the correct output for this input, and it is why the clause remains
+unexercised rather than validated. The toy `trace-json.json` is 318 bytes,
+`{"spans": [...], "trace_id": "toy-0001"}`: no `info` object, no `request_time`,
+zero keys matching `time|date|stamp|_at|seq`, and no message list, so no prose
+sentence either. The capture states its instant in **neither** form. A clause
+scoped to "where the capture states the instant in prose" cannot fire against a
+capture that states it nowhere. **Nothing in this repository's fixtures has yet
+been observed exercising the prose-instant clause**, and this round does not
+change that; the change was motivated by tau2-bench trajectories, and observing
+it would take a dispatch against one.
+
+What this round does show, which is a negative control on the rule rather than
+evidence for the clause: with the rule in scope and no instant obtainable, the
+member neither fabricated one nor silently dropped the requirement. It recorded
+the absence in the `statement` of both observed-state claims, verbatim from
+`clm-trace-json-007`:
+
+> For the input `action=find_tickets, queue="shipping", status="open"`,
+> `query_tickets` returned an empty array. Gap: this artifact records no capture
+> instant -- it carries no timestamp, request-time or sequence field anywhere,
+> and no prose statement of the current time -- so this observed-state result
+> cannot be placed in time relative to any other observation.
+
+Its own report named the same thing under "refusal conditions hit": "*No capture
+instant available.* ... I recorded that as an explicit gap in each `statement`
+rather than supplying one." Note what that is not: the paragraph tells the member
+what to do when an instant exists and says nothing about what to do when none
+does, so this is behaviour the prompt did not ask for and did not forbid. One
+sample, one model.
+
+### Round 1's epistemic-isolation check, re-measured on the same slice
+
+Round 1 read the `trace-json` claims for characterizing language and found none;
+that is the check this slice makes available again, so it was re-run. Zero
+matches for `unusual|unexpected|atypical|surprising|typically|usually|one would
+expect|bug`, case-insensitive, across the whole file. `clm-trace-json-008`
+phrases the `get_ticket(9999) -> {}` call as "returned an empty object rather
+than any error value visible in the span", with the id qualified as "an id no
+other span in this trace establishes as valid" -- and does not import
+`notes.md`'s documented error behaviour, which this member never read. Refusal
+condition 5's trigger held on the model this round ran on.
+
+**Read audit (`scripts/audit-reads.sh`), against `reads = ["manifest",
+"input_file"]`:** `Read` calls were `SKILL.md`, its own
+`00-inputs/trace-json.json`, `manifest.json`, and the packaged claims schema
+`src/rubrica/schema/claims-0.1.json`; the only `Write` was its own
+`01-claims/trace-json.json`. The `Bash` lines were one `find` for the claims
+schema path and two `rubrica validate` invocations. No sibling input, no
+`docs/`, no `tests/`, no other skill. That schema is not a run artifact and not
+any member's slice, and round 3 recorded the same lookup by `find`; here the
+member read the file the `find` located.
+
+**Two harness facts, neither of which touched the artifact.** The member's
+sandboxed `rubrica validate` failed with `apply-seccomp: unshare(CLONE_NEWUSER):
+Invalid argument` on this WSL2 kernel and it re-ran the command unsandboxed; and
+one `Bash` call was refused for being compound (`echo "EXIT=$?"` appended),
+after which it ran the bare command. Both are recorded because a future round
+seeing either should know it is the lab, not the prompt.
