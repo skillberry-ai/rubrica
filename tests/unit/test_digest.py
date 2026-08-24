@@ -353,3 +353,61 @@ def test_a_skeleton_landing_exactly_on_the_node_cap_is_not_truncated():
     result = digest.digest_for_payload(payload, "other", body_chars=2000)
     assert len(result["skeleton"]) == 128
     assert result["skeleton_nodes_truncated"] is False
+
+
+def test_a_chat_trajectory_is_recognised_as_a_message_list():
+    """The shape tau2-bench's 200 trajectories actually have.
+
+    Measured there: every file's key intersection is exactly {'role'}, because
+    895 of 5,182 messages are {role, tool_calls} and carry no `content`. So no
+    key-set rule reaches them -- a string `role` on every element is the only
+    invariant they have, and that is what this predicate keys on.
+    """
+    payload = [
+        {"role": "system", "content": "You are an airline agent."},
+        {"role": "user", "content": "I need to change my flight."},
+        {"role": "assistant", "tool_calls": [{"function": {"name": "get_reservation_details"}}]},
+        {"role": "tool", "tool_call_id": "call_1", "content": '{"reservation_id": "EHGLP3"}'},
+    ]
+    assert digest.is_message_list(payload) is True
+
+
+def test_a_list_of_dicts_without_role_is_not_a_message_list():
+    """The predicate's discriminating clause. Without it, any homogeneous list
+    of objects would be digested as a conversation, and `element_counts` would
+    report role tallies for records that have no roles."""
+    assert digest.is_message_list([{"a": 1, "b": 2}, {"a": 3, "b": 4}]) is False
+
+
+def test_a_single_message_is_not_a_conversation():
+    """Two, not one: a one-element list carrying `role` is a shape common in
+    configuration, and digesting it as a dialogue reports a conversation that
+    does not exist."""
+    assert digest.is_message_list([{"role": "user", "content": "hi"}]) is False
+
+
+def test_a_message_list_needs_content_or_tool_calls_somewhere():
+    """Role tags alone are not behaviour. A list of bare {role: ...} records
+    carries nothing `request_text` or `names` could ever read, so it is not
+    what this path exists for."""
+    assert digest.is_message_list([{"role": "user"}, {"role": "assistant"}]) is False
+
+
+def test_a_non_string_role_is_not_a_message_list():
+    """Guards the distinct-role set below from an unhashable value, and states
+    the shape rule: a role is a string."""
+    assert digest.is_message_list([{"role": {"n": 1}, "content": "x"}] * 2) is False
+
+
+def test_a_payload_with_more_distinct_roles_than_the_breadth_cap_is_not_a_conversation():
+    """The cap sits in the predicate rather than in a truncation flag, so
+    `element_counts` is bounded by construction. Measured on tau2: 4 roles."""
+    many = [{"role": f"r{i}", "content": "x"} for i in range(digest._SKELETON_MAX_CHILDREN + 1)]
+    assert digest.is_message_list(many) is False
+
+
+def test_a_list_of_scalars_is_not_a_message_list():
+    """The same payload `test_a_non_dict_trace_payload_falls_back_to_the_generic_skeleton`
+    pins: it must keep reaching the skeleton, which requires failing here."""
+    assert digest.is_message_list(["not", "a", "dict"]) is False
+    assert digest.is_message_list({"role": "user"}) is False

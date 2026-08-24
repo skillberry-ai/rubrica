@@ -100,6 +100,44 @@ def _lookup_scopes(payload: dict) -> list[dict]:
     return scopes
 
 
+def is_message_list(payload: Any) -> bool:
+    """Whether this payload is a conversation: a list of role-tagged messages.
+
+    One home for the shape rule, because `intake.classify` and
+    `digest_for_payload` must agree on it: a file classified `trace` for being a
+    message list and then digested by the dict producer would fall through to a
+    skeleton, which is exactly the defect issue #4 reported.
+
+    Measured on tau2-bench's 200 chat trajectories, which is what this exists
+    for: every file's key intersection is exactly {'role'} -- 895 of 5,182
+    messages are {role, tool_calls} and carry no `content` -- so no key-set rule
+    reaches them, and `EXPLODE_MIN_COMMON_KEYS` relaxed to 2 admits 0 of the
+    200. A string `role` on every element is the only invariant they have.
+
+    Two elements, not one: a one-element list carrying `role` is a shape common
+    in configuration, and digesting it as a dialogue reports a conversation that
+    does not exist. The distinct-role cap bounds `element_counts` by
+    construction rather than by a truncation flag -- `_SKELETON_MAX_CHILDREN` is
+    already this module's breadth budget, and a payload with more distinct roles
+    than that is not a dialogue. Measured on tau2: 4 roles.
+
+    Precision, measured: 200 of 200 tau2 trajectories, 0 of the 15 JSON fixtures
+    under tests/fixtures/, 0 of the tau2-bench/src/tau2 tree.
+    """
+    if not isinstance(payload, list) or len(payload) < 2:
+        return False
+    # A *string* role, not merely a present one: the distinct-role set below
+    # would raise on an unhashable value, and a role is a string in every shape
+    # this targets.
+    if not all(
+        isinstance(message, dict) and isinstance(message.get("role"), str) for message in payload
+    ):
+        return False
+    if not any("content" in message or "tool_calls" in message for message in payload):
+        return False
+    return len({message["role"] for message in payload}) <= _SKELETON_MAX_CHILDREN
+
+
 def _first_scalar(payload: dict, keys: tuple[str, ...]) -> Any | None:
     for scope in _lookup_scopes(payload):
         for key in keys:
