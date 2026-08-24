@@ -101,9 +101,12 @@ def classify(path: Path) -> str:
         return "trace"
     # A conversation is a capture of what the target did, which is what `trace`
     # means -- and issue #4 measured the cost of it classifying `other`: 200 tau2
-    # trajectory files reached triage as skeleton-only rows. Widening the
-    # existing kind rather than adding one, because no code branches on
-    # `kind == "trace"` outside this function and survey.classify_payload.
+    # trajectory files reached triage as skeleton-only rows. Widening the existing
+    # kind rather than adding one, because exactly one consumer distinguishes
+    # anything by it -- `digest_for_payload`'s `kind == "trace"` branch, which now
+    # dispatches on shape and handles a dict-shaped capture and a message list
+    # alike. A new kind would touch the enum, both schemas and
+    # `slices._signature` for a distinction nothing else acts on.
     if is_message_list(payload):
         return "trace"
     return "other"
