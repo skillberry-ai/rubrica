@@ -299,8 +299,9 @@ def test_a_wide_object_skeleton_reports_its_true_key_count_and_truncation():
 def test_a_non_dict_trace_payload_falls_back_to_the_generic_skeleton():
     """survey.explode can hand a trace-kind element that is not itself a dict
     (a heterogeneous or scalar element); digest_for_payload's trace branch
-    guards on isinstance(payload, dict), so this must not raise and must not
-    silently produce an empty result."""
+    dispatches on shape -- a dict to one producer, a message list to another --
+    and a payload that is neither falls through here, so this must not raise and
+    must not silently produce an empty result."""
     result = digest.digest_for_payload(["not", "a", "dict"], "trace", body_chars=2000)
     assert result["skeleton"]["/"] == {"type": "array", "length": 3}
 
@@ -406,6 +407,14 @@ def test_a_payload_with_more_distinct_roles_than_the_breadth_cap_is_not_a_conver
     assert digest.is_message_list(many) is False
 
 
+def test_a_payload_at_exactly_the_breadth_cap_is_still_a_conversation():
+    """The cap is `<=`, and the negative above sits one role past it -- a count
+    that fails `< cap` and `<= cap` alike, so it cannot see an off-by-one edit.
+    Only a payload landing exactly on the boundary can."""
+    exactly = [{"role": f"r{i}", "content": "x"} for i in range(digest._SKELETON_MAX_CHILDREN)]
+    assert digest.is_message_list(exactly) is True
+
+
 def test_a_list_of_scalars_is_not_a_message_list():
     """The same payload `test_a_non_dict_trace_payload_falls_back_to_the_generic_skeleton`
     pins: it must keep reaching the skeleton, which requires failing here."""
@@ -464,6 +473,21 @@ def test_request_text_comes_from_the_user_turn_not_the_system_prompt():
     assert "Airline Agent Policy" not in result["request_text"]
 
 
+def test_request_text_comes_from_the_first_user_turn_not_a_later_one():
+    """First, not merely some: a design clause whose violation is silent. Drop
+    the loop's `break` and the field carries the *last* user turn instead, with
+    no key appearing or disappearing to say so. `_TRAJECTORY` has one user turn,
+    so it cannot tell the two apart -- this payload has two."""
+    payload = [
+        {"role": "system", "content": "policy"},
+        {"role": "user", "content": "I want to cancel reservation EHGLP3."},
+        {"role": "assistant", "content": "Cancelled."},
+        {"role": "user", "content": "Now change my seat."},
+    ]
+    result = digest.digest_for_payload(payload, "trace", body_chars=2000)
+    assert result["request_text"] == "I want to cancel reservation EHGLP3."
+
+
 def test_a_trajectory_with_no_user_turn_fires_no_request_text():
     """Honesty over coverage: the field is absent and `heuristics_fired` says so,
     which is what lets triage decline `digest_insufficient` and name what it
@@ -499,6 +523,20 @@ def test_a_chat_trajectory_fires_neither_status_nor_error_markers():
     assert "error_markers" not in result
     assert "status" not in result["heuristics_fired"]
     assert "error_markers" not in result["heuristics_fired"]
+
+
+def test_error_markers_fires_on_a_message_carrying_an_error_shaped_key():
+    """The message-list producer's own `_has_error_key` clause. Every other
+    assertion about it on this path is an *absence*, and tau2's 200 files fire it
+    0 times. Measured: delete the clause and this is the only test in tests/unit
+    that goes red -- the reachability test above covers the dict producer only."""
+    payload = [
+        {"role": "user", "content": "cancel reservation EHGLP3"},
+        {"role": "tool", "tool_call_id": "call_1", "error": "boom"},
+    ]
+    result = digest.digest_for_payload(payload, "trace", body_chars=2000)
+    assert result["error_markers"] is True
+    assert "error_markers" in result["heuristics_fired"]
 
 
 def test_a_message_list_trace_digest_carries_no_skeleton_key():

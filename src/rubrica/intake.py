@@ -105,8 +105,10 @@ def classify(path: Path) -> str:
     # kind rather than adding one, because exactly one consumer distinguishes
     # anything by it -- `digest_for_payload`'s `kind == "trace"` branch, which now
     # dispatches on shape and handles a dict-shaped capture and a message list
-    # alike. A new kind would touch the enum, both schemas and
-    # `slices._signature` for a distinction nothing else acts on.
+    # alike. A new kind would land in three schema enums -- manifest, catalogue,
+    # triage -- plus the enum `docs/reference/artifacts.md` counts, and arrive in
+    # `slices._split_by_kind_then_bytes` as one more bucket, for a distinction
+    # nothing else acts on.
     if is_message_list(payload):
         return "trace"
     return "other"
