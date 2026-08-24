@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from rubrica.artifacts import ArtifactError, canonical_bytes, read_json, sha256_of, write_json
+from rubrica.digest import is_message_list
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
 from rubrica.manifest import utc_stamp
@@ -97,6 +98,13 @@ def classify(path: Path) -> str:
         and isinstance(payload[0], dict)
         and ("spans" in payload[0] or "trace_id" in payload[0])
     ):
+        return "trace"
+    # A conversation is a capture of what the target did, which is what `trace`
+    # means -- and issue #4 measured the cost of it classifying `other`: 200 tau2
+    # trajectory files reached triage as skeleton-only rows. Widening the
+    # existing kind rather than adding one, because no code branches on
+    # `kind == "trace"` outside this function and survey.classify_payload.
+    if is_message_list(payload):
         return "trace"
     return "other"
 

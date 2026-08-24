@@ -365,3 +365,23 @@ def test_whatever_intake_does_mint_validates_as_the_intake_stage(tmp_path, case)
     except ValueError:
         return
     assert validate_artifact(run.manifest, "manifest") == []
+
+
+def test_classify_recognises_a_chat_trajectory_as_a_trace(tmp_path):
+    """Issue #4: a list of {role, content} messages carries neither `spans` nor
+    `trace_id`, so it classified `other` and got a skeleton digest. It is a
+    capture of what the target did, which is what `trace` means."""
+    payload = [
+        {"role": "system", "content": "You are an airline agent."},
+        {"role": "user", "content": "Cancel EHGLP3."},
+        {"role": "assistant", "tool_calls": [{"function": {"name": "cancel_reservation"}}]},
+    ]
+    assert classify(_write(tmp_path, "37_1_abc.json", payload)) == "trace"
+
+
+def test_classify_leaves_a_list_of_non_message_records_alone(tmp_path):
+    """The widening is scoped to conversations. A homogeneous list of records
+    without roles is not one, and calling it a trace would hand the trace
+    producer a payload with no field it can read."""
+    payload = [{"id": 1, "value": "a"}, {"id": 2, "value": "b"}, {"id": 3, "value": "c"}]
+    assert classify(_write(tmp_path, "records.json", payload)) == "other"
