@@ -1074,12 +1074,14 @@ the mitigation does not apply at all — such elements cluster on skeleton shape
 alone.
 
 Issue #4 was read as an instance of that, and the reading was wrong twice over.
-Measured on the 200 tau2 chat trajectories it reports: their skeleton digests
-are **39 distinct**, largest identical group 18, differing only by message
-count — not identical, as this entry previously said. The conclusion survives on
-firmer ground: clustering keys on `heuristics_fired` and `names`, and a skeleton
-digest carries neither, so clustering is inapplicable however many distinct
-skeletons exist.
+Measured on the skeleton digests those 200 tau2 chat trajectories used to get,
+the digests were **39 distinct**, largest identical group 18, differing only by
+message count — not identical, as this entry previously said. They no longer get
+a skeleton at all: they classify `trace`, and their digests carry `names`, which
+is where the 68 toolset signatures in the entry below come from. So the
+conclusion cannot rest on a skeleton carrying neither `heuristics_fired` nor
+`names` — it rests on the grouping key described below, which holds before and
+after.
 
 The second correction is the ordering. The projection that made #4 look
 downstream of this design — roughly 5,425 candidates and ~2.9MB, past both of
@@ -1087,8 +1089,9 @@ downstream of this design — roughly 5,425 candidates and ~2.9MB, past both of
 per message. They should not: a trajectory is one episode, in which message 7 is
 unreadable without 1 through 6, which is the same shape the OpenAPI ruling keeps
 whole. Measured for the file-level digest instead: 443 candidates unchanged, a
-472,799-byte catalogue against a 444,355-byte baseline, 7 slices. Nothing
-approaches a cap, so there is no ordering dependency in either direction.
+472,799-byte catalogue against a 444,355-byte baseline, 7 slices. Neither
+figure moves toward a cap, so there is no ordering dependency in either
+direction.
 
 What does not change is which grouping key those candidates get. They are corpus
 candidates, not container elements, and `slices._signature` clusters only an
