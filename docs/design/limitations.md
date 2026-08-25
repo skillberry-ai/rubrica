@@ -642,9 +642,12 @@ The death issue #3 reports is real and was observed twice: the monolithic
 compaction and once by exhausting its whole dollar budget. What closed the
 issue is not a run that survived it. It is a partition whose shards measure
 small enough to hold, plus a `catalogue_facts` block that takes the one
-remaining unbounded pass from 472,799 bytes to 51,792 — both arithmetic over
-catalogues that already existed, which is the entry above this one restated
-about a specific issue.
+remaining unbounded pass from 472,799 bytes to 51,792 on the tau2 catalogue the
+design was measured against — both arithmetic over catalogues that already
+existed, which is the entry above this one restated about a specific issue. The
+absolute figures move with the corpus checkout and the ratio does not: a re-run
+during this change measured 480,399 to 52,542, 9.14x against the design's
+9.13x.
 
 The gap is narrow and worth naming precisely. That the objective pass's input
 now fits one `Read` is measured and not in doubt. That a dispatch which *fits*
