@@ -4,7 +4,7 @@
   "title": "Corpus slices",
   "description": "triage-slices' (code) output: the catalogue's admissible candidates, packed into byte-bounded slices ahead of the dispositions fan-out. One shard on disk per slice (00-slices/<id>.json) mirrors this array's candidate_ids; refs.check_slices holds the two to the same partition of the catalogue.",
   "type": "object",
-  "required": ["schema_version", "run_id", "slices", "cap_bytes"],
+  "required": ["schema_version", "run_id", "slices", "cap_bytes", "catalogue_facts"],
   "additionalProperties": false,
   "properties": {
     "schema_version": {"const": "0.1"},
@@ -13,6 +13,33 @@
       "type": "integer",
       "minimum": 1,
       "description": "The byte budget every slice was packed against. Echoed here (rather than only in the catalogue's policy) so a reader auditing one slice's bytes against the cap does not have to open a second file."
+    },
+    "catalogue_facts": {
+      "description": "Everything rb-triage-objective may know about 00-catalogue.json without opening it, so that pass's reads does not name the catalogue and its dispatch is bounded by max_candidates rather than by corpus size. request and policy are verbatim copies; the other two are derived, and refs.check_slices recomputes both from the catalogue through the same functions that wrote them.",
+      "type": "object",
+      "required": ["request", "policy", "excluded", "candidate_bytes"],
+      "additionalProperties": false,
+      "properties": {
+        "request": {"type": "object"},
+        "policy": {"type": "object"},
+        "excluded": {
+          "description": "The catalogue's excluded array as a tally plus the paths for the four exclusion reasons that embed a disputable judgment. Bounded in bytes, not entries: a count cap without a character bound is the defect open against digest's names.",
+          "type": "object",
+          "required": ["total", "by_reason", "entries", "entries_truncated"],
+          "additionalProperties": false,
+          "properties": {
+            "total": {"description": "Length of the catalogue's excluded array, including entries no path is kept for -- the only thing at gate 0 separating a corpus with 123 binaries from one with none.", "type": "integer", "minimum": 0},
+            "by_reason": {"description": "One key per exclusion_reason that occurs, sorted. Reasons that did not occur are absent rather than zero.", "type": "object", "additionalProperties": {"type": "integer", "minimum": 1}},
+            "entries": {"type": "array", "items": {"$ref": "catalogue-0.1.json#/properties/excluded/items"}},
+            "entries_truncated": {"description": "Whether the byte budget stopped the entries list short. An unconditional sibling of entries, present as false when it did not bite, following keys_truncated and skeleton_nodes_truncated: a truncation a prompt can see is a fact about the input, and one it cannot see is a lie about it.", "type": "boolean"}
+          }
+        },
+        "candidate_bytes": {
+          "description": "candidate_id -> that candidate's own source bytes, for every catalogue candidate including inadmissible ones. Source size, never a serialized row's size, which saturates once the digest skeleton hits its 128-node clamp.",
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        }
+      }
     },
     "slices": {
       "type": "array",

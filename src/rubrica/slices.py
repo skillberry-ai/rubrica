@@ -181,6 +181,57 @@ def excluded_summary(excluded: list) -> dict:
     }
 
 
+def candidate_bytes_index(candidates: list[dict]) -> dict[str, int]:
+    """`candidate_id` -> that candidate's own catalogue `bytes`, for every candidate.
+
+    Source file size, never row_bytes' serialized size. digest.py clamps a
+    skeleton at 128 nodes, so two candidates of very different evidential size
+    serialize to nearly the same row once both are past the cap -- a metric
+    that saturates stops discriminating exactly where rb-triage-objective's
+    weight.bytes needs it to.
+
+    Every candidate, admissible or not: plan_slices partitions all of them and
+    a surface's `evidence` may name any. A map rather than a list of objects
+    because it measured 41.1 bytes per candidate against 80.1 for the list
+    form, on a field the whole point of which is to be small.
+
+    Shared with refs.check_slices for the reason excluded_summary is.
+    """
+    return {
+        cid: b
+        for candidate in candidates
+        if isinstance(candidate, dict)
+        and isinstance(cid := candidate.get("candidate_id"), str)
+        # `isinstance(True, int)` is True in Python, so a `bytes: true` would
+        # otherwise index as the integer 1. The standing guard in this repo,
+        # present at triage.py:450, manifest.py:149, intake.py:239, seal.py:307.
+        and isinstance(b := candidate.get("bytes"), int)
+        and not isinstance(b, bool)
+    }
+
+
+def catalogue_facts(catalogue: dict) -> dict:
+    """Everything rb-triage-objective may know about the catalogue, without opening it.
+
+    Named `catalogue_facts` and not `catalogue_projection`: `projection`
+    already means "a manufactured artifact admitted to close a deficiency"
+    throughout this subsystem, and a second sense of the word in the most
+    projection-dense part of the codebase is a readability cost with no
+    upside. The design spec specs the other name; it is recorded history and
+    is not edited to match.
+
+    `request` and `policy` are copied verbatim, which is not a new pattern:
+    write_slices' docstring already argues for the shards carrying both rather
+    than each member seeking a sorted-keys catalogue for two small fields.
+    """
+    return {
+        "request": catalogue["request"],
+        "policy": catalogue["policy"],
+        "excluded": excluded_summary(catalogue["excluded"]),
+        "candidate_bytes": candidate_bytes_index(catalogue.get("candidates", [])),
+    }
+
+
 def _str_tuple(value: object) -> tuple[str, ...]:
     """Every string in `value`, sorted -- or an empty tuple for anything else.
 
@@ -563,8 +614,9 @@ def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path
 
     Several failure modes are refused before planning even starts, all exit 2
     at the CLI rather than a finding: a catalogue that is not a JSON object at
-    all, or that is one but is missing `run_id`, `request`, or `policy` (the
-    three fields this function and every shard read verbatim); a `candidates`
+    all, or that is one but is missing `run_id`, `request`, `policy`, or
+    `excluded` (the four fields this function reads verbatim, three of which
+    every shard carries); an `excluded` that is not an array; a `candidates`
     that is not an array, or an empty one (nothing for a slice to hold -- a
     survey defect, not a triage-slices one); a candidate that is not an object
     carrying a *string* `candidate_id` (read bare, and sorted on, by every
@@ -591,6 +643,17 @@ def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path
     this module exists to eliminate. Paying a few duplicated bytes per shard
     is cheaper than one extra seek per member, every time.
 
+    The plan carries a `catalogue_facts` block for the same reason one step
+    further out: it is everything rb-triage-objective needs, so that pass's
+    `reads` no longer names the catalogue at all. Measured on the tau2
+    catalogue, that took the objective dispatch's input from 472,799 bytes to
+    51,792 -- inside the harness's 256KB whole-file Read refusal, where the
+    catalogue was not -- and bounded it by max_candidates, since the block
+    costs 41.1 bytes per candidate. canonical_bytes sorts keys, so the block
+    and run_id both land ahead of the slices array: the 470KB seek for run_id
+    that chunk-reading dispatches used to pay is gone as a consequence of the
+    sort rather than as a special case.
+
     Idempotent and safe to re-run: a human adopting a projection at gate 0
     changes the catalogue, and the plan must be mintable again from scratch.
     Every shard the new plan does not name is deleted, so a slice id that
@@ -610,9 +673,24 @@ def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path
             f"{run.catalogue} is not a JSON object: found {catalogue!r}; there is no catalogue "
             "here to partition"
         )
-    missing_top = [key for key in ("run_id", "request", "policy") if key not in catalogue]
+    missing_top = [
+        key for key in ("run_id", "request", "policy", "excluded") if key not in catalogue
+    ]
     if missing_top:
         raise UsageError(f"{run.catalogue} is missing required field(s): {missing_top}")
+    # `excluded` of the wrong container shape, guarded for the reason
+    # `candidates` is below, and both halves are wrong differently. `7` and
+    # `null` raise TypeError out of excluded_summary's `len()` -- from a *code*
+    # stage, so cli.py's catch-all turns it into an exit 1 `[internal]` finding
+    # naming the RUN ROOT: a malformed catalogue arriving as a stage defect,
+    # against the wrong artifact. A string or an object does not raise at all,
+    # which is worse: both iterate to zero well-formed entries, so the plan
+    # would carry a plausible and wrong summary with nothing to say so.
+    if not isinstance(catalogue["excluded"], list):
+        raise UsageError(
+            f"{run.catalogue}'s excluded is not an array: found {catalogue['excluded']!r}; its "
+            "exclusions cannot be summarised"
+        )
     candidates = catalogue.get("candidates", [])
     # `candidates` of the wrong container shape, for the same reason: a number
     # raised TypeError out of `enumerate`, and a *string* passed every guard
@@ -656,6 +734,7 @@ def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path
         "schema_version": "0.1",
         "run_id": catalogue["run_id"],
         "cap_bytes": cap,
+        "catalogue_facts": catalogue_facts(catalogue),
         "slices": [
             {
                 "id": s.id,

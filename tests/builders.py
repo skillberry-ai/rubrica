@@ -569,6 +569,22 @@ def minimal_slices(**over: Any) -> dict[str, Any]:
         "schema_version": "0.1",
         "run_id": minimal_triage()["run_id"],
         "cap_bytes": 1_048_576,
+        # `request` and `policy` are reused from minimal_catalogue rather than
+        # restated, for the same reason the parts are sliced out of the whole:
+        # catalogue_facts copies both verbatim, so a builder that drifted from
+        # minimal_catalogue would let a test pass against a pair the writer
+        # could never have produced.
+        "catalogue_facts": {
+            "request": minimal_catalogue()["request"],
+            "policy": minimal_catalogue()["policy"],
+            "excluded": {
+                "total": 0,
+                "by_reason": {},
+                "entries": [],
+                "entries_truncated": False,
+            },
+            "candidate_bytes": {candidate_id: 37},
+        },
         "slices": [
             {
                 "id": "s01",

@@ -499,3 +499,187 @@ def test_a_malformed_exclusion_entry_does_not_raise():
     assert summary["total"] == 4
     assert summary["by_reason"] == {"duplicate": 1}
     assert len(summary["entries"]) == 1
+
+
+def test_truncation_keeps_the_prefix_before_the_oversized_entry_not_what_fits_after():
+    """The prefix invariant, measured where truncation does *not* bite at index 0.
+
+    The sibling case above proves it only for a first entry that alone busts
+    the budget, where "the prefix that fit" and "the empty list" are the same
+    list. Here three short entries fit, a 9KB one cannot, and three more short
+    ones would -- so a fill-what-fits implementation is distinguishable from a
+    prefix one by exactly the last assertion.
+    """
+    early = [{"path": f"/corpus/early-{i}.json", "reason": "duplicate"} for i in range(3)]
+    oversized = [{"path": "/corpus/" + "p" * 9000, "reason": "duplicate"}]
+    late = [{"path": f"/corpus/late-{i}.json", "reason": "duplicate"} for i in range(3)]
+    summary = slices.excluded_summary([*early, *oversized, *late])
+
+    assert summary["entries"] == early, "the leading run that fit, and nothing past it"
+    assert summary["entries_truncated"] is True
+    assert summary["total"] == 7, "the tally still describes all seven"
+    # The discriminating assertion: each of these three fits inside what the
+    # oversized entry left unspent, so fill-what-fits would have picked them up.
+    assert not any("late-" in entry["path"] for entry in summary["entries"])
+
+
+def test_candidate_bytes_indexes_every_candidate_by_its_own_source_size():
+    """The map is source `bytes`, never `row_bytes`, and covers inadmissible rows.
+
+    Source size is the metric `weight.bytes` needs: digest.py clamps a skeleton
+    at 128 nodes, so a 2.7MB file and a 20KB one serialize to nearly the same
+    row once both are past the cap, and a metric that saturates cannot say
+    which of two surfaces carries more evidence. Inadmissible candidates are
+    included because plan_slices partitions every candidate and a surface's
+    evidence may name any of them.
+    """
+    rows = [_cand("c1", pad=1000), _cand("c2", pad=2000) | {"admissible": False}]
+    index = slices.candidate_bytes_index(rows)
+    assert index == {"c1": 1000, "c2": 2000}
+    assert index["c2"] != slices.row_bytes(rows[1]), "source bytes, not serialized row bytes"
+
+
+def test_catalogue_facts_carries_exactly_four_fields():
+    """Pinned as set equality: a fifth field is a schema change, not a detail.
+
+    `additionalProperties: false` would reject an unknown key at layer 1, but
+    this asserts the *producer* stays in shape, so a field added here without
+    the schema fails in this file rather than in every validate call.
+    """
+    catalogue = {
+        "run_id": "run-20260825-120000",
+        "request": {"objective": "breadth"},
+        "policy": {"max_candidates": 500},
+        "excluded": [],
+        "candidates": [_cand("c1", pad=11)],
+    }
+    facts = slices.catalogue_facts(catalogue)
+    assert set(facts) == {"request", "policy", "excluded", "candidate_bytes"}
+    assert facts["request"] == {"objective": "breadth"}, "verbatim, not reshaped"
+    assert facts["policy"] == {"max_candidates": 500}, "verbatim, not reshaped"
+    assert facts["candidate_bytes"] == {"c1": 11}
+    assert facts["excluded"]["total"] == 0
+
+
+def test_the_written_plan_carries_catalogue_facts_agreeing_with_the_catalogue(tmp_path):
+    """The whole point, end to end on the real fixture."""
+    run = _toy_run(tmp_path)
+    slices.write_slices(run, cap=2500)
+
+    catalogue = read_json(run.catalogue)
+    facts = read_json(run.slices)["catalogue_facts"]
+
+    assert facts["request"] == catalogue["request"]
+    assert facts["policy"] == catalogue["policy"]
+    assert facts["candidate_bytes"] == {
+        c["candidate_id"]: c["bytes"] for c in catalogue["candidates"]
+    }
+    assert facts["excluded"] == {
+        "total": 0,
+        "by_reason": {},
+        "entries": [],
+        "entries_truncated": False,
+    }
+
+
+def test_catalogue_facts_sorts_ahead_of_the_slices_array_on_disk(tmp_path):
+    """The head lands in the first bytes, which is the seek this module exists to end.
+
+    canonical_bytes sorts keys, so `catalogue_facts` and `run_id` both precede
+    `slices`. On the 472,799-byte tau2 catalogue `run_id` sat at byte 470,054
+    and a dispatch had to seek the whole file for it; this asserts the plan
+    does not repeat that. Asserted on byte offsets rather than on key order,
+    because a reader pays for offsets.
+    """
+    run = _toy_run(tmp_path)
+    slices.write_slices(run, cap=2500)
+    text = run.slices.read_text(encoding="utf-8")
+    assert text.index('"catalogue_facts"') < text.index('"slices"')
+    assert text.index('"run_id"') < text.index('"slices"')
+
+
+def test_a_catalogue_with_no_excluded_field_is_refused_at_exit_two(tmp_path):
+    """`excluded` joins the three fields write_slices reads bare.
+
+    It is `required` in catalogue-0.1.json, so its absence is a broken
+    catalogue rather than a shape this stage should tolerate. UsageError, so
+    cli.py maps it to exit 2: no retry of triage-slices can fix a catalogue.
+    The message must name the catalogue, because that is where the operator
+    looks next -- naming this stage would send them to the wrong file.
+    """
+    run = _toy_run(tmp_path)
+    catalogue = read_json(run.catalogue)
+    del catalogue["excluded"]
+    write_json(run.catalogue, catalogue)
+    with pytest.raises(UsageError) as caught:
+        slices.write_slices(run, cap=2500)
+    assert str(run.catalogue) in str(caught.value)
+    assert "excluded" in str(caught.value)
+
+
+@pytest.mark.parametrize("excluded", ["7", "null", '"hi"', "{}"])
+def test_an_excluded_that_is_not_an_array_is_refused(tmp_path, excluded):
+    """Present but of the wrong container shape, guarded the way `candidates` is.
+
+    Two of these raise and two do not, and both halves are wrong in their own
+    way. `7` and `null` raise TypeError out of `excluded_summary`'s `len()` --
+    from a *code* stage, so cli.py's catch-all reports it as exit 1 with an
+    `[internal]` finding naming the run root: a stage defect where a malformed
+    catalogue belongs, against the wrong artifact, two rules of the exit-code
+    contract at once. `"hi"` and `{}` do not raise, which is worse: both
+    iterate to zero well-formed entries, so the plan would carry a plausible
+    and wrong summary with nothing on disk to say so.
+    """
+    run = _toy_run(tmp_path)
+    catalogue = read_json(run.catalogue)
+    catalogue["excluded"] = json.loads(excluded)
+    write_json(run.catalogue, catalogue)
+    with pytest.raises(UsageError) as caught:
+        slices.write_slices(run, cap=2500)
+    assert str(run.catalogue) in str(caught.value)
+    assert "excluded" in str(caught.value)
+
+
+def test_a_populated_exclusion_list_reaches_the_plan_summarised(tmp_path):
+    """The toy fixture excludes nothing, so the populated path needs injecting."""
+    run = _toy_run(tmp_path)
+    catalogue = read_json(run.catalogue)
+    catalogue["excluded"] = [
+        {"path": "/corpus/a.png", "reason": "binary"},
+        {"path": "/corpus/b.png", "reason": "binary"},
+        {"path": "/corpus/c.json", "reason": "duplicate"},
+    ]
+    write_json(run.catalogue, catalogue)
+    slices.write_slices(run, cap=2500)
+
+    excluded = read_json(run.slices)["catalogue_facts"]["excluded"]
+    assert excluded["total"] == 3
+    assert excluded["by_reason"] == {"binary": 2, "duplicate": 1}
+    assert [e["path"] for e in excluded["entries"]] == ["/corpus/c.json"]
+    assert excluded["entries_truncated"] is False
+
+
+def test_the_plan_still_validates_against_its_schema(tmp_path):
+    """Layer 1, on the real writer's output rather than on a builder."""
+    run = _toy_run(tmp_path)
+    slices.write_slices(run, cap=2500)
+    assert validate.validate_stage(run, "triage-slices") == []
+
+
+def test_adding_catalogue_facts_left_the_partition_byte_identical(tmp_path):
+    """`slices[]` and every shard are untouched by this change.
+
+    The spec's global constraint: nothing here touches plan_slices. Compared
+    against plan_slices' own output rather than a recorded fixture, so the
+    assertion cannot rot into agreeing with a regression.
+    """
+    run = _toy_run(tmp_path)
+    _, plan = slices.write_slices(run, cap=2500)
+    document = read_json(run.slices)
+    expected = slices.plan_slices(read_json(run.catalogue)["candidates"], cap=2500)
+
+    assert [s["id"] for s in document["slices"]] == [s.id for s in expected]
+    assert [s["candidate_ids"] for s in document["slices"]] == [
+        list(s.candidate_ids) for s in expected
+    ]
+    assert [s.id for s in plan] == [s.id for s in expected]
