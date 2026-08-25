@@ -1701,11 +1701,16 @@ says the reverse. Every test in the module stayed green in every case, and
 
 | Predicate | Inversion written into the skill |
 |---|---|
-| `:117` `…forbids_reading_candidate_digests` | "you **may** read every field of `candidates[]`, including each candidate's `digest`" (replaced by a windowed `…forbids_reading_a_shard`; see below) |
-| `:122` `…admits_that_a_map_is_thinner_than_the_digests` | "`supported` is a reliable verdict … this pass has no blind spot to flag" |
-| `:139` `…states_which_bytes_weight_sums` | `weight.bytes` sums serialized row size, "never a candidate's own catalogue `bytes`" |
-| `:168` `…explains_predicted_surface_count_is_a_prediction` | the member "has made an error … reconcile the member's count to this prediction" |
-| `:268` `test_the_rule_pass_inverts_the_decline_everything_refusal` | "**Refuse** if you would decline every candidate in your slice" |
+| `test_the_objective_pass_forbids_reading_candidate_digests` | "you **may** read every field of `candidates[]`, including each candidate's `digest`" (deleted; replaced by a windowed `…forbids_reading_a_shard`, see below) |
+| `test_the_objective_pass_admits_that_a_map_is_thinner_than_the_digests` | "`supported` is a reliable verdict … this pass has no blind spot to flag" |
+| `test_the_objective_pass_states_which_bytes_weight_sums` | `weight.bytes` sums serialized row size, "never a candidate's own catalogue `bytes`" |
+| `test_the_objective_pass_explains_predicted_surface_count_is_a_prediction` | the member "has made an error … reconcile the member's count to this prediction" |
+| `test_the_rule_pass_inverts_the_decline_everything_refusal` | "**Refuse** if you would decline every candidate in your slice" |
+
+Named rather than cited by line, because every line number this entry was
+written with has since drifted twice — the same reason
+`…forbids_reading_a_shard`'s own docstring sizes its window from a heading
+rather than from a line.
 
 The first is the consequential one. `CLAUDE.md`'s stage table describes
 `triage-objective` as the barrier that "reads the corpus map, **never a
@@ -1718,9 +1723,14 @@ prose that nothing checks.
 **The first one is now closed, and not by fixing the predicate.**
 `rb-triage-objective`'s `reads` no longer names `catalogue`, and
 `00-slices.json` carries no candidate digest, so the permission that inversion
-granted has nothing left to grant. What remains reachable is a *shard*: seven
-of them hold every candidate's full digest and on the tau2 corpus total
-470,455 bytes against the catalogue's 472,799. So the prohibition moved rather
+granted has nothing left to grant. What remains reachable is a *shard*: the
+shards hold every candidate's full digest between them, and their total is
+within a percent of the catalogue's own size — seven shards, 470,455 bytes
+against 472,799, on the tau2 catalogue the design was measured against, and
+eight shards, 479,204 against 480,399, on a re-run during this change. The
+counts and the absolutes are checkout-specific; that the shards come to very
+nearly the whole catalogue is what both measurements say. So the prohibition
+moved rather
 than resolved, and its replacement is windowed and measured in both
 directions. Its status improved as well as its guard: reading the catalogue
 was *in contract*, so nothing could call it a violation, whereas reading a
@@ -1729,19 +1739,24 @@ Auditable is not the same as impossible, and the remaining eleven are
 untouched.
 
 The five are not equally severe, and the difference is the mirror question
-`CLAUDE.md` asks of any proposed guard. `:139`'s property is already gated
-deterministically: `refs.check_objective` recomputes `weight.bytes` from the
-catalogue, so that predicate is redundant belt-and-braces and its vacuity costs
-nothing. `:168`'s is not gated anywhere — a member that quietly reconciles its
-observed surface count to the prediction erases the divergence from the data,
-and `gate-brief`'s predicted-vs-observed surface at gate 0 then has nothing to
-show. `:268` inverts a **refusal condition**, the do-not-refuse that keeps the
+`CLAUDE.md` asks of any proposed guard. `…states_which_bytes_weight_sums`'
+property is already gated deterministically: `refs.check_objective` recomputes
+`weight.bytes` from the catalogue, so that predicate is redundant
+belt-and-braces and its vacuity costs nothing.
+`…explains_predicted_surface_count_is_a_prediction`'s is not gated anywhere — a
+member that quietly reconciles its observed surface count to the prediction
+erases the divergence from the data, and `gate-brief`'s predicted-vs-observed
+surface at gate 0 then has nothing to show.
+`…inverts_the_decline_everything_refusal` inverts a **refusal condition**, the
+do-not-refuse that keeps the
 fan-out from stranding on a legitimately all-declines slice, which
 [`rationale.md`](rationale.md) uses as its worked example of decorativeness.
 
 **A better shape is known, because it was measured in the same file.** Inverting
-`rb-triage-objective`'s primary refusal condition left the unwindowed `:178`
-green and turned the windowed `:184` **red**. Same prose, same file, same
+`rb-triage-objective`'s primary refusal condition left the unwindowed
+`…refuses_on_an_absent_objective_and_not_on_an_unsupported_one` green and turned
+the windowed `…refuses_before_the_fanout_is_dispatched` **red**. Same prose,
+same file, same
 section: the shape of the predicate is the whole difference. The windowed
 predicates also hold in the other direction — the two tightest were recomputed
 from the shipped prose and their docstrings' stated distances are exact (the
@@ -1768,8 +1783,9 @@ meaning-preserving clause appended to that fourth mention's own sentence, ending
 below the shipped radius, past which the predicate passes against a skill whose
 Inputs section grants the opposite permission. One honest sentence
 inserted earlier in the section takes it to **107**; an earlier probe with a
-differently worded insertion measured **334**, 55% of the headroom gone. The
-figure depends entirely on where the new prohibition word lands, which is the
+differently worded insertion measured **334**, which still leaves only 34
+characters between the ceiling and the shipped radius. Every one of these
+figures depends entirely on where the new prohibition word lands, which is the
 point: nothing in the suite reports any of it, because the shipped prose still
 passes. A radius that is sound today is sound at the pleasure of prose nobody is
 watching for that effect.
@@ -1803,8 +1819,10 @@ rather than better, since the vocabulary is a list of tokens that make a window
 pass. Using it as a **veto** instead — red if a `not` sits near the mention —
 catches this one construction and is a length pin in disguise: the shipped
 section already carries `\bnot\b` within 300 characters of three of its four
-`shard` mentions ("the point is not that a digest is forbidden information"),
-and the veto survives only because the *first* mention happens to have none. One
+`shard` mentions — "precisely the unbounded read this pass exists **not** to
+perform" covers the second and third, and "this pass does **not** write
+`deficiencies[]`" the fourth — and the veto survives only because the *first*
+mention happens to have none. One
 honest sentence with a `not` in it near that first mention turns the predicate
 red against a correct skill. A negation that avoids the token at all — "a shard
 is yours to open, contrary to what an earlier draft said" — is untouched either
@@ -1812,13 +1830,14 @@ way.
 
 The second hole is a **misaimed** prohibition: "`decisions.md` is never yours. A
 shard under `00-slices/` is yours to open." puts the two tokens 15 characters
-apart and goes
-green from radius 15 — *below* the measured floor of 33, so no radius this
-predicate could legally take excludes it. A gentler arrangement of the same
-hole, with the prohibition trailing instead of leading, sits 75 characters away
-and is green only from 80; that one is refutable with "use radius 60", which is
-true of the example and false of the hole, which is why the sharper construction
-is the one recorded.
+apart and goes green from radius 15 — *below* the measured floor of 33, so no
+radius this predicate could legally take excludes it. A gentler arrangement of
+the same hole, with the prohibition trailing instead of leading — "a shard under
+`00-slices/` is yours to open, and the run's `decisions.md` is never yours." —
+sits 75 characters away and is green only from 80, so that one *is* refutable
+with "use radius 60", which is true of that sentence and false of the hole. The
+figure is wording-dependent in both directions, which is why the sharper
+construction is the one recorded.
 
 **The root is not the numbers.** A window can establish that a prohibition token
 sits *near* an object. It cannot establish that the prohibition *governs* that
@@ -1836,8 +1855,10 @@ a `do not` anywhere in it turns the predicate red against a correct skill. An
 ordinal-mention exclusion — "ignore the fourth `shard`" — keys on a position that
 drifts the moment an earlier mention is added.
 
-One predicate fails in the opposite direction: `:551` asserts `"is also a claim"
-in body or "is itself a claim" in body`, and rewording the audit's Output prose
+One predicate fails in the opposite direction:
+`test_the_audit_pass_writes_both_blocks_even_when_empty` asserts `"is also a
+claim" in body or "is itself a claim" in body`, and rewording the audit's Output
+prose
 to "is a claim in its own right" — meaning identical — turns it red. The
 module's `_norm` handles whitespace reflow; nothing handles synonym. The
 predicate is the wrong one, not the prose.

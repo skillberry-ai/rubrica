@@ -143,8 +143,12 @@ def test_the_objective_pass_forbids_reading_a_shard():
     `00-slices.json` carries no candidate digest at all, so the old form of
     this predicate -- "digest" and a prohibition word both somewhere in the
     section -- no longer even has a subject. What can still make this pass
-    unbounded is a shard: seven of them hold every candidate's full digest and
-    on the tau2 corpus total 470,455 bytes against the catalogue's 472,799.
+    unbounded is a shard: the shards hold every candidate's full digest between
+    them and come to within a percent of the catalogue's own size -- seven
+    shards, 470,455 bytes against 472,799, on the tau2 catalogue this design
+    was measured against, and eight shards, 479,204 against 480,399, on a
+    re-run of the same corpus later. The counts and the absolutes are
+    checkout-specific; the near-equality is what both measurements say.
 
     Windowed rather than section-wide, because the unwindowed form of this
     predicate was measured vacuous: inverting the skill to grant the opposite

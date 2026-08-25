@@ -157,7 +157,7 @@ in passes rather than in one dispatch: `triage-slices` (code) partitions the
 catalogue into byte-bounded shards, writing `00-slices.json`;
 `rb-triage-objective` (a prompt pass, not code) rules whether the declared
 objective is supported by the corpus map -- writing `00-objective.json` from
-`00-slices.json` and `00-catalogue.json` alone, never a candidate digest;
+`00-slices.json` alone, never the catalogue and never a candidate digest;
 `rb-triage-rule` (a fan-out prompt pass, one dispatch per slice) rules on
 every candidate in its own slice against that objective, admitting or
 declining with a reason and writing `00-dispositions/<slice_id>.json`;
