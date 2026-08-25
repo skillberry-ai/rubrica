@@ -276,8 +276,8 @@ def test_a_candidate_bytes_value_disagreeing_with_the_catalogue_is_reported(tmp_
     """The check that makes the whole block safe to read.
 
     check_objective recomputes weight.bytes from the catalogue's own
-    candidates[]. Once rb-triage-objective takes that same number from
-    candidate_bytes instead -- it still reads candidates[] directly today -- an
+    candidates[]. rb-triage-objective takes that same number from
+    candidate_bytes -- the catalogue is not in its reads at all -- so an
     unchecked drift here would surface the objective pass's *correct*
     arithmetic as a finding against 00-objective.json: a 1 naming the wrong
     artifact.

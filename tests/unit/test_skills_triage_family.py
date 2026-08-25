@@ -125,19 +125,40 @@ def _occurrences(body: str, token: str) -> list[int]:
 
 
 def test_the_objective_pass_declares_its_exact_contract():
-    """The brief's contract, verbatim: slices and catalogue, never the
-    shards or a per-slice dispositions part."""
+    """The brief's contract, verbatim: the plan alone -- never the catalogue,
+    the shards, or a per-slice dispositions part. The catalogue left this list
+    when 00-slices.json started carrying the facts this pass needs: reading
+    472,799 bytes for the 21KB it used was the residual half of issue #3."""
     skill = _objective()
     assert skill.contract["stage"] == "triage-objective"
-    assert skill.contract["reads"] == ["slices", "catalogue"]
+    assert skill.contract["reads"] == ["slices"]
     assert skill.contract["writes"] == ["objective"]
     assert skill.contract["schemas"] == ["objective"]
     assert skill.contract["invokes"] == ["validate"]
 
 
-def test_the_objective_pass_forbids_reading_candidate_digests():
+def test_the_objective_pass_forbids_reading_a_shard():
+    """The pass's bounding constraint, on the artifact that now holds the digests.
+
+    `00-slices.json` carries no candidate digest at all, so the old form of
+    this predicate -- "digest" and a prohibition word both somewhere in the
+    section -- no longer even has a subject. What can still make this pass
+    unbounded is a shard: seven of them hold every candidate's full digest and
+    on the tau2 corpus total 470,455 bytes against the catalogue's 472,799.
+
+    Windowed rather than section-wide, because the unwindowed form of this
+    predicate was measured vacuous: inverting the skill to grant the opposite
+    permission left it green. radius=300 against a measured distance of well
+    under 150 characters from each `shard` mention to its prohibition word.
+    """
     body = _norm(skills.section_body(_objective(), "1. Inputs"))
-    assert "digest" in body and ("not" in body or "never" in body)
+    indices = _occurrences(body, "shard")
+    assert indices, "the Inputs section never names a shard"
+    words = ("never", "not yours", "do not")
+    near_prohibition = any(
+        any(w in _window_around(body, at, radius=300) for w in words) for at in indices
+    )
+    assert near_prohibition, "no `shard` mention sits near a prohibition"
 
 
 def test_the_objective_pass_admits_that_a_map_is_thinner_than_the_digests():
@@ -893,7 +914,7 @@ def test_the_audit_pass_does_not_refuse_when_the_absence_walk_finds_nothing():
 @pytest.mark.parametrize(
     ("pass_name", "source"),
     [
-        ("rb-triage-objective", "00-catalogue.json"),
+        ("rb-triage-objective", "00-slices.json"),
         ("rb-triage-rule", "shard"),
         ("rb-triage-audit", "00-objective.json"),
     ],

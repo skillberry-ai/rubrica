@@ -181,10 +181,10 @@ def test_the_run_artifacts_a_stage_must_read_are_not_denied(settings):
 # --- triage --------------------------------------------------------------------
 #
 # triage-objective is a barrier pass (no slice id) reading only
-# 00-catalogue.json, so unlike `settings` above these two dispatch it directly
+# 00-slices.json, so unlike `settings` above these two dispatch it directly
 # rather than through the `propose`-shaped fixture. It stands in for the family
-# here because it is the pass whose input the family's own gate also reads,
-# which is what the second test needs.
+# here because its gate reads a file the pass itself does not, which is what
+# the second test needs.
 
 
 def test_the_triage_dispatch_denies_the_decisions_log(tmp_path):
@@ -209,8 +209,10 @@ def test_dispatch_hands_a_rule_member_its_slice_id():
 def test_the_triage_dispatch_does_not_deny_the_catalogue_it_must_read(tmp_path):
     """The mirror of the rule that cost two wrong denies: 2f93726 measured that
     denying a path check-refs reads makes a stage's own gate fabricate findings.
-    The catalogue is both triage-objective's only input and a path
-    check_catalogue reads."""
+    triage-objective no longer reads the catalogue itself -- `catalogue_facts`
+    on the plan is what it reads instead -- but check_catalogue and
+    check_slices both do, so denying it would break the gate rather than
+    tighten the dispatch."""
     run = tmp_path / "run"
     run.mkdir()
     perms, sandbox, _ = _paths(_dispatch(tmp_path, "triage-objective", str(run), run=run))

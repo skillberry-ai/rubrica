@@ -16,10 +16,11 @@ that writes them.
 
 - **Schema:** `src/rubrica/schema/catalogue-0.1.json`
 - **Written by:** `survey` (code)
-- **Read by:** `triage-slices` (code — the whole file, to partition it);
-  `rb-triage-objective` (`request`, `policy`, `excluded`, and
-  `candidates[].bytes` — never a `digest`); `intake` (the `--run` path,
-  admitting whatever triage already ruled on)
+- **Read by:** `triage-slices` (code — the whole file, to partition it, and to
+  project `request`, `policy`, `excluded` and `candidates[].bytes` onto the
+  plan's `catalogue_facts`, which is why `rb-triage-objective` reads the plan
+  and not this file); `intake` (the `--run` path, admitting whatever triage
+  already ruled on)
 - **Path:** `00-catalogue.json`
 
 Every candidate a survey found in a corpus, each with a bounded digest rather

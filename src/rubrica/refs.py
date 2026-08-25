@@ -462,19 +462,20 @@ def check_slices(run: RunPaths) -> list[Finding]:
     # being a plan minted before a human adopted a projection at gate 0,
     # rather than arithmetic this module could get wrong twice identically.
     #
-    # What selects a field for checking is the wrong-artifact hazard, not
-    # whether it was derived. check_objective recomputes weight.bytes from the
-    # catalogue's own candidates[], so once rb-triage-objective's reads narrow
-    # to 00-slices.json alone and it takes those same numbers from
-    # candidate_bytes instead, undetected drift here would surface that pass's
-    # *correct* arithmetic as a finding against 00-objective.json. Checking the
-    # plan is what keeps the 1 on the artifact actually at fault -- the
-    # exit-code contract's third rule, and what four fabricated `no such claim`
-    # findings against a correct world model once cost.
+    # Two criteria put a field in, and each field below carries its own. The
+    # first is the wrong-artifact hazard: check_objective recomputes
+    # weight.bytes from the catalogue's own candidates[], and
+    # rb-triage-objective's reads are 00-slices.json alone, so it takes those
+    # same numbers from candidate_bytes -- undetected drift here would surface
+    # that pass's *correct* arithmetic as a finding against 00-objective.json.
+    # Checking the plan is what keeps the 1 on the artifact actually at fault --
+    # the exit-code contract's third rule, and what four fabricated `no such
+    # claim` findings against a correct world model once cost.
     #
-    # The tally is in for a reader's reason rather than a recomputation's:
-    # nothing below intake reopens the corpus, so `total` and `by_reason` are
-    # the only account of what survey dropped that gate 0 will ever see.
+    # The second is a reader's rather than a recomputation's, and the tally is
+    # in on it: `total` and `by_reason` are the only account of what survey
+    # dropped that the objective pass can see, and a drifted tally is a lie no
+    # artifact it reads can correct.
     #
     # `request` and `policy` stay unchecked because they are verbatim copies,
     # and nothing verifies the shards' own copies of either. `excluded.entries`

@@ -260,8 +260,9 @@ The plan itself carries a `catalogue_facts` block for the same reason one step
 further out: `request` and `policy` verbatim, the catalogue's `excluded` array
 as a tally plus the paths for the exclusion reasons that embed a disputable
 judgment, and every candidate's own source `bytes` as a map. That is
-everything `rb-triage-objective` reads the catalogue for, so its dispatch is
-bounded by `max_candidates` rather than by corpus size. `canonical_bytes`
+everything `rb-triage-objective` needs from the catalogue, so that pass does
+not read the catalogue at all and its dispatch is bounded by `max_candidates`
+rather than by corpus size. `canonical_bytes`
 sorts keys, so the block and `run_id` both land ahead of the `slices` array.
 
 Required: `--run RUN`.
