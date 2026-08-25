@@ -376,3 +376,126 @@ def test_a_candidate_id_that_is_present_but_not_a_string_is_refused(tmp_path):
     write_json(run.catalogue, catalogue)
     with pytest.raises(UsageError):
         slices.write_slices(run, cap=2500)
+
+
+def _excl(reason, *, path_len=20):
+    """One catalogue exclusion, padded to a known byte cost."""
+    return {"path": "/corpus/" + "p" * path_len, "reason": reason}
+
+
+def test_the_tally_counts_every_exclusion_including_ones_whose_paths_are_dropped():
+    """`total` and `by_reason` describe the whole array, not the kept subset.
+
+    The tally is the only thing a human at gate 0 has to tell "the corpus had
+    123 binaries" from "the corpus had none", and `binary` is precisely a
+    reason whose paths this function drops. A tally computed over `entries`
+    would report zero binaries for a corpus full of them.
+    """
+    summary = slices.excluded_summary(
+        [_excl("binary") for _ in range(123)] + [_excl("duplicate") for _ in range(11)]
+    )
+    assert summary["total"] == 134
+    assert summary["by_reason"] == {"binary": 123, "duplicate": 11}
+    assert len(summary["entries"]) == 11
+    assert {e["reason"] for e in summary["entries"]} == {"duplicate"}
+
+
+def test_only_reasons_carrying_a_judgment_keep_their_paths():
+    """The four disputable reasons keep paths; the four mechanical ones do not.
+
+    Asserted as set equality over both halves rather than "duplicate is kept",
+    so adding a ninth exclusion_reason without ruling on which side it falls
+    fails here instead of silently defaulting to dropped.
+    """
+    every = [
+        "duplicate",
+        "operator_excluded",
+        "unreadable",
+        "vendored",
+        "gitignored",
+        "vcs_metadata",
+        "binary",
+        "lockfile",
+    ]
+    summary = slices.excluded_summary([_excl(r) for r in every])
+    assert summary["total"] == 8
+    assert {e["reason"] for e in summary["entries"]} == set(slices.DISPUTABLE_EXCLUSION_REASONS)
+    assert set(slices.DISPUTABLE_EXCLUSION_REASONS) == {
+        "duplicate",
+        "operator_excluded",
+        "unreadable",
+        "vendored",
+    }
+
+
+def test_by_reason_is_sorted_so_two_runs_produce_one_byte_shape():
+    """Insertion order must not reach the document: the plan is byte-compared."""
+    summary = slices.excluded_summary(
+        [_excl("vendored"), _excl("binary"), _excl("duplicate"), _excl("binary")]
+    )
+    assert list(summary["by_reason"]) == ["binary", "duplicate", "vendored"]
+
+
+def test_an_empty_exclusion_list_produces_the_zero_shape_not_absent_keys():
+    """Every key is present at zero, because the toy fixture excludes nothing.
+
+    `tests/fixtures/toy/` surveys to `excluded: []`, so this is the shape every
+    toy-based test in the suite sees. Absent keys here would make the schema's
+    `required` list unsatisfiable on the fixture the whole suite is built on.
+    """
+    assert slices.excluded_summary([]) == {
+        "total": 0,
+        "by_reason": {},
+        "entries": [],
+        "entries_truncated": False,
+    }
+
+
+def test_the_entry_block_is_bounded_by_bytes_and_says_so_when_it_bit():
+    """The budget stops filling before it is exceeded, and records that it did.
+
+    A count cap is what issue #8 is open about: `digest`'s `names` is capped at
+    64 entries and unbounded in characters, so a verbose value makes `survey`
+    exit 2 on a row that used to be small. Paths vary in length far more than
+    tool names do, so this block is bounded in bytes.
+    """
+    many = [_excl("duplicate", path_len=400) for _ in range(40)]
+    summary = slices.excluded_summary(many)
+
+    assert summary["entries_truncated"] is True
+    assert summary["total"] == 40, "the tally still describes all forty"
+    assert summary["by_reason"] == {"duplicate": 40}
+    kept = summary["entries"]
+    assert 0 < len(kept) < 40
+    # The invariant is "the longest prefix that fits", so the block is under
+    # the budget and one more entry would have broken it.
+    assert len(canonical_bytes(kept)) <= slices.MAX_EXCLUDED_ENTRY_BYTES
+    assert len(canonical_bytes([*kept, many[len(kept)]])) > slices.MAX_EXCLUDED_ENTRY_BYTES
+
+
+def test_truncation_stops_filling_rather_than_skipping_to_smaller_entries():
+    """Once the budget bites the block ends, even if a later entry would fit.
+
+    Fill-what-fits would make the kept set depend on the size of entries the
+    operator never sees, so two corpora differing only in one long path would
+    produce entry lists that are not prefixes of each other. A prefix is
+    explainable at gate 0; a subset chosen by size is not.
+    """
+    entries = [_excl("duplicate", path_len=9000), _excl("duplicate", path_len=10)]
+    summary = slices.excluded_summary(entries)
+    assert summary["entries"] == [], "the first entry alone exceeds the budget"
+    assert summary["entries_truncated"] is True
+
+
+def test_a_malformed_exclusion_entry_does_not_raise():
+    """`excluded` is schema-required to hold objects, but this runs before validate.
+
+    `write_slices` is reached with whatever is on disk. A non-object entry
+    counts toward `total` -- it is an exclusion the catalogue records -- and
+    contributes no reason, rather than crashing a code stage into the exit 2
+    that means "no retry can help".
+    """
+    summary = slices.excluded_summary(["nonsense", 7, None, _excl("duplicate")])
+    assert summary["total"] == 4
+    assert summary["by_reason"] == {"duplicate": 1}
+    assert len(summary["entries"]) == 1

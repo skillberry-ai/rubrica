@@ -121,6 +121,66 @@ def oversized_rows(
     ]
 
 
+# Four of the eight exclusion_reason values embed a judgment that could be
+# wrong, and those are the ones an operator could dispute at gate 0: an
+# --exclude that over-reached, a permissions failure, a near-duplicate that is
+# not one, a heuristic vendored-detection. The other four -- gitignored,
+# vcs_metadata, binary, lockfile -- are mechanical facts about a file with no
+# scoping decision in them. Measured on the tau2 catalogue: keeping these four
+# kept all 11 `duplicate` entries and dropped 123 `binary` paths, 1,062 bytes
+# against 12,914 for the whole array.
+DISPUTABLE_EXCLUSION_REASONS = ("duplicate", "operator_excluded", "unreadable", "vendored")
+
+# A byte budget rather than an entry count, and the reason is a defect open
+# against this repository right now: digest's `names` is capped at 64 entries
+# and unbounded in characters, so one verbose tool name makes survey exit 2 on
+# a row that used to be small. Paths vary in length far more than tool names
+# do, so a count cap here would reproduce that defect in a new place.
+# Truncating a path is not the alternative -- a mangled path cannot be
+# disputed at a gate -- so the block is bounded rather than its contents.
+MAX_EXCLUDED_ENTRY_BYTES = 8192
+
+
+def excluded_summary(excluded: list) -> dict:
+    """`excluded` compressed to a tally plus the paths an operator could dispute.
+
+    Shared with refs.check_slices rather than mirrored there, the same way
+    check 5 recomputes a slice's bytes through row_bytes: what the check is
+    for is drift between the plan and the catalogue -- a plan minted before a
+    human adopted a projection at gate 0 -- not whether this arithmetic is
+    right. A second implementation would let a defect in this one pass both.
+
+    `total` counts every element of the array, including entries this function
+    keeps no path for and entries too malformed to carry a reason, because it
+    is the only thing at gate 0 that separates "the corpus had 123 binaries"
+    from "the corpus had none".
+    """
+    tally: Counter[str] = Counter()
+    entries: list[dict] = []
+    truncated = False
+    for entry in excluded:
+        if isinstance(entry, dict) and isinstance(reason := entry.get("reason"), str):
+            tally[reason] += 1
+        else:
+            continue
+        if truncated or reason not in DISPUTABLE_EXCLUSION_REASONS:
+            continue
+        # Stop filling rather than skip to whatever still fits: the kept list
+        # must be a prefix, so two corpora differing in one long path produce
+        # entry lists one of which is a prefix of the other. A prefix is
+        # explainable at a gate; a subset chosen by size is not.
+        if len(canonical_bytes([*entries, entry])) > MAX_EXCLUDED_ENTRY_BYTES:
+            truncated = True
+            continue
+        entries.append(entry)
+    return {
+        "total": len(excluded),
+        "by_reason": dict(sorted(tally.items())),
+        "entries": entries,
+        "entries_truncated": truncated,
+    }
+
+
 def _str_tuple(value: object) -> tuple[str, ...]:
     """Every string in `value`, sorted -- or an empty tuple for anything else.
 
