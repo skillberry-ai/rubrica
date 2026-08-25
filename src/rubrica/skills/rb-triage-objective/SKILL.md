@@ -186,9 +186,8 @@ assigns to a group you fold into a surface becomes that surface's evidence.
 **Step 4 -- weigh each surface and rule on the objective.** For each surface,
 sum `weight.candidates` (distinct evidence ids) and `weight.bytes` (each
 evidence candidate's entry in `catalogue_facts.candidate_bytes`, per §2). Then
-answer: can
-the declared objective be met from a corpus shaped like this? Write
-`supported`, and `recommended_objective` if you disagree -- see §2's
+answer: can the declared objective be met from a corpus shaped like this?
+Write `supported`, and `recommended_objective` if you disagree -- see §2's
 invariant on acting on it.
 
 **Step 5 -- predict how many surfaces a digest-level reading will find.**

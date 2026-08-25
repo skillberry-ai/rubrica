@@ -148,8 +148,21 @@ def test_the_objective_pass_forbids_reading_a_shard():
 
     Windowed rather than section-wide, because the unwindowed form of this
     predicate was measured vacuous: inverting the skill to grant the opposite
-    permission left it green. radius=300 against a measured distance of well
-    under 150 characters from each `shard` mention to its prohibition word.
+    permission left it green.
+
+    Measured unbounded rather than clipped to the window: the section holds
+    exactly three prohibition words, all of them `never`, and its four `shard`
+    mentions sit 28, 123, 176 and 743 characters from the nearest one. The
+    first three all resolve to the *same* `never` -- the one inside the
+    prohibition sentence itself -- so this is an OR over mentions and the
+    module's floor applies to the nearest alternative: radius=300 against 28 is
+    a ~10.7x margin, not the ~1.7x that reading 176 as the governing distance
+    would suggest. The fourth mention ("firming up a surface judgment by
+    opening a shard") is 743 away and outside the window on purpose -- it
+    states the consequence, not the prohibition. Keeping it out is not
+    automatic: it sat 220 away, inside the window, until the sentence above it
+    was reworded from "never by how large they are" to "rather than by how
+    large they are", and at 220 the inversion probe below passed for free.
     """
     body = _norm(skills.section_body(_objective(), "1. Inputs"))
     indices = _occurrences(body, "shard")
@@ -187,9 +200,10 @@ def test_the_objective_pass_names_objective_reviews_three_required_keys():
     `surfaces`; this pass names the first two and, before the fix, referred to
     the third only as prose ("the surfaces the corpus map shows", "group the
     map's groups into surfaces"). Nothing it reads carries the shape either:
-    `00-slices.json` and `00-catalogue.json` hold no `objective_review` to copy
-    from, so the key was one a member had to invent -- the same position the
-    dispositions pass was in when three dispatches invented `verdict`.
+    `00-slices.json` is now this pass's only input and holds no
+    `objective_review` to copy from, so the key was one a member had to invent
+    -- the same position the dispositions pass was in when three dispatches
+    invented `verdict`.
 
     The reader/writer asymmetry is what makes this worth its own predicate:
     `rb-triage-rule` names ``00-objective.json``'s `surfaces` in key position
@@ -211,10 +225,12 @@ def test_the_objective_pass_names_objective_reviews_three_required_keys():
 
 
 def test_the_objective_pass_states_which_bytes_weight_sums():
-    """The ruling task 11's brief settles: weight.bytes sums each evidence
-    candidate's own catalogue `bytes` field (source file size), never a
-    slice's or a serialized row's size -- a saturating metric cannot express
-    weight once the digest's 128-node skeleton clamp caps row size."""
+    """The ruling task 11's brief settles, restated onto the field that now
+    carries the number: weight.bytes sums each evidence candidate's entry in
+    the plan's `catalogue_facts.candidate_bytes` (the source file's size),
+    never `slices[].bytes` or any other serialized row's size -- a saturating
+    metric cannot express weight once the digest's 128-node skeleton clamp caps
+    row size."""
     body = _norm(skills.section_body(_objective(), "2. Output"))
     assert "weight.bytes" in body or "weight" in body
     assert "bytes" in body

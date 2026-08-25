@@ -262,8 +262,8 @@ as a tally plus the paths for the exclusion reasons that embed a disputable
 judgment, and every candidate's own source `bytes` as a map. That is
 everything `rb-triage-objective` needs from the catalogue, so that pass does
 not read the catalogue at all and its dispatch is bounded by `max_candidates`
-rather than by corpus size. `canonical_bytes`
-sorts keys, so the block and `run_id` both land ahead of the `slices` array.
+rather than by corpus size. `canonical_bytes` sorts keys, so the block and
+`run_id` both land ahead of the `slices` array.
 
 Required: `--run RUN`.
 

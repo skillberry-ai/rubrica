@@ -485,8 +485,11 @@ def check_slices(run: RunPaths) -> list[Finding]:
     # retained element verbatim. It is out because a mismatch message would
     # inline up to MAX_EXCLUDED_ENTRY_BYTES twice on one line, against a
     # contract that wants one *readable* finding per line. Its truncation flag
-    # is checked below: that is one boolean, and a stale `false` tells a gate-0
-    # reader the disputable list is complete when it is not.
+    # is checked below on the same reader's grounds as the tally, and scoped the
+    # same way: that is one boolean, and a stale `false` tells the objective
+    # pass the disputable list is complete when it is not. Not a gate-0 human --
+    # `entries_truncated` is never rendered by brief.py, so the only party the
+    # flag can mislead is the pass that reads the plan and nothing else.
     facts = plan.get("catalogue_facts")
     if isinstance(facts, dict) and isinstance(catalogue, dict):
         # Both halves skip on an unreadable or wrong-shaped catalogue rather

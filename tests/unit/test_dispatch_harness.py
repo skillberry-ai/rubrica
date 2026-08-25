@@ -210,9 +210,11 @@ def test_the_triage_dispatch_does_not_deny_the_catalogue_it_must_read(tmp_path):
     """The mirror of the rule that cost two wrong denies: 2f93726 measured that
     denying a path check-refs reads makes a stage's own gate fabricate findings.
     triage-objective no longer reads the catalogue itself -- `catalogue_facts`
-    on the plan is what it reads instead -- but check_catalogue and
-    check_slices both do, so denying it would break the gate rather than
-    tighten the dispatch."""
+    on the plan is what it reads instead -- and its own gate cannot either,
+    since its contract is `invokes = ["validate"]`. What a deny would break is
+    a *later* `rubrica check-refs`: check_catalogue and check_slices both read
+    the file, and RUN_DENY is one global list rather than a per-stage one, so a
+    path denied here is denied to every dispatch whose gate does run it."""
     run = tmp_path / "run"
     run.mkdir()
     perms, sandbox, _ = _paths(_dispatch(tmp_path, "triage-objective", str(run), run=run))
