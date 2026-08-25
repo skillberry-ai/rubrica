@@ -536,12 +536,26 @@ def test_a_chat_trajectory_is_one_admissible_candidate_and_is_not_exploded(tmp_p
     `survey.explode` in prose, never calls it. So classification and digesting
     were each covered and their meeting inside `survey`'s corpus loop was not.
 
-    Measured with the `is_message_list` gate reverted: this file explodes into
-    four `container_element` candidates, each classified `other` by
-    `classify_payload` and digested to a one-turn skeleton, and the one row
-    carrying the behavioural digest gets `admissible: False` -- the exact
-    inversion, since a container may not be admitted. Every assertion below goes
-    red in that state.
+    Measured with the `is_message_list` gate reverted: the catalogue grows from 1
+    candidate to 5 -- this file explodes into four `container_element` rows, each
+    classified `other` by `classify_payload` and digested to a one-turn skeleton,
+    while the row carrying the behavioural digest gets `admissible: False`, since
+    a container may not be admitted.
+
+    **Exactly two of the assertions below go red in that state**, and it is worth
+    knowing which, because the rest are not idle: `admissible is True` and the
+    empty-`container_element` list are the two that pin this fix. Everything else
+    stays green, measured, and for reasons that say what it does pin instead.
+    `validate_stage` passes either way -- a catalogue full of exploded elements is
+    schema-valid, which is exactly why no gate caught this. `kind == "trace"`
+    comes from `classify(path)`, which explosion never touched. `len(episodes) ==
+    1` holds even when the file explodes, because container elements carry no
+    `path` key at all and so never enter that filter -- it reads like it pins the
+    fix and does not. And every digest assertion holds because the corpus row's
+    digest comes from `digest_for_path`, which explosion does not reach; those
+    five guard the *kept* row against a regression that routed a message list to
+    the skeleton producer, which is a different defect from this one and equally
+    worth a guard.
     """
     run = _survey(tmp_path, corpus_roots=[_metadata_rich_trajectory_corpus(tmp_path)])
 

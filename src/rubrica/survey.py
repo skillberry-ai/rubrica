@@ -420,8 +420,8 @@ def survey(
                 # candidate, and the digest heuristics record that.
                 #
                 # A conversation is exempt, and the parse happens here rather
-                # than inside the `explode` call so this check can see the
-                # payload. A trajectory is one episode whose records are turns,
+                # than inside the `explode` call so this check can see what was
+                # parsed. A trajectory is one episode whose records are turns,
                 # not a container of independent records -- message 7 is
                 # unreadable without 1 through 6, the same shape the OpenAPI
                 # ruling keeps whole. Exploding one is doubly wrong: the file
@@ -431,12 +431,18 @@ def survey(
                 # message is admitted instead as its own candidate, which
                 # `classify_payload` calls `other` and digests to a one-turn
                 # skeleton with no tool name, no request text and no sibling
-                # context. Measured on a metadata-rich capture of tau2-bench:
-                # the per-episode key intersection is exactly 4 on all 200
-                # episodes and all 200 carry at least 3 messages, so 200 of 200
-                # satisfied `EXPLODE_MIN_COMMON_KEYS` -- 200 files plus 5,800
-                # message rows, 6,000 candidates against a
-                # DEFAULT_MAX_CANDIDATES of 500.
+                # context.
+                #
+                # Measured on the four metadata-rich airline result files under
+                # tau2-bench's `data/tau2/results/final`, and scoped to them by
+                # name because the per-file totals vary -- an unqualified
+                # file-dependent figure is unfalsifiable. Invariant across all
+                # four: the per-episode key intersection is exactly 4 on all 200
+                # episodes, all 200 carry at least 3 messages, and so 200 of 200
+                # satisfy `EXPLODE_MIN_COMMON_KEYS` in every one of them. Only
+                # the size of the wreckage varies -- 4,374 to 5,800 message rows,
+                # so 4,574 to 6,000 candidates against a DEFAULT_MAX_CANDIDATES
+                # of 500, an order of magnitude past the cap in all four.
                 #
                 # Gated on `is_message_list` and deliberately never on
                 # `kind == "trace"`: a parsec-shaped list of `{spans, trace_id}`
@@ -446,9 +452,9 @@ def survey(
                 # files): `is_message_list` is False for all three, so this gate
                 # changes no corpus already surveyed here.
                 try:
-                    payload = json.loads(path.read_text(encoding="utf-8"))
-                    if not digest_module.is_message_list(payload):
-                        exploded = explode(payload)
+                    parsed = json.loads(path.read_text(encoding="utf-8"))
+                    if not digest_module.is_message_list(parsed):
+                        exploded = explode(parsed)
                 except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError):
                     exploded = None
 

@@ -206,14 +206,18 @@ def _has_error_key(node: Any, depth: int) -> bool:
             # `False` belongs in the emptiness tuple, and it carries `0` with it:
             # `in` compares by equality and `0 == False`, so one entry covers the
             # boolean flag and the zero count alike. Without it, a field that
-            # explicitly states no error occurred *asserted* one -- measured on a
-            # metadata-rich capture of tau2-bench, whose messages carry a
-            # top-level `error: False`: this fired on 200 of 200 episodes,
-            # including all 100 that scored `reward == 1.0`, and `error_markers`
-            # reached triage as a found fact about every successful episode. That
-            # is worse than silence, because `rb-triage-rule` reads a failing
-            # trace as almost never a near-duplicate of a successful one and this
-            # asserted failure everywhere. `{"error": None}` was already correct.
+            # explicitly states no error occurred *asserted* one -- measured on
+            # each of the four metadata-rich airline result files under
+            # tau2-bench's `data/tau2/results/final`, whose messages carry a
+            # top-level `error: False`: this fired on 200 of 200 episodes in all
+            # four, including every episode that scored `reward == 1.0`. No count
+            # here on purpose: how many episodes succeeded varies by file, and the
+            # point is that success and failure were indistinguishable rather than
+            # how many of each there were. `error_markers` reached triage as a
+            # found fact about every successful episode, which is worse than
+            # silence, because `rb-triage-rule` reads a failing trace as almost
+            # never a near-duplicate of a successful one and this asserted failure
+            # everywhere. `{"error": None}` was already correct.
             if key.lower() in _ERROR_KEYS and value not in (None, "", [], {}, False):
                 return True
             if _has_error_key(value, depth - 1):
