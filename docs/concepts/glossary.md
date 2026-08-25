@@ -245,8 +245,10 @@ no entry there, and their absence is not a finding.
 
 The survey's stated aim, `breadth` or `depth`, recorded in
 `request.objective` in the catalogue (`src/rubrica/schema/catalogue-0.1.json`)
-and read by `rb-triage-objective` before any candidate is ruled on. That pass
-judges whether
+and copied verbatim onto the slice plan's `catalogue_facts.request`
+(`src/rubrica/schema/slices-0.1.json`), which is where
+`rb-triage-objective` reads it before any candidate is ruled on — that pass
+never opens the catalogue itself. It judges whether
 the objective is `supported` against the surfaces it found — `depth` on a surface
 with one candidate is not supported, and neither is `breadth` when almost every
 surface has no behavioural evidence at all. It may record a
@@ -462,15 +464,22 @@ subjects — see `docs/design/limitations.md`.
 
 A coherent region of the target's behaviour that a suite could be built about:
 a persona, an API area, a workflow, a subsystem. `rb-triage-objective` groups
-every candidate into exactly one surface — including the ones it declines — and
-records each with a `name`, the `evidence` candidate ids, and a `weight` of
-`{candidates, bytes}` that is plain arithmetic over the catalogue so a reader
-can check it — `refs.check_objective` recomputes both numbers and reports a
-disagreement (`src/rubrica/schema/triage-0.1.json`'s
+the slice plan's own `groups` and slice labels into surfaces by what they are
+evidence *about* — one surface can span several groups, and one group can be a
+surface on its own — and records each with a `name`, the `evidence` candidate
+ids, and a `weight` of `{candidates, bytes}` that is plain arithmetic so a
+reader can check it — `refs.check_objective` recomputes both numbers and reports
+a disagreement (`src/rubrica/schema/triage-0.1.json`'s
 `objective_review.surfaces[]`; the term itself is defined in
-`src/rubrica/skills/rb-triage-objective/SKILL.md`). `weight.bytes` sums each
-evidence candidate's own `bytes` — the size of the source file — and never the
-size of its serialised catalogue row. A row is clamped, so row size saturates:
+`src/rubrica/skills/rb-triage-objective/SKILL.md`). It declines nothing: a
+candidate is admitted or declined by the per-slice `rb-triage-rule` fan-out
+that runs after it. `weight.bytes` sums each evidence candidate's entry in
+`00-slices.json`'s `catalogue_facts.candidate_bytes` — the size of the source
+file — and never the size of its serialised catalogue row. The pass reads that
+map rather than the catalogue, and `refs.check_objective` recomputes the same
+sum from the catalogue's own `candidates[].bytes`; the two agree by
+construction, and that agreement is what `refs.check_slices` verifies. A row is
+clamped, so row size saturates:
 a 2.7MB source and a 20KB one can serialise to nearly the same row, and a
 weight that saturates stops discriminating exactly where this pass needs it.
 

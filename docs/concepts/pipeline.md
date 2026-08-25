@@ -26,7 +26,7 @@ contract, not a diagram convention.
 |---|---|---|---|---|---|
 | — | `survey` | code — walks a corpus and mints the run | the corpus roots you name, plus target name, interface, objective | `00-catalogue.json` | validate |
 | — | `triage-slices` | code — partitions the catalogue into byte-bounded slices | `00-catalogue.json` only | `00-slices.json`, `00-slices/<id>.json` | validate |
-| — | `triage-objective` | `rb-triage-objective` | `00-slices.json`, `00-catalogue.json` — never a candidate digest | `00-objective.json` | validate |
+| — | `triage-objective` | `rb-triage-objective` | `00-slices.json` only — its `catalogue_facts` block, never a shard's digests | `00-objective.json` | validate |
 | — | `triage-rule` | `rb-triage-rule` — fan-out, one per slice | its own `00-slices/<slice_id>.json` shard, and `00-objective.json` — never a sibling's shard | `00-dispositions/<slice_id>.json` | validate |
 | — | `triage-audit` | `rb-triage-audit` — dispatched once every `triage-rule` member has landed | `00-objective.json`, every file in `00-dispositions/` — never a shard, never a candidate | `00-audit.json` | validate · check-refs |
 | — | `triage-seal` | code — assembles the triage record from the staged parts | `00-objective.json`, `00-slices.json`, `00-dispositions/<slice>.json`, `00-audit.json`, `00-adoptions.json` (optional) | `00-triage.json` | validate · human gate 0 |

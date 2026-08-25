@@ -635,6 +635,28 @@ every entry this design added to this file wherever the arithmetic guessed
 wrong. Until that exists, the staged family is a well-tested hypothesis about
 judgment and not a demonstrated improvement in it.
 
+### Issue #3 was closed on arithmetic, and the run that would confirm it has not happened
+
+The death issue #3 reports is real and was observed twice: the monolithic
+`rb-triage` stage died on a 595KB / 351-candidate catalogue, once in context
+compaction and once by exhausting its whole dollar budget. What closed the
+issue is not a run that survived it. It is a partition whose shards measure
+small enough to hold, plus a `catalogue_facts` block that takes the one
+remaining unbounded pass from 472,799 bytes to 51,792 — both arithmetic over
+catalogues that already existed, which is the entry above this one restated
+about a specific issue.
+
+The gap is narrow and worth naming precisely. That the objective pass's input
+now fits one `Read` is measured and not in doubt. That a dispatch which *fits*
+produces a better **judgment** than one that died is the claim the whole design
+rests on, and it is the claim nothing here measures.
+
+Recorded rather than parked-with-a-fix because the fix is a dispatch, not a
+change: run the staged family against a parsec-class corpus and write what
+happened into the passes' `exercise.md` files. Until then, a reader who finds
+#3 closed should not infer that anyone watched `00-triage.json` get written on
+the corpus that killed the monolith.
+
 ### The loop's stopping rule is blind to goal-coverage progress
 
 `coverage-0.1.json` defines `progress` as exactly `new_cells_this_round` plus
@@ -950,8 +972,11 @@ and why `rb-orchestrate` never dispatches one of them at all.
 ### `supported` is ruled from a corpus map, not from the digests
 
 `rb-triage-objective` runs before any candidate has been ruled on, and its input
-is `request` plus a code-computed corpus map: the directory tree, kind and byte
-counts per subtree, the slice labels and their sizes. It reads no digest at all.
+is `00-slices.json` alone: the slice labels and their sizes, each group's
+provenance, and the `catalogue_facts` block's `request`, `policy`, exclusion
+tally and per-candidate source bytes. It reads no digest, and as of the
+`catalogue_facts` change that is structural rather than instructed — the file
+it reads contains none.
 So `supported`, the surfaces it enumerates, and each surface's weight are ruled
 from directory names and byte counts — and a surface ruling made from that view
 can be wrong in ways a reading of the digests would not have been. Two subtrees
@@ -1650,9 +1675,16 @@ re-measuring predicates that are currently pinned in four directions.
 
 `tests/unit/test_skills_triage_family.py` contains two shapes of prose
 predicate. The windowed shape — `_window_after` / `_window_around` around an
-anchor token — constrains what it claims to. The plain `"X" in body and "Y" in
-body` shape does not, and there are **fourteen** of them (`grep -c "in body
-and"`). The section scoping via `skills.section_body` that `CLAUDE.md` requires
+anchor token — constrains a great deal more, though not everything this entry
+originally claimed for it; the last third of this entry is what a second round
+of measurement found on its other edge. The plain `"X" in body and "Y" in body`
+shape constrains almost nothing. Fourteen was the count when this entry was
+written, and the count was taken from `grep -c "in body and"`, which was two
+too many: two of those hits are prose inside docstrings rather than assertions,
+so the plain shape covered twelve predicates then and eleven now, one of them
+having been converted by the `catalogue_facts` change. The heading keeps the
+original number because the number is the entry's name, not its measurement.
+The section scoping via `skills.section_body` that `CLAUDE.md` requires
 is present in both, so these are not the vacuous-against-the-whole-file case
 that convention already closed; they are vacuous *within a correctly scoped
 section*, because a section that says a thing and a section that says its
@@ -1666,7 +1698,7 @@ says the reverse. Every test in the module stayed green in every case, and
 
 | Predicate | Inversion written into the skill |
 |---|---|
-| `:117` `…forbids_reading_candidate_digests` | "you **may** read every field of `candidates[]`, including each candidate's `digest`" |
+| `:117` `…forbids_reading_candidate_digests` | "you **may** read every field of `candidates[]`, including each candidate's `digest`" (replaced by a windowed `…forbids_reading_a_shard`; see below) |
 | `:122` `…admits_that_a_map_is_thinner_than_the_digests` | "`supported` is a reliable verdict … this pass has no blind spot to flag" |
 | `:139` `…states_which_bytes_weight_sums` | `weight.bytes` sums serialized row size, "never a candidate's own catalogue `bytes`" |
 | `:168` `…explains_predicted_surface_count_is_a_prediction` | the member "has made an error … reconcile the member's count to this prediction" |
@@ -1680,6 +1712,19 @@ Granting the opposite permission in the skill's own Inputs section *and* in
 Invariant 1 left the whole unit suite green. The design's bounding constraint is
 prose that nothing checks.
 
+**The first one is now closed, and not by fixing the predicate.**
+`rb-triage-objective`'s `reads` no longer names `catalogue`, and
+`00-slices.json` carries no candidate digest, so the permission that inversion
+granted has nothing left to grant. What remains reachable is a *shard*: seven
+of them hold every candidate's full digest and on the tau2 corpus total
+470,455 bytes against the catalogue's 472,799. So the prohibition moved rather
+than resolved, and its replacement is windowed and measured in both
+directions. Its status improved as well as its guard: reading the catalogue
+was *in contract*, so nothing could call it a violation, whereas reading a
+sibling's shard breaks the fan-out isolation rule and a read audit catches it.
+Auditable is not the same as impossible, and the remaining eleven are
+untouched.
+
 The five are not equally severe, and the difference is the mirror question
 `CLAUDE.md` asks of any proposed guard. `:139`'s property is already gated
 deterministically: `refs.check_objective` recomputes `weight.bytes` from the
@@ -1691,7 +1736,7 @@ show. `:268` inverts a **refusal condition**, the do-not-refuse that keeps the
 fan-out from stranding on a legitimately all-declines slice, which
 [`rationale.md`](rationale.md) uses as its worked example of decorativeness.
 
-**The remedy is known because it was measured, in the same file.** Inverting
+**A better shape is known, because it was measured in the same file.** Inverting
 `rb-triage-objective`'s primary refusal condition left the unwindowed `:178`
 green and turned the windowed `:184` **red**. Same prose, same file, same
 section: the shape of the predicate is the whole difference. The windowed
@@ -1699,8 +1744,94 @@ predicates also hold in the other direction — the two tightest were recomputed
 from the shipped prose and their docstrings' stated distances are exact (the
 objective's Invariants anchor sits 142 chars from the nearest prohibition word
 inside a radius-300 forward window, 2.11x; the audit's `deficiency_notes` anchor
-208 chars from `your job` inside radius 500, 2.40x), so the 2x floor holds and no
-window on this branch is a length pin in disguise.
+208 chars from `your job` inside radius 500, 2.40x), so the 2x floor this
+module's docstring sets is met by every window in it.
+
+**But a window has two edges, and the floor is the only one this repo has ever
+measured.** The `catalogue_facts` change swept the replacement predicate,
+`test_the_objective_pass_forbids_reading_a_shard`, in both directions and found
+a working band rather than a floor with open space above it: `radius ∈ [33,
+747]`. Below 33 the predicate goes red against the correct prose. From 748 up it
+goes green against *inverted* prose, which is what vacuous means. The shipped
+`radius=300` therefore sits 9.09x above the floor and 2.49x below vacuity — a
+value inside a band, not a value with room to spare.
+
+**The upper edge is a property of the skill's prose, not of the test.** 747
+holds only because the section's fourth `shard` mention sits 743 characters from
+the section's next `never`; any honest edit that puts a prohibition word closer
+to any mention lowers it. Two were tried against the shipped file. A
+meaning-preserving clause appended to that fourth mention's own sentence, ending
+"and a pass that spends it is never bounded again", takes the ceiling to **75** —
+below the shipped radius, past which the predicate passes against a skill whose
+Inputs section grants the opposite permission. One honest sentence
+inserted earlier in the section takes it to **107**; an earlier probe with a
+differently worded insertion measured **334**, 55% of the headroom gone. The
+figure depends entirely on where the new prohibition word lands, which is the
+point: nothing in the suite reports any of it, because the shipped prose still
+passes. A radius that is sound today is sound at the pleasure of prose nobody is
+watching for that effect.
+
+**Neither probe direction can detect that.** Deletion and inversion are both run
+against the real prose at authoring time; soundness after some future honest
+edit is a claim about a counterfactual the suite never holds. It is the same
+blind spot this module's docstring already records for a too-tight window,
+mirrored: there an honest lengthening fails a *correct* skill, here it passes an
+*incorrect* one, and both are invisible to the probe that was actually run.
+
+**The prohibition vocabulary matched substrings until the `catalogue_facts`
+change fixed it in that one predicate.** `never` is a substring of `whenever`,
+and an inversion reading "yours to open whenever you like" passed at radius 300 —
+the inversion
+probe defeated by the vocabulary it was probing with. That predicate now matches
+on `\b` boundaries; the eleven plain predicates still match unanchored. The
+vocabulary is also narrower in practice than it reads: of its three
+alternatives — `never`, `not yours`, `do not` — only `never` occurs in the
+section at all, three times, so every distance and both band edges above belong
+to one word.
+
+**Two holes no radius and no boundary matching reaches**, both confirmed by
+construction rather than reasoned about. The first is a **negated** prohibition:
+"it is not the case that a shard under `00-slices/` is never yours to open"
+puts `\bnever\b` 28 characters from `shard` and goes green from radius 33 —
+both numbers byte for byte the shipped sentence's own, so the correct
+prohibition and its negation are *indistinguishable* in the only quantity a
+window measures. Adding `not` to the *prohibition* vocabulary makes this worse
+rather than better, since the vocabulary is a list of tokens that make a window
+pass. Using it as a **veto** instead — red if a `not` sits near the mention —
+catches this one construction and is a length pin in disguise: the shipped
+section already carries `\bnot\b` within 300 characters of three of its four
+`shard` mentions ("the point is not that a digest is forbidden information"),
+and the veto survives only because the *first* mention happens to have none. One
+honest sentence with a `not` in it near that first mention turns the predicate
+red against a correct skill. A negation that avoids the token at all — "a shard
+is yours to open, contrary to what an earlier draft said" — is untouched either
+way.
+
+The second hole is a **misaimed** prohibition: "`decisions.md` is never yours. A
+shard under `00-slices/` is yours to open." puts the two tokens 15 characters
+apart and goes
+green from radius 15 — *below* the measured floor of 33, so no radius this
+predicate could legally take excludes it. A gentler arrangement of the same
+hole, with the prohibition trailing instead of leading, sits 75 characters away
+and is green only from 80; that one is refutable with "use radius 60", which is
+true of the example and false of the hole, which is why the sharper construction
+is the one recorded.
+
+**The root is not the numbers.** A window can establish that a prohibition token
+sits *near* an object. It cannot establish that the prohibition *governs* that
+object, nor that the prohibition is not itself negated. That is the same
+semantic/mechanical boundary `CLAUDE.md` draws when it forbids inventing a
+layer-2 check for whether a claim *supports* an element rather than merely
+resolves, and neither radius tuning nor boundary matching crosses it.
+
+**What is owed is a change of unit, not a better number:** sentence-scoped
+co-occurrence — asserting that some *sentence* of the section carries both the
+anchor and a word-bounded prohibition. The two cheaper repairs are both the
+length pin the module's docstring rules out. A prohibition-word count would pin
+the section at the three `never`s it carries today, so any honest edit that adds
+a `do not` anywhere in it turns the predicate red against a correct skill. An
+ordinal-mention exclusion — "ignore the fourth `shard`" — keys on a position that
+drifts the moment an earlier mention is added.
 
 One predicate fails in the opposite direction: `:551` asserts `"is also a claim"
 in body or "is itself a claim" in body`, and rewording the audit's Output prose
@@ -1710,12 +1841,15 @@ predicate is the wrong one, not the prose.
 
 **Why it is parked.** Every one of these is a test that fails to constrain, not
 shipped behaviour that is wrong: the prose the predicates were written to guard
-is correct on disk in all fourteen cases, and the two check layers are
-unaffected. Fixing them properly means converting fourteen predicates to the
-windowed co-occurrence form, each conversion requiring its own anchor-to-token
-measurement and its own both-directions probe — real work, and work that is
-worse than useless done in a hurry, because a window sized by guess rather than
-by measurement is the length pin this module's docstring already warns about.
+is correct on disk in every case, and the two check layers are
+unaffected. Fixing them properly means converting the remaining eleven to a form
+that actually discriminates — and the measurement above says that form is
+sentence-scoped co-occurrence, not a wider window, since a window's own upper
+edge is set by prose it cannot see coming. Each conversion still needs its own
+both-directions probe, and any that stays windowed needs its ceiling swept as
+well as its floor — real work, and work that is worse than useless done in a
+hurry, because a window sized by guess rather than by measurement is the length
+pin this module's docstring already warns about.
 The branch converted the hardest ones and left the rest in the shape it found
 them. What is owed is the conversion, not a decision.
 

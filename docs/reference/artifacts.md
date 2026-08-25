@@ -74,8 +74,9 @@ this, never the prose criterion, which stays a human's call).
 
 - **Schema:** `src/rubrica/schema/slices-0.1.json`
 - **Written by:** `triage-slices` (code)
-- **Read by:** `rb-triage-objective` (the header only — `slices[]`'s labels,
-  groups and counts, never a shard's candidate digests); `rb-triage-rule`
+- **Read by:** `rb-triage-objective` (this file alone — `slices[]`'s labels,
+  groups and counts, plus the `catalogue_facts` block; never a shard's
+  candidate digests, and never `00-catalogue.json`); `rb-triage-rule`
   (one dispatch per slice, each reading only its own `00-slices/<id>.json`
   shard whole — never a sibling's)
 - **Path:** `00-slices.json`, one shard per slice at `00-slices/<id>.json`
@@ -97,7 +98,15 @@ overrulable by a human at gate 0.
 Fields worth knowing: `slices[].bytes` (the slice's total digest bytes,
 recomputed from the shard by a later reference check so a slice cannot
 silently drift from its own header); `slices[].provenance[].other_slices`
-(empty exactly when the group it names was not split across slices).
+(empty exactly when the group it names was not split across slices); and
+`catalogue_facts`, which is everything `rb-triage-objective` may know
+about `00-catalogue.json` without opening it — `request` and `policy`
+verbatim, `excluded` as a tally plus the paths for the exclusion reasons an
+operator could dispute, and `candidate_bytes` giving each candidate's own source
+size. Sorted keys put it and `run_id` ahead of `slices[]`, so the head a
+reader needs is in the first bytes rather than 470KB in, which is what a
+chunk-reading dispatch used to pay for. `refs.check_slices` recomputes the two
+derived fields from the catalogue through the same functions that wrote them.
 
 ## `objective`
 
@@ -113,15 +122,17 @@ per-slice dispositions member has read a candidate digest: `objective_review`
 objective is `supported`, and an optional `recommended_objective` the pass may
 not act on itself) and `predicted_surface_count`, a prediction against what
 the digest-reading members will later observe. It is built from
-`00-slices.json` and `00-catalogue.json` alone — never a candidate `digest` —
-so this pass's dispatch is sized to the corpus map, not to the corpus.
+`00-slices.json` alone — never a candidate `digest`, and never
+`00-catalogue.json` — so this pass's dispatch is sized to the corpus map, not
+to the corpus.
 
 Fields worth knowing: `objective_review.surfaces[].weight.bytes` (the sum of
-each evidence candidate's own catalogue `bytes` field — the source file's
-size — never a slice's or a serialized row's size, which saturates once
-the digest skeleton hits its 128-node cap); `predicted_surface_count`
-(a prediction, not a report — a later member observing a different surface
-count is a fact about this map's adequacy, not proof either reading erred).
+each evidence candidate's entry in the plan's `catalogue_facts.candidate_bytes`
+— the source file's size — never `slices[].bytes` or any other serialized
+row's size, which saturates once the digest skeleton hits its 128-node cap);
+`predicted_surface_count` (a prediction, not a report — a later member
+observing a different surface count is a fact about this map's adequacy, not
+proof either reading erred).
 
 ## `dispositions-part`
 

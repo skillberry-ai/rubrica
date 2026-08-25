@@ -42,12 +42,12 @@ Its consumers are prompt stages, not code paths. No Python reads
 `target.interface` after writing it — it is copied into the manifest and the
 world model and validated for non-blankness, and nothing branches on its
 value. It reaches models as context: `rb-triage-objective` is told that
-`00-catalogue.json` gives it `request` — "the target's name and interface, the
-declared `objective`" — every `rb-triage-rule` member sees that same `request`
-copied verbatim into its own shard, and the value rides in `manifest.json` and
-`01-world-model.json` for whatever later pass reads them. **So a typo here is
-invisible** — nothing rejects it, and the only reader is a model that will do
-its best with an unfamiliar word.
+`00-slices.json`'s `catalogue_facts` gives it `request` — "the target's name and
+interface, the declared `objective`" — every `rb-triage-rule` member sees that
+same `request` copied verbatim into its own shard, and the value rides in
+`manifest.json` and `01-world-model.json` for whatever later pass reads them.
+**So a typo here is invisible** — nothing rejects it, and the only reader is a
+model that will do its best with an unfamiliar word.
 Intake is code and no repair prompt can rewrite a manifest, so the value a run
 is minted with is the value it keeps.
 
