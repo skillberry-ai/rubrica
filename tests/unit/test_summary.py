@@ -1128,3 +1128,513 @@ def test_deficiencies_carries_the_closed_by_the_record_records(tmp_path):
     got = {d.id_: d for d in summary.deficiencies(run)}
     assert got["def-1"].closed_by == "prj-1"
     assert got["def-2"].closed_by == "", "an open deficiency renders a blank, not None"
+
+
+def _sealed(run) -> dict:
+    """The sealed world model as it sits on disk.
+
+    Read rather than hand-written: every assertion below about a count or a
+    collection compares against what the fixture actually sealed, and an
+    expectation typed out here would only ever agree with itself.
+    """
+    return json.loads(run.world_model.read_text(encoding="utf-8"))
+
+
+def test_world_model_counts_every_kind(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    got = summary.world_model(run)
+    for kind in ("capabilities", "entities", "actors", "goals", "gaps", "contradictions"):
+        assert kind in got.counts, f"{kind} is a world-model collection"
+    assert got.counts["capabilities"] > 0
+
+
+def test_world_model_counts_are_the_lengths_of_the_sealed_collections(tmp_path):
+    """Every count against the fixture's own arrays, not one spot check.
+
+    The presence test above passes on a `world_model` that returns 0 for five of
+    the six collections -- measured: replacing the length with the literal 0
+    leaves it green, because only `capabilities` is asserted non-empty there.
+
+    The key set is derived from the sealed document rather than re-typed, so a
+    collection added to world-model-0.1.json and not to
+    `_WORLD_MODEL_COLLECTIONS` goes red here: the three non-collection keys are
+    named, and everything else the document carries must be counted.
+
+    `gaps` is asserted at exactly 0 because that is the fixture's own value -- it
+    is what proves a zero count still renders as a row rather than being dropped
+    with the key.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    sealed = _sealed(run)
+    got = summary.world_model(run)
+    assert set(got.counts) == set(sealed) - {"schema_version", "target", "denominator"}
+    assert got.counts == {kind: len(sealed[kind]) for kind in got.counts}
+    assert got.counts["gaps"] == 0
+    assert sorted(kind for kind, n in got.counts.items() if n) == [
+        "actors",
+        "capabilities",
+        "contradictions",
+        "entities",
+        "goals",
+    ], "five of the six collections are non-empty in the toy world model"
+    assert got.target == sealed["target"]
+    assert got.denominator == sealed["denominator"]
+
+
+@pytest.mark.parametrize(
+    "collection", ["capabilities", "entities", "actors", "goals", "gaps", "contradictions"]
+)
+def test_world_model_counts_a_collection_that_is_not_a_list_as_zero(tmp_path, collection):
+    """`_dicts` at each of the six keys, one parametrisation per key.
+
+    `"actors": "nope"` is a four-character string, and `len()` on it counts four
+    actors. Parametrised rather than asserted once because the six keys are a
+    comprehension over a tuple -- the copy-paste slip this shape invites is a key
+    spelled wrong, and only a case per key can see it. The other five counts are
+    asserted unchanged, so a guard that swallowed the whole document would go red.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    sealed = _sealed(run)
+    sealed[collection] = "nope"
+    write_json(run.world_model, sealed)
+    got = summary.world_model(run)
+    assert got.counts[collection] == 0
+    assert {kind: n for kind, n in got.counts.items() if kind != collection} == {
+        kind: len(_sealed(run)[kind]) for kind in got.counts if kind != collection
+    }
+
+
+def test_world_model_survives_a_target_and_denominator_that_are_not_mappings(tmp_path):
+    """Both are rendered key by key, so a truthy non-dict is the shape that raises.
+
+    `brief._mapping`'s docstring records it measured at three gates: the
+    `x.get("y") or {}` idiom substitutes only on a falsy value, so `"target":
+    "nope"` reaches `.get` and raises AttributeError. The counts are asserted
+    still populated, because the collections and these two fields are read off the
+    same document and one malformation must not take the section with it.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    sealed = _sealed(run)
+    sealed["target"] = "nope"
+    sealed["denominator"] = ["also nope"]
+    write_json(run.world_model, sealed)
+    got = summary.world_model(run)
+    assert got.target == {}
+    assert got.denominator == {}
+    assert got.counts["capabilities"] == len(sealed["capabilities"])
+
+
+def test_world_model_before_the_seal_is_absent(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+    assert isinstance(summary.world_model(run), summary.Absent)
+
+
+def test_world_model_absent_names_the_artifact_it_looked_for(tmp_path):
+    """`Absent("")` satisfies an isinstance check; the page needs the name."""
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+    assert summary.world_model(run).what == "01-world-model.json"
+
+
+def test_world_model_survives_a_malformed_world_model(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    run.world_model.write_text("{not json", encoding="utf-8")
+    assert isinstance(summary.world_model(run), summary.Absent)
+
+
+def test_utilisation_totals_and_names_uncited_artifacts(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    got = summary.utilisation(run)
+    assert got.total > 0
+    assert got.cited <= got.total
+    assert got.pct == pytest.approx(got.cited / got.total * 100)
+    for artifact_id in got.uncited:
+        matching = [a for a in got.per_artifact if a["artifact_id"] == artifact_id]
+        assert matching and matching[0]["cited"] == 0
+
+
+def test_utilisation_sums_the_report_rather_than_recomputing(tmp_path):
+    """The numbers come from `claim_utilisation`, the one definition in this build.
+
+    Asserted against that module's own output, because the page must not disagree
+    with the `claim-utilisation` subcommand a reader runs beside it or with
+    `refs.check_claim_utilisation`, which shares the arithmetic. The rows are
+    asserted identical objects-in-order, so re-sorting or rebuilding them here
+    goes red; the columns are asserted as its sums.
+
+    The measured totals are pinned alongside: 9/9, 8/8 and 2/2 on the toy
+    fixture, 19 of 19 overall. Derived sums alone would agree with a `utilisation`
+    that summed the wrong column, since cited == total on this fixture.
+    """
+    from rubrica.utilisation import claim_utilisation
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    report = claim_utilisation(run)
+    got = summary.utilisation(run)
+    assert got.per_artifact == report["artifacts"]
+    assert got.cited == sum(a["cited"] for a in report["artifacts"])
+    assert got.total == sum(a["total"] for a in report["artifacts"])
+    assert (got.cited, got.total) == (19, 19), "the toy world model cites all 19 claims"
+    assert got.pct == pytest.approx(100.0)
+
+
+def test_utilisation_names_an_artifact_the_world_model_cites_nothing_of(tmp_path):
+    """`uncited`, which the toy fixture cannot reach unaltered.
+
+    Measured: the sealed toy world model cites every claim of all three inputs
+    (9/9, 8/8, 2/2), so the loop in
+    test_utilisation_totals_and_names_uncited_artifacts has an empty body and the
+    list ships unexercised -- and it is the entire input to the
+    `uncited-artifacts` flag.
+
+    trace-json is emptied of citations here. Its claims are cited in two places
+    and both must go: a capability's `claims` array, and the sealed
+    contradiction's `claim_b` -- `utilisation._cited_claim_ids` counts a
+    contradiction's two sides as citations on purpose, and its comment says why,
+    so dropping only the capability's reference would leave trace-json at 1 of 2
+    rather than 0.
+
+    The result is validated against world-model-0.1.json, since a fixture that
+    could not exist would prove nothing about a real run.
+    """
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    sealed = _sealed(run)
+    for group in ("capabilities", "entities", "actors", "goals"):
+        for member in sealed[group]:
+            member["claims"] = [c for c in member["claims"] if not c.startswith("clm-trace-")]
+    sealed["contradictions"] = []
+    write_json(run.world_model, sealed)
+    assert validate_artifact(run.world_model, "world-model") == [], (
+        "an uncited input must be produced by a world model that could really exist"
+    )
+    got = summary.utilisation(run)
+    assert got.uncited == ["trace-json"]
+    assert {a["artifact_id"]: a["cited"] for a in got.per_artifact}["trace-json"] == 0
+    assert (got.cited, got.total) == (17, 19), "trace-json's two claims stopped being cited"
+    assert got.pct == pytest.approx(17 / 19 * 100)
+
+
+def test_utilisation_reports_no_percentage_when_no_claim_was_extracted(tmp_path):
+    """The `if total else None` guard, at the one shape that reaches it.
+
+    An empty `claims` array is schema-valid -- claims-0.1.json sets no minItems --
+    and `claim_utilisation` reports such a file as a row with total 0. So a run
+    whose claims files are all empty divides by zero here without the guard, and
+    the fixture is asserted valid to show the shape needs no hand edit.
+
+    `None` rather than 0.0 because 0% asserts every claim was dropped, which is a
+    judgment about the reconcile passes, while "nothing was extracted to cite" is
+    a different fact about the run.
+    """
+    from rubrica.artifacts import write_json
+    from rubrica.paths import list_json
+    from rubrica.validate import validate_artifact
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    for path in list_json(run.claims_dir):
+        path.unlink()
+    empty = run.claims_dir / "empty.json"
+    write_json(empty, {"schema_version": "0.1", "artifact_id": "empty", "claims": []})
+    assert validate_artifact(empty, "claims") == [], "an empty claims file is a valid one"
+    got = summary.utilisation(run)
+    assert (got.cited, got.total) == (0, 0)
+    assert got.pct is None, "0.0 would assert every claim was dropped"
+    assert got.uncited == ["empty"]
+
+
+def test_utilisation_before_the_seal_is_absent(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+    assert isinstance(summary.utilisation(run), summary.Absent)
+
+
+def test_utilisation_absent_says_the_seal_has_not_run(tmp_path):
+    """The `what` distinguishes the two readings of an empty report.
+
+    `claim_utilisation` returns no artifacts when there is no world model to
+    resolve citations against, which means "the seal has not run" and not "no
+    input was cited" -- so the absence has to say which, or the page states the
+    second about a run in the first state.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+    assert summary.utilisation(run).what == "claim utilisation (no world model yet)"
+
+
+def test_gaps_carry_every_field_including_the_blocks_array(tmp_path):
+    """Rewritten from the plan's version, whose fixture cannot reach its assertion.
+
+    Measured: `build_toy_run(upto="reconcile-seal")` seals `"gaps": []`, so the
+    plan's `assert got, "the toy world model carries a gap"` fails on the very
+    fixture it names. Two gaps are written into the sealed model here instead, and
+    the result is validated against world-model-0.1.json because the schema
+    spelling is the point: `why_it_matters` is what a gap carries, and `why` is
+    what the dataclass calls it -- reading `why` off the record yields the empty
+    string on every real run, and no assertion over the fixture's own gaps would
+    catch that if the fixture were hand-written to match the dataclass.
+
+    The order is asserted as the document's, not sorted: `blocks` is what a reader
+    scans, and re-ordering the rows would disagree with the world model a reader
+    opens beside the page.
+    """
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    sealed = _sealed(run)
+    sealed["gaps"] = [
+        {
+            "id": "gap-not-found",
+            "subject": "get_ticket",
+            "unknown": "what get_ticket returns for an id that does not exist",
+            "why_it_matters": "no scenario on the missing branch has a stated gold answer",
+            "blocks": ["propose", "score"],
+        },
+        {
+            "id": "gap-auth",
+            "subject": "authentication",
+            "unknown": "whether any call requires a token",
+            "why_it_matters": "an unauthenticated seed may be exercising a different target",
+            "blocks": ["instantiate"],
+        },
+    ]
+    write_json(run.world_model, sealed)
+    assert validate_artifact(run.world_model, "world-model") == [], (
+        "the fixture must be the shape reconcile-seal actually writes"
+    )
+    got = summary.gaps(run)
+    assert [gap.id_ for gap in got] == ["gap-not-found", "gap-auth"], "the document's own order"
+    assert got[0].subject == "get_ticket"
+    assert got[0].unknown == "what get_ticket returns for an id that does not exist"
+    assert got[0].why == sealed["gaps"][0]["why_it_matters"], "why reads why_it_matters"
+    assert got[0].blocks == ["propose", "score"]
+    assert got[1].blocks == ["instantiate"], "each gap keeps its own blocks, not the first's"
+
+
+def test_gaps_without_a_world_model_is_empty(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+    assert summary.gaps(run) == []
+
+
+def test_gaps_on_a_sealed_model_recording_none_is_empty(tmp_path):
+    """The fixture's own state, asserted rather than assumed.
+
+    `world_model` reports `gaps: 0` for this run and `Absent` for the run above,
+    which is what makes an empty list an honest answer in both cases -- the
+    section that says which of the two it is is a different section.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    assert _sealed(run)["gaps"] == []
+    assert summary.gaps(run) == []
+
+
+@pytest.mark.parametrize("bad", ["gap-1", {"gap-1": {}}, ["oops"], [None], 7])
+def test_gaps_on_a_malformed_gaps_field_is_empty(tmp_path, bad):
+    """`_dicts` at both depths: not-a-list, and a list of non-dicts.
+
+    `"gaps": "gap-1"` iterates as five characters, and `"gaps": ["oops"]` reaches
+    `.get` on a string -- the measured AttributeError `brief._dicts` exists for.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    sealed = _sealed(run)
+    sealed["gaps"] = bad
+    write_json(run.world_model, sealed)
+    assert summary.gaps(run) == []
+
+
+def test_contradictions_tallies_resolution_nested_inside_each_part(tmp_path):
+    """The measured trap: resolution lives inside contradictions[], not at the
+    top level of the part. Reading it at the top level tallies {"null": N}.
+
+    The fixture's own six parts are cleared first -- measured:
+    `build_toy_run(upto="reconcile-seal")` ships six parts holding one
+    contradiction (`preferred_a`), so the counts asserted here would be 3 and 8
+    against the untouched directory. The subject of this test is the nesting, not
+    the fixture's parts, and
+    test_contradictions_tallies_the_fixtures_own_parts_in_full covers those.
+    """
+    from rubrica.artifacts import write_json
+    from rubrica.paths import list_json
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    run.contradictions_dir.mkdir(parents=True, exist_ok=True)
+    for path in list_json(run.contradictions_dir):
+        path.unlink()
+    write_json(
+        run.contradictions_dir / "subj-a.json",
+        {
+            "schema_version": "0.1",
+            "subject_id": "subj-a",
+            "contradictions": [
+                {"id": "con-1", "resolution": "unresolved", "statement": "x"},
+                {"id": "con-2", "resolution": "preferred_a", "statement": "y"},
+            ],
+        },
+    )
+    write_json(
+        run.contradictions_dir / "subj-b.json",
+        {"schema_version": "0.1", "subject_id": "subj-b", "contradictions": []},
+    )
+    got = summary.contradictions(run)
+    assert got.total == 2
+    assert got.parts_swept == 2
+    assert got.by_resolution["unresolved"] == 1
+    assert got.by_resolution["preferred_a"] == 1
+    assert "null" not in got.by_resolution
+    # The tally must hold nothing but what the two parts recorded, plus the
+    # `unresolved` seed. A top-level read of `resolution` adds an
+    # `(unrecorded)` group of 2 while leaving every assertion above green except
+    # the two group counts, so the exact-dict form is what makes this a lock in
+    # both directions.
+    assert got.by_resolution == {"preferred_a": 1, "unresolved": 1}
+    assert list(got.by_resolution) == sorted(got.by_resolution), "sorted, so the page is diffable"
+
+
+def test_contradictions_tallies_the_fixtures_own_parts_in_full(tmp_path):
+    """The unaltered fixture, exactly: 1 contradiction across 6 swept parts.
+
+    Five of those parts record an empty `contradictions` array, which is a real
+    record and not an absence -- contradictions-part-0.1.json says so where it
+    declines to set `minItems`, and `parts_swept` is what separates "swept and
+    clean" from "never swept". A `parts_swept` counting only the parts that found
+    something would read 1 here and would be wrong about five subjects.
+    """
+    from rubrica.paths import list_json
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    assert len(list_json(run.contradictions_dir)) == 6, "the fixture ships six parts"
+    got = summary.contradictions(run)
+    assert got.total == 1
+    assert got.parts_swept == 6
+    assert got.by_resolution == {"preferred_a": 1, "unresolved": 0}
+
+
+def test_contradictions_names_unresolved_at_zero(tmp_path):
+    """brief.py's ruling: unresolved is named at zero whenever the tally renders
+    at all, because a reader scanning for it must not have to infer absence."""
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    run.contradictions_dir.mkdir(parents=True, exist_ok=True)
+    write_json(
+        run.contradictions_dir / "subj-a.json",
+        {
+            "schema_version": "0.1",
+            "subject_id": "subj-a",
+            "contradictions": [{"id": "con-1", "resolution": "both_possible"}],
+        },
+    )
+    got = summary.contradictions(run)
+    assert got.by_resolution["unresolved"] == 0
+
+
+def test_contradictions_labels_a_member_whose_resolution_was_hand_removed(tmp_path):
+    """The `or "(unrecorded)"` fallback, and the malformation one level deeper.
+
+    `resolution` is required by contradictions-part-0.1.json, so a member without
+    one is hand-edited -- and an empty group label on the page would read as a
+    rendering bug rather than as a fact about the record, which is the ruling
+    `dispositions` already makes for a decline carrying no reason code. The
+    non-dict member and the non-list array are `_dicts`' two measured shapes: both
+    are counted as nothing rather than raising, and the part is still swept.
+    """
+    from rubrica.artifacts import write_json
+    from rubrica.paths import list_json
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    for path in list_json(run.contradictions_dir):
+        path.unlink()
+    write_json(
+        run.contradictions_dir / "subj-a.json",
+        {
+            "schema_version": "0.1",
+            "subject_id": "subj-a",
+            "contradictions": [{"id": "con-1"}, {"id": "con-2", "resolution": ""}, "oops"],
+        },
+    )
+    write_json(
+        run.contradictions_dir / "subj-b.json",
+        {"schema_version": "0.1", "subject_id": "subj-b", "contradictions": "nope"},
+    )
+    got = summary.contradictions(run)
+    assert got.total == 2, "the string member is dropped, the two objects are counted"
+    assert got.by_resolution == {"(unrecorded)": 2, "unresolved": 0}
+    assert got.parts_swept == 2, "a part nothing could be read out of was still swept"
+
+
+def test_contradictions_without_the_directory_is_absent(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+    assert not run.contradictions_dir.exists(), "the fixture level under test writes no parts"
+    assert isinstance(summary.contradictions(run), summary.Absent)
+
+
+def test_contradictions_absent_names_the_directory_it_looked_for(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+    assert summary.contradictions(run).what == "01-contradictions/"
+
+
+def test_contradictions_on_an_empty_directory_is_absent(tmp_path):
+    """A directory with no part in it, which is not the same as a swept run.
+
+    `reconcile-contradict` writes one file per subject, so an empty directory has
+    the same meaning for this section as no directory -- and a `Contradictions`
+    reporting 0 of 0 would say the sweep happened and found nothing.
+    """
+    from rubrica.paths import list_json
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    for path in list_json(run.contradictions_dir):
+        path.unlink()
+    assert isinstance(summary.contradictions(run), summary.Absent)
+
+
+def test_contradictions_on_an_unreadable_directory_is_absent(tmp_path):
+    """The `except` around `list_json`, which raises `UsageError` -- not `OSError`.
+
+    That is why this handler cannot be the `except OSError` the spine uses:
+    `paths.list_json` catches the OSError itself and re-raises it as a
+    `UsageError`, a ValueError subclass, so an unreadable directory would escape
+    an OSError-only guard and take the whole page with it.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    run.contradictions_dir.chmod(0o000)
+    try:
+        got = summary.contradictions(run)
+        assert isinstance(got, summary.Absent)
+        assert got.what == "01-contradictions/", "both absence branches name the same directory"
+    finally:
+        run.contradictions_dir.chmod(0o755)
+
+
+def test_contradictions_survives_a_part_that_is_not_readable(tmp_path):
+    """One unreadable part degrades one part, not the tally.
+
+    `_quietly` returns None for it and `_mapping` makes that an empty document, so
+    the sweep count still includes the file -- the run did write it -- while its
+    contradictions are simply not readable. The five other parts are still tallied,
+    which is the control: without it this would pass on a `contradictions` that
+    had stopped reading anything.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    from rubrica.paths import list_json
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    holding = run.contradictions_dir / "sub-cap-get-ticket.json"
+    assert holding.is_file(), "the one fixture part that records a contradiction"
+    holding.chmod(0o000)
+    try:
+        got = summary.contradictions(run)
+        assert got.parts_swept == len(list_json(run.contradictions_dir))
+        assert got.total == 0, "the only recorded contradiction lives in the unreadable part"
+        assert got.by_resolution == {"unresolved": 0}
+    finally:
+        holding.chmod(0o644)

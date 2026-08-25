@@ -44,7 +44,14 @@ from rubrica.brief import _dicts, _mapping, _quietly, _strings
 # misdescribe which candidate became which `artifact_id` the first time the two
 # drifted. It is also documented total, which is why nothing guards the call.
 from rubrica.intake import admit_sort_key
-from rubrica.paths import STAGES, RunPaths
+from rubrica.paths import STAGES, RunPaths, list_json
+
+# The one place utilisation is computed in this build, imported rather than
+# re-derived: `refs.check_claim_utilisation` and the `claim-utilisation`
+# subcommand already read it from here, and a third spelling of the same
+# arithmetic is how the gate and the report would come to disagree about what
+# utilisation means. This module composes; it does not analyse.
+from rubrica.utilisation import claim_utilisation
 
 # The one tunable threshold in the flag table. Every other flag triggers on a
 # count crossing zero or on a comparison between two fields, so it has nothing
@@ -496,3 +503,211 @@ def deficiencies(run: RunPaths) -> list[Deficiency]:
             )
         )
     return found
+
+
+# Every collection the sealed world model can carry, in the order a reader wants
+# them: what the target can do, what it does it to, who asks, why, then the two
+# collections that are about the *evidence* rather than about the target. Keyed
+# from this tuple rather than from the document's own keys so a count of 0 still
+# renders -- "0 gaps" is a fact about the run, while a missing row is
+# indistinguishable from a renderer that forgot the kind. Measured on the toy
+# world model, which carries `"gaps": []`: keying off the payload would have
+# dropped the gaps row from the one fixture the page is developed against.
+_WORLD_MODEL_COLLECTIONS = (
+    "capabilities",
+    "entities",
+    "actors",
+    "goals",
+    "gaps",
+    "contradictions",
+)
+
+
+@dataclass(frozen=True)
+class WorldModel:
+    counts: dict[str, int]
+    # Rendered as whatever they hold rather than unpacked into fields, for
+    # `Header.max_rounds`' reason: both are small closed objects (`target` is
+    # name/interface/notes, `denominator` is version/capability_cells/goals) that
+    # the page prints key by key, and naming their fields here would be a second
+    # spelling of world-model-0.1.json that a schema revision could silently
+    # outdate.
+    target: dict
+    denominator: dict
+
+
+def world_model(run: RunPaths) -> WorldModel | Absent:
+    """The sealed world model's collection counts, plus target and denominator.
+
+    Counts, not contents, for every collection but `gaps` -- `gaps()` below reads
+    those in full because each one names the stages it blocks, which is the only
+    thing on this page that says what the run cannot do. A capability list read in
+    full would be the world model rendered rather than summarised.
+
+    The `contradictions` count here is the *sealed* one, and `contradictions()`
+    below tallies the fan-out parts instead. They are two different facts and both
+    are rendered: the parts are what `reconcile-contradict` recorded, the sealed
+    array is what survived the seal, and a divergence between them is a real
+    finding about the run rather than a rendering to reconcile.
+    """
+    payload = _mapping(_quietly(run.world_model))
+    if not payload:
+        return Absent("01-world-model.json")
+    # `_dicts` rather than `len(...)` on the raw value: a hand-edited
+    # `"actors": "nope"` is not a list at all, and iterating it would count four
+    # characters as four actors.
+    counts = {name: len(_dicts(payload.get(name))) for name in _WORLD_MODEL_COLLECTIONS}
+    return WorldModel(
+        counts=counts,
+        target=_mapping(payload.get("target")),
+        denominator=_mapping(payload.get("denominator")),
+    )
+
+
+@dataclass(frozen=True)
+class Utilisation:
+    cited: int
+    total: int
+    # None, not 0.0, when nothing was extracted: 0% says every claim was dropped,
+    # which is a judgment about the reconcile passes, and "no claims to cite" is a
+    # different fact about the run. A claims file with an empty `claims` array is
+    # schema-valid (claims-0.1.json sets no minItems), so this is reachable
+    # without a hand edit.
+    pct: float | None
+    uncited: list[str]
+    per_artifact: list[dict]
+
+
+def utilisation(run: RunPaths) -> Utilisation | Absent:
+    """Claim utilisation, from `claim_utilisation` rather than recomputed.
+
+    The uncited artifacts are named rather than counted, because that is the
+    actionable half: "18.4% overall" tells a reader the run is thin, and "these
+    eleven inputs contributed nothing" tells them where to look. Measured across
+    the three runs on disk at design time: 32.3%, 33.6%, 65.6%.
+
+    `Absent` when the report holds no artifacts, which is the one state
+    `claim_utilisation` documents for a run with no world model yet -- an empty
+    report there means "the seal has not run", not "no input was cited", and a
+    0-of-0 row on the page would assert the second.
+    """
+    report = _mapping(claim_utilisation(run))
+    artifacts = _dicts(report.get("artifacts"))
+    if not artifacts:
+        return Absent("claim utilisation (no world model yet)")
+    # _as_int over both columns: these come from claim_utilisation, which builds
+    # them itself, but they are summed here and a summed column must not raise --
+    # and the same reading is what makes the `cited == 0` filter below total.
+    cited = sum(_as_int(a.get("cited")) for a in artifacts)
+    total = sum(_as_int(a.get("total")) for a in artifacts)
+    return Utilisation(
+        cited=cited,
+        total=total,
+        pct=(cited / total * 100) if total else None,
+        uncited=[str(a.get("artifact_id", "")) for a in artifacts if _as_int(a.get("cited")) == 0],
+        # The report's own rows, unmodified and in its own order, which is
+        # `list_json(run.claims_dir)`'s sort. Re-sorting them here would make the
+        # page disagree with the `claim-utilisation` subcommand a reader runs
+        # beside it.
+        per_artifact=artifacts,
+    )
+
+
+@dataclass(frozen=True)
+class Gap:
+    id_: str
+    subject: str
+    blocks: list[str]
+    unknown: str
+    # `why_it_matters` in the schema, `why` here: the field is rendered under a
+    # column header on a page whose width is a real constraint, and this dataclass
+    # is the one place the two spellings meet.
+    why: str
+
+
+def gaps(run: RunPaths) -> list[Gap]:
+    """Every gap, with the stages it blocks.
+
+    `blocks` is a column rather than a flag. Measured at design time: every gap
+    in every run on disk carried a non-empty `blocks` (8 of 8, 19 of 19, 15 of
+    15), so a flag on it would fire always and discriminate nothing.
+
+    A list rather than `Absent`, matching `deficiencies`: an empty list is the
+    honest reading of both a run with no world model and a run whose world model
+    records no gap, and the section above already says which of the two it is --
+    `world_model` returns `Absent` for the first and a `gaps: 0` count for the
+    second.
+    """
+    payload = _mapping(_quietly(run.world_model))
+    return [
+        Gap(
+            id_=str(member.get("id", "")),
+            subject=str(member.get("subject", "")),
+            blocks=_strings(member.get("blocks")),
+            unknown=str(member.get("unknown", "")),
+            why=str(member.get("why_it_matters", "")),
+        )
+        for member in _dicts(payload.get("gaps"))
+    ]
+
+
+@dataclass(frozen=True)
+class Contradictions:
+    total: int
+    by_resolution: dict[str, int]
+    parts_swept: int
+
+
+def contradictions(run: RunPaths) -> Contradictions | Absent:
+    """A tally over `01-contradictions/`, never the contradictions themselves.
+
+    An aggregate on purpose -- the ruling gate-brief already makes: this is a
+    pointer at the directory rather than a substitute for reading it.
+
+    **`resolution` is nested inside each member of a part's `contradictions[]`,
+    not a top-level field of the part.** A part is `{schema_version, subject_id,
+    contradictions[]}`, and contradictions-part-0.1.json closes it with
+    `additionalProperties: false`, so a top-level `resolution` cannot exist on a
+    valid part at all. Reading it off the part was measured against the real parts
+    during design and tallied `{"null": 14}` for a run whose actual tally is
+    `both_possible=1 preferred_a=1 preferred_b=1`.
+
+    `unresolved` is named at zero whenever this renders at all, because a
+    non-zero unresolved is the cheapest signal that a part is worth opening and a
+    reader scanning for it must not have to infer its absence from a missing key.
+
+    `parts_swept` counts every part, including the ones recording no
+    disagreement: an empty `contradictions` array is a real record -- the schema
+    says so where it declines to set `minItems` -- and it is what separates "this
+    subject was swept and was clean" from "this subject was never swept".
+    """
+    try:
+        parts = list_json(run.contradictions_dir)
+    except Exception:  # deliberate: list_json raises UsageError, which is not an OSError
+        return Absent("01-contradictions/")
+    # An existing directory holding no part is absence too: `reconcile-contradict`
+    # writes one file per subject, so a directory with nothing in it has the same
+    # meaning for this section as no directory at all.
+    if not parts:
+        return Absent("01-contradictions/")
+    by_resolution: dict[str, int] = {"unresolved": 0}
+    total = 0
+    for path in parts:
+        part = _mapping(_quietly(path))
+        for member in _dicts(part.get("contradictions")):
+            total += 1
+            # `or "(unrecorded)"` catches both the missing key and an empty
+            # string. `resolution` is required by the schema, so this is the
+            # hand-edited case -- and a blank group label on the page would read
+            # as a rendering bug rather than as a fact about the record, which is
+            # the ruling `dispositions` makes for a decline with no reason code.
+            key = str(member.get("resolution", "")) or "(unrecorded)"
+            by_resolution[key] = by_resolution.get(key, 0) + 1
+    return Contradictions(
+        total=total,
+        # Sorted for `dispositions`' reason: two runs over the same parts must
+        # render the same table for the page to be diffable, and a dict keyed in
+        # first-seen order is keyed by whichever subject sorted first.
+        by_resolution=dict(sorted(by_resolution.items())),
+        parts_swept=len(parts),
+    )
