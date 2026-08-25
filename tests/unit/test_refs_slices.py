@@ -1,12 +1,13 @@
 """refs.check_slices: 00-slices.json against 00-catalogue.json.
 
 Every check that module numbers -- the partition, the shards, the byte
-arithmetic, the cap, and the catalogue_facts block's two derived fields (see
+arithmetic, the cap, and the catalogue_facts block's derived fields (see
 check_slices itself for what each number means; a count written here went
 stale the first time a check was added) -- is proven here with a mutation
-isolated to *only* that invariant:
-the plan and the shard are edited together so every other check's inputs
-stay internally consistent, and only the targeted defect is visible. This
+isolated to *only* that invariant: the plan and the shard are edited together
+where a check spans both, and the plan alone where a check does not, so every
+other check's inputs stay internally consistent and only the targeted defect
+is visible. This
 is the same discipline test_refs_readable.py uses for check_readable, and
 for the same reason -- a test that lets its own mutation trip a second,
 unrelated check would prove only "some finding fires", not "this checker
@@ -271,18 +272,15 @@ def _mutate_facts(run, mutate):
     write_json(run.slices, plan)
 
 
-def test_a_clean_run_reports_no_catalogue_facts_findings(tmp_path):
-    run = _sliced_run(tmp_path)
-    assert check_slices(run) == []
-
-
 def test_a_candidate_bytes_value_disagreeing_with_the_catalogue_is_reported(tmp_path):
     """The check that makes the whole block safe to read.
 
-    rb-triage-objective sums weight.bytes from candidate_bytes while
-    check_objective recomputes it from the catalogue. Without this check a
-    drifted block would surface the objective pass's *correct* arithmetic as a
-    finding against 00-objective.json -- a 1 naming the wrong artifact.
+    check_objective recomputes weight.bytes from the catalogue's own
+    candidates[]. Once rb-triage-objective takes that same number from
+    candidate_bytes instead -- it still reads candidates[] directly today -- an
+    unchecked drift here would surface the objective pass's *correct*
+    arithmetic as a finding against 00-objective.json: a 1 naming the wrong
+    artifact.
     """
     run = _sliced_run(tmp_path)
     catalogue = read_json(run.catalogue)
@@ -337,6 +335,27 @@ def test_an_exclusion_tally_disagreeing_with_the_catalogue_is_reported(tmp_path)
     findings = check_slices(run)
     assert len(findings) == 1
     assert findings[0].pointer == "/catalogue_facts/excluded/by_reason"
+
+
+def test_an_exclusion_truncation_flag_disagreeing_with_the_catalogue_is_reported(tmp_path):
+    """Independently reachable, so not covered by the other two by proxy.
+
+    A corpus whose excluded paths lengthen without changing counts flips
+    truncation while leaving total and by_reason equal. What a stale `false`
+    costs is the property slices-0.1.json states in its own words: a
+    truncation a prompt can see is a fact about the input, one it cannot see
+    is a lie about it -- told at the gate that decides what the run can ever
+    know.
+    """
+    run = _sliced_run(tmp_path)
+    # The toy fixture truncates nothing, so `true` is the disagreeing value.
+    # The check needs only that plan and catalogue differ, not a fixture whose
+    # entries actually overflow MAX_EXCLUDED_ENTRY_BYTES.
+    assert read_json(run.slices)["catalogue_facts"]["excluded"]["entries_truncated"] is False
+    _mutate_facts(run, lambda facts: facts["excluded"].update({"entries_truncated": True}))
+    findings = check_slices(run)
+    assert len(findings) == 1
+    assert findings[0].pointer == "/catalogue_facts/excluded/entries_truncated"
 
 
 def test_an_unreadable_catalogue_reports_no_catalogue_facts_findings(tmp_path):

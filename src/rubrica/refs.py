@@ -367,6 +367,10 @@ def check_slices(run: RunPaths) -> list[Finding]:
                     coverage.setdefault(cid, set()).add(sid)
 
         declared_bytes = entry.get("bytes")
+        # Check 7: no slice is over cap_bytes, the budget every slice in this
+        # plan was packed against. Numbered because the checks below cite it as
+        # a landmark -- it went unlabelled when it was added on top of 1-6, and
+        # a stale pointer to it outlived that in two docstrings.
         if (
             isinstance(cap_bytes, int)
             and isinstance(declared_bytes, int)
@@ -451,24 +455,37 @@ def check_slices(run: RunPaths) -> list[Finding]:
                 )
             )
 
-    # Checks 8 and 9: the catalogue_facts block's two *derived* fields,
-    # recomputed from the catalogue through the same functions write_slices
-    # used to produce them -- check 5's discipline, for check 5's reason. What
-    # this catches is drift between the plan and the catalogue, the realistic
-    # case being a plan minted before a human adopted a projection at gate 0,
+    # Checks 8 and 9: the catalogue_facts block's *derived* fields, recomputed
+    # from the catalogue through the same functions write_slices used to
+    # produce them -- check 5's discipline, for check 5's reason. What this
+    # catches is drift between the plan and the catalogue, the realistic case
+    # being a plan minted before a human adopted a projection at gate 0,
     # rather than arithmetic this module could get wrong twice identically.
     #
-    # `request`, `policy` and `excluded.entries` are deliberately *not*
-    # checked: they are verbatim copies, and nothing verifies the shards' own
-    # copies of request/policy either. Derived numbers are arithmetic a reader
-    # recomputes; verbatim copies are not testimony to begin with.
+    # What selects a field for checking is the wrong-artifact hazard, not
+    # whether it was derived. check_objective recomputes weight.bytes from the
+    # catalogue's own candidates[], so once rb-triage-objective's reads narrow
+    # to 00-slices.json alone and it takes those same numbers from
+    # candidate_bytes instead, undetected drift here would surface that pass's
+    # *correct* arithmetic as a finding against 00-objective.json. Checking the
+    # plan is what keeps the 1 on the artifact actually at fault -- the
+    # exit-code contract's third rule, and what four fabricated `no such claim`
+    # findings against a correct world model once cost.
     #
-    # Mandatory rather than tidiness. rb-triage-objective sums weight.bytes
-    # from candidate_bytes, while check_objective recomputes the same number
-    # from the catalogue -- so an unchecked drift here would surface that
-    # pass's *correct* arithmetic as a finding against 00-objective.json. That
-    # is the exit-code contract's third rule, and it is what four fabricated
-    # `no such claim` findings against a correct world model once cost.
+    # The tally is in for a reader's reason rather than a recomputation's:
+    # nothing below intake reopens the corpus, so `total` and `by_reason` are
+    # the only account of what survey dropped that gate 0 will ever see.
+    #
+    # `request` and `policy` stay unchecked because they are verbatim copies,
+    # and nothing verifies the shards' own copies of either. `excluded.entries`
+    # stays unchecked for a different reason, and *not* because it is a copy --
+    # its selection is derived twice, filtered to DISPUTABLE_EXCLUSION_REASONS
+    # and then cut to a prefix that fits the byte budget, with only each
+    # retained element verbatim. It is out because a mismatch message would
+    # inline up to MAX_EXCLUDED_ENTRY_BYTES twice on one line, against a
+    # contract that wants one *readable* finding per line. Its truncation flag
+    # is checked below: that is one boolean, and a stale `false` tells a gate-0
+    # reader the disputable list is complete when it is not.
     facts = plan.get("catalogue_facts")
     if isinstance(facts, dict) and isinstance(catalogue, dict):
         # Both halves skip on an unreadable or wrong-shaped catalogue rather
@@ -499,7 +516,7 @@ def check_slices(run: RunPaths) -> list[Finding]:
             expected_excluded = excluded_summary(catalogue_excluded)
             declared_excluded = facts.get("excluded")
             declared_excluded = declared_excluded if isinstance(declared_excluded, dict) else {}
-            for key in ("total", "by_reason"):
+            for key in ("total", "by_reason", "entries_truncated"):
                 if declared_excluded.get(key) != expected_excluded[key]:
                     report(
                         f"/catalogue_facts/excluded/{key}",
