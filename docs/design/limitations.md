@@ -1095,17 +1095,21 @@ ordering dependency in either direction.
 
 That "should not" was a ruling with nothing enforcing it, and the gap was not
 theoretical. The trajectory files those figures were taken on are the stripped
-projection, whose per-file key intersection is one key, so `explode` declined
-them by luck of what the projection happened to drop rather than by any rule
-about conversations. On a metadata-rich capture of the same target the
-intersection is 4 on all 200 episodes and every one carries at least 3 messages,
-so 200 of 200 satisfied `EXPLODE_MIN_COMMON_KEYS` and the fragmentation this
-paragraph called impossible happened — at a different scale, 200 files plus
-5,800 message rows against a `--max-candidates` default of 500. The count is
-not even the worst of it: the file candidate is the only row carrying the
-behavioural digest, and exploding it marked that row inadmissible while
-admitting one row per turn, each classified `other` and digesting to a one-turn
-skeleton.
+projection, whose per-file key intersection is one key (`role` alone, measured),
+so `explode` declined them by luck of what the projection happened to drop
+rather than by any rule about conversations.
+
+Measured on the four metadata-rich airline result files under
+`data/tau2/results/final`, and scoped to them by name because the totals vary
+per file: the per-episode key intersection is exactly 4 on all 200 episodes,
+every episode carries at least 3 messages, and so 200 of 200 satisfy
+`EXPLODE_MIN_COMMON_KEYS` in all four. The fragmentation this paragraph called
+impossible happened, and only its size varies — 4,374 to 5,800 message rows, so
+4,574 to 6,000 candidates against a `--max-candidates` default of 500, an order
+of magnitude past the cap in every one. The count is not even the worst of it:
+the file candidate is the only row carrying the behavioural digest, and
+exploding it marked that row inadmissible while admitting one row per turn, each
+classified `other` and digesting to a one-turn skeleton.
 
 `survey`'s corpus loop now declines to explode any payload
 `digest.is_message_list` admits, so the ruling is the code's rather than this
@@ -1129,9 +1133,19 @@ The fact that decides it is not in the file.
 Measured on `tau2-bench`. The 200 trajectory files under
 `data/tau2/trajectories` are a projection of the `simulations` records inside
 `data/tau2/results/final/*.json`, and the projection dropped everything that
-scores the episode: each simulation record carries `reward_info` — **`reward` is
-1.0 for 100 records and 0.0 for the other 100** — plus `start_time`, `end_time`,
-`duration`, `task_id` and `trial`, and the trajectory keeps only `messages`.
+scores the episode: each simulation record carries `reward_info` — a `reward` of
+1.0 or 0.0 — plus `start_time`, `end_time`, `duration`, `task_id` and `trial`,
+and the trajectory keeps only `messages`.
+
+**That reward split is per result file, and the figure this entry used to state
+unqualified was one file's.** It read "`reward` is 1.0 for 100 records and 0.0
+for the other 100", which is the `claude-3-7-sonnet` airline file; across the
+four airline files the splits are 100/100, 112/88, 101/99 and 118/82. The
+`data/tau2/trajectories` directory measured here is itself named for the
+`gpt-4.1` airline run, so the 200 files this entry is about are the 112/88 one.
+Nothing in the entry's argument moves — what the projection drops is the
+scoring, whatever its distribution — but an unqualified count invites a reader
+to open a different one of the 26 result files and conclude the record is wrong.
 
 So the digest's silence here is honest rather than thin: `status` cannot fire
 because no key in `_STATUS_KEYS` appears in any of the 5,182 messages, and
@@ -1141,20 +1155,30 @@ whose `content` begins with an error sentinel, present in 12 of the 200 —
 nowhere near the 100 that scored 0.0 — and reading it is the value inspection
 `_has_error_marker` was deliberately narrowed to exclude.
 
-That 0 of 200 holds and stays. What it does not describe is the same target's
-metadata-rich capture, on which the same check measured the exact opposite — and
-for a reason that was a defect rather than a difference in corpus. Those
-messages carry a top-level **`error: False`**, a field whose whole content is
-that nothing failed, and `_has_error_key`'s emptiness guard tested
-`value not in (None, "", [], {})` — a tuple omitting `False`. So the key fired
-on **200 of 200 episodes, including all 100 that scored `reward` 1.0**, and
-`error_markers` reached triage through `heuristics_fired` as a found fact about
-every successful episode. Not thin but backwards, and the one assertion
-`rb-triage-rule`'s near-duplicate step must never be handed, since it says
-failure everywhere. Fixed by adding `False`
-to that tuple, which covers a zero count with it because `in` compares by
-equality. The count above is unaffected either way: the fix only ever removes a
-firing, and there it was already zero.
+That 0 of 200 holds and stays — re-measured on the same 200 stripped files, it
+is 0 both before and after the fix below. What it does not describe is the four
+metadata-rich airline result files the same 200 episodes were projected from, on
+which the same check measured the exact opposite — and for a reason that was a
+defect rather than a difference in corpus. Those messages carry a top-level
+**`error: False`**, a field whose whole content is that nothing failed, and
+`_has_error_key`'s emptiness guard tested `value not in (None, "", [], {})` — a
+tuple omitting `False`. So the key fired on **200 of 200 episodes in all four,
+including every episode that scored `reward` 1.0**, and `error_markers` reached
+triage through `heuristics_fired` as a found fact about every successful
+episode.
+
+No count of those successful episodes is given on purpose: it varies by file
+(100, 112, 101 and 118 of 200), and the finding is that success and failure had
+become indistinguishable rather than how many of each a file holds. Not thin but
+backwards, and the one assertion `rb-triage-rule`'s near-duplicate step must
+never be handed, since it says failure everywhere.
+
+Fixed by adding `False` to that tuple, which covers a zero count with it because
+`in` compares by equality. The fix does not blanket-silence the heuristic: on
+those same four files it still fires on 15, 12, 37 and 10 of 200 — same file
+order as the splits above — where a genuine error-shaped value is present. And
+the 0 of 200 above is unaffected either way, since the fix only ever removes a
+firing.
 
 The authoritative artifact is reachable in principle and not admitted in
 practice, for a third independent reason: `results/final/*.json` is
