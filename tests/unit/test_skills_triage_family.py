@@ -177,13 +177,30 @@ def test_the_objective_pass_forbids_reading_a_shard():
     for free at this very radius. The floor, by contrast, has never broken and
     for the surviving alternative barely can: `shard` and `never` are 28
     characters apart inside one sentence.
+
+    **The vocabulary is matched on word boundaries, and that is load-bearing
+    rather than fastidious.** `"never" in window` is also satisfied by
+    "whe-never": an inversion reading "a shard under `00-slices/` is yours to
+    open **whenever** you like" -- prose granting the exact permission this
+    predicate exists to forbid -- put that substring 42 characters from the
+    first mention and passed at radius=300. What that defeats is not the
+    predicate directly but the *inversion probe*, which is the only evidence
+    this predicate has: a probe that goes green against permission-granting
+    prose measures nothing. So the measurement is three-directional, and
+    direction 3 is an inversion whose only prohibition-looking token is a
+    substring. Switching to `\\b...\\b` changed no distance and no band edge --
+    28/123/176/743 and [33, 747] are the same under both matchers, because none
+    of the three real hits was ever a substring artefact.
     """
     body = _norm(skills.section_body(_objective(), "1. Inputs"))
     indices = _occurrences(body, "shard")
     assert indices, "the Inputs section never names a shard"
-    words = ("never", "not yours", "do not")
+    # Word-boundary rather than substring, for the reason direction 3 records:
+    # `"never" in window` is also satisfied by "whenever", which is how
+    # permission-granting prose passes a prohibition check.
+    prohibition = re.compile(r"\b(?:never|not yours|do not)\b")
     near_prohibition = any(
-        any(w in _window_around(body, at, radius=300) for w in words) for at in indices
+        prohibition.search(_window_around(body, at, radius=300)) for at in indices
     )
     assert near_prohibition, "no `shard` mention sits near a prohibition"
 
