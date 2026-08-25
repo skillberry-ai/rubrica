@@ -583,7 +583,7 @@ def test_the_written_plan_carries_catalogue_facts_agreeing_with_the_catalogue(tm
 
 
 def test_catalogue_facts_sorts_ahead_of_the_slices_array_on_disk(tmp_path):
-    """The head lands in the first bytes, which is the seek this module exists to end.
+    """The head lands in the first bytes, which is the seek issue #3 filed.
 
     canonical_bytes sorts keys, so `catalogue_facts` and `run_id` both precede
     `slices`. On the 472,799-byte tau2 catalogue `run_id` sat at byte 470,054

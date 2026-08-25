@@ -449,7 +449,8 @@ def main(argv: list[str] | None = None) -> int:
             # catalogue, no candidates, a candidate over cap, or -- guarded
             # inside write_slices itself, before any bare dict[...] read of
             # untrusted catalogue content -- a catalogue that is not a JSON
-            # object, one missing run_id, request, or policy, or a candidate
+            # object, one missing run_id, request, policy, or excluded, an
+            # excluded that is present but is not an array, or a candidate
             # that is not an object carrying a string candidate_id. Those
             # guards are load-bearing, not decorative: a bare KeyError
             # from any of those falls through to the generic `except

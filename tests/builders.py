@@ -583,7 +583,13 @@ def minimal_slices(**over: Any) -> dict[str, Any]:
                 "entries": [],
                 "entries_truncated": False,
             },
-            "candidate_bytes": {candidate_id: 37},
+            # 19, deliberately not the slice's own `bytes: 37` below. The two
+            # are different metrics -- this one is the candidate's source file
+            # size, that one is row_bytes' serialized size -- and never
+            # conflating them is the whole subject of candidate_bytes_index'
+            # docstring. A builder where they read as the same number would
+            # teach the opposite.
+            "candidate_bytes": {candidate_id: 19},
         },
         "slices": [
             {

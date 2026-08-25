@@ -256,13 +256,23 @@ human can still act on at gate 0. Every shard carries the run's `request` and
 `policy` verbatim alongside that slice's own candidates, so a later dispatch
 reading its own slice never has to seek across the catalogue for a head field.
 
+The plan itself carries a `catalogue_facts` block for the same reason one step
+further out: `request` and `policy` verbatim, the catalogue's `excluded` array
+as a tally plus the paths for the exclusion reasons that embed a disputable
+judgment, and every candidate's own source `bytes` as a map. That is
+everything `rb-triage-objective` reads the catalogue for, so its dispatch is
+bounded by `max_candidates` rather than by corpus size. `canonical_bytes`
+sorts keys, so the block and `run_id` both land ahead of the `slices` array.
+
 Required: `--run RUN`.
 
 Reports no findings, so it never exits 1: a catalogue with no admissible
 candidates, one that cannot be read at all, or one missing `run_id`,
-`request`, `policy`, or a candidate's `candidate_id` — every field this
-command or a shard reads verbatim, checked before that read happens — is exit
-2, a survey defect or a broken run, not a repairable stage output. A single
+`request`, `policy`, `excluded`, or a candidate's `candidate_id` — every field
+this command or a shard reads verbatim, checked before that read happens — is
+exit 2, a survey defect or a broken run, not a repairable stage output. An
+`excluded` that is present but is not an array is exit 2 for the same reason:
+its exclusions cannot be summarised onto the plan. A single
 candidate too large for any slice is exit 2 for the same reason: no splitter
 here can shrink one row. Re-running replans and removes any shard the new
 plan no longer names, so a human adopting a projection at gate 0 can re-mint

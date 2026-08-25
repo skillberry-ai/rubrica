@@ -912,13 +912,14 @@ def _minimal_catalogue(**over):
     return document
 
 
-@pytest.mark.parametrize("missing_field", ["run_id", "request", "policy"])
+@pytest.mark.parametrize("missing_field", ["run_id", "request", "policy", "excluded"])
 def test_triage_slices_exits_two_on_a_catalogue_missing_a_head_field(
     tmp_path, capsys, missing_field
 ):
-    """The Critical this covers: run_id/request/policy are read with a bare
-    catalogue[...], never catalogue.get(...), because every shard carries
-    them verbatim. A syntactically valid catalogue missing one of them must
+    """The Critical this covers: run_id/request/policy/excluded are read with a
+    bare catalogue[...], never catalogue.get(...) -- the first three because
+    every shard carries them verbatim, `excluded` because the plan's
+    catalogue_facts block summarises it. A catalogue missing one of them must
     raise UsageError (exit 2) before that bare read ever happens -- not fall
     through as a bare KeyError, which cli.py's generic handler turns into a
     fabricated exit-1 finding blaming the stage rather than the catalogue.
