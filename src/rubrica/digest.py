@@ -203,7 +203,18 @@ def _has_error_key(node: Any, depth: int) -> bool:
         return False
     if isinstance(node, dict):
         for key, value in node.items():
-            if key.lower() in _ERROR_KEYS and value not in (None, "", [], {}):
+            # `False` belongs in the emptiness tuple, and it carries `0` with it:
+            # `in` compares by equality and `0 == False`, so one entry covers the
+            # boolean flag and the zero count alike. Without it, a field that
+            # explicitly states no error occurred *asserted* one -- measured on a
+            # metadata-rich capture of tau2-bench, whose messages carry a
+            # top-level `error: False`: this fired on 200 of 200 episodes,
+            # including all 100 that scored `reward == 1.0`, and `error_markers`
+            # reached triage as a found fact about every successful episode. That
+            # is worse than silence, because `rb-triage-rule` reads a failing
+            # trace as almost never a near-duplicate of a successful one and this
+            # asserted failure everywhere. `{"error": None}` was already correct.
+            if key.lower() in _ERROR_KEYS and value not in (None, "", [], {}, False):
                 return True
             if _has_error_key(value, depth - 1):
                 return True

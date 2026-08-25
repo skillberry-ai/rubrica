@@ -581,6 +581,40 @@ def test_error_markers_fires_on_a_message_carrying_an_error_shaped_key():
     assert "error_markers" in result["heuristics_fired"]
 
 
+def test_a_field_saying_no_error_occurred_does_not_fire_error_markers():
+    """The emptiness guard omitted `False`, so `error: False` -- a field whose
+    whole content is "nothing went wrong" -- asserted failure.
+
+    Measured on a metadata-rich capture of tau2-bench, whose messages carry a
+    top-level `error: False`: `_has_error_key` fired on 200 of 200 episodes,
+    including all 100 that scored `reward == 1.0`. `heuristics_fired` then
+    reported `error_markers` as a found fact about every successful episode,
+    which defeats `rb-triage-rule` reading a failing trace as almost never a
+    near-duplicate of a successful one.
+
+    The three cases are one guard, not three: `in` compares by equality and
+    `0 == False`, so the single `False` entry covers the zero count too, and
+    `None` was already handled. The truthy value is asserted alongside them
+    because a guard that swallowed it would be the mirror defect -- silence
+    where a real error key exists -- and the test above pins only the string
+    form through the producer.
+    """
+    assert digest._has_error_key({"error": False}, digest._SKELETON_DEPTH) is False
+    assert digest._has_error_key({"error": 0}, digest._SKELETON_DEPTH) is False
+    assert digest._has_error_key({"error": None}, digest._SKELETON_DEPTH) is False
+    assert digest._has_error_key({"error": True}, digest._SKELETON_DEPTH) is True
+
+    # Through the producer, on the shape this became newly reachable for: an
+    # episode whose every message states it did not fail.
+    payload = [
+        {"role": "user", "content": "cancel reservation EHGLP3", "error": False},
+        {"role": "assistant", "content": "Cancelled.", "error": False},
+    ]
+    result = digest.digest_for_payload(payload, "trace", body_chars=2000)
+    assert "error_markers" not in result
+    assert "error_markers" not in result["heuristics_fired"]
+
+
 def test_a_message_list_trace_digest_carries_no_skeleton_key():
     """Same rule as the dict producer: a trace digest has no skeleton, so it must
     not grow a truncation flag about one."""
