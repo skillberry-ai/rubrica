@@ -26,6 +26,14 @@ from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 
+# Imported rather than re-spelled, private names and all, for the reason
+# `brief.py` gives where it imports `refs._as_list`: these two are the one
+# definition each of "read it or return None" and "a dict or nothing" in this
+# build, and their docstrings carry the measurements that made them exist. A
+# local copy would be a second spelling of a guard whose whole point is that
+# there is one, and half a module's worth of inconsistent isinstance checks is
+# the defect `_mapping` exists to have fixed.
+from rubrica.brief import _mapping, _quietly
 from rubrica.paths import STAGES, RunPaths
 
 # The one tunable threshold in the flag table. Every other flag triggers on a
@@ -154,3 +162,70 @@ def stage_spine(run: RunPaths) -> list[StageRow]:
         )
         rows.append(StageRow(name=stage, produced=produced))
     return rows
+
+
+@dataclass(frozen=True)
+class StageRecord:
+    stage: str
+    model: str
+    effort: str
+    skill_sha256: str
+
+
+@dataclass(frozen=True)
+class Header:
+    run_id: str
+    created_utc: str
+    schema_version: str
+    # Deliberately not `int`: these come straight off a JSON document that may
+    # have been hand-edited, and coercing a malformed limit would either raise
+    # or invent a number. Whatever is there is rendered as what is there.
+    max_rounds: object
+    max_scenarios: object
+    stages: list[StageRecord]
+
+
+def header(run: RunPaths) -> Header | Absent:
+    """The manifest's own facts, plus the per-stage reproducibility record.
+
+    `manifest.stages` is the record of which model at which effort ran against
+    which skill hash, which is the only thing on the page that says whether two
+    runs are comparable at all -- so it is rendered even when a record exists for
+    a stage the spine shows as absent, because that disagreement is a real
+    finding (`stage-record-incomplete`, flags()) rather than a rendering bug to
+    paper over.
+
+    The run id comes from the manifest rather than from the directory name. The
+    two agree in every run this code mints, and the manifest is still the right
+    source: it is the run's own record of its identity, so a directory copied or
+    renamed after the fact cannot relabel the page.
+    """
+    payload = _mapping(_quietly(run.manifest))
+    if not payload:
+        return Absent("manifest.json")
+    limits = _mapping(payload.get("limits"))
+    recorded = _mapping(payload.get("stages"))
+    stages = []
+    # `_mapping` twice over, at both depths a hand-edited manifest can break:
+    # `"stages": "nope"` yields no records, and `"stages": {"extract": "nope"}`
+    # yields a record whose fields are blank. Dropping the latter's row instead
+    # would render as "no stage record", which is a different fact about the run
+    # from "a stage record nothing could be read out of".
+    for name, body in sorted(recorded.items()):
+        entry = _mapping(body)
+        stages.append(
+            StageRecord(
+                stage=name,
+                model=str(entry.get("model", "")),
+                effort=str(entry.get("effort", "")),
+                skill_sha256=str(entry.get("skill_sha256", "")),
+            )
+        )
+    return Header(
+        run_id=str(payload.get("run_id", "")),
+        created_utc=str(payload.get("created_utc", "")),
+        schema_version=str(payload.get("schema_version", "")),
+        max_rounds=limits.get("max_rounds"),
+        max_scenarios=limits.get("max_scenarios"),
+        stages=stages,
+    )
