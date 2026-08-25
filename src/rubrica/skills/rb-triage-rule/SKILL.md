@@ -84,9 +84,9 @@ A trace digest taken from a chat trajectory carries one more such flag,
 `role_keys_truncated`. Its `element_counts` tallies messages per role, and a
 role name too long to spell in a count key is cut to a bounded prefix; when
 `role_keys_truncated` is `true`, two roles that differ only past that prefix
-have merged into one tally. Read it the same way as the two flags below: a fact
-about the digest, never a fact about the candidate having had one role where it
-had two.
+can have merged into one tally. Read it the same way as the two flags below: a
+fact about the digest, never a fact about the candidate having had one role
+where it had two.
 
 Non-trace digests carry no such list; instead they carry a `skeleton`, and it
 can mislead the same way if you read it as complete. `digest.py` caps how
