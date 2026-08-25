@@ -154,15 +154,29 @@ def test_the_objective_pass_forbids_reading_a_shard():
     exactly three prohibition words, all of them `never`, and its four `shard`
     mentions sit 28, 123, 176 and 743 characters from the nearest one. The
     first three all resolve to the *same* `never` -- the one inside the
-    prohibition sentence itself -- so this is an OR over mentions and the
-    module's floor applies to the nearest alternative: radius=300 against 28 is
-    a ~10.7x margin, not the ~1.7x that reading 176 as the governing distance
-    would suggest. The fourth mention ("firming up a surface judgment by
-    opening a shard") is 743 away and outside the window on purpose -- it
-    states the consequence, not the prohibition. Keeping it out is not
-    automatic: it sat 220 away, inside the window, until the sentence above it
-    was reworded from "never by how large they are" to "rather than by how
-    large they are", and at 220 the inversion probe below passed for free.
+    prohibition sentence itself -- so this is an OR over mentions, and the
+    "Window margin convention" in this module's own docstring sizes a radius
+    from the nearer of an OR-group's alternatives (a line number would drift;
+    the heading will not): the governing distance is 28, not 176. That is
+    load-bearing rather than tidier bookkeeping, because reading 176 as
+    governing would put the 2x floor at 352 and oblige *raising* the radius
+    this predicate was actually measured at. The fourth mention ("firming up a
+    surface judgment by opening a shard") is 743 away and outside the window on
+    purpose -- it states the consequence, not the prohibition.
+
+    **radius=300 is a value inside a measured band, not a tuned number, and the
+    edge that can break is the upper one.** Swept in both directions: green on
+    the shipped prose from radius 33 up, and green on the *inverted* prose --
+    that is, vacuous -- from radius 748 up, where the fourth mention reaches
+    the section's next `never`. The band is [33, 747]; 300 sits 9.1x above the
+    lower edge and 2.5x below vacuity. **Do not widen it.** Every failure this
+    predicate has had has been a ceiling failure: the unwindowed form was
+    vacuous, and that fourth mention sat 220 away rather than 743 until the
+    sentence above it was reworded from "never by how large they are" to
+    "rather than by how large they are" -- at 220 the inversion probe passed
+    for free at this very radius. The floor, by contrast, has never broken and
+    for the surviving alternative barely can: `shard` and `never` are 28
+    characters apart inside one sentence.
     """
     body = _norm(skills.section_body(_objective(), "1. Inputs"))
     indices = _occurrences(body, "shard")

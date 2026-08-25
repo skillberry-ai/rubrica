@@ -488,8 +488,9 @@ def check_slices(run: RunPaths) -> list[Finding]:
     # is checked below on the same reader's grounds as the tally, and scoped the
     # same way: that is one boolean, and a stale `false` tells the objective
     # pass the disputable list is complete when it is not. Not a gate-0 human --
-    # `entries_truncated` is never rendered by brief.py, so the only party the
-    # flag can mislead is the pass that reads the plan and nothing else.
+    # `entries_truncated` is never rendered by brief.py, so the only party it
+    # misleads directly is the pass that reads the plan and nothing else; a
+    # human inherits the error only through that pass's notes.
     facts = plan.get("catalogue_facts")
     if isinstance(facts, dict) and isinstance(catalogue, dict):
         # Both halves skip on an unreadable or wrong-shaped catalogue rather
