@@ -1088,3 +1088,269 @@ def scenarios(run: RunPaths) -> list[ScenarioRow] | Absent:
             )
         )
     return rows
+
+
+# The stages that run as code rather than as a dispatched skill. They have no
+# manifest.stages entry by design, so stage-record-incomplete must not accuse
+# them -- CLAUDE.md states their absence there is not a finding.
+#
+# Measured, not assumed: `set(STAGES) - {every skill's declared stage}` is
+# exactly {intake, reconcile-seal, smoke, survey, triage-seal, triage-slices}.
+# Note `emit` is NOT in it -- rb-emit is a thin wrapper over `rubrica emit`, so
+# emit does get a manifest.stages entry and must stay accusable. Hardcoding the
+# set here got that wrong once; test_code_stages_is_exactly_the_stages_that_run
+# _as_code re-derives it from skills.discover() so a stage converted between code
+# and a skill fails there rather than being exempted forever in silence.
+#
+# Spelled out rather than derived at import time on purpose: `skills.discover()`
+# reads every SKILL.md off disk and honours RUBRICA_SKILLS_DIR, so deriving it
+# here would make one flag on a page about a *run* depend on the skills directory
+# the reader happens to have configured.
+_CODE_STAGES = frozenset(
+    {"intake", "reconcile-seal", "smoke", "survey", "triage-seal", "triage-slices"}
+)
+
+
+@dataclass(frozen=True)
+class Challenge:
+    tallies: dict[str, int]
+    judged: int
+    packages: int
+    incomplete_packages: list[str]
+    # The smoke report as it stands on disk, or None. A document rather than a
+    # boolean, for `SUITE_FILES`' reason one section up: "smoke ran" and "smoke
+    # ran and found nothing" are different facts, and a flag cannot draw that
+    # line.
+    smoke: dict | None
+
+
+def challenge(run: RunPaths) -> Challenge | Absent:
+    """Verdict tallies and what actually landed in the emitted suite.
+
+    Two counts that a reader will assume agree and that diverge for real reasons:
+    `judged` counts `05-verdicts/`, `packages` counts `06-suite/`. A re-seeded
+    scenario is judged and never emitted; a scenario whose record disappeared
+    between the two stages is emitted and pruned. They are read from separate
+    directories rather than one being derived from the other, so the divergence is
+    visible instead of being averaged away.
+
+    `incomplete_packages` is the third state, and the one `_suite_files` exists to
+    expose: a directory under `06-suite/` holding some of `SUITE_FILES` but not
+    all six is a package `emit` began and did not finish, which is a different
+    failure from a package that was never written. `_suite_files` returns `[]` for
+    three distinguishable states -- no package, an unreadable `06-suite/`, and an
+    unsafe scenario id -- and this section reads all three as "no package landed",
+    which is the honest reading for an inventory: none of the three put a task on
+    disk that Harbor could score.
+
+    `Absent` when `05-verdicts/` holds nothing, which is every run short of
+    `challenge`. Both directory reads are guarded, and neither guard can be
+    `except OSError`: `list_json` and `scenario_ids_with_tasks` both raise
+    `UsageError`, which is a `ValueError` -- the same measurement
+    `contradictions` records against the same helper. The suite guard is separate
+    from the verdict one so that an unreadable `06-suite/` costs the inventory and
+    not the tally: the verdicts are still perfectly readable, and how the
+    adversary judged the run is the half a reader came for.
+    """
+    try:
+        verdict_paths = list_json(run.verdicts_dir)
+    except Exception:  # deliberate: list_json raises UsageError, which is not an OSError
+        verdict_paths = []
+    if not verdict_paths:
+        return Absent("05-verdicts/")
+    tallies: dict[str, int] = {}
+    for path in verdict_paths:
+        doc = _mapping(_quietly(path))
+        # `or "(unrecorded)"` for both the missing key and the empty string, which
+        # is `contradictions`' ruling on `resolution` and `dispositions`' on a
+        # decline with no reason code: a blank group label on the page reads as a
+        # rendering bug rather than as a fact about the record.
+        key = str(doc.get("verdict", "")) or "(unrecorded)"
+        tallies[key] = tallies.get(key, 0) + 1
+    try:
+        package_ids = run.scenario_ids_with_tasks()
+    except Exception:  # deliberate: UsageError again, on an unreadable 06-suite/
+        package_ids = []
+    incomplete = [sid for sid in package_ids if len(_suite_files(run, sid)) != len(SUITE_FILES)]
+    return Challenge(
+        # Sorted for `dispositions`' reason: two runs over the same verdicts must
+        # render the same table for the page to be diffable, and a dict keyed in
+        # first-seen order is keyed by whichever scenario id sorted first.
+        tallies=dict(sorted(tallies.items())),
+        judged=len(verdict_paths),
+        packages=len(package_ids),
+        incomplete_packages=incomplete,
+        smoke=_mapping(_quietly(run.report)) or None,
+    )
+
+
+def orphaned_temp_files(run: RunPaths) -> list[str]:
+    """Names of `*.tmp.*` files left in the run root, sorted.
+
+    A stage writes its artifact to a temp file and renames it, so one left behind
+    is a dispatch that died mid-write. Found by inspection while this was
+    designed: `02-scenarios.json.tmp.43146.cb890a5abaf7` was sitting in the
+    newest run on disk, and `decisions.md` records an earlier one removed by hand
+    after a budget ceiling killed a reconcile pass.
+
+    The run root only, which is the scope rather than an oversight: every sealed
+    artifact lives there, and a stray one level down is already invisible to
+    `list_json`, which keeps only a `.json` suffix. Naming one would put a file on
+    the page that nothing else in the run reacts to.
+
+    `except OSError` because the whole point is a run too broken to read: a root
+    at mode 000 -- the shape a run copied out of a container under a different uid
+    has -- makes `iterdir` raise, and "no strays visible" is the honest answer.
+    """
+    try:
+        return sorted(p.name for p in run.root.iterdir() if ".tmp." in p.name)
+    except OSError:
+        return []
+
+
+@dataclass(frozen=True)
+class Flag:
+    id_: str
+    headline: str
+    # The rule that fired, in words, and not optional. A flag whose threshold is
+    # not on the page is a black box a reader cannot argue with -- which is the one
+    # property test_every_flag_states_its_threshold asserts over a run where all
+    # of them fire at once.
+    threshold: str
+    detail: str
+
+
+def flags(run: RunPaths) -> list[Flag]:
+    """Every rule-based flag that fires for this run.
+
+    Each carries the threshold that fired it, because a flag whose rule is not on
+    the page is a black box a reader cannot argue with. `LOW_UTILISATION_PCT` is
+    the only tunable threshold in the table; every other flag triggers on a count
+    crossing zero or on a comparison between two fields the artifacts already
+    hold, which is deliberate -- a page that composes rather than analyses has no
+    business carrying a second dial nobody has calibrated.
+
+    **Every builder result is `isinstance`-checked before it is indexed.** This
+    function calls six of them and each can return `Absent`; `utilisation` can
+    return it for two distinct reasons, and one of those -- an unreadable
+    `01-claims/` -- is a run that is otherwise perfectly readable. An unchecked
+    `.pct` there breaks this module's one absolute promise at the section a reader
+    scans first.
+
+    An absent section flags nothing, and that is a ruling rather than a fallback:
+    a run with no world model has no claim utilisation, not 0%, and a run that has
+    not scored has no coverage verdict, not a halt. Flagging either would put a
+    finding on the page of every partial run -- and partial runs are the primary
+    case.
+    """
+    found: list[Flag] = []
+
+    util = utilisation(run)
+    if isinstance(util, Utilisation) and util.pct is not None:
+        # Strictly `<`, matching the threshold string below and
+        # `refs.check_claim_utilisation`'s own predicate: a run exactly at the
+        # threshold is not below it.
+        if util.pct < LOW_UTILISATION_PCT:
+            found.append(
+                Flag(
+                    id_="low-utilisation",
+                    headline=f"Claim utilisation {util.pct:.1f}%",
+                    threshold=f"overall cited/total below {LOW_UTILISATION_PCT:.0f}%",
+                    detail=f"{util.cited} of {util.total} claims cited by the world model",
+                )
+            )
+        if util.uncited:
+            found.append(
+                Flag(
+                    id_="uncited-artifacts",
+                    headline=f"{len(util.uncited)} input(s) contributed no cited claim",
+                    # `cited == 0` and not a percentage: the `total` guard is
+                    # already applied in `utilisation`, so a 0-of-0 artifact is not
+                    # in this list and the gate this mirrors exempts it too.
+                    threshold="any artifact with claims of which none is cited",
+                    detail=", ".join(util.uncited),
+                )
+            )
+
+    cons = contradictions(run)
+    if isinstance(cons, Contradictions):
+        # `by_resolution["unresolved"]`, never `total`: a recorded and resolved
+        # contradiction is the reconcile family working, and the toy fixture holds
+        # one, so a flag on `total` fires on the golden world.
+        unresolved = cons.by_resolution.get("unresolved", 0)
+        if unresolved:
+            found.append(
+                Flag(
+                    id_="unresolved-contradictions",
+                    headline=f"{unresolved} unresolved contradiction(s)",
+                    threshold="any contradiction whose resolution is unresolved",
+                    detail=(
+                        "a later pass may be modelling one side without saying so; "
+                        f"swept {cons.parts_swept} subject part(s)"
+                    ),
+                )
+            )
+
+    cov = coverage(run)
+    # `and cov.terminal_verdict` before the inequality: a `latest.json` with no
+    # verdict leaves the field `""`, and `"" != "converged"` would render
+    # "Coverage ended" with nothing after it -- the blank-label shape the verdict
+    # tally and `dispositions` both rule against. An unrecorded verdict is a
+    # score-stage defect for `validate` to name, not a halt.
+    if isinstance(cov, Coverage) and cov.terminal_verdict not in ("", "converged"):
+        found.append(
+            Flag(
+                id_="coverage-halted",
+                headline=f"Coverage ended {cov.terminal_verdict}",
+                threshold="terminal verdict is not converged",
+                detail=f"{len(cov.holes)} open hole(s) at the last round",
+            )
+        )
+
+    rows = scenarios(run)
+    if isinstance(rows, list):
+        overstated = [r.id_ for r in rows if r.difficulty_overstated]
+        if overstated:
+            found.append(
+                Flag(
+                    id_="difficulty-overstated",
+                    headline=f"{len(overstated)} scenario(s) reachable in fewer calls",
+                    threshold="minimum_tool_calls_found < hop_depth",
+                    detail=", ".join(overstated),
+                )
+            )
+
+    strays = orphaned_temp_files(run)
+    if strays:
+        found.append(
+            Flag(
+                id_="orphaned-temp",
+                headline=f"{len(strays)} orphaned temp file(s)",
+                threshold="any *.tmp.* in the run root",
+                detail=", ".join(strays) + " -- a dispatch died mid-write",
+            )
+        )
+
+    head = header(run)
+    if isinstance(head, Header):
+        recorded = {s.stage for s in head.stages}
+        # Only a stage the spine shows as *produced* is owed a record: accusing
+        # `score` on a run that stopped at `propose` would put four findings on
+        # every partial run's page. `- _CODE_STAGES` is the other half -- see that
+        # constant for why hardcoding it once got `emit` wrong.
+        produced = {row.name for row in stage_spine(run) if row.produced}
+        missing = sorted(produced - recorded - _CODE_STAGES)
+        if missing:
+            found.append(
+                Flag(
+                    id_="stage-record-incomplete",
+                    headline=f"{len(missing)} dispatched stage(s) unrecorded in the manifest",
+                    threshold="a produced prompt stage with no manifest.stages entry",
+                    detail=(
+                        ", ".join(missing)
+                        + " -- without model, effort and skill hash the run is not comparable"
+                    ),
+                )
+            )
+
+    return found

@@ -2740,3 +2740,664 @@ def test_scenarios_on_a_document_that_is_not_a_mapping_is_absent(tmp_path):
     got = summary.scenarios(run)
     assert isinstance(got, summary.Absent)
     assert got.what == "02-scenarios.json"
+
+
+# --- 3.6 the challenge tallies and the emitted-suite inventory ----------------
+
+
+def test_challenge_tallies_verdicts_by_value(tmp_path):
+    """The tally is keyed by the verdict each part actually holds.
+
+    The toy fixture is *uniform* here -- all four verdicts are `accept` -- so a
+    test that only asserted `sum(tallies.values()) == judged` would pass an
+    implementation that keyed every part under one invented label, or under the
+    filename. One verdict is flipped to `re-seed` so the dict has two keys to get
+    wrong, which is the fixture-uniformity trap this plan has already lost two
+    mutations to.
+
+    `scn-blocked` is the one flipped, and which part it is matters: `list_json`
+    sorts by filename, so flipping the *first* part makes the first-seen key order
+    `re-seed, accept` while the sorted order is `accept, re-seed`. Dict equality
+    ignores order, so without the `list(...)` assertion the sort that makes the
+    page diffable is unlocked -- and flipping `scn-empty` instead leaves the two
+    orders identical, which is a fixture that cannot see the difference.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.verdict("scn-blocked"))
+    assert doc["verdict"] == "accept", "the fixture must start uniform for the flip to vary it"
+    doc["verdict"] = "re-seed"
+    write_json(run.verdict("scn-blocked"), doc)
+    got = summary.challenge(run)
+    assert got.tallies == {"accept": 3, "re-seed": 1}
+    assert list(got.tallies) == ["accept", "re-seed"], "sorted, not in first-seen order"
+    assert got.judged == 4
+    assert sum(got.tallies.values()) == got.judged
+
+
+def test_challenge_tallies_a_verdict_with_no_value_as_unrecorded(tmp_path):
+    """`dispositions`' ruling on a blank label, applied to the verdict column.
+
+    A verdict part whose `verdict` is missing or empty is a hand-edited record;
+    grouping it under `""` would render as a blank row that reads like a rendering
+    bug rather than as a fact about the part.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.verdict("scn-empty"))
+    doc["verdict"] = ""
+    write_json(run.verdict("scn-empty"), doc)
+    got = summary.challenge(run)
+    assert got.tallies == {"(unrecorded)": 1, "accept": 3}
+    assert list(got.tallies) == ["(unrecorded)", "accept"], "sorted, not in first-seen order"
+
+
+def test_challenge_counts_emitted_packages_apart_from_the_verdicts(tmp_path):
+    """`packages` counts `06-suite/`, not `05-verdicts/`.
+
+    On an unedited toy run the two counts are both 4, so asserting `packages > 0`
+    is satisfied by an implementation returning `len(verdict_paths)`. One package
+    directory is removed so the two numbers differ, which is the only shape that
+    tells them apart.
+    """
+    import shutil
+
+    from rubrica.emit import emit_run
+
+    run = build_toy_run(tmp_path / "runs")
+    emitted, _ = emit_run(run)
+    shutil.rmtree(run.task_dir(emitted[0]))
+    got = summary.challenge(run)
+    assert got.packages == len(emitted) - 1
+    assert got.judged == len(emitted), "the verdict count is untouched"
+    assert got.incomplete_packages == [], "a package that is gone is absent, not incomplete"
+
+
+def test_challenge_names_a_package_missing_a_file(tmp_path):
+    """A package missing one of `SUITE_FILES` is named, and only that one.
+
+    The exact-list assertion is the lock: `incomplete_packages` returning every
+    emitted id would satisfy a membership test while telling a reader nothing.
+    """
+    from rubrica.emit import emit_run
+
+    run = build_toy_run(tmp_path / "runs")
+    emitted, _ = emit_run(run)
+    (run.task_dir(emitted[0]) / "golden.json").unlink()
+    got = summary.challenge(run)
+    assert got.incomplete_packages == [emitted[0]]
+    assert got.packages == len(emitted), "the package is still there, just short a file"
+
+
+def test_challenge_reports_no_package_before_emit(tmp_path):
+    """A judged run that never emitted: verdicts tallied, inventory empty."""
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    got = summary.challenge(run)
+    assert got.judged == 4
+    assert got.packages == 0
+    assert got.incomplete_packages == []
+
+
+def test_challenge_before_the_stage_is_absent(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    got = summary.challenge(run)
+    assert isinstance(got, summary.Absent)
+    assert got.what == "05-verdicts/"
+
+
+def test_challenge_carries_the_smoke_report_when_one_was_written(tmp_path):
+    """`smoke` is the report document, or None -- not a boolean.
+
+    `build_toy_run` never writes `07-report.json` even at its last checkpoint, so
+    both halves are asserted here: None before smoke ran, and the document's own
+    fields after, since a `bool(path.exists())` would satisfy the second half
+    alone.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    assert summary.challenge(run).smoke is None
+    write_json(run.report, {"schema_version": "0.1", "checked": 4, "failures": []})
+    assert summary.challenge(run).smoke == {
+        "schema_version": "0.1",
+        "checked": 4,
+        "failures": [],
+    }
+
+
+def test_challenge_on_an_unreadable_verdicts_dir_is_absent(tmp_path):
+    """`list_json` raises `UsageError`, which is a ValueError and not an OSError.
+
+    The same shape `contradictions` documents: the guard has to catch the class,
+    not `OSError`, or the one absolute promise of this module is broken by a
+    `chmod` on one directory.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    run.verdicts_dir.chmod(0o000)
+    try:
+        assert isinstance(summary.challenge(run), summary.Absent)
+    finally:
+        run.verdicts_dir.chmod(0o755)
+
+
+def test_challenge_on_an_unreadable_suite_dir_still_tallies(tmp_path):
+    """`scenario_ids_with_tasks` raises `UsageError` too, and only the inventory dies.
+
+    The tally is the control: an unreadable `06-suite/` must cost the package
+    count and nothing else, because the verdicts are perfectly readable and "how
+    did the adversary judge this run" is the half a reader came for.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    from rubrica.emit import emit_run
+
+    run = build_toy_run(tmp_path / "runs")
+    emit_run(run)
+    run.suite_dir.chmod(0o000)
+    try:
+        got = summary.challenge(run)
+        assert got.packages == 0
+        assert got.tallies == {"accept": 4}, "the verdicts still tally"
+    finally:
+        run.suite_dir.chmod(0o755)
+
+
+# --- the orphaned temp-file scan ---------------------------------------------
+
+
+def test_orphaned_temp_files_finds_a_stray_tmp(tmp_path):
+    """Found by inspection during design: an orphaned
+    02-scenarios.json.tmp.43146.cb890a5abaf7 was sitting in the newest run on
+    disk, and decisions.md records an earlier one removed by hand."""
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    (run.root / "02-scenarios.json.tmp.4242.deadbeef").write_text("{}", encoding="utf-8")
+    assert summary.orphaned_temp_files(run) == ["02-scenarios.json.tmp.4242.deadbeef"]
+
+
+def test_orphaned_temp_files_sorts_more_than_one(tmp_path):
+    """Sorted, for the reason every other collection on this page is: two runs
+    over the same directory must render the same list, and `iterdir` order is the
+    filesystem's."""
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    for name in ("02-scenarios.json.tmp.9.zz", "01-goals.json.tmp.1.aa"):
+        (run.root / name).write_text("{}", encoding="utf-8")
+    assert summary.orphaned_temp_files(run) == [
+        "01-goals.json.tmp.1.aa",
+        "02-scenarios.json.tmp.9.zz",
+    ]
+
+
+def test_orphaned_temp_files_is_empty_on_a_clean_run(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    assert summary.orphaned_temp_files(run) == []
+
+
+def test_orphaned_temp_files_scans_only_the_run_root(tmp_path):
+    """The scan is one directory deep, and that is the scope, not an oversight.
+
+    A stray under `01-claims/` is already invisible to every reader of that
+    directory -- `list_json` keeps only a `.json` suffix -- so naming it here would
+    put a file on the page that nothing else in the run reacts to. The run root is
+    where the sealed artifacts live and where an interrupted seal leaves its temp.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    (run.claims_dir / "api-json.json.tmp.7.bb").write_text("{}", encoding="utf-8")
+    assert summary.orphaned_temp_files(run) == []
+
+
+def test_orphaned_temp_files_on_an_unreadable_run_root_is_empty(tmp_path):
+    """`except OSError` around `iterdir`, at the shape that reaches it.
+
+    A run root at mode 000 is the shape a run copied out of a container under a
+    different uid has, and the scan reporting "no strays" is the honest answer:
+    there is nothing it can see.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run.root.chmod(0o000)
+    try:
+        assert summary.orphaned_temp_files(run) == []
+    finally:
+        run.root.chmod(0o755)
+
+
+# --- 3.7 the flag table ------------------------------------------------------
+
+
+def test_code_stages_is_exactly_the_stages_that_run_as_code():
+    """`_CODE_STAGES` re-derived, because a hardcoded set got `emit` wrong once.
+
+    CLAUDE.md: the code stages have no `manifest.stages` entry by design and
+    "their absence there is not a finding", so `stage-record-incomplete` must
+    exempt exactly them. `emit` is deliberately *not* exempt -- `rb-emit` is a
+    thin wrapper over `rubrica emit`, so `emit` does get a record and must stay
+    accusable -- and that is the half a hardcoded set loses first.
+
+    Derived from `skills.discover()` rather than compared against a second
+    hand-written list, so converting a stage from code to a skill (or the other
+    way) fails here instead of quietly exempting it forever.
+    """
+    from rubrica import skills
+
+    declared = {s.contract.get("stage") for s in skills.discover()}
+    assert set(STAGES) - declared == summary._CODE_STAGES
+    assert "emit" not in summary._CODE_STAGES, "rb-emit exists, so emit must stay accusable"
+
+
+def test_flags_fire_low_utilisation_below_the_threshold(tmp_path, monkeypatch):
+    """The threshold is patched *above* 100 because the toy fixture cites everything.
+
+    Measured: the toy run's claim utilisation is 100.0% (api-json 9/9, notes-md
+    8/8, trace-json 2/2). The predicate is a strict `<`, so patching the threshold
+    to 100.0 -- as this test was first written -- leaves `100.0 < 100.0` False and
+    the flag silently not firing while the test claims to have observed it. 100.1
+    is the smallest round value that makes the predicate observable on a fixture
+    with nothing uncited.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    assert summary.utilisation(run).pct == 100.0, "the fixture this threshold is chosen against"
+    monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 100.1)
+    fired = {f.id_: f for f in summary.flags(run)}
+    assert "low-utilisation" in fired
+    assert "100.0%" in fired["low-utilisation"].headline
+
+
+def test_flags_do_not_fire_low_utilisation_above_the_threshold(tmp_path, monkeypatch):
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 0.0)
+    ids = {f.id_ for f in summary.flags(run)}
+    assert "low-utilisation" not in ids
+
+
+def test_flags_do_not_fire_low_utilisation_exactly_at_the_threshold(tmp_path, monkeypatch):
+    """`below`, not `at or below` -- the boundary the threshold text promises.
+
+    Without this the pair above is satisfied by `<=` just as well as by `<`, and
+    the threshold string on the page says "below". A flag whose stated rule and
+    whose predicate disagree at the boundary is worse than no flag.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 100.0)
+    ids = {f.id_ for f in summary.flags(run)}
+    assert "low-utilisation" not in ids
+
+
+def test_flags_do_not_fire_low_utilisation_before_the_seal(tmp_path, monkeypatch):
+    """`Absent` utilisation is not 0%, so the flag must stay silent.
+
+    A threshold of 100.1 fires on any readable pct at all; a run with no world
+    model has no pct, and reporting "0% cited" there would be a judgment about
+    reconcile passes that have not run.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-gaps")
+    monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 100.1)
+    assert isinstance(summary.utilisation(run), summary.Absent)
+    ids = {f.id_ for f in summary.flags(run)}
+    assert "low-utilisation" not in ids
+
+
+def test_flags_do_not_raise_when_nothing_was_extracted(tmp_path, monkeypatch):
+    """`util.pct is not None` is load-bearing, and this is the shape that reaches it.
+
+    A claims file with an empty `claims` array is schema-valid -- claims-0.1.json
+    sets no `minItems` -- so a run whose extract pass found nothing yields a
+    `Utilisation` with real artifact rows, `total == 0` and `pct is None`. That is
+    the one state where the section is present and the number is not: without the
+    `is not None` guard, `None < LOW_UTILISATION_PCT` raises `TypeError` on a
+    perfectly readable run, which is this module's one absolute promise broken.
+
+    Not `Absent` and not 0%, which is `utilisation`'s own ruling: 0% asserts every
+    claim was dropped, and "there were no claims to cite" is a different fact.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    for path in sorted(run.claims_dir.iterdir()):
+        doc = read_json(path)
+        doc["claims"] = []
+        write_json(path, doc)
+    util = summary.utilisation(run)
+    assert util.pct is None and util.total == 0, "the shape under test"
+    monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 100.1)
+    ids = {f.id_ for f in summary.flags(run)}
+    assert "low-utilisation" not in ids
+    assert "uncited-artifacts" not in ids, "a 0-of-0 input is what the gate exempts"
+
+
+def test_flags_fire_uncited_artifacts_and_name_them(tmp_path):
+    """The toy fixture has *nothing* uncited, so the fixture has to be varied.
+
+    An extra claims artifact nothing in the world model cites is the shape
+    `refs.check_claim_utilisation` fires on, and naming it is the actionable half:
+    "one input contributed nothing" is not useful without which one.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    assert summary.utilisation(run).uncited == [], "the fixture starts fully cited"
+    write_json(run.claims_dir / "stray-md.json", _stray_claims_doc())
+    fired = {f.id_: f for f in summary.flags(run)}
+    assert "uncited-artifacts" in fired
+    assert "stray-md" in fired["uncited-artifacts"].detail
+
+
+def test_flags_do_not_fire_uncited_artifacts_on_a_fully_cited_run(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    ids = {f.id_ for f in summary.flags(run)}
+    assert "uncited-artifacts" not in ids
+
+
+def test_flags_fire_unresolved_contradictions(tmp_path):
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    run.contradictions_dir.mkdir(parents=True, exist_ok=True)
+    write_json(
+        run.contradiction_part("subj-a"),
+        {
+            "schema_version": "0.1",
+            "subject_id": "subj-a",
+            "contradictions": [{"id": "con-1", "resolution": "unresolved"}],
+        },
+    )
+    fired = {f.id_: f for f in summary.flags(run)}
+    assert "unresolved-contradictions" in fired
+    assert fired["unresolved-contradictions"].headline.startswith("1 ")
+
+
+def test_flags_do_not_fire_unresolved_when_all_are_resolved(tmp_path):
+    """The negative half, and a lock on *which* number the flag reads.
+
+    The toy fixture already records one `preferred_a` contradiction, so a flag
+    reading `cons.total` instead of `by_resolution["unresolved"]` fires here --
+    which is exactly the misread `contradictions`' own docstring records against
+    the top-level `resolution` field.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    run.contradictions_dir.mkdir(parents=True, exist_ok=True)
+    write_json(
+        run.contradiction_part("subj-a"),
+        {
+            "schema_version": "0.1",
+            "subject_id": "subj-a",
+            "contradictions": [{"id": "con-1", "resolution": "both_possible"}],
+        },
+    )
+    assert summary.contradictions(run).total == 2, "the fixture's own contradiction is still there"
+    ids = {f.id_ for f in summary.flags(run)}
+    assert "unresolved-contradictions" not in ids
+
+
+def test_flags_fire_coverage_halted(tmp_path):
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    doc = read_json(run.coverage_latest)
+    doc["verdict"] = "halted_no_progress"
+    write_json(run.coverage_latest, doc)
+    fired = {f.id_: f for f in summary.flags(run)}
+    assert "coverage-halted" in fired
+    assert "halted_no_progress" in fired["coverage-halted"].headline
+
+
+def test_flags_do_not_fire_coverage_halted_on_converged(tmp_path):
+    from rubrica.artifacts import read_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    assert read_json(run.coverage_latest)["verdict"] == "converged"
+    ids = {f.id_ for f in summary.flags(run)}
+    assert "coverage-halted" not in ids
+
+
+def test_flags_do_not_fire_coverage_halted_before_score(tmp_path):
+    """An `Absent` coverage section is not a halt.
+
+    `coverage` returns `Absent` before `score` runs, and a `Coverage` whose
+    `terminal_verdict` is the empty string for a run whose `latest.json` records
+    none -- neither is a run that stopped making progress, and flagging either
+    would put a halt on the page of every run that has not scored yet.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    assert isinstance(summary.coverage(run), summary.Absent)
+    ids = {f.id_ for f in summary.flags(run)}
+    assert "coverage-halted" not in ids
+
+
+def test_flags_do_not_fire_coverage_halted_on_an_unrecorded_verdict(tmp_path):
+    """A `latest.json` with no `verdict` is a score-stage defect, not a halt.
+
+    `terminal_verdict` is `""` there, and `"" != "converged"` -- so a flag that
+    tested only inequality would render "Coverage ended" with nothing after it,
+    which is the blank-label shape `dispositions` and the verdict tally both rule
+    against.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    doc = read_json(run.coverage_latest)
+    del doc["verdict"]
+    write_json(run.coverage_latest, doc)
+    assert summary.coverage(run).terminal_verdict == ""
+    ids = {f.id_ for f in summary.flags(run)}
+    assert "coverage-halted" not in ids
+
+
+def test_flags_fire_difficulty_overstated_and_name_the_scenario(tmp_path):
+    """`difficulty_overstated` is uniformly False on the toy run, so vary it.
+
+    `scn-blocked` is proposed at `hop_depth: 2` and its verdict finds the same 2
+    calls; dropping the found count to 1 is the one edit that makes the column
+    non-uniform, and without it the flag's predicate is unobservable.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    assert not any(r.difficulty_overstated for r in summary.scenarios(run))
+    doc = read_json(run.verdict("scn-blocked"))
+    doc["minimum_tool_calls_found"] = 1
+    write_json(run.verdict("scn-blocked"), doc)
+    fired = {f.id_: f for f in summary.flags(run)}
+    assert "difficulty-overstated" in fired
+    assert fired["difficulty-overstated"].detail == "scn-blocked"
+
+
+def test_flags_do_not_fire_difficulty_overstated_on_an_unedited_run(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    ids = {f.id_ for f in summary.flags(run)}
+    assert "difficulty-overstated" not in ids
+
+
+def test_flags_fire_orphaned_temp(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    (run.root / "02-scenarios.json.tmp.1.x").write_text("{}", encoding="utf-8")
+    fired = {f.id_: f for f in summary.flags(run)}
+    assert "orphaned-temp" in fired
+    assert "02-scenarios.json.tmp.1.x" in fired["orphaned-temp"].detail
+
+
+def test_flags_do_not_fire_orphaned_temp_on_a_clean_run(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    ids = {f.id_ for f in summary.flags(run)}
+    assert "orphaned-temp" not in ids
+
+
+def test_flags_fire_stage_record_incomplete_and_exempt_the_code_stages(tmp_path):
+    """The fixture already has an empty `manifest.stages`, so the *detail* is the test.
+
+    Measured: `build_toy_run` mints a manifest whose `stages` is `{}` at every
+    checkpoint, so this flag fires on an unedited toy run and a test that "emptied
+    stages" first would be asserting against a no-op mutation. What is worth
+    locking is which stages get accused: the dispatched ones, and not `intake` or
+    `reconcile-seal`, whose absence from `manifest.stages` CLAUDE.md states is not
+    a finding.
+    """
+    from rubrica.artifacts import read_json
+
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    assert read_json(run.manifest)["stages"] == {}, "the fixture records no stage"
+    fired = {f.id_: f for f in summary.flags(run)}
+    assert "stage-record-incomplete" in fired
+    named = set(fired["stage-record-incomplete"].detail.split(" -- ")[0].split(", "))
+    assert {"extract", "propose", "reconcile-goals"} <= named
+    assert named.isdisjoint(summary._CODE_STAGES), "a code stage must never be accused"
+
+
+def test_flags_do_not_fire_stage_record_incomplete_when_every_stage_is_recorded(tmp_path):
+    """The negative half, and the only test that can catch an over-broad exemption.
+
+    Every produced stage that is not a code stage is given a record, so the flag
+    must go silent. A `_CODE_STAGES` that had grown to swallow `extract` would
+    still pass the positive test above on the strength of `propose` alone; this one
+    and the derivation test are what close that.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    produced = {row.name for row in summary.stage_spine(run) if row.produced}
+    manifest = read_json(run.manifest)
+    manifest["stages"] = {
+        name: {"model": "m", "effort": "high", "skill_sha256": "0" * 64}
+        for name in sorted(produced - summary._CODE_STAGES)
+    }
+    assert manifest["stages"], "the mutation must actually record something"
+    write_json(run.manifest, manifest)
+    ids = {f.id_ for f in summary.flags(run)}
+    assert "stage-record-incomplete" not in ids
+
+
+def test_flags_do_not_fire_stage_record_incomplete_for_a_stage_that_never_ran(tmp_path):
+    """A record is owed only for a stage the spine shows as *produced*.
+
+    A propose-level run never dispatched `score`, `instantiate`, `challenge` or
+    `emit`, so accusing them of an unrecorded dispatch would put four findings on
+    the page of every partial run -- and partial runs are the primary case.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    fired = {f.id_: f for f in summary.flags(run)}
+    named = set(fired["stage-record-incomplete"].detail.split(" -- ")[0].split(", "))
+    assert named.isdisjoint({"score", "instantiate", "challenge", "emit"})
+
+
+def _stray_claims_doc() -> dict:
+    """A claims artifact the toy world model cites nothing from.
+
+    Beside the flag tests rather than in `tests/toy.py`: it is not a checkpoint of
+    the golden world, it is the one addition to it that makes `uncited-artifacts`
+    observable, and putting it in the fixture module would give every other test's
+    run an uncited input.
+    """
+    return {
+        "schema_version": "0.1",
+        "artifact_id": "stray-md",
+        "claims": [
+            {
+                "id": "clm-stray-001",
+                "kind": "capability",
+                "statement": "nothing in the world model cites this",
+                "confidence": "low",
+                "derivation": "stated",
+                "evidence": [{"artifact_id": "stray-md", "locator": "#/never"}],
+            }
+        ],
+    }
+
+
+def _run_with_every_flag(tmp_path, monkeypatch) -> RunPaths:
+    """A run engineered so every flag in the table fires at once.
+
+    One fixture rather than seven, because the property under test is about the
+    table as a whole: that no flag can reach the page without stating the rule
+    that put it there. Each edit below is the same one the single-flag test above
+    it makes, so a flag that stops firing here fails there too and the diagnosis
+    is not ambiguous.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    # low-utilisation and uncited-artifacts: one claims artifact nothing cites
+    # drops the pct off 100.0 and gives the uncited list a member.
+    write_json(run.claims_dir / "stray-md.json", _stray_claims_doc())
+    monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 100.0)
+    write_json(
+        run.contradiction_part("subj-stray"),
+        {
+            "schema_version": "0.1",
+            "subject_id": "subj-stray",
+            "contradictions": [{"id": "con-stray", "resolution": "unresolved"}],
+        },
+    )
+    latest = read_json(run.coverage_latest)
+    latest["verdict"] = "halted_round_cap"
+    write_json(run.coverage_latest, latest)
+    verdict = read_json(run.verdict("scn-blocked"))
+    verdict["minimum_tool_calls_found"] = 1
+    write_json(run.verdict("scn-blocked"), verdict)
+    (run.root / "01-goals.json.tmp.5.abc").write_text("{}", encoding="utf-8")
+    # stage-record-incomplete needs no edit: build_toy_run mints an empty
+    # manifest.stages.
+    return run
+
+
+def test_every_flag_states_its_threshold(tmp_path, monkeypatch):
+    """A flag whose threshold is not on the page is a black box.
+
+    Asserted over a run where *every* flag fires, not over the two that happen to
+    fire on a propose-level run with a stray temp file: the property is that no
+    flag can reach the page without its rule, and a loop over two of seven checks
+    it for two. The id set is pinned in the same assertion, so a flag added
+    without a threshold cannot slip in behind a `for` loop that never sees it.
+    """
+    run = _run_with_every_flag(tmp_path, monkeypatch)
+    fired = summary.flags(run)
+    assert {f.id_ for f in fired} == {
+        "low-utilisation",
+        "uncited-artifacts",
+        "unresolved-contradictions",
+        "coverage-halted",
+        "difficulty-overstated",
+        "orphaned-temp",
+        "stage-record-incomplete",
+    }
+    for flag in fired:
+        assert flag.threshold, f"{flag.id_} states no threshold"
+        assert flag.headline, f"{flag.id_} states no headline"
+        assert flag.detail, f"{flag.id_} states no detail"
+
+
+def test_flags_are_unique_and_ordered_stably(tmp_path, monkeypatch):
+    """One row per rule, in a fixed order, so two renderings of a run diff cleanly."""
+    run = _run_with_every_flag(tmp_path, monkeypatch)
+    ids = [f.id_ for f in summary.flags(run)]
+    assert len(ids) == len(set(ids))
+    assert ids == [f.id_ for f in summary.flags(run)]
+
+
+def test_flags_on_an_empty_run_do_not_raise(tmp_path):
+    empty = tmp_path / "run-empty"
+    empty.mkdir()
+    assert summary.flags(RunPaths(empty)) == []
+
+
+def test_flags_on_an_unreadable_run_root_do_not_raise(tmp_path):
+    """The module's one absolute promise, at the flag table.
+
+    `flags` calls six other builders and each can return `Absent`, which is why
+    every one of them is `isinstance`-checked before it is indexed. A run root at
+    mode 000 makes all six absent at once, which is the cheapest way to find a
+    missing check.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs")
+    run.root.chmod(0o000)
+    try:
+        assert summary.flags(run) == []
+    finally:
+        run.root.chmod(0o755)
