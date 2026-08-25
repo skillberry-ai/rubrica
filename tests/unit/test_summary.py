@@ -374,3 +374,662 @@ def test_header_survives_a_stage_whose_body_is_not_a_mapping(tmp_path):
     assert summary.header(run).stages == [
         summary.StageRecord(stage="extract", model="", effort="", skill_sha256="")
     ]
+
+
+def test_inputs_rows_carry_every_manifest_field(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    got = summary.inputs(run)
+    assert got.rows, "intake registers the toy inputs"
+    row = got.rows[0]
+    assert row.artifact_id
+    assert row.kind
+    assert row.bytes_ > 0
+    assert len(row.sha256) == 64
+    assert row.stored_as
+
+
+def test_inputs_rows_match_the_manifest_entry_field_for_field(tmp_path):
+    """Every field of every row against the manifest, as whole-row equality.
+
+    The test above reads five fields off `rows[0]` and asserts only that each is
+    truthy, so a row that put `kind` in `stored_as`, or read every row out of
+    `inputs[0]`, stays green -- the toy manifest's three entries all have a
+    truthy value in all six fields. Building the expected rows from the document
+    on disk is the lock, and it pins the order too: `inputs` renders the
+    manifest's own sequence, which is the order intake registered them in.
+    """
+    from rubrica.artifacts import read_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    entries = read_json(run.manifest)["inputs"]
+    assert len(entries) > 1, "one row cannot discriminate a per-row mapping"
+    assert summary.inputs(run).rows == [
+        summary.InputRow(
+            artifact_id=entry["artifact_id"],
+            kind=entry["kind"],
+            bytes_=entry["bytes"],
+            sha256=entry["sha256"],
+            source_path=entry["source_path"],
+            stored_as=entry["stored_as"],
+        )
+        for entry in entries
+    ]
+
+
+def test_inputs_totals_bytes_and_tallies_kinds(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    got = summary.inputs(run)
+    assert got.total_bytes == sum(r.bytes_ for r in got.rows)
+    assert sum(got.kinds.values()) == len(got.rows)
+
+
+def test_inputs_totals_the_manifests_own_bytes_and_counts_a_repeated_kind(tmp_path):
+    """The two aggregates against the file, on a manifest with a duplicated kind.
+
+    Both assertions in the test above are self-referential: `total_bytes ==
+    sum(r.bytes_ ...)` holds for any total computed from the rows however wrong
+    the rows are, and `sum(kinds.values()) == len(rows)` holds for a `kinds` that
+    is a *set* of kinds rather than a tally, because the toy manifest's three
+    inputs have three distinct kinds. So the total is compared to the document
+    here, and one input's kind is rewritten to collide with another's -- which
+    makes the expected tally `{"mcp_tool_schema": 1, "trace": 2}` and fails a set.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    manifest = read_json(run.manifest)
+    manifest["inputs"][1]["kind"] = "trace"
+    write_json(run.manifest, manifest)
+    got = summary.inputs(run)
+    assert got.total_bytes == sum(e["bytes"] for e in manifest["inputs"])
+    assert got.kinds == {"mcp_tool_schema": 1, "trace": 2}
+
+
+def test_inputs_without_a_manifest_is_absent(tmp_path):
+    empty = tmp_path / "run-empty"
+    empty.mkdir()
+    assert isinstance(summary.inputs(RunPaths(empty)), summary.Absent)
+
+
+def test_inputs_absent_names_the_artifact_it_looked_for(tmp_path):
+    """`Absent("")` satisfies the isinstance check above; the page needs the name."""
+    empty = tmp_path / "run-empty"
+    empty.mkdir()
+    assert summary.inputs(RunPaths(empty)).what == "manifest.json"
+
+
+@pytest.mark.parametrize("bad", ["a lot", None, {"count": 3}, [], True])
+def test_inputs_reads_a_non_integer_bytes_as_zero(tmp_path, bad):
+    """`_as_int`, at every shape a hand-edited manifest reaches a summed column with.
+
+    `bytes` feeds both a rendered cell and `total_bytes`, so a bare `int()` here
+    takes the whole page down on one bad row -- `int("a lot")` raises ValueError
+    and `int(None)` raises TypeError, and neither is caught anywhere between this
+    and `main()`. Zero is the honest reading: the row still renders, and a byte
+    count of 0 beside a real file is visibly wrong to a reader in a way an
+    exception is not. `True` is in the list to record what `int()` does with it
+    (1, not 0) rather than to endorse it -- the coercion is documented total, so
+    every shape it accepts is measured.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    manifest = read_json(run.manifest)
+    manifest["inputs"][0]["bytes"] = bad
+    write_json(run.manifest, manifest)
+    got = summary.inputs(run)
+    expected = 1 if bad is True else 0
+    assert got.rows[0].bytes_ == expected
+    assert got.total_bytes == expected + sum(e["bytes"] for e in manifest["inputs"][1:])
+
+
+def test_inputs_drops_a_non_dict_member_rather_than_raising(tmp_path):
+    """`_dicts`' measured shape, on the one list this section reads.
+
+    A string member reaches `.get` and raises `AttributeError` without the guard,
+    on a run that is otherwise perfectly readable. The surviving row is asserted
+    alongside the count so that "dropped everything" cannot pass.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    manifest = read_json(run.manifest)
+    manifest["inputs"] = ["oops-a-string", manifest["inputs"][0]]
+    write_json(run.manifest, manifest)
+    got = summary.inputs(run)
+    assert [r.artifact_id for r in got.rows] == ["api-json"]
+    assert got.total_bytes == manifest["inputs"][1]["bytes"]
+
+
+def test_inputs_on_a_manifest_whose_inputs_is_not_a_list_has_no_rows(tmp_path):
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    manifest = read_json(run.manifest)
+    manifest["inputs"] = "nope"
+    write_json(run.manifest, manifest)
+    got = summary.inputs(run)
+    assert got.rows == []
+    assert got.total_bytes == 0
+    assert got.kinds == {}
+
+
+def _objective_document(run_id: str) -> dict:
+    """A schema-shaped `00-objective.json` payload, built rather than repeated.
+
+    Every field name here is one `objective` reads, so the shape is pinned by
+    objective-0.1.json in the one test that validates against it and reused by
+    the rest.
+    """
+    return {
+        "schema_version": "0.1",
+        "run_id": run_id,
+        "predicted_surface_count": 2,
+        "objective_review": {
+            "declared_objective": "breadth",
+            "supported": True,
+            "surfaces": [
+                {
+                    "name": "search",
+                    "evidence": ["api-json"],
+                    "weight": {"candidates": 1, "bytes": 40},
+                },
+                {
+                    "name": "tickets",
+                    "evidence": ["notes-md", "trace-json"],
+                    "weight": {"candidates": 2, "bytes": 1216},
+                },
+            ],
+        },
+    }
+
+
+def test_objective_reads_the_review_and_its_surfaces(tmp_path):
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    write_json(run.objective, _objective_document(run.root.name))
+    got = summary.objective(run)
+    assert got.declared == "breadth"
+    assert got.supported is True
+    assert got.predicted_count == 2
+    assert got.surfaces[0].evidence == ["api-json"]
+    assert got.surfaces[0].candidates == 1
+    assert got.surfaces[0].bytes_ == 40
+
+
+def test_objective_maps_each_surface_to_its_own_weight_in_order(tmp_path):
+    """Both surfaces in full, which one surface cannot discriminate.
+
+    A single-surface assertion is satisfied by an implementation that reads
+    `surfaces[0]`'s weight for every row, or that reads `candidates` into
+    `bytes_`. Two surfaces with pairwise distinct names, evidence lists and
+    weights fail all of those, and whole-list equality pins the order the
+    document declares -- surfaces are ranked by the pass that writes them, so
+    re-sorting them here would relabel its ranking.
+
+    The document is validated against objective-0.1.json first: this section
+    reads six field names off it, and a fixture that drifted off-schema would let
+    a wrong spelling pass here and read nothing at all on a real run.
+    """
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    write_json(run.objective, _objective_document(run.root.name))
+    assert validate_artifact(run.objective, "objective") == [], (
+        "the fixture must be the shape rb-triage-objective actually writes"
+    )
+    assert summary.objective(run).surfaces == [
+        summary.Surface(name="search", evidence=["api-json"], candidates=1, bytes_=40),
+        summary.Surface(
+            name="tickets", evidence=["notes-md", "trace-json"], candidates=2, bytes_=1216
+        ),
+    ]
+
+
+def test_objective_reads_the_objective_file_not_the_sealed_triage_copy(tmp_path):
+    """Which of the two documents carrying `objective_review` this section reads.
+
+    `triage-seal` copies `objective_review` into `00-triage.json` verbatim, so on
+    a sealed run both files answer every assertion in the tests above and neither
+    of them says which one was opened. `00-objective.json` is the answer, for two
+    reasons: it is what the objective pass itself wrote, and it is the only one of
+    the two carrying `predicted_surface_count` at all -- the field section 4.1's
+    divergence check needs, which the seal does not copy. A run can also hold it
+    while `triage-seal` has not run yet.
+
+    The two documents are given contradictory verdicts here precisely so that
+    reading the wrong one fails rather than coinciding.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    write_json(run.objective, _objective_document(run.root.name))
+    write_json(
+        run.triage,
+        {
+            "schema_version": "0.1",
+            "run_id": run.root.name,
+            "objective_review": {
+                "declared_objective": "depth",
+                "supported": False,
+                "surfaces": [
+                    {"name": "sealed", "evidence": ["x"], "weight": {"candidates": 9, "bytes": 9}}
+                ],
+            },
+            "dispositions": [],
+        },
+    )
+    got = summary.objective(run)
+    assert got.declared == "breadth"
+    assert got.supported is True
+    assert [s.name for s in got.surfaces] == ["search", "tickets"]
+
+
+def test_objective_absent_when_the_stage_has_not_run(tmp_path):
+    """`upto="intake"` writes `manifest.json` and `00-inputs/` and nothing else,
+    so there is no `00-objective.json` for this to find."""
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    assert not run.objective.exists(), "the fixture must not already carry the artifact"
+    got = summary.objective(RunPaths(run.root))
+    assert isinstance(got, summary.Absent)
+    assert got.what == "00-objective.json"
+
+
+def test_objective_survives_a_review_that_is_not_a_mapping(tmp_path):
+    """`_mapping`'s measured shape: `"objective_review": "nope"` reached `.get`.
+
+    The declared objective renders empty rather than the section vanishing --
+    `predicted_surface_count` is still legible, and it is the half of the
+    divergence check this document is the only source of.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    write_json(
+        run.objective,
+        {"schema_version": "0.1", "run_id": run.root.name, "objective_review": "nope"},
+    )
+    got = summary.objective(run)
+    assert got.declared == ""
+    assert got.surfaces == []
+    assert got.supported is None
+
+
+def _triage_document(run_id: str, dispositions: list) -> dict:
+    return {"schema_version": "0.1", "run_id": run_id, "dispositions": dispositions}
+
+
+def test_dispositions_counts_admits_and_groups_declines_by_reason(tmp_path):
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    write_json(
+        run.triage,
+        _triage_document(
+            run.root.name,
+            [
+                {"candidate_id": "a", "disposition": "admit", "priority": 1, "reason": "keep"},
+                {
+                    "candidate_id": "b",
+                    "disposition": "decline",
+                    "reason_code": "near_duplicate",
+                    "reason": "same as a",
+                },
+                {
+                    "candidate_id": "c",
+                    "disposition": "decline",
+                    "reason_code": "near_duplicate",
+                    "reason": "same as a too",
+                },
+                {
+                    "candidate_id": "d",
+                    "disposition": "decline",
+                    "reason_code": "implementation_detail",
+                    "reason": "build only",
+                },
+            ],
+        ),
+    )
+    got = summary.dispositions(run)
+    assert got.admit_count == 1
+    assert got.decline_count == 3
+    assert sorted(got.declines_by_reason) == ["implementation_detail", "near_duplicate"]
+    assert len(got.declines_by_reason["near_duplicate"]) == 2
+
+
+def test_dispositions_lists_admits_in_the_order_intake_will_materialise_them(tmp_path):
+    """`intake.admit_sort_key`, measured: priority order, not document order.
+
+    The counts asserted above are order-blind, so an unsorted `admits` passes
+    every one of them. The order is the whole reason this reuses the pipeline's
+    own key rather than spelling a sort here: the admits a human reads at gate 0
+    are the sequence `admit_from_triage` will register, and the collision
+    suffixes `_unique_artifact_id` hands out depend on it -- a page listing them
+    in a different order would misdescribe which candidate became which
+    `artifact_id`.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    write_json(
+        run.triage,
+        _triage_document(
+            run.root.name,
+            [
+                {"candidate_id": "third", "disposition": "admit", "priority": 3, "reason": "r"},
+                {"candidate_id": "first", "disposition": "admit", "priority": 1, "reason": "r"},
+                {"candidate_id": "second", "disposition": "admit", "priority": 2, "reason": "r"},
+            ],
+        ),
+    )
+    got = summary.dispositions(run)
+    assert [d["candidate_id"] for d in got.admits] == ["first", "second", "third"]
+
+
+def test_dispositions_does_not_raise_on_a_priority_that_is_not_an_integer(tmp_path):
+    """A string `priority` beside an integer one -- the shape `admit_sort_key`
+    exists for, and the reason there is no `try` around that sort.
+
+    Measured before that function existed: `sorted` raised `TypeError: '<' not
+    supported between instances of 'int' and 'str'`, which nothing between here
+    and `main()` catches. A non-integer priority sorts as if absent, so it lands
+    after the integers rather than being dropped -- the candidate is still on the
+    page, which is what a reader needs to see the malformation at all.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    write_json(
+        run.triage,
+        _triage_document(
+            run.root.name,
+            [
+                {"candidate_id": "stringly", "disposition": "admit", "priority": "1"},
+                {"candidate_id": "numeric", "disposition": "admit", "priority": 2},
+            ],
+        ),
+    )
+    got = summary.dispositions(run)
+    assert [d["candidate_id"] for d in got.admits] == ["numeric", "stringly"]
+
+
+def test_dispositions_orders_the_decline_groups_by_reason_code(tmp_path):
+    """The group order, which `sorted(got.declines_by_reason)` above cannot see.
+
+    Wrapping a comparison in `sorted()` makes it pass whatever order the mapping
+    is in, so that assertion is satisfied by insertion order -- and insertion
+    order is whatever the triage record happened to list, which two runs of the
+    same pipeline need not share. This iterates the mapping itself. The three
+    codes are inserted in reverse alphabetical order so file order and sorted
+    order disagree.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    write_json(
+        run.triage,
+        _triage_document(
+            run.root.name,
+            [
+                {"candidate_id": "a", "disposition": "admit", "priority": 1},
+                {"candidate_id": "s", "disposition": "decline", "reason_code": "superseded"},
+                {"candidate_id": "n", "disposition": "decline", "reason_code": "near_duplicate"},
+                {"candidate_id": "i", "disposition": "decline", "reason_code": "generated"},
+            ],
+        ),
+    )
+    got = summary.dispositions(run)
+    assert list(got.declines_by_reason) == ["generated", "near_duplicate", "superseded"]
+
+
+def test_dispositions_groups_a_decline_with_no_reason_code_the_way_gate_0_does(tmp_path):
+    """`reason_code` is optional in triage-0.1.json, so this shape is *valid*.
+
+    Not a malformation: a decline is required to carry `reason` and `authority`
+    and may carry no `reason_code` at all. `gate_brief`'s gate 0 renders that
+    group as `?`, and this page reads the same field for the same human at the
+    same gate, so it says the same thing -- an empty group label would read as a
+    rendering bug rather than as a fact about the record.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    write_json(
+        run.triage,
+        _triage_document(
+            run.root.name,
+            [
+                {"candidate_id": "a", "disposition": "admit", "priority": 1},
+                {"candidate_id": "b", "disposition": "decline", "reason": "no code given"},
+            ],
+        ),
+    )
+    got = summary.dispositions(run)
+    assert list(got.declines_by_reason) == ["?"]
+    assert got.decline_count == 1
+
+
+def test_dispositions_survives_a_non_dict_member(tmp_path):
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    write_json(
+        run.triage,
+        {
+            "schema_version": "0.1",
+            "run_id": run.root.name,
+            "dispositions": ["oops-a-string", {"candidate_id": "a", "disposition": "admit"}],
+        },
+    )
+    got = summary.dispositions(run)
+    assert got.admit_count == 1, "the string member is dropped, not raised on"
+
+
+def test_dispositions_without_a_triage_record_is_absent(tmp_path):
+    empty = tmp_path / "run-empty"
+    empty.mkdir()
+    got = summary.dispositions(RunPaths(empty))
+    assert isinstance(got, summary.Absent)
+    assert got.what == "00-triage.json"
+
+
+def _projection(projection_id: str, closes: list[str], statement: str) -> dict:
+    """A schema-shaped projection, since triage-0.1.json requires seven fields.
+
+    Only `projection_id`, `closes` and `wanted.statement` are read by
+    `deficiencies`; the other four are required by the schema, and building them
+    here is what lets one test validate the whole document rather than trusting a
+    literal.
+    """
+    return {
+        "projection_id": projection_id,
+        "closes": closes,
+        "sources": [{"candidate_id": "api-json", "digest_note": "the tool block"}],
+        "wanted": {"kind": "mcp_tool_schema", "statement": statement, "why": "seeding needs it"},
+        "method": {"confidence": "high", "steps": ["import the module"]},
+        "acceptance": {"classifies_as": "mcp_tool_schema", "prose": "one document"},
+        "boundary": "invents no result shape no trace exercises",
+    }
+
+
+def test_deficiencies_pairs_each_with_its_projection(tmp_path):
+    """The pairing, on a document validated against triage-0.1.json.
+
+    The schema names are `deficiency_id` on a deficiency and `closes` -- a list
+    of deficiency ids -- on a projection, and both objects are
+    `additionalProperties: false`, so a reading keyed on anything else finds
+    nothing on a real run while passing happily against a hand-written literal.
+    Validating the fixture is what makes this test a lock on the field names
+    rather than on one spelling of them.
+    """
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    write_json(
+        run.triage,
+        {
+            "schema_version": "0.1",
+            "run_id": run.root.name,
+            # Required by triage-0.1.json, and unread by `deficiencies`: the seal
+            # writes all six top-level fields, so a fixture that validates has to
+            # carry it even though this section never looks at it.
+            "objective_review": _objective_document(run.root.name)["objective_review"],
+            "dispositions": [
+                {
+                    "candidate_id": "api-json",
+                    "disposition": "admit",
+                    "priority": 1,
+                    "reason": "the tool block",
+                    "authority": "triage",
+                }
+            ],
+            "deficiencies": [
+                {"deficiency_id": "def-1", "subject": "errors", "statement": "no error path"}
+            ],
+            "projections": [_projection("prj-1", ["def-1"], "author one error trace")],
+        },
+    )
+    assert validate_artifact(run.triage, "triage") == [], (
+        "the fixture must be the shape triage-seal actually writes"
+    )
+    got = summary.deficiencies(run)
+    assert [d.id_ for d in got] == ["def-1"]
+    assert got[0].statement == "no error path"
+    assert "author one error trace" in got[0].projection
+    assert "prj-1" in got[0].projection, "the id is the argument adopt-projection takes"
+
+
+def test_deficiencies_renders_the_empty_string_for_one_nothing_would_close(tmp_path):
+    """A deficiency with no projection, which is the one worth reading.
+
+    Asserted explicitly because it is the informative case: a projection is the
+    plan for closing a deficiency, so a deficiency with none is the one gate 0
+    has to rule on unaided. The second deficiency is paired, so "everything
+    renders empty" cannot pass.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    write_json(
+        run.triage,
+        {
+            "schema_version": "0.1",
+            "run_id": run.root.name,
+            "dispositions": [],
+            "deficiencies": [
+                {"deficiency_id": "def-1", "subject": "errors", "statement": "no error path"},
+                {"deficiency_id": "def-2", "subject": "auth", "statement": "no auth model"},
+            ],
+            "projections": [_projection("prj-2", ["def-2"], "author an auth note")],
+        },
+    )
+    got = {d.id_: d.projection for d in summary.deficiencies(run)}
+    assert got["def-1"] == ""
+    assert "author an auth note" in got["def-2"]
+
+
+def test_deficiencies_reads_a_sealed_run_once_rather_than_twice(tmp_path):
+    """The double-count a two-document union produces on every sealed run.
+
+    `seal.seal` *copies* 00-audit.json's deficiencies and projections into
+    00-triage.json (enriched with `closed_by` and `satisfied_by` from any
+    adoption), so past `triage-seal` both files carry the same deficiency and
+    reading both would list each one twice. That is the common case, not an edge:
+    every run that reaches gate 0 has been sealed.
+
+    The fixture is sealed by the real `seal.seal` over a patched audit part,
+    rather than by two hand-written documents that merely resemble its output, so
+    the duplication under test is the one the pipeline actually produces.
+    """
+    from rubrica.artifacts import read_json, write_json
+    from rubrica.seal import seal
+
+    run = build_toy_run(tmp_path / "runs", upto="triage-audit")
+    audit = read_json(run.audit)
+    audit["deficiencies"] = [
+        {"deficiency_id": "def-1", "subject": "errors", "statement": "no error path"}
+    ]
+    audit["projections"] = [_projection("prj-1", ["def-1"], "author one error trace")]
+    write_json(run.audit, audit)
+    _, findings = seal(run)
+    assert findings == [], "; ".join(f.message for f in findings)
+    assert [d["deficiency_id"] for d in read_json(run.triage)["deficiencies"]] == ["def-1"], (
+        "the seal must have copied the deficiency, or there is no duplication to avoid"
+    )
+    got = summary.deficiencies(run)
+    assert [d.id_ for d in got] == ["def-1"]
+    assert "author one error trace" in got[0].projection
+
+
+def test_deficiencies_falls_back_to_the_audit_before_the_seal_has_run(tmp_path):
+    """The audit part is the only source between `triage-audit` and `triage-seal`.
+
+    Preferring the sealed record must not mean ignoring the part it is assembled
+    from: a run stopped at the audit pass has deficiencies to read and no
+    00-triage.json to read them out of, and the audit's `deficiencies` and
+    `projections` are the same two schema objects under the same names.
+    """
+    from rubrica.artifacts import read_json, write_json
+    from rubrica.validate import validate_artifact
+
+    run = build_toy_run(tmp_path / "runs", upto="triage-audit")
+    assert not run.triage.exists(), "the fixture must stop before the seal"
+    audit = read_json(run.audit)
+    audit["deficiencies"] = [
+        {"deficiency_id": "def-1", "subject": "errors", "statement": "no error path"}
+    ]
+    audit["projections"] = [_projection("prj-1", ["def-1"], "author one error trace")]
+    write_json(run.audit, audit)
+    assert validate_artifact(run.audit, "audit") == []
+    got = summary.deficiencies(run)
+    assert [d.id_ for d in got] == ["def-1"]
+    assert "author one error trace" in got[0].projection
+
+
+def test_deficiencies_on_a_run_without_triage_is_empty(tmp_path):
+    empty = tmp_path / "run-empty"
+    empty.mkdir()
+    assert summary.deficiencies(RunPaths(empty)) == []
+
+
+def test_deficiencies_survives_a_projection_whose_closes_is_not_a_list_of_ids(tmp_path):
+    """`_strings` on `closes`, at the two shapes that reach it.
+
+    `closes` is a *list* of deficiency ids, so the pairing iterates it -- and a
+    hand-edited `"closes": "def-1"` is a string whose characters would each be
+    taken for a deficiency id, while a list member that is not a string cannot
+    match an id that is and can be unhashable (`setdefault` raises TypeError on a
+    list key). Both must leave the deficiency rendered and unpaired rather than
+    raising, and the third projection is well-formed so that "paired nothing"
+    cannot pass either.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    string_closes = _projection("prj-str", [], "unreachable by a string")
+    string_closes["closes"] = "def-1"
+    list_closes = _projection("prj-list", [], "unreachable by a list")
+    list_closes["closes"] = [["def-1"]]
+    write_json(
+        run.triage,
+        {
+            "schema_version": "0.1",
+            "run_id": run.root.name,
+            "dispositions": [],
+            "deficiencies": [
+                {"deficiency_id": "def-1", "subject": "errors", "statement": "no error path"},
+                {"deficiency_id": "def-2", "subject": "auth", "statement": "no auth model"},
+            ],
+            "projections": [
+                string_closes,
+                list_closes,
+                _projection("prj-2", ["def-2"], "author an auth note"),
+            ],
+        },
+    )
+    got = {d.id_: d.projection for d in summary.deficiencies(run)}
+    assert got["def-1"] == ""
+    assert "author an auth note" in got["def-2"]
