@@ -272,11 +272,11 @@ candidates, one that cannot be read at all, or one missing `run_id`,
 this command or a shard reads verbatim, checked before that read happens — is
 exit 2, a survey defect or a broken run, not a repairable stage output. An
 `excluded` that is present but is not an array is exit 2 for the same reason:
-its exclusions cannot be summarised onto the plan. A single
-candidate too large for any slice is exit 2 for the same reason: no splitter
-here can shrink one row. Re-running replans and removes any shard the new
-plan no longer names, so a human adopting a projection at gate 0 can re-mint
-the plan safely.
+its exclusions cannot be summarised onto the plan. A single candidate too
+large for any slice is exit 2 for the same reason: no splitter here can
+shrink one row. Re-running replans and removes any shard the new plan no
+longer names, so a human adopting a projection at gate 0 can re-mint the
+plan safely.
 
 Prints one line per slice — id, byte size, candidate count, label — then
 exits 0.

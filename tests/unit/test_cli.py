@@ -885,8 +885,8 @@ def test_triage_slices_exits_two_on_an_unreadable_catalogue(tmp_path):
 
 
 def _minimal_catalogue(**over):
-    """A schema-shaped catalogue with one candidate, for the four field-drop
-    cases below -- each removes exactly one key a bare `dict[...]` read
+    """A schema-shaped catalogue with one candidate, for every field-drop
+    case below -- each removes exactly one key a bare `dict[...]` read
     relies on, rather than reaching for an intentionally-malformed document
     the way test_triage_slices_exits_two_on_an_unreadable_catalogue does."""
     document = {
@@ -917,8 +917,8 @@ def test_triage_slices_exits_two_on_a_catalogue_missing_a_head_field(
     tmp_path, capsys, missing_field
 ):
     """The Critical this covers: run_id/request/policy/excluded are read with a
-    bare catalogue[...], never catalogue.get(...) -- the first three because
-    every shard carries them verbatim, `excluded` because the plan's
+    bare catalogue[...], never catalogue.get(...) -- run_id, request and policy
+    because every shard carries them verbatim, `excluded` because the plan's
     catalogue_facts block summarises it. A catalogue missing one of them must
     raise UsageError (exit 2) before that bare read ever happens -- not fall
     through as a bare KeyError, which cli.py's generic handler turns into a
