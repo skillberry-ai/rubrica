@@ -1155,12 +1155,12 @@ because no key in `_STATUS_KEYS` appears in any of the 5,182 messages, and
 `error_markers` fires on 0 of the 200 because the structural error-key check
 finds nothing. The only failure signal the file carries at all is a tool result
 whose `content` begins with an error sentinel, present in 12 of the 200 —
-nowhere near the 100 that scored 0.0 — and reading it is the value inspection
+nowhere near the 88 that scored 0.0 — and reading it is the value inspection
 `_has_error_marker` was deliberately narrowed to exclude.
 
 That 0 of 200 holds and stays — re-measured on the same 200 stripped files, it
-is 0 both before and after the fix below. What it does not describe is the four
-metadata-rich airline result files the same 200 episodes were projected from, on
+is 0 both before and after the fix below. What it does not describe is the
+metadata-rich airline file they were projected from and its three siblings, on
 which the same check measured the exact opposite — and for a reason that was a
 defect rather than a difference in corpus. Those messages carry a top-level
 **`error: False`**, a field whose whole content is that nothing failed, and
