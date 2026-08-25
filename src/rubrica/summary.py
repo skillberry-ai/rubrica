@@ -46,6 +46,13 @@ from rubrica.brief import _dicts, _mapping, _quietly, _strings
 from rubrica.intake import admit_sort_key
 from rubrica.paths import STAGES, RunPaths, list_json
 
+# The implied suite size, composed rather than recomputed for `claim_utilisation`'s
+# reason: `gate-brief` reports this same number at gates 1 and 2, and a second
+# spelling of the acceptance-allowance arithmetic here is how the page and the gate
+# would come to disagree about one run. It is not total -- see `coverage`'s
+# docstring for the shape measured escaping it, and the guard at its call site.
+from rubrica.sizing import implied_size
+
 # The one place utilisation is computed in this build, imported rather than
 # re-derived: `refs.check_claim_utilisation` and the `claim-utilisation`
 # subcommand already read it from here, and a third spelling of the same
@@ -745,4 +752,179 @@ def contradictions(run: RunPaths) -> Contradictions | Absent:
         # first-seen order is keyed by whichever subject sorted first.
         by_resolution=dict(sorted(by_resolution.items())),
         parts_swept=len(parts),
+    )
+
+
+@dataclass(frozen=True)
+class RoundRow:
+    round_: object
+    verdict: str
+    cells_covered: int
+    cells_total: int
+    # `object`, not `float`: see the comment at the assignment in `_round_row`.
+    pct: object
+    goals_covered: int
+    goals_total: int
+    # `object` for the same reason as `pct`, and both are `progress` fields rather
+    # than matrix fields: rendering a hand-edited `new_cells_this_round: "two"` as
+    # `0` would say the round made no progress, which is a claim about the run
+    # rather than a claim about the document.
+    new_cells: object
+    rounds_without_progress: object
+    holes: int
+
+
+@dataclass(frozen=True)
+class Cell:
+    capability_id: str
+    outcome_class_id: str
+    covered: bool
+    scenario_ids: list[str]
+
+
+@dataclass(frozen=True)
+class Hole:
+    ref: str
+    reason: str
+    justification: str
+
+
+@dataclass(frozen=True)
+class Coverage:
+    rounds: list[RoundRow]
+    terminal_verdict: str
+    cells: list[Cell]
+    holes: list[Hole]
+    # None in three situations that share one return value: no world model yet, a
+    # world model `implied_size` could not read, and the one shape measured
+    # escaping it as an exception -- see `coverage`'s docstring. All three read the
+    # same way on the page ("not computed"), and separating them would put a
+    # sizing diagnostic's failure modes on a page that composes rather than
+    # analyses.
+    implied: dict | None
+
+
+def _round_row(doc: dict) -> RoundRow:
+    """One row from one coverage document, `latest.json` included.
+
+    Split out rather than inlined because `latest` is read through it too: the
+    fallback below builds a row from `latest` when no `round-N.json` is readable,
+    and two spellings of the same seven columns is how the fallback row would come
+    to disagree with the rows beside it.
+    """
+    caps = _mapping(doc.get("capability_matrix"))
+    goals = _mapping(doc.get("goal_matrix"))
+    progress = _mapping(doc.get("progress"))
+    return RoundRow(
+        # Passed through rather than `_as_int`'d, unlike the sort key below: a
+        # document saying `"round": "two"` must render "two", because `0` beside a
+        # readable file reads as a rendering bug rather than as the score-stage
+        # defect it is. The sort reads the same value through `_as_int` precisely
+        # so that this one can stay uncoerced.
+        round_=doc.get("round"),
+        verdict=str(doc.get("verdict", "")),
+        cells_covered=_as_int(caps.get("covered")),
+        cells_total=_as_int(caps.get("total")),
+        # pct is passed through rather than coerced: a non-numeric pct is a
+        # score-stage defect for `validate` to name, and rendering the value the
+        # file actually holds is more use to a reader than rendering 0.
+        pct=caps.get("pct"),
+        goals_covered=_as_int(goals.get("covered")),
+        goals_total=_as_int(goals.get("total")),
+        new_cells=progress.get("new_cells_this_round"),
+        rounds_without_progress=progress.get("rounds_without_progress"),
+        # Counted from `holes[]` rather than read from a field, because the
+        # document has no hole count to read: `holes` is the array itself, and
+        # `_dicts` is what keeps a hand-edited `"holes": "nope"` from being counted
+        # as four.
+        holes=len(_dicts(doc.get("holes"))),
+    )
+
+
+def coverage(run: RunPaths) -> Coverage | Absent:
+    """The round progression, the capability matrix, the holes, the implied size.
+
+    Rows come from the `round-N.json` documents so the progression is visible;
+    the matrix and holes come from `latest.json`, which is the state the run
+    ended in. A run holding only `latest.json` still renders one row, because
+    `latest` is a round document too -- the fallback is on the *rows*, not on the
+    paths, so a run whose only round document is corrupt still reports where it
+    ended rather than reporting that it ran no rounds.
+
+    **`implied_size` is not total, and the call is guarded for it** -- the same
+    finding `utilisation` above records against `claim_utilisation`, in a different
+    place in the callee. `sizing.py` wraps its reads in `except Exception`, but
+    `ceiling_binding` is computed in the `return` statement *below* that handler,
+    so a hand-edited `manifest.limits.max_scenarios` that is not a number raises
+    from `implied > ceiling`: measured `TypeError: '>' not supported between
+    instances of 'int' and 'str'` for `"eight"`, and the same for `None` and for a
+    list. A second shape was measured too, `PermissionError` from
+    `run.world_model.is_file()` on a run root with mode 000 -- `Path.is_file`
+    ignores ENOENT and ENOTDIR but not EACCES -- which this section cannot reach,
+    since a coverage directory under that root is unreadable and returns `Absent`
+    first. The guard covers both because it catches the class, not the instance.
+
+    Guarded here rather than widened in `sizing.py`: that module is a report with
+    its own contract and its own callers (`gate-brief` at gates 1 and 2), and
+    changing what it raises is a change to theirs.
+    """
+    latest = _mapping(_quietly(run.coverage_latest))
+    try:
+        round_paths = [p for p in list_json(run.coverage_dir) if p.name != "latest.json"]
+    except Exception:  # deliberate: list_json raises UsageError, which is not an OSError
+        round_paths = []
+    if not latest and not round_paths:
+        return Absent("03-coverage/")
+
+    rows = []
+    for path in round_paths:
+        doc = _mapping(_quietly(path))
+        # A document that could not be read contributes no row rather than a row of
+        # zeros: an all-zero round reads as a round that made no progress, which is
+        # a statement about the run, and "this file is broken" is not.
+        if doc:
+            rows.append(_round_row(doc))
+    if not rows and latest:
+        rows.append(_round_row(latest))
+    # Sorted on the number rather than left in `list_json`'s order, which is by
+    # name: `round-10.json` sorts before `round-2.json`, so a run that reached ten
+    # rounds would render its progression out of order. `_as_int` is what makes the
+    # key total over a hand-edited `"round": "two"`.
+    rows.sort(key=lambda r: _as_int(r.round_))
+
+    caps = _mapping(latest.get("capability_matrix"))
+    cells = [
+        Cell(
+            capability_id=str(member.get("capability_id", "")),
+            outcome_class_id=str(member.get("outcome_class_id", "")),
+            covered=bool(member.get("covered")),
+            scenario_ids=_strings(member.get("scenario_ids")),
+        )
+        for member in _dicts(caps.get("cells"))
+    ]
+    holes = [
+        Hole(
+            ref=str(member.get("ref", "")),
+            reason=str(member.get("reason", "")),
+            # Carried in full, not summarised: the reason is a closed enum a reader
+            # scans, and the justification is the sentence that says why *this*
+            # cell was left open, which is the half a human at gate 2 acts on.
+            justification=str(member.get("justification", "")),
+        )
+        for member in _dicts(latest.get("holes"))
+    ]
+    try:
+        implied = implied_size(run)
+    except Exception:  # deliberate: the non-numeric ceiling measured in the docstring
+        implied = None
+    return Coverage(
+        rounds=rows,
+        # `latest`'s, never the last row's. They are the same on a run `score`
+        # wrote, and they diverge on a run whose round documents were copied
+        # without `latest` or the other way round -- and "where the run ended" is
+        # the fact this field names.
+        terminal_verdict=str(latest.get("verdict", "")),
+        cells=cells,
+        holes=holes,
+        implied=implied,
     )

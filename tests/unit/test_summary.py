@@ -1807,3 +1807,362 @@ def test_utilisation_exempts_a_zero_of_zero_input_the_gate_exempts(tmp_path):
     assert [f.message for f in findings] == [
         "no world-model element cites any claim from trace-json (2 claims)"
     ], "the page names exactly what the gate reports"
+
+
+def _round_doc(latest: dict, **fields) -> dict:
+    """The toy's coverage document with `fields` replaced, deep-copied.
+
+    Deep-copied through `json` rather than `dict(latest)`: every test below that
+    writes more than one round document would otherwise be mutating the same
+    nested `capability_matrix` the earlier write already put on disk, and the
+    progression it means to assert about would be three references to one object.
+    """
+    doc = json.loads(json.dumps(latest))
+    doc.update(fields)
+    return doc
+
+
+def test_coverage_reads_a_row_per_round_document(tmp_path):
+    """One row per `round-N.json`, ordered by the round number and not by filename.
+
+    The brief's version of this test wrote `run.coverage_round(1)` from `latest`,
+    which the score fixture already writes -- so it overwrote a file rather than
+    adding one, and a `coverage` that ignored the round documents entirely and
+    rendered a single row off `latest` satisfied it. Three rounds are written here,
+    and the third is round *10* deliberately: `list_json` sorts by name, where
+    `round-10.json` sorts before `round-2.json`, so `[1, 2, 10]` is red for a
+    builder that keeps `list_json`'s order and green only for one that sorts on the
+    number.
+
+    `latest` carries a fourth verdict, different from every round's, which is what
+    separates the two facts this section reads: the rows are the progression, and
+    `terminal_verdict` is the state the run ended in.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    latest = read_json(run.coverage_latest)
+    for n, verdict in ((1, "continue"), (2, "continue"), (10, "halted_round_cap")):
+        write_json(run.coverage_round(n), _round_doc(latest, round=n, verdict=verdict))
+    write_json(run.coverage_latest, _round_doc(latest, round=10, verdict="converged"))
+    got = summary.coverage(run)
+    assert [r.round_ for r in got.rounds] == [1, 2, 10]
+    assert [r.verdict for r in got.rounds] == ["continue", "continue", "halted_round_cap"]
+    assert got.terminal_verdict == "converged", "the terminal verdict is latest's, not a row's"
+
+
+def test_coverage_row_reads_each_column_from_the_matrix_that_owns_it(tmp_path):
+    """Seven columns, seven distinct numbers, so no swapped pair survives.
+
+    `cells_covered`/`cells_total` come from `capability_matrix`, `goals_covered`/
+    `goals_total` from `goal_matrix`, and `new_cells`/`rounds_without_progress`
+    from `progress` -- three objects whose members are spelled `covered` and
+    `total` twice over. A test using the fixture's own numbers cannot tell the two
+    matrices apart, because the toy converges at 4-of-4 and 2-of-2 with the same
+    `pct`.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    latest = read_json(run.coverage_latest)
+    holes = [
+        {"ref": f"cell:cap-{n}/oc-x", "reason": "not_yet_attempted", "justification": "later"}
+        for n in range(6)
+    ]
+    write_json(
+        run.coverage_round(1),
+        _round_doc(
+            latest,
+            round=1,
+            verdict="continue",
+            capability_matrix={"cells": [], "covered": 3, "total": 7, "pct": 0.42},
+            goal_matrix={"rows": [], "covered": 1, "total": 5, "pct": 0.2},
+            progress={"new_cells_this_round": 2, "rounds_without_progress": 4},
+            holes=holes,
+        ),
+    )
+    row = summary.coverage(run).rounds[0]
+    assert (row.cells_covered, row.cells_total) == (3, 7)
+    assert (row.goals_covered, row.goals_total) == (1, 5)
+    assert row.pct == 0.42
+    assert (row.new_cells, row.rounds_without_progress) == (2, 4)
+    assert row.holes == 6, "the row's hole count is that round's, counted not read"
+
+
+def test_coverage_renders_one_row_from_latest_when_no_round_document_exists(tmp_path):
+    """`latest` is a round document too, so a run holding only it still has a row.
+
+    Reachable without a hand edit: `score` writes `latest.json` and `round-N.json`
+    together, and a run copied or archived by hand keeps whichever the copier took.
+    The round number is moved off the fixture's 1 so that a row invented with a
+    hard-coded round would be red.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    latest = read_json(run.coverage_latest)
+    write_json(run.coverage_latest, _round_doc(latest, round=4, verdict="halted_round_cap"))
+    run.coverage_round(1).unlink()
+    got = summary.coverage(run)
+    assert [r.round_ for r in got.rounds] == [4]
+    assert got.rounds[0].verdict == "halted_round_cap"
+    assert got.terminal_verdict == "halted_round_cap"
+
+
+def test_coverage_exposes_matrix_cells_with_their_scenarios(tmp_path):
+    """The matrix is `latest`'s, cell for cell, and a round document's is a decoy.
+
+    Compared field by field against the document rather than by count: the two id
+    columns are both `$defs/id` strings, so a builder that read `outcome_class_id`
+    into `capability_id` would satisfy every count-and-type assertion the brief's
+    version made. The decoy in `round-1.json` is what makes "the matrix comes from
+    the state the run ended in" a lock rather than a docstring.
+
+    One cell is turned *uncovered* before the read, because the toy converges: with
+    all four cells at `covered: true`, a builder hard-coding `covered=True` was
+    measured surviving this test and every other one in the module. An uncovered
+    cell in `latest` is also the state the page exists to show -- a converged run
+    is the one reading a summary tells a human least about.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    latest = read_json(run.coverage_latest)
+    latest["capability_matrix"]["cells"][0]["covered"] = False
+    write_json(run.coverage_latest, latest)
+    decoy = {
+        "capability_id": "cap-decoy",
+        "outcome_class_id": "oc-decoy",
+        "covered": False,
+        "scenario_ids": [],
+    }
+    write_json(
+        run.coverage_round(1),
+        _round_doc(
+            latest,
+            capability_matrix={"cells": [decoy], "covered": 0, "total": 1, "pct": 0},
+        ),
+    )
+    got = summary.coverage(run)
+    assert [
+        (c.capability_id, c.outcome_class_id, c.covered, c.scenario_ids) for c in got.cells
+    ] == [
+        (m["capability_id"], m["outcome_class_id"], m["covered"], m["scenario_ids"])
+        for m in latest["capability_matrix"]["cells"]
+    ]
+    assert "cap-decoy" not in {c.capability_id for c in got.cells}
+    assert [c for c in got.cells if c.covered], "covered cells render as covered"
+    assert [c for c in got.cells if not c.covered], "and the uncovered one as uncovered"
+    assert [c.scenario_ids for c in got.cells if c.scenario_ids], "and they name their scenarios"
+
+
+def test_coverage_reads_holes_with_reason_and_justification(tmp_path):
+    """Both fields, in document order -- the justification is the half a reader acts on.
+
+    The brief's version asserted the reasons and the first `ref` and never looked
+    at `justification`, which its own name promises: a builder leaving that field
+    at `""` passed it. Order is asserted rather than a set, because the holes are
+    rendered as a list and `score` writes them in the order it judged them.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    doc = read_json(run.coverage_latest)
+    doc["holes"] = [
+        {"ref": "cell:cap-a/oc-x", "reason": "unreachable", "justification": "no mapping"},
+        {"ref": "cell:cap-a/oc-y", "reason": "no_evidence", "justification": "nothing shows it"},
+    ]
+    write_json(run.coverage_latest, doc)
+    got = summary.coverage(run)
+    assert [(h.ref, h.reason, h.justification) for h in got.holes] == [
+        ("cell:cap-a/oc-x", "unreachable", "no mapping"),
+        ("cell:cap-a/oc-y", "no_evidence", "nothing shows it"),
+    ]
+
+
+def test_coverage_before_score_is_absent(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    got = summary.coverage(run)
+    assert isinstance(got, summary.Absent)
+    assert got.what == "03-coverage/"
+
+
+def test_coverage_passes_a_pct_that_is_not_a_number_through_uncoerced(tmp_path):
+    """A `pct: "half"` is a score-stage defect for `validate` to name, and it renders.
+
+    The brief's version of this test was vacuous twice over: it edited
+    `latest.json`, whose `pct` no row reads while a `round-1.json` exists, and it
+    asserted only that the section was not `Absent` -- which a `pct=_as_int(...)`
+    rendering the string as `0` also satisfies. The mutation is moved onto the
+    round document the row is built from, and the assertion onto the value, so
+    coercing it is red.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    doc = read_json(run.coverage_round(1))
+    doc["capability_matrix"]["pct"] = "half"
+    write_json(run.coverage_round(1), doc)
+    got = summary.coverage(run)
+    assert not isinstance(got, summary.Absent)
+    assert got.rounds[0].pct == "half", "rendering what the file holds, not a zero"
+
+
+def test_coverage_passes_a_round_number_that_is_not_a_number_through(tmp_path):
+    """`round_` is `object`, and a non-numeric one sorts rather than raising.
+
+    Two facts at once, because they are one line of implementation each: the value
+    is rendered as the document holds it (a `_as_int`'d `round_` would print `0`
+    beside a document that says `"two"`, which is a rendering that lies), and the
+    *sort* reads it through `_as_int`, so the row still places instead of taking
+    `sort` down with `TypeError: '<' not supported between 'str' and 'int'`.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    latest = read_json(run.coverage_latest)
+    write_json(run.coverage_round(2), _round_doc(latest, round="two", verdict="continue"))
+    got = summary.coverage(run)
+    assert [r.round_ for r in got.rounds] == ["two", 1], '"two" reads as 0 for the sort only'
+
+
+def test_coverage_takes_the_implied_size_from_sizing_rather_than_recomputing(tmp_path):
+    """Composed, not derived: the report's own dict, keys and all.
+
+    `sizing.implied_size` is the one place this arithmetic lives -- `gate-brief`
+    reports it at gates 1 and 2 -- and a second spelling here is how the page and
+    the gate would come to disagree about the same run's implied size. Asserted as
+    equality against a direct call plus the presence of `basis` and
+    `ceiling_binding`, which a locally rebuilt number would not carry.
+    """
+    from rubrica.sizing import implied_size
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    got = summary.coverage(run)
+    assert got.implied == implied_size(run)
+    assert got.implied["basis"] == "world_model+coverage"
+    assert "ceiling_binding" in got.implied
+
+
+@pytest.mark.parametrize("ceiling", ["eight", None, [8]], ids=["str", "null", "list"])
+def test_coverage_implied_is_none_rather_than_raising_on_a_non_numeric_ceiling(tmp_path, ceiling):
+    """The hole measured in `implied_size`, at all three shapes that reach it.
+
+    `sizing.implied_size` wraps its reads in `except Exception` -- but
+    `ceiling_binding` is computed in the `return` *below* that handler, so
+    `implied > ceiling` raises `TypeError: '>' not supported between instances of
+    'int' and 'str'` for a hand-edited `manifest.limits.max_scenarios`. That is
+    the same class of hazard `claim_utilisation` turned out to be, and the same
+    ruling applies: guarded here, not widened in `sizing.py`, which is a report
+    with its own contract and its own callers.
+
+    The `pytest.raises` is deliberate and is the measurement, not decoration: if
+    `sizing.py` is ever made total this line goes red, and that redness is the
+    notice that `summary.coverage`'s guard has become belt-and-braces rather than
+    the only thing standing between a hand-edited manifest and a blank page.
+    """
+    from rubrica.artifacts import read_json, write_json
+    from rubrica.sizing import implied_size
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    manifest = read_json(run.manifest)
+    manifest["limits"]["max_scenarios"] = ceiling
+    write_json(run.manifest, manifest)
+    with pytest.raises(TypeError):
+        implied_size(run)
+    got = summary.coverage(run)
+    assert got.implied is None
+    assert got.rounds and got.cells, "the rest of the section still renders"
+
+
+def test_coverage_skips_a_round_document_it_cannot_read(tmp_path):
+    """One malformed round document loses its row, not the section.
+
+    `_quietly` returns None for it and the `if doc` guard drops it, so the rounds
+    that *are* readable still render. A builder that appended a row per path
+    regardless would render an all-zero row for a file it never read, which reads
+    as a round that made no progress -- the opposite of "this file is broken".
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    latest = read_json(run.coverage_latest)
+    write_json(run.coverage_round(2), _round_doc(latest, round=2, verdict="converged"))
+    run.coverage_round(1).write_text("{not json", encoding="utf-8")
+    got = summary.coverage(run)
+    assert [r.round_ for r in got.rounds] == [2]
+
+
+def test_coverage_falls_back_to_latest_when_every_round_document_is_unreadable(tmp_path):
+    """No readable round document is the same state as none at all.
+
+    The fallback is on `rows`, not on `round_paths`, and that is the difference
+    this test holds: a run whose only `round-1.json` is corrupt still has a
+    `latest.json` saying where it ended, and dropping the row would report a scored
+    run as having run no rounds.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    write_json(run.coverage_latest, _round_doc(read_json(run.coverage_latest), round=3))
+    run.coverage_round(1).write_text("nope", encoding="utf-8")
+    got = summary.coverage(run)
+    assert [r.round_ for r in got.rounds] == [3]
+
+
+def test_coverage_on_an_unreadable_directory_is_absent(tmp_path):
+    """`list_json` raises `UsageError`, a ValueError and *not* an OSError.
+
+    The same shape measured against `contradictions`: an `except OSError` here
+    would let it through, and `03-coverage/` unreadable is exactly the run a
+    reader opens this page to understand.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    run.coverage_dir.chmod(0o000)
+    try:
+        got = summary.coverage(run)
+        assert isinstance(got, summary.Absent)
+        assert got.what == "03-coverage/"
+    finally:
+        run.coverage_dir.chmod(0o755)
+
+
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("capability_matrix", "x"),
+        ("goal_matrix", 7),
+        ("progress", "nope"),
+        ("holes", "nope"),
+    ],
+)
+def test_coverage_survives_a_field_that_is_the_wrong_type(tmp_path, field, bad):
+    """A truthy non-list, non-dict in either document renders as nothing found.
+
+    `"capability_matrix": "x"` is the exact shape `brief._mapping`'s docstring
+    records raising `AttributeError` at gate 2, and `"holes": "nope"` is `_dicts`':
+    iterating the string would count four holes. Both documents are mutated,
+    because the row reads one and the matrix reads the other.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    for path in (run.coverage_latest, run.coverage_round(1)):
+        doc = read_json(path)
+        doc[field] = bad
+        write_json(path, doc)
+    got = summary.coverage(run)
+    assert not isinstance(got, summary.Absent)
+    row = got.rounds[0]
+    if field == "capability_matrix":
+        assert (row.cells_covered, row.cells_total, row.pct) == (0, 0, None)
+        assert got.cells == []
+    if field == "goal_matrix":
+        assert (row.goals_covered, row.goals_total) == (0, 0)
+    if field == "progress":
+        assert (row.new_cells, row.rounds_without_progress) == (None, None)
+    if field == "holes":
+        assert row.holes == 0
+        assert got.holes == []
