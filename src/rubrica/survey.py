@@ -418,8 +418,37 @@ def survey(
                 # corpus took down the whole inventory. Not exploding it is the
                 # right outcome anyway: a file this decoder cannot read is one
                 # candidate, and the digest heuristics record that.
+                #
+                # A conversation is exempt, and the parse happens here rather
+                # than inside the `explode` call so this check can see the
+                # payload. A trajectory is one episode whose records are turns,
+                # not a container of independent records -- message 7 is
+                # unreadable without 1 through 6, the same shape the OpenAPI
+                # ruling keeps whole. Exploding one is doubly wrong: the file
+                # candidate, the only row carrying the behavioural digest
+                # `_trace_digest_from_messages` produces, gets `admissible:
+                # False` because a container may not be admitted, and each
+                # message is admitted instead as its own candidate, which
+                # `classify_payload` calls `other` and digests to a one-turn
+                # skeleton with no tool name, no request text and no sibling
+                # context. Measured on a metadata-rich capture of tau2-bench:
+                # the per-episode key intersection is exactly 4 on all 200
+                # episodes and all 200 carry at least 3 messages, so 200 of 200
+                # satisfied `EXPLODE_MIN_COMMON_KEYS` -- 200 files plus 5,800
+                # message rows, 6,000 candidates against a
+                # DEFAULT_MAX_CANDIDATES of 500.
+                #
+                # Gated on `is_message_list` and deliberately never on
+                # `kind == "trace"`: a parsec-shaped list of `{spans, trace_id}`
+                # records classifies `trace` too and must keep exploding.
+                # Measured on this repository's three exploding JSON fixtures
+                # (corpus-toy/capture.json and both reservation-trajectories
+                # files): `is_message_list` is False for all three, so this gate
+                # changes no corpus already surveyed here.
                 try:
-                    exploded = explode(json.loads(path.read_text(encoding="utf-8")))
+                    payload = json.loads(path.read_text(encoding="utf-8"))
+                    if not digest_module.is_message_list(payload):
+                        exploded = explode(payload)
                 except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError):
                     exploded = None
 

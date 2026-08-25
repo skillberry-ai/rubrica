@@ -473,3 +473,97 @@ def test_a_long_container_name_and_a_long_key_stay_inside_the_id_cap(tmp_path):
     for element_id in element_ids:
         assert len(element_id) <= 128
         assert is_safe_segment(element_id), element_id
+
+
+def _metadata_rich_trajectory_corpus(tmp_path):
+    """One chat trajectory of the shape `explode` used to shred.
+
+    Its own directory for the same reason `_dict_keyed_corpus` has one: every
+    other corpus here is pinned by candidate-count assertions in this module and
+    in test_admit.py / test_survey_fixture.py.
+
+    Four keys on every message -- `role`, `content`, `turn_idx`, `timestamp` --
+    because the collision needs `EXPLODE_MIN_COMMON_KEYS` (3) satisfied, and a
+    real metadata-rich capture is exactly where that happens: measured on such a
+    capture of tau2-bench, the per-episode key intersection is 4 on all 200
+    episodes. The stripped `{role, content}` projection this repo's other
+    trajectory fixtures use intersects at one key and so could never reach the
+    bug. `error` is deliberately *not* one of the four: this test is about
+    explosion, and an `error` key would couple it to the emptiness guard in
+    `digest._has_error_key`.
+
+    `tool_calls` on the assistant turn only, so `names` has something to reach
+    and the key intersection stays at four.
+    """
+    root = tmp_path / "trajectory-corpus"
+    root.mkdir()
+    messages = [
+        {
+            "role": "system",
+            "content": "# Airline Agent Policy",
+            "turn_idx": 0,
+            "timestamp": "2026-08-24T10:00:00Z",
+        },
+        {
+            "role": "user",
+            "content": "I want to cancel reservation EHGLP3.",
+            "turn_idx": 1,
+            "timestamp": "2026-08-24T10:00:01Z",
+        },
+        {
+            "role": "assistant",
+            "content": None,
+            "turn_idx": 2,
+            "timestamp": "2026-08-24T10:00:02Z",
+            "tool_calls": [{"function": {"name": "get_reservation_details"}}],
+        },
+        {
+            "role": "tool",
+            "content": '{"reservation_id": "EHGLP3"}',
+            "turn_idx": 3,
+            "timestamp": "2026-08-24T10:00:03Z",
+        },
+    ]
+    (root / "episode.json").write_text(json.dumps(messages), encoding="utf-8")
+    return root
+
+
+def test_a_chat_trajectory_is_one_admissible_candidate_and_is_not_exploded(tmp_path):
+    """The conjunction neither mechanism's own tests could see.
+
+    `test_survey_explode.py` never builds a message list -- it has no occurrence
+    of `role` at all -- and `tests/unit/test_digest.py` only names
+    `survey.explode` in prose, never calls it. So classification and digesting
+    were each covered and their meeting inside `survey`'s corpus loop was not.
+
+    Measured with the `is_message_list` gate reverted: this file explodes into
+    four `container_element` candidates, each classified `other` by
+    `classify_payload` and digested to a one-turn skeleton, and the one row
+    carrying the behavioural digest gets `admissible: False` -- the exact
+    inversion, since a container may not be admitted. Every assertion below goes
+    red in that state.
+    """
+    run = _survey(tmp_path, corpus_roots=[_metadata_rich_trajectory_corpus(tmp_path)])
+
+    assert validate.validate_stage(run, "survey") == []
+    catalogue = read_json(run.catalogue)
+
+    episodes = [c for c in catalogue["candidates"] if c.get("path") == "episode.json"]
+    assert len(episodes) == 1, "one episode is one candidate, not one candidate per turn"
+    episode = episodes[0]
+    assert episode["kind"] == "trace"
+    # The whole point: the row carrying the readable behaviour is the row triage
+    # is allowed to admit.
+    assert episode["admissible"] is True
+
+    # Not merely "no elements from this file" -- no elements at all, since this
+    # corpus holds nothing else that could produce one.
+    assert [c for c in catalogue["candidates"] if c["origin"] == "container_element"] == []
+
+    # And the digest it kept is the behavioural one, not a skeleton.
+    digest = episode["digest"]
+    assert digest["heuristics_fired"] == ["element_counts", "request_text", "names"]
+    assert digest["element_counts"]["messages"] == 4
+    assert digest["request_text"] == "I want to cancel reservation EHGLP3."
+    assert digest["names"] == ["get_reservation_details"]
+    assert "skeleton" not in digest
