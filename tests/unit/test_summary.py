@@ -1033,3 +1033,98 @@ def test_deficiencies_survives_a_projection_whose_closes_is_not_a_list_of_ids(tm
     got = {d.id_: d.projection for d in summary.deficiencies(run)}
     assert got["def-1"] == ""
     assert "author an auth note" in got["def-2"]
+
+
+@pytest.mark.parametrize("token", ["Infinity", "-Infinity", "NaN"])
+def test_inputs_reads_a_non_finite_bytes_as_zero(tmp_path, token):
+    """The three bare tokens `json.loads` accepts, reached through a real manifest.
+
+    Not a unit call on `_as_int`: the promise this measures is the module's, that
+    nothing raises on a readable run's *content*, and only the artifact path
+    proves it. `artifacts.read_json` calls `json.loads` with defaults, so
+    `Infinity`, `-Infinity` and `NaN` are all accepted as bare tokens and arrive
+    as floats -- and `int(inf)` raises **OverflowError**, which is in neither
+    `TypeError` nor `ValueError`. Measured before the finite guard existed:
+    `summary.inputs()` raised `OverflowError: cannot convert float infinity to
+    integer` on a manifest that `validate --stage intake` is the right command to
+    complain about. `NaN` is in the list because it is the sibling that already
+    worked (`int(nan)` raises ValueError), so the parametrisation records which
+    of the three the guard actually changed.
+
+    The token is written into the file text rather than through `write_json`, and
+    asserted present, because a test whose fixture quietly stored the string
+    `"Infinity"` would measure `int()` on a string instead of on a float.
+    """
+    from rubrica.artifacts import read_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    manifest = read_json(run.manifest)
+    manifest["inputs"][0]["bytes"] = "__TOKEN__"
+    run.manifest.write_text(
+        json.dumps(manifest, indent=2).replace('"__TOKEN__"', token), encoding="utf-8"
+    )
+    assert f": {token}" in run.manifest.read_text(encoding="utf-8"), (
+        "the artifact must hold the bare token, not a quoted string"
+    )
+    got = summary.inputs(run)
+    assert got.rows[0].bytes_ == 0
+    assert got.total_bytes == sum(e["bytes"] for e in manifest["inputs"][1:])
+
+
+def test_deficiencies_carries_the_closed_by_the_record_records(tmp_path):
+    """`closed_by`, the field that separates a closed deficiency from an open one.
+
+    Read because the page is otherwise unable to say the difference: `seal.seal`
+    stamps `closed_by` onto a deficiency when a human adopts a projection that
+    closes it, and gate 0's text brief renders exactly that distinction
+    (`brief.py`, `OPEN` versus `closed by <projection_id>`). Without it an
+    adopted-and-closed deficiency renders identically to one nothing has answered,
+    which inverts what the section is read for.
+
+    The empty string for an open deficiency, not `None`, matching the other three
+    fields: absence is a rendered blank, and `str(...)` over a hand-edited
+    non-string keeps the column total.
+
+    The fixture is validated against triage-0.1.json -- all six required top-level
+    fields, `dispositions` non-empty as its `minItems: 1` requires -- because the
+    whole point of the field is its schema spelling.
+    """
+    from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    closed = _projection("prj-1", ["def-1"], "author one error trace")
+    closed["satisfied_by"] = "prj-1-json"
+    write_json(
+        run.triage,
+        {
+            "schema_version": "0.1",
+            "run_id": run.root.name,
+            "objective_review": _objective_document(run.root.name)["objective_review"],
+            "dispositions": [
+                {
+                    "candidate_id": "api-json",
+                    "disposition": "admit",
+                    "priority": 1,
+                    "reason": "the tool block",
+                    "authority": "triage",
+                }
+            ],
+            "deficiencies": [
+                {
+                    "deficiency_id": "def-1",
+                    "subject": "errors",
+                    "statement": "no error path",
+                    "closed_by": "prj-1",
+                },
+                {"deficiency_id": "def-2", "subject": "auth", "statement": "no auth model"},
+            ],
+            "projections": [closed, _projection("prj-2", ["def-2"], "author an auth note")],
+        },
+    )
+    assert validate_artifact(run.triage, "triage") == [], (
+        "the fixture must be the shape triage-seal actually writes"
+    )
+    got = {d.id_: d for d in summary.deficiencies(run)}
+    assert got["def-1"].closed_by == "prj-1"
+    assert got["def-2"].closed_by == "", "an open deficiency renders a blank, not None"

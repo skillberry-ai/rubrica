@@ -22,6 +22,7 @@ rendering would be branching on a rendering.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
@@ -251,7 +252,33 @@ def _as_int(value) -> int:
     reading rather than a dropped row: the row still renders, and a byte count of
     0 beside a real file is visibly wrong to a reader in a way a traceback is
     not.
+
+    **The `math.isfinite` guard is the third failure mode, and it is neither of
+    those two exceptions.** `json.loads` accepts `Infinity`, `-Infinity` and
+    `NaN` as bare tokens and `artifacts.read_json` calls it with defaults, so a
+    non-finite float reaches here from any hand-edited artifact -- and
+    `int(inf)` raises **OverflowError**, outside the tuple below. Measured
+    end-to-end: a `manifest.json` carrying `"bytes": Infinity` made `inputs()`
+    raise, breaking this module's promise never to raise on a readable run's
+    content. `NaN` was already handled, since `int(nan)` raises ValueError; the
+    explicit finite test is written out because "not finite" is the reason a
+    reader needs for both, and this repo has ruled twice on exactly this token
+    class in exactly this shape -- `smoke.components` and
+    `suite.verify._is_number`, both of which reach for `math.isfinite` rather
+    than for an exception.
+
+    A float is the only shape that can be non-finite here, which is what makes
+    one `isinstance` check enough rather than the precedents' fuller
+    number-typing: every value reaching this function was produced by
+    `json.loads`, and it turns a bare non-finite token into a `float` and
+    nothing else. `bool` is not excluded, unlike in those two -- `True` is not a
+    reward there, while here it is simply a malformed count that renders as 1
+    rather than as a crash.
     """
+    # Before int(), not after: OverflowError is not catchable by the tuple below
+    # without claiming a fourth failure mode the caller cannot tell apart.
+    if isinstance(value, float) and not math.isfinite(value):
+        return 0
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -412,6 +439,11 @@ class Deficiency:
     id_: str
     statement: str
     projection: str
+    # The empty string, never None, when the record carries no `closed_by`: the
+    # page renders this cell either way, and "" is the blank a reader reads as
+    # open. `seal.seal` stamps the field on from an adoption, so it is the only
+    # thing separating a deficiency a human has answered from one nothing has.
+    closed_by: str
 
 
 def deficiencies(run: RunPaths) -> list[Deficiency]:
@@ -424,7 +456,8 @@ def deficiencies(run: RunPaths) -> list[Deficiency]:
     adoption, so a union over the two documents lists every deficiency of every
     sealed run twice; and a sealed run is not an edge case, it is every run that
     has reached gate 0. The sealed copy is also the strictly better one, since it
-    is the only one carrying what a human adopted.
+    is the only one carrying what a human adopted -- `closed_by` is stamped on by
+    the seal from an adoption and is absent from the audit part by construction.
 
     A list rather than `Absent`: both documents are optional, and an empty list is
     the honest reading of a run that has neither.
@@ -459,6 +492,7 @@ def deficiencies(run: RunPaths) -> list[Deficiency]:
                 id_=did,
                 statement=str(member.get("statement", "")),
                 projection="; ".join(projections.get(did, [])),
+                closed_by=str(member.get("closed_by", "")),
             )
         )
     return found
