@@ -81,8 +81,24 @@ def _exists(path: Path) -> bool:
 
 
 def _has_part(directory: Path) -> bool:
+    """Whether `directory` holds at least one thing a fan-out stage would write.
+
+    A subdirectory counts, not only a `*.json` file, and that is not defensive
+    breadth -- it is a measured fix. Two of the four fan-out stages write
+    directories rather than files: `instantiate` writes
+    `04-instances/<scenario_id>/seed.json` and `emit` writes
+    `06-suite/<scenario_id>/task.toml`, so *no* `.json` file is ever a direct
+    child of either. Counting only `.json` suffixes marked `instantiate` absent
+    on a fully built toy run that had four instance directories, and would have
+    done the same to `emit` on the one run of the eleven that reached a suite --
+    the spine reporting "never ran" about the two stages a complete run is most
+    read for.
+
+    An unreadable directory is absence here for `_exists`'s reason: the spine's
+    whole job is to render on a run too incomplete to read.
+    """
     try:
-        return any(p.suffix == ".json" for p in directory.iterdir())
+        return any(p.suffix == ".json" or p.is_dir() for p in directory.iterdir())
     except OSError:
         return False
 

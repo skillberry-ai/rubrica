@@ -51,3 +51,18 @@ def test_stage_spine_on_an_empty_directory_marks_everything_absent(tmp_path):
     rows = summary.stage_spine(RunPaths(empty))
     assert rows, "the spine is the pipeline's stages, so it is never empty"
     assert not any(row.produced for row in rows)
+
+
+def test_stage_spine_marks_a_directory_writing_fan_out_stage_produced(tmp_path):
+    """instantiate and emit write per-scenario *directories*, never a top-level file.
+
+    Measured, not hypothetical: an evidence test that counted only `*.json` children
+    of `04-instances/` marked `instantiate` absent on this very run, which has four
+    instance directories. `emit` has the same shape (`06-suite/<sid>/task.toml`), so
+    the spine was reporting "never ran" about the two stages a complete run is most
+    read for.
+    """
+    run = build_toy_run(tmp_path / "runs")
+    assert run.scenario_ids_with_instances(), "the fixture must actually have instances"
+    produced = {row.name: row.produced for row in summary.stage_spine(run)}
+    assert produced["instantiate"] is True
