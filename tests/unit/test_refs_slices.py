@@ -1,7 +1,10 @@
 """refs.check_slices: 00-slices.json against 00-catalogue.json.
 
-Six checks (plus a seventh added on top, cap_bytes -- see check_slices'
-docstring), each proven with a mutation isolated to *only* that invariant:
+Every check that module numbers -- the partition, the shards, the byte
+arithmetic, the cap, and the catalogue_facts block's two derived fields (see
+check_slices itself for what each number means; a count written here went
+stale the first time a check was added) -- is proven here with a mutation
+isolated to *only* that invariant:
 the plan and the shard are edited together so every other check's inputs
 stay internally consistent, and only the targeted defect is visible. This
 is the same discipline test_refs_readable.py uses for check_readable, and
@@ -253,3 +256,109 @@ def test_a_slice_over_the_cap_is_reported(tmp_path):
     findings = check_slices(run)
     assert len(findings) == 1
     assert sid in findings[0].message and "cap" in findings[0].message
+
+
+def _mutate_facts(run, mutate):
+    """Edit only 00-slices.json's catalogue_facts, leaving the partition alone.
+
+    The module's discipline: a mutation must be visible to exactly one check.
+    catalogue_facts is read by nothing else in check_slices, so editing it
+    cannot trip the partition, shard or cap checks -- which is why every test
+    below can assert its finding is the only one.
+    """
+    plan = read_json(run.slices)
+    mutate(plan["catalogue_facts"])
+    write_json(run.slices, plan)
+
+
+def test_a_clean_run_reports_no_catalogue_facts_findings(tmp_path):
+    run = _sliced_run(tmp_path)
+    assert check_slices(run) == []
+
+
+def test_a_candidate_bytes_value_disagreeing_with_the_catalogue_is_reported(tmp_path):
+    """The check that makes the whole block safe to read.
+
+    rb-triage-objective sums weight.bytes from candidate_bytes while
+    check_objective recomputes it from the catalogue. Without this check a
+    drifted block would surface the objective pass's *correct* arithmetic as a
+    finding against 00-objective.json -- a 1 naming the wrong artifact.
+    """
+    run = _sliced_run(tmp_path)
+    catalogue = read_json(run.catalogue)
+    victim = catalogue["candidates"][0]["candidate_id"]
+    real = catalogue["candidates"][0]["bytes"]
+
+    def bump(facts):
+        facts["candidate_bytes"][victim] = real + 1
+
+    _mutate_facts(run, bump)
+    findings = check_slices(run)
+    assert len(findings) == 1
+    assert findings[0].pointer == f"/catalogue_facts/candidate_bytes/{victim}"
+    assert str(real) in findings[0].message
+    # Finding's field is `artifact`, not `path`. Which artifact a finding names
+    # is the exit-code contract's third rule, so this assertion is the point of
+    # the test as much as the pointer is.
+    assert str(run.slices) == str(findings[0].artifact), "the plan is at fault, not the catalogue"
+
+
+def test_a_candidate_missing_from_candidate_bytes_is_reported(tmp_path):
+    run = _sliced_run(tmp_path)
+    victim = read_json(run.catalogue)["candidates"][0]["candidate_id"]
+    _mutate_facts(run, lambda facts: facts["candidate_bytes"].pop(victim))
+    findings = check_slices(run)
+    assert len(findings) == 1
+    assert findings[0].pointer == f"/catalogue_facts/candidate_bytes/{victim}"
+    assert "no candidate_bytes entry" in findings[0].message
+
+
+def test_candidate_bytes_naming_a_candidate_the_catalogue_does_not_have_is_reported(tmp_path):
+    """An extra id is drift too: a plan minted before the catalogue shrank."""
+    run = _sliced_run(tmp_path)
+    _mutate_facts(run, lambda facts: facts["candidate_bytes"].update({"ghost-1": 10}))
+    findings = check_slices(run)
+    assert len(findings) == 1
+    assert findings[0].pointer == "/catalogue_facts/candidate_bytes/ghost-1"
+    assert "not a catalogue candidate" in findings[0].message
+
+
+def test_an_exclusion_total_disagreeing_with_the_catalogue_is_reported(tmp_path):
+    run = _sliced_run(tmp_path)
+    _mutate_facts(run, lambda facts: facts["excluded"].update({"total": 7}))
+    findings = check_slices(run)
+    assert len(findings) == 1
+    assert findings[0].pointer == "/catalogue_facts/excluded/total"
+
+
+def test_an_exclusion_tally_disagreeing_with_the_catalogue_is_reported(tmp_path):
+    run = _sliced_run(tmp_path)
+    _mutate_facts(run, lambda facts: facts["excluded"].update({"by_reason": {"binary": 3}}))
+    findings = check_slices(run)
+    assert len(findings) == 1
+    assert findings[0].pointer == "/catalogue_facts/excluded/by_reason"
+
+
+def test_an_unreadable_catalogue_reports_no_catalogue_facts_findings(tmp_path):
+    """Silence, not one finding per candidate against a plan that is fine.
+
+    This is the 01-claims/ incident: check-refs over an unreadable directory
+    once reported four fabricated `no such claim` findings against a correct
+    world model. An unreadable catalogue is check_readable's finding, and
+    resolving candidate_bytes against candidates that were never parsed would
+    blame the plan for the catalogue being broken.
+    """
+    run = _sliced_run(tmp_path)
+    run.catalogue.write_text("{not json", encoding="utf-8")
+    findings = check_slices(run)
+    assert [f for f in findings if "catalogue_facts" in f.pointer] == []
+
+
+def test_a_catalogue_whose_candidates_are_not_an_array_reports_no_bytes_findings(tmp_path):
+    """The same skip, through the branch that already sets known_ids to None."""
+    run = _sliced_run(tmp_path)
+    catalogue = read_json(run.catalogue)
+    catalogue["candidates"] = "not an array"
+    write_json(run.catalogue, catalogue)
+    findings = check_slices(run)
+    assert [f for f in findings if "candidate_bytes" in f.pointer] == []

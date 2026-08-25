@@ -31,7 +31,7 @@ from rubrica.findings import Finding
 from rubrica.invariants import InvariantForm
 from rubrica.invariants import evaluate as evaluate_invariant
 from rubrica.paths import RunPaths, is_safe_segment, list_json
-from rubrica.slices import row_bytes
+from rubrica.slices import candidate_bytes_index, excluded_summary, row_bytes
 from rubrica.suite.verify import DATA_KINDS, TRAJECTORY_KINDS
 from rubrica.utilisation import claim_utilisation
 
@@ -451,6 +451,61 @@ def check_slices(run: RunPaths) -> list[Finding]:
                 )
             )
 
+    # Checks 8 and 9: the catalogue_facts block's two *derived* fields,
+    # recomputed from the catalogue through the same functions write_slices
+    # used to produce them -- check 5's discipline, for check 5's reason. What
+    # this catches is drift between the plan and the catalogue, the realistic
+    # case being a plan minted before a human adopted a projection at gate 0,
+    # rather than arithmetic this module could get wrong twice identically.
+    #
+    # `request`, `policy` and `excluded.entries` are deliberately *not*
+    # checked: they are verbatim copies, and nothing verifies the shards' own
+    # copies of request/policy either. Derived numbers are arithmetic a reader
+    # recomputes; verbatim copies are not testimony to begin with.
+    #
+    # Mandatory rather than tidiness. rb-triage-objective sums weight.bytes
+    # from candidate_bytes, while check_objective recomputes the same number
+    # from the catalogue -- so an unchecked drift here would surface that
+    # pass's *correct* arithmetic as a finding against 00-objective.json. That
+    # is the exit-code contract's third rule, and it is what four fabricated
+    # `no such claim` findings against a correct world model once cost.
+    facts = plan.get("catalogue_facts")
+    if isinstance(facts, dict) and isinstance(catalogue, dict):
+        # Both halves skip on an unreadable or wrong-shaped catalogue rather
+        # than reporting every entry, reusing the same reasoning that leaves
+        # known_ids None above.
+        if isinstance(catalogue_candidates, list):
+            expected_bytes = candidate_bytes_index(catalogue_candidates)
+            declared = facts.get("candidate_bytes")
+            declared = declared if isinstance(declared, dict) else {}
+            for cid in sorted(expected_bytes):
+                pointer = f"/catalogue_facts/candidate_bytes/{cid}"
+                if cid not in declared:
+                    report(pointer, f"catalogue_facts has no candidate_bytes entry for {cid!r}")
+                elif declared[cid] != expected_bytes[cid]:
+                    report(
+                        pointer,
+                        f"catalogue_facts records {cid!r} at {declared[cid]!r} bytes but "
+                        f"the catalogue says {expected_bytes[cid]}",
+                    )
+            for cid in sorted(set(declared) - set(expected_bytes)):
+                report(
+                    f"/catalogue_facts/candidate_bytes/{cid}",
+                    f"catalogue_facts records candidate_bytes for {cid!r}, which is not "
+                    "a catalogue candidate",
+                )
+        catalogue_excluded = catalogue.get("excluded")
+        if isinstance(catalogue_excluded, list):
+            expected_excluded = excluded_summary(catalogue_excluded)
+            declared_excluded = facts.get("excluded")
+            declared_excluded = declared_excluded if isinstance(declared_excluded, dict) else {}
+            for key in ("total", "by_reason"):
+                if declared_excluded.get(key) != expected_excluded[key]:
+                    report(
+                        f"/catalogue_facts/excluded/{key}",
+                        f"catalogue_facts records excluded.{key}={declared_excluded.get(key)!r} "
+                        f"but the catalogue's exclusions give {expected_excluded[key]!r}",
+                    )
     return out
 
 
