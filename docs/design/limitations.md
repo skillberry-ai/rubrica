@@ -1093,6 +1093,27 @@ whole. Measured for the file-level digest instead: 443 candidates unchanged, a
 count does not change at all and the byte figure barely moves, so there is no
 ordering dependency in either direction.
 
+That "should not" was a ruling with nothing enforcing it, and the gap was not
+theoretical. The trajectory files those figures were taken on are the stripped
+projection, whose per-file key intersection is one key, so `explode` declined
+them by luck of what the projection happened to drop rather than by any rule
+about conversations. On a metadata-rich capture of the same target the
+intersection is 4 on all 200 episodes and every one carries at least 3 messages,
+so 200 of 200 satisfied `EXPLODE_MIN_COMMON_KEYS` and the fragmentation this
+paragraph called impossible happened — at a different scale, 200 files plus
+5,800 message rows against a `--max-candidates` default of 500. The count is
+not even the worst of it: the file candidate is the only row carrying the
+behavioural digest, and exploding it marked that row inadmissible while
+admitting one row per turn, each classified `other` and digesting to a one-turn
+skeleton.
+
+`survey`'s corpus loop now declines to explode any payload
+`digest.is_message_list` admits, so the ruling is the code's rather than this
+entry's. The gate is on that shape and deliberately not on `kind == "trace"`: a
+list of `{spans, trace_id}` records classifies `trace` too and must keep
+exploding, and all three of this repository's exploding JSON fixtures are
+`is_message_list == False`.
+
 What does not change is which grouping key those candidates get. They are corpus
 candidates, not container elements, and `slices._signature` clusters only an
 oversized container's elements — so signature clustering still does not reach
@@ -1119,6 +1140,21 @@ finds nothing. The only failure signal the file carries at all is a tool result
 whose `content` begins with an error sentinel, present in 12 of the 200 —
 nowhere near the 100 that scored 0.0 — and reading it is the value inspection
 `_has_error_marker` was deliberately narrowed to exclude.
+
+That 0 of 200 holds and stays. What it does not describe is the same target's
+metadata-rich capture, on which the same check measured the exact opposite — and
+for a reason that was a defect rather than a difference in corpus. Those
+messages carry a top-level **`error: False`**, a field whose whole content is
+that nothing failed, and `_has_error_key`'s emptiness guard tested
+`value not in (None, "", [], {})` — a tuple omitting `False`. So the key fired
+on **200 of 200 episodes, including all 100 that scored `reward` 1.0**, and
+`error_markers` reached triage through `heuristics_fired` as a found fact about
+every successful episode. Not thin but backwards, and the one assertion
+`rb-triage-rule`'s near-duplicate step must never be handed, since it says
+failure everywhere. Fixed by adding `False`
+to that tuple, which covers a zero count with it because `in` compares by
+equality. The count above is unaffected either way: the fix only ever removes a
+firing, and there it was already zero.
 
 The authoritative artifact is reachable in principle and not admitted in
 practice, for a third independent reason: `results/final/*.json` is
