@@ -1331,6 +1331,15 @@ def test_utilisation_reports_no_percentage_when_no_claim_was_extracted(tmp_path)
     `None` rather than 0.0 because 0% asserts every claim was dropped, which is a
     judgment about the reconcile passes, while "nothing was extracted to cite" is
     a different fact about the run.
+
+    The 0-of-0 artifact is asserted **absent** from `uncited` while still present
+    in `per_artifact`, which is the distinction `refs.check_claim_utilisation`
+    already draws: its `entry["total"]` guard exempts a claims file with zero
+    claims, because `rb-extract` is allowed to produce nothing for an input with
+    nothing to extract, and the comment at that gate says the exemption is not a
+    hole precisely because the artifact still shows in the report at 0/0. Naming it
+    uncited here would make the `uncited-artifacts` flag fire on inputs the gate
+    exempts.
     """
     from rubrica.artifacts import write_json
     from rubrica.paths import list_json
@@ -1345,7 +1354,10 @@ def test_utilisation_reports_no_percentage_when_no_claim_was_extracted(tmp_path)
     got = summary.utilisation(run)
     assert (got.cited, got.total) == (0, 0)
     assert got.pct is None, "0.0 would assert every claim was dropped"
-    assert got.uncited == ["empty"]
+    assert got.uncited == [], "a 0-of-0 input is the case check_claim_utilisation exempts"
+    assert [a["artifact_id"] for a in got.per_artifact] == ["empty"], (
+        "exempt from the flag, still on the page"
+    )
 
 
 def test_utilisation_before_the_seal_is_absent(tmp_path):
@@ -1638,3 +1650,160 @@ def test_contradictions_survives_a_part_that_is_not_readable(tmp_path):
         assert got.by_resolution == {"unresolved": 0}
     finally:
         holding.chmod(0o644)
+
+
+# The seven readable-run shapes measured escaping `claim_utilisation` as
+# exceptions, each as a mutation of a fully sealed toy run. Driven end to end
+# through `summary.utilisation()` rather than through `claim_utilisation` itself:
+# the defect this closes is that a report which "never raises on a readable run's
+# content" was calling a function that does, and only the composed call proves the
+# guard is in the path the page actually takes. `id` is the parametrisation label
+# and the escape it produced, so a red test names the shape it lost.
+def _claims_member_is_a_string(run) -> None:
+    from rubrica.artifacts import read_json, write_json
+    from rubrica.paths import list_json
+
+    path = list_json(run.claims_dir)[0]
+    payload = read_json(path)
+    payload["claims"] = ["oops"]
+    write_json(path, payload)
+
+
+def _claim_has_no_id(run) -> None:
+    from rubrica.artifacts import read_json, write_json
+    from rubrica.paths import list_json
+
+    path = list_json(run.claims_dir)[0]
+    payload = read_json(path)
+    payload["claims"] = [{"statement": "a claim with no id"}]
+    write_json(path, payload)
+
+
+def _claims_is_not_a_list(run) -> None:
+    from rubrica.artifacts import read_json, write_json
+    from rubrica.paths import list_json
+
+    path = list_json(run.claims_dir)[0]
+    payload = read_json(path)
+    payload["claims"] = 7
+    write_json(path, payload)
+
+
+def _group_member_is_a_string(run) -> None:
+    from rubrica.artifacts import write_json
+
+    sealed = _sealed(run)
+    sealed["goals"] = ["oops"]
+    write_json(run.world_model, sealed)
+
+
+def _contradictions_member_is_a_string(run) -> None:
+    from rubrica.artifacts import write_json
+
+    sealed = _sealed(run)
+    sealed["contradictions"] = ["oops"]
+    write_json(run.world_model, sealed)
+
+
+def _collection_is_not_a_list(run) -> None:
+    from rubrica.artifacts import write_json
+
+    sealed = _sealed(run)
+    sealed["capabilities"] = "nope"
+    write_json(run.world_model, sealed)
+
+
+def _claims_dir_is_unreadable(run) -> None:
+    run.claims_dir.chmod(0o000)
+
+
+@pytest.mark.parametrize(
+    "break_it",
+    [
+        pytest.param(_claims_member_is_a_string, id="TypeError-string-indices"),
+        pytest.param(_claim_has_no_id, id="KeyError-id"),
+        pytest.param(_claims_is_not_a_list, id="TypeError-int-not-iterable"),
+        pytest.param(_group_member_is_a_string, id="AttributeError-group-member"),
+        pytest.param(_contradictions_member_is_a_string, id="AttributeError-contradiction"),
+        pytest.param(_collection_is_not_a_list, id="AttributeError-collection"),
+        pytest.param(_claims_dir_is_unreadable, id="UsageError-unreadable-claims-dir"),
+    ],
+)
+def test_utilisation_is_absent_rather_than_raising_on_a_readable_run(tmp_path, break_it):
+    """The one hole measured in this module's never-raise promise, at all seven shapes.
+
+    `claim_utilisation` is a report with its own contract and its own callers, and
+    it is not total: `utilisation.py` indexes `claim["id"]` bare, `.get`s
+    world-model group members bare, and calls `list_json(run.claims_dir)`, whose
+    `UsageError` is a ValueError rather than an OSError. Every shape here is a
+    *readable* run -- a hand-edited artifact, or a directory permission -- which is
+    exactly the class this module promises to render rather than crash on, and one
+    of them escaping takes the whole page down.
+
+    Guarded in `summary.py`, not widened in `utilisation.py`: the gate and the
+    subcommand share that module's arithmetic, and changing what it raises is a
+    change to their contract.
+    """
+    if os.geteuid() == 0 and break_it is _claims_dir_is_unreadable:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    break_it(run)
+    try:
+        got = summary.utilisation(run)
+        assert isinstance(got, summary.Absent)
+        assert got.what == "claim utilisation (01-claims/ or 01-world-model.json unreadable)"
+    finally:
+        run.claims_dir.chmod(0o755)
+
+
+def test_utilisation_absent_reads_differently_from_the_no_world_model_absence(tmp_path):
+    """Two absences, two readings, so they must not share one string.
+
+    "The seal has not run" is a fact about how far the run got; "something in the
+    run could not be read" is a defect in an artifact. A page that rendered the
+    same line for both would tell a reader with a broken claims file that their run
+    simply had not reached reconcile-seal.
+    """
+    from rubrica.artifacts import read_json, write_json
+    from rubrica.paths import list_json
+
+    unsealed = build_toy_run(tmp_path / "runs", upto="extract")
+    broken = build_toy_run(tmp_path / "runs2", upto="reconcile-seal")
+    path = list_json(broken.claims_dir)[0]
+    payload = read_json(path)
+    payload["claims"] = ["oops"]
+    write_json(path, payload)
+    assert summary.utilisation(unsealed).what != summary.utilisation(broken).what
+
+
+def test_utilisation_exempts_a_zero_of_zero_input_the_gate_exempts(tmp_path):
+    """`uncited` is `check_claim_utilisation`'s predicate, `total and cited == 0`.
+
+    One input is emptied of claims and another is left cited, so the two halves are
+    separated: the 0-of-0 input must not be named, the 0-of-N input must be. Without
+    the `total` guard `refs.py`'s gate reports one finding here while this page
+    would name two inputs, and Task 7's `uncited-artifacts` flag would fire on an
+    input `rb-extract` is explicitly allowed to have produced nothing for.
+    """
+    from rubrica.artifacts import read_json, write_json
+    from rubrica.refs import check_claim_utilisation
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    emptied = run.claims_dir / "notes-md.json"
+    payload = read_json(emptied)
+    payload["claims"] = []
+    write_json(emptied, payload)
+    sealed = _sealed(run)
+    for group in ("capabilities", "entities", "actors", "goals"):
+        for member in sealed[group]:
+            member["claims"] = [c for c in member["claims"] if not c.startswith("clm-trace-")]
+    sealed["contradictions"] = []
+    write_json(run.world_model, sealed)
+    got = summary.utilisation(run)
+    assert got.uncited == ["trace-json"], "0 of 2 is uncited; 0 of 0 is exempt"
+    assert {a["artifact_id"] for a in got.per_artifact} == {"api-json", "notes-md", "trace-json"}
+    assert [a for a in got.per_artifact if a["artifact_id"] == "notes-md"][0]["total"] == 0
+    findings = check_claim_utilisation(run)
+    assert [f.message for f in findings] == [
+        "no world-model element cites any claim from trace-json (2 claims)"
+    ], "the page names exactly what the gate reports"
