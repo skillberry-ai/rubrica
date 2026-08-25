@@ -2166,3 +2166,577 @@ def test_coverage_survives_a_field_that_is_the_wrong_type(tmp_path, field, bad):
     if field == "holes":
         assert row.holes == 0
         assert got.holes == []
+
+
+# -- the scenario table (spec 3.5) -------------------------------------------
+# The section the report exists for, and the only one joined across three
+# directories: `02-scenarios.json`, `05-verdicts/<sid>.json` and
+# `06-suite/<sid>/`. Two properties of the toy fixture shape every test below and
+# are worth stating once rather than re-measuring in each docstring.
+#
+# **The fixture is uniform in six of the seventeen row fields.** All five
+# scenarios carry `round` 1 and `actor_id` "act-support"; all four verdicts carry
+# the same `notes` prose, `verdict` "accept", `uniquely_determined` true and
+# `derivable_without_guessing` true. A test over an unmutated toy run therefore
+# cannot tell a field that is *read* from one that is *hardcoded* -- the same
+# fixture-uniformity trap that let a `covered=True` mutation survive the coverage
+# sweep. Every assertion over one of those fields below runs against a run whose
+# document has been edited to make the value distinct.
+#
+# **The fixture does vary in the rest, and those variations are used as-is:**
+# `hop_depth` (1 and 2), `goal_id` (goal-locate and goal-explain), `title`,
+# `discriminating_fact`, `cells` (one ref and two), `min_tool_calls` (1 and 2) and
+# -- because `scn-open-dup` is the folded duplicate -- `has_instance`,
+# `suite_files` and the whole verdict join, which are present for four rows and
+# absent for the fifth. `status` is the one field whose variation depends on the
+# fixture *level*: uniform "proposed" at `propose`, and active-against-duplicate
+# only from `score` on, which is where it is locked.
+
+
+def test_scenarios_returns_a_row_per_scenario(tmp_path):
+    from rubrica.artifacts import read_json
+
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    expected = len(read_json(run.scenarios)["scenarios"])
+    rows = summary.scenarios(run)
+    assert len(rows) == expected
+
+
+def test_scenarios_reads_every_id_in_document_order(tmp_path):
+    """The ids, in the document's order, as an exact list.
+
+    The count test above is satisfied by five rows carrying anything at all, and
+    the order matters to a reader: `propose` appends, so position carries the round
+    a scenario was proposed in as much as the `round` column does. The folded
+    duplicate is last, which is what makes it the row every "absent join" assertion
+    below indexes.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    assert [r.id_ for r in summary.scenarios(run)] == [
+        "scn-open",
+        "scn-empty",
+        "scn-blocked",
+        "scn-missing",
+        "scn-open-dup",
+    ]
+
+
+def test_scenarios_row_carries_the_record_fields(tmp_path):
+    """Each record column, by value, against the fixture's first scenario.
+
+    Written as exact values rather than as the brief's truthiness checks, which
+    were measured satisfiable by a wrong implementation: `assert row.title and
+    row.goal_id` stays green when the two are swapped, and every column here is a
+    `str(member.get(...))` one line from its neighbour, which is exactly where a
+    copy-paste slip lands. `round_` and `actor_id` are asserted in
+    test_scenarios_reads_the_round_and_actor_from_the_record instead -- the fixture
+    is uniform in both, so a value read from this run could not distinguish them
+    from a constant.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    row = summary.scenarios(run)[0]
+    assert row.id_ == "scn-open"
+    assert row.title == "Find the open billing ticket"
+    assert row.goal_id == "goal-locate"
+    assert row.hop_depth == 1
+    assert row.cells == ["cap-find-tickets/oc-found"]
+    assert row.discriminating_fact == "exactly one billing ticket has status open"
+    # A second row, because four of these columns are uniform *within* the first one
+    # and only differ between scenarios: `scn-blocked` is the fixture's only
+    # two-hop, two-cell, goal-explain scenario, and without it a hardcoded
+    # `goal_id="goal-locate"` passes -- measured as a surviving mutation before this
+    # half was added.
+    deeper = summary.scenarios(run)[2]
+    assert deeper.id_ == "scn-blocked"
+    assert deeper.goal_id == "goal-explain"
+    assert deeper.hop_depth == 2
+    assert deeper.cells == ["cap-find-tickets/oc-found", "cap-get-ticket/oc-detail"]
+    # "proposed", not "active": `propose` writes every scenario proposed and `score`
+    # is what promotes or folds it. Measured, because the natural guess is wrong and
+    # the same field reads differently two stages later -- which is also why the
+    # status column is locked at a level where it varies, in the test below.
+    assert row.status == "proposed"
+
+
+def test_scenarios_reads_the_status_where_the_statuses_differ(tmp_path):
+    """Every status on a scored run, as an exact mapping.
+
+    `status` is uniform at `propose` ("proposed" for all five) and varies only once
+    `score` has folded the duplicate, so the level matters: a test at `propose`
+    cannot tell a read status from a constant, and a hardcoded `"active"` would be
+    the plausible wrong answer, since four of the five rows carry it.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    assert {r.id_: r.status for r in summary.scenarios(run)} == {
+        "scn-open": "active",
+        "scn-empty": "active",
+        "scn-blocked": "active",
+        "scn-missing": "active",
+        "scn-open-dup": "duplicate",
+    }
+
+
+def test_scenarios_reads_the_round_and_actor_from_the_record(tmp_path):
+    """`round_` and `actor_id`, on a run edited to stop them being uniform.
+
+    The toy fixture proposes every scenario in round 1 and gives every one
+    `act-support`, so a hardcoded `round_=1` or `actor_id="act-support"` passes
+    every other test in this file. One row is edited to differ; the untouched
+    sibling is the control, without which a hardcode of the *new* values would pass.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    doc = read_json(run.scenarios)
+    doc["scenarios"][1]["round"] = 2
+    doc["scenarios"][1]["actor_id"] = "act-admin"
+    write_json(run.scenarios, doc)
+    rows = summary.scenarios(run)
+    assert (rows[1].round_, rows[1].actor_id) == (2, "act-admin")
+    assert (rows[0].round_, rows[0].actor_id) == (1, "act-support")
+
+
+def test_scenarios_carries_long_prose_in_full_rather_than_truncated(tmp_path):
+    """`discriminating_fact` and `notes` are carried whole, not summarised.
+
+    They are the two paragraph-shaped fields on the row and the reason the row
+    carries them at all: the renderer puts each in a `title` attribute rather than
+    a column, which is what keeps a 128-scenario run a scannable table. Truncating
+    here would make the attribute a summary of a judgment, and the judgment is the
+    half a human at gate 3 acts on. The fixture's longest `discriminating_fact` is
+    used, since a short one is equal to its own first clause.
+    """
+    from rubrica.artifacts import read_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    record = {m["id"]: m for m in read_json(run.scenarios)["scenarios"]}["scn-blocked"]
+    row = {r.id_: r for r in summary.scenarios(run)}["scn-blocked"]
+    assert row.discriminating_fact == record["discriminating_fact"]
+    assert len(row.discriminating_fact) > 60, "the fixture's multi-clause fact, not a short one"
+    assert row.notes == read_json(run.verdict("scn-blocked"))["notes"]
+
+
+def test_scenarios_flattens_capability_refs_into_cell_labels(tmp_path):
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    doc = read_json(run.scenarios)
+    doc["scenarios"][0]["capability_refs"] = [
+        {"capability_id": "cap-a", "outcome_class_id": "oc-x"},
+        {"capability_id": "cap-b", "outcome_class_id": "oc-y"},
+    ]
+    write_json(run.scenarios, doc)
+    row = summary.scenarios(run)[0]
+    assert row.cells == ["cap-a/oc-x", "cap-b/oc-y"]
+
+
+def test_scenarios_joins_the_challenge_verdict(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    rows = {r.id_: r for r in summary.scenarios(run)}
+    judged = [r for r in rows.values() if r.verdict]
+    assert judged, "a challenged run has verdicts to join"
+    # The brief wrote `judged[0].notes or judged[0].notes == ""` here, which is
+    # tautological for a `str` -- a string is either truthy or equal to "" -- so it
+    # held for a `notes` that was never read at all, and
+    # `uniquely_determined is not None` held for a hardcoded `True`. Both fields are
+    # locked by value in test_scenarios_reads_each_verdict_field_from_the_field_that_owns_it
+    # instead; what this test still owns is that the join happens for every judged
+    # scenario and for no other.
+    assert len(judged) == 4, "four of the five toy scenarios were challenged"
+    assert rows["scn-open-dup"].verdict == "", "the folded duplicate was never challenged"
+
+
+def test_scenarios_reads_each_verdict_field_from_the_field_that_owns_it(tmp_path):
+    """Four verdict columns, each given a distinct value in one document.
+
+    The toy fixture accepts every challenged scenario with the same notes and the
+    same two booleans, so `verdict == "accept"`, `uniquely_determined is True` and
+    `derivable is True` are all satisfied by constants -- and `derivable` reads
+    `derivable_without_guessing`, a rename no assertion over a uniform fixture can
+    catch pointing at the wrong key. The values are chosen to be mutually
+    distinguishable: `False` against `True` so a swap of the two booleans is
+    visible, and a `min_tool_calls` that is neither of the fixture's 1 and 2.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.verdict("scn-open"))
+    doc.update(
+        verdict="reject",
+        uniquely_determined=False,
+        derivable_without_guessing=True,
+        minimum_tool_calls_found=7,
+        notes="two answers fit the seed equally well",
+    )
+    write_json(run.verdict("scn-open"), doc)
+    row = {r.id_: r for r in summary.scenarios(run)}["scn-open"]
+    assert row.verdict == "reject"
+    assert row.uniquely_determined is False
+    assert row.derivable is True
+    assert row.min_tool_calls == 7
+    assert row.notes == "two answers fit the seed equally well"
+
+
+def test_scenarios_without_verdicts_leaves_the_verdict_empty(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    assert all(r.verdict == "" for r in summary.scenarios(run))
+
+
+def test_scenarios_reports_the_instance_directory_per_row(tmp_path):
+    """`has_instance` both ways, from the fixture's own variation.
+
+    `instantiate` writes a directory for each active scenario and none for the
+    folded duplicate, so a challenged toy run distinguishes a read `has_instance`
+    from a hardcoded `True` without any editing -- the one boolean on this row for
+    which that is true. Asserted as an exact set, because "four rows have one"
+    would hold if the wrong four did.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    rows = summary.scenarios(run)
+    assert {r.id_ for r in rows if r.has_instance} == {
+        "scn-open",
+        "scn-empty",
+        "scn-blocked",
+        "scn-missing",
+    }
+    assert {r.id_: r.status for r in rows if not r.has_instance} == {"scn-open-dup": "duplicate"}
+
+
+def test_scenarios_flags_difficulty_overstated_when_fewer_calls_suffice(tmp_path):
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.scenarios)
+    sid = doc["scenarios"][0]["id"]
+    doc["scenarios"][0]["hop_depth"] = 3
+    write_json(run.scenarios, doc)
+    verdict = read_json(run.verdict(sid))
+    verdict["minimum_tool_calls_found"] = 1
+    write_json(run.verdict(sid), verdict)
+    rows = summary.scenarios(run)
+    row = {r.id_: r for r in rows}[sid]
+    assert row.difficulty_overstated is True
+    # The control the brief's pair lacks: every other row is judged against its own
+    # hop_depth, so a flag that had become unconditional would still pass above.
+    assert not [r for r in rows if r.id_ != sid and r.difficulty_overstated]
+
+
+def test_scenarios_does_not_flag_difficulty_when_calls_match(tmp_path):
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.scenarios)
+    sid = doc["scenarios"][0]["id"]
+    doc["scenarios"][0]["hop_depth"] = 2
+    write_json(run.scenarios, doc)
+    verdict = read_json(run.verdict(sid))
+    verdict["minimum_tool_calls_found"] = 2
+    write_json(run.verdict(sid), verdict)
+    row = {r.id_: r for r in summary.scenarios(run)}[sid]
+    assert row.difficulty_overstated is False
+
+
+def test_scenarios_does_not_flag_difficulty_without_a_verdict(tmp_path):
+    """A missing verdict leaves the found count `None`, and `None < 1` raises.
+
+    The folded duplicate is the shape: `hop_depth` 1 with no `05-verdicts/` entry,
+    so dropping the `isinstance(found, int)` test from the flag turns rendering a
+    challenged toy run into a `TypeError` -- breaking this module's one absolute
+    promise, that it never raises on a readable run's content. Reachable without
+    editing the fixture, which is why it is a test rather than a comment.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    row = {r.id_: r for r in summary.scenarios(run)}["scn-open-dup"]
+    assert row.min_tool_calls is None
+    assert row.difficulty_overstated is False
+
+
+def test_scenarios_does_not_flag_difficulty_for_a_boolean_call_count(tmp_path):
+    """`True < 3` is legal Python and is a nonsense comparison.
+
+    `bool` is an `int` subclass, so an `isinstance(found, int)` test alone accepts a
+    hand-edited `"minimum_tool_calls_found": true` and reports the scenario's
+    difficulty as overstated on the strength of it -- a claim about the run made
+    from a malformed document. The `not isinstance(found, bool)` guard is what this
+    locks, and `_as_int`'s docstring records the opposite ruling for a count that is
+    merely rendered: there, `True` reading as 1 is preferable to a crash.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.scenarios)
+    doc["scenarios"][0]["hop_depth"] = 3
+    write_json(run.scenarios, doc)
+    verdict = read_json(run.verdict("scn-open"))
+    verdict["minimum_tool_calls_found"] = True
+    write_json(run.verdict("scn-open"), verdict)
+    row = {r.id_: r for r in summary.scenarios(run)}["scn-open"]
+    assert row.min_tool_calls is True, "rendered as the document holds it"
+    assert row.difficulty_overstated is False
+
+    # And the mirror, on the other side of the comparison: a `"hop_depth": true`
+    # against a found count of 0 is `0 < True`, which is `True`. Without this the
+    # `not isinstance(hop, bool)` half of the guard is unreachable by any test --
+    # measured, and the reason the guard is written symmetrically rather than only
+    # around the count.
+    doc["scenarios"][0]["hop_depth"] = True
+    write_json(run.scenarios, doc)
+    verdict["minimum_tool_calls_found"] = 0
+    write_json(run.verdict("scn-open"), verdict)
+    row = {r.id_: r for r in summary.scenarios(run)}["scn-open"]
+    assert row.hop_depth is True, "rendered as the document holds it"
+    assert row.difficulty_overstated is False
+
+
+@pytest.mark.parametrize("bad", ["two", None, [2], 2.5])
+def test_scenarios_does_not_flag_difficulty_for_a_hop_depth_that_is_not_an_int(tmp_path, bad):
+    """A non-int `hop_depth` renders uncoerced and flags nothing.
+
+    `2.5` is in the list because a float is an ordinary comparison partner --
+    `1 < 2.5` is `True` -- so it is the one shape an `isinstance(found, int)`-only
+    guard would flag rather than raise on, and a fractional hop depth is a
+    malformed document rather than an overstated difficulty. Passed through rather
+    than `_as_int`'d, for `_round_row`'s ruling on `round`: a `0` beside a readable
+    file reads as a rendering bug rather than as the propose-stage defect it is.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.scenarios)
+    doc["scenarios"][0]["hop_depth"] = bad
+    write_json(run.scenarios, doc)
+    row = {r.id_: r for r in summary.scenarios(run)}["scn-open"]
+    assert row.hop_depth == bad
+    assert row.difficulty_overstated is False
+
+
+def test_scenarios_reports_which_suite_files_landed(tmp_path):
+    from rubrica.emit import emit_run
+
+    run = build_toy_run(tmp_path / "runs")
+    emit_run(run)
+    rows = [r for r in summary.scenarios(run) if r.suite_files]
+    assert rows, "emit writes a package for every accepted instance"
+    assert "task.toml" in rows[0].suite_files
+    assert "seed.json" in rows[0].suite_files
+
+
+def test_scenarios_reports_a_full_package_as_every_suite_file(tmp_path):
+    """The whole of `SUITE_FILES` for a complete package, `tests` included.
+
+    `tests` is a *directory* and the other five are files, so a presence check
+    written as `is_file()` reports five of six for a package emit wrote correctly --
+    measured: emit writes all six for each of the four accepted toy scenarios. The
+    folded duplicate is the negative half: no package at all is `[]`, which is what
+    Task 7's challenge section distinguishes from a partial one.
+    """
+    from rubrica.emit import emit_run
+
+    run = build_toy_run(tmp_path / "runs")
+    emit_run(run)
+    rows = {r.id_: r for r in summary.scenarios(run)}
+    assert rows["scn-open"].suite_files == list(summary.SUITE_FILES)
+    assert "tests" in rows["scn-open"].suite_files, "a directory, not a file"
+    assert rows["scn-open-dup"].suite_files == []
+
+
+def test_scenarios_reports_a_package_missing_a_file_as_the_subset(tmp_path):
+    """A package missing its golden answer is not a package that was never written.
+
+    That is the distinction `SUITE_FILES` exists for and the one a boolean "package
+    emitted" column cannot draw. Without this test, a `suite_files` returning
+    `list(SUITE_FILES)` whenever the directory exists passes every other suite
+    assertion in this file, because emit writes all six for every toy package --
+    the fixture is uniform in package *contents* even though it varies in package
+    presence.
+    """
+    from rubrica.emit import emit_run
+
+    run = build_toy_run(tmp_path / "runs")
+    emit_run(run)
+    (run.task_dir("scn-open") / "golden.json").unlink()
+    row = {r.id_: r for r in summary.scenarios(run)}["scn-open"]
+    assert "golden.json" not in row.suite_files
+    assert row.suite_files == [n for n in summary.SUITE_FILES if n != "golden.json"]
+
+
+def test_scenarios_before_propose_is_absent(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+    got = summary.scenarios(run)
+    assert isinstance(got, summary.Absent)
+    assert got.what == "02-scenarios.json"
+
+
+def test_scenarios_survives_a_non_dict_member(tmp_path):
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    doc = read_json(run.scenarios)
+    before = len(doc["scenarios"])
+    doc["scenarios"].append("oops-a-string")
+    write_json(run.scenarios, doc)
+    rows = summary.scenarios(run)
+    assert all(r.id_ for r in rows), "the string member is dropped, not raised on"
+    # The count is the control the brief's assertion lacked: `all(...)` over an empty
+    # list is `True`, so dropping every member -- not only the malformed one -- passed
+    # it.
+    assert len(rows) == before
+
+
+def test_scenarios_survives_an_id_that_is_not_a_safe_path_segment(tmp_path):
+    """An unsafe id yields a row with an empty join, never a traceback.
+
+    `run.verdict`, `run.instance_dir` and `run.task_dir` all call `safe_segment`,
+    which raises `UnsafeSegment` -- a `ValueError`, so neither an `except OSError`
+    nor `_quietly`'s guard around the *read* catches it: the raise happens while
+    building the path argument, before the read is attempted. `"../../etc"` is the
+    shape `safe_segment`'s docstring names as a plausible thing for a confused stage
+    to emit, and `paths.scenario_ids_with_tasks` filters for exactly this reason.
+    All three joins are asserted, because guarding one and not its neighbours is
+    what a `_suite_files`-only guard looks like from the outside.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.scenarios)
+    doc["scenarios"].append(dict(doc["scenarios"][0], id="../../etc"))
+    write_json(run.scenarios, doc)
+    row = summary.scenarios(run)[-1]
+    assert row.id_ == "../../etc"
+    assert row.verdict == ""
+    assert row.has_instance is False
+    assert row.suite_files == []
+    assert row.difficulty_overstated is False
+
+
+def test_scenarios_survives_a_member_with_no_id_at_all(tmp_path):
+    """A record missing `id` renders a row, and joins nothing.
+
+    `is_safe_segment("")` is `False`, so the empty id takes the same branch the
+    unsafe one does -- one predicate for both, rather than a `bool(sid)` test beside
+    an `is_safe_segment(sid)` test that could disagree. Without this, an
+    implementation that joined on `""` would probe `05-verdicts/.json` and
+    `06-suite/`, and `06-suite/` itself holding a `task.toml` would report the whole
+    suite directory as this scenario's package.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.scenarios)
+    member = dict(doc["scenarios"][0])
+    member.pop("id")
+    doc["scenarios"].append(member)
+    write_json(run.scenarios, doc)
+    row = summary.scenarios(run)[-1]
+    assert row.id_ == ""
+    assert row.verdict == ""
+    assert row.has_instance is False
+    assert row.suite_files == []
+
+
+def test_scenarios_survives_an_unreadable_verdicts_directory(tmp_path):
+    """A `05-verdicts/` at mode 000 empties the join rather than raising.
+
+    `read_json` on a file under an untraversable directory raises
+    `PermissionError`, which `_quietly` catches -- so this tests the
+    *composition*, and its value is that it is the shape a run copied out of a
+    container under a different uid actually has. The record columns must still
+    render: the run's scenarios are readable, and "the verdicts cannot be read" is
+    a statement about one directory.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    run.verdicts_dir.chmod(0o000)
+    try:
+        rows = summary.scenarios(run)
+        assert all(r.verdict == "" for r in rows)
+        assert rows[0].title == "Find the open billing ticket", "the record still renders"
+    finally:
+        run.verdicts_dir.chmod(0o755)
+
+
+def test_scenarios_survives_an_unreadable_suite_directory(tmp_path):
+    """A `06-suite/` at mode 000 reports no package rather than raising.
+
+    `Path.exists()` swallows ENOENT and ENOTDIR but *not* EACCES, so a probe for
+    `06-suite/<sid>/task.toml` under an untraversable parent raises rather than
+    returning False -- which is why `_suite_files` probes through `_exists`, the
+    helper the stage spine already needed for the same reason. `has_instance` is the
+    control: `04-instances/` is untouched, so a guard that had swallowed the whole
+    join rather than this one probe would show up here.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    from rubrica.emit import emit_run
+
+    run = build_toy_run(tmp_path / "runs")
+    emit_run(run)
+    run.suite_dir.chmod(0o000)
+    try:
+        rows = summary.scenarios(run)
+        assert all(r.suite_files == [] for r in rows)
+        assert rows[0].has_instance is True, "the instances directory is still readable"
+    finally:
+        run.suite_dir.chmod(0o755)
+
+
+def test_suite_files_is_empty_when_no_package_was_written(tmp_path):
+    """`_suite_files`' contract, asserted directly because Task 7 consumes it.
+
+    The challenge section reads it to tell an accepted scenario whose package
+    landed from one whose did not, so `[]` for "there is no package" is part of the
+    interface rather than an implementation detail of this table.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    assert not run.suite_dir.exists(), "a challenged run has not emitted yet"
+    assert summary._suite_files(run, "scn-open") == []
+    assert summary._suite_files(run, "../../etc") == []
+
+
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("capability_refs", "nope"),
+        ("capability_refs", ["oops-a-string"]),
+        ("capability_refs", 7),
+    ],
+)
+def test_scenarios_survives_a_capability_refs_that_is_not_a_list_of_dicts(tmp_path, field, bad):
+    """The one nested collection on the record, guarded by `_dicts`.
+
+    `"capability_refs": "nope"` is `_mapping`'s measured shape one level down --
+    iterating the string yields characters, and each `.get` on one raises
+    `AttributeError` -- and `["oops-a-string"]` is `_dicts`' own: the list is a list,
+    so a bare `or []` passes it straight through to the same raise. The row still
+    renders, with no cells, because "this scenario's refs are malformed" is
+    `validate`'s finding to report and not a reason for the page to fail.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    doc = read_json(run.scenarios)
+    doc["scenarios"][0][field] = bad
+    write_json(run.scenarios, doc)
+    rows = summary.scenarios(run)
+    assert rows[0].cells == []
+    assert rows[0].id_ == "scn-open", "the rest of the row is unaffected"
+    assert len(rows) == 5, "and so are its siblings"
+
+
+def test_scenarios_on_a_document_that_is_not_a_mapping_is_absent(tmp_path):
+    """A `02-scenarios.json` holding a list reads as the artifact not being there.
+
+    `_mapping`'s reason, at the top of the section rather than inside a row: a
+    truthy non-dict reaches `.get` and raises `AttributeError`, and a document that
+    is a JSON array is not a scenarios artifact at all. `Absent` is the honest
+    answer -- there is nothing to tabulate -- and `validate --stage propose` is what
+    names the defect.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    write_json(run.scenarios, ["scn-open"])
+    got = summary.scenarios(run)
+    assert isinstance(got, summary.Absent)
+    assert got.what == "02-scenarios.json"

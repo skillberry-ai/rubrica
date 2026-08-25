@@ -44,7 +44,7 @@ from rubrica.brief import _dicts, _mapping, _quietly, _strings
 # misdescribe which candidate became which `artifact_id` the first time the two
 # drifted. It is also documented total, which is why nothing guards the call.
 from rubrica.intake import admit_sort_key
-from rubrica.paths import STAGES, RunPaths, list_json
+from rubrica.paths import STAGES, RunPaths, is_safe_segment, list_json
 
 # The implied suite size, composed rather than recomputed for `claim_utilisation`'s
 # reason: `gate-brief` reports this same number at gates 1 and 2, and a second
@@ -928,3 +928,163 @@ def coverage(run: RunPaths) -> Coverage | Absent:
         holes=holes,
         implied=implied,
     )
+
+
+# The files `emit` writes into one package. Listed rather than reduced to a
+# boolean so the table can report which of them landed: a package missing its
+# `golden.json` is a different failure from a package that was never written, and
+# a column saying only "emitted" cannot draw that line. `tests` is a *directory*
+# and the other five are files, which is why the probe below asks about existence
+# rather than about being a file -- measured: emit writes all six for every
+# accepted toy scenario.
+SUITE_FILES: tuple[str, ...] = (
+    "task.toml",
+    "seed.json",
+    "golden.json",
+    "instruction.md",
+    "provenance.md",
+    "tests",
+)
+
+
+@dataclass(frozen=True)
+class ScenarioRow:
+    id_: str
+    round_: object
+    title: str
+    goal_id: str
+    actor_id: str
+    # `object` rather than `int`, for `_round_row`'s ruling on `round`: a
+    # hand-edited `"hop_depth": "two"` renders as "two", because a `0` beside a
+    # readable file reads as a rendering bug rather than as the propose-stage defect
+    # it is. The flag below is what has to be total over that, not this field.
+    hop_depth: object
+    cells: list[str]
+    status: str
+    discriminating_fact: str
+    verdict: str
+    uniquely_determined: object
+    derivable: object
+    min_tool_calls: object
+    notes: str
+    has_instance: bool
+    suite_files: list[str]
+    difficulty_overstated: bool
+
+
+def _suite_files(run: RunPaths, scenario_id: str) -> list[str]:
+    """Which of `SUITE_FILES` the emitted package holds, or `[]` if there is none.
+
+    Split out rather than inlined because Task 7's challenge section reads it too:
+    it tells an accepted scenario whose package landed from one whose did not, so
+    the `[]`-for-no-package answer is an interface rather than a detail of the
+    table.
+
+    `is_safe_segment` before `task_dir`, which calls `safe_segment` and *raises*
+    `UnsafeSegment` on a bad id -- the same defensive filter
+    `paths.scenario_ids_with_tasks` applies to the same directory, and for the
+    reason its docstring gives: `UnsafeSegment` is a `ValueError`, so it is caught
+    by neither an `except OSError` nor `_quietly`, whose guard wraps the read and
+    not the path construction. It also answers `False` for the empty string, so a
+    record with no `id` takes this branch too rather than probing `06-suite/`
+    itself and reporting the whole suite directory as one scenario's package.
+
+    `_exists` rather than a bare `Path.exists()`: `exists` swallows ENOENT and
+    ENOTDIR but not EACCES, so probing under a `06-suite/` at mode 000 raises
+    rather than answering False -- the same distinction that made the stage spine
+    need the helper.
+    """
+    if not is_safe_segment(scenario_id):
+        return []
+    directory = run.task_dir(scenario_id)
+    return [name for name in SUITE_FILES if _exists(directory / name)]
+
+
+def scenarios(run: RunPaths) -> list[ScenarioRow] | Absent:
+    """One row per scenario, joined across the record, its verdict and its package.
+
+    The section the report exists for, and the only one reading three directories
+    at once: `02-scenarios.json` for what was proposed, `05-verdicts/<sid>.json`
+    for what `challenge` found, and `06-suite/<sid>/` for what `emit` wrote.
+
+    Long prose is carried on the row but is deliberately not a column:
+    `discriminating_fact` and the verdict's `notes` are paragraphs, and the
+    renderer puts each in a `title` attribute. That is what keeps a 128-scenario
+    run a scannable table, and it is why every id is rendered as a link to the
+    artifact on disk -- the drill-in path replaces inlining the seed and the golden
+    answer, either of which would make one row taller than the rest of the page.
+
+    **The three joins are gated on `is_safe_segment`, not just the package probe.**
+    `run.verdict` and `run.instance_dir` call `safe_segment` exactly as
+    `run.task_dir` does, so an id like `"../../etc"` -- the shape `safe_segment`'s
+    docstring names -- raises `UnsafeSegment` while the *argument* is being built,
+    upstream of `_quietly`'s guard around the read. Guarding the package probe
+    alone would leave two of the three raising, which is this module's one absolute
+    promise broken for a run that is perfectly readable.
+    """
+    payload = _mapping(_quietly(run.scenarios))
+    if not payload:
+        return Absent("02-scenarios.json")
+    rows = []
+    for member in _dicts(payload.get("scenarios")):
+        sid = str(member.get("id", ""))
+        # One predicate for two cases, rather than a `bool(sid)` test beside an
+        # `is_safe_segment(sid)` one that could drift: `is_safe_segment("")` is
+        # False, so a record with no id joins nothing instead of probing
+        # `05-verdicts/.json`.
+        joinable = is_safe_segment(sid)
+        verdict = _mapping(_quietly(run.verdict(sid))) if joinable else {}
+        hop = member.get("hop_depth")
+        found = verdict.get("minimum_tool_calls_found")
+        rows.append(
+            ScenarioRow(
+                id_=sid,
+                round_=member.get("round"),
+                title=str(member.get("title", "")),
+                goal_id=str(member.get("goal_id", "")),
+                actor_id=str(member.get("actor_id", "")),
+                hop_depth=hop,
+                # Flattened to one label per ref rather than kept as pairs: the cell
+                # is what the coverage matrix is indexed by, so `cap/oc` is the string
+                # a reader matches against section 3.4 by eye.
+                cells=[
+                    f"{ref.get('capability_id', '')}/{ref.get('outcome_class_id', '')}"
+                    for ref in _dicts(member.get("capability_refs"))
+                ],
+                status=str(member.get("status", "")),
+                discriminating_fact=str(member.get("discriminating_fact", "")),
+                verdict=str(verdict.get("verdict", "")),
+                uniquely_determined=verdict.get("uniquely_determined"),
+                # The verdict spells this `derivable_without_guessing`; the row
+                # shortens it, because the column heading shares a line with every
+                # other column's. The rename is one-sided, which is why the test
+                # pins the value rather than its truthiness: the toy fixture makes
+                # every verdict `true` here, so a `.get("derivable")` reading None
+                # for all four rows is indistinguishable from a uniform read.
+                derivable=verdict.get("derivable_without_guessing"),
+                min_tool_calls=found,
+                notes=str(verdict.get("notes", "")),
+                has_instance=(_exists(run.instance_dir(sid)) if joinable else False),
+                suite_files=_suite_files(run, sid),
+                # Both sides must be real ints before this comparison means
+                # anything, and each exclusion closes a measured shape rather than a
+                # hypothetical one. A scenario with no verdict leaves `found` None
+                # and `None < 1` raises TypeError -- reachable on an unedited toy
+                # run, whose folded duplicate is exactly that. A hand-edited
+                # `"hop_depth": 2.5` compares fine and would flag a malformed
+                # document as an overstated difficulty. And `bool` is an `int`
+                # subclass, so `"minimum_tool_calls_found": true` would make
+                # `True < 3` report a scenario's difficulty as overstated on the
+                # strength of a nonsense comparison -- the opposite ruling from
+                # `_as_int`'s, which renders `True` as 1 rather than crash, because
+                # rendering a count is not asserting a relation between two.
+                difficulty_overstated=(
+                    isinstance(found, int)
+                    and not isinstance(found, bool)
+                    and isinstance(hop, int)
+                    and not isinstance(hop, bool)
+                    and found < hop
+                ),
+            )
+        )
+    return rows
