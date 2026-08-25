@@ -1140,12 +1140,15 @@ and the trajectory keeps only `messages`.
 **That reward split is per result file, and the figure this entry used to state
 unqualified was one file's.** It read "`reward` is 1.0 for 100 records and 0.0
 for the other 100", which is the `claude-3-7-sonnet` airline file; across the
-four airline files the splits are 100/100, 112/88, 101/99 and 118/82. The
-`data/tau2/trajectories` directory measured here is itself named for the
-`gpt-4.1` airline run, so the 200 files this entry is about are the 112/88 one.
-Nothing in the entry's argument moves — what the projection drops is the
-scoring, whatever its distribution — but an unqualified count invites a reader
-to open a different one of the 26 result files and conclude the record is wrong.
+four airline files the splits are 100/100, 112/88, 101/99 and 118/82. The 200
+files this entry is about are the 112/88 one, and that is established by content
+rather than by the directory's name: their non-system role counts are exactly
+the `gpt-4.1` airline file's — assistant 2,183, user 1,268, tool 1,531 — and its
+4,982 messages plus one prepended `system` turn per episode give the stripped
+set's 5,182 exactly. No other airline result file matches that triple. Nothing
+in the entry's argument moves — what the projection drops is the scoring,
+whatever its distribution — but an unqualified count invites a reader to open a
+different one of the 26 result files and conclude the record is wrong.
 
 So the digest's silence here is honest rather than thin: `status` cannot fire
 because no key in `_STATUS_KEYS` appears in any of the 5,182 messages, and
