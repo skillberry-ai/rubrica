@@ -1398,9 +1398,20 @@ def collect_scenarios(run: RunPaths) -> tuple[list[dict], list[Finding]]:
             except ArtifactError as exc:
                 findings.append(Finding(path, "rounds", "", str(exc)))
                 continue
-            if not isinstance(part, dict) or not isinstance(part.get("scenarios"), list):
+            # SPLIT into two refusals, not one, and the reason is a testability
+            # constraint rather than a stylistic one: a combined guard reports both
+            # shapes at the same pointer, so no assertion can tell them apart, and
+            # `/scenarios` does not resolve at all in a payload that is not an
+            # object. Pinning Finding.pointer -- which is what survives a
+            # meaning-preserving reword of the message -- requires each shape to
+            # carry its own pointer. The same split applies to the score part's
+            # container and to each row guard.
+            if not isinstance(part, dict):
+                findings.append(Finding(path, "rounds", "", "part is not a JSON object"))
+                continue
+            if not isinstance(part.get("scenarios"), list):
                 findings.append(
-                    Finding(path, "rounds", "", "part is not an object carrying a scenarios array")
+                    Finding(path, "rounds", "/scenarios", "part's scenarios is not an array")
                 )
                 continue
             for i, scenario in enumerate(part["scenarios"]):
@@ -1468,6 +1479,9 @@ def _apply_rulings(run: RunPaths, scenarios: list[dict]) -> list[Finding]:
         seen_here: dict[str, int] = {}
         for i, ruling in enumerate(part["rulings"]):
             sid = ruling.get("scenario_id") if isinstance(ruling, dict) else None
+            # Registered AFTER the string check below, not before: an id that is
+            # not a string cannot key the register, and checking membership first
+            # would mean reasoning about that case twice.
             if isinstance(sid, str) and sid in seen_here:
                 findings.append(
                     Finding(
