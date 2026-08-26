@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from rubrica import brief, cli, survey
+from rubrica import brief, cli, refs, survey
 from rubrica.artifacts import read_json, write_json
 from rubrica.paths import RunPaths, list_json
 from rubrica.utilisation import claim_utilisation
@@ -591,6 +591,96 @@ def test_gate_one_does_not_raise_on_hand_edited_reconcile_partials(tmp_path):
     # fan-out covered at exactly the moment a human is judging its coverage.
     assert f"{len(parts)} subjects swept, 1 contradictions recorded" in text
     assert "(no resolution): 1" in text
+
+
+def test_gate_one_reports_read_coverage_per_pass(tmp_path):
+    """Per pass, not per input -- the aggregate above it is what hid issue #6.
+
+    Measured on run-20260823-112746: `claim-utilisation` read 33.6% overall while
+    per-kind citation ran 110 of 135 for the pass that had read every claims file
+    and 2 of 38 for the pass that had read three of twenty-three. A per-artifact
+    number cannot say which pass did the citing, so the brief printed the average
+    of a diligent pass and a skimming one.
+
+    Every figure asserted here is summed back out of the partials on disk, keyed
+    by the name the schema gives it, so a rendering that read the wrong key, lost
+    a pass or mis-summed a column goes red while a reflow of the prose does not.
+    `refs.PASS_OWN_KINDS` is iterated rather than re-typed for the same reason
+    `brief` imports it: a second copy of which pass owns which kind is a copy of
+    a judgment, and this test would then be able to agree with a stale one.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+
+    text = brief.gate_brief(run, 1)
+    section = _section(text, "Read coverage, per pass")
+
+    for attribute, own_kinds in refs.PASS_OWN_KINDS:
+        path = getattr(run, attribute)
+        rows = read_json(path)["inputs_seen"]
+        cited = sum(row["cited"] for row in rows)
+        total = sum(row["own_kind_total"] for row in rows)
+        assert f"{path.name}: {cited}/{total} claims of {', '.join(own_kinds)} cited" in section
+
+    # The toy's one drop, and the note that says it was a decision: that is the
+    # line a human is at gate 1 to rule on. Read off disk rather than named here,
+    # so the fixture is the oracle for which row it is.
+    dropped = [row for row in read_json(run.outcomes_part)["inputs_seen"] if row["dropped"]]
+    assert len(dropped) == 1, f"the toy is expected to carry exactly one drop, got {dropped}"
+    row = _row(section, dropped[0]["artifact_id"])
+    assert f"{dropped[0]['cited']}/{dropped[0]['own_kind_total']} cited" in row
+    assert f"{dropped[0]['dropped']} dropped" in row
+    assert dropped[0]["note"] in row, "a drop is only readable beside the note it required"
+    # And it is the *only* row printed under any pass. The toy carries a 0/0/0 row
+    # for every artifact holding none of a pass's kinds -- honest in the artifact,
+    # and it would bury this line in the brief.
+    assert [line for line in section.splitlines() if line.startswith("    ")] == [row]
+
+
+def test_gate_one_read_coverage_is_quiet_before_the_partials_exist(tmp_path):
+    """gate-brief is a report, not a gate: it exits 0 on a readable run, so a run
+    stopped before any reconcile pass has written its partial must render a line
+    saying there is nothing to report rather than raise or print a blank block."""
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+
+    section = _section(brief.gate_brief(run, 1), "Read coverage, per pass")
+
+    assert "nothing to report" in section
+
+
+def test_gate_one_read_coverage_does_not_raise_on_a_hand_edited_accounting(tmp_path):
+    """A human at gate 1 hand-editing a partial before re-reading the brief is
+    supported, so every shape that edit produces has to render rather than raise
+    -- the same ruling `test_gate_one_does_not_raise_on_hand_edited_reconcile_partials`
+    pins for the sweep, and the same fabricated `[internal]` finding at exit 1 is
+    the failure. One shape per guard: a whole `inputs_seen` that is not a list
+    (`_dicts`), a row that is not a dict (`_dicts`), a count that is a string and
+    one that is null (`_count`, because `sum` raises rather than skipping), a
+    partial that is a directory where a file belongs (`_quietly`), and a row with
+    no `dropped` key at all.
+
+    Asserted through cli.main, because the exit code is the promise.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    part = read_json(run.capabilities_part)
+    part["inputs_seen"] = [
+        {"artifact_id": "api-json", "own_kind_total": "5", "cited": None, "dropped": 5},
+        {"artifact_id": "notes-md", "own_kind_total": 1, "cited": 1},
+        "not-a-dict-at-all",
+    ]
+    write_json(run.capabilities_part, part)
+    part = read_json(run.entities_part)
+    part["inputs_seen"] = "not-a-list"
+    write_json(run.entities_part, part)
+    run.outcomes_part.unlink()
+    run.outcomes_part.mkdir()
+
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+    section = _section(brief.gate_brief(run, 1), "Read coverage, per pass")
+    # The one pass whose accounting is intact still renders its own line: a guard
+    # that dropped the whole block on one bad row would take the readable passes
+    # down with the edited one.
+    goals = read_json(run.goals_part)["inputs_seen"]
+    assert f"{run.goals_part.name}: {sum(row['cited'] for row in goals)}/" in section
 
 
 @pytest.mark.parametrize(

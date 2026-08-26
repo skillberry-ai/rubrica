@@ -277,6 +277,45 @@ than restating them — a duplicated `$defs/entity` that fell behind would make 
 partial accept an element the sealed world model then rejects.
 `capabilities-part` is the single exception and says so in its own entry.
 
+The four passes that own a claim kind — `capabilities-part`, `outcomes-part`,
+`entities-part`, `goals-part` — each carry an **`inputs_seen` accounting** on top
+of their elements: one row per input `manifest.json` registers, each
+`{artifact_id, own_kind_total, cited, dropped}` plus a `note` whenever `dropped`
+is not zero. The row shape lives once, in
+`src/rubrica/schema/inputs-seen-0.1.json`, which the four `$ref` and which is
+**not an artifact kind** — no stage writes a document of that shape, so it is
+the one schema in the package with no entry in `validate.ARTIFACT_SCHEMAS` and
+nothing `rubrica validate --stage X` ever looks for on its own.
+
+`own_kind_total` is the forcing function: it is how many claims of *that pass's*
+kinds the named input's claims file holds, which is the one figure a pass cannot
+state for a file it never opened. `check-refs` **recomputes** it from
+`01-claims/` and recomputes `cited` from the `claims` arrays in the partial
+itself, so neither is taken on the pass's word, and the accounting is **total
+over `manifest.inputs`** — a registered input with no row is a finding, because a
+pass that never opened a claims file is otherwise indistinguishable from one that
+opened it and cited nothing. Issue #6 is what that measures: read coverage of
+`01-claims/` varied from three files of twenty-three to all twenty-three across
+byte-identical dispatches, and both check layers accepted the skimmed run,
+because a skimmed read still produces a well-formed partial.
+
+The drops themselves are **nobody's finding**. Every row with a non-zero
+`dropped` carries the `note` layer 1 requires of it, which is what makes the drop
+a decision on the record rather than an oversight — and `check-refs` deliberately
+does not report even the sharpest case, a positive `own_kind_total` cited zero
+times. Ruling on that is the human's job at gate 1, where `gate-brief --gate 1`
+prints each pass's own-kind rate and every row that dropped something beside its
+note. Making it an exit code would put a coverage judgment behind a repair round
+that cannot repair anything.
+
+The other three partials carry no accounting, for two different reasons.
+`subjects` and `contradictions-part` need none: `check-refs` already holds the
+subject cover to totality over every claim in the run, so the cover is the
+accounting. `gaps-part` cannot be given one — its pass owns none of the six
+claim kinds, and a gap asserts what no input *contains*, so no output shape can
+force its read coverage. See
+[`docs/design/limitations.md`](../design/limitations.md).
+
 ## `subjects`
 
 - **Schema:** `src/rubrica/schema/subjects-0.1.json`
@@ -356,7 +395,8 @@ silently.
 Fields worth knowing: `capabilities[].binding` (optional in the schema and
 required by `emit`, which reports a finding for an accepted scenario whose
 capability has none — so a capability without one is a defect deferred, not
-avoided).
+avoided); `inputs_seen[].own_kind_total` (how many `capability`-kind claims the
+named input holds — the one kind this pass is accountable for).
 
 ## `outcomes-part`
 
@@ -375,7 +415,13 @@ Fields worth knowing: `outcomes[].outcome_classes[].kind` (the same five-value
 enum the world model uses — `success`, `empty`, `not_found`, `error`,
 `underspecified`; `underspecified` is the one that records "nothing addresses
 this", which is not the same as silence, and dropping it costs the coverage
-denominator a column for every capability).
+denominator a column for every capability);
+`outcomes[].outcome_classes[].claims` (required and non-empty, as on every other
+element — and for an `underspecified` class it is the claims that establish the
+*operation* the class belongs to, since evidence for an outcome nothing states
+does not exist);
+`inputs_seen[].own_kind_total` (how many `outcome_class`-kind claims the named
+input holds — this pass's own kind).
 
 ## `entities-part`
 
@@ -394,7 +440,11 @@ what this file carries.
 Fields worth knowing: `entities[].invariants[].machine` versus `.prose` — the
 same distinction the `world-model` entry describes, and the same consequence:
 `prose` leaves the reachability gate nothing to evaluate, while a `machine`
-invariant promoted from an inference fails every seed that is actually correct.
+invariant promoted from an inference fails every seed that is actually correct;
+`entities[].invariants[].claims` (required and non-empty, so an invariant's
+provenance sits on the invariant rather than on its parent entity);
+`inputs_seen[].own_kind_total` (how many claims of this pass's two kinds —
+`entity` and `invariant` — the named input holds).
 
 ## `goals-part`
 
@@ -411,9 +461,11 @@ because goals are half the frozen denominator: `reconcile-seal` counts them,
 every goal needs a real `actor_id` to resolve.
 
 Fields worth knowing: `goals[].expected_hop_depths` (as in the world model, the
-multi-hop depths a goal is expected to be tested at); both arrays lack
-`minItems`, because a corpus that establishes no actor is a fact for
-`rb-reconcile-gaps` to record rather than one for the schema to forbid.
+multi-hop depths a goal is expected to be tested at);
+`inputs_seen[].own_kind_total` (how many claims of this pass's two kinds —
+`actor` and `goal` — the named input holds); both element arrays lack `minItems`,
+because a corpus that establishes no actor is a fact for `rb-reconcile-gaps` to
+record rather than one for the schema to forbid.
 
 ## `gaps-part`
 
@@ -435,7 +487,10 @@ rather than recorded it.
 
 Fields worth knowing: `gaps[].blocks` (the later stages a gap makes
 unsafe — a gap blocking `propose` is what makes the orchestrator halt, so it is
-named honestly rather than narrowly, and never left empty to avoid a halt).
+named honestly rather than narrowly, and never left empty to avoid a halt);
+`gaps[].claims` (required and non-empty, and **not** evidence for the unknown,
+which by definition nothing states — the claims that make the absence *matter*,
+so a gap's provenance is resolvable rather than sitting in prose).
 
 ## `world-model`
 
@@ -454,7 +509,15 @@ produced: `capabilities`, `entities`, `actors`, `goals`, recorded
 resolved), recorded `gaps` (things no input says anything about, each naming
 which later stages it `blocks`), and a `denominator` frozen at a `version` for
 the rest of the run. Every element carries a `claims` array of the claim ids
-that support it.
+that support it — **including the nested ones**: an outcome class, an invariant
+and a gap each require their own non-empty array, and until issue #6 none of the
+three could carry one at all, so an invariant's provenance went onto its parent
+entity and an outcome class's into `description` prose. Measured on the run that
+issue reports: `invariant` claims were cited 0 of 55 times and `outcome_class` 7
+of 62, with 24 more appearing only inside prose — 117 of 434 claims with nowhere
+structured to record where they came from, and none of them visible to
+`claim-utilisation` or to `check-refs`. As everywhere else here, resolving a
+citation means the claim *exists*, never that it supports the element.
 
 **No representation for a field's value domain.** `capability.params` and
 `entity.fields` carry only a name and a type, with `additionalProperties:

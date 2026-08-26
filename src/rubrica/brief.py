@@ -36,6 +36,12 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   later pass quietly modelling what `rb-reconcile-contradict` recorded
   `unresolved` -- is not something layer 2 can see, and a non-zero `unresolved`
   in the tally is the cheapest signal that there is a part worth opening.
+  Read coverage is reported *per pass* beside the per-input utilisation, and the
+  two are not the same measure: utilisation is a fact about an input, and issue
+  #6 measured a run where averaging it across every citing pass reported 33.6%
+  while one pass was citing 110 of 135 claims of its own kind and another 2 of
+  38. Each pass's own-kind rate is its own line, and only the rows that dropped
+  a claim are printed under it, each beside the note the drop required.
 - **Gates 2 and 3** render what already exists: the coverage verdict, and the
   challenge stage's verdict tallies.
 
@@ -61,7 +67,12 @@ from rubrica.paths import RunPaths, list_json
 # TypeError). A local copy beside `_dicts` and `_mapping` would be a second
 # spelling of that guard, and half-a-module's-worth of inconsistent isinstance
 # checks is the defect `_dicts` exists to have fixed.
-from rubrica.refs import _as_list
+# PASS_OWN_KINDS is public for exactly this import: which reconcile pass is
+# accountable for which claim kind is a *judgment*, and a second copy of it here
+# would let the gate's reading surface and the checker that recomputes the
+# numbers come to disagree about what a per-pass rate means -- the drift
+# utilisation.py exists as its own module to refuse.
+from rubrica.refs import PASS_OWN_KINDS, _as_list
 from rubrica.sizing import implied_size
 from rubrica.utilisation import claim_utilisation
 
@@ -147,6 +158,25 @@ def _strings(value) -> list[str]:
     if not isinstance(value, list):
         return []
     return [member for member in value if isinstance(member, str)]
+
+
+def _count(value) -> int:
+    """`value` if it is an integer, else 0 -- for a field this module *sums*.
+
+    `_dicts`' and `_mapping`'s sibling, and the one whose absence does not fail
+    cleanly: a comparison against a string reports, but `sum` over one raises
+    `TypeError: unsupported operand type(s) for +: 'int' and 'str'`. Measured in
+    refs.check_input_dispositions with `"cited": "2"` in 01-outcomes.json, at
+    exit 1 with one fabricated `[internal]` finding that loses every real finding
+    in the run; here the loss would be the whole gate-1 brief.
+
+    Counting the malformed value as 0 makes the rendered total disagree with the
+    file, which is deliberate and is the softer of the two failures: the
+    disagreement is recoverable by reading the artifact, and layer 1 rejects the
+    non-integer by name (`inputs-seen-0.1.json` requires an integer) while
+    check_input_dispositions reports it against the row it sits on.
+    """
+    return value if isinstance(value, int) else 0
 
 
 def _disposition_parts(run: RunPaths) -> tuple[list[dict], list[str]]:
@@ -593,6 +623,54 @@ def _gate_1(run: RunPaths) -> str:
             )
     else:
         lines.append("  (no world model yet; nothing to report)")
+    lines.append("")
+
+    # Per pass, not per input, and that distinction is the whole point: the block
+    # above is an aggregate across every citing pass, which is what hid issue #6.
+    # Measured on run-20260823-112746, utilisation read 33.6% while the pass that
+    # had read every claims file was citing 110 of 135 claims of its own kind and
+    # the pass that had read three of twenty-three was citing 2 of 38 -- and
+    # trajectories-json-9 reported 13 claims cited, every one of them a capability
+    # claim, while the goals pass never opened the file. A per-artifact number
+    # cannot say which pass did the citing, so one diligent pass masks another's
+    # skipped file.
+    lines.append("Read coverage, per pass")
+    rendered = False
+    for attribute, own_kinds in PASS_OWN_KINDS:
+        path = getattr(run, attribute)
+        rows = _dicts(_mapping(_quietly(path)).get("inputs_seen"))
+        if not rows:
+            continue
+        rendered = True
+        cited = sum(_count(row.get("cited")) for row in rows)
+        total = sum(_count(row.get("own_kind_total")) for row in rows)
+        # The artifact's filename, not the stage name: it is what a reader opens
+        # next, and it is derived from the same attribute rather than needing a
+        # second mapping from pass to partial.
+        lines.append(f"  {path.name}: {cited}/{total} claims of {', '.join(own_kinds)} cited")
+        # Only the rows that dropped something, and always with the note the
+        # schema required for the drop. The accounting is total over
+        # manifest.inputs, so most rows on a real run read 0/0/0 -- printing them
+        # would bury the one line a human is at this gate to rule on.
+        for row in rows:
+            # Truthiness rather than `_count` here, and the asymmetry is
+            # deliberate: a row that states a drop in any shape is a row worth
+            # printing, and the values printed below are raw, so a malformed
+            # `dropped` shows up as itself. `_count` guards the sums because
+            # addition raises; nothing raises on deciding whether to print a line.
+            if row.get("dropped"):
+                note = row.get("note")
+                # Raw, unlike the summed columns above: a reader who came here
+                # because the pass total looked wrong needs to see what the row
+                # actually says, and a malformed count rendered as 0 would read as
+                # the artifact's own claim rather than this report's substitution.
+                lines.append(
+                    f"    {row.get('artifact_id')}: {row.get('cited')}/"
+                    f"{row.get('own_kind_total')} cited, {row.get('dropped')} dropped"
+                    f" -- {note if isinstance(note, str) else '(no note)'}"
+                )
+    if not rendered:
+        lines.append("  (no reconcile partials with an accounting yet; nothing to report)")
     lines.append("")
 
     lines.append("Implied suite size")
