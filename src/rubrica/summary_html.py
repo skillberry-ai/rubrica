@@ -17,11 +17,20 @@ network -- so it still reads when the run directory is archived or opened
 offline. Links to sibling artifacts are relative, which is what lets the page
 travel with the run while remaining openable on its own.
 
-Nothing here reads an artifact. Every section calls the builder in `summary.py`
-that owns its document and renders whatever comes back, `Absent` included, which
-is what keeps the two halves separable: a section that disagrees with the
-`gate-brief` a reader runs beside it is a defect in one builder rather than in
-two spellings of the same read.
+`decisions.md` is the one artifact this module reads, and every other section
+calls the builder in `summary.py` that owns its document and renders whatever
+comes back, `Absent` included. That is what keeps the two halves separable: a
+section that disagrees with the `gate-brief` a reader runs beside it is a defect
+in one builder rather than in two spellings of the same read.
+
+The exception is deliberate rather than an oversight, and `_decisions` states it
+again where it happens: `decisions.md` is prose all the way down, so a builder
+over it would return `str | Absent` having computed nothing -- a pass-through
+whose only work is the escaping this module does anyway. There is nothing for the
+reading half to own, so the cut would buy a symmetry and no separability.
+`test_summary_html_reads_exactly_one_artifact_and_names_it` is what keeps this
+sentence true: a second read there fails the suite rather than quietly making the
+docstring wrong.
 """
 
 from __future__ import annotations
@@ -53,6 +62,13 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .matrix td.cell { white-space: nowrap; font-size: 12px; }
 .scroll { overflow-x: auto; }
 .mono { font-family: ui-monospace, monospace; font-size: 12px; }
+/* An unreachable hole is a closed question; every other reason is an open one a
+   human at gate 2 may still act on. Weight and a rule carry it, never colour
+   alone -- each row also says which in words. */
+.hole-reason.open { font-weight: 600; border-left: 3px solid #c60; }
+.hole-reason.closed { opacity: .6; }
+.hole-reason .qkind { font-size: 11px; opacity: .7; font-weight: 400; }
+.clip { opacity: .6; }
 details summary { cursor: pointer; }
 pre { white-space: pre-wrap; font-size: 12px; }
 """
@@ -112,6 +128,28 @@ def _val(value) -> str:
     return esc(value)
 
 
+# The width at which a prose cell is clipped. One constant for the two columns
+# that clip -- a disposition's `reason` and a gap's `why_it_matters` -- because a
+# reader comparing the two tables should not have to notice they cut at different
+# places.
+_CLIP_AT = 120
+
+
+def _clipped(text: str) -> str:
+    """Prose for a cell, with a visible mark when anything was cut.
+
+    The full text is on the cell's `title` either way, but nothing on the page
+    says to hover: a sentence clipped at `_CLIP_AT` characters reads as a complete
+    one, and the reader who most needs the rest is exactly the one with no way to
+    tell there is any. The ellipsis is a character rather than a CSS affordance
+    for the reason the labels in `_hole_reason` are words: it survives the page
+    being printed, dumped to text, or read with the stylesheet stripped.
+    """
+    if len(text) <= _CLIP_AT:
+        return _val(text)
+    return esc(text[:_CLIP_AT].rstrip()) + '<span class="clip">&hellip;</span>'
+
+
 def _table(headers: tuple[str, ...], rows: list[str], *, css_id: str = "", num: tuple = ()) -> str:
     """A sortable table with its headings escaped here, so no caller can forget.
 
@@ -126,6 +164,55 @@ def _table(headers: tuple[str, ...], rows: list[str], *, css_id: str = "", num: 
     return (
         f'<table class="sortable"{ident}><thead><tr>{head}</tr></thead>'
         f"<tbody>\n" + "\n".join(rows) + "\n</tbody></table>"
+    )
+
+
+def _pct(value) -> str:
+    """A coverage percentage: a float to three places, anything else verbatim.
+
+    Display formatting, which is not the coercion Task 5's pass-through ruling is
+    against: `"pct": "half"` still renders `half`, because a non-numeric pct is a
+    score-stage defect for `validate` to name and a `0.0` in its place would hide
+    it. What this drops is float noise -- measured on `run-20260825-094033`,
+    19-of-148 cells rendered as `0.12837837837837837`, seventeen digits in a cell
+    nobody reads past the second.
+
+    Three places rather than one, and that is measured too: the field is a
+    *fraction* in every coverage document on disk (0.55 on `run-20260823-112746`,
+    1.0 on the toy world), so `:.1f` would render 11-of-20 cells as `0.6` -- a
+    rounding a reader can catch out against the covered and total columns beside
+    it. At three places 0.128 and 0.550 both survive, and nothing on this page
+    turns on the fourth.
+    """
+    if isinstance(value, float):
+        return esc(f"{value:.3f}")
+    return _val(value)
+
+
+def _hole_reason(reason: str) -> str:
+    """A hole's reason, with `unreachable` set apart from every other one.
+
+    Spec 3.4's requirement and its reasoning: an `unreachable` hole is a *closed*
+    question -- the cell has no natural instance, so no projection and no later
+    round will fill it -- while every other reason names an open one that a human
+    at gate 2 may still act on. Rendered flat, the two read alike, and a reader
+    counting open holes counts the closed ones with them.
+
+    Distinguished by a word as well as a class. The class is what carries it in a
+    browser; the word is what survives the page being printed, piped through a
+    text dump, or read with the stylesheet stripped -- and a distinction that
+    exists only in a colour is one a colour-blind reader does not have.
+
+    A hole whose `reason` is missing counts as open: it is the reading that puts
+    the cell in front of a human rather than filing it away, and an unrecorded
+    reason is a score-stage defect for `validate` to name.
+    """
+    closed = reason == "unreachable"
+    kind = "closed" if closed else "open"
+    label = "closed question" if closed else "open question"
+    return (
+        f'<td class="hole-reason {kind}">{_val(reason)} '
+        f'<span class="qkind">({esc(label)})</span></td>'
     )
 
 
@@ -334,7 +421,8 @@ def _disposition_rows(members: list[dict]) -> list[str]:
         f'<td class="num">{_val(member.get("priority"))}</td>'
         f'<td class="mono">{_val(member.get("candidate_id"))}</td>'
         f"<td>{_val(member.get('authority'))}</td>"
-        f'<td title="{esc(member.get("reason"))}">{_val(str(member.get("reason", ""))[:120])}</td>'
+        f'<td title="{esc(member.get("reason"))}">'
+        f"{_clipped(str(member.get('reason', '')))}</td>"
         "</tr>"
         for member in members
     ]
@@ -481,7 +569,7 @@ def _gaps(run: RunPaths) -> str:
         f"<td>{_val(gap.subject)}</td>"
         f"<td>{_val(', '.join(gap.blocks))}</td>"
         f"<td>{_val(gap.unknown)}</td>"
-        f'<td title="{esc(gap.why)}">{_val(gap.why[:120])}</td>'
+        f'<td title="{esc(gap.why)}">{_clipped(gap.why)}</td>'
         "</tr>"
         for gap in found
     ]
@@ -557,7 +645,7 @@ def _coverage(run: RunPaths):
         f"<td>{_val(row.verdict)}</td>"
         f'<td class="num">{esc(row.cells_covered)}</td>'
         f'<td class="num">{esc(row.cells_total)}</td>'
-        f'<td class="num">{_val(row.pct)}</td>'
+        f'<td class="num">{_pct(row.pct)}</td>'
         f'<td class="num">{esc(row.goals_covered)}</td>'
         f'<td class="num">{esc(row.goals_total)}</td>'
         f'<td class="num">{_val(row.new_cells)}</td>'
@@ -634,8 +722,8 @@ def _coverage(run: RunPaths):
         hole_rows = [
             "<tr>"
             f'<td class="mono">{_val(hole.ref)}</td>'
-            f"<td>{_val(hole.reason)}</td>"
-            f"<td>{_val(hole.justification)}</td>"
+            + _hole_reason(hole.reason)
+            + f"<td>{_val(hole.justification)}</td>"
             "</tr>"
             for hole in got.holes
         ]

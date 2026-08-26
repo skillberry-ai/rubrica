@@ -4030,3 +4030,188 @@ def test_render_is_byte_identical_across_two_calls(tmp_path):
     """
     run = build_toy_run(tmp_path / "runs", upto="challenge")
     assert summary.run_summary(run) == summary.run_summary(run)
+
+
+# --------------------------------------------- fix round 1: four render items ---
+
+
+def test_render_formats_a_float_pct_without_the_float_noise(tmp_path):
+    """A float pct is formatted for display, which is not coercion.
+
+    Measured on run-20260825-094033: 19 of 148 cells rendered as
+    `0.12837837837837837`, seventeen digits in a cell nobody reads past the
+    second. Three places, not one, because the field is a fraction in every
+    coverage document on disk -- `:.1f` would render 11-of-20 cells as `0.6`.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.coverage_round(1))
+    doc["capability_matrix"]["pct"] = 0.12837837837837837
+    write_json(run.coverage_round(1), doc)
+    html = summary.run_summary(run)
+    assert '<td class="num">0.128</td>' in html
+    assert "0.12837837837837837" not in html
+
+
+def test_render_renders_a_non_float_pct_verbatim(tmp_path):
+    """The other direction, and the one Task 5's ruling protects: a pct that is
+    not a float is a score-stage defect for `validate` to name, and rendering
+    `0.0` in its place would hide it.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.coverage_round(1))
+    doc["capability_matrix"]["pct"] = "half"
+    write_json(run.coverage_round(1), doc)
+    html = summary.run_summary(run)
+    assert '<td class="num">half</td>' in html
+
+
+def _run_with_two_hole_kinds(tmp_path):
+    """A run whose terminal holes carry one closed reason and two open ones.
+
+    The toy world converges with no hole at all, so the distinction under test is
+    unreachable on the unedited fixture -- and a test that cannot reach the
+    condition it names is the fixture-cannot-reach shape this module has already
+    been bitten by once.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    latest = read_json(run.coverage_latest)
+    latest["holes"] = [
+        {
+            "ref": "cell:cap-find-tickets/oc-none",
+            "reason": "unreachable",
+            "justification": "the tool cannot return an empty set for this capability",
+        },
+        {
+            "ref": "cell:cap-get-ticket/oc-detail",
+            "reason": "blocked_by_gap",
+            "justification": "no claim says what the tool returns for a missing ticket",
+        },
+        {
+            "ref": "cell:cap-get-ticket/oc-missing",
+            "reason": "not_yet_attempted",
+            "justification": "round 1 proposed nothing for this cell",
+        },
+    ]
+    write_json(run.coverage_latest, latest)
+    return run
+
+
+def test_render_distinguishes_an_unreachable_hole_from_an_open_one(tmp_path):
+    """Spec 3.4: an `unreachable` hole is a closed question, the others open ones.
+
+    Both halves are asserted, because a renderer that marked every hole closed --
+    or every hole open -- would satisfy a test looking for one class alone, and
+    the whole point is that a reader counting open holes does not count the closed
+    ones with them.
+    """
+    html = summary.run_summary(_run_with_two_hole_kinds(tmp_path))
+    assert '<td class="hole-reason closed">unreachable ' in html
+    assert '<td class="hole-reason open">blocked_by_gap ' in html
+    assert '<td class="hole-reason open">not_yet_attempted ' in html
+    # In words as well as in a class: a distinction carried only by a colour is
+    # one a colour-blind reader, a printed page and a text dump all lose.
+    assert html.count("(closed question)") == 1
+    assert html.count("(open question)") == 2
+
+
+def test_render_marks_a_clipped_gap_rationale(tmp_path):
+    """A sentence cut at 120 characters reads as a complete one unless it is marked.
+
+    The full text stays on the cell's `title`; the ellipsis is what tells a reader
+    there is more to hover for.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    long_why = "the queue a refund lands in is unrecorded, " + "and " * 40 + "nobody knows"
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.world_model)
+    doc["gaps"] = [
+        {
+            "id": "gap-long",
+            "subject": "refunds",
+            "blocks": ["propose"],
+            "unknown": "the queue",
+            "why_it_matters": long_why,
+        }
+    ]
+    write_json(run.world_model, doc)
+    html = summary.run_summary(run)
+    assert "&hellip;" in html, "the clipped cell carries no mark"
+    assert long_why[:100] in html
+    assert f'title="{long_why}"' in html, "the full text is still one hover away"
+
+
+def test_render_does_not_mark_a_gap_rationale_that_fits(tmp_path):
+    """The other direction: nothing shorter than the clip width gains an ellipsis.
+
+    Measured against the whole page rather than the one cell, which is what makes
+    it a lock: `_clipped` is used by exactly two columns, and on this run one of
+    them is absent, so a mark anywhere means an unclipped value was marked.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.world_model)
+    doc["gaps"] = [
+        {
+            "id": "gap-short",
+            "subject": "refunds",
+            "blocks": ["propose"],
+            "unknown": "the queue",
+            "why_it_matters": "no scenario can assert the queue",
+        }
+    ]
+    write_json(run.world_model, doc)
+    html = summary.run_summary(run)
+    assert "no scenario can assert the queue" in html
+    assert "&hellip;" not in html
+
+
+def test_render_marks_a_clipped_disposition_reason(tmp_path):
+    """The second of the two columns that clip, pinned separately.
+
+    One test over one call site cannot tell a renderer that marks both from one
+    that marks the column the test happened to pick -- and a disposition's
+    `reason` is a paragraph in every real run, so this is the site a reader meets
+    first.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="triage-seal")
+    doc = read_json(run.triage)
+    long_reason = "admitted because " + "it carries the golden world's shape and " * 6
+    doc["dispositions"][0]["reason"] = long_reason
+    write_json(run.triage, doc)
+    html = summary.run_summary(run)
+    assert "&hellip;" in html
+    assert f'title="{summary.esc(long_reason)}"' in html
+
+
+def test_summary_html_reads_exactly_one_artifact_and_names_it():
+    """`decisions.md` is the module's one read, and the docstring says so.
+
+    A structural guard rather than a phrase pin: it counts the reads in the source
+    and requires the docstring to name the artifact. The module docstring claimed
+    "nothing here reads an artifact" while `_decisions` read one, and a comment
+    that has drifted from the code is worse than no comment -- so the sentence and
+    the count are asserted together, and a second read added here fails the suite
+    rather than quietly making the prose wrong.
+    """
+    from pathlib import Path
+
+    from rubrica import summary_html
+
+    source = Path(summary_html.__file__).read_text(encoding="utf-8")
+    reads = [
+        line.strip()
+        for line in source.splitlines()
+        if ".read_text(" in line or "read_json(" in line or "list_json(" in line
+    ]
+    assert reads == ['text = run.decisions.read_text(encoding="utf-8")'], reads
+    assert "decisions.md" in summary_html.__doc__
