@@ -10,8 +10,9 @@ MEASURED, run-20260825-094033 (executive-agent, 5 files, sonnet/medium): round
 returned verdict `continue`. Round 2 then had to emit round 1's scenarios
 verbatim plus one new scenario per closable hole, of which the coverage report
 listed 86. At the file's own 1,162-byte mean that is ~124,545 bytes in one
-response against a 32,000-output-token cap: the dispatch spent $3.57 over 31
-minutes and wrote nothing at all.
+response -- ~35,600 tokens at BYTES_PER_TOKEN, past the 32,000-token
+OUTPUT_TOKEN_CEILING below: the dispatch spent $3.57 over 31 minutes and wrote
+nothing at all.
 
 The term that binds is NOT the accumulated re-emit, which was 24,613 of those
 bytes -- 20%. It is the round's own batch, sized by the closable-hole count,
@@ -42,12 +43,78 @@ from rubrica.paths import RunPaths
 # more batch than strictly needed.
 DEFAULT_BYTES_PER_SCENARIO = 1600
 
-# Per-member output budget, ~8k output tokens at ~3.5 bytes/token. Chosen well
-# under the 32,000 that killed round 2 rather than just under it: the cap counts
-# thinking tokens too, and a member also emits its report back to the
-# orchestrator, so the write is not the whole response. At this budget the
-# measured 86 closable holes become 6 batches.
+# Claude Code's own default max output tokens for the process dispatch-stage.sh
+# spawns. Observed once, by one route only: as the error that killed propose
+# round 2 on run-20260825-094033. It is NOT a model limit, and NOT a value this
+# repo sets anywhere today -- Task 10 pins it. Recorded here so the budget below
+# can be related to it by a test rather than only by a comment, which is what
+# test_the_default_member_budget_leaves_half_the_output_ceiling_free does.
+OUTPUT_TOKEN_CEILING = 32000
+
+# An ESTIMATE, not a measurement: no file from that run has been tokenized. It
+# exists only to make a byte budget and a token ceiling comparable, which needs
+# the right order of magnitude rather than a precise ratio.
+BYTES_PER_TOKEN = 3.5
+
+# Per-member output budget, in BYTES -- ~8k output tokens at BYTES_PER_TOKEN,
+# a quarter of OUTPUT_TOKEN_CEILING. Deliberately a fraction of the ceiling
+# rather than just under it: the ceiling counts thinking tokens too, and a
+# member also emits its report back to the orchestrator, so the write is not the
+# whole response. The units are the trap here -- the ceiling is tokens and this
+# is bytes, so the two are comparable only through BYTES_PER_TOKEN. At this
+# budget the measured 86 closable holes become 6 batches.
 DEFAULT_SCENARIO_PART_BYTES = 28000
+
+
+def _object_or_refuse(path: Path, payload: object, required: tuple[str, ...] = ()) -> dict:
+    """`payload` as a JSON object carrying every key in `required`, or a UsageError.
+
+    The same container door slices.write_slices puts in front of the catalogue,
+    and it is here for the same measured reason: this module's callers index keys
+    bare, so a payload of the wrong top-level shape raises TypeError or KeyError
+    out of a *code* step, which cli.py's catch-all reports as an exit-1
+    `[internal]` finding anchored on the RUN ROOT -- the exit-code contract's
+    third rule ("a 1 must name the right artifact") breached, and breached
+    against an artifact no re-dispatch can repair, since manifest.json is
+    intake's own code output. Of the four wrong top-level shapes, `[]` and `"hi"`
+    answer `key not in payload` correctly and would reach the missing-field
+    refusal, while `None` and `7` raise TypeError; this guard makes all four one
+    refusal instead of two refusals and two tracebacks.
+    """
+    if not isinstance(payload, dict):
+        raise UsageError(f"{path} is not a JSON object: found {payload!r}")
+    missing = [key for key in required if key not in payload]
+    if missing:
+        raise UsageError(f"{path} is missing required field(s): {missing}")
+    return payload
+
+
+def _rows_with_string_id(path: Path, field: str, rows: object, key: str = "id") -> list[dict]:
+    """`rows` as a list of objects each carrying a non-empty string `key`, else UsageError.
+
+    Presence of the array is not enough, and slices.write_slices records both
+    halves of why one level out: a row that is not an object raises TypeError
+    from the indexing its caller does, and a `key` present but not a string
+    reaches an f-string that interpolates it silently -- minting a plausible and
+    wrong hole ref that check-refs would later report against the batch plan
+    rather than against the artifact that actually carried the defect. Empty is
+    refused alongside the non-strings because `cell:/oc` does not match
+    coverage-0.1.json's hole_ref pattern, so the only place it could surface is
+    layer 1 against this module's own output.
+    """
+    if not isinstance(rows, list):
+        raise UsageError(f"{path}'s {field} is not an array: found {rows!r}")
+    unshaped = [
+        i
+        for i, row in enumerate(rows)
+        if not isinstance(row, dict) or not isinstance(row.get(key), str) or not row[key]
+    ]
+    if unshaped:
+        raise UsageError(
+            f"{path} has {field} entries that are not an object with a non-empty "
+            f"string {key}, at index {unshaped}"
+        )
+    return rows
 
 
 def closable_holes(run: RunPaths) -> list[str]:
@@ -64,22 +131,32 @@ def closable_holes(run: RunPaths) -> list[str]:
     suite is not trying to cover, and `blocked_by_gap` means the world model
     does not yet support a scenario there, so proposing anyway produces one
     rb-instantiate cannot honestly seed.
+
+    `capabilities`, `goals` and `holes` are required rather than defaulted, and
+    that matches layer 1 exactly -- world-model-0.1.json and coverage-0.1.json
+    each list them in `required` -- so a document reaching here without one is a
+    hand-edit, and refusing it names the artifact that carries the defect.
     """
-    world = read_json(run.world_model)
-    if not run.coverage_latest.exists():
-        refs = [
-            f"cell:{cap['id']}/{oc['id']}"
-            for cap in world.get("capabilities", [])
-            for oc in cap.get("outcome_classes", [])
-        ]
-        refs += [f"goal:{goal['id']}" for goal in world.get("goals", [])]
-        return sorted(refs)
-    coverage = read_json(run.coverage_latest)
-    return sorted(
-        hole["ref"]
-        for hole in coverage.get("holes", [])
-        if hole.get("reason") == "not_yet_attempted"
+    world = _object_or_refuse(
+        run.world_model, read_json(run.world_model), ("capabilities", "goals")
     )
+    if not run.coverage_latest.exists():
+        refs: list[str] = []
+        for cap in _rows_with_string_id(run.world_model, "capabilities", world["capabilities"]):
+            classes = _rows_with_string_id(
+                run.world_model,
+                f"capabilities[{cap['id']}].outcome_classes",
+                cap.get("outcome_classes", []),
+            )
+            refs.extend(f"cell:{cap['id']}/{oc['id']}" for oc in classes)
+        refs.extend(
+            f"goal:{goal['id']}"
+            for goal in _rows_with_string_id(run.world_model, "goals", world["goals"])
+        )
+        return sorted(refs)
+    coverage = _object_or_refuse(run.coverage_latest, read_json(run.coverage_latest), ("holes",))
+    holes = _rows_with_string_id(run.coverage_latest, "holes", coverage["holes"], "ref")
+    return sorted(hole["ref"] for hole in holes if hole.get("reason") == "not_yet_attempted")
 
 
 def bytes_per_scenario(run: RunPaths) -> int:
@@ -90,10 +167,18 @@ def bytes_per_scenario(run: RunPaths) -> int:
     scenarios are wordier than the fixture's would otherwise be under-estimated
     every round. Falls back on a missing or empty file rather than dividing by
     zero -- round 1 has neither.
+
+    Compact `json.dumps`, not artifacts.canonical_bytes, and the divergence from
+    slices.row_bytes is deliberate: what this bounds is one *response*, and a
+    model emitting a scenario does not pay for the seal's `indent=2`. row_bytes
+    measures the opposite thing -- a shard's real size on disk, which is what a
+    member's Read call pays for -- so the two answer different questions and must
+    not be unified.
     """
     if not run.scenarios.exists():
         return DEFAULT_BYTES_PER_SCENARIO
-    scenarios = read_json(run.scenarios).get("scenarios", [])
+    sealed = _object_or_refuse(run.scenarios, read_json(run.scenarios))
+    scenarios = sealed.get("scenarios", [])
     if not scenarios:
         return DEFAULT_BYTES_PER_SCENARIO
     total = sum(len(json.dumps(s, sort_keys=True)) for s in scenarios)
@@ -127,15 +212,41 @@ def _cap_bytes(run: RunPaths) -> int:
 
     Absent rather than required in manifest-0.1.json: a third required limit
     would invalidate every manifest already on disk under runs/.
+
+    A present-but-malformed value is refused as a UsageError naming the manifest
+    and the value, never left to surface downstream. Two reasons, and the second
+    is specific to this file: a string reaches `partition`'s comparison and
+    raises TypeError, which cli.py's catch-all turns into an exit-1 `[internal]`
+    finding against the run root -- wrong code and wrong artifact at once; and
+    manifest.json is written by intake in *code*, so a finding against it is
+    unrepairable by any re-dispatch, which is the trap CLAUDE.md names for this
+    exact file. The range check sits beside the type check because
+    manifest-0.1.json constrains the field to `integer, minimum: 1`, and this is
+    that same constraint for a manifest that reached here without layer 1.
+    `isinstance(True, int)` is True in Python, so a `max_scenario_part_bytes:
+    true` would otherwise cap every batch at one byte -- the standing bool guard
+    in this repo, present at triage.py:450, manifest.py:149, intake.py:239 and
+    seal.py:307.
     """
     if not run.manifest.exists():
         return DEFAULT_SCENARIO_PART_BYTES
-    limits = read_json(run.manifest).get("limits", {})
-    return limits.get("max_scenario_part_bytes", DEFAULT_SCENARIO_PART_BYTES)
+    manifest = _object_or_refuse(run.manifest, read_json(run.manifest))
+    limits = manifest.get("limits", {})
+    if not isinstance(limits, dict):
+        raise UsageError(f"{run.manifest}'s limits is not a JSON object: found {limits!r}")
+    if "max_scenario_part_bytes" not in limits:
+        return DEFAULT_SCENARIO_PART_BYTES
+    cap = limits["max_scenario_part_bytes"]
+    if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
+        raise UsageError(
+            f"{run.manifest}'s limits.max_scenario_part_bytes must be an integer >= 1: "
+            f"found {cap!r}"
+        )
+    return cap
 
 
 def write_batches(run: RunPaths, *, round_n: int) -> Path | None:
-    """Partition this round's closable holes into 02-batches.json.
+    """Partition this round's closable holes into 02-batches/round-N.json.
 
     Returns None and writes nothing when no hole is closable. That is different
     from writing an empty batches array, which batches-0.1.json refuses: no

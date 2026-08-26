@@ -187,3 +187,145 @@ def test_write_batches_reports_an_unreadable_world_model(tmp_path):
     # call under test has a typo, so it is an assertion that cannot fail.
     with pytest.raises(ArtifactError):
         rounds.write_batches(run, round_n=1)
+
+
+def test_the_default_member_budget_leaves_half_the_output_ceiling_free():
+    # Half the ceiling, not all of it: OUTPUT_TOKEN_CEILING counts thinking
+    # tokens as well, and a member also emits its report back to the
+    # orchestrator, neither of which a byte budget bounds. Relational rather than
+    # a value pin, so retuning the budget inside the safe band survives this
+    # while a raise past the band does not -- measured both ways, red at 120,000
+    # bytes and green at 28,000. The conversion is load-bearing: the ceiling is
+    # in tokens and the budget is in bytes, so comparing them without
+    # BYTES_PER_TOKEN is a unit error rather than a guard.
+    assert (
+        rounds.DEFAULT_SCENARIO_PART_BYTES / rounds.BYTES_PER_TOKEN
+        <= rounds.OUTPUT_TOKEN_CEILING * 0.5
+    )
+
+
+# Pinned on the manifest PATH, not merely on UsageError, and that is what makes
+# these two assertions able to fail. Measured: 0, -1 and True are each below
+# DEFAULT_BYTES_PER_SCENARIO, so partition refuses them on its own -- dropping
+# _cap_bytes' whole range-and-bool half left a bare `pytest.raises(UsageError)`
+# green, passing on a refusal raised by different code about a different thing.
+# partition's message carries no path, so the path is the discriminator, and it
+# is also the property actually at stake: the exit-code contract's third rule is
+# that a finding must name the right artifact.
+_MANIFEST_BUDGET_REFUSAL = r"manifest\.json's limits\.max_scenario_part_bytes must be an integer"
+
+
+def test_a_non_integer_manifest_budget_is_a_usage_error(tmp_path):
+    # UsageError naming the manifest, not the TypeError a string raises inside
+    # partition's comparison: that reaches cli.py's catch-all as an exit-1
+    # [internal] finding against the run root -- wrong exit code and wrong
+    # artifact -- and manifest.json is intake's own code output, so a finding
+    # against it is unrepairable by any re-dispatch.
+    run = _run_with_world(tmp_path, _world())
+    for bad in ("28000", 28000.0, None, [28000]):
+        write_json(run.manifest, {"limits": {"max_scenario_part_bytes": bad}})
+        with pytest.raises(UsageError, match=_MANIFEST_BUDGET_REFUSAL):
+            rounds.write_batches(run, round_n=1)
+
+
+def test_a_manifest_budget_outside_the_schema_range_is_a_usage_error(tmp_path):
+    # Range beside type, matching manifest-0.1.json's `integer, minimum: 1` for a
+    # manifest that reached here without layer 1. True is the case Python makes
+    # easy to miss: isinstance(True, int) is True, so a bool would otherwise cap
+    # every batch at one byte.
+    run = _run_with_world(tmp_path, _world())
+    for bad in (0, -1, True):
+        write_json(run.manifest, {"limits": {"max_scenario_part_bytes": bad}})
+        with pytest.raises(UsageError, match=_MANIFEST_BUDGET_REFUSAL):
+            rounds.write_batches(run, round_n=1)
+
+
+def test_a_malformed_manifest_document_is_a_usage_error(tmp_path):
+    # The manifest document itself, not only its limits: without the container
+    # door a manifest of `[]` or `7` reaches `.get` and raises AttributeError or
+    # TypeError out of a code step, which names the run root instead.
+    run = _run_with_world(tmp_path, _world())
+    for bad in ([], "hi", None, 7, {"limits": "none"}, {"limits": 7}):
+        write_json(run.manifest, bad)
+        with pytest.raises(UsageError, match=r"manifest\.json"):
+            rounds.write_batches(run, round_n=1)
+
+
+def test_a_world_model_of_the_wrong_shape_is_a_usage_error(tmp_path):
+    # All four wrong top-level shapes, because they fail differently: [] and "hi"
+    # answer `key not in payload` correctly, while None and 7 raise TypeError --
+    # the split slices.write_slices' container-door comment records. The last two
+    # are objects missing a key this function indexes.
+    run = RunPaths(tmp_path)
+    for bad in ([], "hi", None, 7, {"schema_version": "0.1"}, {"capabilities": []}):
+        write_json(run.world_model, bad)
+        with pytest.raises(UsageError):
+            rounds.closable_holes(run)
+
+
+def test_a_capability_or_goal_without_a_string_id_is_a_usage_error(tmp_path):
+    # An id absent, not a string, or empty all reach the same f-string, where a
+    # non-string interpolates silently into a plausible and wrong hole ref and an
+    # empty one mints `cell:/oc`, which coverage-0.1.json's hole_ref pattern
+    # refuses -- so the only place it could surface is layer 1 against this
+    # module's own output.
+    run = RunPaths(tmp_path)
+    for bad in (
+        {"capabilities": [{"outcome_classes": []}], "goals": []},
+        {"capabilities": [{"id": 7, "outcome_classes": []}], "goals": []},
+        {"capabilities": [{"id": "", "outcome_classes": []}], "goals": []},
+        {"capabilities": [{"id": "cap-0", "outcome_classes": [{}]}], "goals": []},
+        {"capabilities": [{"id": "cap-0", "outcome_classes": "x"}], "goals": []},
+        {"capabilities": [], "goals": [{"title": "no id"}]},
+    ):
+        write_json(run.world_model, bad)
+        with pytest.raises(UsageError):
+            rounds.closable_holes(run)
+
+
+def test_a_capability_or_goal_array_that_is_not_an_array_is_a_usage_error(tmp_path):
+    # Pinned on "is not an array", because a string or a dict here passes for the
+    # wrong reason: `enumerate("x")` yields characters and `enumerate({"a": 1})`
+    # yields keys, neither of which is a dict, so the unshaped-row refusal fires
+    # and a bare `pytest.raises(UsageError)` stayed green with the array guard
+    # deleted. Measured. A number is the case that genuinely needs the guard --
+    # `enumerate(7)` raises TypeError, which from a code step names the run root.
+    run = RunPaths(tmp_path)
+    for bad in (
+        {"capabilities": 7, "goals": []},
+        {"capabilities": "x", "goals": []},
+        {"capabilities": {"cap-0": {}}, "goals": []},
+        {"capabilities": [], "goals": 7},
+        {"capabilities": [], "goals": "x"},
+        {"capabilities": [{"id": "cap-0", "outcome_classes": 7}], "goals": []},
+        {"capabilities": [{"id": "cap-0", "outcome_classes": "x"}], "goals": []},
+    ):
+        write_json(run.world_model, bad)
+        with pytest.raises(UsageError, match="is not an array"):
+            rounds.closable_holes(run)
+
+
+def test_a_coverage_report_of_the_wrong_shape_is_a_usage_error(tmp_path):
+    # Including a hole with no `ref`, which used to raise a bare KeyError -- and
+    # a KeyError from a code step names the run root, not the coverage report.
+    run = _run_with_world(tmp_path, _world())
+    for bad in (
+        [],
+        None,
+        {"round": 1},
+        {"holes": "x"},
+        {"holes": 7},
+        {"holes": [{"reason": "not_yet_attempted"}]},
+        {"holes": [{"ref": 7, "reason": "not_yet_attempted"}]},
+        {"holes": [{"ref": "", "reason": "not_yet_attempted"}]},
+    ):
+        write_json(run.coverage_latest, bad)
+        with pytest.raises(UsageError):
+            rounds.closable_holes(run)
+
+
+def test_a_sealed_scenarios_file_of_the_wrong_shape_is_a_usage_error(tmp_path):
+    run = _run_with_world(tmp_path, _world())
+    write_json(run.scenarios, [])
+    with pytest.raises(UsageError):
+        rounds.bytes_per_scenario(run)
