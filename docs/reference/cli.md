@@ -300,8 +300,13 @@ nothing, prints `no closable holes: there is no propose round to dispatch`, and
 still exits 0** — that is the loop's normal terminal state, not an error, and a
 finding there would send the orchestrator to repair a propose member that has
 nothing wrong with it and no batch to read. It reports no findings at all, so it
-never exits 1: an unreadable or malformed `01-world-model.json`, `manifest.json`
-or `02-scenarios.json`, and a budget below one scenario, are all exit 2.
+never exits 1: an unreadable or malformed `01-world-model.json`, `manifest.json`,
+`02-scenarios.json` or `03-coverage/latest.json`, and a budget below one scenario,
+are all exit 2. A hole whose `ref` or `reason` is missing or is not a string is
+refused rather than skipped, because a skipped hole shrinks the worklist in
+silence — and a worklist that empties that way is indistinguishable from the
+`no closable holes` outcome above, which the orchestrator reads as the end of the
+loop.
 
 ```bash
 rubrica propose-batches --run runs/run-20260806-123005 --round 1
@@ -323,7 +328,7 @@ Reads every `02-scenarios/round-N/<batch>.json`, every `03-score/round-N.json` f
 its `rulings`, and `01-world-model.json` for the `denominator.version` it echoes
 onto the sealed document. Writes `02-scenarios.json` and prints its path.
 
-Exits 1, one finding per line on stdout, naming the part at fault: a part absent,
+Exits 1, one finding per line on stdout, naming the part at fault: a part that is
 unparseable, not a JSON object, or carrying no `scenarios` array; a scenario that
 is not an object or has no string id; two parts claiming one scenario id, which
 has to be caught here because members mint their own ids and the merged array
@@ -339,6 +344,12 @@ ruling, which is supported and applied in ascending round order. It
 `triage-seal` writes nothing: a half-assembled document would clear layer 1 for
 the fields it did manage to fill and read as a complete scenario list to a human
 at gate 2.
+
+One exit-1 case names the round **directory**, `02-scenarios/round-N/`, rather than
+a part: a file in it whose name is not a safe path segment. That is the one
+exception to "naming the part at fault" above, and it has to be — the offending
+name is precisely what this package will not join into a path, so there is no part
+path to put in the finding.
 
 Two clean outcomes print no path, and they are different states rather than one.
 No part anywhere means propose was never dispatched, so there is nothing to seal —

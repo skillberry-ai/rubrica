@@ -379,6 +379,42 @@ def test_a_coverage_report_of_the_wrong_shape_is_a_usage_error(tmp_path):
             rounds.closable_holes(run)
 
 
+@pytest.mark.parametrize(
+    "hole",
+    [
+        {"ref": "cell:cap-0/cap-0-oc-0", "justification": "x"},
+        {"ref": "cell:cap-0/cap-0-oc-0", "reason": 7, "justification": "x"},
+        {"ref": "cell:cap-0/cap-0-oc-0", "reason": "", "justification": "x"},
+    ],
+)
+def test_a_malformed_hole_reason_refuses_rather_than_ending_the_loop(tmp_path, hole):
+    """`reason` is READ here, so a malformed one must refuse, not filter itself out.
+
+    Measured before this door covered it, on the first two shapes below:
+    closable_holes returned [], write_batches returned None, and `rubrica
+    propose-batches` printed "no closable holes" and exited 0 having written
+    nothing -- the loop's normal TERMINAL STATE manufactured out of a malformed
+    coverage document, which the orchestrator branches on to stop the loop. Third
+    instance of that class in this module, after _declared_cells' outcome_classes
+    door and bytes_per_scenario's `scenarios` door.
+    """
+    run = _run_with_world(tmp_path, _world())
+    write_json(run.coverage_latest, {"schema_version": "0.1", "holes": [hole]})
+    # `string reason`, not the sentence around it: the `ref` guard produces the
+    # very same sentence with a different key, so a bare pytest.raises(UsageError)
+    # here would pass on whichever guard fired first -- the weakness this branch
+    # has already shipped five times.
+    with pytest.raises(UsageError, match="string reason") as caught:
+        rounds.closable_holes(run)
+    # And the right artifact: latest.json is seal_score's own code output, which
+    # is why this is a UsageError at all rather than a finding against a part.
+    assert str(run.coverage_latest) in str(caught.value)
+    # The defect end to end -- no None returned, and no plan left on disk.
+    with pytest.raises(UsageError, match="string reason"):
+        rounds.write_batches(run, round_n=2)
+    assert not run.batches(2).exists()
+
+
 def test_the_undersized_budget_refusal_names_where_the_budget_came_from(tmp_path):
     # Measured before this split: a run with no manifest was refused with
     # `max_scenario_part_bytes=28000 is below the 40023-byte estimate`, sending a

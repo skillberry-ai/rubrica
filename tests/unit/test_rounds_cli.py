@@ -82,7 +82,15 @@ def test_propose_batches_exits_two_on_a_budget_below_one_scenario(tmp_path, caps
     # A misconfigured budget is a usage error, not a stage defect: no
     # re-dispatch of any prompt can fix it.
     assert main(["propose-batches", "--run", str(tmp_path), "--round", "1"]) == 2
-    assert "max_scenario_part_bytes" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    # Scoped to the refusal that this fixture actually reaches. A bare
+    # `max_scenario_part_bytes` pin is satisfiable by the WRONG guard: _cap_bytes'
+    # own type/range refusal names the same key, and it was measured passing on
+    # that instead. `is below the` belongs to partition's undersized-budget
+    # refusal alone, and the key stays asserted beside it so the message still has
+    # to name the lever the operator has.
+    assert "is below the" in err
+    assert "max_scenario_part_bytes" in err
 
 
 def test_propose_seal_exits_one_with_a_line_per_finding(tmp_path, capsys):

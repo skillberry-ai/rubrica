@@ -221,7 +221,32 @@ def closable_holes(run: RunPaths) -> list[str]:
         # otherwise cost two dispatched writes for one cell.
         return sorted(set(refs))
     coverage = _object_or_refuse(run.coverage_latest, read_json(run.coverage_latest), ("holes",))
-    holes = _rows_with_string_id(run.coverage_latest, "holes", coverage["holes"], "ref")
+    # BOTH keys, mirroring progress()' pass over a prior matrix's cells, and
+    # `reason` is here for exactly the reason `ref` is: this function READS it, so
+    # a malformed one has to refuse rather than filter itself out of the worklist.
+    #
+    # Measured before this door covered it, on round 2 against a latest.json
+    # carrying one otherwise well-formed hole: with `reason` absent, and again
+    # with `reason: 7`, the filter below matched neither, closable_holes returned
+    # [], write_batches returned None, and `rubrica propose-batches` printed "no
+    # closable holes" and exited 0 having written nothing -- the loop's normal
+    # TERMINAL STATE manufactured out of a malformed coverage document, which the
+    # orchestrator then branches on to stop the loop. The same hole with
+    # `reason: "not_yet_attempted"` wrote its plan, so nothing in the run's shape
+    # distinguished the two outcomes.
+    #
+    # That is the third instance of this class in this loop: _declared_cells'
+    # outcome_classes door and bytes_per_scenario's `scenarios` door were both
+    # closed for the same reason, that a malformed artifact must never produce a
+    # plausible-looking normal outcome. UsageError and not a Finding by the
+    # who-wrote-it rule -- 03-coverage/latest.json is seal_score's own code
+    # output, so no re-dispatch of any prompt could repair it. coverage-0.1.json
+    # requires both keys on a hole, which is what keeps this a fix rather than an
+    # emergency; a hole can still reach here unvalidated, which is why the read
+    # refuses rather than trusting that layer.
+    holes = coverage["holes"]
+    for key in ("ref", "reason"):
+        holes = _rows_with_string_id(run.coverage_latest, "holes", holes, key)
     # Deduped, and the duplicate is not this module's defect: coverage-0.1.json
     # puts no `uniqueItems` on `holes`, so two identical not_yet_attempted refs
     # are a score-stage defect arriving from upstream. The COST is here, though
@@ -230,7 +255,7 @@ def closable_holes(run: RunPaths) -> list[str]:
     # code that can drop it before it is paid for in dispatches. A `set` rather
     # than a refusal because a duplicate has an unambiguous correct reading,
     # unlike the malformed shapes above; sorted() was already collapsing order.
-    return sorted({hole["ref"] for hole in holes if hole.get("reason") == "not_yet_attempted"})
+    return sorted({hole["ref"] for hole in holes if hole["reason"] == "not_yet_attempted"})
 
 
 def bytes_per_scenario(run: RunPaths) -> int:
