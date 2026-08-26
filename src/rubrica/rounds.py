@@ -10,9 +10,12 @@ MEASURED, run-20260825-094033 (executive-agent, 5 files, sonnet/medium): round
 returned verdict `continue`. Round 2 then had to emit round 1's scenarios
 verbatim plus one new scenario per closable hole, of which the coverage report
 listed 86. At the file's own 1,162-byte mean that is ~124,545 bytes in one
-response -- ~35,600 tokens at BYTES_PER_TOKEN, past the 32,000-token
-OUTPUT_TOKEN_CEILING below: the dispatch spent $3.57 over 31 minutes and wrote
-nothing at all.
+response: the dispatch spent $3.57 over 31 minutes and wrote nothing at all.
+
+Those bytes are measured; the token figure they imply is not. At the ESTIMATED
+BYTES_PER_TOKEN below, ~124,545 bytes is ~35,600 tokens, past the 32,000-token
+OUTPUT_TOKEN_CEILING -- an inference from an estimate, kept out from under the
+MEASURED header above so that header vouches only for what was observed.
 
 The term that binds is NOT the accumulated re-emit, which was 24,613 of those
 bytes -- 20%. It is the round's own batch, sized by the closable-hole count,
@@ -66,7 +69,15 @@ BYTES_PER_TOKEN = 3.5
 DEFAULT_SCENARIO_PART_BYTES = 28000
 
 
-def _object_or_refuse(path: Path, payload: object, required: tuple[str, ...] = ()) -> dict:
+# The two spellings of "where the budget came from", so partition's refusal can
+# name the lever the operator actually has: correct the manifest key, or set it.
+DEFAULT_CAP_SOURCE = "the default per-member output budget (no manifest limit set)"
+MANIFEST_CAP_SOURCE = "manifest.json's limits.max_scenario_part_bytes"
+
+
+def _object_or_refuse(
+    path: Path, payload: object, required: tuple[str, ...] = (), where: str = ""
+) -> dict:
     """`payload` as a JSON object carrying every key in `required`, or a UsageError.
 
     The same container door slices.write_slices puts in front of the catalogue,
@@ -81,15 +92,21 @@ def _object_or_refuse(path: Path, payload: object, required: tuple[str, ...] = (
     refusal, while `None` and `7` raise TypeError; this guard makes all four one
     refusal instead of two refusals and two tracebacks.
     """
+    # `where` names the sub-location when the object is nested, because a
+    # refusal reading "01-world-model.json is missing outcome_classes" leaves an
+    # operator to find WHICH capability in a file with 148 cells in it.
+    at = f"{path}{where}"
     if not isinstance(payload, dict):
-        raise UsageError(f"{path} is not a JSON object: found {payload!r}")
+        raise UsageError(f"{at} is not a JSON object: found {payload!r}")
     missing = [key for key in required if key not in payload]
     if missing:
-        raise UsageError(f"{path} is missing required field(s): {missing}")
+        raise UsageError(f"{at} is missing required field(s): {missing}")
     return payload
 
 
-def _rows_with_string_id(path: Path, field: str, rows: object, key: str = "id") -> list[dict]:
+def _rows_with_string_id(
+    path: Path, field: str, rows: object, key: str = "id", *, min_rows: int = 0
+) -> list[dict]:
     """`rows` as a list of objects each carrying a non-empty string `key`, else UsageError.
 
     Presence of the array is not enough, and slices.write_slices records both
@@ -104,6 +121,18 @@ def _rows_with_string_id(path: Path, field: str, rows: object, key: str = "id") 
     """
     if not isinstance(rows, list):
         raise UsageError(f"{path}'s {field} is not an array: found {rows!r}")
+    # `min_rows` is the schema's own minItems, and only outcome_classes carries
+    # one. capabilities, goals and scenarios may all legitimately be empty -- a
+    # world model with no capabilities is what write_batches returns None for --
+    # so this stays opt-in rather than a blanket non-empty rule. Measured: with
+    # the presence check alone, a capability whose outcome_classes was `[]`
+    # contributed zero cells in the same silence the presence check just closed,
+    # so requiring the key without its minItems left half the hole open.
+    if len(rows) < min_rows:
+        raise UsageError(
+            f"{path}'s {field} has {len(rows)} entries, fewer than the {min_rows} "
+            "its schema requires"
+        )
     unshaped = [
         i
         for i, row in enumerate(rows)
@@ -143,20 +172,47 @@ def closable_holes(run: RunPaths) -> list[str]:
     if not run.coverage_latest.exists():
         refs: list[str] = []
         for cap in _rows_with_string_id(run.world_model, "capabilities", world["capabilities"]):
+            # Required, not defaulted, for the reason capabilities and goals
+            # are: world-model-0.1.json lists outcome_classes in
+            # capability.required with minItems 1. Measured before this line
+            # existed -- a capability without it contributed zero cells in
+            # silence, and a world model of only such capabilities made
+            # write_batches return None, manufacturing the loop's normal
+            # terminal state out of a malformed artifact. 01-world-model.json
+            # is reconcile-seal's own code output, so a finding against it is
+            # unrepairable by re-dispatch -- the same argument _cap_bytes makes
+            # for manifest.json.
             classes = _rows_with_string_id(
                 run.world_model,
                 f"capabilities[{cap['id']}].outcome_classes",
-                cap.get("outcome_classes", []),
+                _object_or_refuse(
+                    run.world_model,
+                    cap,
+                    ("outcome_classes",),
+                    f" capabilities[{cap['id']}]",
+                )["outcome_classes"],
+                min_rows=1,
             )
             refs.extend(f"cell:{cap['id']}/{oc['id']}" for oc in classes)
         refs.extend(
             f"goal:{goal['id']}"
             for goal in _rows_with_string_id(run.world_model, "goals", world["goals"])
         )
-        return sorted(refs)
+        # Deduped for the reason the coverage branch below is: two capabilities
+        # sharing an id, or one carrying the same outcome class twice, would
+        # otherwise cost two dispatched writes for one cell.
+        return sorted(set(refs))
     coverage = _object_or_refuse(run.coverage_latest, read_json(run.coverage_latest), ("holes",))
     holes = _rows_with_string_id(run.coverage_latest, "holes", coverage["holes"], "ref")
-    return sorted(hole["ref"] for hole in holes if hole.get("reason") == "not_yet_attempted")
+    # Deduped, and the duplicate is not this module's defect: coverage-0.1.json
+    # puts no `uniqueItems` on `holes`, so two identical not_yet_attempted refs
+    # are a score-stage defect arriving from upstream. The COST is here, though
+    # -- one hole would take two batch slots, so a member writes two scenarios
+    # for the same cell and rb-instantiate seeds both -- and this is the last
+    # code that can drop it before it is paid for in dispatches. A `set` rather
+    # than a refusal because a duplicate has an unambiguous correct reading,
+    # unlike the malformed shapes above; sorted() was already collapsing order.
+    return sorted({hole["ref"] for hole in holes if hole.get("reason") == "not_yet_attempted"})
 
 
 def bytes_per_scenario(run: RunPaths) -> int:
@@ -168,6 +224,18 @@ def bytes_per_scenario(run: RunPaths) -> int:
     every round. Falls back on a missing or empty file rather than dividing by
     zero -- round 1 has neither.
 
+    `scenarios` is required and its rows shape-checked, not defaulted, and this
+    was the module's worst-shaped hole: every other malformed artifact here now
+    produces a refusal, but a `scenarios` of the wrong type produced a
+    PLAUSIBLE WRONG NUMBER. Measured -- `{"scenarios": 7}` raised TypeError from
+    the sum (the exit-1-against-the-run-root class these guards close), and
+    `{"scenarios": "eighteen scenarios"}` iterated the string's characters to a
+    3-byte estimate, which on an 86-hole world model emitted ONE batch of all 86
+    holes projecting 258 bytes against a real write of ~99,932 -- 387x under, and
+    exactly the cap that does not bind, silently, that this module exists to
+    close. scenarios-0.1.json lists `scenarios` in `required` and every scenario
+    carries a required string `id`, so both checks match layer 1.
+
     Compact `json.dumps`, not artifacts.canonical_bytes, and the divergence from
     slices.row_bytes is deliberate: what this bounds is one *response*, and a
     model emitting a scenario does not pay for the seal's `indent=2`. row_bytes
@@ -177,15 +245,21 @@ def bytes_per_scenario(run: RunPaths) -> int:
     """
     if not run.scenarios.exists():
         return DEFAULT_BYTES_PER_SCENARIO
-    sealed = _object_or_refuse(run.scenarios, read_json(run.scenarios))
-    scenarios = sealed.get("scenarios", [])
+    sealed = _object_or_refuse(run.scenarios, read_json(run.scenarios), ("scenarios",))
+    scenarios = _rows_with_string_id(run.scenarios, "scenarios", sealed["scenarios"])
     if not scenarios:
         return DEFAULT_BYTES_PER_SCENARIO
     total = sum(len(json.dumps(s, sort_keys=True)) for s in scenarios)
     return max(1, total // len(scenarios))
 
 
-def partition(refs: list[str], *, cap_bytes: int, per_scenario: int) -> list[list[str]]:
+def partition(
+    refs: list[str],
+    *,
+    cap_bytes: int,
+    per_scenario: int,
+    cap_source: str = DEFAULT_CAP_SOURCE,
+) -> list[list[str]]:
     """Chunk hole refs so each batch's projected output stays inside cap_bytes.
 
     Adjacent chunks in the order given, not a size-packing: every hole projects
@@ -197,17 +271,22 @@ def partition(refs: list[str], *, cap_bytes: int, per_scenario: int) -> list[lis
     to one hole per batch would emit a batch that cannot fit its own projection
     -- a cap that does not bind, silently, which is the whole defect class this
     module closes.
+
+    `cap_source` names where the budget came from, because the refusal used to
+    say `max_scenario_part_bytes=28000` on a run whose manifest carries no such
+    key -- sending a reader to a field that does not exist, when the operator's
+    actual lever there is to SET that key rather than to correct it.
     """
     if cap_bytes < per_scenario:
         raise UsageError(
-            f"max_scenario_part_bytes={cap_bytes} is below the {per_scenario}-byte "
+            f"{cap_source} ({cap_bytes} bytes) is below the {per_scenario}-byte "
             "estimate for a single scenario, so no batch could fit one"
         )
     per_batch = cap_bytes // per_scenario
     return [refs[i : i + per_batch] for i in range(0, len(refs), per_batch)]
 
 
-def _cap_bytes(run: RunPaths) -> int:
+def _cap_bytes(run: RunPaths) -> tuple[int, str]:
     """The manifest's per-member budget, or the default when it carries none.
 
     Absent rather than required in manifest-0.1.json: a third required limit
@@ -229,20 +308,20 @@ def _cap_bytes(run: RunPaths) -> int:
     seal.py:307.
     """
     if not run.manifest.exists():
-        return DEFAULT_SCENARIO_PART_BYTES
+        return DEFAULT_SCENARIO_PART_BYTES, DEFAULT_CAP_SOURCE
     manifest = _object_or_refuse(run.manifest, read_json(run.manifest))
     limits = manifest.get("limits", {})
     if not isinstance(limits, dict):
         raise UsageError(f"{run.manifest}'s limits is not a JSON object: found {limits!r}")
     if "max_scenario_part_bytes" not in limits:
-        return DEFAULT_SCENARIO_PART_BYTES
+        return DEFAULT_SCENARIO_PART_BYTES, DEFAULT_CAP_SOURCE
     cap = limits["max_scenario_part_bytes"]
     if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
         raise UsageError(
             f"{run.manifest}'s limits.max_scenario_part_bytes must be an integer >= 1: "
             f"found {cap!r}"
         )
-    return cap
+    return cap, MANIFEST_CAP_SOURCE
 
 
 def write_batches(run: RunPaths, *, round_n: int) -> Path | None:
@@ -257,8 +336,8 @@ def write_batches(run: RunPaths, *, round_n: int) -> Path | None:
     if not refs:
         return None
     per_scenario = bytes_per_scenario(run)
-    cap = _cap_bytes(run)
-    batches = partition(refs, cap_bytes=cap, per_scenario=per_scenario)
+    cap, cap_source = _cap_bytes(run)
+    batches = partition(refs, cap_bytes=cap, per_scenario=per_scenario, cap_source=cap_source)
     write_json(
         run.batches(round_n),
         {

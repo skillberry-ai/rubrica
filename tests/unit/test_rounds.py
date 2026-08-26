@@ -8,6 +8,7 @@ runs/run-20260825-094033 on 2026-08-26: 148 capability cells plus 22 goals,
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -204,15 +205,27 @@ def test_the_default_member_budget_leaves_half_the_output_ceiling_free():
     )
 
 
-# Pinned on the manifest PATH, not merely on UsageError, and that is what makes
-# these two assertions able to fail. Measured: 0, -1 and True are each below
-# DEFAULT_BYTES_PER_SCENARIO, so partition refuses them on its own -- dropping
-# _cap_bytes' whole range-and-bool half left a bare `pytest.raises(UsageError)`
-# green, passing on a refusal raised by different code about a different thing.
-# partition's message carries no path, so the path is the discriminator, and it
-# is also the property actually at stake: the exit-code contract's third rule is
-# that a finding must name the right artifact.
-_MANIFEST_BUDGET_REFUSAL = r"manifest\.json's limits\.max_scenario_part_bytes must be an integer"
+# Pinned on the field name AND the value echo, not merely on UsageError, and both
+# halves are load-bearing. Why a pin at all: 0, -1 and True are each below
+# DEFAULT_BYTES_PER_SCENARIO, so partition refuses them on its own, and a bare
+# `pytest.raises(UsageError)` stayed green with _cap_bytes' whole range-and-bool
+# half deleted -- passing on a refusal raised by different code about a different
+# thing.
+#
+# Why not the field name alone: partition's refusal now NAMES the cap source, and
+# for a manifest-set budget that source string is that same field. Measured -- the
+# field name alone matches both refusals, so it stopped discriminating the moment
+# the source was added to partition's message. `found {cap!r}` is unique to
+# _cap_bytes, so the value echo is what separates them.
+#
+# Why it stops there: the pin once ran through "must be an integer", which is
+# prose rather than identity, and measured, it broke on a meaning-preserving
+# reword to "must be a positive integer". `.*` spans the prose instead of pinning
+# it, so this survives that reword and still goes red when either guard half is
+# deleted. A pin that breaks on an innocuous reword is as much a defect as one
+# that never fails, and only measuring both directions tells them apart.
+def _budget_refusal(value: object) -> str:
+    return rf"limits\.max_scenario_part_bytes.*found {re.escape(repr(value))}"
 
 
 def test_a_non_integer_manifest_budget_is_a_usage_error(tmp_path):
@@ -224,7 +237,7 @@ def test_a_non_integer_manifest_budget_is_a_usage_error(tmp_path):
     run = _run_with_world(tmp_path, _world())
     for bad in ("28000", 28000.0, None, [28000]):
         write_json(run.manifest, {"limits": {"max_scenario_part_bytes": bad}})
-        with pytest.raises(UsageError, match=_MANIFEST_BUDGET_REFUSAL):
+        with pytest.raises(UsageError, match=_budget_refusal(bad)):
             rounds.write_batches(run, round_n=1)
 
 
@@ -236,7 +249,7 @@ def test_a_manifest_budget_outside_the_schema_range_is_a_usage_error(tmp_path):
     run = _run_with_world(tmp_path, _world())
     for bad in (0, -1, True):
         write_json(run.manifest, {"limits": {"max_scenario_part_bytes": bad}})
-        with pytest.raises(UsageError, match=_MANIFEST_BUDGET_REFUSAL):
+        with pytest.raises(UsageError, match=_budget_refusal(bad)):
             rounds.write_batches(run, round_n=1)
 
 
@@ -244,6 +257,12 @@ def test_a_malformed_manifest_document_is_a_usage_error(tmp_path):
     # The manifest document itself, not only its limits: without the container
     # door a manifest of `[]` or `7` reaches `.get` and raises AttributeError or
     # TypeError out of a code step, which names the run root instead.
+    #
+    # Held by these CASES, not by the match= pin: measured, relaxing this to a
+    # bare `pytest.raises(UsageError)` and deleting the container door still goes
+    # red, because a non-dict manifest cannot reach any other refusal. The two
+    # mechanisms are worth keeping straight -- a comment that credits the wrong
+    # guard is how the right one gets deleted later.
     run = _run_with_world(tmp_path, _world())
     for bad in ([], "hi", None, 7, {"limits": "none"}, {"limits": 7}):
         write_json(run.manifest, bad)
@@ -284,12 +303,16 @@ def test_a_capability_or_goal_without_a_string_id_is_a_usage_error(tmp_path):
 
 
 def test_a_capability_or_goal_array_that_is_not_an_array_is_a_usage_error(tmp_path):
-    # Pinned on "is not an array", because a string or a dict here passes for the
+    # Pinned on "is not an array" because a string or a dict here passes for the
     # wrong reason: `enumerate("x")` yields characters and `enumerate({"a": 1})`
     # yields keys, neither of which is a dict, so the unshaped-row refusal fires
-    # and a bare `pytest.raises(UsageError)` stayed green with the array guard
-    # deleted. Measured. A number is the case that genuinely needs the guard --
-    # `enumerate(7)` raises TypeError, which from a code step names the run root.
+    # instead -- with only those cases, a bare `pytest.raises(UsageError)` stayed
+    # green when the array guard was deleted. Measured.
+    #
+    # The `7` cases are what actually hold the guard, pin or no pin: `enumerate(7)`
+    # raises TypeError, which from a code step names the run root. So the pin
+    # rules out the wrong-reason pass and the number rules out deletion; keeping
+    # the division straight is the point of saying so here.
     run = RunPaths(tmp_path)
     for bad in (
         {"capabilities": 7, "goals": []},
@@ -303,6 +326,38 @@ def test_a_capability_or_goal_array_that_is_not_an_array_is_a_usage_error(tmp_pa
         write_json(run.world_model, bad)
         with pytest.raises(UsageError, match="is not an array"):
             rounds.closable_holes(run)
+
+
+def test_a_capability_without_outcome_classes_is_a_usage_error(tmp_path):
+    # world-model-0.1.json lists outcome_classes in capability.required with
+    # minItems 1. Measured before the guard: such a capability contributed zero
+    # cells in silence, and a world model of only such capabilities made
+    # write_batches return None -- manufacturing the loop's NORMAL TERMINAL STATE
+    # out of a malformed artifact, which is worse than a crash because nothing
+    # downstream can tell it from a converged run. The refusal names the
+    # capability, not just the file, because a real world model has 148 cells.
+    run = RunPaths(tmp_path)
+    write_json(run.world_model, {"capabilities": [{"id": "cap-0"}], "goals": []})
+    with pytest.raises(UsageError, match=r"capabilities\[cap-0\]"):
+        rounds.closable_holes(run)
+    # And end to end: no batch plan, and no None either.
+    with pytest.raises(UsageError):
+        rounds.write_batches(run, round_n=1)
+    assert not run.batches(1).exists()
+
+
+def test_an_empty_outcome_class_array_is_a_usage_error(tmp_path):
+    # minItems 1 in the schema: a capability with an empty array contributes no
+    # cell either, so requiring the key without checking it is empty would leave
+    # half the silent-zero-cells hole open. Measured: this case returns [] with
+    # only the presence check.
+    run = RunPaths(tmp_path)
+    write_json(
+        run.world_model,
+        {"capabilities": [{"id": "cap-0", "outcome_classes": []}], "goals": []},
+    )
+    with pytest.raises(UsageError, match=r"capabilities\[cap-0\]"):
+        rounds.closable_holes(run)
 
 
 def test_a_coverage_report_of_the_wrong_shape_is_a_usage_error(tmp_path):
@@ -324,8 +379,132 @@ def test_a_coverage_report_of_the_wrong_shape_is_a_usage_error(tmp_path):
             rounds.closable_holes(run)
 
 
-def test_a_sealed_scenarios_file_of_the_wrong_shape_is_a_usage_error(tmp_path):
+def test_the_undersized_budget_refusal_names_where_the_budget_came_from(tmp_path):
+    # Measured before this split: a run with no manifest was refused with
+    # `max_scenario_part_bytes=28000 is below the 40023-byte estimate`, sending a
+    # reader to a manifest field that does not exist -- and the operator's actual
+    # lever there is to SET that key, not to correct it. Two cases because the
+    # message must differ between them, which a single case cannot show.
+    world = _world(caps=1, ocs=1, goals=0)
+    run = _run_with_world(tmp_path, world)
+    write_json(
+        run.scenarios,
+        {
+            "schema_version": "0.1",
+            "denominator_version": 1,
+            "scenarios": [{"id": "sc-b01-001", "body": "x" * 40000}],
+        },
+    )
+    with pytest.raises(UsageError, match="no manifest limit set"):
+        rounds.write_batches(run, round_n=1)
+    write_json(
+        run.manifest,
+        {"limits": {"max_rounds": 2, "max_scenarios": 8, "max_scenario_part_bytes": 1000}},
+    )
+    # The source string here, not _budget_refusal: this test is about which cap
+    # SOURCE partition names, and the value 1000 is legitimately set, not refused
+    # by _cap_bytes at all.
+    with pytest.raises(UsageError, match=r"limits\.max_scenario_part_bytes"):
+        rounds.write_batches(run, round_n=1)
+
+
+def test_duplicate_holes_cost_one_batch_slot_not_two(tmp_path):
+    # coverage-0.1.json puts no uniqueItems on `holes`, so a duplicate is a
+    # score-stage defect arriving from upstream -- but the cost lands here: one
+    # hole would take two batch slots, so a member writes two scenarios for the
+    # same cell and rb-instantiate seeds both. This is the last code that can drop
+    # it before it is paid for in dispatches. Not a refusal, because unlike the
+    # malformed shapes a duplicate has one unambiguous correct reading.
     run = _run_with_world(tmp_path, _world())
-    write_json(run.scenarios, [])
-    with pytest.raises(UsageError):
-        rounds.bytes_per_scenario(run)
+    write_json(
+        run.coverage_latest,
+        {
+            "schema_version": "0.1",
+            "holes": [
+                {
+                    "ref": "cell:cap-0/cap-0-oc-0",
+                    "reason": "not_yet_attempted",
+                    "justification": "x",
+                },
+                {
+                    "ref": "cell:cap-0/cap-0-oc-0",
+                    "reason": "not_yet_attempted",
+                    "justification": "a second, differently justified copy",
+                },
+                {"ref": "goal:goal-0", "reason": "not_yet_attempted", "justification": "y"},
+            ],
+        },
+    )
+    assert rounds.closable_holes(run) == ["cell:cap-0/cap-0-oc-0", "goal:goal-0"]
+
+
+def test_duplicate_cells_in_the_world_model_cost_one_batch_slot(tmp_path):
+    # The round-1 branch needs the same collapse: two capabilities sharing an id,
+    # or one carrying the same outcome class twice, would otherwise cost two
+    # dispatched writes for one cell.
+    run = _run_with_world(
+        tmp_path,
+        {
+            "schema_version": "0.1",
+            "goals": [],
+            "capabilities": [
+                {"id": "cap-0", "outcome_classes": [{"id": "oc-0"}, {"id": "oc-0"}]},
+                {"id": "cap-0", "outcome_classes": [{"id": "oc-0"}]},
+            ],
+        },
+    )
+    assert rounds.closable_holes(run) == ["cell:cap-0/oc-0"]
+
+
+def test_a_sealed_scenarios_file_of_the_wrong_shape_is_a_usage_error(tmp_path):
+    # `scenarios` required rather than defaulted, matching scenarios-0.1.json,
+    # plus every row shape-checked: a scenario with no string `id` is the row
+    # shape layer 1 requires, and the estimate is a mean over these objects.
+    run = _run_with_world(tmp_path, _world())
+    for bad in (
+        [],
+        None,
+        7,
+        {"schema_version": "0.1"},
+        {"scenarios": 7},
+        {"scenarios": "eighteen scenarios"},
+        {"scenarios": [7]},
+        {"scenarios": [{"round": 1}]},
+        {"scenarios": [{"id": "", "round": 1}]},
+    ):
+        write_json(run.scenarios, bad)
+        with pytest.raises(UsageError):
+            rounds.bytes_per_scenario(run)
+
+
+def test_a_string_scenarios_array_cannot_produce_a_projection_that_does_not_bind(tmp_path):
+    # The module's worst-shaped hole, and the only one that produced a plausible
+    # wrong number rather than a refusal. Measured before the guard existed: a
+    # `scenarios` of "eighteen scenarios" iterated the string's CHARACTERS to a
+    # 3-byte estimate, so 86 closable holes became ONE batch projecting 258 bytes
+    # against a real write of ~99,932 -- 387x under, and exactly the cap that does
+    # not bind, silently, that this module exists to close. Asserted end to end
+    # through write_batches rather than on bytes_per_scenario alone, because the
+    # projection is where the damage showed.
+    run = _run_with_world(
+        tmp_path,
+        {
+            "schema_version": "0.1",
+            "goals": [],
+            "capabilities": [
+                {
+                    "id": f"cap-{i:02d}",
+                    "outcome_classes": [{"id": f"cap-{i:02d}-oc-0"}],
+                }
+                for i in range(86)
+            ],
+        },
+    )
+    assert len(rounds.closable_holes(run)) == 86
+    write_json(
+        run.scenarios,
+        {"schema_version": "0.1", "denominator_version": 1, "scenarios": "eighteen scenarios"},
+    )
+    with pytest.raises(UsageError, match="is not an array"):
+        rounds.write_batches(run, round_n=1)
+    assert not run.batches(1).exists()
