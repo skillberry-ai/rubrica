@@ -35,8 +35,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from rubrica.artifacts import read_json, write_json
+from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.errors import UsageError
+from rubrica.findings import Finding
 from rubrica.paths import RunPaths
 
 # The measured maximum scenario on run-20260825-094033 was 1,579 serialized
@@ -358,3 +359,233 @@ def write_batches(run: RunPaths, *, round_n: int) -> Path | None:
         },
     )
     return run.batches(round_n)
+
+
+# score-part-0.1.json's own `status` enum, and deliberately NOT
+# scenarios-0.1.json's, which also admits `proposed`. A ruling exists to CHANGE
+# a status, and `proposed` is what a scenario already carries out of its propose
+# member, so a ruling naming it would be a no-op that still had to be honoured.
+# A whitelist rather than isinstance(status, str) because _apply_rulings writes
+# this value straight onto the scenario: an arbitrary string would make the
+# assembled 02-scenarios.json fail its own schema, and that document is code
+# output, so the finding would be unrepairable by any re-dispatch.
+_RULING_STATUSES = frozenset({"active", "duplicate", "rejected"})
+
+# (the field a status requires, the status that requires it) -- score-part-0.1.json
+# spells the same pair as two if/then clauses, and scenarios-0.1.json repeats them
+# on the sealed scenario, so the fold and the rejection each carry exactly one.
+_STATUS_FIELDS: tuple[tuple[str, str], ...] = (
+    ("duplicate_of", "duplicate"),
+    ("rejected_reason", "rejected"),
+)
+
+# The reads in this module split by WHO WROTE the artifact, and the split is the
+# exit-code contract rather than a style choice. The world model and the sealed
+# scenario list are code output, so a malformed one is a misconfigured run and
+# `_object_or_refuse`/`_rows_with_string_id` raise the UsageError that maps to
+# exit 2 -- what closable_holes and bytes_per_scenario already do. The propose
+# and score parts are MODEL output, so a malformed one is a repairable stage
+# defect, and "a stage defect must never surface as 2" makes it a Finding on the
+# functions below instead. Both shapes still exist for the same underlying
+# reason: indexing a key bare out of a code step raises KeyError or TypeError,
+# which cli.py's catch-all reports as an exit-1 `[internal]` finding anchored on
+# the run root -- the wrong artifact, every time.
+
+
+def collect_scenarios(run: RunPaths) -> tuple[list[dict], list[Finding]]:
+    """Every part's scenarios, ordered by (round, batch id, position in part).
+
+    Deterministic ordering is the whole point: this list becomes
+    02-scenarios.json, and two runs with identical parts must produce identical
+    bytes. Round and batch id are both sorted rather than taken in directory
+    order, because a filesystem's order is not a promise -- and the sorting is
+    RunPaths' (scenario_part_rounds, scenario_part_batch_ids), so this module
+    never parses a round out of a filename and the two seals cannot disagree
+    about what a round directory is.
+    """
+    scenarios: list[dict] = []
+    findings: list[Finding] = []
+    seen: dict[str, str] = {}
+    for round_n in run.scenario_part_rounds():
+        for name in run.unsafe_scenario_part_names(round_n):
+            findings.append(
+                Finding(
+                    run.scenario_round_dir(round_n),
+                    "rounds",
+                    "",
+                    f"part name {name!r} in round {round_n} is not a safe path segment, "
+                    "so this seal will not join it into a path",
+                )
+            )
+        for batch_id in run.scenario_part_batch_ids(round_n):
+            path = run.scenario_part(round_n, batch_id)
+            try:
+                part = read_json(path)
+            except ArtifactError as exc:
+                findings.append(Finding(path, "rounds", "", str(exc)))
+                continue
+            if not isinstance(part, dict) or not isinstance(part.get("scenarios"), list):
+                findings.append(
+                    Finding(path, "rounds", "", "part is not an object carrying a scenarios array")
+                )
+                continue
+            for i, scenario in enumerate(part["scenarios"]):
+                if not isinstance(scenario, dict) or not isinstance(scenario.get("id"), str):
+                    findings.append(
+                        Finding(path, "rounds", f"/scenarios/{i}", "scenario has no string id")
+                    )
+                    continue
+                sid = scenario["id"]
+                where = f"round {round_n} batch {batch_id}"
+                if sid in seen:
+                    findings.append(
+                        Finding(
+                            path,
+                            "rounds",
+                            f"/scenarios/{i}/id",
+                            f"scenario id {sid} is already claimed by {seen[sid]}; members "
+                            "mint their own ids, so a collision has to be caught here -- the "
+                            "merged array would simply carry it twice",
+                        )
+                    )
+                    continue
+                seen[sid] = where
+                scenarios.append(scenario)
+    return scenarios, findings
+
+
+def _apply_rulings(run: RunPaths, scenarios: list[dict]) -> list[Finding]:
+    """Fold every round's score rulings into the assembled scenarios, in place.
+
+    Rounds are applied in ascending order so a later round may overturn an
+    earlier ruling. rb-score's Output section asks for "do not re-open a ruling
+    that nothing new bears on", never "statuses are frozen after the round that
+    set them" -- a rejection notice carried into a re-dispatch is exactly the
+    case where changing one is the point.
+
+    Called only on a clean collect, never on one that reported a finding. A part
+    that did not parse means every scenario it held is absent from `by_id`, so
+    every ruling naming one would be reported here as "no propose part wrote it"
+    -- a finding against 03-score for a defect in 02-scenarios, and this package
+    has twice shipped a checker that named the wrong artifact.
+    """
+    findings: list[Finding] = []
+    by_id = {s["id"]: s for s in scenarios}
+    for round_n in run.score_part_rounds():
+        path = run.score_part(round_n)
+        try:
+            part = read_json(path)
+        except ArtifactError as exc:
+            findings.append(Finding(path, "rounds", "", str(exc)))
+            continue
+        if not isinstance(part, dict) or not isinstance(part.get("rulings"), list):
+            findings.append(
+                Finding(path, "rounds", "", "score part is not an object carrying a rulings array")
+            )
+            continue
+        for i, ruling in enumerate(part["rulings"]):
+            sid = ruling.get("scenario_id") if isinstance(ruling, dict) else None
+            if not isinstance(sid, str):
+                findings.append(
+                    Finding(path, "rounds", f"/rulings/{i}", "ruling has no string scenario_id")
+                )
+                continue
+            status = ruling.get("status")
+            if status not in _RULING_STATUSES:
+                # Checked rather than indexed bare, and checked against the enum
+                # rather than against `str`: see _RULING_STATUSES for both halves.
+                findings.append(
+                    Finding(
+                        path,
+                        "rounds",
+                        f"/rulings/{i}/status",
+                        f"ruling for {sid} carries status {status!r}, which is not one of "
+                        f"{sorted(_RULING_STATUSES)}",
+                    )
+                )
+                continue
+            required = [field for field, keep in _STATUS_FIELDS if status == keep]
+            missing = [field for field in required if not isinstance(ruling.get(field), str)]
+            if missing:
+                findings.append(
+                    Finding(
+                        path,
+                        "rounds",
+                        f"/rulings/{i}",
+                        f"ruling for {sid} has status {status!r} but no string "
+                        f"{missing[0]}, which that status requires",
+                    )
+                )
+                continue
+            target = by_id.get(sid)
+            if target is None:
+                findings.append(
+                    Finding(
+                        path,
+                        "rounds",
+                        f"/rulings/{i}/scenario_id",
+                        f"ruling names {sid}, which no propose part wrote",
+                    )
+                )
+                continue
+            target["status"] = status
+            # Set only what the new status requires, and clear the other, so a
+            # scenario rejected after having been folded does not keep a stale
+            # duplicate_of that check_scenarios would then resolve happily -- it
+            # asks only whether the target exists, so nothing would report it.
+            for field, keep in _STATUS_FIELDS:
+                if status == keep:
+                    target[field] = ruling[field]
+                else:
+                    target.pop(field, None)
+    return findings
+
+
+def seal_scenarios(run: RunPaths) -> tuple[Path | None, list[Finding]]:
+    """Assemble 02-scenarios.json from every propose part and every score ruling.
+
+    A pure function of those parts: it never reads its own output, which is what
+    makes it idempotent and lets it run twice per round -- after propose, so
+    score has a document to read, and after score, so instantiate sees the
+    statuses -- with no way for the second run to disagree with the first.
+
+    Writes nothing when any finding is reported, for the reason seal.py gives:
+    a half-assembled document would clear layer 1 for the fields it did manage
+    to fill and read as a complete scenario list to a human at gate 2.
+    """
+    scenarios, findings = collect_scenarios(run)
+    if findings:
+        # Before the ruling pass, not merged with it: _apply_rulings' docstring
+        # records the misattributed cascade that ordering produces.
+        return None, findings
+    if not scenarios:
+        # Propose has not run. Not a refusal: reporting one would make the
+        # orchestrator retry a stage that was never dispatched.
+        return None, []
+    findings = _apply_rulings(run, scenarios)
+    if findings:
+        return None, findings
+    world = _object_or_refuse(run.world_model, read_json(run.world_model), ("denominator",))
+    # Echoed from the world model, never defaulted, and this is the one place a
+    # default would be silently wrong rather than loudly: refs.check_scenarios
+    # compares this field to world["denominator"]["version"] for EQUALITY, so a
+    # fallback of 1 against a world model at 2 is a check-refs finding against a
+    # document this code just wrote -- unrepairable by any re-dispatch. Presence
+    # only, not an integer check, and the line between that and _cap_bytes' type
+    # check is which layer already owns the field: world-model-0.1.json lists
+    # denominator in `required` and constrains version to `integer, minimum: 1`,
+    # while manifest-0.1.json does not require max_scenario_part_bytes at all, so
+    # layer 1 covers this one and covers nothing there. Same ruling reconcile.seal
+    # states for its own payload keys.
+    denominator = _object_or_refuse(
+        run.world_model, world["denominator"], ("version",), " denominator"
+    )
+    write_json(
+        run.scenarios,
+        {
+            "schema_version": "0.1",
+            "denominator_version": denominator["version"],
+            "scenarios": scenarios,
+        },
+    )
+    return run.scenarios, findings

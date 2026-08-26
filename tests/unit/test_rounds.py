@@ -508,3 +508,376 @@ def test_a_string_scenarios_array_cannot_produce_a_projection_that_does_not_bind
     with pytest.raises(UsageError, match="is not an array"):
         rounds.write_batches(run, round_n=1)
     assert not run.batches(1).exists()
+
+
+def _part(run, round_n, batch, scenarios):
+    write_json(
+        run.scenario_part(round_n, batch),
+        {
+            "schema_version": "0.1",
+            "round": round_n,
+            "batch_id": batch,
+            "scenarios": scenarios,
+        },
+    )
+
+
+def _scenario(sid, *, round_n=1, goal="goal-0", status="proposed", refs=None, depth=1):
+    return {
+        "id": sid,
+        "round": round_n,
+        "goal_id": goal,
+        "actor_id": "actor-0",
+        "title": f"title {sid}",
+        "user_intent": f"intent {sid}",
+        "hop_depth": depth,
+        "capability_refs": refs
+        if refs is not None
+        else [{"capability_id": "cap-0", "outcome_class_id": "cap-0-oc-0"}],
+        "discriminating_fact": f"fact {sid}",
+        "status": status,
+        # Schema-valid rather than the bare {"round": n} the brief sketched:
+        # scenarios-0.1.json puts hole_refs (minItems 1) and claim_ids in
+        # provenance.required, and one test below validates the sealed document
+        # against that schema, which a bare provenance would fail for a reason
+        # that has nothing to do with the seal.
+        "provenance": {
+            "hole_refs": ["cell:cap-0/cap-0-oc-0"],
+            "claim_ids": ["cl-0"],
+            "round": round_n,
+        },
+    }
+
+
+def _score_part(run, round_n, rulings, verdict="continue"):
+    write_json(
+        run.score_part(round_n),
+        {
+            "schema_version": "0.1",
+            "round": round_n,
+            "holes": [],
+            "verdict": verdict,
+            "rulings": rulings,
+        },
+    )
+
+
+def _refuse(run, note=None):
+    """seal_scenarios' findings, with the two properties every refusal shares.
+
+    Every finding this module raises carries layer "rounds" -- a reader triaging
+    a failed round has to know which assembler refused without reading the
+    message -- and no refusal returns a path. Asserted through one helper rather
+    than once per test because the layer is set at eight separate call sites, and
+    a single spot check leaves seven unpinned: measured, replacing only the
+    FIRST `"rounds"` in rounds.py with `"refs"` left the whole suite green.
+    """
+    path, findings = rounds.seal_scenarios(run)
+    assert path is None, note
+    assert findings, note
+    assert {f.layer for f in findings} == {"rounds"}, note
+    return findings
+
+
+def test_the_seal_assembles_every_round_in_order(tmp_path):
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b02", [_scenario("sc-b02-001")])
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    _part(run, 2, "b01", [_scenario("sc-b01-002", round_n=2)])
+    path, findings = rounds.seal_scenarios(run)
+    assert findings == []
+    assert path == run.scenarios
+    doc = read_json(path)
+    # Ordered by (round, batch id, position in part): deterministic, and it is
+    # the order a reader scanning rounds expects.
+    assert [s["id"] for s in doc["scenarios"]] == [
+        "sc-b01-001",
+        "sc-b02-001",
+        "sc-b01-002",
+    ]
+    assert doc["denominator_version"] == 1
+
+
+def test_the_sealed_document_is_schema_valid(tmp_path):
+    # The seal's output is code output, so a layer-1 finding against it is
+    # unrepairable by any re-dispatch -- which makes "does it clear its own
+    # schema" the one property no other test in this module was asserting.
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001"), _scenario("sc-b01-002")])
+    _score_part(
+        run,
+        1,
+        [{"scenario_id": "sc-b01-002", "status": "duplicate", "duplicate_of": "sc-b01-001"}],
+    )
+    path, findings = rounds.seal_scenarios(run)
+    assert findings == []
+    assert validate_artifact(path, "scenarios") == []
+
+
+def test_the_seal_is_byte_identical_across_two_runs(tmp_path):
+    # The property emit and both existing seals exist to hold: identical parts
+    # must produce identical bytes, or variance stops being attributable.
+    first = _run_with_world(tmp_path / "a", _world())
+    second = _run_with_world(tmp_path / "b", _world())
+    for run in (first, second):
+        _part(run, 1, "b01", [_scenario("sc-b01-001"), _scenario("sc-b01-002")])
+        _part(run, 1, "b02", [_scenario("sc-b02-001")])
+        rounds.seal_scenarios(run)
+    assert first.scenarios.read_bytes() == second.scenarios.read_bytes()
+
+
+def test_the_seal_is_idempotent(tmp_path):
+    # It runs twice per round -- after propose and after score -- so a second
+    # run must not be able to disagree with the first. It reads only parts,
+    # never its own output, which is what makes that true by construction.
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    rounds.seal_scenarios(run)
+    once = run.scenarios.read_bytes()
+    rounds.seal_scenarios(run)
+    assert run.scenarios.read_bytes() == once
+
+
+def test_the_seal_applies_a_rounds_rulings(tmp_path):
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001"), _scenario("sc-b01-002")])
+    _score_part(
+        run,
+        1,
+        [
+            {"scenario_id": "sc-b01-001", "status": "active"},
+            {"scenario_id": "sc-b01-002", "status": "duplicate", "duplicate_of": "sc-b01-001"},
+        ],
+        verdict="converged",
+    )
+    _, findings = rounds.seal_scenarios(run)
+    assert findings == []
+    by_id = {s["id"]: s for s in read_json(run.scenarios)["scenarios"]}
+    assert by_id["sc-b01-001"]["status"] == "active"
+    assert by_id["sc-b01-002"]["status"] == "duplicate"
+    assert by_id["sc-b01-002"]["duplicate_of"] == "sc-b01-001"
+
+
+def test_a_scenario_with_no_ruling_keeps_the_status_its_member_gave_it(tmp_path):
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    _score_part(run, 1, [])
+    rounds.seal_scenarios(run)
+    assert read_json(run.scenarios)["scenarios"][0]["status"] == "proposed"
+
+
+def test_a_later_round_may_overturn_an_earlier_ruling(tmp_path):
+    # rb-score's Output section: "do not re-open a ruling that nothing new bears
+    # on", never "statuses are frozen after the round that set them". A
+    # rejection notice carried into a re-dispatch is exactly the case.
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    _score_part(run, 1, [{"scenario_id": "sc-b01-001", "status": "active"}])
+    _score_part(
+        run,
+        2,
+        [{"scenario_id": "sc-b01-001", "status": "rejected", "rejected_reason": "ambiguous"}],
+        verdict="converged",
+    )
+    rounds.seal_scenarios(run)
+    only = read_json(run.scenarios)["scenarios"][0]
+    assert only["status"] == "rejected"
+    assert only["rejected_reason"] == "ambiguous"
+
+
+def test_overturning_a_fold_clears_the_duplicate_pointer_it_left(tmp_path):
+    # Set only what the new status requires and clear the other: a scenario
+    # rejected after having been folded would otherwise keep a stale
+    # duplicate_of, which check_scenarios resolves happily -- it only asks
+    # whether the target exists -- so nothing downstream would report it.
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001"), _scenario("sc-b01-002")])
+    _score_part(
+        run,
+        1,
+        [{"scenario_id": "sc-b01-002", "status": "duplicate", "duplicate_of": "sc-b01-001"}],
+    )
+    _score_part(
+        run,
+        2,
+        [{"scenario_id": "sc-b01-002", "status": "rejected", "rejected_reason": "out_of_scope"}],
+        verdict="converged",
+    )
+    rounds.seal_scenarios(run)
+    by_id = {s["id"]: s for s in read_json(run.scenarios)["scenarios"]}
+    assert "duplicate_of" not in by_id["sc-b01-002"]
+    assert by_id["sc-b01-002"]["rejected_reason"] == "out_of_scope"
+
+
+def test_the_seal_refuses_two_parts_claiming_one_scenario_id(tmp_path):
+    # Members mint their own ids, so a collision is possible in a way it never
+    # was for a single dispatch. It has to be caught here: the merged array
+    # would simply carry the id twice, and check_scenarios indexes that array,
+    # so it would agree with whatever it was handed.
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-001")])
+    _part(run, 1, "b02", [_scenario("sc-001")])
+    findings = _refuse(run)
+    assert not run.scenarios.exists()
+    assert any("sc-001" in f.message for f in findings)
+
+
+def test_the_seal_refuses_a_ruling_for_a_scenario_no_part_wrote(tmp_path):
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    _score_part(run, 1, [{"scenario_id": "sc-nope", "status": "active"}])
+    assert any("sc-nope" in f.message for f in _refuse(run))
+
+
+def test_a_ruling_with_no_usable_scenario_id_is_a_finding_not_a_traceback(tmp_path):
+    # A KeyError out of a code step reaches cli.py's catch-all as an exit-1
+    # [internal] finding anchored on the RUN ROOT -- the exit-code contract's
+    # third rule breached against an artifact no re-dispatch can repair.
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    for bad in ({}, {"status": "active"}, {"scenario_id": 7, "status": "active"}, 7, None, []):
+        _score_part(run, 1, [bad])
+        assert any("scenario_id" in f.message for f in _refuse(run, bad)), bad
+    assert not run.scenarios.exists()
+
+
+def test_a_ruling_status_outside_the_parts_own_enum_is_a_finding(tmp_path):
+    # The whitelist is score-part-0.1.json's own enum, not merely "a string":
+    # an arbitrary value would be written straight onto the scenario and make
+    # 02-scenarios.json fail scenarios-0.1.json, which is code output too. That
+    # enum excludes `proposed` deliberately -- a ruling naming it would be a
+    # no-op that still had to be honoured -- so it is refused here as well.
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    for bad in (
+        {"scenario_id": "sc-b01-001"},
+        {"scenario_id": "sc-b01-001", "status": "proposed"},
+        {"scenario_id": "sc-b01-001", "status": 7},
+        {"scenario_id": "sc-b01-001", "status": "ACTIVE"},
+    ):
+        _score_part(run, 1, [bad])
+        assert any("status" in f.message for f in _refuse(run, bad)), bad
+    assert not run.scenarios.exists()
+
+
+def test_a_fold_or_rejection_missing_its_required_field_is_a_finding(tmp_path):
+    # The other half of the same KeyError class: score-part-0.1.json requires
+    # duplicate_of with `duplicate` and rejected_reason with `rejected` through
+    # an if/then, and `ruling[field]` would raise for a part that reached here
+    # without layer 1.
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    for bad, field in (
+        ({"scenario_id": "sc-b01-001", "status": "duplicate"}, "duplicate_of"),
+        ({"scenario_id": "sc-b01-001", "status": "duplicate", "duplicate_of": 7}, "duplicate_of"),
+        ({"scenario_id": "sc-b01-001", "status": "rejected"}, "rejected_reason"),
+    ):
+        _score_part(run, 1, [bad])
+        assert any(field in f.message for f in _refuse(run, bad)), bad
+    assert not run.scenarios.exists()
+
+
+def test_the_seal_refuses_a_score_part_that_is_not_an_object_with_rulings(tmp_path):
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    for bad in (None, 7, [], "hi", {"round": 1}, {"rulings": 7}, {"rulings": "two"}):
+        write_json(run.score_part(1), bad)
+        assert any("rulings array" in f.message for f in _refuse(run, bad)), bad
+    assert not run.scenarios.exists()
+
+
+def test_the_seal_refuses_an_unparseable_score_part(tmp_path):
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    run.score_part(1).parent.mkdir(parents=True, exist_ok=True)
+    run.score_part(1).write_text("{not json", encoding="utf-8")
+    assert [str(f.artifact) for f in _refuse(run)] == [str(run.score_part(1))]
+
+
+def test_the_seal_refuses_an_unparseable_part(tmp_path):
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    run.scenario_part(1, "b02").write_text("{not json", encoding="utf-8")
+    findings = _refuse(run)
+    assert any("b02" in str(f.artifact) or "b02" in f.message for f in findings)
+
+
+def test_an_unparseable_part_does_not_blame_the_score_part_for_its_scenarios(tmp_path):
+    # The cascade an unconditional ruling pass would produce: a part that does
+    # not parse means every scenario it held is absent from the index, so every
+    # ruling naming one is reported as "no propose part wrote it" -- a finding
+    # against 03-score for a defect in 02-scenarios. This package has twice
+    # shipped a checker that named the wrong artifact.
+    run = _run_with_world(tmp_path, _world())
+    run.scenario_round_dir(1).mkdir(parents=True, exist_ok=True)
+    run.scenario_part(1, "b01").write_text("{not json", encoding="utf-8")
+    _score_part(run, 1, [{"scenario_id": "sc-b01-001", "status": "active"}])
+    findings = _refuse(run)
+    assert [str(f.artifact) for f in findings] == [str(run.scenario_part(1, "b01"))]
+
+
+def test_the_seal_refuses_a_part_that_is_not_an_object_with_scenarios(tmp_path):
+    run = _run_with_world(tmp_path, _world())
+    for bad in (None, 7, [], "hi", {"round": 1}, {"scenarios": 7}, {"scenarios": "two"}):
+        write_json(run.scenario_part(1, "b01"), bad)
+        assert any("scenarios array" in f.message for f in _refuse(run, bad)), bad
+    assert not run.scenarios.exists()
+
+
+def test_the_seal_refuses_a_scenario_with_no_string_id(tmp_path):
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [{"round": 1}])
+    assert any(f.pointer == "/scenarios/0" for f in _refuse(run))
+
+
+def test_the_seal_refuses_a_part_whose_name_is_not_a_safe_segment(tmp_path):
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    (run.scenario_round_dir(1) / "..bad.json").write_text("{}", encoding="utf-8")
+    assert any("..bad" in f.message for f in _refuse(run))
+
+
+def test_the_seal_writes_nothing_when_no_part_exists(tmp_path):
+    # Not a refusal: a run that has not dispatched propose yet simply has no
+    # scenarios, and reporting a finding would make the orchestrator retry a
+    # stage that has not run.
+    run = _run_with_world(tmp_path, _world())
+    path, findings = rounds.seal_scenarios(run)
+    assert path is None
+    assert findings == []
+
+
+def test_the_denominator_version_is_the_world_models_own(tmp_path):
+    # Echoed, never defaulted: refs.check_scenarios compares this field to
+    # world["denominator"]["version"] for equality, so a default of 1 against a
+    # world model at 2 is a check-refs finding against a document this code
+    # wrote -- unrepairable by re-dispatch.
+    world = _world()
+    world["denominator"]["version"] = 3
+    run = _run_with_world(tmp_path, world)
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    path, _ = rounds.seal_scenarios(run)
+    assert read_json(path)["denominator_version"] == 3
+
+
+def test_a_world_model_with_no_denominator_version_is_a_usage_error(tmp_path):
+    # Required rather than defaulted for the reason capabilities and goals are
+    # in closable_holes: world-model-0.1.json lists denominator in `required`
+    # and version in denominator.required, so a document reaching here without
+    # one is a hand-edit, and refusing names the artifact that carries it.
+    # Each pin is a VALUE ECHO rather than a phrase from _object_or_refuse, for
+    # two reasons at once: "denominator" alone appears in all three messages, so
+    # it discriminates none of them from the others, and pinning that helper's
+    # wording would break this test on a reword that changes nothing here.
+    for i, (world, pin) in enumerate(
+        (
+            ({"schema_version": "0.1"}, r"\['denominator'\]"),
+            ({"schema_version": "0.1", "denominator": {}}, r"\['version'\]"),
+            ({"schema_version": "0.1", "denominator": 7}, "found 7"),
+        )
+    ):
+        run = _run_with_world(tmp_path / f"w{i}", world)
+        _part(run, 1, "b01", [_scenario("sc-b01-001")])
+        with pytest.raises(UsageError, match=pin):
+            rounds.seal_scenarios(run)
+        assert not run.scenarios.exists()

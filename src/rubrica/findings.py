@@ -14,7 +14,7 @@ class Finding:
     root. `layer` names the checking layer that produced it, so a reader can
     tell a shape error from a reference error without parsing the message.
     The layers: "schema" | "refs" | "invariant" | "emit" | "reconcile" |
-    "internal" | "recall" | "review" | "skill" | "seal".
+    "internal" | "recall" | "review" | "skill" | "seal" | "rounds".
 
     "internal" is the layer cli.py uses when a checking layer raised instead of
     returning: the artifact is malformed in a way layer 1 must reject first, and
@@ -35,6 +35,15 @@ class Finding:
     findings need a layer name distinct from "refs" precisely because they
     fire *before* the record refs.check_triage would otherwise check exists
     at all.
+
+    "rounds" is rounds.py's layer: the artifacts are the propose parts and the
+    score parts, and the failure is that they cannot be assembled at all -- two
+    parts claiming one scenario id, a ruling for a scenario no part wrote, a
+    part that does not parse. Distinct from "refs" for the reason "reconcile"
+    is: refs checks a run someone may still be building, while this names the
+    reason one command produced no output. Distinct from "seal" and "reconcile"
+    because a reader triaging a failed round needs to know which assembler
+    refused without reading the message.
     """
 
     artifact: Path
