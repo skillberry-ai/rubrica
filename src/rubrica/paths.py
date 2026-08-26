@@ -272,12 +272,26 @@ class RunPaths:
         round-1 and round-2, which is exactly what sorted() on the stem does.
         """
         rounds: list[int] = []
-        for entry in list_dir(self.scenario_parts_dir):
-            if not entry.is_dir() or not entry.name.startswith("round-"):
-                continue
-            suffix = entry.name[len("round-") :]
-            if suffix.isdigit():
-                rounds.append(int(suffix))
+        try:
+            for entry in list_dir(self.scenario_parts_dir):
+                if not entry.is_dir() or not entry.name.startswith("round-"):
+                    continue
+                suffix = entry.name[len("round-") :]
+                if suffix.isdigit():
+                    rounds.append(int(suffix))
+        except OSError as exc:
+            # The same catch _instance_dir_names carries, for the same measured
+            # reason: list_dir converts the failure of listing this directory,
+            # but a directory that can be listed and not stat'ed through (mode
+            # 0o444) makes `entry.is_dir()` on a *child* raise instead, which
+            # list_dir never touches. Measured without this: PermissionError
+            # escaped to cli.py's catch-all and became an `[internal]` finding
+            # at exit 1, telling the orchestrator to retry a chmod problem no
+            # re-dispatch can fix. Same type and message as every sibling
+            # listing, so a caller cannot tell which one failed.
+            raise UsageError(
+                f"cannot read run directory: {self.scenario_parts_dir} ({exc})"
+            ) from exc
         return sorted(rounds)
 
     def _scenario_part_stems(self, round_n: int) -> list[str]:

@@ -474,3 +474,65 @@ def test_unsafe_scenario_part_names_are_listed_not_raised(tmp_path):
     (d / "..bad.json").write_text("{}", encoding="utf-8")
     assert run.scenario_part_batch_ids(1) == ["b01"]
     assert run.unsafe_scenario_part_names(1) == ["..bad"]
+
+
+@pytest.mark.parametrize("mode", [0o000, 0o444])
+def test_the_round_part_listings_raise_a_usage_error_on_an_unreadable_directory(tmp_path, mode):
+    """The new round-part listings, held to the same ruling as every other one.
+
+    Measured, not assumed: before scenario_part_rounds wrapped its loop, mode
+    0o444 on 02-scenarios/ escaped as a bare PermissionError. That is not in
+    cli.py's narrow catch tuple, so it reached the catch-all and became an
+    `[internal]` finding at exit 1 -- telling the orchestrator "repairable stage
+    defect, retry once" about a chmod problem no re-dispatch can fix, when an
+    unreadable run directory is exit 2 by contract.
+
+    Both modes, because they fail in different places. At 0o000 the listing
+    itself raises and list_dir/list_json converts it. At 0o444 the listing
+    succeeds and stat'ing a *child* is what raises -- which list_dir cannot
+    convert because it never touches the child, so scenario_part_rounds carries
+    its own catch the way _instance_dir_names does.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = RunPaths(tmp_path)
+    # A round directory holding a *.json child, because that is what both
+    # listings really read: scenario_part_rounds stats round-1 as a child of
+    # 02-scenarios/, and the batch-id listings stat b01.json inside it. Without
+    # each of those children the 0o444 stat that raises is never reached and the
+    # listing comes back empty instead.
+    part = run.scenario_part(1, "b01")
+    part.parent.mkdir(parents=True)
+    part.write_text("{}", encoding="utf-8")
+    run.score_parts_dir.mkdir(parents=True)
+    run.score_part(1).write_text("{}", encoding="utf-8")
+
+    directories = (run.scenario_parts_dir, run.scenario_round_dir(1), run.score_parts_dir)
+    calls = (
+        run.scenario_part_rounds,
+        lambda: run.scenario_part_batch_ids(1),
+        lambda: run.unsafe_scenario_part_names(1),
+        run.score_part_rounds,
+    )
+    # Innermost first, so the parent is still traversable while the child's mode
+    # is being set -- and restored outermost first in the finally for the same
+    # reason, which is why a failed assertion cannot leave the tree unreadable.
+    for directory in reversed(directories):
+        directory.chmod(mode)
+    try:
+        for call in calls:
+            # UsageError is a ValueError, so a bare PermissionError would not
+            # satisfy this -- pytest.raises does not match sibling exceptions.
+            with pytest.raises(UsageError, match="cannot read run directory"):
+                call()
+    finally:
+        for directory in directories:
+            directory.chmod(0o755)
+
+    # And the same four calls answer normally once the modes are back: without
+    # this the test would pass just as well if the accessors were broken outright
+    # and raised UsageError on a perfectly readable run.
+    assert run.scenario_part_rounds() == [1]
+    assert run.scenario_part_batch_ids(1) == ["b01"]
+    assert run.unsafe_scenario_part_names(1) == []
+    assert run.score_part_rounds() == [1]
