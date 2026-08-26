@@ -790,6 +790,18 @@ def test_the_partition_of_nothing_is_nothing():
     assert rounds.partition([], cap_bytes=28000, per_scenario=1600) == []
 
 
+def test_the_default_budget_stays_well_under_the_output_token_ceiling():
+    # The guard that makes the budget mean something. Without it,
+    # `doc["cap_bytes"] == DEFAULT_SCENARIO_PART_BYTES` is a tautology on the
+    # value and a later raise to 120,000 bytes -- past the ceiling once thinking
+    # is counted -- passes every test, silently reinstating the failure this
+    # module exists to prevent. Half, not all: the rest of the ceiling is for
+    # thinking tokens and the member's report back to the orchestrator, neither
+    # of which a byte budget bounds.
+    projected = rounds.DEFAULT_SCENARIO_PART_BYTES / rounds.BYTES_PER_TOKEN
+    assert projected <= rounds.OUTPUT_TOKEN_CEILING * 0.5
+
+
 def test_a_budget_smaller_than_one_scenario_is_a_usage_error():
     # max(1, cap // per) would silently produce a batch that cannot fit, which
     # is the silent cap this whole change exists to remove. Refuse instead.
@@ -897,17 +909,25 @@ from rubrica.paths import RunPaths
 # more batch than strictly needed.
 DEFAULT_BYTES_PER_SCENARIO = 1600
 
+# The ceiling the budget below is sized against. NOT a model limit and not
+# anything this repo sets today: it is Claude Code's own default max_tokens for
+# the process dispatch-stage.sh spawns, observed once as the error that killed
+# propose round 2 on run-20260825-094033. Task 10 pins it explicitly so the loop
+# stops depending on an undeclared default belonging to another tool.
+OUTPUT_TOKEN_CEILING = 32000
+
+# An ESTIMATE, not a measurement -- nobody has tokenized the real file. Used only
+# to relate the byte budget below to the token ceiling above, which is what stops
+# a later raise of that budget from silently reinstating the failure this module
+# exists to prevent.
+BYTES_PER_TOKEN = 3.5
+
 # Per-member output budget, ~8k output tokens at ~3.5 bytes/token. Chosen well
 # under the 32,000 that killed round 2 rather than just under it: the cap counts
 # thinking tokens too, and a member also emits its report back to the
 # orchestrator, so the write is not the whole response. At this budget the
 # measured 86 closable holes become 6 batches.
 DEFAULT_SCENARIO_PART_BYTES = 28000
-
-
-def _live_statuses() -> tuple[str, ...]:
-    """Statuses that still count toward coverage: a test may yet ship for them."""
-    return ("proposed", "active")
 
 
 def closable_holes(run: RunPaths) -> list[str]:
@@ -926,6 +946,12 @@ def closable_holes(run: RunPaths) -> list[str]:
     rb-instantiate cannot honestly seed.
     """
     world = read_json(run.world_model)
+    # Guarded the way slices.py guards its own untrusted-artifact reads, and for
+    # the same reason: a bare KeyError or TypeError out of the indexing below
+    # reaches cli.py's catch-all as an exit-1 finding naming the run root, which
+    # is a finding against the wrong artifact.
+    if not isinstance(world, dict):
+        raise UsageError(f"world model is not a JSON object: {run.world_model}")
     if not run.coverage_latest.exists():
         refs = [
             f"cell:{cap['id']}/{oc['id']}"
@@ -935,6 +961,10 @@ def closable_holes(run: RunPaths) -> list[str]:
         refs += [f"goal:{goal['id']}" for goal in world.get("goals", [])]
         return sorted(refs)
     coverage = read_json(run.coverage_latest)
+    if not isinstance(coverage, dict) or not isinstance(coverage.get("holes", []), list):
+        raise UsageError(
+            f"coverage report is not an object carrying a holes array: {run.coverage_latest}"
+        )
     return sorted(
         hole["ref"]
         for hole in coverage.get("holes", [])
@@ -987,11 +1017,28 @@ def _cap_bytes(run: RunPaths) -> int:
 
     Absent rather than required in manifest-0.1.json: a third required limit
     would invalidate every manifest already on disk under runs/.
+
+    The type and range are checked here and raised as UsageError, which is exit
+    2, rather than left to fail in the arithmetic below. cli.py draws the 1-vs-2
+    line at "malformed content is a stage defect", and that is right for an
+    artifact a prompt wrote -- but manifest.json is written by intake, in code.
+    A finding against it is unrepairable by any re-dispatch, which is the trap
+    CLAUDE.md names by that file's own name. So a string where an int belongs is
+    a misconfigured run, not a stage defect. (Ruling R14.)
     """
     if not run.manifest.exists():
         return DEFAULT_SCENARIO_PART_BYTES
-    limits = read_json(run.manifest).get("limits", {})
-    return limits.get("max_scenario_part_bytes", DEFAULT_SCENARIO_PART_BYTES)
+    manifest = read_json(run.manifest)
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("limits", {}), dict):
+        raise UsageError(f"manifest is not an object carrying a limits object: {run.manifest}")
+    cap = manifest.get("limits", {}).get("max_scenario_part_bytes", DEFAULT_SCENARIO_PART_BYTES)
+    # bool before int: True is an int in Python and would sail through as 1.
+    if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
+        raise UsageError(
+            f"limits.max_scenario_part_bytes must be an integer >= 1, "
+            f"got {cap!r} in {run.manifest}"
+        )
+    return cap
 
 
 def write_batches(run: RunPaths, *, round_n: int) -> Path | None:
@@ -1687,6 +1734,16 @@ Expected: FAIL, `AttributeError: module 'rubrica.rounds' has no attribute 'capab
 Append to `src/rubrica/rounds.py`:
 
 ```python
+def _live_statuses() -> tuple[str, ...]:
+    """Statuses that still count toward coverage: a test may yet ship for them.
+
+    Defined here rather than in Task 3 because this is where its first caller
+    arrives, and a helper with no caller is dead code a reviewer is right to
+    reject. Both matrices below and nothing else use it.
+    """
+    return ("proposed", "active")
+
+
 def capability_matrix(world: dict, scenarios: list[dict]) -> dict:
     """One cell per capability x outcome-class pair the world model declares.
 
