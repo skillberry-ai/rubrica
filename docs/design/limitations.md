@@ -369,6 +369,46 @@ every claim — the shape the pass split exists to avoid — and not a filter th
 decides for the pass. If you are about to propose one, engage the attribution
 argument above rather than the throughput one.
 
+### `rb-reconcile-gaps`' read coverage cannot be forced by any output shape
+
+The four reconcile passes that own a claim kind each carry an `inputs_seen`
+accounting whose `own_kind_total` is recomputed from `01-claims/`, so a pass
+cannot state a count for a file it never opened. `rb-reconcile-gaps` has no such
+accounting and cannot be given one: `refs.PASS_OWN_KINDS` gives it no claim kind
+at all — the kinds `claims-0.1.json` defines partition onto the passes that own
+one — and a gap is an assertion about what no input **contains**. A
+pass that read three of twenty-three claims files can write a well-formed,
+entirely plausible gap about the other twenty's silence, and every mechanical
+check will pass — the gap resolves, its `blocks` list is a legal subset of stage
+names, and its `claims` cite ids that exist.
+
+What it did gain is a required `claims` array on `$defs/gap`, so the evidence
+that an absence *matters* is resolvable rather than sitting in prose. That closes
+a self-contradicting gate-1 brief, and the case is worth stating with its ids
+because the tree cannot hold it: `runs/` is gitignored. On
+`run-20260823-112746`, run 1's brief reported
+`trajectories2-json-14: 0/19 claims cited (0%)` while
+`gap-search-tool-error-response`, in the same brief, rested its `unknown` on
+`clm-trajectories2-json-14-019`. The directory that survives holds run 2's
+re-seal — its utilisation recomputes to run 2's 146/434, and that artifact's row
+to 5/19 — so it corroborates the gap's half rather than the pairing: the gap
+still names that claim id in prose, no `claims` array anywhere in the document
+holds it, and three further claim ids sit the same way under two more gaps.
+Closing that says nothing about read coverage.
+
+**Why it is parked rather than fixed:** every candidate fix asserts something the
+pass cannot know. A "claims considered" count would be a self-report, which is
+prose about its own compliance — the shape `objective_review` is already recorded
+here for. Requiring a gap per uncited claim would manufacture gaps, which is the
+confabulation every refusal-conditions section in this family exists to prevent.
+The honest instrument is the transcript: `scripts/audit-reads.sh` over a real
+dispatch, which is the same answer the isolation rule at the top of this file
+gets, and for the same reason.
+
+What this means for you: **a gap is the one world-model element whose evidence of
+diligence is entirely outside the artifact.** If a run's gaps look thin, read the
+transcript rather than the gaps.
+
 ### Every directory a fan-out writes into is created by a member's `Write`, and until 2026-08-23 nothing told the member so
 
 Of a run's directories, `grep -rn mkdir src/rubrica/` creates `run.root`,
@@ -453,7 +493,19 @@ reliably.
 across two runs — and the measurement has not been taken. The two real-target
 runs that exist are incomparable by construction, because they read different
 input sets, so their stage diffs localise differences rather than quantify
-variance. Nobody has yet run the same inputs twice and diffed the result.
+variance.
+
+**"Nobody has yet run the same inputs twice and diffed the result" was this
+entry's closing sentence, and it no longer holds for the `reconcile-*` family.**
+Issue #6 re-dispatched the passes that own a structured `claims` array over a
+byte-identical run directory — `run-20260823-112746`, the reservation-service
+corpus, 23 admitted inputs and 434 claims — same skill file, same model, same
+effort, nothing appended to either dispatch. Read coverage of `01-claims/` came
+out 3 of 23 files for one pass and 23 of 23 for another, and the entry below
+records what that cost. The premise is what that measurement takes away, not the
+ruling: it says nothing about `extract`, `propose`, `score`, `instantiate`,
+`challenge` or the chain as a whole, none of which anyone has run twice over one
+input set.
 
 Parked on cost: a variance measurement means running the whole chain several
 times over one input set, and each full run over a real target costs real money.
@@ -556,6 +608,56 @@ What this means for you: **do not read a single run's `blocks` as the design's
 verdict on what is answerable.** It is one dispatch's judgment about one claim
 set, and B4 is strict enough that on a real corpus the question is usually which
 stage halts rather than whether one does.
+
+#### A later pair over the same inputs had no prompt confound, and disagreed on read coverage
+
+The confound above — the prompt was not byte-identical between the two runs — is
+absent from the pair issue #6 measured, which makes it the clean measurement this
+entry says is still owed, for the `reconcile-*` family. On
+`run-20260823-112746` the passes that own a structured `claims` array were
+re-dispatched over a byte-identical run directory: same skill file, same model,
+same effort, no appended findings and no prompt additions. What differed between
+run 1 and run 2 was the dispatch.
+
+Distinct `01-claims/*.json` files each pass opened, taken from the transcripts:
+
+| pass | run 1 | run 2 |
+|---|---|---|
+| `rb-reconcile-capabilities` | 12 / 23 | 23 / 23 |
+| `rb-reconcile-entities` | 10 / 23 | 13 / 23 |
+| `rb-reconcile-goals` | 9 / 23 | 3 / 23 |
+
+**The asymmetry is the finding rather than the spread.** One pass went to full
+coverage, one improved a little, one got materially worse — and no systematic
+cause can do that: a schema barrier, a permission block or a size cap could not
+improve one pass and degrade another on identical bytes. Both dispatches reported
+`subtype: success`, and `rubrica validate` exited 0 over both.
+
+Re-sealing after run 2 with nothing else changed moved claim utilisation from
+80/434 to 146/434 — 18.4% to 33.6% — and `refs.check_claim_utilisation` from
+eleven findings to one. The world model's element counts were identical across the
+pair: the same capabilities, entities, actors, goals, gaps and contradictions. So
+the two runs are indistinguishable to any check that counts elements rather than
+citations, and to a human reading counts at gate 1.
+
+What identifies read coverage as the cause rather than a difference in citation
+judgment is that the correlation is exact. In run 1, setting aside the
+`invariant` claims that had nowhere to be cited at the time, claims in files the
+citing passes read were cited 80 of 212 — about 38% — while claims in files they
+never opened were cited **0 of 167**. Not lower. Zero.
+
+Parked, and the reason is narrower than its parent's now that half the instrument
+exists. What shipped is visibility, not variance: the four passes that own a
+claim kind carry an `inputs_seen` accounting, `refs.check_input_dispositions`
+recomputes every number in it against `01-claims/` and `manifest.inputs`, and
+`rubrica gate-brief --gate 1` renders read coverage per pass. That makes one
+dispatch's coverage legible at the gate; it does not measure the spread across
+two, and nobody has run the pair again with the accounting in place.
+
+What this means for you: **a pass's citations are bounded by what it opened, and
+per-input utilisation cannot tell you what that was.** It is an average over
+every citing pass, so one diligent pass masks another's skipped file — which is
+exactly how this survived a run before anybody looked.
 
 ### No pass of the triage family carries an `exercise.md`, and what the stage it replaced produced is not in the repository
 
@@ -1522,6 +1624,111 @@ closed, and because the deterministic pipeline never reaches it —
 passed. Small fix, low reach; it is here so that finding it does not cost a
 round.
 
+### `claim-utilisation` and `gate-brief` exit 1 on a hand-edited claims document, and both are reports
+
+`CLAUDE.md` rules both commands **reports, not gates**: each always exits clean
+on a readable run, so an orchestrator reading an exit code can never mistake data
+for a defect. `docs/reference/cli.md` states that promise in both sections and
+qualifies it in both, pointing here. This is the qualification.
+
+`claim_utilisation` walks `01-claims/` with `claim["id"]` bare — deliberately, and
+the comment beside the line says so — so a hand-edited claims document reaches the
+CLI as an exception rather than as a number. Measured on a fully sealed toy run,
+each shape one mutation of one claims file, `claim-utilisation` and
+`gate-brief --gate 1` both exiting **1** on every one:
+
+| the file says | what escapes |
+|---|---|
+| `"claims": ["clm-api-001"]`, ids where records belong | `TypeError: string indices must be integers` |
+| `"claims": 7` | `TypeError: 'int' object is not iterable` |
+| a claim record carrying no `id` | `KeyError: 'id'` |
+
+`cli.py`'s catch-all turns each into one `[internal]` finding, so the narrower
+invariant holds — no `1` with empty stdout. What does not hold is the reports
+promise, and the circumstance is the ordinary one rather than a tampering case: a
+readable run, a person hand-editing an artifact at gate 1 exactly as the gate
+invites, and the command that exists to show them the consequence declining to
+run.
+
+**An unreadable `01-claims/` directory is not part of this hole, and reading it in
+is the mistake to avoid.** `paths.list_json` raises `UsageError` on one, `cli.py`
+maps that to exit **2**, and the exit-code contract's own ruling for a filesystem
+problem is 2 — the harness was pointed at something broken, not a stage.
+Guarding it inside `utilisation.py` would turn it into an exit 0 reporting empty
+utilisation over claims nobody could read, which is the one reading a human at
+gate 1 must never be handed. That error was written into the records of this
+ruling once and had to be taken back out of every one of them, so
+`tests/unit/test_brief.py::test_an_unreadable_claims_directory_is_exit_2_from_both_reports`
+now pins both commands at 2 and goes red under exactly the guard someone might
+add.
+
+**Why it is parked, when the other half of the same defect was closed in this
+branch.** Two grounds, and neither reaches this half. Issue #6 widened
+`utilisation._cited_claim_ids` so that a world-model *container* it cannot walk is
+skipped rather than raised through, and it closed every container that walk
+touches — three of which, `gaps`, `capabilities[].outcome_classes` and
+`entities[].invariants`, are walks the same change had just added, so it was
+cleaning up after itself as much as inheriting a hole. It never touched the
+`01-claims/` path. Underneath that sat a prior ruling, recorded in
+`tests/unit/test_summary.py::test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run`
+rather than here: these shapes were to be guarded in `summary.py` and not widened
+in `utilisation.py`, on the grounds that `run-summary`'s "Present but unreadable"
+marker is a signal a widening would delete. That ruling was half overturned and
+half left standing, which is why a reader now finds two records of one decision —
+and it is the main reason this entry exists, so the split is on the record here
+instead of only in a docstring a reader has to already know to open.
+
+**The exit-code argument reaches both halves equally, and this entry must not be
+read as saying otherwise.** Each shape in the table takes two reports to exit 1
+on a readable run, which is the same breach the world-model half was widened to
+close. What keeps this half open is scope and authorisation — only the
+world-model half was ruled in — not the contract. If you are about to close it,
+the thing to settle first is what `run-summary` should render once
+`claim_utilisation` no longer raises, because that marker is what the prior ruling
+was protecting.
+
+### `check_coverage` and `_claim_index` read their containers unguarded, and a gate has a findings channel where a report does not
+
+Two readers in `refs.py`, both live, both surfaced while the reports beside them
+were being widened.
+
+`check_coverage` builds `gap_ids = {g["id"] for g in world.get("gaps", [])}`, and
+spells the world model's `goals` and the scenario list the same way. Measured on a
+sealed toy run with `"gaps": "nope"`: `TypeError: string indices must be integers`
+out of that comprehension, because iterating a string yields characters that then
+get indexed.
+
+`_claim_index` does `payload["claims"]` and then `claim["id"]` with no guard on
+either, so each shape in the entry above raises out of layer 2 as well — measured
+at those two lines. What makes it worth a line rather than a shrug is its
+neighbour: `_claims_by_artifact`, the next function in the file, guards both —
+`_as_list` on the array, `isinstance(claim, dict)` on each member — and that
+function is *new*, written directly beneath the unguarded one by the same change
+that forced read coverage. So one reader of `01-claims/` in this module is total,
+the one immediately above it is not, and the second was written without the first
+being touched.
+
+**Ruled out of scope rather than overlooked, on the distinction the entry above
+turns on.** A layer-2 checker that raises degrades to an exit 1 carrying one
+`[internal]` finding — measured, for every shape named here — which is a bad
+finding but is still a finding, in a channel `check-refs` has and a report does
+not. So the reports promise is *breached* by the cases above and merely *served
+badly* by these, and only the breach was in scope. Nor did that change widen
+this path: it touched `utilisation.py`'s world-model walk and added the
+`inputs_seen` checker, and left every reader here as it was. It did notice —
+`check_world_model` carries a parenthesis saying `check_coverage` reads
+`world["gaps"]` — which is how a comment ends up recording an open hole and this
+file ends up recording the ruling on it.
+
+Reachable only by a hand-edit or a tampered artifact: measured, layer 1 exits 1
+on every one of these shapes at the stage that wrote it — `validate --stage
+extract` for the claims spellings, `validate --stage reconcile-seal` for the
+`gaps` ones — which lowers the priority without closing it, per this file's own
+convention. The fix is `_as_list` plus an
+`isinstance` at each site, which is how the rest of the module already spells
+this; its only real cost is deciding which findings a partially-walked world model
+should still produce, and nobody has measured that.
+
 ### `survey`, `intake` and `adopt-projection` sit outside the exception net
 
 `cli.py` wraps its subcommand dispatch in a catch-all that converts an
@@ -1749,6 +1956,51 @@ gate.
 The gap fixture's forbidden-substring list **is its specification.** Do not
 relax it to make prose easier; if a word is truly unavoidable, remove it and say
 so.
+
+### Two committed recordings predate the requirement that every element cite a claim
+
+`tests/fixtures/toy-contradiction/recorded/01-world-model.json` and
+`tests/fixtures/toy-gap/recorded/01-world-model.json` are committed live output of
+the superseded single-dispatch `rb-reconcile`, and neither satisfies the
+world-model schema any more. Measured with `validate.validate_artifact` against
+`world-model-0.1.json` as it now stands: **15 findings for the contradiction
+recording and 19 for the gap recording, every one of them `'claims' is a required
+property`**, landing on each recording's outcome classes, its entities'
+invariants and its gaps — the three `$defs` that gained a required `claims` array
+when read coverage was forced. Nothing was wrong with the recordings when they
+were made. Nothing asked for the array then.
+
+They are not red, and it takes two facts rather than one to see why.
+`tests/unit/test_refusals_live.py` reads them with `read_json` and asserts on
+their content, never against a schema — so `make live` is not quietly broken
+either — and no test anywhere validates a `recorded/` payload. And `check-refs`
+over a bare `recorded/` directory already exits 1: measured on the gap recording,
+every finding a `no such claim`, because a lone world model has no `01-claims/` to
+resolve its citations against. There is no gate whose reading of these two files
+changes.
+
+So the debt is evidential rather than red — two records of what a prompt did at
+one commit, in a shape the schema no longer accepts, sitting in the fixture tree a
+reader calibrates from.
+
+**Why it is parked, and note that two independent arguments hold it there.** The
+first is this project's rule about fabricated evidence: re-recording is a
+dispatch, and hand-writing `claims` arrays into committed model output would
+invent the only behavioural evidence this project has. A reasoned number presented
+as an observed one has shipped here once and had to be retracted; a reasoned
+*citation* is the same defect with a longer reach, because a later reader would
+take it as a measurement of what a pass chose to cite. The second is already in
+this file, under the coverage-denominator entry: these two recordings are the last
+place `refs.check_world_model`'s denominator arithmetic is a real check on a
+number a *prompt* wrote rather than an identity over numbers code derived, so
+refreshing them for tidiness would close that observation. Both arguments point
+the same way, and the second is why this is not a chore somebody should just do.
+
+What this means for you: **do not read those two files as examples of current
+schema shape.** They are records of a dispatch. The re-record is owed whenever one
+of the `reconcile-*` skills is next dispatched for real against either fixture,
+and when it happens it spends the denominator observation above — a trade to make
+deliberately rather than in passing.
 
 ### Three smaller test-accuracy residues
 

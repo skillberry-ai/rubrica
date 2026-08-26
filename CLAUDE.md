@@ -222,12 +222,15 @@ are judgments rather than list entries:
   `gate-brief` composes what already exists into the reading surface at each
   human gate: at gate 0 the objective verdict, the predicted-vs-observed surface
   divergence, grouped declines, the slice table and every group the slicer split
-  across more than one slice; the reconcile sweep plus utilisation and implied
-  size at gate 1; the coverage matrix at gate 2; the verdict tally at gate 3.
+  across more than one slice; the reconcile sweep plus per-input utilisation,
+  per-pass read coverage and implied size at gate 1; the coverage matrix at gate
+  2; the verdict tally at gate 3.
   Gate 1's sweep is an **aggregate, not a per-subject tally** — how many subjects
   cover how many claims, how many subjects were swept, how many contradictions
   were recorded, and, only when any were, the tally by `resolution` with
-  `unresolved` first.
+  `unresolved` first. Gate 1's read coverage is **per pass, not per input**: each
+  owning pass's own-kind claims cited over total, and under it only the input rows
+  that dropped a claim, each beside the `note` the drop required.
 - `survey` is `intake`'s counterpart for the corpus path: it walks a corpus,
   digests each candidate, and mints the run, but writes `00-catalogue.json`
   instead of a manifest — there is nothing to extract from yet, because nothing
