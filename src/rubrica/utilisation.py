@@ -61,6 +61,22 @@ def _cited_claim_ids(run: RunPaths) -> set[str] | None:
     for group in ("capabilities", "entities", "actors", "goals"):
         for item in world.get(group, []):
             cited.update(item.get("claims", []) or [])
+    # The three nested sites. `$defs/invariant`, `$defs/outcome_class` and
+    # `$defs/gap` carried no `claims` array at all until issue #6, so an
+    # invariant's provenance had to go on its entity or into `description`
+    # prose. Measured on run-20260823-112746 while that was still true:
+    # `invariant` claims were cited 0 of 55 times and `outcome_class` 7 of 62,
+    # with 24 more appearing only inside prose -- 117 of 434 claims, 27% of
+    # the corpus, that this function could not see. Walking the children is
+    # what makes those citations structural rather than prose.
+    for capability in world.get("capabilities", []):
+        for outcome_class in capability.get("outcome_classes", []) or []:
+            cited.update(outcome_class.get("claims", []) or [])
+    for entity in world.get("entities", []):
+        for invariant in entity.get("invariants", []) or []:
+            cited.update(invariant.get("claims", []) or [])
+    for gap in world.get("gaps", []) or []:
+        cited.update(gap.get("claims", []) or [])
     # `refs.check_world_model` (refs.py:464-467) already resolves contradictions[].claim_a
     # and claim_b as claim references -- it reports one as a finding if it does not
     # resolve. A definition of "cited" that excludes them would disagree with that

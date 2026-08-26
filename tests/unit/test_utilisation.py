@@ -16,9 +16,10 @@ from __future__ import annotations
 
 import json
 
+from rubrica.artifacts import read_json, write_json
 from rubrica.paths import RunPaths
 from rubrica.refs import check_claim_utilisation
-from rubrica.utilisation import claim_utilisation
+from rubrica.utilisation import _cited_claim_ids, claim_utilisation
 from tests.toy import build_toy_run
 
 
@@ -115,3 +116,40 @@ def test_partial_utilisation_is_reported_but_is_not_a_finding(tmp_path):
     assert entry["cited"] == 1
     assert entry["percent"] < 100
     assert check_claim_utilisation(run) == []
+
+
+def test_a_claim_cited_only_on_a_child_element_counts_as_cited(tmp_path):
+    """An invariant's, outcome class's or gap's own claims are citations.
+
+    Measured on run-20260823-112746 before this walk existed: 38 claim ids
+    appeared somewhere in the world model and nowhere in this function's
+    result, because the only structured place those three elements had to
+    record provenance was their parent's `claims` array or their own
+    `description` prose. A counter that misses them reports an input as
+    uncited while the world model rests on it -- the self-contradicting gate-1
+    brief issue #6 reports.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    world = read_json(run.world_model)
+    # One id per new site, moved *out* of every existing site so the only way
+    # it can be counted is the new walk.
+    world["capabilities"][0]["claims"] = ["clm-api-001"]
+    world["capabilities"][0]["outcome_classes"][0]["claims"] = ["clm-api-005"]
+    world["entities"][0]["claims"] = ["clm-api-003"]
+    world["entities"][0]["invariants"][0]["claims"] = ["clm-notes-005"]
+    world["gaps"] = [
+        {
+            "id": "gap-x",
+            "subject": "x",
+            "unknown": "x",
+            "why_it_matters": "x",
+            "blocks": ["propose"],
+            "claims": ["clm-notes-006"],
+        }
+    ]
+    write_json(run.world_model, world)
+
+    cited = _cited_claim_ids(run)
+    assert "clm-api-005" in cited, "an outcome class's own claims are not counted"
+    assert "clm-notes-005" in cited, "an invariant's own claims are not counted"
+    assert "clm-notes-006" in cited, "a gap's own claims are not counted"
