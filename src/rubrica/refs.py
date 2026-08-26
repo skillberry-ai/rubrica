@@ -1947,7 +1947,7 @@ def check_input_dispositions(run: RunPaths) -> list[Finding]:
             #
             # An *unreadable* claims file is check_readable's finding, by name. An
             # *absent* one is deliberately nobody's: check_manifest checks the
-            # manifest-to-claims direction only, because "a registered input with
+            # claims-to-manifest direction only, because "a registered input with
             # no claims file yet is the normal state during the extract fan-out",
             # and this checker must not become the place it is reported for the
             # same reason -- the reconcile partials do not exist during that
@@ -1992,6 +1992,15 @@ def check_input_dispositions(run: RunPaths) -> list[Finding]:
             # document first (_as_list's docstring states the rule), and
             # check_verdicts' declared-vs-found comparison guards both sides this
             # same way.
+            #
+            # One behaviour change comes with the guard, and it is deliberate: a
+            # row *missing* `dropped` outright now fails the isinstance and no
+            # clause fires, where the `.get(key, 0)` default this replaced read it
+            # as 0 and could report the arithmetic. Layer 1 owns that absence --
+            # `dropped` is required and `"type": "integer"` in
+            # inputs-seen-0.1.json -- and a property a deterministic gate already
+            # enforces belongs to that gate, not to a second reading of it here
+            # that would report the same defect against a different pointer.
             counts = [row.get(key) for key in ("cited", "dropped", "own_kind_total")]
             if all(isinstance(value, int) for value in counts) and (
                 counts[0] + counts[1] != counts[2]
