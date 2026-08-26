@@ -133,6 +133,14 @@ world-model entity declares. **Nothing anywhere runs world→seed.** No check
 asks whether every entity the world model declares has a collection in the
 seed, or whether that collection holds a single record.
 
+Know what the check *does* reach before you write anything, because it is more
+than the set difference above and less than it looks: inside a collection that is
+present, every record is held to the entity's declared fields in both directions —
+a missing declared field, an undeclared extra one, and a value whose type is not
+the declared one are each a finding. So the hole is not "records are unchecked."
+It is that presence itself is unchecked, and a check written against the records
+lands where one already is.
+
 Measured on the toy run: dropping `tickets` from `scn-empty`'s seed, and
 separately keeping both of its collections present but empty, each leave
 `validate --stage instantiate` **and** `check-refs` at exit 0 with zero
@@ -363,9 +371,13 @@ argument above rather than the throughput one.
 
 ### Every directory a fan-out writes into is created by a member's `Write`, and until 2026-08-23 nothing told the member so
 
-`grep -rn mkdir src/rubrica/` creates exactly three of a run's directories:
-`run.root`, `inputs_dir` and `slices_dir`. Every other one exists only as a side
-effect of a dispatched member's `Write`, which creates parents — `01-claims/`,
+Of a run's directories, `grep -rn mkdir src/rubrica/` creates `run.root`,
+`inputs_dir`, `slices_dir` and `review_dir` — and the property that matters is
+not the count but that **not one of them is a fan-out's output directory.** Re-run
+the grep rather than trusting a number here: this entry said "exactly three" when
+it was written, `review_dir` made it four, and the next code stage to mint a
+directory of its own will make it five without changing anything below. Every other one exists only as a
+side effect of a dispatched member's `Write`, which creates parents — `01-claims/`,
 `03-coverage/`, `04-instances/`, `05-verdicts/`, and, in the staged families,
 `00-dispositions/` and `01-contradictions/`. That is a consistent design, and
 `validate.py` states it plainly for one of them: "a directory that does not exist
@@ -714,23 +726,33 @@ for one run, with the reason recorded in `decisions.md`.
 ### The orchestrator has no lever for `effort`
 
 `rubrica record-stage` records a `model` and an `effort` per stage, and
-`rb-orchestrate`'s prose says where both come from. But **the dispatch
-mechanism cannot supply an effort level.** There is no channel through which
-the orchestrator sets it.
+`rb-orchestrate`'s prose says where both come from. But **there is no channel
+through which the orchestrator sets it.** It dispatches a stage as a subagent,
+and that dispatch carries no effort level.
 
-So every `effort` value in a manifest today is a *characterization* of what was
-run, not a *setting* that made it run that way. The one completed run recorded
-the most neutral characterization available and flagged the assumption rather
-than presenting it as fact — which is the right handling, and is also why you
-should not read an `effort` field as reproducibility information.
-Reproducibility rests on `model` and `skill_sha256`, which do the real work in
-`diff-runs`' comparability precondition.
+Read the heading narrowly, because one grep falsifies the wider claim this entry
+used to make. `scripts/dispatch-stage.sh` **does** have the lever:
+`RUBRICA_EFFORT` reaches `claude -p --effort`, defaulting to `medium`, so a stage
+dispatched by hand through that script runs at an effort somebody chose. What has
+no lever is the orchestrator — the one party that would have to set it for a whole
+run rather than for one stage.
 
-Parked because supplying it is a property of the dispatch mechanism rather than
-of this codebase: nothing in `rubrica` can add a lever the harness does not
-expose. Recording the field anyway is deliberate — the field is where the value
-goes the moment a harness can supply one, and dropping it would lose the
-comparability slot.
+So an `effort` value in a manifest is a *setting* exactly when a human dispatched
+that stage through the harness, and a *characterization* of what was run whenever
+`rb-orchestrate` did — and **nothing in the artifact distinguishes the two.** That
+is the reason not to read the field as reproducibility information even now that
+one path can set it: reproducibility rests on `model` and `skill_sha256`, which do
+the real work in `diff-runs`' comparability precondition. The one completed run
+recorded the most neutral characterization available and flagged the assumption
+rather than presenting it as fact, which is the right handling.
+
+Parked because closing it is a property of the dispatch mechanism rather than of
+this codebase: nothing in `rubrica` can add a lever to a channel the harness does
+not expose, and the harness that does expose one is not the channel a run goes
+through. Recording the field anyway is deliberate, and the harness is the argument
+for it rather than against — the value already exists for by-hand dispatches, so
+dropping the field would lose a slot that is sometimes real and always the place
+an orchestrator-set value would go.
 
 ### Input digests are re-verified within a run, never across two
 
@@ -949,14 +971,26 @@ and why `rb-orchestrate` never dispatches one of them at all.
 
 ### `supported` is ruled from a corpus map, not from the digests
 
-`rb-triage-objective` runs before any candidate has been ruled on, and its input
-is `request` plus a code-computed corpus map: the directory tree, kind and byte
-counts per subtree, the slice labels and their sizes. It reads no digest at all.
-So `supported`, the surfaces it enumerates, and each surface's weight are ruled
-from directory names and byte counts — and a surface ruling made from that view
-can be wrong in ways a reading of the digests would not have been. Two subtrees
-whose names suggest one surface may hold unrelated behaviour; a subtree whose
-name says nothing may hold the corpus's only failure evidence.
+`rb-triage-objective` runs before any candidate has been ruled on, and the input
+it is *instructed* to use is `request` plus a code-computed corpus map: the
+directory tree, kind and byte counts per subtree, the slice labels and their
+sizes. So `supported`, the surfaces it enumerates, and each surface's weight are
+ruled from directory names and byte counts — and a surface ruling made from that
+view can be wrong in ways a reading of the digests would not have been. Two
+subtrees whose names suggest one surface may hold unrelated behaviour; a subtree
+whose name says nothing may hold the corpus's only failure evidence.
+
+**"It reads no digest" is the instruction, not the contract.** This pass declares
+`reads = ["slices", "catalogue"]` and is the only skill in the repository whose
+`reads` names `catalogue` — the one artifact that carries every candidate's
+digest. So the thin view this entry costs is a rule the pass is told to follow
+inside a contract that grants it the thick one, and `check-skills` holds `reads`
+to the artifact vocabulary rather than to any prose, so no gate is watching.
+Measured, and recorded in full by the prose-predicates entry further down this
+file: inverting that prohibition to *may read every digest*, in the skill's own
+Inputs section and in Invariant 1, left the whole unit suite green and `rubrica
+check-skills` at exit 0. Do not read the cost below as bounded by anything
+mechanical.
 
 The trade was made deliberately and the reason is worth keeping. The objective
 decides every subsequent call, and a pass that reads the candidates first
@@ -1662,15 +1696,17 @@ Five were measured, each by **inverting** the claim in a `/tmp` copy under
 `RUBRICA_SKILLS_DIR` — a stronger probe than deletion, because the tokens do not
 vanish and the predicate is handed everything it asks for while the prose now
 says the reverse. Every test in the module stayed green in every case, and
-`rubrica check-skills` exited 0:
+`rubrica check-skills` exited 0. Each is cited by function name rather than by
+line, because this entry carried line numbers once and every one of them had
+moved by the time somebody checked:
 
 | Predicate | Inversion written into the skill |
 |---|---|
-| `:117` `…forbids_reading_candidate_digests` | "you **may** read every field of `candidates[]`, including each candidate's `digest`" |
-| `:122` `…admits_that_a_map_is_thinner_than_the_digests` | "`supported` is a reliable verdict … this pass has no blind spot to flag" |
-| `:139` `…states_which_bytes_weight_sums` | `weight.bytes` sums serialized row size, "never a candidate's own catalogue `bytes`" |
-| `:168` `…explains_predicted_surface_count_is_a_prediction` | the member "has made an error … reconcile the member's count to this prediction" |
-| `:268` `test_the_rule_pass_inverts_the_decline_everything_refusal` | "**Refuse** if you would decline every candidate in your slice" |
+| `test_the_objective_pass_forbids_reading_candidate_digests` | "you **may** read every field of `candidates[]`, including each candidate's `digest`" |
+| `test_the_objective_pass_admits_that_a_map_is_thinner_than_the_digests` | "`supported` is a reliable verdict … this pass has no blind spot to flag" |
+| `test_the_objective_pass_states_which_bytes_weight_sums` | `weight.bytes` sums serialized row size, "never a candidate's own catalogue `bytes`" |
+| `test_the_objective_pass_explains_predicted_surface_count_is_a_prediction` | the member "has made an error … reconcile the member's count to this prediction" |
+| `test_the_rule_pass_inverts_the_decline_everything_refusal` | "**Refuse** if you would decline every candidate in your slice" |
 
 The first is the consequential one. `CLAUDE.md`'s stage table describes
 `triage-objective` as the barrier that "reads the corpus map, **never a
@@ -1681,20 +1717,24 @@ Invariant 1 left the whole unit suite green. The design's bounding constraint is
 prose that nothing checks.
 
 The five are not equally severe, and the difference is the mirror question
-`CLAUDE.md` asks of any proposed guard. `:139`'s property is already gated
-deterministically: `refs.check_objective` recomputes `weight.bytes` from the
-catalogue, so that predicate is redundant belt-and-braces and its vacuity costs
-nothing. `:168`'s is not gated anywhere — a member that quietly reconciles its
-observed surface count to the prediction erases the divergence from the data,
-and `gate-brief`'s predicted-vs-observed surface at gate 0 then has nothing to
-show. `:268` inverts a **refusal condition**, the do-not-refuse that keeps the
-fan-out from stranding on a legitimately all-declines slice, which
-[`rationale.md`](rationale.md) uses as its worked example of decorativeness.
+`CLAUDE.md` asks of any proposed guard. The `weight_sums` property is already
+gated deterministically: `refs.check_objective` recomputes `weight.bytes` from
+the catalogue, so that predicate is redundant belt-and-braces and its vacuity
+costs nothing. The `predicted_surface_count` one is not gated anywhere — a member
+that quietly reconciles its observed surface count to the prediction erases the
+divergence from the data, and `gate-brief`'s predicted-vs-observed surface at
+gate 0 then has nothing to show. The `decline_everything` one inverts a **refusal
+condition**, the do-not-refuse that keeps the fan-out from stranding on a
+legitimately all-declines slice, which [`rationale.md`](rationale.md) uses as its
+worked example of decorativeness.
 
 **The remedy is known because it was measured, in the same file.** Inverting
-`rb-triage-objective`'s primary refusal condition left the unwindowed `:178`
-green and turned the windowed `:184` **red**. Same prose, same file, same
-section: the shape of the predicate is the whole difference. The windowed
+`rb-triage-objective`'s primary refusal condition left the unwindowed
+`test_the_objective_pass_refuses_on_an_absent_objective_and_not_on_an_unsupported_one`
+green and turned the windowed
+`test_the_objective_pass_refuses_before_the_fanout_is_dispatched` **red**. Same
+prose, same file, same section — both read `5. Refusal conditions` of the same
+skill: the shape of the predicate is the whole difference. The windowed
 predicates also hold in the other direction — the two tightest were recomputed
 from the shipped prose and their docstrings' stated distances are exact (the
 objective's Invariants anchor sits 142 chars from the nearest prohibition word
@@ -1702,9 +1742,10 @@ inside a radius-300 forward window, 2.11x; the audit's `deficiency_notes` anchor
 208 chars from `your job` inside radius 500, 2.40x), so the 2x floor holds and no
 window on this branch is a length pin in disguise.
 
-One predicate fails in the opposite direction: `:551` asserts `"is also a claim"
-in body or "is itself a claim" in body`, and rewording the audit's Output prose
-to "is a claim in its own right" — meaning identical — turns it red. The
+One predicate fails in the opposite direction:
+`test_the_audit_pass_writes_both_blocks_even_when_empty` asserts `"is also a
+claim" in body or "is itself a claim" in body`, and rewording the audit's Output
+prose to "is a claim in its own right" — meaning identical — turns it red. The
 module's `_norm` handles whitespace reflow; nothing handles synonym. The
 predicate is the wrong one, not the prose.
 
