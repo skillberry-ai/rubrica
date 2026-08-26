@@ -172,6 +172,50 @@ def _claim_ids(run: RunPaths) -> set[str]:
     return set(_claim_index(run))
 
 
+def _claims_by_artifact(run: RunPaths) -> dict[str, list[dict]]:
+    """artifact_id -> its claim records, from 01-claims/ itself.
+
+    Keyed on the payload's own `artifact_id` rather than the filename, because
+    that is the field every other checker resolves against and a mismatch
+    between the two is check_manifest's finding, not this reader's.
+    """
+    out: dict[str, list[dict]] = {}
+    for path in list_json(run.claims_dir):
+        payload = _load(path)
+        if not isinstance(payload, dict):
+            continue
+        artifact_id = payload.get("artifact_id")
+        if not isinstance(artifact_id, str):
+            continue
+        out.setdefault(artifact_id, []).extend(
+            claim for claim in _as_list(payload.get("claims")) if isinstance(claim, dict)
+        )
+    return out
+
+
+def _claim_refs_in(node: Any) -> list[str]:
+    """Every id in every `claims` array anywhere in a document.
+
+    A walk rather than a per-part list of paths: the four reconcile partials nest
+    their citations differently -- an entity carries them on itself and on each
+    invariant, the outcomes part two levels down inside an `outcomes` record --
+    and a path list would need revising by whoever nests a new element, which is
+    the drift this module's "$ref, do not restate" rule refuses elsewhere. An
+    inputs_seen row has no `claims` key, so the accounting cannot count itself.
+    """
+    found: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "claims":
+                found.extend(v for v in _as_list(value) if isinstance(v, str))
+            else:
+                found.extend(_claim_refs_in(value))
+    elif isinstance(node, list):
+        for item in node:
+            found.extend(_claim_refs_in(item))
+    return found
+
+
 def _cells(world: dict) -> set[tuple[str, str]]:
     """Every (capability_id, outcome_class_id) pair the world model declares."""
     return {
@@ -1811,6 +1855,128 @@ def check_world_model(run: RunPaths) -> list[Finding]:
     return out
 
 
+# Which claim kinds each reconcile pass is accountable for. The six kinds in
+# claims-0.1.json partition onto the four passes that own one, and that is what
+# makes a per-pass number possible at all: measured on run-20260823-112746,
+# per-kind citation ran capability 110/135 (the pass that read 23/23 files) and
+# goal 2/38 (the pass that read 3/23), while the run's one aggregate utilisation
+# figure was 33.6% -- the average that hid both. reconcile-gaps owns no kind, and
+# reconcile-subjects and reconcile-contradict need no accounting because
+# check_subjects already makes the cover total.
+PASS_OWN_KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("capabilities_part", ("capability",)),
+    ("entities_part", ("entity", "invariant")),
+    ("outcomes_part", ("outcome_class",)),
+    ("goals_part", ("actor", "goal")),
+)
+
+
+def check_input_dispositions(run: RunPaths) -> list[Finding]:
+    """Each reconcile pass's accounting of the inputs it read, recomputed.
+
+    Issue #6 measured a pass's read coverage of 01-claims/ varying 3/23 to 23/23
+    across byte-identical dispatches, with claims in files it never opened cited
+    at exactly 0/167. Neither check layer could see it: a skimmed read produces a
+    well-formed partial, and utilisation is a lagging aggregate that averages a
+    diligent pass with a skimming one.
+
+    So every number a row declares is recomputed here -- `own_kind_total` from
+    the claims file, `cited` from the part's own citations -- and `own_kind_total`
+    is the forcing function, because it is the one figure a pass cannot state for
+    a file it never opened.
+
+    What this deliberately does *not* report: a row whose own_kind_total is
+    positive and whose cited is zero. Such a row already carries a required note,
+    so the drop is on the record and belongs to the human at gate 1. Making it a
+    finding would fail a repair round that cannot repair anything, and would put
+    a coverage judgment behind an exit code -- the threshold
+    check_claim_utilisation refuses for a reason its own docstring measures.
+    """
+    manifest = _load(run.manifest)
+    if manifest is None:
+        return []
+    declared = [
+        entry["artifact_id"]
+        for entry in _as_list(manifest.get("inputs"))
+        if isinstance(entry, dict) and isinstance(entry.get("artifact_id"), str)
+    ]
+    by_artifact = _claims_by_artifact(run)
+
+    out: list[Finding] = []
+    for attribute, own_kinds in PASS_OWN_KINDS:
+        path = getattr(run, attribute)
+        part = _load(path)
+        if part is None:
+            # An absent or unreadable partial is reconcile.seal's finding and
+            # layer 1's; reporting it again here would double-count one defect
+            # and name a second artifact for it.
+            continue
+
+        # `path=path` binds the loop variable deliberately: ruff's B023 fires
+        # otherwise, and it would be a real bug -- every finding in the run would
+        # be reported against the last partial this loop reached.
+        def report(pointer: str, message: str, path: Path = path) -> None:
+            out.append(Finding(path, "refs", pointer, message))
+
+        rows = [row for row in _as_list(part.get("inputs_seen")) if isinstance(row, dict)]
+        cited_ids = set(_claim_refs_in(part))
+        seen: set[str] = set()
+
+        for i, row in enumerate(rows):
+            artifact_id = row.get("artifact_id")
+            if not isinstance(artifact_id, str):
+                continue
+            seen.add(artifact_id)
+            if artifact_id not in declared:
+                report(
+                    f"/inputs_seen/{i}/artifact_id",
+                    f"no such input: {artifact_id}; the accounting must be over "
+                    "manifest.inputs, and a row for an artifact the manifest does not "
+                    "name is a row about nothing",
+                )
+                continue
+            # A claims file that is absent or unreadable contributes no claims, so
+            # this counts 0 for it and reports only the disagreement it genuinely
+            # sees. Reporting the absence itself belongs to the checker that owns
+            # 01-claims/ -- check-refs over an unreadable claims directory once
+            # produced four fabricated `no such claim` findings against a correct
+            # world model, and naming the wrong artifact is what sends the
+            # orchestrator's one bounded repair at a file that is fine.
+            own = [
+                claim
+                for claim in by_artifact.get(artifact_id, [])
+                if claim.get("kind") in own_kinds
+            ]
+            actual_cited = sum(1 for claim in own if claim.get("id") in cited_ids)
+            if row.get("own_kind_total") != len(own):
+                report(
+                    f"/inputs_seen/{i}/own_kind_total",
+                    f"declared own_kind_total={row.get('own_kind_total')} for "
+                    f"{artifact_id} but 01-claims/ holds {len(own)} claim(s) of "
+                    f"{', '.join(own_kinds)}",
+                )
+            if row.get("cited") != actual_cited:
+                report(
+                    f"/inputs_seen/{i}/cited",
+                    f"declared cited={row.get('cited')} for {artifact_id} but this "
+                    f"artifact's claims appear {actual_cited} time(s) in this part",
+                )
+            if row.get("cited", 0) + row.get("dropped", 0) != row.get("own_kind_total"):
+                report(
+                    f"/inputs_seen/{i}",
+                    f"cited + dropped does not equal own_kind_total for {artifact_id}",
+                )
+
+        for artifact_id in [a for a in declared if a not in seen]:
+            report(
+                "/inputs_seen",
+                f"no row for input {artifact_id}; the accounting must be total over "
+                "manifest.inputs, or a pass that never opened a claims file is "
+                "indistinguishable from one that opened it and cited nothing",
+            )
+    return out
+
+
 def check_claim_utilisation(run: RunPaths) -> list[Finding]:
     """An input whose claims the world model cites *none* of.
 
@@ -2762,6 +2928,10 @@ def check_all(run: RunPaths) -> list[Finding]:
     findings.extend(check_subjects(run))
     findings.extend(check_contradiction_parts(run))
     findings.extend(check_outcomes(run))
+    # After the partials are readable, before anything reasons about the model
+    # assembled from them: the accounting is a property of what each pass wrote,
+    # so it is answerable while the parts are still separate documents.
+    findings.extend(check_input_dispositions(run))
     findings.extend(check_world_model(run))
     findings.extend(check_claim_utilisation(run))
     findings.extend(check_scenarios(run))
