@@ -1753,8 +1753,9 @@ def check_world_model(run: RunPaths) -> list[Finding]:
     #
     # `_as_list` at every level, `isinstance` on each element, and `isinstance` on
     # each claim entry, because these loops reach shapes nothing reached before.
-    # `gaps` in particular was iterated by no checker at all, so every malformed
-    # spelling of it was clean here and an unguarded loop makes it raise instead.
+    # `gaps` in particular was iterated by no loop in this function, so every
+    # malformed spelling of it was clean here and an unguarded loop makes it raise
+    # instead. (check_coverage does read `world["gaps"]`, for its hole references.)
     # Three measurements, each of a real defect an earlier draft of this block had:
     #
     #   - `"gaps": null` and `"gaps": "x"` raised AttributeError out of a layer-2
