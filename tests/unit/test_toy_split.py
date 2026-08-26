@@ -140,3 +140,44 @@ def test_a_cross_artifact_contradiction_is_findable_inside_one_subject():
     covered_by = {s["id"]: set(s["claims"]) for s in parts["subjects"]["subjects"]}
     for subject_id, contradiction in found:
         assert {contradiction["claim_a"], contradiction["claim_b"]} <= covered_by[subject_id]
+
+
+# own_kind_total / cited / dropped for every (pass, artifact) pair in the golden
+# corpus, read off the fixture by hand and typed out here.
+_EXPECTED_INPUTS_SEEN: dict[str, dict[str, tuple[int, int, int]]] = {
+    "capabilities": {"api-json": (5, 5, 0), "notes-md": (0, 0, 0), "trace-json": (0, 0, 0)},
+    "entities": {"api-json": (2, 2, 0), "notes-md": (2, 2, 0), "trace-json": (0, 0, 0)},
+    "outcomes": {"api-json": (2, 2, 0), "notes-md": (1, 1, 0), "trace-json": (2, 1, 1)},
+    "goals": {"api-json": (0, 0, 0), "notes-md": (5, 5, 0), "trace-json": (0, 0, 0)},
+}
+
+
+def test_the_derived_rows_match_a_hand_written_table():
+    """A literal, where every other expectation in this module is derived.
+
+    Deliberate, and the only expectation in the repository that neither walk can
+    satisfy by agreeing with itself. tests.toy._inputs_seen and
+    refs._claim_refs_in are line-for-line the same walk, so every test that
+    builds its expectation by mutating what the fixture produced would still
+    pass with a mirrored bug in both -- two identical algorithms agreeing is not
+    evidence. This table was read off tests/fixtures/toy/ by hand, so it fails
+    if either walk drifts, and it fails if the fixture's claim kinds change
+    without someone noticing. Issue #6, where read coverage varied 3/23 to 23/23
+    across byte-identical dispatches, is exactly the class of defect that a
+    self-confirming measurement cannot see.
+
+    trace-json's outcomes row is the one non-zero drop, so it is also the one
+    row required to carry a note.
+    """
+    parts = split_world_model()
+    for key, expected in _EXPECTED_INPUTS_SEEN.items():
+        rows = {row["artifact_id"]: row for row in parts[key]["inputs_seen"]}
+        assert set(rows) == set(expected), key
+        for artifact_id, (own_kind_total, cited, dropped) in expected.items():
+            row = rows[artifact_id]
+            assert (row["own_kind_total"], row["cited"], row["dropped"]) == (
+                own_kind_total,
+                cited,
+                dropped,
+            ), f"{key} / {artifact_id}"
+            assert ("note" in row) is bool(dropped), f"{key} / {artifact_id}"
