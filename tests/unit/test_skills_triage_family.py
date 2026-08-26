@@ -128,12 +128,22 @@ def test_the_objective_pass_declares_its_exact_contract():
     """The brief's contract, verbatim: the plan alone -- never the catalogue,
     the shards, or a per-slice dispositions part. The catalogue left this list
     when 00-slices.json started carrying the facts this pass needs: reading
-    472,799 bytes for the 21KB it used was the residual half of issue #3.
-    Those absolutes are the tau2 catalogue this design was measured against; a
-    re-run of the same corpus later measured 480,399 bytes against a 21,041-byte
-    facts block. The catalogue figure moves with the checkout, the facts block
-    barely does -- it is bounded by how many candidates the run admitted rather
-    than by how large they are, which is the whole point."""
+    472,799 bytes for the ~21KB it used was the residual half of issue #3.
+
+    That the block is bounded by how many candidates a run admitted rather than
+    by how large they are is a **code** fact, readable in slices.py and needing
+    no measurement: candidate_bytes is one integer per candidate id, excluded is
+    capped at MAX_EXCLUDED_ENTRY_BYTES, and request and policy are fixed-size
+    verbatim copies.
+
+    What two runs of the same corpus **observed** is narrower and is a
+    controlled comparison only because the candidate count was the same 443 in
+    both. Against that fixed count the catalogue grew 472,799 -> 480,399 bytes,
+    while the block's four components came out byte-identical (candidate_bytes
+    18,204, excluded 1,062, policy 349, request 303 in each) and its in-file
+    share moved 5 bytes, 22,134 -> 22,129. Without the count held fixed those
+    two points would support "the candidate set did not change" exactly as well,
+    which is why the count is named here and not left implied."""
     skill = _objective()
     assert skill.contract["stage"] == "triage-objective"
     assert skill.contract["reads"] == ["slices"]

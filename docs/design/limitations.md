@@ -1778,28 +1778,33 @@ value inside a band, not a value with room to spare.
 smallest radius at which a given piece of prose goes green. A *ceiling* is the
 largest radius at which inverted prose still goes red — last-sound rather than
 first-vacuous, so both edges of a band are inclusive and 747 is a radius that
-works. And the window is `body[at - radius : at + radius]`, which is what makes
-the pairs below agree rather than look sloppy: a prohibition *following* the
-anchor needs `distance + len(token)` to fall inside it, while one *preceding* it
-needs `distance` exactly. That is why 28 characters goes green at 33 and 75 goes
+works. And the window is `body[max(0, at - radius) : at + radius]`, which is
+what makes the pairs below agree rather than look sloppy: a prohibition
+*following* the anchor needs `distance + len(token)` to fall inside it, while one
+*preceding* it needs `distance` exactly. That is why 28 characters goes green at 33 and 75 goes
 green at 80, both following, while the 15 of a leading prohibition goes green at
 15.
 
 **The upper edge is a property of the skill's prose, not of the test.** 747
 holds only because the section's fourth `shard` mention sits 743 characters from
-the section's next `never`; any honest edit that puts a prohibition word closer
-to any mention lowers it. Two were tried against the shipped file. A
-meaning-preserving clause appended to that fourth mention's own sentence,
-ending "and a pass that spends it is never bounded again", takes the ceiling to
-**74** — below the shipped radius, past which the predicate passes against a
-skill whose Inputs section grants the opposite permission. One honest sentence
-inserted earlier in the section takes it to **106**; an earlier probe with a
-differently worded insertion measured **333** (reported at the time as vacuous
-from 334), which still leaves only 33 characters between the ceiling and the
-shipped radius. Every one of these figures depends entirely on where the new
-prohibition word lands, which is the point: nothing in the suite reports any of it, because the shipped prose still
-passes. A radius that is sound today is sound at the pleasure of prose nobody is
-watching for that effect.
+the section's next `never` — and by the rule above that is where 748 comes from,
+`743 + len("never")`, so the band's upper edge is derivable from the distance
+rather than resting on the sweep alone. Any honest edit that puts a prohibition
+word closer to any mention lowers it. Two were tried against the shipped file, and both are
+printed here because a ceiling figure whose perturbation is not quoted cannot be
+audited from the page — the same objection that got the misaimed sentence below
+printed. Appending a meaning-preserving clause to that fourth mention's own
+sentence, so that it ends "and a pass that spends it is never bounded again",
+takes the ceiling to **74**. Inserting one honest sentence earlier in the
+section — "A slice's label is a directory name, and a directory name is never a
+reading of what the files under it contain." ahead of the `excluded` paragraph —
+takes it to **106**. Both land *below* the shipped radius of 300, which is the
+part that matters: past its ceiling the predicate goes green against a skill
+whose Inputs section grants the opposite permission. Neither edit is one a
+reviewer would question, and the figure each produces depends entirely on where
+its new prohibition word lands. Nothing in the suite reports any of it, because
+the shipped prose still passes. A radius that is sound today is sound at the
+pleasure of prose nobody is watching for that effect.
 
 **Neither probe direction can detect that.** Deletion and inversion are both run
 against the real prose at authoring time; soundness after some future honest
