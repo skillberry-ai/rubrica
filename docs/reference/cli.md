@@ -452,14 +452,24 @@ Required: `--run RUN`. Optional: `-o PATH` / `--output PATH` — where to write
 the page, defaulting to `<run>/run-summary.html`.
 
 **A report, not a gate: it always exits clean on a readable run.** Every
-artifact it reads is optional and an absent one renders as a stated absence, so
-a run that stopped at `extract` produces a page saying so rather than an error.
-The output is derived rather than an artifact: no schema, outside the numbered
-contract, and read by no stage.
+artifact it reads is optional, so a run that stopped at `extract` produces a page
+saying so rather than an error. Absence and malformation are stated separately,
+because the stage spine tests whether an artifact *exists* and each section tests
+whether it can be *read*: an artifact that is not there renders as `Not present`,
+and one that is there and unreadable — bad JSON, a document of the wrong shape,
+a permission, bytes that are not UTF-8 — renders as `Present but unreadable`, with
+the reason. That second case is a defect `validate --stage X` will name; it is
+still exit 0 here, and a stage bolded in the spine above such a section is the two
+tests disagreeing about one artifact on purpose. The output is derived rather than
+an artifact: no schema, outside the numbered contract, and read by no stage.
 
 The page is self-contained — inline CSS and JS, no external asset, no network
 — so it still reads when the run is archived. Links to sibling artifacts are
-relative, so the page travels with the run.
+relative, so the page travels with the run: written to the default destination
+they resolve, and written elsewhere with `-o` the page still reads while its
+links do not resolve. The page says so at the top rather than leaving an
+operator to discover it, since `-o` is exactly the flag reached for on a
+read-only run directory.
 
 ```bash
 rubrica run-summary --run runs/run-20260806-123005

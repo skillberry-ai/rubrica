@@ -334,9 +334,20 @@ def test_header_absent_names_the_artifact_it_looked_for(tmp_path):
 
 
 def test_header_survives_a_malformed_manifest(tmp_path):
+    """`Malformed`, not `Absent`: the manifest is right there, and the spine says so.
+
+    The spine marks `intake` produced from the file existing, so an `Absent` here
+    would put "3 of 22 stages produced an artifact" on the same page as "Not
+    present: manifest.json" -- two tests of one artifact, rendered as a
+    contradiction the page never reconciles.
+    """
     run = build_toy_run(tmp_path / "runs", upto="intake")
     run.manifest.write_text("{not json", encoding="utf-8")
-    assert isinstance(summary.header(RunPaths(run.root)), summary.Absent)
+    got = summary.header(RunPaths(run.root))
+    assert isinstance(got, summary.Malformed)
+    assert not isinstance(got, summary.Absent), "the two markers are siblings, not a subclass"
+    assert got.what == "manifest.json"
+    assert got.why, "a malformation says why, or the reader cannot tell it from an absence"
 
 
 def test_header_survives_a_manifest_whose_stages_is_not_a_mapping(tmp_path):
@@ -544,6 +555,27 @@ def _objective_document(run_id: str) -> dict:
     }
 
 
+def _one_admit() -> list[dict]:
+    """A `dispositions` array that satisfies triage-0.1.json's `minItems: 1`.
+
+    Three fixtures in this file carried `"dispositions": []`, which the schema
+    forbids -- a triage record with no disposition is not one triage-seal can
+    write. None of the three reads `dispositions` at all, so the empty array cost
+    nothing where it stood and everything when it was copied: CLAUDE.md names the
+    copyable-invalid-fixture hazard, and a fixture nobody validates is exactly how
+    a stage gets taught the wrong shape.
+    """
+    return [
+        {
+            "candidate_id": "api-json",
+            "disposition": "admit",
+            "priority": 1,
+            "reason": "the tool block",
+            "authority": "triage",
+        }
+    ]
+
+
 def test_objective_reads_the_review_and_its_surfaces(tmp_path):
     from rubrica.artifacts import write_json
 
@@ -603,6 +635,7 @@ def test_objective_reads_the_objective_file_not_the_sealed_triage_copy(tmp_path)
     reading the wrong one fails rather than coinciding.
     """
     from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
 
     run = build_toy_run(tmp_path / "runs", upto="intake")
     write_json(run.objective, _objective_document(run.root.name))
@@ -618,8 +651,13 @@ def test_objective_reads_the_objective_file_not_the_sealed_triage_copy(tmp_path)
                     {"name": "sealed", "evidence": ["x"], "weight": {"candidates": 9, "bytes": 9}}
                 ],
             },
-            "dispositions": [],
+            "dispositions": _one_admit(),
+            "deficiencies": [],
+            "projections": [],
         },
+    )
+    assert validate_artifact(run.triage, "triage") == [], (
+        "the sealed fixture must be the shape triage-seal actually writes"
     )
     got = summary.objective(run)
     assert got.declared == "breadth"
@@ -911,6 +949,7 @@ def test_deficiencies_renders_the_empty_string_for_one_nothing_would_close(tmp_p
     renders empty" cannot pass.
     """
     from rubrica.artifacts import write_json
+    from rubrica.validate import validate_artifact
 
     run = build_toy_run(tmp_path / "runs", upto="intake")
     write_json(
@@ -918,13 +957,17 @@ def test_deficiencies_renders_the_empty_string_for_one_nothing_would_close(tmp_p
         {
             "schema_version": "0.1",
             "run_id": run.root.name,
-            "dispositions": [],
+            "objective_review": _objective_document(run.root.name)["objective_review"],
+            "dispositions": _one_admit(),
             "deficiencies": [
                 {"deficiency_id": "def-1", "subject": "errors", "statement": "no error path"},
                 {"deficiency_id": "def-2", "subject": "auth", "statement": "no auth model"},
             ],
             "projections": [_projection("prj-2", ["def-2"], "author an auth note")],
         },
+    )
+    assert validate_artifact(run.triage, "triage") == [], (
+        "the fixture must be the shape triage-seal actually writes"
     )
     got = {d.id_: d.projection for d in summary.deficiencies(run)}
     assert got["def-1"] == ""
@@ -1005,6 +1048,12 @@ def test_deficiencies_survives_a_projection_whose_closes_is_not_a_list_of_ids(tm
     list key). Both must leave the deficiency rendered and unpaired rather than
     raising, and the third projection is well-formed so that "paired nothing"
     cannot pass either.
+
+    This is the one fixture here that triage-0.1.json rejects, and only in the
+    field under test: `closes` is `{"type": "array", "minItems": 1}`, so a string
+    or a nested list is exactly the hand edit being modelled. Every *incidental*
+    invalidity is gone -- `objective_review` and a real disposition are present --
+    so nothing else about the document is a shape the seal could not write.
     """
     from rubrica.artifacts import write_json
 
@@ -1018,7 +1067,8 @@ def test_deficiencies_survives_a_projection_whose_closes_is_not_a_list_of_ids(tm
         {
             "schema_version": "0.1",
             "run_id": run.root.name,
-            "dispositions": [],
+            "objective_review": _objective_document(run.root.name)["objective_review"],
+            "dispositions": _one_admit(),
             "deficiencies": [
                 {"deficiency_id": "def-1", "subject": "errors", "statement": "no error path"},
                 {"deficiency_id": "def-2", "subject": "auth", "statement": "no auth model"},
@@ -1240,9 +1290,12 @@ def test_world_model_absent_names_the_artifact_it_looked_for(tmp_path):
 
 
 def test_world_model_survives_a_malformed_world_model(tmp_path):
+    """Present and unreadable, which is not the pre-seal absence above."""
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     run.world_model.write_text("{not json", encoding="utf-8")
-    assert isinstance(summary.world_model(run), summary.Absent)
+    got = summary.world_model(run)
+    assert isinstance(got, summary.Malformed)
+    assert got.what == "01-world-model.json"
 
 
 def test_utilisation_totals_and_names_uncited_artifacts(tmp_path):
@@ -1374,7 +1427,12 @@ def test_utilisation_absent_says_the_seal_has_not_run(tmp_path):
     second about a run in the first state.
     """
     run = build_toy_run(tmp_path / "runs", upto="extract")
-    assert summary.utilisation(run).what == "claim utilisation (no world model yet)"
+    got = summary.utilisation(run)
+    # `what` names the report and `why` the reading, which is the split every
+    # marker now takes: ten of the twelve absences were bare paths and two were
+    # sentences, and nothing said which a reader should expect.
+    assert (got.what, got.why) == ("claim utilisation", "no world model yet")
+    assert isinstance(got, summary.Absent), "not reaching the seal is not a malformation"
 
 
 def test_gaps_carry_every_field_including_the_blocks_array(tmp_path):
@@ -1606,13 +1664,19 @@ def test_contradictions_on_an_empty_directory_is_absent(tmp_path):
     assert isinstance(summary.contradictions(run), summary.Absent)
 
 
-def test_contradictions_on_an_unreadable_directory_is_absent(tmp_path):
+def test_contradictions_on_an_unreadable_directory_is_malformed_not_absent(tmp_path):
     """The `except` around `list_json`, which raises `UsageError` -- not `OSError`.
 
     That is why this handler cannot be the `except OSError` the spine uses:
     `paths.list_json` catches the OSError itself and re-raises it as a
     `UsageError`, a ValueError subclass, so an unreadable directory would escape
     an OSError-only guard and take the whole page with it.
+
+    `Malformed` rather than `Absent`, and the empty-directory test above is the
+    other half: `list_json` answers `[]` for a directory that is not there and
+    *raises* for one it cannot list, so the two branches are two facts. Both name
+    the same directory; only the malformation says the parts are on disk and
+    unreadable.
     """
     if os.geteuid() == 0:
         pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
@@ -1620,8 +1684,9 @@ def test_contradictions_on_an_unreadable_directory_is_absent(tmp_path):
     run.contradictions_dir.chmod(0o000)
     try:
         got = summary.contradictions(run)
-        assert isinstance(got, summary.Absent)
-        assert got.what == "01-contradictions/", "both absence branches name the same directory"
+        assert isinstance(got, summary.Malformed)
+        assert got.what == "01-contradictions/", "both branches name the same directory"
+        assert got.why
     finally:
         run.contradictions_dir.chmod(0o755)
 
@@ -1729,7 +1794,7 @@ def _claims_dir_is_unreadable(run) -> None:
         pytest.param(_claims_dir_is_unreadable, id="UsageError-unreadable-claims-dir"),
     ],
 )
-def test_utilisation_is_absent_rather_than_raising_on_a_readable_run(tmp_path, break_it):
+def test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run(tmp_path, break_it):
     """The one hole measured in this module's never-raise promise, at all seven shapes.
 
     `claim_utilisation` is a report with its own contract and its own callers, and
@@ -1750,19 +1815,25 @@ def test_utilisation_is_absent_rather_than_raising_on_a_readable_run(tmp_path, b
     break_it(run)
     try:
         got = summary.utilisation(run)
-        assert isinstance(got, summary.Absent)
-        assert got.what == "claim utilisation (01-claims/ or 01-world-model.json unreadable)"
+        # `Malformed`: every shape here is an artifact that is *there* and could not
+        # be read, which is a defect `validate` will name -- not a stage that has
+        # not run, which is what the absence one test above reports.
+        assert isinstance(got, summary.Malformed)
+        assert got.what == "claim utilisation"
+        assert got.why == "01-claims/ or 01-world-model.json unreadable"
     finally:
         run.claims_dir.chmod(0o755)
 
 
 def test_utilisation_absent_reads_differently_from_the_no_world_model_absence(tmp_path):
-    """Two absences, two readings, so they must not share one string.
+    """Two markers, two readings, so they must not render as one line.
 
     "The seal has not run" is a fact about how far the run got; "something in the
     run could not be read" is a defect in an artifact. A page that rendered the
     same line for both would tell a reader with a broken claims file that their run
-    simply had not reached reconcile-seal.
+    simply had not reached reconcile-seal. The marker *type* differs now as well as
+    the words, and both halves are asserted: sharing `what` while differing in type
+    is a distinction the page can still draw, and sharing both is not.
     """
     from rubrica.artifacts import read_json, write_json
     from rubrica.paths import list_json
@@ -1773,7 +1844,9 @@ def test_utilisation_absent_reads_differently_from_the_no_world_model_absence(tm
     payload = read_json(path)
     payload["claims"] = ["oops"]
     write_json(path, payload)
-    assert summary.utilisation(unsealed).what != summary.utilisation(broken).what
+    one, other = summary.utilisation(unsealed), summary.utilisation(broken)
+    assert type(one) is not type(other), "one is an absence, the other a malformation"
+    assert (one.what, one.why) != (other.what, other.why)
 
 
 def test_utilisation_exempts_a_zero_of_zero_input_the_gate_exempts(tmp_path):
@@ -2110,7 +2183,7 @@ def test_coverage_falls_back_to_latest_when_every_round_document_is_unreadable(t
     assert [r.round_ for r in got.rounds] == [3]
 
 
-def test_coverage_on_an_unreadable_directory_is_absent(tmp_path):
+def test_coverage_on_an_unreadable_directory_is_malformed_not_absent(tmp_path):
     """`list_json` raises `UsageError`, a ValueError and *not* an OSError.
 
     The same shape measured against `contradictions`: an `except OSError` here
@@ -2123,10 +2196,30 @@ def test_coverage_on_an_unreadable_directory_is_absent(tmp_path):
     run.coverage_dir.chmod(0o000)
     try:
         got = summary.coverage(run)
-        assert isinstance(got, summary.Absent)
+        assert isinstance(got, summary.Malformed)
         assert got.what == "03-coverage/"
     finally:
         run.coverage_dir.chmod(0o755)
+
+
+def test_coverage_with_no_readable_round_document_is_malformed_not_absent(tmp_path):
+    """The measured I5 shape: the spine bolds `score` while the section denies it.
+
+    A `03-coverage/` holding only a garbage `latest.json` is the run this
+    distinction was found on. The directory exists, so the spine marks `score`
+    produced; nothing in it parses, so this section has no body. Reported as an
+    absence, the one page said both "score produced an artifact" and "03-coverage/
+    is not present".
+    """
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    for path in run.coverage_dir.iterdir():
+        path.unlink()
+    run.coverage_latest.write_text("{not json", encoding="utf-8")
+    got = summary.coverage(run)
+    assert isinstance(got, summary.Malformed)
+    assert got.what == "03-coverage/"
+    produced = {row.name: row.produced for row in summary.stage_spine(run)}
+    assert produced["score"] is True, "the spine counts the directory, so the page must agree"
 
 
 @pytest.mark.parametrize(
@@ -2724,22 +2817,24 @@ def test_scenarios_survives_a_capability_refs_that_is_not_a_list_of_dicts(tmp_pa
     assert len(rows) == 5, "and so are its siblings"
 
 
-def test_scenarios_on_a_document_that_is_not_a_mapping_is_absent(tmp_path):
-    """A `02-scenarios.json` holding a list reads as the artifact not being there.
+def test_scenarios_on_a_document_that_is_not_a_mapping_is_malformed(tmp_path):
+    """A `02-scenarios.json` holding a list is the artifact present and unreadable.
 
     `_mapping`'s reason, at the top of the section rather than inside a row: a
     truthy non-dict reaches `.get` and raises `AttributeError`, and a document that
-    is a JSON array is not a scenarios artifact at all. `Absent` is the honest
-    answer -- there is nothing to tabulate -- and `validate --stage propose` is what
-    names the defect.
+    is a JSON array is not a scenarios artifact at all. `Malformed` is the honest
+    answer -- the file is on disk, the spine counts it, and there is nothing to
+    tabulate -- and `validate --stage propose` is what names the defect.
     """
     from rubrica.artifacts import write_json
 
     run = build_toy_run(tmp_path / "runs", upto="propose")
     write_json(run.scenarios, ["scn-open"])
     got = summary.scenarios(run)
-    assert isinstance(got, summary.Absent)
+    assert isinstance(got, summary.Malformed)
     assert got.what == "02-scenarios.json"
+    produced = {row.name: row.produced for row in summary.stage_spine(run)}
+    assert produced["propose"] is True, "the spine counts the file, so the page must agree"
 
 
 # --- 3.6 the challenge tallies and the emitted-suite inventory ----------------
@@ -2867,19 +2962,26 @@ def test_challenge_carries_the_smoke_report_when_one_was_written(tmp_path):
     }
 
 
-def test_challenge_on_an_unreadable_verdicts_dir_is_absent(tmp_path):
+def test_challenge_on_an_unreadable_verdicts_dir_is_malformed_not_absent(tmp_path):
     """`list_json` raises `UsageError`, which is a ValueError and not an OSError.
 
     The same shape `contradictions` documents: the guard has to catch the class,
     not `OSError`, or the one absolute promise of this module is broken by a
     `chmod` on one directory.
+
+    And the marker has to be `Malformed`: this section's absence means "no verdicts
+    yet", which is every run short of `challenge`, and a run whose verdicts are all
+    on disk and unlistable is the opposite fact. The pre-stage test above is the
+    control, so "everything is a malformation" cannot pass either.
     """
     if os.geteuid() == 0:
         pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
     run = build_toy_run(tmp_path / "runs", upto="challenge")
     run.verdicts_dir.chmod(0o000)
     try:
-        assert isinstance(summary.challenge(run), summary.Absent)
+        got = summary.challenge(run)
+        assert isinstance(got, summary.Malformed)
+        assert got.what == "05-verdicts/"
     finally:
         run.verdicts_dir.chmod(0o755)
 
@@ -3633,8 +3735,16 @@ def test_render_names_every_input_with_its_bytes_and_the_total(tmp_path):
     html = summary.run_summary(run)
     got = summary.inputs(run)
     for row in got.rows:
-        assert row.artifact_id in html
-        assert f'<td class="num">{row.bytes_}</td>' in html
+        # The row prefix, not the id on its own: Task 4's claim-utilisation table
+        # renders the same `artifact_id` values, so `row.artifact_id in html` held
+        # whether or not the *inputs* table rendered it -- measured, replacing the
+        # inputs id cell with a literal left the assertion green. The two cells that
+        # follow are what scope it to this table.
+        assert (
+            f'<td class="mono">{row.artifact_id}</td>'
+            f"<td>{row.kind}</td>"
+            f'<td class="num">{row.bytes_}</td>' in html
+        )
         assert f'<a href="00-inputs/{row.stored_as}">' in html
     assert f"{got.total_bytes} bytes" in html
 
@@ -3727,7 +3837,16 @@ def test_render_reports_the_utilisation_percentage_and_both_columns(tmp_path):
     assert f"{got.cited} of {got.total} claims cited" in html
     assert f"{got.pct:.1f}%" in html
     for row in got.per_artifact:
-        assert f'<td class="num">{row["cited"]}</td>' in html
+        # Three cells as one string, not the `cited` cell alone: `cited == total` on
+        # this fixture (9/9, 8/8, 2/2), so the adjacent `total` column satisfied a
+        # lone `cited` assertion -- measured green with the cited cell mutated to
+        # `_val(-1)`. The same adjacent-identical-column trap
+        # test_render_names_every_round_with_its_verdict_and_cells already records.
+        assert (
+            f'<td class="mono">{row["artifact_id"]}</td>'
+            f'<td class="num">{row["cited"]}</td>'
+            f'<td class="num">{row["total"]}</td>' in html
+        )
 
 
 def test_render_prints_the_pre_seal_utilisation_absence_verbatim(tmp_path):
@@ -3739,7 +3858,7 @@ def test_render_prints_the_pre_seal_utilisation_absence_verbatim(tmp_path):
     assert "Not present: claim utilisation (no world model yet)" in summary.run_summary(run)
 
 
-def test_render_prints_the_unreadable_utilisation_absence_verbatim(tmp_path):
+def test_render_states_the_unreadable_utilisation_as_a_malformation(tmp_path):
     from rubrica.artifacts import write_json
 
     run = build_toy_run(tmp_path / "runs", upto="challenge")
@@ -3747,7 +3866,14 @@ def test_render_prints_the_unreadable_utilisation_absence_verbatim(tmp_path):
     # `claim_utilisation` as an exception -- TypeError, not an OSError.
     write_json(run.claims_dir / "broken.json", {"schema_version": "0.1", "claims": 7})
     html = summary.run_summary(run)
-    assert "Not present: claim utilisation (01-claims/ or 01-world-model.json unreadable)" in html
+    # "Present but unreadable", not "Not present": `01-claims/` is on disk and the
+    # spine says `extract` produced it, so an absence line here is the page
+    # contradicting its own first section.
+    assert (
+        "Present but unreadable: claim utilisation "
+        "(01-claims/ or 01-world-model.json unreadable)" in html
+    )
+    assert "Not present: claim utilisation" not in html
 
 
 def test_render_reports_each_gap_with_the_stages_it_blocks(tmp_path):
@@ -3916,13 +4042,18 @@ def test_render_tallies_the_verdicts_and_counts_the_packages(tmp_path):
         assert f'<tr><td>{key}</td><td class="num">{count}</td></tr>' in html
 
 
-def test_render_states_the_challenge_absence_without_claiming_a_reason(tmp_path):
-    """`challenge`'s `Absent` conflates "no verdicts yet" with an unreadable
-    `05-verdicts/`, so the page states the directory and stops there.
+def test_render_states_the_challenge_absence_as_the_stage_not_having_run(tmp_path):
+    """A run short of `challenge` has no verdicts, which is an absence and not a defect.
+
+    The unreadable-directory half is `test_challenge_on_an_unreadable_verdicts_dir
+    _is_malformed_not_absent`; this is the control that keeps the two apart on the
+    page, since "05-verdicts/ could not be listed" about a run that never reached
+    the stage would invent a defect.
     """
     run = build_toy_run(tmp_path / "runs", upto="score")
     html = summary.run_summary(run)
     assert "Not present: 05-verdicts/" in html
+    assert "Present but unreadable: 05-verdicts/" not in html
     assert "scenario(s) judged" not in html
 
 
@@ -4304,3 +4435,326 @@ def test_cli_exits_two_on_a_missing_run_directory(tmp_path, capsys):
     # an unknown subcommand: measured, this assertion on the exit code alone
     # passed before `run-summary` was wired at all.
     assert f"run directory does not exist: {missing}" in capsys.readouterr().err
+
+
+# ------------------------------------ fix round 2: the text-encoding hazards ---
+#
+# Every hazard the nine tasks hardened was a JSON *shape* -- `Infinity`, `"nope"`,
+# `../../etc`, `chmod 000` -- and not one was a text *encoding*. That is why C1 and
+# C2 survived nine scoped reviews: `grep -E 'UnicodeDecode|UnicodeEncode|surrogate'`
+# over this file returned nothing across 4,306 lines, and every fixture wrote its
+# artifacts with `encoding="utf-8"`, which is the one input that cannot reproduce
+# either defect. The fixtures below write **bytes**.
+#
+# Both defects made a *report* exit 1, which is the contract violation rather than
+# the crash: CLAUDE.md's exit-code table reserves 1 for a repairable stage defect
+# with a finding per line, and the `[internal]` finding both produced advised
+# `rubrica validate --stage <stage>` -- unactionable for `decisions.md`, which has
+# no schema, and misleading for the surrogate, since the page had already rendered
+# completely and correctly. So each is driven end to end through `cli.main` and the
+# assertion is on the exit code, not merely on nothing being raised.
+
+
+def test_cli_exits_clean_on_a_decisions_md_that_is_not_utf_8(tmp_path, capsys):
+    """C1: `UnicodeDecodeError` is a `ValueError`, so `except OSError` never saw it.
+
+    Measured before the fix: exit **1**, a traceback on stderr, and
+    `[internal] <run>: run-summary raised UnicodeDecodeError ... run `rubrica
+    validate --stage <stage>`` on stdout. After: exit 0, and the section says the
+    file is there and unreadable rather than absent.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    # A lone continuation byte: latin-1 prose is how a real `decisions.md` acquires
+    # one, since `decide` appends whatever a human or an orchestrator hands it.
+    run.decisions.write_bytes(b"Some prose with a latin-1 byte: \xe9tape\n")
+    capsys.readouterr()
+    assert cli.main(["run-summary", "--run", str(run.root)]) == 0
+    assert capsys.readouterr().out == f"{run.root / 'run-summary.html'}\n"
+    page = (run.root / "run-summary.html").read_text(encoding="utf-8")
+    assert "Present but unreadable: decisions.md" in page
+    assert "not UTF-8 text" in page
+    # Not the absence line: the file is on disk, and saying it is not there is the
+    # spine-versus-section contradiction `Malformed` exists to prevent.
+    assert "Not present: decisions.md" not in page
+
+
+def test_decisions_that_is_not_utf_8_is_malformed_rather_than_absent(tmp_path):
+    """The builder half of the test above, at the marker rather than the page."""
+    from rubrica import summary_html
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    run.decisions.write_bytes(b"\xff\xfe not text at all\n")
+    got = summary_html._decisions(run)
+    assert isinstance(got, summary.Malformed)
+    assert got.what == "decisions.md"
+
+
+def test_cli_exits_clean_on_a_lone_surrogate_in_an_artifact(tmp_path, capsys):
+    """C2(a): the reachable source, and the one that must have a test.
+
+    `json.loads('"\\udcff"')` returns the lone surrogate `'\\udcff'` -- accepted by
+    default exactly as `Infinity` is, which is the token class this module already
+    guards against in `_as_int`. It flows manifest -> `inputs` -> `InputRow
+    .stored_as` -> the `stored as` cell. `html.escape` does not touch surrogates
+    and `write_text(encoding="utf-8")` cannot encode one, so before the fix this
+    was exit **1** with a `UnicodeEncodeError` -- *after* the page had rendered
+    completely and correctly, which is why nothing inside the rendering module
+    could see it.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    manifest = json.loads(run.manifest.read_text(encoding="utf-8"))
+    manifest["inputs"][0]["stored_as"] = json.loads('"\\udcff"')
+    assert len(manifest["inputs"][0]["stored_as"]) == 1, "one code point, not six characters"
+    # `surrogatepass`, because writing this document is exactly what a plain UTF-8
+    # write cannot do -- which is the defect, one layer up.
+    run.manifest.write_bytes(json.dumps(manifest).encode("utf-8", "surrogatepass"))
+    capsys.readouterr()
+    assert cli.main(["run-summary", "--run", str(run.root)]) == 0
+    page = (run.root / "run-summary.html").read_text(encoding="utf-8")
+    # Rendered as the escape `os.fsdecode` would have produced, not dropped and not
+    # turned into a `?`: which byte it was is the only actionable thing about it.
+    assert r"\udcff" in page
+
+
+def test_cli_exits_clean_on_a_stray_temp_file_whose_name_is_not_utf_8(tmp_path):
+    """C2(b): `run.root.iterdir()` surrogate-escapes a non-UTF-8 filename.
+
+    The name reaches the page through the `orphaned-temp` flag's `detail`, so this
+    is a second, independent route to the same `UnicodeEncodeError` -- and the
+    reason the fix is one decision in `esc` rather than three at three sources.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    (run.root / os.fsdecode(b"x.json.tmp.1.\xff\xfe")).write_bytes(b"{}")
+    assert cli.main(["run-summary", "--run", str(run.root)]) == 0
+    page = (run.root / "run-summary.html").read_text(encoding="utf-8")
+    assert "orphaned temp file(s)" in page, "the flag is what carries the name onto the page"
+
+
+def test_cli_exits_clean_on_a_run_directory_whose_name_is_not_utf_8(tmp_path):
+    """C2(c): `run.root.name` is interpolated into the `<title>` and the `<h1>`.
+
+    An *otherwise empty* directory, which is what makes this the third independent
+    source: no artifact, no stray file, and the page still could not be written.
+    """
+    root = tmp_path / os.fsdecode(b"run-\xff\xfe")
+    root.mkdir()
+    assert cli.main(["run-summary", "--run", str(root)]) == 0
+    page = (root / "run-summary.html").read_text(encoding="utf-8")
+    assert page.startswith("<!doctype html>")
+    assert page.endswith("</body></html>")
+
+
+def test_esc_turns_a_lone_surrogate_into_text_and_leaves_real_text_alone(tmp_path):
+    """The single decision, at the one function that makes it.
+
+    Both directions: the surrogate becomes six characters a reader can recognise,
+    and text that was already text is untouched -- including the non-ASCII prose
+    and the markup characters `esc` exists to escape, which an over-broad
+    sanitiser would have mangled.
+    """
+    assert summary.esc("\udcff") == r"\udcff"
+    assert summary.esc("x\udcffy") == r"x\udcffy"
+    assert summary.esc("émile — ok") == "émile — ok"
+    assert summary.esc('<b>"a"</b>') == "&lt;b&gt;&quot;a&quot;&lt;/b&gt;"
+    # The whole point: whatever comes back can be written as UTF-8.
+    summary.esc("\udcff").encode("utf-8")
+
+
+# ---------------------------------- fix round 2: malformed content exits clean ---
+#
+# Measured by Task 9's reviewer and never committed. Each is a *readable* run whose
+# manifest cannot be read as an artifact, which is the class this module promises to
+# render rather than raise on -- and the class the exit-code contract reserves 1 for
+# only when a stage produced it and a repair could fix it.
+
+
+def test_cli_exits_clean_on_a_garbage_json_manifest(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    run.manifest.write_text("{not json", encoding="utf-8")
+    assert cli.main(["run-summary", "--run", str(run.root)]) == 0
+    page = (run.root / "run-summary.html").read_text(encoding="utf-8")
+    assert "Present but unreadable: manifest.json" in page
+
+
+def test_cli_exits_clean_on_a_manifest_that_is_a_json_list(tmp_path):
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    write_json(run.manifest, ["not", "a", "manifest"])
+    assert cli.main(["run-summary", "--run", str(run.root)]) == 0
+    page = (run.root / "run-summary.html").read_text(encoding="utf-8")
+    assert "Present but unreadable: manifest.json" in page
+
+
+def test_cli_exits_clean_on_an_unreadable_manifest_in_a_readable_run(tmp_path):
+    """`chmod 000` on the manifest alone -- the run root, and every other artifact,
+    stays readable. An OSError on one artifact inside a readable run is not the
+    harness pointed at something it cannot read, so it is not exit 2 either.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    run.manifest.chmod(0o000)
+    try:
+        assert cli.main(["run-summary", "--run", str(run.root)]) == 0
+        page = (run.root / "run-summary.html").read_text(encoding="utf-8")
+        assert "Present but unreadable: manifest.json" in page
+    finally:
+        run.manifest.chmod(0o644)
+
+
+# ------------------------------- fix round 2: the rest of the review's findings ---
+
+
+def test_render_agrees_with_its_own_spine_about_a_present_unreadable_artifact(tmp_path):
+    """I5, on the run the disagreement was measured on.
+
+    A valid manifest, `02-scenarios.json` holding `[]`, and a garbage
+    `latest.json`: the spine bolds `propose` and `score` because both artifacts
+    exist, while both sections found nothing to read. Rendered as absences, the one
+    page said "3 of 22 stages produced an artifact" *and* that neither artifact was
+    present -- the spine testing existence, the sections testing parseability, and
+    nothing reconciling them.
+    """
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    write_json(run.scenarios, [])
+    for path in run.coverage_dir.iterdir():
+        path.unlink()
+    run.coverage_latest.write_text("{not json", encoding="utf-8")
+    html = summary.run_summary(run)
+    assert '<li class="yes">propose</li>' in html
+    assert '<li class="yes">score</li>' in html
+    assert "Present but unreadable: 02-scenarios.json" in html
+    assert "Present but unreadable: 03-coverage/" in html
+    assert "Not present: 02-scenarios.json" not in html
+    assert "Not present: 03-coverage/" not in html
+    # And the spine says which test it made, so a reader does not take the two for
+    # a contradiction.
+    assert "Produced means the stage's artifact exists" in html
+
+
+def test_render_spells_a_json_boolean_as_yes_or_no(tmp_path):
+    """M10: 35 cells read `True` and one read `False` -- Python's spelling, on a page
+    about a run rather than about the program reading it, and one column away from
+    the scenario table's `instance` cell, which already read `yes`.
+
+    Both spellings are asserted gone and both replacements asserted present, since
+    a `_val` that mapped every boolean to `yes` would satisfy half of this.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    html = summary.run_summary(run)
+    # The verdict columns are where the 35 `True` cells were: every verdict on this
+    # fixture carries `uniquely_determined` and `derivable_without_guessing`.
+    assert "<td>yes</td>" in html
+    assert ">True<" not in html
+    assert ">False<" not in html
+    # The other direction, so a `_val` mapping every boolean to `yes` cannot pass.
+    doc = read_json(run.verdict("scn-open"))
+    doc["uniquely_determined"] = False
+    write_json(run.verdict("scn-open"), doc)
+    flipped = summary.run_summary(run)
+    assert "<td>no</td>" in flipped
+    assert ">False<" not in flipped
+    # And the one boolean rendered outside a table cell, on a run that has an
+    # objective verdict to render: `Supported:</b> True` was the reading before.
+    triaged = build_toy_run(tmp_path / "runs2", upto="triage-seal")
+    assert "<b>Supported:</b> yes" in summary.run_summary(triaged)
+
+
+def test_render_heads_the_holes_column_ref_because_a_hole_can_name_a_goal(tmp_path):
+    """I4: 22 of 151 holes on `run-20260825-094033` were `goal:goal-...` refs.
+
+    Headed `cell` beside a `Capability matrix (148 cells)` heading, `151 holes`
+    read as an arithmetic error -- and the caveat the page already carried is about
+    a different discrepancy (per-round holes against `latest.json`'s), so it
+    misdirected the reader who checked. The header was wrong; the numbers were not.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    doc = read_json(run.coverage_latest)
+    doc["holes"] = [
+        {"ref": "cell:cap-a/oc-x", "reason": "unreachable", "justification": "no mapping"},
+        {"ref": "goal:goal-refund", "reason": "no_evidence", "justification": "no trace"},
+    ]
+    write_json(run.coverage_latest, doc)
+    html = summary.run_summary(run)
+    assert "<th>ref (cell or goal)</th>" in html
+    assert "<th>cell</th>" not in html
+    assert "goal:goal-refund" in html
+    # The heading count and the matrix count are over different sets, and the page
+    # has to say so where a reader compares them.
+    assert "over different sets and need not agree" in html
+
+
+def test_render_labels_which_denominator_the_coverage_prose_means(tmp_path):
+    """M11: one word, two numbers, on one page -- measured 127 in the coverage prose
+    against `capability_cells 148, goals 22` in the world-model table, and neither
+    saying which sense it meant.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    html = summary.run_summary(run)
+    # The comma and the trailing space pin the *prose* line rather than the note
+    # below it, which necessarily uses the same two words: measured, `assert
+    # "sizing denominator" in html` stayed green with the prose reverted, because
+    # the note alone satisfied it.
+    assert ", sizing denominator " in html
+    assert "expected hop-depth slots, less blocked cells" in html
+    # The world model's own record is still rendered under its own name, so the two
+    # senses are distinguishable rather than merged.
+    assert "<h3>Denominator</h3>" in html
+
+
+def test_render_says_the_artifact_links_are_relative_to_the_run(tmp_path):
+    """M12: all 23 relative hrefs are dead when `-o` points outside the run, and
+    `-o` is exactly the flag an operator uses for a read-only run directory. The
+    behaviour is correct and documented; the page carried no note.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    html = summary.run_summary(run)
+    assert "Artifact links are relative to the run directory" in html
+    assert "-o" in html.split("Artifact links are relative")[1][:400]
+
+
+def test_render_links_a_scenario_to_its_instance_and_its_package(tmp_path):
+    """R28, and spec 3.5: three hrefs per row, of which only `05-verdicts/` existed.
+
+    Both new links are asserted, and both negatives with them: the plain-text
+    `yes` and the plain-text file list are what this replaces, so a renderer that
+    linked one column and not the other cannot pass.
+    """
+    from rubrica.emit import emit_run
+
+    run = build_toy_run(tmp_path / "runs")
+    emit_run(run)
+    html = summary.run_summary(run)
+    assert '<a href="04-instances/scn-open/">yes</a>' in html
+    assert '<a href="06-suite/scn-open/">' in html
+    rows = summary.scenarios(run)
+    # One link per row that has the thing, and no more: the folded duplicate has
+    # neither, so a renderer that linked every row cannot pass.
+    assert html.count('<a href="04-instances/') == len([r for r in rows if r.has_instance])
+    assert html.count('<a href="06-suite/') == len([r for r in rows if r.suite_files])
+    assert '<span class="absent">no package</span>' in html
+
+
+def test_clipped_marks_one_character_past_the_boundary_and_not_the_boundary(tmp_path):
+    """The `<=` in `_clipped`, which nothing pinned.
+
+    Measured: mutating `<= _CLIP_AT` to `< _CLIP_AT` -- which marks an uncut
+    120-character cell as clipped -- left every test in this file green, because
+    both existing tests sit far from the boundary. Asserted at the two adjacent
+    widths, on `_clipped` itself rather than through a page, because no artifact
+    field can be pinned to an exact length without the fixture asserting it.
+    """
+    from rubrica import summary_html
+
+    exact = "x" * summary_html._CLIP_AT
+    over = "x" * (summary_html._CLIP_AT + 1)
+    assert "&hellip;" not in summary_html._clipped(exact), "a cell that fits is not clipped"
+    assert summary_html._clipped(exact) == exact
+    assert "&hellip;" in summary_html._clipped(over)

@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from rubrica import summary
 from rubrica.paths import RunPaths
-from rubrica.summary import Absent, esc
+from rubrica.summary import Malformed, Marker, esc
 
 _CSS = """
 :root { color-scheme: light dark; }
@@ -51,6 +51,10 @@ th, td { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid #8884;
 th { cursor: pointer; user-select: none; white-space: nowrap; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .absent { opacity: .65; font-style: italic; }
+/* An artifact that is there and unreadable is a defect in the run, not a stage
+   that has not happened yet -- so it carries the flag rule's weight rather than
+   absence's grey, and says so in words either way. */
+.malformed { border-left: 3px solid #c60; padding-left: .5rem; font-style: italic; }
 .note { opacity: .7; font-size: 12px; }
 .flag { border-left: 3px solid #c60; padding: .4rem .75rem; margin: .4rem 0; }
 .flag .thr { opacity: .7; font-size: 12px; }
@@ -122,7 +126,22 @@ def _val(value) -> str:
     indistinguishable -- and both are absences a reader must be able to see. `0`
     and `False` are values and render as themselves: `0 == ""` is False, which is
     why this is an equality test against `""` rather than a truthiness test.
+
+    **A JSON boolean renders `yes`/`no`, not `True`/`False`.** Measured on
+    `run-20260825-094033`: 35 cells read `True` and one read `False`, in Python's
+    spelling on a page that is otherwise about a run rather than about the program
+    reading it -- and the scenario table's `instance` column, one column away from
+    two of them, already rendered `yes`. Settled here because this is the single
+    scalar-cell policy; settling it per call site is how the page came to spell one
+    boolean two ways.
+
+    `is True` / `is False` rather than `== True`: `1 == True`, and a count of one
+    is not a yes.
     """
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
     if value is None or value == "":
         return _NOT_RECORDED
     return esc(value)
@@ -229,23 +248,37 @@ def _kv_table(pairs) -> str:
     return f"<table><tbody>{rows}</tbody></table>"
 
 
+def _marker(body: Marker) -> str:
+    """A marker as one sentence: what was looked for, and why there is no body.
+
+    Two sentences, not one, because the two markers are two facts and the spine
+    above asserts one of them. `Absent` is a stage that has not run: the spine
+    shows it unproduced and the reader is done. `Malformed` is an artifact the
+    spine *counts* -- it exists, so the stage wrote something -- that this section
+    could not read, which is a defect `validate --stage X` will name. Spelling
+    both "Not present" is what let one page say `score` had produced an artifact
+    and that `03-coverage/` was not there.
+
+    `why` is printed in parentheses rather than mapped onto a fixed line per
+    section, because a builder can return the same marker for more than one
+    reason: `utilisation` distinguishes "the seal has not run" from
+    "01-claims/ or 01-world-model.json unreadable".
+    """
+    tail = f" ({esc(body.why)})" if body.why else ""
+    if isinstance(body, Malformed):
+        return f'<p class="malformed">Present but unreadable: {esc(body.what)}{tail}</p>'
+    return f'<p class="absent">Not present: {esc(body.what)}{tail}</p>'
+
+
 def _section(heading: str, body) -> str:
     """One section, with its heading always present.
 
-    An `Absent` renders as a stated absence naming what was looked for, never as
-    a skipped section: on a run that stopped at extract, "no 01-world-model.json"
-    is the most informative thing the world model section can say, and a section
-    that disappears is indistinguishable from one this renderer forgot.
-
-    `Absent.what` is printed verbatim rather than mapped onto a fixed line per
-    section, because two of the builders return it for more than one reason:
-    `utilisation` distinguishes "the seal has not run" from "something in the run
-    could not be read", and those are different facts about the run.
+    A marker renders as a stated absence naming what was looked for, never as a
+    skipped section: on a run that stopped at extract, "no 01-world-model.json" is
+    the most informative thing the world model section can say, and a section that
+    disappears is indistinguishable from one this renderer forgot.
     """
-    if isinstance(body, Absent):
-        inner = f'<p class="absent">Not present: {esc(body.what)}</p>'
-    else:
-        inner = body
+    inner = _marker(body) if isinstance(body, Marker) else body
     return f"<h2>{esc(heading)}</h2>\n{inner}\n"
 
 
@@ -263,12 +296,20 @@ def _spine(run: RunPaths) -> str:
     return (
         f'<ul class="spine">{items}</ul>'
         f"<p>{esc(produced)} of {esc(len(rows))} stages produced an artifact.</p>"
+        # The reconciliation, stated where the claim is made: this row tests that
+        # the evidence *exists*, and a section below tests that it can be read. A
+        # stage bolded here whose section says "Present but unreadable" is those
+        # two tests disagreeing about one artifact on purpose, and a reader who is
+        # not told that reads it as a rendering bug.
+        '<p class="note">Produced means the stage\'s artifact exists. Whether it '
+        "can be read is each section's own answer below, which is why a bolded "
+        "stage can sit above a section reporting an unreadable artifact.</p>"
     )
 
 
 def _header(run: RunPaths):
     got = summary.header(run)
-    if isinstance(got, Absent):
+    if isinstance(got, Marker):
         return got
     fields = (
         ("run_id", got.run_id),
@@ -324,7 +365,7 @@ def _flags(run: RunPaths) -> str:
 
 def _inputs(run: RunPaths):
     got = summary.inputs(run)
-    if isinstance(got, Absent):
+    if isinstance(got, Marker):
         return got
     kinds = ", ".join(f"{esc(kind)}: {esc(count)}" for kind, count in sorted(got.kinds.items()))
     parts = [
@@ -371,7 +412,7 @@ def _inputs(run: RunPaths):
 
 def _objective(run: RunPaths):
     got = summary.objective(run)
-    if isinstance(got, Absent):
+    if isinstance(got, Marker):
         return got
     parts = [
         f"<p><b>Declared objective:</b> {_val(got.declared)}</p>",
@@ -430,7 +471,7 @@ def _disposition_rows(members: list[dict]) -> list[str]:
 
 def _dispositions(run: RunPaths):
     got = summary.dispositions(run)
-    if isinstance(got, Absent):
+    if isinstance(got, Marker):
         return got
     parts = [f"<p>{esc(got.admit_count)} admitted, {esc(got.decline_count)} declined.</p>"]
     if got.admits:
@@ -497,7 +538,7 @@ def _deficiencies(run: RunPaths) -> str:
 
 def _world_model(run: RunPaths):
     got = summary.world_model(run)
-    if isinstance(got, Absent):
+    if isinstance(got, Marker):
         return got
     counts = "".join(
         f'<tr><td>{esc(kind)}</td><td class="num">{esc(count)}</td></tr>'
@@ -519,7 +560,7 @@ def _world_model(run: RunPaths):
 
 def _utilisation(run: RunPaths):
     got = summary.utilisation(run)
-    if isinstance(got, Absent):
+    if isinstance(got, Marker):
         return got
     # `pct is None` means "no claim to cite", which is a different fact from 0%:
     # 0% says every claim was dropped, which is a judgment about the reconcile
@@ -578,7 +619,7 @@ def _gaps(run: RunPaths) -> str:
 
 def _contradictions(run: RunPaths):
     got = summary.contradictions(run)
-    if isinstance(got, Absent):
+    if isinstance(got, Marker):
         return got
     rows = "".join(
         f'<tr><td>{esc(key)}</td><td class="num">{esc(count)}</td></tr>'
@@ -637,7 +678,7 @@ def _matrix(cells) -> str:
 
 def _coverage(run: RunPaths):
     got = summary.coverage(run)
-    if isinstance(got, Absent):
+    if isinstance(got, Marker):
         return got
     rows = [
         "<tr>"
@@ -693,10 +734,22 @@ def _coverage(run: RunPaths):
         parts.append(
             f"<p>The world model implies {esc(got.implied.get('implied'))} scenario(s) "
             f"against a ceiling {esc(got.implied.get('ceiling'))} "
-            f"(basis {esc(got.implied.get('basis'))}, denominator "
+            f"(basis {esc(got.implied.get('basis'))}, sizing denominator "
             f"{esc(got.implied.get('denominator'))}"
             + (", <b>ceiling binding</b>" if got.implied.get("ceiling_binding") else "")
             + ").</p>"
+        )
+        # The word carries two numbers on this page and neither said which sense it
+        # meant: `sizing.implied_size` divides capability cells plus expected
+        # hop-depth slots, less any blocked cells, by one run's measured acceptance
+        # rate, while the World model section prints the sealed `denominator`
+        # object, which counts cells and goals. Measured on run-20260825-094033:
+        # 127 here against 148 cells and 22 goals there.
+        parts.append(
+            '<p class="note">The sizing denominator is capability cells plus '
+            "expected hop-depth slots, less blocked cells &mdash; not the world "
+            'model\'s own <span class="mono">denominator</span> record above, '
+            "which counts cells and goals.</p>"
         )
     else:
         # One line for three facts -- no world model yet, a world model
@@ -718,6 +771,14 @@ def _coverage(run: RunPaths):
     else:
         parts.append('<p class="absent">latest.json carries no capability cell.</p>')
     parts.append(f"<h3>Open holes at the last round ({esc(len(got.holes))})</h3>")
+    # Said at the heading rather than left to the column: a reader comparing this
+    # count against the matrix's is comparing two different denominators, and the
+    # caveat above this table is about a different discrepancy entirely (per-round
+    # holes against latest.json's).
+    parts.append(
+        '<p class="note">A hole names a capability cell or a goal, so this count '
+        "and the cell count above are over different sets and need not agree.</p>"
+    )
     if got.holes:
         hole_rows = [
             "<tr>"
@@ -727,7 +788,12 @@ def _coverage(run: RunPaths):
             "</tr>"
             for hole in got.holes
         ]
-        parts.append(_table(("cell", "reason", "justification"), hole_rows))
+        # `ref`, not `cell`: a hole's `ref` is a cell ref *or* a goal ref --
+        # measured on `run-20260825-094033`, 22 of 151 holes were `goal:goal-...`
+        # -- and heading the column `cell` beside a `Capability matrix (148 cells)`
+        # made `151 holes` read as an arithmetic error. The count is right; the
+        # header was wrong.
+        parts.append(_table(("ref (cell or goal)", "reason", "justification"), hole_rows))
     else:
         parts.append("<p>latest.json records no open hole.</p>")
     return "\n".join(parts)
@@ -735,7 +801,7 @@ def _coverage(run: RunPaths):
 
 def _scenarios(run: RunPaths):
     got = summary.scenarios(run)
-    if isinstance(got, Absent):
+    if isinstance(got, Marker):
         return got
     if not got:
         return '<p class="absent">02-scenarios.json records no scenario.</p>'
@@ -759,8 +825,18 @@ def _scenarios(run: RunPaths):
                 f'<span title="minimum_tool_calls_found &lt; hop_depth">'
                 f"{esc(row.min_tool_calls)} (overstated)</span>"
             )
+        # Spec 3.5 asks for three hrefs per row -- `04-instances/<id>/`,
+        # `05-verdicts/<id>.json` and `06-suite/<id>/` -- because the drill-in path
+        # is what replaces inlining a seed or a golden answer in the cell. The
+        # href is safe without a second check for the same reason the id above is
+        # linked only when a verdict was read: `has_instance` is False and
+        # `suite_files` is empty for every id `is_safe_segment` rejected, so an
+        # id like `../../etc` never reaches an href here.
+        instance = (
+            f'<a href="04-instances/{esc(row.id_)}/">yes</a>' if row.has_instance else _NOT_RECORDED
+        )
         package = (
-            esc(", ".join(row.suite_files))
+            f'<a href="06-suite/{esc(row.id_)}/">{esc(", ".join(row.suite_files))}</a>'
             if row.suite_files
             # Three states read the same here -- no package, an unreadable
             # 06-suite/, an unsafe id -- and the honest reading for an inventory is
@@ -781,7 +857,7 @@ def _scenarios(run: RunPaths):
             f"<td>{_val(row.uniquely_determined)}</td>"
             f"<td>{_val(row.derivable)}</td>"
             f'<td class="num">{calls}</td>'
-            f"<td>{'yes' if row.has_instance else _NOT_RECORDED}</td>"
+            f"<td>{instance}</td>"
             f'<td class="mono">{package}</td>'
             "</tr>"
         )
@@ -816,15 +892,16 @@ def _scenarios(run: RunPaths):
             + "</div>",
             '<p class="note">The discriminating fact is on the title cell and the '
             "verdict notes are on the verdict cell: both are paragraphs, and a column "
-            "of paragraphs makes one row taller than the rest of the page. Every id "
-            "with a verdict links to it on disk.</p>",
+            "of paragraphs makes one row taller than the rest of the page. Each row "
+            "links to what it has on disk: the id to its verdict, the instance cell "
+            "to 04-instances/, the package cell to 06-suite/.</p>",
         ]
     )
 
 
 def _challenge(run: RunPaths):
     got = summary.challenge(run)
-    if isinstance(got, Absent):
+    if isinstance(got, Marker):
         return got
     tallies = "".join(
         f'<tr><td>{esc(key)}</td><td class="num">{esc(count)}</td></tr>'
@@ -863,11 +940,34 @@ def _decisions(run: RunPaths):
     `run.decisions` rather than a path joined here, which is `paths.py`'s rule for
     every artifact path in this repo -- a rename there cannot leave a stale
     spelling behind.
+
+    **`UnicodeDecodeError` is caught here, and it is not an `OSError`.** It is a
+    `ValueError`, so before this line it escaped `_decisions`, `render`,
+    `run_summary` and every handler in `cli.py` but the catch-all, and made a
+    *report* exit 1 -- with an `[internal]` finding advising `rubrica validate
+    --stage <stage>`, which cannot name `decisions.md` at all, since it is prose
+    with no schema. Reproduced end to end with a `decisions.md` holding
+    `b"Some prose with a latin-1 byte: \\xe9tape\\n"`. `artifacts.read_json` ruled
+    on the identical shape for every artifact that *does* have a schema -- bytes
+    that are not UTF-8 are malformed content, reported against the path that holds
+    them rather than raised past the handler that knows one -- and this is the same
+    ruling for the one artifact this module reads itself. It is `Malformed` rather
+    than `errors="replace"` for the reason `Malformed` exists: a page that silently
+    substituted U+FFFD would render prose nobody wrote and say nothing about it,
+    while a run whose `decisions.md` is not text is a fact a reader at a gate needs.
+
+    An `OSError` splits the same way: `decisions.md` is unwritten on most runs, and
+    one that is there and unopenable -- a mode-000 file, a directory in its place
+    -- is a different fact from one nothing has written yet.
     """
     try:
         text = run.decisions.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        return Malformed("decisions.md", f"not UTF-8 text: {exc}")
     except OSError:
-        return Absent("decisions.md")
+        return summary._absent_or_malformed(
+            run.decisions, "decisions.md", "the file could not be read"
+        )
     return f"<pre>{esc(text)}</pre>"
 
 
@@ -879,6 +979,14 @@ def render(run: RunPaths) -> str:
         f"<title>{esc(run.root.name)} — rubrica run summary</title>",
         f"<style>{_CSS}</style></head><body>",
         f"<h1>{esc(run.root.name)}</h1>",
+        # Stated once, at the top, because it is a property of the whole page and
+        # of one flag: every link below is relative to the run directory, which is
+        # correct for the default destination and dead for every `-o` outside it --
+        # and `-o` is exactly the flag an operator reaches for on a read-only run.
+        '<p class="note">Artifact links are relative to the run directory, so they '
+        "resolve only while this page sits inside it: written elsewhere with "
+        '<span class="mono">-o</span>, the page still reads and its links do not '
+        "resolve.</p>",
         _section("Pipeline progress", _spine(run)),
         _section("Run header", _header(run)),
         _section("Flags", _flags(run)),

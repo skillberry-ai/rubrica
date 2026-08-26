@@ -9,9 +9,11 @@ Partial runs are the primary case. Measured across the 11 run directories on
 disk when this was designed: 1 reached an emitted suite, 2 had any scenarios, 4
 had a world model, and 6 held nothing past intake. A summary that rendered only
 complete runs would have been useless for 10 of the 11, so every section returns
-`Absent` rather than raising when its artifact is missing, and the stage spine
-leads the page because "how far did this get" is the first thing a reader of a
-partial run needs.
+a marker rather than raising when it cannot build a body -- `Absent` when the
+artifact is not there and `Malformed` when it is there and unreadable, which the
+spine's existence test makes two different facts -- and the stage spine leads the
+page because "how far did this get" is the first thing a reader of a partial run
+needs.
 
 `run_summary` never raises on a readable run's *content*, and the command always
 exits 0 -- `claim_utilisation`'s ruling, restated for the same reason: a report
@@ -74,10 +76,37 @@ def esc(value) -> str:
     `notes` and a scenario's `discriminating_fact` are rendered into `title`
     attributes, and both carry double quotes in real runs -- an unescaped one
     ends the attribute and drops the rest of the prose into the tag.
+
+    **A lone surrogate is turned into text here, and this is the one place that
+    decides it.** `html.escape` does not touch surrogates, and the page is written
+    with `Path.write_text(..., encoding="utf-8")`, which cannot encode one:
+    `UnicodeEncodeError` is a `ValueError`, so it escaped every handler in
+    `cli.py` but the catch-all and made a *report* exit 1 -- with an `[internal]`
+    finding advising `rubrica validate --stage <stage>`, which no stage can act
+    on, and after the page had already rendered completely and correctly. Three
+    independent sources were measured, which is why the decision is here rather
+    than at any one of them: artifact JSON content, since `json.loads('"\\udcff"')`
+    returns the lone surrogate and `artifacts.read_json` accepts it by default
+    exactly as it accepts `Infinity`; a non-UTF-8 filename under the run root,
+    which `Path.iterdir` surrogate-escapes into `orphaned_temp_files`; and the run
+    directory's own name, which the page's `<title>` and `<h1>` interpolate. Fixing
+    it at the write instead would have left the page's one escaping rule with an
+    exception, and `artifacts.read_json` has already ruled on this class in this
+    shape at the *reading* end -- bytes that are not UTF-8 are malformed content,
+    reported against the path that holds them rather than raised past the handler
+    that knows one.
+
+    `backslashreplace` rather than `replace`: the surrogate renders as the six
+    characters `\\udcff`, which is the escape `os.fsdecode` produced and a reader
+    can recognise as a byte that was never text, where `?` or U+FFFD would erase
+    which byte it was.
     """
     if value is None:
         return ""
-    return escape(str(value), quote=True)
+    # Encode-then-decode is the identity for every string that is already text,
+    # so this costs one round trip and changes nothing but the surrogates.
+    text = str(value).encode("utf-8", "backslashreplace").decode("utf-8")
+    return escape(text, quote=True)
 
 
 @dataclass(frozen=True)
@@ -88,9 +117,48 @@ class Absent:
     stopped at extract, "no world model" is the most informative thing the world
     model section can say, and a section silently omitted is indistinguishable
     from one the renderer forgot.
+
+    **Not there, never there-but-unreadable** -- that second state is `Malformed`
+    below, and the two were one word until a run measured with `02-scenarios.json`
+    holding `[]` and a garbage `latest.json` said, on one page, that `propose` and
+    `score` had produced an artifact *and* that neither artifact was present. The
+    spine tests existence and a section tests readability, so a page that spells
+    both absences the same asserts a contradiction it never reconciles.
     """
 
     what: str
+    # The reading, when the artifact's name is not the whole fact: `utilisation`
+    # is absent because "the seal has not run", which names no artifact at all. A
+    # field rather than a sentence folded into `what`, so that every marker's
+    # `what` is the artifact and nothing else -- before this, ten of the twelve
+    # were bare paths and two were prose, and nothing said which a reader should
+    # expect.
+    why: str = ""
+
+
+@dataclass(frozen=True)
+class Malformed:
+    """An artifact that is *there* and that nothing could be read out of.
+
+    A sibling of `Absent` rather than a subclass of it: the two are different
+    facts about a run, and an `isinstance(x, Absent)` that quietly answered True
+    for both is how the distinction this class exists to draw would be lost again
+    at the first call site that forgot. `Marker` below is what the renderer tests
+    when it only needs to know that a body was not built.
+
+    The same reading `artifacts.read_json` takes on bytes that are not UTF-8:
+    malformed content, reported against the path that holds it. What differs is
+    that a report cannot raise -- so this is returned, rendered, and named.
+    """
+
+    what: str
+    why: str = ""
+
+
+# What a section builder returns in place of a body. Spelled once so the renderer
+# can ask "is there a body?" without enumerating the marker types at eleven call
+# sites, and so adding a third marker cannot leave one of them behind.
+Marker = Absent | Malformed
 
 
 @dataclass(frozen=True)
@@ -110,6 +178,24 @@ def _exists(path: Path) -> bool:
         return path.exists()
     except OSError:
         return False
+
+
+def _absent_or_malformed(path: Path, what: str, why: str) -> Marker:
+    """`Absent` when the artifact is not there, `Malformed` when it is unreadable.
+
+    The one place the distinction is decided, so that every section draws it the
+    same way and the spine above cannot disagree with a section below: the spine
+    marks a stage produced when its evidence *exists*, which is exactly the test
+    made here, so an artifact the spine counts is one this returns `Malformed`
+    for rather than `Absent`.
+
+    `_exists` rather than a bare `Path.exists()`, for that helper's reason: a run
+    root at mode 000 makes the stat raise, and "not there" is the honest answer
+    for a section that cannot see the artifact at all.
+    """
+    if _exists(path):
+        return Malformed(what, why)
+    return Absent(what)
 
 
 def _has_part(directory: Path) -> bool:
@@ -135,14 +221,15 @@ def _has_part(directory: Path) -> bool:
         return False
 
 
-def _stage_evidence(run: RunPaths) -> dict[str, tuple]:
+def _stage_evidence(run: RunPaths) -> dict[str, tuple[Path, ...]]:
     """Per stage, the paths whose presence proves it ran.
 
     A fan-out stage's evidence is a directory with at least one part in it; a
     sealing stage's is one file. Keyed by every name in `paths.STAGES` so the
     spine cannot silently omit a stage added there -- a stage with no entry
-    renders absent forever, which is why test_stage_spine_covers_every_declared
-    _stage_in_order asserts against STAGES rather than against this mapping.
+    renders absent forever, which is why
+    test_stage_spine_covers_every_declared_stage_in_order asserts against STAGES
+    rather than against this mapping.
 
     Every path here comes from a `RunPaths` property, the six reconcile partials
     included, rather than being joined from a filename in this table: `paths.py`
@@ -182,7 +269,14 @@ def stage_spine(run: RunPaths) -> list[StageRow]:
     for stage in STAGES:
         paths = evidence.get(stage, ())
         produced = any(
-            _has_part(path) if path.is_dir() else _exists(path) for path in paths if _exists(path)
+            # The filter has already proved the path stat-able, so a non-directory
+            # is evidence by existing: the `else _exists(path)` this replaces could
+            # only ever be True, and asking cost a second stat of every path.
+            # `path.is_dir()` is safe only *inside* the filter -- it raises EACCES,
+            # which is why `_exists` exists at all.
+            not path.is_dir() or _has_part(path)
+            for path in paths
+            if _exists(path)
         )
         rows.append(StageRow(name=stage, produced=produced))
     return rows
@@ -209,7 +303,7 @@ class Header:
     stages: list[StageRecord]
 
 
-def header(run: RunPaths) -> Header | Absent:
+def header(run: RunPaths) -> Header | Marker:
     """The manifest's own facts, plus the per-stage reproducibility record.
 
     `manifest.stages` is the record of which model at which effort ran against
@@ -226,7 +320,7 @@ def header(run: RunPaths) -> Header | Absent:
     """
     payload = _mapping(_quietly(run.manifest))
     if not payload:
-        return Absent("manifest.json")
+        return _absent_or_malformed(run.manifest, "manifest.json", "nothing could be read from it")
     limits = _mapping(payload.get("limits"))
     recorded = _mapping(payload.get("stages"))
     stages = []
@@ -316,7 +410,7 @@ class Inputs:
     kinds: dict[str, int]
 
 
-def inputs(run: RunPaths) -> Inputs | Absent:
+def inputs(run: RunPaths) -> Inputs | Marker:
     """`manifest.inputs[]`, with bytes totalled and kinds tallied.
 
     In the manifest's own order, which is the order intake registered them in --
@@ -326,7 +420,7 @@ def inputs(run: RunPaths) -> Inputs | Absent:
     """
     payload = _mapping(_quietly(run.manifest))
     if not payload:
-        return Absent("manifest.json")
+        return _absent_or_malformed(run.manifest, "manifest.json", "nothing could be read from it")
     rows = []
     kinds: dict[str, int] = {}
     for member in _dicts(payload.get("inputs")):
@@ -368,7 +462,7 @@ class Objective:
     surfaces: list[Surface]
 
 
-def objective(run: RunPaths) -> Objective | Absent:
+def objective(run: RunPaths) -> Objective | Marker:
     """The objective verdict and the surfaces the corpus map found.
 
     Read from `00-objective.json` rather than from the sealed triage record's copy
@@ -380,7 +474,9 @@ def objective(run: RunPaths) -> Objective | Absent:
     """
     payload = _mapping(_quietly(run.objective))
     if not payload:
-        return Absent("00-objective.json")
+        return _absent_or_malformed(
+            run.objective, "00-objective.json", "nothing could be read from it"
+        )
     review = _mapping(payload.get("objective_review"))
     surfaces = [
         Surface(
@@ -407,7 +503,7 @@ class Dispositions:
     decline_count: int
 
 
-def dispositions(run: RunPaths) -> Dispositions | Absent:
+def dispositions(run: RunPaths) -> Dispositions | Marker:
     """Admits priority-sorted, declines grouped by reason code.
 
     `admit_sort_key` rather than a local sort, for the reason brief.py imports it:
@@ -416,7 +512,7 @@ def dispositions(run: RunPaths) -> Dispositions | Absent:
     """
     payload = _mapping(_quietly(run.triage))
     if not payload:
-        return Absent("00-triage.json")
+        return _absent_or_malformed(run.triage, "00-triage.json", "nothing could be read from it")
     admits: list[dict] = []
     declines: dict[str, list[dict]] = {}
     for member in _dicts(payload.get("dispositions")):
@@ -543,7 +639,7 @@ class WorldModel:
     denominator: dict
 
 
-def world_model(run: RunPaths) -> WorldModel | Absent:
+def world_model(run: RunPaths) -> WorldModel | Marker:
     """The sealed world model's collection counts, plus target and denominator.
 
     Counts, not contents, for every collection but `gaps` -- `gaps()` below reads
@@ -559,7 +655,9 @@ def world_model(run: RunPaths) -> WorldModel | Absent:
     """
     payload = _mapping(_quietly(run.world_model))
     if not payload:
-        return Absent("01-world-model.json")
+        return _absent_or_malformed(
+            run.world_model, "01-world-model.json", "nothing could be read from it"
+        )
     # `_dicts` rather than `len(...)` on the raw value: a hand-edited
     # `"actors": "nope"` is not a list at all, and iterating it would count four
     # characters as four actors.
@@ -585,7 +683,7 @@ class Utilisation:
     per_artifact: list[dict]
 
 
-def utilisation(run: RunPaths) -> Utilisation | Absent:
+def utilisation(run: RunPaths) -> Utilisation | Marker:
     """Claim utilisation, from `claim_utilisation` rather than recomputed.
 
     The uncited artifacts are named rather than counted, because that is the
@@ -620,13 +718,14 @@ def utilisation(run: RunPaths) -> Utilisation | Absent:
     try:
         report = _mapping(claim_utilisation(run))
     except Exception:  # deliberate: the seven measured shapes named in the docstring
-        return Absent("claim utilisation (01-claims/ or 01-world-model.json unreadable)")
+        return Malformed("claim utilisation", "01-claims/ or 01-world-model.json unreadable")
     artifacts = _dicts(report.get("artifacts"))
     if not artifacts:
-        return Absent("claim utilisation (no world model yet)")
+        return Absent("claim utilisation", "no world model yet")
     # _as_int over both columns: these come from claim_utilisation, which builds
     # them itself, but they are summed here and a summed column must not raise --
-    # and the same reading is what makes the `cited == 0` filter below total.
+    # and the same reading is what makes the `total and cited == 0` filter below
+    # total.
     cited = sum(_as_int(a.get("cited")) for a in artifacts)
     total = sum(_as_int(a.get("total")) for a in artifacts)
     return Utilisation(
@@ -700,7 +799,7 @@ class Contradictions:
     parts_swept: int
 
 
-def contradictions(run: RunPaths) -> Contradictions | Absent:
+def contradictions(run: RunPaths) -> Contradictions | Marker:
     """A tally over `01-contradictions/`, never the contradictions themselves.
 
     An aggregate on purpose -- the ruling gate-brief already makes: this is a
@@ -726,7 +825,13 @@ def contradictions(run: RunPaths) -> Contradictions | Absent:
     try:
         parts = list_json(run.contradictions_dir)
     except Exception:  # deliberate: list_json raises UsageError, which is not an OSError
-        return Absent("01-contradictions/")
+        # `list_json` answers `[]` for a directory that is not there and *raises*
+        # for one it cannot list, so reaching this handler means the directory
+        # exists -- except when the run root itself is unreadable, which is what
+        # `_absent_or_malformed` re-tests rather than assuming.
+        return _absent_or_malformed(
+            run.contradictions_dir, "01-contradictions/", "the directory could not be listed"
+        )
     # An existing directory holding no part is absence too: `reconcile-contradict`
     # writes one file per subject, so a directory with nothing in it has the same
     # meaning for this section as no directory at all.
@@ -809,7 +914,7 @@ def _round_row(doc: dict) -> RoundRow:
 
     Split out rather than inlined because `latest` is read through it too: the
     fallback below builds a row from `latest` when no `round-N.json` is readable,
-    and two spellings of the same seven columns is how the fallback row would come
+    and two spellings of the same ten columns is how the fallback row would come
     to disagree with the rows beside it.
     """
     caps = _mapping(doc.get("capability_matrix"))
@@ -841,7 +946,7 @@ def _round_row(doc: dict) -> RoundRow:
     )
 
 
-def coverage(run: RunPaths) -> Coverage | Absent:
+def coverage(run: RunPaths) -> Coverage | Marker:
     """The round progression, the capability matrix, the holes, the implied size.
 
     Rows come from the `round-N.json` documents so the progression is visible;
@@ -860,9 +965,10 @@ def coverage(run: RunPaths) -> Coverage | Absent:
     instances of 'int' and 'str'` for `"eight"`, and the same for `None` and for a
     list. A second shape was measured too, `PermissionError` from
     `run.world_model.is_file()` on a run root with mode 000 -- `Path.is_file`
-    ignores ENOENT and ENOTDIR but not EACCES -- which this section cannot reach,
-    since a coverage directory under that root is unreadable and returns `Absent`
-    first. The guard covers both because it catches the class, not the instance.
+    ignores ENOENT and ENOTDIR but not EACCES. Which permission layouts let that
+    one reach *this* section is not something this docstring asserts either way:
+    it was measured escaping `sizing.py`, and the guard below covers it because it
+    catches the class rather than the instance.
 
     Guarded here rather than widened in `sizing.py`: that module is a report with
     its own contract and its own callers (`gate-brief` at gates 1 and 2), and
@@ -874,7 +980,13 @@ def coverage(run: RunPaths) -> Coverage | Absent:
     except Exception:  # deliberate: list_json raises UsageError, which is not an OSError
         round_paths = []
     if not latest and not round_paths:
-        return Absent("03-coverage/")
+        # The directory being there with nothing readable in it is the shape this
+        # distinction was measured on: a garbage `latest.json` and no round
+        # document left the spine bolding `score` while this section said the
+        # directory was not present.
+        return _absent_or_malformed(
+            run.coverage_dir, "03-coverage/", "no round document could be read"
+        )
 
     rows = []
     for path in round_paths:
@@ -1000,7 +1112,7 @@ def _suite_files(run: RunPaths, scenario_id: str) -> list[str]:
     return [name for name in SUITE_FILES if _exists(directory / name)]
 
 
-def scenarios(run: RunPaths) -> list[ScenarioRow] | Absent:
+def scenarios(run: RunPaths) -> list[ScenarioRow] | Marker:
     """One row per scenario, joined across the record, its verdict and its package.
 
     The section the report exists for, and the only one reading three directories
@@ -1024,7 +1136,9 @@ def scenarios(run: RunPaths) -> list[ScenarioRow] | Absent:
     """
     payload = _mapping(_quietly(run.scenarios))
     if not payload:
-        return Absent("02-scenarios.json")
+        return _absent_or_malformed(
+            run.scenarios, "02-scenarios.json", "nothing could be read from it"
+        )
     rows = []
     for member in _dicts(payload.get("scenarios")):
         sid = str(member.get("id", ""))
@@ -1098,9 +1212,10 @@ def scenarios(run: RunPaths) -> list[ScenarioRow] | Absent:
 # exactly {intake, reconcile-seal, smoke, survey, triage-seal, triage-slices}.
 # Note `emit` is NOT in it -- rb-emit is a thin wrapper over `rubrica emit`, so
 # emit does get a manifest.stages entry and must stay accusable. Hardcoding the
-# set here got that wrong once; test_code_stages_is_exactly_the_stages_that_run
-# _as_code re-derives it from skills.discover() so a stage converted between code
-# and a skill fails there rather than being exempted forever in silence.
+# set here got that wrong once;
+# test_code_stages_is_exactly_the_stages_that_run_as_code re-derives it from
+# skills.discover() so a stage converted between code and a skill fails there
+# rather than being exempted forever in silence.
 #
 # Spelled out rather than derived at import time on purpose: `skills.discover()`
 # reads every SKILL.md off disk and honours RUBRICA_SKILLS_DIR, so deriving it
@@ -1124,7 +1239,7 @@ class Challenge:
     smoke: dict | None
 
 
-def challenge(run: RunPaths) -> Challenge | Absent:
+def challenge(run: RunPaths) -> Challenge | Marker:
     """Verdict tallies and what actually landed in the emitted suite.
 
     Two counts that a reader will assume agree and that diverge for real reasons:
@@ -1155,7 +1270,13 @@ def challenge(run: RunPaths) -> Challenge | Absent:
     try:
         verdict_paths = list_json(run.verdicts_dir)
     except Exception:  # deliberate: list_json raises UsageError, which is not an OSError
-        verdict_paths = []
+        # Not `verdict_paths = []` and on to the shared absence below: an
+        # unreadable directory and a run that has not reached `challenge` are
+        # different facts, and collapsing them told a reader "no verdicts yet"
+        # about a run whose verdicts were all on disk and unlistable.
+        return _absent_or_malformed(
+            run.verdicts_dir, "05-verdicts/", "the directory could not be listed"
+        )
     if not verdict_paths:
         return Absent("05-verdicts/")
     tallies: dict[str, int] = {}
