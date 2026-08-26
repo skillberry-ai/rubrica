@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -715,6 +716,22 @@ def test_a_batches_document_with_no_batches_is_refused(tmp_path):
     assert validate_artifact(path, "batches") != []
 
 
+def test_a_batch_projecting_zero_bytes_is_refused(tmp_path):
+    """`minimum: 1`, because 0 is unreachable by the formula the field states.
+
+    projected_bytes is hole_refs length times bytes_per_scenario, and both factors
+    carry their own floor -- minItems: 1 and minimum: 1 -- so a product of 0 can
+    only come from a partition that did not compute what it claims to have
+    computed. Layer 1 refuses it outright rather than leaving the sole objection
+    to a recompute a run may never reach.
+    """
+    payload = minimal_batches()
+    payload["batches"][0]["projected_bytes"] = 0
+    path = tmp_path / "batches.json"
+    write_json(path, payload)
+    assert validate_artifact(path, "batches") != []
+
+
 def test_a_scenarios_part_validates_and_carries_its_own_batch_id(tmp_path):
     path = tmp_path / "scenarios-part.json"
     write_json(path, {"schema_version": "0.1", "round": 1, "batch_id": "b01", "scenarios": []})
@@ -740,6 +757,59 @@ def test_a_scenarios_part_holds_its_scenarios_to_the_shared_definition(tmp_path)
     path = tmp_path / "scenarios-part.json"
     write_json(path, payload)
     assert validate_artifact(path, "scenarios-part") != []
+
+
+@pytest.mark.parametrize(
+    "reason,expected_findings",
+    [("out_of_scope", False), ("because_i_said_so", True)],
+)
+def test_a_score_part_rejected_reason_is_the_scenario_enum(tmp_path, reason, expected_findings):
+    """score-part's rejected_reason $refs the sealed scenario's own enum.
+
+    Both directions in one parametrization, because neither alone proves the ref
+    *binds*: the valid case shows it resolves at all (an unresolvable ref raises
+    out of iter_errors rather than returning findings), and the invalid case shows
+    it constrains. Before this predicate existed nothing reached the enum at all
+    -- every other score-part case here rules `active`, and minimal_score_part
+    carries no rejected_reason -- so the five values could have been a copy that
+    had silently fallen behind scenarios-0.1.json.
+
+    The drift this closes is concrete: score-seal writes a ruling's
+    rejected_reason straight onto the scenario it names, so a sixth value on one
+    side alone would either make the ruling unrecordable in a part or make the
+    assembled 02-scenarios.json schema-invalid -- a finding against an artifact
+    code wrote, and no repair prompt fixes one of those.
+    """
+    payload = minimal_score_part()
+    payload["rulings"] = [
+        {"scenario_id": "sc-b01-002", "status": "rejected", "rejected_reason": reason}
+    ]
+    path = tmp_path / "score-part.json"
+    write_json(path, payload)
+    assert bool(validate_artifact(path, "score-part")) is expected_findings
+
+
+def test_the_score_part_status_enum_is_a_subset_of_the_scenario_status_enum(tmp_path):
+    """The one deliberate non-$ref in these part schemas, pinned as a subset.
+
+    `status` is restated rather than shared *because* it subtracts `proposed`: a
+    ruling exists to change a status, and `proposed` is what a scenario already
+    carries out of its propose member. A $ref would widen the part back to the
+    value it exists to exclude, so this asserts both halves -- proper subset, and
+    `proposed` specifically absent -- rather than leaving the asymmetry with
+    rejected_reason above readable only as an oversight.
+    """
+    scenario = json.loads(
+        (schema_dir() / ARTIFACT_SCHEMAS["scenarios"]).read_text(encoding="utf-8")
+    )
+    part = json.loads((schema_dir() / ARTIFACT_SCHEMAS["score-part"]).read_text(encoding="utf-8"))
+    sealed = set(scenario["$defs"]["scenario"]["properties"]["status"]["enum"])
+    ruling = set(part["properties"]["rulings"]["items"]["properties"]["status"]["enum"])
+
+    assert ruling < sealed, "score-part's status is no longer a proper subset of the scenario's"
+    assert sealed - ruling == {"proposed"}, (
+        "the subtraction has changed; `proposed` is the only value a ruling may not name"
+    )
 
 
 def test_a_score_part_verdict_is_the_coverage_enum(tmp_path):

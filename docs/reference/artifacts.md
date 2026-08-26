@@ -496,8 +496,19 @@ mapping or a checker that exists today — the paths, though, are the ones
 Like the reconcile partials above, none of these schemas restates an element it
 shares with a sealed document: `scenarios-part` resolves
 `scenarios-0.1.json#/$defs/scenario`, and `score-part` resolves
-`coverage-0.1.json#/$defs/hole` and that schema's own `verdict` enum, through
-`validate._schema_registry`.
+`coverage-0.1.json#/$defs/hole`, that schema's own `verdict` enum, and the
+scenario's `rejected_reason` enum, through `validate._schema_registry`. Two of
+those refs point at a *property* subschema rather than a `$defs` entry, which is
+a legal target and the one that was available here — the alternative was a copied
+enum that `score-seal` would carry onto a sealed scenario, so a sixth value added
+on one side alone would make the ruling unrecordable or the sealed document
+invalid.
+
+The **one** deliberate non-`$ref` is `score-part`'s `status`, and it is a
+subtraction rather than a copy: the sealed scenario's enum also admits
+`proposed`, which a ruling may not name, so sharing the definition would widen
+the part back to the value it exists to exclude. Its own `description` says so,
+beside the shared `rejected_reason` it sits next to.
 
 ## `batches`
 

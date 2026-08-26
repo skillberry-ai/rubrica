@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "batches-0.1.json",
   "title": "One round's propose batches",
-  "description": "propose-batches' (code) output: the closable holes of this round, partitioned into batches whose projected output keeps one rb-propose dispatch inside the harness output cap. A batch is a writing unit, not a decision unit -- every closable hole reaches a member, and which holes are closable is rb-score's ruling, not this partition's. Measured on run-20260825-094033: 86 closable holes at a 1,162-byte mean scenario would have been ~124KB in one response against a 32,000-token cap.",
+  "description": "propose-batches' (code) output: the closable holes of this round, partitioned into batches whose projected output keeps one rb-propose dispatch inside the harness output cap. A batch is a writing unit, not a decision unit -- every closable hole reaches a member, and which holes are closable is rb-score's ruling, not this partition's. Measured on run-20260825-094033: 86 closable holes at a 1,162-byte mean scenario is 99,932 bytes of new scenarios, and on top of that the 24,613-byte re-emit of every earlier round the single-document shape obliged -- ~124KB in one response against a 32,000-token cap.",
   "type": "object",
   "required": ["schema_version", "round", "cap_bytes", "bytes_per_scenario", "batches"],
   "additionalProperties": false,
@@ -40,8 +40,8 @@
           },
           "projected_bytes": {
             "type": "integer",
-            "minimum": 0,
-            "description": "hole_refs length times bytes_per_scenario. refs.check_batches recomputes it, so a batch cannot drift from its own header."
+            "minimum": 1,
+            "description": "hole_refs length times bytes_per_scenario. refs.check_batches recomputes it, so a batch cannot drift from its own header -- but `minimum: 1` rather than 0, because both factors carry their own floor (hole_refs has minItems: 1, bytes_per_scenario has minimum: 1) and a product of 0 is therefore unreachable by the stated formula. Layer 1 refuses it here rather than leaving the only objection to a recompute the run may not reach."
           }
         }
       }

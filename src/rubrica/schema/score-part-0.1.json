@@ -18,10 +18,14 @@
         "additionalProperties": false,
         "properties": {
           "scenario_id": {"$ref": "world-model-0.1.json#/$defs/id"},
-          "status": {"enum": ["active", "duplicate", "rejected"]},
+          "status": {
+            "enum": ["active", "duplicate", "rejected"],
+            "description": "Restated rather than $ref-ed, and that asymmetry with rejected_reason below is deliberate: this is a proper SUBSET of the sealed scenario's status enum, which also admits `proposed`. A $ref would widen it back, and the whole point of the narrower set is that a ruling naming `proposed` would be a no-op that still had to be honoured. rejected_reason has no such subtraction, so it is shared."
+          },
           "duplicate_of": {"$ref": "world-model-0.1.json#/$defs/id"},
           "rejected_reason": {
-            "enum": ["ambiguous", "not_derivable", "wrong_label", "out_of_scope", "blocked_by_gap"]
+            "$ref": "scenarios-0.1.json#/$defs/scenario/properties/rejected_reason",
+            "description": "The sealed scenario's own enum, resolved through validate._schema_registry rather than copied. score-seal writes a ruling's rejected_reason straight onto the scenario it names, so a copy that fell behind would either make a reason unrecordable in a part or make the assembled 02-scenarios.json schema-invalid -- a finding against an artifact code wrote, which no repair prompt can fix. A property subschema is a legal $ref target, the same way `verdict` below resolves coverage-0.1.json#/properties/verdict."
           }
         },
         "allOf": [
