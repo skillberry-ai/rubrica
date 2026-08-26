@@ -452,7 +452,7 @@ Expected: FAIL — `KeyError: 'batches'` and `TypeError: set_limit() got an unex
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "batches-0.1.json",
   "title": "One round's propose batches",
-  "description": "propose-batches' (code) output: the closable holes of this round, partitioned into batches whose projected output keeps one rb-propose dispatch inside the harness output cap. A batch is a writing unit, not a decision unit -- every closable hole reaches a member, and which holes are closable is rb-score's ruling, not this partition's. Measured on run-20260825-094033: 86 closable holes at a 1,162-byte mean scenario would have been ~124KB in one response against a 32,000-token cap.",
+  "description": "propose-batches' (code) output: the closable holes of this round, partitioned into batches whose projected output keeps one rb-propose dispatch inside the harness output cap. A batch is a writing unit, not a decision unit -- every closable hole reaches a member, and which holes are closable is rb-score's ruling, not this partition's. Measured on run-20260825-094033: round 2 would have had to emit 86 closable holes at a 1,162-byte mean (99,932 bytes) PLUS round 1's accumulated 24,613-byte re-emit -- 124,545 bytes in one response against a 32,000-token cap. Both terms are named because the sum has to reconstruct from them: the batch is the larger one at 80%, which is why this partitions holes rather than only dropping the re-emit.",
   "type": "object",
   "required": ["schema_version", "round", "cap_bytes", "bytes_per_scenario", "batches"],
   "additionalProperties": false,
@@ -490,8 +490,8 @@ Expected: FAIL — `KeyError: 'batches'` and `TypeError: set_limit() got an unex
           },
           "projected_bytes": {
             "type": "integer",
-            "minimum": 0,
-            "description": "hole_refs length times bytes_per_scenario. refs.check_batches recomputes it, so a batch cannot drift from its own header."
+            "minimum": 1,
+            "description": "hole_refs length times bytes_per_scenario. Minimum 1, not 0: hole_refs has minItems 1 and bytes_per_scenario has minimum 1, so 0 is unreachable by this formula and layer 1 should refuse it outright rather than leaving it to Task 7's recompute. refs.check_batches recomputes the product anyway, so a batch cannot drift from its own header."
           }
         }
       }
@@ -549,7 +549,7 @@ Expected: FAIL — `KeyError: 'batches'` and `TypeError: set_limit() got an unex
           "status": {"enum": ["active", "duplicate", "rejected"]},
           "duplicate_of": {"$ref": "world-model-0.1.json#/$defs/id"},
           "rejected_reason": {
-            "enum": ["ambiguous", "not_derivable", "wrong_label", "out_of_scope", "blocked_by_gap"]
+            "$ref": "scenarios-0.1.json#/$defs/scenario/properties/rejected_reason"
           }
         },
         "allOf": [
@@ -573,6 +573,8 @@ Expected: FAIL — `KeyError: 'batches'` and `TypeError: set_limit() got an unex
   }
 }
 ```
+
+`rejected_reason` `$ref`s the sealed schema's own property rather than restating its five values, the way line 44 already `$ref`s `coverage-0.1.json#/properties/verdict`. The drift it prevents is concrete: `score-seal` copies a part's `rejected_reason` onto a sealed scenario, so a sixth reason added on one side alone would either make the ruling unrecordable or make `02-scenarios.json` schema-invalid — a finding against an artifact code wrote.
 
 `status` deliberately omits `proposed`: a ruling exists to change a status, and `proposed` is what a scenario already carries out of its propose member, so a ruling naming it would be a no-op that still had to be honoured. `scenarios-0.1.json` already exposes the scenario object as `$defs/scenario` (verified 2026-08-26 — its `$defs` are `id`, `hole_ref`, `scenario`, and `properties/scenarios/items` is already a `$ref` to it), so `scenarios-part` `$ref`s it with no change to that file. Do not copy the scenario object: a second definition is how a field drifts between the part and the sealed document.
 
