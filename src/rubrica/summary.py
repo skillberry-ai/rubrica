@@ -1354,3 +1354,14 @@ def flags(run: RunPaths) -> list[Flag]:
             )
 
     return found
+
+
+def run_summary(run: RunPaths) -> str:
+    """The whole page. One entry point, so callers never import the markup half.
+
+    Imported here rather than at module scope: summary_html imports this module
+    for its dataclasses and `esc`, so a top-level import would be circular.
+    """
+    from rubrica import summary_html
+
+    return summary_html.render(run)

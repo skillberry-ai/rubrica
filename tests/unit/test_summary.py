@@ -3449,3 +3449,584 @@ def test_flags_on_an_unreadable_run_root_do_not_raise(tmp_path):
         assert summary.flags(run) == []
     finally:
         run.root.chmod(0o755)
+
+
+# --------------------------------------------------------------- the renderer ---
+# Every assertion below is on a rendered *value*, not on a heading. Measured: a
+# renderer that emits `<h2>Inputs</h2>` and nothing under it satisfies
+# `"Inputs" in html`, so a heading-only test is satisfied by a page that renders
+# no data at all -- the substring-of-message shape CLAUDE.md names, at the one
+# place in this module where every number a reader came for is interpolated.
+
+
+def test_render_produces_one_self_contained_document(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    html = summary.run_summary(run)
+    assert html.startswith("<!doctype html>")
+    assert "</html>" in html
+    assert "<style>" in html, "CSS is inline; the page has no external assets"
+
+
+def test_render_references_no_external_resource(tmp_path):
+    """Self-contained means no network: a page that fetches is a page that breaks
+    when the run directory is archived or read offline."""
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    html = summary.run_summary(run)
+    for token in ("http://", "https://", "<script src=", '<link rel="stylesheet"'):
+        assert token not in html, f"{token} makes the page depend on something outside it"
+
+
+def test_render_names_the_run(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    html = summary.run_summary(run)
+    assert run.root.name in html
+    # The bare-substring form above was measured satisfiable with the run name
+    # dropped from *both* the `<h1>` and the `<title>`: the manifest's `run_id` is
+    # the directory name on every run this code mints, so the Run header section
+    # satisfied it on its own. The heading is pinned in the shape it renders in.
+    assert f"<h1>{run.root.name}</h1>" in html
+    assert f"<title>{run.root.name} " in html
+
+
+def test_render_includes_every_section_heading(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    html = summary.run_summary(run)
+    for heading in ("Inputs", "Scenarios", "Coverage", "World model", "Flags"):
+        assert heading in html, f"the {heading} section is missing"
+        # As an `<h2>`, not merely somewhere on the page: measured, renaming the
+        # Coverage heading left the bare-substring loop green, because the section's
+        # own prose says "Coverage ended halted_no_progress". A heading test that
+        # any sentence can satisfy is not a heading test.
+        assert f"<h2>{heading}</h2>" in html, f"the {heading} heading is not a heading"
+
+
+def test_render_escapes_prose_carrying_markup_and_quotes(tmp_path):
+    """discriminating_fact and verdict notes reach a title attribute and carry
+    double quotes in real runs; an unescaped one ends the attribute early."""
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    doc = read_json(run.scenarios)
+    doc["scenarios"][0]["discriminating_fact"] = 'he said "<script>alert(1)</script>" & left'
+    write_json(run.scenarios, doc)
+    html = summary.run_summary(run)
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;" in html
+    assert "&quot;" in html
+
+
+def test_render_escapes_a_title_bearing_markup(tmp_path):
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    doc = read_json(run.scenarios)
+    doc["scenarios"][0]["title"] = "<b>bold</b>"
+    write_json(run.scenarios, doc)
+    html = summary.run_summary(run)
+    assert "<b>bold</b>" not in html
+    assert "&lt;b&gt;bold&lt;/b&gt;" in html
+
+
+def test_render_states_an_absence_rather_than_omitting_the_section(tmp_path):
+    """The 10-of-11 case: a partial run renders every section, saying what is
+    not there. A section silently omitted is indistinguishable from one the
+    renderer forgot.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+    html = summary.run_summary(run)
+    assert "01-world-model.json" in html, "the absent artifact is named"
+    assert "Scenarios" in html, "the section still has its heading"
+    # The heading half of the assertion above is satisfied by a page that renders
+    # the heading and nothing else, so the absence under it is pinned too: the
+    # section's whole content on this run is the stated absence.
+    assert "Not present: 02-scenarios.json" in html
+
+
+def test_render_on_an_empty_directory_still_produces_a_page(tmp_path):
+    empty = tmp_path / "run-empty"
+    empty.mkdir()
+    html = summary.run_summary(RunPaths(empty))
+    assert html.startswith("<!doctype html>")
+    assert "</html>" in html
+    # Not just well-formed: the page is *useful*, which for a directory holding
+    # nothing means it names what it looked for. Every one of these is a section
+    # that would have vanished had `_section` skipped an Absent.
+    for what in (
+        "Not present: manifest.json",
+        "Not present: 00-objective.json",
+        "Not present: 00-triage.json",
+        "Not present: 01-world-model.json",
+        "Not present: 01-contradictions/",
+        "Not present: 03-coverage/",
+        "Not present: 02-scenarios.json",
+        "Not present: 05-verdicts/",
+        "Not present: decisions.md",
+    ):
+        assert what in html, f"{what} is not stated on the page"
+
+
+def test_render_links_each_scenario_to_its_artifacts(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    html = summary.run_summary(run)
+    assert "05-verdicts/" in html, "ids are links to the artifacts on disk"
+    assert '<a href="05-verdicts/scn-open.json">scn-open</a>' in html
+
+
+def test_render_includes_decisions_md_when_present(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    (run.root / "decisions.md").write_text("- a decision was taken\n", encoding="utf-8")
+    assert "a decision was taken" in summary.run_summary(run)
+
+
+def test_render_escapes_decisions_md(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    (run.root / "decisions.md").write_text("- <b>not bold</b>\n", encoding="utf-8")
+    html = summary.run_summary(run)
+    assert "<b>not bold</b>" not in html
+    assert "&lt;b&gt;not bold&lt;/b&gt;" in html
+
+
+def test_render_marks_the_spine_produced_and_absent_per_stage(tmp_path):
+    """The first thing a reader of a partial run needs, and it must distinguish.
+
+    Both classes are asserted, because a spine that marks every stage `yes` reads
+    as a complete run and a spine that marks every stage `no` reads as a run that
+    never started -- and either is satisfied by a test that only looks for the
+    stage names.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    html = summary.run_summary(run)
+    assert '<li class="yes">challenge</li>' in html
+    assert '<li class="no">emit</li>' in html
+    assert '<li class="no">survey</li>' in html
+    for stage in STAGES:
+        assert f">{stage}</li>" in html, f"{stage} is missing from the spine"
+
+
+def test_render_shows_a_recorded_limit_as_its_value(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge", max_rounds=2, max_scenarios=8)
+    html = summary.run_summary(run)
+    assert "<tr><td>max_rounds</td><td>2</td></tr>" in html
+    assert "<tr><td>max_scenarios</td><td>8</td></tr>" in html
+
+
+def test_render_marks_a_missing_limit_rather_than_blanking_the_cell(tmp_path):
+    """`esc(None)` is the empty string, so a missing limit would render blank.
+
+    Measured in Task 2: a manifest with no `limits` gave `max_rounds` an empty
+    `<td>`, and a blank cell reads as a ceiling of nothing rather than as a field
+    the manifest never carried.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.manifest)
+    del doc["limits"]
+    write_json(run.manifest, doc)
+    html = summary.run_summary(run)
+    assert '<tr><td>max_rounds</td><td><span class="absent">not recorded</span></td></tr>' in html
+    assert "<tr><td>max_rounds</td><td></td></tr>" not in html
+
+
+def test_render_names_every_input_with_its_bytes_and_the_total(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    html = summary.run_summary(run)
+    got = summary.inputs(run)
+    for row in got.rows:
+        assert row.artifact_id in html
+        assert f'<td class="num">{row.bytes_}</td>' in html
+        assert f'<a href="00-inputs/{row.stored_as}">' in html
+    assert f"{got.total_bytes} bytes" in html
+
+
+def test_render_shows_a_supported_verdict_that_is_not_a_boolean(tmp_path):
+    """`Objective.supported` is typed `object` on purpose; the page must not
+    coerce it. A hand-edited `"supported": "partly"` renders as "partly", because
+    rendering False there would invent a gate-0 verdict the pass never gave.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="triage-seal")
+    doc = read_json(run.objective)
+    doc["objective_review"]["supported"] = "partly"
+    write_json(run.objective, doc)
+    html = summary.run_summary(run)
+    assert "Supported:</b> partly" in html
+
+
+def test_render_reports_the_predicted_against_the_observed_surface_count(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="triage-seal")
+    got = summary.objective(run)
+    html = summary.run_summary(run)
+    assert f"predicted surfaces:</b> {got.predicted_count}" in html
+    assert f"observed surfaces:</b> {len(got.surfaces)}" in html
+    for surface in got.surfaces:
+        assert surface.name in html
+        assert f'<td class="num">{surface.bytes_}</td>' in html
+
+
+def test_render_lists_the_admitted_candidates_in_priority_order(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="triage-seal")
+    got = summary.dispositions(run)
+    html = summary.run_summary(run)
+    assert f"{got.admit_count} admitted" in html
+    # Indexed inside the admits table, not over the whole page. Measured:
+    # `html.index(candidate_id)` over the whole page found the id in the Objective
+    # section's surface-evidence titles, which render *above* this table and in a
+    # different order -- so `_disposition_rows(got.admits[::-1])` survived.
+    start = html.index("Admitted, in priority order")
+    table = html[start : html.index("</table>", start)]
+    positions = [table.index(str(member["candidate_id"])) for member in got.admits]
+    assert positions == sorted(positions), "the admits table reshuffled the priority order"
+
+
+def test_render_distinguishes_a_closed_deficiency_from_an_open_one(tmp_path):
+    """`closed_by` is the only thing separating a deficiency a human answered
+    from one nothing has, and `brief.py` renders that distinction at gate 0.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="triage-seal")
+    doc = read_json(run.triage)
+    doc["deficiencies"] = [
+        {"deficiency_id": "def-open", "statement": "nothing answers this"},
+        {
+            "deficiency_id": "def-shut",
+            "statement": "a human answered this",
+            "closed_by": "proj-1",
+        },
+    ]
+    doc["projections"] = [
+        {
+            "projection_id": "proj-1",
+            "closes": ["def-shut"],
+            "wanted": {"statement": "a digest of the missing surface"},
+        }
+    ]
+    write_json(run.triage, doc)
+    html = summary.run_summary(run)
+    assert "closed by proj-1" in html
+    assert "<b>OPEN</b>" in html
+    assert "proj-1: a digest of the missing surface" in html
+
+
+def test_render_tabulates_the_world_model_counts_and_denominator(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    got = summary.world_model(run)
+    html = summary.run_summary(run)
+    for kind, count in got.counts.items():
+        assert f'<tr><td>{kind}</td><td class="num">{count}</td></tr>' in html
+    for key, value in got.denominator.items():
+        assert f"<tr><td>{key}</td><td>{value}</td></tr>" in html
+
+
+def test_render_reports_the_utilisation_percentage_and_both_columns(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    got = summary.utilisation(run)
+    html = summary.run_summary(run)
+    assert f"{got.cited} of {got.total} claims cited" in html
+    assert f"{got.pct:.1f}%" in html
+    for row in got.per_artifact:
+        assert f'<td class="num">{row["cited"]}</td>' in html
+
+
+def test_render_prints_the_pre_seal_utilisation_absence_verbatim(tmp_path):
+    """`Utilisation` is `Absent` for two distinct reasons, and the page prints
+    `Absent.what` rather than one fixed line: "the seal has not run" and
+    "something in the run could not be read" are different facts.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+    assert "Not present: claim utilisation (no world model yet)" in summary.run_summary(run)
+
+
+def test_render_prints_the_unreadable_utilisation_absence_verbatim(tmp_path):
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    # `"claims": 7` is one of the seven shapes measured escaping
+    # `claim_utilisation` as an exception -- TypeError, not an OSError.
+    write_json(run.claims_dir / "broken.json", {"schema_version": "0.1", "claims": 7})
+    html = summary.run_summary(run)
+    assert "Not present: claim utilisation (01-claims/ or 01-world-model.json unreadable)" in html
+
+
+def test_render_reports_each_gap_with_the_stages_it_blocks(tmp_path):
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.world_model)
+    doc["gaps"] = [
+        {
+            "id": "gap-1",
+            "subject": "the refund path",
+            "blocks": ["propose", "instantiate"],
+            "unknown": "which queue a refund lands in",
+            "why_it_matters": "no scenario can assert the queue",
+        }
+    ]
+    write_json(run.world_model, doc)
+    html = summary.run_summary(run)
+    assert "gap-1" in html
+    assert "propose, instantiate" in html
+    assert "which queue a refund lands in" in html
+
+
+def test_render_tallies_the_contradictions_by_resolution(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    got = summary.contradictions(run)
+    html = summary.run_summary(run)
+    assert f"{got.total} contradiction(s)" in html
+    assert f"{got.parts_swept} subject part(s)" in html
+    for key, count in got.by_resolution.items():
+        assert f'<tr><td>{key}</td><td class="num">{count}</td></tr>' in html
+
+
+def test_render_marks_each_matrix_cell_covered_or_not(tmp_path):
+    """Both classes, because a matrix drawn all-yes reads as a converged run.
+
+    The toy fixture covers all four cells, so one is turned off here: a test over
+    the unedited fixture cannot tell a renderer that emits `cell yes`
+    unconditionally from one that reads `covered`.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    latest = read_json(run.coverage_latest)
+    latest["capability_matrix"]["cells"][1]["covered"] = False
+    latest["capability_matrix"]["cells"][1]["scenario_ids"] = []
+    write_json(run.coverage_latest, latest)
+    html = summary.run_summary(run)
+    assert 'class="cell yes"' in html
+    assert 'class="cell no"' in html
+    assert 'title="scn-open, scn-blocked"' in html
+
+
+def test_render_labels_the_round_hole_count_apart_from_the_terminal_holes(tmp_path):
+    """`RoundRow.holes` and `Coverage.holes` come from different documents by
+    design and can differ without either being wrong, so the page must not let a
+    reader take the difference for an arithmetic error.
+    """
+    html = summary.run_summary(build_toy_run(tmp_path / "runs", upto="challenge"))
+    # Pinned as the column header, not as a substring: the note under the table
+    # explains the same distinction in prose, so a bare `"holes that round" in
+    # html` survives the column itself being relabelled "holes".
+    assert '<th class="num">holes that round</th>' in html
+    assert "Open holes at the last round" in html
+
+
+def test_render_reports_the_implied_suite_size(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    got = summary.coverage(run)
+    html = summary.run_summary(run)
+    assert f"implies {got.implied['implied']} scenario(s)" in html
+    assert f"ceiling {got.implied['ceiling']}" in html
+    assert got.implied["basis"] in html
+
+
+def test_render_says_the_implied_size_was_not_computed_when_it_could_not_be(tmp_path):
+    """`implied is None` merges three facts, so the page states one honest line
+    rather than guessing which of the three it was.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.manifest)
+    # The measured shape: `implied > ceiling` raises TypeError on a non-numeric
+    # ceiling, below sizing.py's own handler.
+    doc["limits"]["max_scenarios"] = "eight"
+    write_json(run.manifest, doc)
+    html = summary.run_summary(run)
+    assert "Implied suite size not computed" in html
+    assert "implies" not in html.split("Implied suite size not computed")[1]
+
+
+def test_render_names_every_round_with_its_verdict_and_cells(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    got = summary.coverage(run)
+    html = summary.run_summary(run)
+    assert f"Coverage ended <b>{got.terminal_verdict}</b>" in html
+    for row in got.rounds:
+        # The two cells asserted as an adjacent pair, not one at a time. Measured:
+        # the toy run has covered == total == 4, so dropping the numeric class from
+        # the covered cell left a lone `<td class="num">4</td>` assertion green
+        # against the *total* cell -- the fixture-cannot-reach shape.
+        assert (
+            f'<td class="num">{row.cells_covered}</td><td class="num">{row.cells_total}</td>'
+            in html
+        )
+
+
+def test_render_names_every_scenario_with_its_verdict_and_package_state(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    html = summary.run_summary(run)
+    rows = summary.scenarios(run)
+    assert len(rows) == 5
+    for row in rows:
+        assert row.title in html
+        assert row.id_ in html
+    # The folded duplicate has no verdict and no instance, and the row still
+    # renders: a table that dropped it would hide the one scenario score folded.
+    assert "scn-open-dup" in html
+    assert '<span class="absent">no package</span>' in html
+
+
+def test_render_puts_the_discriminating_fact_in_a_title_and_not_a_column(tmp_path):
+    """Long prose on a title attribute is what keeps a 128-row table scannable."""
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    rows = summary.scenarios(run)
+    fact = next(r.discriminating_fact for r in rows if r.discriminating_fact)
+    html = summary.run_summary(run)
+    assert f'title="{fact}"' in html
+    assert f">{fact}<" not in html, "the fact became a column and widened every row"
+
+
+def test_render_shows_an_uncoerced_hop_depth_verbatim(tmp_path):
+    """`ScenarioRow.hop_depth` is `object`: a hand-edited `"two"` renders as
+    "two", because a `0` beside a readable file reads as a rendering bug rather
+    than as the propose-stage defect it is.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.scenarios)
+    doc["scenarios"][0]["hop_depth"] = "two"
+    write_json(run.scenarios, doc)
+    html = summary.run_summary(run)
+    assert ">two</td>" in html
+
+
+def test_render_marks_an_overstated_difficulty_on_the_row(tmp_path):
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    verdict = read_json(run.verdict("scn-blocked"))
+    verdict["minimum_tool_calls_found"] = 1
+    write_json(run.verdict("scn-blocked"), verdict)
+    html = summary.run_summary(run)
+    assert "1 (overstated)" in html
+
+
+def test_render_tallies_the_verdicts_and_counts_the_packages(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    got = summary.challenge(run)
+    html = summary.run_summary(run)
+    assert f"{got.judged} scenario(s) judged" in html
+    assert f"{got.packages} package(s)" in html
+    for key, count in got.tallies.items():
+        assert f'<tr><td>{key}</td><td class="num">{count}</td></tr>' in html
+
+
+def test_render_states_the_challenge_absence_without_claiming_a_reason(tmp_path):
+    """`challenge`'s `Absent` conflates "no verdicts yet" with an unreadable
+    `05-verdicts/`, so the page states the directory and stops there.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    html = summary.run_summary(run)
+    assert "Not present: 05-verdicts/" in html
+    assert "scenario(s) judged" not in html
+
+
+def test_render_states_every_flag_with_its_threshold(tmp_path, monkeypatch):
+    """A flag whose rule is not on the page is a black box a reader cannot argue
+    with. Task 7's review measured that a renderer dropping the threshold column
+    would still pass every test in Task 7, so the assertion lives here.
+    """
+    run = _run_with_every_flag(tmp_path, monkeypatch)
+    html = summary.run_summary(run)
+    fired = summary.flags(run)
+    assert len(fired) == 7
+    for flag in fired:
+        # Through `esc`, not raw: `difficulty-overstated`'s threshold is
+        # "minimum_tool_calls_found < hop_depth", so the page carries it with the
+        # `<` escaped -- and a test comparing the raw string would push a
+        # renderer towards *not* escaping the one flag whose rule contains markup.
+        assert summary.esc(flag.headline) in html, f"{flag.id_} has no headline on the page"
+        assert summary.esc(flag.threshold) in html, f"{flag.id_} reached the page without its rule"
+        assert summary.esc(flag.detail) in html, f"{flag.id_} has no detail on the page"
+
+
+def test_render_says_no_flags_fired_rather_than_leaving_the_section_empty(tmp_path):
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.manifest)
+    # stage-record-incomplete is the one flag an unedited toy run fires, because
+    # build_toy_run mints an empty manifest.stages.
+    doc["stages"] = {
+        name: {"model": "m", "effort": "high", "skill_sha256": "0" * 64}
+        for name in (
+            "extract",
+            "reconcile-subjects",
+            "reconcile-contradict",
+            "reconcile-capabilities",
+            "reconcile-outcomes",
+            "reconcile-entities",
+            "reconcile-goals",
+            "reconcile-gaps",
+            "propose",
+            "score",
+            "instantiate",
+            "challenge",
+        )
+    }
+    write_json(run.manifest, doc)
+    assert summary.flags(run) == []
+    assert "No flags fired." in summary.run_summary(run)
+
+
+def test_render_escapes_a_verdict_note_reaching_a_title_attribute(tmp_path):
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    verdict = read_json(run.verdict("scn-open"))
+    verdict["notes"] = 'the agent said "no" & stopped'
+    write_json(run.verdict("scn-open"), verdict)
+    html = summary.run_summary(run)
+    assert 'title="the agent said &quot;no&quot; &amp; stopped"' in html
+
+
+def test_render_escapes_an_unsafe_scenario_id(tmp_path):
+    """A scenario id is a value like any other and goes through `esc`.
+
+    The id cell, not the `href`, and that is a measured limit rather than a
+    weaker claim than intended: an id carrying a `"` fails `is_safe_segment`, so
+    `summary.scenarios` joins no verdict for it, so it renders unlinked and the
+    `href` branch is unreachable for every shape that could break an attribute.
+    Asserting on the href here would have been the fixture-cannot-reach shape --
+    measured, an unescaped `href` survived it. The `esc` in the href stays as
+    defence in depth against a future id grammar, unpinned and said so.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.scenarios)
+    doc["scenarios"][0]["id"] = 'x" onmouseover="alert(1)'
+    write_json(run.scenarios, doc)
+    html = summary.run_summary(run)
+    assert 'x" onmouseover="alert(1)' not in html
+    assert "onmouseover=&quot;alert(1)" in html
+
+
+def test_render_does_not_raise_on_an_unreadable_run_root(tmp_path):
+    """The module's one absolute promise, at the renderer."""
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs")
+    run.root.chmod(0o000)
+    try:
+        html = summary.run_summary(run)
+    finally:
+        run.root.chmod(0o755)
+    assert html.startswith("<!doctype html>")
+    assert "Not present: manifest.json" in html
+
+
+def test_render_is_byte_identical_across_two_calls(tmp_path):
+    """A page a reader diffs against yesterday's must not reshuffle on its own.
+
+    `dict` iteration and `list_json`'s sort are the two places an unstable order
+    would come from, and both are settled in `summary.py` -- this is the lock at
+    the rendering boundary.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    assert summary.run_summary(run) == summary.run_summary(run)
