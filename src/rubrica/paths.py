@@ -59,6 +59,36 @@ STAGES = (
 
 _SAFE_SEGMENT = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
+# The one definition of a round-part name, shared by scenario_part_rounds and
+# score_part_rounds so the two can never disagree about what counts as a round.
+#
+# A regex rather than str.isdigit(), because isdigit() is *wider* than int() in
+# one direction and equally wide in the other, and both hurt. Measured (codepoints
+# spelled out rather than pasted: U+0663 is right-to-left and reorders the rest of
+# a comment line in most editors):
+#
+#   - U+00B2, superscript two. isdigit() is True, int() raises a bare ValueError.
+#     That is neither OSError nor UsageError, so unlike an unreadable directory it
+#     is *not* in cli.py's exit-2 tuple -- it reaches the catch-all and becomes an
+#     exit-1 [internal] finding, telling the orchestrator to repair a stage over a
+#     directory name. Latent until a subcommand calls these, and closed here
+#     rather than left to whichever caller first does.
+#   - U+FF11 and U+0663, fullwidth one and Arabic-Indic three. isdigit() and int()
+#     BOTH accept them, so no amount of guarding int() helps: a filter built on
+#     either alone silently counts rounds 1 and 3 from names nothing ever wrote.
+#
+# re's `\d` is Unicode-wide too, so the explicit [0-9] class is load-bearing --
+# `[1-9]\d{0,}` looks like the same pattern and accepts round-1<U+0663> as 13.
+#
+# `[1-9][0-9]*` rather than `\d+` on purpose, and this is a ruling, not an
+# oversight: round-01 is REJECTED, not normalised to 1. `\d+` accepts it and
+# int() folds it onto the same number, so round-01 beside round-1 yields
+# [1, 1] -- a duplicated round makes a caller walk one round twice and every
+# scenario id collide. Normalising would invent a round from a directory nobody
+# writes; rejecting says the truth, that the name is not one of ours. It also
+# excludes round-0, which the round_n >= 1 guards already refuse to build.
+_ROUND_PART = re.compile(r"round-([1-9][0-9]*)")
+
 
 class UnsafeSegment(ValueError):
     """Raised when an id from an artifact would escape the run directory."""
@@ -259,7 +289,7 @@ class RunPaths:
 
     def scenario_round_dir(self, round_n: int) -> Path:
         if round_n < 1:
-            raise ValueError(f"round must be >= 1, got {round_n}")
+            raise ValueError(f"scenario round must be >= 1, got {round_n}")
         return self.scenario_parts_dir / f"round-{round_n}"
 
     def scenario_part(self, round_n: int, batch_id: str) -> Path:
@@ -270,25 +300,33 @@ class RunPaths:
 
         Sorted numerically rather than lexically: round-10 must not sort between
         round-1 and round-2, which is exactly what sorted() on the stem does.
+
+        Names that are not _ROUND_PART are skipped rather than raising -- a stray
+        02-scenarios/notes.json, a round-x/, a plain file named round-3 -- for
+        the reason score_part_rounds gives: this is what the seal iterates, and
+        one stray entry must not stop a real round from being assembled.
         """
         rounds: list[int] = []
         try:
             for entry in list_dir(self.scenario_parts_dir):
-                if not entry.is_dir() or not entry.name.startswith("round-"):
-                    continue
-                suffix = entry.name[len("round-") :]
-                if suffix.isdigit():
-                    rounds.append(int(suffix))
+                match = _ROUND_PART.fullmatch(entry.name)
+                if match and entry.is_dir():
+                    rounds.append(int(match.group(1)))
         except OSError as exc:
-            # The same catch _instance_dir_names carries, for the same measured
-            # reason: list_dir converts the failure of listing this directory,
-            # but a directory that can be listed and not stat'ed through (mode
-            # 0o444) makes `entry.is_dir()` on a *child* raise instead, which
-            # list_dir never touches. Measured without this: PermissionError
-            # escaped to cli.py's catch-all and became an `[internal]` finding
-            # at exit 1, telling the orchestrator to retry a chmod problem no
-            # re-dispatch can fix. Same type and message as every sibling
-            # listing, so a caller cannot tell which one failed.
+            # The same catch _instance_dir_names carries, for the same reason:
+            # list_dir converts the failure of listing this directory, but a
+            # directory that can be listed and not stat'ed through (mode 0o444)
+            # makes `entry.is_dir()` on a *child* raise instead, and list_dir
+            # never touches the child.
+            #
+            # This is message fidelity, not an exit-code repair: cli.py's
+            # `except (OSError, UsageError, ArtifactError, UnknownStage)` already
+            # maps both to exit 2. What the bare error got wrong is *which
+            # artifact it named* -- it names an arbitrary child it happened to
+            # stat first (.../02-scenarios/round-1) where every sibling listing
+            # names the directory the accessor actually reads. Same exception
+            # type and the same message shape as _instance_dir_names, so a
+            # caller cannot tell the two apart.
             raise UsageError(
                 f"cannot read run directory: {self.scenario_parts_dir} ({exc})"
             ) from exc
@@ -317,22 +355,22 @@ class RunPaths:
 
     def score_part(self, round_n: int) -> Path:
         if round_n < 1:
-            raise ValueError(f"round must be >= 1, got {round_n}")
+            raise ValueError(f"score round must be >= 1, got {round_n}")
         return self.score_parts_dir / f"round-{round_n}.json"
 
     def score_part_rounds(self) -> list[int]:
         """Every round number that has a score part, ascending.
 
         Sorted numerically for the reason scenario_part_rounds is, and a file
-        whose stem is not round-<digits> is ignored rather than raising: this is
+        whose stem is not _ROUND_PART is ignored rather than raising: this is
         the accessor the seal iterates, and a stray file in the directory must
         not be able to stop a round from being assembled.
         """
         rounds: list[int] = []
         for path in list_json(self.score_parts_dir):
-            stem = path.stem
-            if stem.startswith("round-") and stem[len("round-") :].isdigit():
-                rounds.append(int(stem[len("round-") :]))
+            match = _ROUND_PART.fullmatch(path.stem)
+            if match:
+                rounds.append(int(match.group(1)))
         return sorted(rounds)
 
     @property

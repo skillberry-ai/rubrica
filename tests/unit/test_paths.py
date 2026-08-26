@@ -427,14 +427,90 @@ def test_score_part_rounds_reads_what_is_on_disk(tmp_path):
     assert run.score_part_rounds() == [1, 2, 10]
 
 
+def test_scenario_part_rounds_ignores_entries_that_are_not_rounds(tmp_path):
+    """The stray-tolerance the docstring claims, exercised.
+
+    Matches score_part_rounds' notes.json case, and covers all three branches
+    the filter has: a file that is not a round at all, a round- name whose
+    suffix is not a number, and a round- name that is a plain *file* rather
+    than the directory a round part is.
+    """
+    run = RunPaths(tmp_path)
+    real = run.scenario_part(1, "b01")
+    real.parent.mkdir(parents=True)
+    real.write_text("{}", encoding="utf-8")
+    (run.scenario_parts_dir / "notes.json").write_text("{}", encoding="utf-8")
+    (run.scenario_parts_dir / "round-x").mkdir()
+    # A *file* named round-3, which is what a half-written run or a hand-edit
+    # leaves behind. It matches the name pattern and is still not a round.
+    (run.scenario_parts_dir / "round-3").write_text("{}", encoding="utf-8")
+    assert run.scenario_part_rounds() == [1]
+
+
+@pytest.mark.parametrize("name", ["round-²", "round-1²", "round-１", "round-٣", "round-1٣"])
+def test_round_listings_reject_non_ascii_digits(tmp_path, name):
+    r"""str.isdigit() is wider than int(), in both directions.
+
+    Measured, U+00B2 (superscript two): isdigit() is True and int() raises a bare
+    ValueError. Unlike an unreadable directory, that one is NOT in cli.py's exit-2
+    tuple, so it reaches the catch-all and becomes an exit-1 [internal] finding
+    over a directory name -- the misclassification the exit-code contract forbids.
+
+    U+FF11 and U+0663 (fullwidth one, Arabic-Indic three) are the mirror: isdigit()
+    and int() BOTH accept them, so guarding int() cannot help, and the older filter
+    silently invented rounds 1 and 3 from names nothing ever wrote.
+
+    The last case puts U+0663 in the *tail*, and it is here because writing this
+    predicate the other way round found the hole: `[1-9]\d{0,}` reads as a
+    meaning-preserving rewrite of `[1-9][0-9]*` and is not one, because re's `\d`
+    is Unicode-wide -- it matches that name and int() then returns 13, inventing a
+    round no digit-by-digit reading of the name contains. The explicit [0-9] class
+    is what refuses it, so the class is load-bearing and pinned here.
+    """
+    run = RunPaths(tmp_path)
+    (run.scenario_parts_dir / name).mkdir(parents=True)
+    run.score_parts_dir.mkdir(parents=True)
+    (run.score_parts_dir / f"{name}.json").write_text("{}", encoding="utf-8")
+    assert run.scenario_part_rounds() == []
+    assert run.score_part_rounds() == []
+
+
+def test_leading_zero_rounds_are_rejected_not_normalised(tmp_path):
+    r"""round-01 is not round 1, and must not become it.
+
+    The ruling _ROUND_PART records: `\d+` accepts round-01 and int() folds it
+    onto 1, so round-01 beside round-1 yields [1, 1] -- and a duplicated round
+    makes a caller walk one round twice and collide every scenario id it mints.
+    Rejecting is the honest answer, since nothing in this package ever writes a
+    zero-padded round; normalising would invent a round from a name that is not
+    ours. round-0 goes the same way, which is what the round_n >= 1 guards
+    already refuse to build.
+    """
+    run = RunPaths(tmp_path)
+    for name in ("round-1", "round-01", "round-007", "round-0"):
+        (run.scenario_parts_dir / name).mkdir(parents=True, exist_ok=True)
+    run.score_parts_dir.mkdir(parents=True)
+    for name in ("round-1.json", "round-01.json", "round-007.json", "round-0.json"):
+        (run.score_parts_dir / name).write_text("{}", encoding="utf-8")
+    # Exactly one 1, not two: this is the assertion that fails on `\d+`.
+    assert run.scenario_part_rounds() == [1]
+    assert run.score_part_rounds() == [1]
+
+
 def test_round_numbers_must_be_positive(tmp_path):
     run = RunPaths(tmp_path)
     # Mirrors coverage_round's guard: a round of 0 or -1 is a caller bug, and a
     # path built from one would silently address a directory nobody writes.
+    #
+    # `match=` rather than a bare pytest.raises(ValueError): UsageError and
+    # UnsafeSegment are both ValueError subclasses, so the unnarrowed form would
+    # have passed on an unreadable directory or a rejected segment -- the wrong
+    # failure entirely. The message is also what names the domain, so each
+    # accessor is pinned to its own text rather than to a shared one.
     for bad in (0, -1):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=f"scenario round must be >= 1, got {bad}"):
             run.scenario_round_dir(bad)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=f"score round must be >= 1, got {bad}"):
             run.score_part(bad)
 
 
@@ -480,12 +556,18 @@ def test_unsafe_scenario_part_names_are_listed_not_raised(tmp_path):
 def test_the_round_part_listings_raise_a_usage_error_on_an_unreadable_directory(tmp_path, mode):
     """The new round-part listings, held to the same ruling as every other one.
 
-    Measured, not assumed: before scenario_part_rounds wrapped its loop, mode
-    0o444 on 02-scenarios/ escaped as a bare PermissionError. That is not in
-    cli.py's narrow catch tuple, so it reached the catch-all and became an
-    `[internal]` finding at exit 1 -- telling the orchestrator "repairable stage
-    defect, retry once" about a chmod problem no re-dispatch can fix, when an
-    unreadable run directory is exit 2 by contract.
+    This pins message fidelity, not an exit code. cli.py's `except (OSError,
+    UsageError, ArtifactError, UnknownStage)` already maps both the bare
+    PermissionError and the UsageError to exit 2, so the conversion changes no
+    exit code -- the earlier claim that it did described a cli.py that predates
+    the commit which added OSError to that tuple.
+
+    What it does change is *which artifact the error names*. Observed before the
+    fix: `PermissionError ... '<run>/02-scenarios/round-1'`, naming an arbitrary
+    child the loop happened to stat first, where every sibling listing names the
+    directory the accessor actually reads. That is CLAUDE.md's "a finding must
+    name the right artifact" rule applied to a 2, and it is what makes this
+    accessor indistinguishable from _instance_dir_names to a caller.
 
     Both modes, because they fail in different places. At 0o000 the listing
     itself raises and list_dir/list_json converts it. At 0o444 the listing
