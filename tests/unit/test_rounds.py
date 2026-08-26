@@ -1616,3 +1616,76 @@ def test_a_re_score_after_a_rejection_reopens_the_row_the_scenario_credited(tmp_
     assert cell["covered"] is False
     assert after["capability_matrix"]["pct"] == 0.0
     assert refs.check_coverage(run) == []
+
+
+def test_a_missing_prior_coverage_document_is_refused_rather_than_reset(tmp_path):
+    """Ruling R20, and both halves of it on one run so they cannot collapse.
+
+    Measured before the refusal existed: round 5 with round-4's document absent
+    returned {'new_cells_this_round': 1, 'rounds_without_progress': 0}, erasing
+    four rounds of accumulated history -- so halted_no_progress could never fire
+    from it and the loop would run to the round cap. That is the failure Method
+    step 8 warns about in its own words. Round 1's absence is the legitimate case
+    and stays one, which is why both are asserted here rather than in two tests
+    that could drift apart.
+    """
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    matrix = rounds.capability_matrix(
+        read_json(run.world_model),
+        [
+            _scenario(
+                "sc-001",
+                status="active",
+                refs=[{"capability_id": "cap-0", "outcome_class_id": "cap-0-oc-0"}],
+            )
+        ],
+    )
+    assert matrix["covered"] == 1
+
+    # Round 1: no prior document is normal, and the covered cell is new.
+    assert rounds.progress(run, 1, matrix) == {
+        "new_cells_this_round": 1,
+        "rounds_without_progress": 0,
+    }
+
+    # Round 2 onward: the same absence is an inconsistent run. UsageError rather
+    # than a Finding because 03-coverage/round-N.json is seal_score's own code
+    # output -- no re-dispatch of any prompt can produce it.
+    for round_n in (2, 5):
+        with pytest.raises(UsageError, match=re.escape(str(run.coverage_round(round_n - 1)))):
+            rounds.progress(run, round_n, matrix)
+    assert not run.coverage_round(1).exists()
+
+    # And it is the absence that is refused, not the round number: write round 1's
+    # document and round 2 measures against it.
+    write_json(
+        run.coverage_round(1),
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "denominator_version": 1,
+            "capability_matrix": matrix,
+            "goal_matrix": {"rows": [], "covered": 0, "total": 0, "pct": 0.0},
+            "holes": [],
+            "verdict": "continue",
+            "progress": {"new_cells_this_round": 1, "rounds_without_progress": 0},
+        },
+    )
+    assert rounds.progress(run, 2, matrix) == {
+        "new_cells_this_round": 0,
+        "rounds_without_progress": 1,
+    }
+
+
+def test_a_second_round_seal_refuses_when_the_first_rounds_document_is_absent(tmp_path):
+    # R20 reaching seal_score, which is where the orchestrator meets it: the
+    # compose is otherwise clean, so without the refusal this round would publish
+    # a coverage document carrying a reset halt signal.
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    _part(run, 2, "b01", [_scenario("sc-b01-001", round_n=2, status="active")])
+    _score_part(run, 2, verdict="converged")
+    rounds.seal_scenarios(run)
+    with pytest.raises(UsageError, match=re.escape(str(run.coverage_round(1)))):
+        rounds.seal_score(run, round_n=2)
+    assert not run.coverage_round(2).exists()
+    assert not run.coverage_latest.exists()

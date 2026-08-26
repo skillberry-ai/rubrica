@@ -865,15 +865,23 @@ def progress(run: RunPaths, round_n: int, cap_matrix: dict) -> dict:
     then halt on progress it actually made.
 
     The prior round's coverage document is the baseline, and it is read rather
-    than re-derived from the scenarios' round tags. Method step 8 offers a
-    round-tag restatement of the same clause -- "no live scenario from an earlier
-    round credits them" -- but the two disagree in exactly the states this loop
-    exists to handle: fold round 1's scenario into a round-2 one claiming the
-    same cell, and the round-tag test calls that cell new because no *live*
-    earlier scenario credits it, which is the inflation the step's own hazard
-    sentence names ("inflated by counting cells an earlier round already covered
-    is how a loop that has stopped making progress runs to the round cap
-    anyway"). The primary clause wins over its restatement.
+    than re-derived from the scenarios' round tags.
+
+    WHICH CLAUSE OF METHOD STEP 8 THIS IMPLEMENTS, because the step states two
+    that disagree and a reader has to know which one is in the code. Implemented:
+    the primary clause, "covered now and were *not* covered before this round",
+    as a set difference against the prior round's document. NOT implemented: the
+    step's own round-tag restatement of it, "no live scenario from an earlier
+    round credits them". The two diverge in exactly the states this loop exists
+    to handle -- fold round 1's scenario into a round-2 one claiming the same
+    cell, and the round-tag reading calls that cell new because no *live* earlier
+    scenario credits it, which is the inflation the step's own hazard sentence
+    names ("inflated by counting cells an earlier round already covered is how a
+    loop that has stopped making progress runs to the round cap anyway"). So the
+    restatement contradicts the hazard it is written beside and the primary
+    clause does not. That is a defect in the SKILL, not in this function, and it
+    is recorded as required work for the task that rewrites rb-score -- do not
+    resolve it by changing the code here to match the restatement.
 
     Reading round-(N-1).json rather than latest.json is what keeps the step's
     other warning satisfied: latest.json is rewritten by every re-score, so it
@@ -881,13 +889,40 @@ def progress(run: RunPaths, round_n: int, cap_matrix: dict) -> dict:
     the numbered file is that round's own history.
     """
     now = _covered_cell_keys(cap_matrix)
-    previous = run.coverage_round(round_n - 1) if round_n > 1 else None
-    if previous is None or not previous.exists():
+    if round_n <= 1:
+        # Round 1's absent prior document is the LEGITIMATE case, and it must not
+        # be collapsed with the absence refused just below. There is no earlier
+        # round that could have covered anything, so every covered cell is new by
+        # definition -- Method step 8 says exactly that ("in round 1 it is 0 if
+        # this round covered a cell and 1 if it covered none").
         new_cells = len(now)
         return {
             "new_cells_this_round": new_cells,
             "rounds_without_progress": 0 if new_cells else 1,
         }
+    previous = run.coverage_round(round_n - 1)
+    if not previous.exists():
+        # REFUSED, never defaulted to the round-1 branch above, and do not
+        # "simplify" it back. Measured before this refusal existed: round 5 with
+        # round-4's document absent returned every covered cell as new and
+        # rounds_without_progress as 0, erasing four rounds of accumulated
+        # history -- so `halted_no_progress` could never fire from it and the loop
+        # would run to the round cap. That is the failure Method step 8 warns
+        # about in its own words, arriving through the bound rather than through
+        # the count.
+        #
+        # It is also not a state any repair reaches. seal_score writes nothing
+        # when it refuses, so the orchestrator's path is: seal_score(N) refuses ->
+        # repair score -> seal_score(N) again -> the document exists. Reaching
+        # here means a round's seal was skipped outright, which is an inconsistent
+        # run rather than a legitimate one. UsageError and not a Finding for the
+        # who-wrote-it reason: 03-coverage/round-N.json is seal_score's own code
+        # output, so no re-dispatch of any prompt can produce the missing file.
+        raise UsageError(
+            f"missing artifact: {previous} -- round {round_n} has no round "
+            f"{round_n - 1} coverage document to measure progress against, so "
+            "rounds_without_progress cannot be carried; a round's seal was skipped"
+        )
     # 03-coverage/round-N.json is THIS function's sibling output -- seal_score
     # writes it -- so a malformed one is a hand-edit no re-dispatch could repair,
     # which is why these are UsageErrors rather than findings. Guarded rather
