@@ -21,6 +21,7 @@ from tests.builders import (
     minimal_dispositions_part,
     minimal_objective,
 )
+from tests.toy import split_world_model
 
 # The five kinds this task adds. A literal tuple rather than a slice of
 # ARTIFACT_SCHEMAS: the point of several tests below is to notice if one of
@@ -329,3 +330,80 @@ def test_an_unreadable_sibling_schema_reached_only_via_the_registry_glob(tmp_pat
             validate_artifact(doc_path, "dispositions-part")
     finally:
         locked.chmod(0o644)
+
+
+# The four reconcile partials whose pass owns a claim kind, and so must account
+# for every input the manifest names. A literal tuple for the same reason
+# PART_KINDS above is one: a set computed from ARTIFACT_SCHEMAS could not notice
+# one of these ceasing to exist. gaps-part is deliberately absent --
+# rb-reconcile-gaps owns no claim kind, and a gap asserts what no input
+# contains, so no output shape can force its read coverage.
+_INPUTS_SEEN_PARTS = ("capabilities-part", "entities-part", "outcomes-part", "goals-part")
+
+# Part kind -> the key split_world_model files that partial under.
+_PART_FIXTURE_KEYS = {
+    "capabilities-part": "capabilities",
+    "entities-part": "entities",
+    "outcomes-part": "outcomes",
+    "goals-part": "goals",
+}
+
+
+def _minimal_part(kind):
+    """The golden partial for `kind`, taken from the fixture.
+
+    A thin lookup rather than a second hand-authored part document: several
+    tests in this module exist to notice when a schema and its fixture drift,
+    and a local copy of the document would be the drift instead of the detector.
+    """
+    return split_world_model()[_PART_FIXTURE_KEYS[kind]]
+
+
+@pytest.mark.parametrize("kind", _INPUTS_SEEN_PARTS)
+def test_a_partial_without_inputs_seen_is_rejected(tmp_path, kind):
+    """The four passes that own a claim kind must account for every input.
+
+    Issue #6: read coverage of 01-claims/ varied 3/23 to 23/23 across
+    byte-identical dispatches, and nothing in either check layer could see the
+    difference -- a skimmed read produces a well-formed partial. The accounting
+    is what makes it visible.
+    """
+    document = _minimal_part(kind)
+    del document["inputs_seen"]
+    path = tmp_path / f"{kind}.json"
+    write_json(path, document)
+    assert validate_artifact(path, kind), f"{kind} with no inputs_seen was accepted"
+
+
+@pytest.mark.parametrize("kind", _INPUTS_SEEN_PARTS)
+def test_a_dropped_claim_without_a_note_is_rejected(tmp_path, kind):
+    """`dropped >= 1` requires `note`, and layer 1 owns it.
+
+    A property a deterministic gate can enforce belongs to that gate. This one
+    is expressible in JSON Schema as if/then, so it is not the checker's.
+    """
+    document = _minimal_part(kind)
+    document["inputs_seen"] = [
+        {"artifact_id": "api-json", "own_kind_total": 2, "cited": 1, "dropped": 1}
+    ]
+    path = tmp_path / f"{kind}.json"
+    write_json(path, document)
+    assert validate_artifact(path, kind), f"{kind} dropped a claim with no note"
+
+
+@pytest.mark.parametrize("kind", _INPUTS_SEEN_PARTS)
+def test_a_row_with_nothing_dropped_needs_no_note(tmp_path, kind):
+    """The other direction, and the reason totality costs nothing.
+
+    Rows are total over manifest.inputs, including inputs holding none of the
+    pass's own kind. A 0/0/0 row is the honest record for those, and requiring
+    prose beside it would make the totality rule expensive enough to argue
+    with.
+    """
+    document = _minimal_part(kind)
+    document["inputs_seen"] = [
+        {"artifact_id": "api-json", "own_kind_total": 0, "cited": 0, "dropped": 0}
+    ]
+    path = tmp_path / f"{kind}.json"
+    write_json(path, document)
+    assert validate_artifact(path, kind) == []

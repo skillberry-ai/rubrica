@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inputs-seen-0.1.json",
+  "title": "One reconcile pass's accounting of the inputs it read",
+  "description": "Not an artifact kind: this file holds one $defs/row that the four reconcile partials whose pass owns a claim kind $ref, and no stage produces a document of this shape on its own. Issue #6 measured a pass's read coverage of 01-claims/ varying 3/23 to 23/23 across byte-identical dispatches, with neither check layer able to tell the two runs apart because a skimmed read still produces a well-formed partial. A row per input, carrying a count recomputable from 01-claims/, is what makes the difference visible.",
+  "$defs": {
+    "row": {
+      "type": "object",
+      "required": ["artifact_id", "own_kind_total", "cited", "dropped"],
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": { "$ref": "world-model-0.1.json#/$defs/id" },
+        "own_kind_total": { "type": "integer", "minimum": 0 },
+        "cited": { "type": "integer", "minimum": 0 },
+        "dropped": { "type": "integer", "minimum": 0 },
+        "note": { "type": "string", "minLength": 1 }
+      },
+      "if": { "properties": { "dropped": { "minimum": 1 } }, "required": ["dropped"] },
+      "then": { "required": ["note"] }
+    }
+  }
+}

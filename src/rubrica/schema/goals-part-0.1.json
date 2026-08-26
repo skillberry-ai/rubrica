@@ -4,7 +4,7 @@
   "title": "Actors, and the goals they hold",
   "description": "Its own pass rather than folded into entities because goals are half the frozen denominator: reconcile-seal counts them, rb-propose designs against exactly this list, and a later stage may only request an amendment. Actors travel with goals because every goal needs a real actor_id to resolve.",
   "type": "object",
-  "required": ["schema_version", "actors", "goals"],
+  "required": ["schema_version", "actors", "goals", "inputs_seen"],
   "additionalProperties": false,
   "properties": {
     "schema_version": {"const": "0.1"},
@@ -15,6 +15,10 @@
     "goals": {
       "type": "array",
       "items": {"$ref": "world-model-0.1.json#/$defs/goal"}
+    },
+    "inputs_seen": {
+      "type": "array",
+      "items": {"$ref": "inputs-seen-0.1.json#/$defs/row"}
     }
   }
 }

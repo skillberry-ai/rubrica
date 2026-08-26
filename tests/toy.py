@@ -444,6 +444,80 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
     return payload
 
 
+# Which claim kinds each pass is accountable for. The six kinds in
+# claims-0.1.json partition onto the four passes that own one, which is what
+# makes an own-kind count a per-pass number rather than an aggregate: measured on
+# run-20260823-112746, per-kind citation was capability 110/135 while goal was
+# 2/38, and the run's single aggregate figure of 33.6% is the average that hid
+# it. reconcile-gaps owns no kind, and reconcile-subjects and
+# reconcile-contradict need no accounting -- refs.check_subjects already makes
+# the cover total.
+OWN_KINDS: dict[str, tuple[str, ...]] = {
+    "capabilities": ("capability",),
+    "entities": ("entity", "invariant"),
+    "outcomes": ("outcome_class",),
+    "goals": ("actor", "goal"),
+}
+
+
+def _claim_refs_in(node: Any) -> set[str]:
+    """Every id in every `claims` array anywhere in a partial.
+
+    A walk rather than a per-part list of paths: the four partials nest their
+    citations differently -- an entity carries them on itself and on each
+    invariant, the outcomes part two levels down inside an `outcomes` record --
+    and a path list would need revising by whoever nests a new element. Mirrors
+    refs._claim_refs_in, and both exist because the fixture must compute what
+    the checker recomputes; if they ever disagree, the fixture is what proves
+    the checker wrong rather than the other way round.
+    """
+    found: set[str] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "claims":
+                found.update(v for v in value if isinstance(v, str))
+            else:
+                found.update(_claim_refs_in(value))
+    elif isinstance(node, list):
+        for item in node:
+            found.update(_claim_refs_in(item))
+    return found
+
+
+def _inputs_seen(part: dict[str, Any], own_kinds: tuple[str, ...]) -> list[dict[str, Any]]:
+    """One row per artifact in the toy corpus, computed from the part itself.
+
+    Total over every artifact, including those holding none of this pass's kinds
+    -- a 0/0/0 row is the honest record for those, and it is what makes the
+    accounting an instrument: a pass cannot state a count for a file it never
+    opened.
+    """
+    cited_ids = _claim_refs_in(part)
+    rows: list[dict[str, Any]] = []
+    for artifact_id in ARTIFACT_IDS:
+        own = [c for c in toy_claims(artifact_id)["claims"] if c["kind"] in own_kinds]
+        cited = sum(1 for claim in own if claim["id"] in cited_ids)
+        row: dict[str, Any] = {
+            "artifact_id": artifact_id,
+            "own_kind_total": len(own),
+            "cited": cited,
+            "dropped": len(own) - cited,
+        }
+        if row["dropped"]:
+            # The toy's one drop, and it is the worked example the spec wants on
+            # the record: clm-trace-002 is the losing side of
+            # con-missing-semantics, resolved `preferred_a`. It is cited by the
+            # contradiction and by no partial, so the outcomes pass's row for
+            # trace-json reads 2/1/1 -- which is exactly the case a reader at
+            # gate 1 should be able to tell apart from a file nobody opened.
+            row["note"] = (
+                "the side of a recorded contradiction that its resolution did not prefer; "
+                "cited by 01-contradictions/, deliberately not modelled here"
+            )
+        rows.append(row)
+    return rows
+
+
 def split_world_model(
     world: dict[str, Any] | None = None,
     *,
@@ -577,16 +651,11 @@ def split_world_model(
             if claim_id not in by_id[owner]["claims"]:
                 by_id[owner]["claims"].append(claim_id)
 
-    return {
-        "subjects": {"schema_version": "0.1", "subjects": subjects},
-        "contradictions": {
-            subject_id: {
-                "schema_version": "0.1",
-                "subject_id": subject_id,
-                "contradictions": found,
-            }
-            for subject_id, found in by_subject.items()
-        },
+    # Built before the rows, because _inputs_seen reads the finished part: the
+    # count of cited claims is a property of what the pass wrote, so declaring
+    # rows beside the elements would make them a second assertion to keep
+    # correct rather than a measurement of the first.
+    partials: dict[str, Any] = {
         "capabilities": {
             "schema_version": "0.1",
             "capabilities": [
@@ -607,6 +676,24 @@ def split_world_model(
             "actors": world["actors"],
             "goals": world["goals"],
         },
+    }
+    for key, own_kinds in OWN_KINDS.items():
+        partials[key]["inputs_seen"] = _inputs_seen(partials[key], own_kinds)
+
+    # gaps gets no inputs_seen: rb-reconcile-gaps owns no claim kind, and a gap
+    # asserts what no input contains, so no output shape can force its read
+    # coverage. The hole that leaves is real, and deliberate rather than missed.
+    return {
+        "subjects": {"schema_version": "0.1", "subjects": subjects},
+        "contradictions": {
+            subject_id: {
+                "schema_version": "0.1",
+                "subject_id": subject_id,
+                "contradictions": found,
+            }
+            for subject_id, found in by_subject.items()
+        },
+        **partials,
         "gaps": {"schema_version": "0.1", "gaps": world["gaps"]},
     }
 

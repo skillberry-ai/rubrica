@@ -518,12 +518,38 @@ def minimal_contradictions_part(**over: Any) -> dict[str, Any]:
     return payload
 
 
+def _minimal_inputs_seen(own_kind_total: int) -> list[dict[str, Any]]:
+    """The accounting row for minimal_claims' single artifact, nothing dropped.
+
+    Required on the four partials whose pass owns a claim kind since issue #6,
+    where read coverage of 01-claims/ varied 3/23 to 23/23 across byte-identical
+    dispatches. Counted against minimal_claims rather than fixed at zero, so the
+    baseline every kind's validity test starts from is the honest arithmetic for
+    that one-claim corpus: its only claim is of kind `capability`, so
+    capabilities-part reads 1/1/0 and the other three 0/0/0. `note` is absent
+    because nothing is dropped, which is the half of the schema's if/then that
+    keeps a 0/0/0 row cheap enough for the totality rule to be worth having.
+    """
+    return [
+        {
+            "artifact_id": minimal_claims()["artifact_id"],
+            "own_kind_total": own_kind_total,
+            "cited": own_kind_total,
+            "dropped": 0,
+        }
+    ]
+
+
 def minimal_capabilities_part(**over: Any) -> dict[str, Any]:
     capability = minimal_world_model()["capabilities"][0]
     # The one subtraction that defines this artifact: outcome classes are the
     # next pass's output, so capability_core forbids them here.
     del capability["outcome_classes"]
-    payload: dict[str, Any] = {"schema_version": "0.1", "capabilities": [capability]}
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "capabilities": [capability],
+        "inputs_seen": _minimal_inputs_seen(1),
+    }
     payload.update(over)
     return payload
 
@@ -538,6 +564,7 @@ def minimal_outcomes_part(**over: Any) -> dict[str, Any]:
                 "outcome_classes": capability["outcome_classes"],
             }
         ],
+        "inputs_seen": _minimal_inputs_seen(0),
     }
     payload.update(over)
     return payload
@@ -547,6 +574,7 @@ def minimal_entities_part(**over: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": "0.1",
         "entities": minimal_world_model()["entities"],
+        "inputs_seen": _minimal_inputs_seen(0),
     }
     payload.update(over)
     return payload
@@ -558,6 +586,7 @@ def minimal_goals_part(**over: Any) -> dict[str, Any]:
         "schema_version": "0.1",
         "actors": world["actors"],
         "goals": world["goals"],
+        "inputs_seen": _minimal_inputs_seen(0),
     }
     payload.update(over)
     return payload

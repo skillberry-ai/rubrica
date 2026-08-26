@@ -4,13 +4,17 @@
   "title": "Entities, with their invariants and relations",
   "description": "rb-reconcile-entities' output, quantified over the capabilities already declared in 01-capabilities.json: if a claim spells out the shape a capability returns, that shape becomes an entity here.",
   "type": "object",
-  "required": ["schema_version", "entities"],
+  "required": ["schema_version", "entities", "inputs_seen"],
   "additionalProperties": false,
   "properties": {
     "schema_version": {"const": "0.1"},
     "entities": {
       "type": "array",
       "items": {"$ref": "world-model-0.1.json#/$defs/entity"}
+    },
+    "inputs_seen": {
+      "type": "array",
+      "items": {"$ref": "inputs-seen-0.1.json#/$defs/row"}
     }
   }
 }

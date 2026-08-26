@@ -4,7 +4,7 @@
   "title": "Capabilities, before their outcome classes",
   "description": "What rb-reconcile-capabilities declares: each capability's identity, params and binding, with no outcome classes -- those are rb-reconcile-outcomes' output, quantified over this list, and reconcile-seal folds them in. capability_core restates $defs/capability's property set minus outcome_classes because JSON Schema cannot express that subtraction while additionalProperties is false; tests/unit/test_schema_part_sharing.py pins the two in step.",
   "type": "object",
-  "required": ["schema_version", "capabilities"],
+  "required": ["schema_version", "capabilities", "inputs_seen"],
   "additionalProperties": false,
   "$defs": {
     "capability_core": {
@@ -30,6 +30,10 @@
       "type": "array",
       "minItems": 1,
       "items": {"$ref": "#/$defs/capability_core"}
+    },
+    "inputs_seen": {
+      "type": "array",
+      "items": {"$ref": "inputs-seen-0.1.json#/$defs/row"}
     }
   }
 }

@@ -4,7 +4,7 @@
   "title": "Outcome classes, keyed by capability",
   "description": "A join table, not a collection: outcome_classes is nested inside the capability object in the world model, so this pass cannot write a sibling array and reconcile-seal folds each entry into its capability. Keeping it a separate pass makes the capability list a file rather than a memory of having just written one -- the quantification the 45% measurement in rb-reconcile-outcomes' method rests on.",
   "type": "object",
-  "required": ["schema_version", "outcomes"],
+  "required": ["schema_version", "outcomes", "inputs_seen"],
   "additionalProperties": false,
   "properties": {
     "schema_version": {"const": "0.1"},
@@ -24,6 +24,10 @@
           }
         }
       }
+    },
+    "inputs_seen": {
+      "type": "array",
+      "items": {"$ref": "inputs-seen-0.1.json#/$defs/row"}
     }
   }
 }

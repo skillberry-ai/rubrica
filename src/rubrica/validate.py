@@ -69,6 +69,13 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "entities-part": "entities-part-0.1.json",
     "goals-part": "goals-part-0.1.json",
     "gaps-part": "gaps-part-0.1.json",
+    # inputs-seen-0.1.json is deliberately absent from this map, and is the only
+    # schema in the package that is not an artifact kind. It holds one $defs/row
+    # that the four reconcile partials $ref, and no stage produces a document of
+    # that shape on its own -- so a kind here would name an artifact
+    # `validate --stage X` must never look for. _schema_registry globs the
+    # directory and registers by filename, so the cross-file $ref resolves
+    # without an entry.
     # Config kinds. Human-authored inputs, not stage outputs, so they are
     # deliberately absent from STAGE_ARTIFACTS: no stage produces them and
     # `validate --stage X` must never look for them.
