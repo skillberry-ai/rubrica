@@ -54,7 +54,7 @@ No behaviour yet — just the paths, so every later task has one place to get th
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: on `RunPaths` — `batches: Path`, `scenario_parts_dir: Path`, `scenario_round_dir(round_n: int) -> Path`, `scenario_part(round_n: int, batch_id: str) -> Path`, `score_parts_dir: Path`, `score_part(round_n: int) -> Path`, `score_part_rounds() -> list[int]`, `scenario_part_rounds() -> list[int]`, `scenario_part_batch_ids(round_n: int) -> list[str]`, `unsafe_scenario_part_names(round_n: int) -> list[str]`.
+- Produces: on `RunPaths` — `batches_dir: Path`, `batches(round_n: int) -> Path`, `batches_rounds() -> list[int]`, `scenario_parts_dir: Path`, `scenario_round_dir(round_n: int) -> Path`, `scenario_part(round_n: int, batch_id: str) -> Path`, `score_parts_dir: Path`, `score_part(round_n: int) -> Path`, `score_part_rounds() -> list[int]`, `scenario_part_rounds() -> list[int]`, `scenario_part_batch_ids(round_n: int) -> list[str]`, `unsafe_scenario_part_names(round_n: int) -> list[str]`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -63,7 +63,8 @@ Append to `tests/unit/test_paths.py`:
 ```python
 def test_new_round_artifact_paths(tmp_path):
     run = RunPaths(tmp_path)
-    assert run.batches == tmp_path / "02-batches.json"
+    assert run.batches_dir == tmp_path / "02-batches"
+    assert run.batches(1) == tmp_path / "02-batches" / "round-1.json"
     assert run.scenario_parts_dir == tmp_path / "02-scenarios"
     assert run.scenario_round_dir(1) == tmp_path / "02-scenarios" / "round-1"
     assert run.scenario_part(2, "b01") == tmp_path / "02-scenarios" / "round-2" / "b01.json"
@@ -182,8 +183,29 @@ Then, immediately after the existing `scenarios` property, add:
 
 ```python
     @property
-    def batches(self) -> Path:
-        return self.root / "02-batches.json"
+    def batches_dir(self) -> Path:
+        return self.root / "02-batches"
+
+    def batches(self, round_n: int) -> Path:
+        # Per-round, not a singleton (Ruling R9). A singleton is overwritten by
+        # the next round, and refs.check_scenario_parts validates EVERY round's
+        # parts against the roster it reads here -- so round 1's parts would be
+        # checked against round 2's batch assignment, making the own-batch check
+        # emit false findings naming the wrong artifact for every round after the
+        # first. It is also the evidence-destroying shape Task 10 fixes for
+        # transcripts, and every sibling loop artifact is already per-round.
+        if round_n < 1:
+            raise ValueError(f"batches round must be >= 1, got {round_n}")
+        return self.batches_dir / f"round-{round_n}.json"
+
+    def batches_rounds(self) -> list[int]:
+        """Every round number that has a batch plan, ascending."""
+        rounds: list[int] = []
+        for path in list_json(self.batches_dir):
+            match = _ROUND_PART.fullmatch(path.stem)
+            if match:
+                rounds.append(int(match.group(1)))
+        return sorted(rounds)
 
     @property
     def scenario_parts_dir(self) -> Path:
@@ -445,7 +467,7 @@ Expected: FAIL — `KeyError: 'batches'` and `TypeError: set_limit() got an unex
     "bytes_per_scenario": {
       "type": "integer",
       "minimum": 1,
-      "description": "The estimate the projection used: rounds.DEFAULT_BYTES_PER_SCENARIO until a sealed 02-scenarios.json exists, and the mean over that file thereafter. Recorded because it is the term that makes the partition self-calibrating, and a reader comparing two rounds' batch sizes needs it to tell a changed estimate from a changed hole count."
+      "description": "The estimate the projection used: rounds.DEFAULT_BYTES_PER_SCENARIO until a sealed 02-scenarios.json exists, and the mean over that file thereafter. Recorded because it is the term that makes the partition self-calibrating, and a reader comparing two rounds' batch sizes needs it to tell a changed estimate from a changed hole count -- which is possible only because these plans are per-round (Ruling R9), the earlier one not being overwritten."
     },
     "batches": {
       "type": "array",
@@ -776,7 +798,7 @@ def test_a_budget_smaller_than_one_scenario_is_a_usage_error():
 def test_write_batches_writes_a_schema_valid_document(tmp_path):
     run = _run_with_world(tmp_path, _world(caps=2, ocs=2, goals=1))
     path = rounds.write_batches(run, round_n=1)
-    assert path == run.batches
+    assert path == run.batches(1)
     # Actually validate, rather than only asserting fields: the kind is
     # registered in Task 2, and a test named "schema valid" that never reaches
     # the validator is the shape of an assertion nobody has watched fail.
@@ -809,7 +831,7 @@ def test_write_batches_writes_nothing_when_no_hole_is_closable(tmp_path):
                                      "denominator": {"capability_cells": 0, "goals": 0,
                                                      "version": 1}})
     assert rounds.write_batches(run, round_n=1) is None
-    assert not run.batches.exists()
+    assert not run.batches(1).exists()
 
 
 def test_write_batches_reports_an_unreadable_world_model(tmp_path):
@@ -985,7 +1007,7 @@ def write_batches(run: RunPaths, *, round_n: int) -> Path | None:
     cap = _cap_bytes(run)
     batches = partition(refs, cap_bytes=cap, per_scenario=per_scenario)
     write_json(
-        run.batches,
+        run.batches(round_n),
         {
             "schema_version": "0.1",
             "round": round_n,
@@ -1003,7 +1025,7 @@ def write_batches(run: RunPaths, *, round_n: int) -> Path | None:
             ],
         },
     )
-    return run.batches
+    return run.batches(round_n)
 ```
 
 Add `from pathlib import Path` to the imports — `write_batches` annotates `Path | None`.
@@ -1944,7 +1966,7 @@ def _minimal(tmp_path):
 def test_propose_batches_exits_clean_and_prints_the_path(tmp_path, capsys):
     run = _minimal(tmp_path)
     assert main(["propose-batches", "--run", str(tmp_path), "--round", "1"]) == 0
-    assert str(run.batches) in capsys.readouterr().out
+    assert str(run.batches(1)) in capsys.readouterr().out
 
 
 def test_propose_batches_says_so_when_there_is_nothing_to_dispatch(tmp_path, capsys):
@@ -1956,7 +1978,7 @@ def test_propose_batches_says_so_when_there_is_nothing_to_dispatch(tmp_path, cap
     # it, and the orchestrator branches on the message rather than on a finding.
     assert main(["propose-batches", "--run", str(tmp_path), "--round", "1"]) == 0
     assert "no closable holes" in capsys.readouterr().out
-    assert not run.batches.exists()
+    assert not run.batches(1).exists()
 
 
 def test_propose_batches_exits_two_on_an_unreadable_world_model(tmp_path, capsys):
@@ -2157,7 +2179,7 @@ Append to `tests/unit/test_refs.py`:
 ```python
 def test_check_batches_recomputes_projected_bytes(tmp_path):
     run = _run_with_world_for_refs(tmp_path)
-    write_json(run.batches, {
+    write_json(run.batches(1), {
         "schema_version": "0.1", "round": 1, "cap_bytes": 28000,
         "bytes_per_scenario": 1600,
         "batches": [{"id": "b01", "hole_refs": ["cell:cap-0/cap-0-oc-0"],
@@ -2169,7 +2191,7 @@ def test_check_batches_recomputes_projected_bytes(tmp_path):
 
 def test_check_batches_reports_a_batch_over_its_own_cap(tmp_path):
     run = _run_with_world_for_refs(tmp_path)
-    write_json(run.batches, {
+    write_json(run.batches(1), {
         "schema_version": "0.1", "round": 1, "cap_bytes": 1600,
         "bytes_per_scenario": 1600,
         "batches": [{"id": "b01",
@@ -2181,7 +2203,7 @@ def test_check_batches_reports_a_batch_over_its_own_cap(tmp_path):
 
 def test_check_batches_reports_a_hole_ref_the_world_model_does_not_declare(tmp_path):
     run = _run_with_world_for_refs(tmp_path)
-    write_json(run.batches, {
+    write_json(run.batches(1), {
         "schema_version": "0.1", "round": 1, "cap_bytes": 28000,
         "bytes_per_scenario": 1600,
         "batches": [{"id": "b01", "hole_refs": ["cell:cap-9/nope"],
@@ -2192,7 +2214,7 @@ def test_check_batches_reports_a_hole_ref_the_world_model_does_not_declare(tmp_p
 
 def test_check_batches_reports_a_hole_assigned_to_two_batches(tmp_path):
     run = _run_with_world_for_refs(tmp_path)
-    write_json(run.batches, {
+    write_json(run.batches(1), {
         "schema_version": "0.1", "round": 1, "cap_bytes": 28000,
         "bytes_per_scenario": 1600,
         "batches": [
@@ -2207,7 +2229,7 @@ def test_check_batches_reports_a_hole_assigned_to_two_batches(tmp_path):
 
 def test_check_scenario_parts_wants_a_file_per_batch(tmp_path):
     run = _run_with_world_for_refs(tmp_path)
-    write_json(run.batches, {
+    write_json(run.batches(1), {
         "schema_version": "0.1", "round": 1, "cap_bytes": 28000,
         "bytes_per_scenario": 1600,
         "batches": [
@@ -2226,7 +2248,7 @@ def test_check_scenario_parts_wants_a_file_per_batch(tmp_path):
 
 def test_check_scenario_parts_reports_a_scenario_outside_its_own_batch(tmp_path):
     run = _run_with_world_for_refs(tmp_path)
-    write_json(run.batches, {
+    write_json(run.batches(1), {
         "schema_version": "0.1", "round": 1, "cap_bytes": 28000,
         "bytes_per_scenario": 1600,
         "batches": [
@@ -2254,7 +2276,7 @@ def test_check_scenario_parts_reports_a_scenario_outside_its_own_batch(tmp_path)
 
 def test_check_scenario_parts_reports_a_mismatched_batch_id_header(tmp_path):
     run = _run_with_world_for_refs(tmp_path)
-    write_json(run.batches, {
+    write_json(run.batches(1), {
         "schema_version": "0.1", "round": 1, "cap_bytes": 28000,
         "bytes_per_scenario": 1600,
         "batches": [{"id": "b01", "hole_refs": ["goal:goal-0"], "projected_bytes": 1600}],
@@ -2304,7 +2326,7 @@ def test_check_all_runs_the_new_checkers(tmp_path):
     # thing as a stage-scoped check-refs -- so a checker not wired in is a
     # checker that never runs on a real run.
     run = _run_with_world_for_refs(tmp_path)
-    write_json(run.batches, {
+    write_json(run.batches(1), {
         "schema_version": "0.1", "round": 1, "cap_bytes": 28000,
         "bytes_per_scenario": 1600,
         "batches": [{"id": "b01", "hole_refs": ["cell:cap-9/nope"],
@@ -2324,8 +2346,8 @@ Expected: FAIL, `AttributeError: module 'rubrica.refs' has no attribute 'check_b
 
 Add to `src/rubrica/refs.py`, following the shape every checker in that module already uses (`_load` for the artifact, an inner `report(pointer, message)` closure that anchors findings on the right path, and an early `return []` when an input is absent so a run someone is still building reports nothing):
 
-- `check_batches(run)` — over `run.batches`: recompute each batch's `projected_bytes` as `len(hole_refs) * bytes_per_scenario` and report a mismatch; report `projected_bytes > cap_bytes`; report a `hole_refs` entry that does not name a cell or goal the world model declares, resolving `cell:<cap>/<oc>` against `_cells(world)` and `goal:<id>` against the goal ids; report a ref appearing in more than one batch, and a duplicate ref within one batch. Anchor every finding on `run.batches`.
-- `check_scenario_parts(run)` — for each round in `run.scenario_part_rounds()`, read `run.batches` for the batch roster and report a batch with no part file, a part whose `batch_id` disagrees with its filename, a part name that is not a safe segment, and — the check that makes the partition enforceable — any scenario whose `goal_id` or `capability_refs` resolve to a hole ref assigned to a *different* batch. Report the offending scenario id and the batch that owns the ref, so the message names both. Anchor findings on the part path, never on `run.scenarios`.
+- `check_batches(run)` — over **every** `run.batches(r)` for `r` in `run.batches_rounds()` (Ruling R9): recompute each batch's `projected_bytes` as `len(hole_refs) * bytes_per_scenario` and report a mismatch; report `projected_bytes > cap_bytes`; report a `hole_refs` entry that does not name a cell or goal the world model declares, resolving `cell:<cap>/<oc>` against `_cells(world)` and `goal:<id>` against the goal ids; report a ref appearing in more than one batch, and a duplicate ref within one batch. Anchor every finding on the round's own `run.batches(r)`, so a defect in round 2's partition never names round 1's file.
+- `check_scenario_parts(run)` — for each round in `run.scenario_part_rounds()`, read `run.batches(round_n)` for **that round's** batch roster (Ruling R9 — never a single shared file, or round 1's parts get checked against round 2's assignment) and report a batch with no part file, a part whose `batch_id` disagrees with its filename, a part name that is not a safe segment, and — the check that makes the partition enforceable — any scenario whose `goal_id` or `capability_refs` resolve to a hole ref assigned to a *different* batch. Report the offending scenario id and the batch that owns the ref, so the message names both. Anchor findings on the part path, never on `run.scenarios`.
 - `check_score_parts(run)` — for each `03-score/round-N.json`: report a ruling naming a scenario absent from `run.scenarios`, and a `duplicate_of` that names a scenario which is itself `duplicate` or `rejected` in the sealed document, or that names the ruling's own `scenario_id`. Anchor findings on the score part path.
 
 Then add all three to `check_all` in pipeline order — after `check_world_model` and before `check_scenarios` — so a run that has batches gets them checked. `check_all` runs every checker the run has inputs for, so a checker left out of it is a checker that never runs on a real run.
@@ -2412,13 +2434,14 @@ Replace the `"propose", "score",` lines with the five, and carry a comment in th
 
 ```python
     if kind == "batches":
-        # is_file(), NOT the always-return form catalogue/slices/subjects use.
-        # propose-batches legitimately writes nothing when no hole is closable,
-        # and that absence is how the loop learns it is over -- the always-return
-        # form would fail layer 1 on a correct terminal round. "Failed" is
-        # distinguished from "no holes" by the subcommand's exit code, which is 2
-        # on every real failure, not by this gate. (Ruling R2.)
-        return [run.batches] if run.batches.is_file() else []
+        # Iterated, and so empty when no round has a plan -- NOT the
+        # always-return form catalogue/slices/subjects use. propose-batches
+        # legitimately writes nothing when no hole is closable, and that absence
+        # is how the loop learns it is over; the always-return form would fail
+        # layer 1 on a correct terminal round. "Failed" is distinguished from "no
+        # holes" by the subcommand's exit code, which is 2 on every real failure,
+        # not by this gate. (Rulings R2 and R9.)
+        return [run.batches(r) for r in run.batches_rounds()]
     if kind == "scenarios-part":
         return [
             run.scenario_part(r, b)
