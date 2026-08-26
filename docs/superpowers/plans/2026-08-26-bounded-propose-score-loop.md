@@ -218,11 +218,14 @@ Then, immediately after the existing `scenarios` property, add:
         rounds: list[int] = []
         try:
             for entry in list_dir(self.scenario_parts_dir):
-                if not entry.is_dir() or not entry.name.startswith("round-"):
-                    continue
-                suffix = entry.name[len("round-") :]
-                if (m := _ROUND_PART.fullmatch(entry.name)):
-                    rounds.append(int(m.group(1)))
+                # Pattern first, is_dir() second: is_dir() is a stat, and testing
+                # the cheap pure-string match first means a directory full of
+                # non-round entries costs no syscalls. Keep BOTH halves -- the
+                # is_dir() branch is what stops a plain *file* named `round-3`
+                # being counted as a round, and it has its own negative test.
+                match = _ROUND_PART.fullmatch(entry.name)
+                if match and entry.is_dir():
+                    rounds.append(int(match.group(1)))
         except OSError as exc:
             raise UsageError(
                 f"cannot read run directory: {self.scenario_parts_dir} ({exc})"
@@ -276,8 +279,9 @@ Then, immediately after the existing `scenarios` property, add:
         """
         rounds: list[int] = []
         for path in list_json(self.score_parts_dir):
-            if m := _ROUND_PART.fullmatch(path.stem):
-                rounds.append(int(m.group(1)))
+            match = _ROUND_PART.fullmatch(path.stem)
+            if match:
+                rounds.append(int(match.group(1)))
         return sorted(rounds)
 ```
 
