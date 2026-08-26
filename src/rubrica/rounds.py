@@ -436,15 +436,29 @@ def collect_scenarios(run: RunPaths) -> tuple[list[dict], list[Finding]]:
             except ArtifactError as exc:
                 findings.append(Finding(path, "rounds", "", str(exc)))
                 continue
-            if not isinstance(part, dict) or not isinstance(part.get("scenarios"), list):
+            # Split rather than one combined guard, and the split is the POINTER:
+            # `/scenarios` does not resolve in a part that is not an object at
+            # all, so the two conditions cannot honestly share one. `_object_or_refuse`
+            # already draws this line for the artifacts it guards, and refs.py
+            # points at an absent member the same way (catalogue_facts'
+            # candidate_bytes entry, refs.py's check_catalogue_facts).
+            if not isinstance(part, dict):
+                findings.append(Finding(path, "rounds", "", "part is not a JSON object"))
+                continue
+            if not isinstance(part.get("scenarios"), list):
                 findings.append(
-                    Finding(path, "rounds", "", "part is not an object carrying a scenarios array")
+                    Finding(path, "rounds", "/scenarios", "part carries no scenarios array")
                 )
                 continue
             for i, scenario in enumerate(part["scenarios"]):
-                if not isinstance(scenario, dict) or not isinstance(scenario.get("id"), str):
+                if not isinstance(scenario, dict):
                     findings.append(
-                        Finding(path, "rounds", f"/scenarios/{i}", "scenario has no string id")
+                        Finding(path, "rounds", f"/scenarios/{i}", "scenario is not a JSON object")
+                    )
+                    continue
+                if not isinstance(scenario.get("id"), str):
+                    findings.append(
+                        Finding(path, "rounds", f"/scenarios/{i}/id", "scenario has no string id")
                     )
                     continue
                 sid = scenario["id"]
@@ -501,18 +515,69 @@ def _apply_rulings(run: RunPaths, scenarios: list[dict]) -> list[Finding]:
         except ArtifactError as exc:
             findings.append(Finding(path, "rounds", "", str(exc)))
             continue
-        if not isinstance(part, dict) or not isinstance(part.get("rulings"), list):
+        if not isinstance(part, dict):
+            findings.append(Finding(path, "rounds", "", "score part is not a JSON object"))
+            continue
+        if not isinstance(part.get("rulings"), list):
             findings.append(
-                Finding(path, "rounds", "", "score part is not an object carrying a rulings array")
+                Finding(path, "rounds", "/rulings", "score part carries no rulings array")
             )
             continue
+        # Reset for EVERY part, never hoisted out of this loop, and that scoping
+        # is the whole ruling. Two rulings for one scenario in ONE part are a
+        # single dispatch contradicting itself, which is a defect. The same pair
+        # across TWO parts is a later round overturning an earlier ruling, which
+        # rb-score's Output section sanctions outright -- it asks for "do not
+        # re-open a ruling that nothing new bears on", never "statuses are frozen
+        # after the round that set them" -- so a global register would refuse the
+        # supported case along with the defect.
+        #
+        # Measured before this guard existed, on rulings [{sc-1, rejected,
+        # out_of_scope}, {sc-1, active}] in one part: `validate --stage` against
+        # score-part-0.1.json returned NO findings, because that schema puts no
+        # uniqueness constraint on `rulings`; seal_scenarios returned (path, [])
+        # and sealed status `active` with the rejection and its rejected_reason
+        # gone. This is the scenario-id collision hole in the other artifact --
+        # the merged document agrees with whatever it was handed, and
+        # check_scenarios indexes that merged document, so it agrees too. The
+        # seal is the only place it can be caught.
+        ruled: dict[str, int] = {}
         for i, ruling in enumerate(part["rulings"]):
-            sid = ruling.get("scenario_id") if isinstance(ruling, dict) else None
-            if not isinstance(sid, str):
+            # Split from the scenario_id check for the reason the part-container
+            # guard above is split: `/rulings/N/scenario_id` does not resolve in a
+            # ruling that is not an object at all.
+            if not isinstance(ruling, dict):
                 findings.append(
-                    Finding(path, "rounds", f"/rulings/{i}", "ruling has no string scenario_id")
+                    Finding(path, "rounds", f"/rulings/{i}", "ruling is not a JSON object")
                 )
                 continue
+            sid = ruling.get("scenario_id")
+            if not isinstance(sid, str):
+                findings.append(
+                    Finding(
+                        path,
+                        "rounds",
+                        f"/rulings/{i}/scenario_id",
+                        "ruling has no string scenario_id",
+                    )
+                )
+                continue
+            # Registered on the id claim alone, before the shape guards below, so
+            # a part naming one scenario twice is reported once for the duplicate
+            # whether or not either ruling is otherwise well formed.
+            if sid in ruled:
+                findings.append(
+                    Finding(
+                        path,
+                        "rounds",
+                        f"/rulings/{i}/scenario_id",
+                        f"this part already ruled on {sid} at /rulings/{ruled[sid]}; one score "
+                        "dispatch contradicting itself is a defect, and the sealed document "
+                        "would carry only the last of the two",
+                    )
+                )
+                continue
+            ruled[sid] = i
             status = ruling.get("status")
             if status not in _RULING_STATUSES:
                 # Checked rather than indexed bare, and checked against the enum
@@ -534,7 +599,7 @@ def _apply_rulings(run: RunPaths, scenarios: list[dict]) -> list[Finding]:
                     Finding(
                         path,
                         "rounds",
-                        f"/rulings/{i}",
+                        f"/rulings/{i}/{missing[0]}",
                         f"ruling for {sid} has status {status!r} but no string "
                         f"{missing[0]}, which that status requires",
                     )

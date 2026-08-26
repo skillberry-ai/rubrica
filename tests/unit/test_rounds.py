@@ -568,9 +568,11 @@ def _refuse(run, note=None):
     Every finding this module raises carries layer "rounds" -- a reader triaging
     a failed round has to know which assembler refused without reading the
     message -- and no refusal returns a path. Asserted through one helper rather
-    than once per test because the layer is set at eight separate call sites, and
-    a single spot check leaves seven unpinned: measured, replacing only the
-    FIRST `"rounds"` in rounds.py with `"refs"` left the whole suite green.
+    than once per test because the layer is set at every call site independently,
+    and a single spot check leaves the rest unpinned: measured, replacing only the
+    FIRST `"rounds"` in rounds.py with `"refs"` left the whole suite green. The
+    sweep that mutates each site in turn is the record of how many there are;
+    a number written here would drift the next time one is added.
     """
     path, findings = rounds.seal_scenarios(run)
     assert path is None, note
@@ -735,9 +737,21 @@ def test_a_ruling_with_no_usable_scenario_id_is_a_finding_not_a_traceback(tmp_pa
     # third rule breached against an artifact no re-dispatch can repair.
     run = _run_with_world(tmp_path, _world())
     _part(run, 1, "b01", [_scenario("sc-b01-001")])
-    for bad in ({}, {"status": "active"}, {"scenario_id": 7, "status": "active"}, 7, None, []):
+    # Pointer, not the word "scenario_id" in the message: a message pin on a
+    # field name the pointer already carries is what broke in review, and it is
+    # the fifth instance of that class on this branch. The two pointers differ
+    # because a ruling that is not an object at all has no /scenario_id member to
+    # point at, so the guard is split and the table records which fires.
+    for bad, pointer in (
+        ({}, "/rulings/0/scenario_id"),
+        ({"status": "active"}, "/rulings/0/scenario_id"),
+        ({"scenario_id": 7, "status": "active"}, "/rulings/0/scenario_id"),
+        (7, "/rulings/0"),
+        (None, "/rulings/0"),
+        ([], "/rulings/0"),
+    ):
         _score_part(run, 1, [bad])
-        assert any("scenario_id" in f.message for f in _refuse(run, bad)), bad
+        assert [f.pointer for f in _refuse(run, bad)] == [pointer], bad
     assert not run.scenarios.exists()
 
 
@@ -756,7 +770,10 @@ def test_a_ruling_status_outside_the_parts_own_enum_is_a_finding(tmp_path):
         {"scenario_id": "sc-b01-001", "status": "ACTIVE"},
     ):
         _score_part(run, 1, [bad])
-        assert any("status" in f.message for f in _refuse(run, bad)), bad
+        # The pointer, for the reason the test above gives: a reviewer reworded
+        # this message meaning-preservingly, dropping the field name the pointer
+        # already carried, and the old `"status" in f.message` pin went red.
+        assert [f.pointer for f in _refuse(run, bad)] == ["/rulings/0/status"], bad
     assert not run.scenarios.exists()
 
 
@@ -773,17 +790,80 @@ def test_a_fold_or_rejection_missing_its_required_field_is_a_finding(tmp_path):
         ({"scenario_id": "sc-b01-001", "status": "rejected"}, "rejected_reason"),
     ):
         _score_part(run, 1, [bad])
-        assert any(field in f.message for f in _refuse(run, bad)), bad
+        # The pointer names the member that should have been there, which is how
+        # refs.check_catalogue_facts points at an absent candidate_bytes entry.
+        # It carries `field` from the table, so it also discriminates the
+        # duplicate_of row from the rejected_reason one.
+        assert [f.pointer for f in _refuse(run, bad)] == [f"/rulings/0/{field}"], bad
     assert not run.scenarios.exists()
 
 
 def test_the_seal_refuses_a_score_part_that_is_not_an_object_with_rulings(tmp_path):
     run = _run_with_world(tmp_path, _world())
     _part(run, 1, "b01", [_scenario("sc-b01-001")])
-    for bad in (None, 7, [], "hi", {"round": 1}, {"rulings": 7}, {"rulings": "two"}):
+    # Two pointers, because `/rulings` does not resolve in a document that is not
+    # an object at all -- the same split the propose-part guard carries.
+    for bad, pointer in (
+        (None, ""),
+        (7, ""),
+        ([], ""),
+        ("hi", ""),
+        ({"round": 1}, "/rulings"),
+        ({"rulings": 7}, "/rulings"),
+        ({"rulings": "two"}, "/rulings"),
+    ):
         write_json(run.score_part(1), bad)
-        assert any("rulings array" in f.message for f in _refuse(run, bad)), bad
+        assert [f.pointer for f in _refuse(run, bad)] == [pointer], bad
     assert not run.scenarios.exists()
+
+
+def test_two_rulings_in_one_part_naming_one_scenario_are_refused(tmp_path):
+    # Measured before the guard: this exact part is layer-1 VALID --
+    # score-part-0.1.json puts no uniqueness constraint on `rulings` -- and
+    # seal_scenarios returned (path, []) with sealed status `active`, the
+    # rejection and its rejected_reason gone. The scenario-id collision hole in
+    # the other artifact: the merged document agrees with whatever it was handed,
+    # check_scenarios indexes that merged document, so the seal is the only place
+    # it can be caught.
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-1")])
+    _score_part(
+        run,
+        1,
+        [
+            {"scenario_id": "sc-1", "status": "rejected", "rejected_reason": "out_of_scope"},
+            {"scenario_id": "sc-1", "status": "active"},
+        ],
+        verdict="converged",
+    )
+    # Layer 1 asserted here, not assumed: the guard's whole justification is that
+    # the schema cannot see this, so a schema that grew a uniqueItems later should
+    # make this line fail and send a reader back to the guard.
+    assert validate_artifact(run.score_part(1), "score-part") == []
+    findings = _refuse(run)
+    assert [f.pointer for f in findings] == ["/rulings/1/scenario_id"]
+    assert [str(f.artifact) for f in findings] == [str(run.score_part(1))]
+    # Both indexes named, so a re-dispatch knows which pair contradicted.
+    assert "sc-1" in findings[0].message and "/rulings/0" in findings[0].message
+    assert not run.scenarios.exists()
+
+
+def test_the_within_part_rule_does_not_reach_across_two_parts(tmp_path):
+    # The scoping, asserted in the direction a global register would break:
+    # rb-score's Output section sanctions a later round overturning an earlier
+    # ruling outright, so the register resets per part. Same scenario, same two
+    # statuses as the test above, split across two rounds -- and this must SEAL.
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-1")])
+    _score_part(
+        run, 1, [{"scenario_id": "sc-1", "status": "rejected", "rejected_reason": "out_of_scope"}]
+    )
+    _score_part(run, 2, [{"scenario_id": "sc-1", "status": "active"}], verdict="converged")
+    path, findings = rounds.seal_scenarios(run)
+    assert findings == []
+    only = read_json(path)["scenarios"][0]
+    assert only["status"] == "active"
+    assert "rejected_reason" not in only
 
 
 def test_the_seal_refuses_an_unparseable_score_part(tmp_path):
@@ -818,16 +898,25 @@ def test_an_unparseable_part_does_not_blame_the_score_part_for_its_scenarios(tmp
 
 def test_the_seal_refuses_a_part_that_is_not_an_object_with_scenarios(tmp_path):
     run = _run_with_world(tmp_path, _world())
-    for bad in (None, 7, [], "hi", {"round": 1}, {"scenarios": 7}, {"scenarios": "two"}):
+    for bad, pointer in (
+        (None, ""),
+        (7, ""),
+        ([], ""),
+        ("hi", ""),
+        ({"round": 1}, "/scenarios"),
+        ({"scenarios": 7}, "/scenarios"),
+        ({"scenarios": "two"}, "/scenarios"),
+    ):
         write_json(run.scenario_part(1, "b01"), bad)
-        assert any("scenarios array" in f.message for f in _refuse(run, bad)), bad
+        assert [f.pointer for f in _refuse(run, bad)] == [pointer], bad
     assert not run.scenarios.exists()
 
 
 def test_the_seal_refuses_a_scenario_with_no_string_id(tmp_path):
     run = _run_with_world(tmp_path, _world())
-    _part(run, 1, "b01", [{"round": 1}])
-    assert any(f.pointer == "/scenarios/0" for f in _refuse(run))
+    for bad, pointer in (({"round": 1}, "/scenarios/0/id"), (7, "/scenarios/0")):
+        _part(run, 1, "b01", [bad])
+        assert [f.pointer for f in _refuse(run, bad)] == [pointer], bad
 
 
 def test_the_seal_refuses_a_part_whose_name_is_not_a_safe_segment(tmp_path):
