@@ -171,8 +171,10 @@ In `src/rubrica/paths.py`, add this module-level constant beside the other modul
 #     round number, making the seal walk one round twice;
 #   no round-0 -- scenario_round_dir and score_part both refuse round_n < 1, so a
 #     listing that admitted round-0 would return a round no accessor can address.
-_ROUND_DIR = re.compile(r"round-[1-9][0-9]*")
+_ROUND_PART = re.compile(r"round-([1-9][0-9]*)")
 ```
+
+**`[0-9]`, never `\d` (Ruling R8).** MEASURED: `\d` is Unicode-wide, so `round-1\u0663` (Arabic-Indic three) matches and `int()` returns **13** — silently inventing a round number, which is strictly worse than the `isdigit()` bug this replaces, since that one at least raised. A later reader "simplifying" `[1-9][0-9]*` to `[1-9]\d*` reintroduces it, and no test outside `test_paths.py` would catch it. The pattern captures the digits so callers use `match.group(1)` rather than re-slicing the prefix off.
 
 `re` needs importing in `paths.py` if it is not already there. Use `fullmatch`, never `match`: `match` would accept `round-1junk`.
 
@@ -219,8 +221,8 @@ Then, immediately after the existing `scenarios` property, add:
                 if not entry.is_dir() or not entry.name.startswith("round-"):
                     continue
                 suffix = entry.name[len("round-") :]
-                if _ROUND_DIR.fullmatch(entry.name):
-                    rounds.append(int(entry.name[len("round-") :]))
+                if (m := _ROUND_PART.fullmatch(entry.name)):
+                    rounds.append(int(m.group(1)))
         except OSError as exc:
             raise UsageError(
                 f"cannot read run directory: {self.scenario_parts_dir} ({exc})"
@@ -274,8 +276,8 @@ Then, immediately after the existing `scenarios` property, add:
         """
         rounds: list[int] = []
         for path in list_json(self.score_parts_dir):
-            if _ROUND_DIR.fullmatch(path.stem):
-                rounds.append(int(path.stem[len("round-") :]))
+            if m := _ROUND_PART.fullmatch(path.stem):
+                rounds.append(int(m.group(1)))
         return sorted(rounds)
 ```
 
