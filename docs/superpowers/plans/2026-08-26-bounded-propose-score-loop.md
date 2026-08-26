@@ -953,22 +953,35 @@ def closable_holes(run: RunPaths) -> list[str]:
     if not isinstance(world, dict):
         raise UsageError(f"world model is not a JSON object: {run.world_model}")
     if not run.coverage_latest.exists():
+        # outcome_classes is required with minItems 1 in world-model-0.1.json, so
+        # it is required here too. Defaulting it lets a malformed capability
+        # contribute zero cells silently -- and a world model of only such
+        # capabilities makes write_batches return None, manufacturing the loop's
+        # NORMAL TERMINAL STATE out of a bad artifact. 01-world-model.json is
+        # written by reconcile-seal in code, so a finding against it is
+        # unrepairable by re-dispatch: the same argument _cap_bytes makes for
+        # manifest.json.
         refs = [
             f"cell:{cap['id']}/{oc['id']}"
-            for cap in world.get("capabilities", [])
-            for oc in cap.get("outcome_classes", [])
+            for cap in world["capabilities"]
+            for oc in cap["outcome_classes"]
         ]
-        refs += [f"goal:{goal['id']}" for goal in world.get("goals", [])]
-        return sorted(refs)
+        refs += [f"goal:{goal['id']}" for goal in world["goals"]]
+        # Deduped, though the duplicate is upstream's: coverage-0.1.json's holes
+        # array carries no uniqueItems, and two identical refs here cost two
+        # dispatched writes for one hole. This is the last code that can drop it.
+        return sorted(set(refs))
     coverage = read_json(run.coverage_latest)
     if not isinstance(coverage, dict) or not isinstance(coverage.get("holes", []), list):
         raise UsageError(
             f"coverage report is not an object carrying a holes array: {run.coverage_latest}"
         )
     return sorted(
-        hole["ref"]
-        for hole in coverage.get("holes", [])
-        if hole.get("reason") == "not_yet_attempted"
+        {
+            hole["ref"]
+            for hole in coverage["holes"]
+            if hole.get("reason") == "not_yet_attempted"
+        }
     )
 
 
@@ -983,7 +996,16 @@ def bytes_per_scenario(run: RunPaths) -> int:
     """
     if not run.scenarios.exists():
         return DEFAULT_BYTES_PER_SCENARIO
-    scenarios = read_json(run.scenarios).get("scenarios", [])
+    # REQUIRED, not defaulted, and this is the sharpest guard in the module.
+    # MEASURED: with a bare .get(), a sealed file carrying
+    # {"scenarios": "eighteen scenarios"} makes this return 3, and write_batches
+    # then emits ONE batch of all 86 holes with projected_bytes: 258 against a
+    # real write of ~99,932 -- a cap that does not bind, silently, which is this
+    # module's own phrase for the defect class it exists to close. It is the only
+    # place here where a malformed artifact yields a plausible wrong NUMBER
+    # rather than a refusal, so it goes through the same door as the rest.
+    sealed = _object_or_refuse(read_json(run.scenarios), run.scenarios, "scenarios")
+    scenarios = _rows_with_string_id(sealed["scenarios"], run.scenarios, "scenarios")
     if not scenarios:
         return DEFAULT_BYTES_PER_SCENARIO
     total = sum(len(json.dumps(s, sort_keys=True)) for s in scenarios)
