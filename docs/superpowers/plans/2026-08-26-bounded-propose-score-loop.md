@@ -1451,8 +1451,37 @@ def _apply_rulings(run: RunPaths, scenarios: list[dict]) -> list[Finding]:
                 Finding(path, "rounds", "", "score part is not an object carrying a rulings array")
             )
             continue
+        # One ruling per scenario WITHIN THIS PART. Scoped to the part, never
+        # global: a later round overturning an earlier ruling is sanctioned --
+        # rb-score's Output section says "do not re-open a ruling that nothing new
+        # bears on", never that statuses are frozen -- and a rejection notice
+        # carried into a re-dispatch is exactly that case. Within one part there is
+        # no such justification: a single dispatch contradicting itself is a
+        # defect. MEASURED before this guard: rulings [{sc-1, rejected,
+        # out_of_scope}, {sc-1, active}] is layer-1 valid, because
+        # score-part-0.1.json's rulings array carries no uniqueness constraint,
+        # and the seal returned (path, []) with the sealed status `active` while
+        # the same part also said `rejected`. Same hole as the scenario-id
+        # collision, in the other artifact, and the seal is the only place either
+        # can be caught: check_scenarios indexes the merged document and so agrees
+        # with whatever it was handed.
+        seen_here: dict[str, int] = {}
         for i, ruling in enumerate(part["rulings"]):
             sid = ruling.get("scenario_id") if isinstance(ruling, dict) else None
+            if isinstance(sid, str) and sid in seen_here:
+                findings.append(
+                    Finding(
+                        path,
+                        "rounds",
+                        f"/rulings/{i}/scenario_id",
+                        f"round {round_n} rules on {sid} twice, at /rulings/"
+                        f"{seen_here[sid]} and /rulings/{i}; one dispatch cannot "
+                        "contradict itself, and the later entry would silently win",
+                    )
+                )
+                continue
+            if isinstance(sid, str):
+                seen_here[sid] = i
             if not isinstance(sid, str):
                 findings.append(
                     Finding(path, "rounds", f"/rulings/{i}", "ruling has no string scenario_id")
