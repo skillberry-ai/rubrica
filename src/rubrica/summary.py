@@ -742,8 +742,8 @@ def utilisation(run: RunPaths) -> Utilisation | Marker:
     renders the numbers computed over what the walk could read rather than a
     marker.
 
-    **That contract argument reaches the `01-claims/` shapes above just as far**:
-    they take the same two reports to exit 1 on a readable run, and
+    **That contract argument reaches the three hand-edited-document shapes above
+    just as far**: each takes both reports to exit 1 on a readable run, and
     `utilisation.py` says so beside the unguarded line. What kept them here is
     scope and authorisation, not the contract -- issue #6 widened the world-model
     walk and never touched the `01-claims/` path, the ruling being overturned was
@@ -752,6 +752,17 @@ def utilisation(run: RunPaths) -> Utilisation | Marker:
     answer for them *for now*, and it is a known-wrong thing rather than a settled
     one -- which belongs in `docs/design/limitations.md`, where this project keeps
     what it knows is wrong, rather than only in a comment beside the code.
+
+    **The fourth bullet is not part of that hole, and closing it would be a
+    regression.** An unreadable `01-claims/` is a filesystem problem, and the
+    exit-code contract's ruling for one is **exit 2** -- measured, both reports exit
+    2 on it, because `list_json`'s `UsageError` reaches `cli.py`'s
+    `(OSError, UsageError, ArtifactError, UnknownStage)` arm rather than the
+    catch-all. That is the contract working, not breaching: guarding it in
+    `utilisation.py` would turn a run whose claims cannot be read into an exit 0
+    reporting empty utilisation, which is the one reading a human at gate 1 must
+    never be handed. It is caught *here* only so this page renders a marker instead
+    of crashing, which is a promise about the page and not about an exit code.
 
     The absence names both artifacts because either can be the unreadable one, and
     the reading is different from the no-world-model absence above: there, nothing

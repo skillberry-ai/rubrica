@@ -850,6 +850,36 @@ def test_gate_one_and_utilisation_survive_a_malformed_citation_container(tmp_pat
     assert any(entry["cited"] for entry in report), f"only the bad container is skipped: {report}"
 
 
+def test_an_unreadable_claims_directory_is_exit_2_from_both_reports(tmp_path):
+    """The shape that must **not** be guarded into an exit 0, pinned as a test
+    rather than only argued in a docstring.
+
+    Every other readable-run shape in this file is a report contract violation to be
+    closed: a hand-edited document takes `claim-utilisation` and `gate-brief` to exit
+    1, and they are reports, so that is a defect. An unreadable `01-claims/` is a
+    different kind. `paths.list_json` raises `UsageError`, `cli.py` maps it to **exit
+    2** alongside OSError, and the exit-code contract's ruling for a filesystem
+    problem *is* 2 -- the harness pointed at something broken, not a stage defect.
+
+    Guarding it inside `utilisation.py` the way the world-model walk was guarded
+    would turn this into an exit 0 reporting empty utilisation over claims nobody
+    could read, which is the one reading a human at gate 1 must never be handed. So
+    this test exists to go red if someone reads
+    `test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run` as an
+    invitation to close its fourth param. Sibling of
+    `test_gate_zero_reports_an_unreadable_dispositions_directory_as_a_broken_run`,
+    whose docstring already claimed this behaviour for `01-claims/` without pinning
+    it.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    run.claims_dir.chmod(0o000)
+    try:
+        assert cli.main(["claim-utilisation", "--run", str(run.root)]) == 2
+        assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 2
+    finally:
+        run.claims_dir.chmod(0o755)
+
+
 # --------------------------------------------------------------------------
 # Task 15: gate 0's three new sections -- the slice table, the
 # predicted-vs-observed surface divergence (spec section 4.1), and the summary

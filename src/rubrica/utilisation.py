@@ -51,8 +51,9 @@ def claim_utilisation(run: RunPaths) -> dict:
         # reaches these reads just as far: they are the same breach, two reports at
         # exit 1 on a readable run. What keeps them unguarded is scope, not the
         # contract -- issue #6 widened the world-model walk and never touched this
-        # path -- so this is a live hole, and the ruling that parks it belongs in
-        # docs/design/limitations.md rather than only in a comment here.
+        # path, and only that half was ruled in -- so this is a live hole, and the
+        # ruling that parks it belongs in docs/design/limitations.md rather than
+        # only in a comment here.
         ids = [claim["id"] for claim in payload.get("claims", [])]
         used = sum(1 for claim_id in ids if claim_id in cited)
         artifacts.append(

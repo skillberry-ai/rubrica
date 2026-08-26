@@ -1855,16 +1855,24 @@ def test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run(tmp_path,
     channel to report a malformed document through, where a layer-2 checker at
     least degrades to an `internal` finding.
 
-    **That reasoning reaches the shapes left here too**, and saying otherwise would
-    make this docstring the weaker of two records of one ruling: these four also
-    take both reports to exit 1 on a readable run, and `utilisation.py` states that
-    hole plainly beside the unguarded line. What keeps them here is scope and
-    authorisation -- issue #6 widened the world-model walk and never touched the
-    `01-claims/` path, the overturned ruling was written specifically about these
-    shapes with this page's marker attached, and only the world-model half was
-    ruled in. So this test pins current behaviour on a known-wrong thing rather
-    than a settled one, and the ruling that parks it belongs in
-    `docs/design/limitations.md` rather than in this docstring.
+    **That reasoning reaches the three hand-edited-document shapes left here too**,
+    and saying otherwise would make this docstring the weaker of two records of one
+    ruling: each of them also takes both reports to exit 1 on a readable run, and
+    `utilisation.py` states that hole plainly beside the unguarded line. What keeps
+    them here is scope and authorisation -- issue #6 widened the world-model walk
+    and never touched the `01-claims/` path, the overturned ruling was written
+    specifically about these shapes with this page's marker attached, and only the
+    world-model half was ruled in. So for those three this test pins current
+    behaviour on a known-wrong thing rather than a settled one, and the ruling that
+    parks it belongs in `docs/design/limitations.md` rather than in this docstring.
+
+    `_claims_dir_is_unreadable` is here for a **different reason, and is not part of
+    that hole**: an unreadable directory is a filesystem problem, `list_json` raises
+    `UsageError`, and `cli.py` maps that to **exit 2** -- measured -- which is the
+    exit-code contract's own ruling for one. Guarding it in `utilisation.py` would
+    turn it into an exit 0 reporting empty utilisation over claims nobody could
+    read, so this param is not a candidate for the same fix; it is caught here
+    purely so the page renders a marker rather than crashing.
     """
     if os.geteuid() == 0 and break_it is _claims_dir_is_unreadable:
         pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
@@ -4068,7 +4076,7 @@ def test_render_states_the_unreadable_utilisation_as_a_malformation(tmp_path):
     from rubrica.artifacts import write_json
 
     run = build_toy_run(tmp_path / "runs", upto="challenge")
-    # `"claims": 7` is one of the seven shapes measured escaping
+    # `"claims": 7` is one of the hand-edited `01-claims/` shapes measured escaping
     # `claim_utilisation` as an exception -- TypeError, not an OSError.
     write_json(run.claims_dir / "broken.json", {"schema_version": "0.1", "claims": 7})
     html = summary.run_summary(run)
