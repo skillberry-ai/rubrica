@@ -1764,7 +1764,13 @@ def check_world_model(run: RunPaths) -> list[Finding]:
     # Three measurements, each of a real defect an earlier draft of this block had:
     #
     #   - `"gaps": null` and `"gaps": "x"` raised AttributeError out of a layer-2
-    #     gate -- a stage defect surfacing as exit 2, which the contract forbids.
+    #     gate. Exit 1, not 2, and the distinction is the same one the third
+    #     bullet draws: cli.py's named handler maps only (OSError, UsageError,
+    #     ArtifactError, UnknownStage) to 2, and `except Exception` takes an
+    #     AttributeError to exit 1 with a generic `internal` finding -- measured,
+    #     by raising one out of this very checker. So it is the specificity half
+    #     of the rule that it breaks, never the exit-code half: a repairable
+    #     stage defect reported against nothing in particular.
     #   - `outcome_class["claims"] = "nope"` reported four `no such claim` findings,
     #     one per character: the wrong-artifact class this module has shipped once.
     #   - `claims: [{"a": 1}]` at any of the three sites raised `TypeError:

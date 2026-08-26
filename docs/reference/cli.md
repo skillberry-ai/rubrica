@@ -448,8 +448,9 @@ is never the thing that turns a readable run into a defect finding. A run
 directory that cannot be read at all is a different failure and still exits
 2, on the same shared catch every other subcommand uses. One measured exception
 to that promise is open and on the record: a hand-edited `01-claims/` document —
-a `claims` value that is not an array, or a claim with no `id` — still raises out
-of the utilisation report this brief reads, taking both commands to exit 1. See
+a `claims` value that is not an array, an array holding bare ids where claim
+records belong, or a claim record with no `id` — still raises out of the
+utilisation report this brief reads, taking both commands to exit 1. See
 [`docs/design/limitations.md`](../design/limitations.md).
 
 ```bash

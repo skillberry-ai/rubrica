@@ -385,9 +385,9 @@ names, and its `claims` cite ids that exist.
 What it did gain is a required `claims` array on `$defs/gap`, so the evidence
 that an absence *matters* is resolvable rather than sitting in prose. That closes
 a self-contradicting gate-1 brief, and the case is worth stating with its ids
-because the tree cannot hold it: `runs/` is gitignored. On
-`run-20260823-112746`, run 1's brief reported
-`trajectories2-json-14: 0/19 claims cited (0%)` while
+because the tree cannot hold it: `runs/` is gitignored. Quoted from issue #6,
+which is where run 1's figures survive at all — on `run-20260823-112746` its
+brief reported `trajectories2-json-14: 0/19 claims cited (0%)` while
 `gap-search-tool-error-response`, in the same brief, rested its `unknown` on
 `clm-trajectories2-json-14-019`. The directory that survives holds run 2's
 re-seal — its utilisation recomputes to run 2's 146/434, and that artifact's row
@@ -1693,19 +1693,25 @@ Two readers in `refs.py`, both live, both surfaced while the reports beside them
 were being widened.
 
 `check_coverage` builds `gap_ids = {g["id"] for g in world.get("gaps", [])}`, and
-spells the world model's `goals` and the scenario list the same way. Measured on a
-sealed toy run with `"gaps": "nope"`: `TypeError: string indices must be integers`
-out of that comprehension, because iterating a string yields characters that then
-get indexed.
+spells the world model's `goals` and the scenario list the same way. Measured
+with `"gaps": "nope"` on a toy run carried through **`score`**, not merely through
+`reconcile-seal`: `TypeError: string indices must be integers` out of that
+comprehension, because iterating a string yields characters that then get indexed.
+The precondition is not incidental and the neighbouring entry is why it is spelled
+out — `claim_utilisation` needs only `01-claims/` and a world model, so a sealed
+run reaches it, while `check_coverage` returns `[]` before it reads anything if
+`03-coverage/latest.json` is absent. Measured both ways: at `reconcile-seal` the
+same mutation yields zero findings and no exception.
 
 `_claim_index` does `payload["claims"]` and then `claim["id"]` with no guard on
 either, so each shape in the entry above raises out of layer 2 as well — measured
 at those two lines. What makes it worth a line rather than a shrug is its
-neighbour: `_claims_by_artifact`, the next function in the file, guards both —
+neighbour: `_claims_by_artifact`, the next reader of `01-claims/` in the file
+(`_claim_ids` sits between them and only delegates), guards both —
 `_as_list` on the array, `isinstance(claim, dict)` on each member — and that
-function is *new*, written directly beneath the unguarded one by the same change
-that forced read coverage. So one reader of `01-claims/` in this module is total,
-the one immediately above it is not, and the second was written without the first
+function is *new*, added to this module by the same change that forced read
+coverage. So one reader of `01-claims/` here is total and the older one is not, and
+the guarded one was written a few lines down from the unguarded one without it
 being touched.
 
 **Ruled out of scope rather than overlooked, on the distinction the entry above
