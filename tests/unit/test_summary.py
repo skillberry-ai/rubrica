@@ -1752,13 +1752,22 @@ def test_contradictions_survives_a_part_that_is_not_readable(tmp_path):
         holding.chmod(0o644)
 
 
-# The seven readable-run shapes measured escaping `claim_utilisation` as
-# exceptions, each as a mutation of a fully sealed toy run. Driven end to end
-# through `summary.utilisation()` rather than through `claim_utilisation` itself:
-# the defect this closes is that a report which "never raises on a readable run's
+# The readable-run shapes measured escaping `claim_utilisation` as exceptions,
+# each as a mutation of a fully sealed toy run. Driven end to end through
+# `summary.utilisation()` rather than through `claim_utilisation` itself: the
+# defect this closes is that a report which "never raises on a readable run's
 # content" was calling a function that does, and only the composed call proves the
 # guard is in the path the page actually takes. `id` is the parametrisation label
 # and the escape it produced, so a red test names the shape it lost.
+#
+# They split into two sets now, and the split is the ruling issue #6 changed. The
+# `01-claims/` shapes still raise and are still caught in summary.py. The
+# world-model *container* shapes below no longer raise at all: `claim-utilisation`
+# and `gate-brief` are reports, and a report has no findings channel through which
+# to say "this document is malformed", so `utilisation._cited_claim_ids` was
+# widened to skip a container it cannot walk --
+# `test_utilisation_renders_over_a_world_model_container_it_could_not_walk` is
+# where they are pinned now.
 def _claims_member_is_a_string(run) -> None:
     from rubrica.artifacts import read_json, write_json
     from rubrica.paths import list_json
@@ -1823,26 +1832,30 @@ def _claims_dir_is_unreadable(run) -> None:
         pytest.param(_claims_member_is_a_string, id="TypeError-string-indices"),
         pytest.param(_claim_has_no_id, id="KeyError-id"),
         pytest.param(_claims_is_not_a_list, id="TypeError-int-not-iterable"),
-        pytest.param(_group_member_is_a_string, id="AttributeError-group-member"),
-        pytest.param(_contradictions_member_is_a_string, id="AttributeError-contradiction"),
-        pytest.param(_collection_is_not_a_list, id="AttributeError-collection"),
         pytest.param(_claims_dir_is_unreadable, id="UsageError-unreadable-claims-dir"),
     ],
 )
 def test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run(tmp_path, break_it):
-    """The one hole measured in this module's never-raise promise, at all seven shapes.
+    """The hole measured in this module's never-raise promise, at the shapes that
+    still reach it as exceptions.
 
     `claim_utilisation` is a report with its own contract and its own callers, and
-    it is not total: `utilisation.py` indexes `claim["id"]` bare, `.get`s
-    world-model group members bare, and calls `list_json(run.claims_dir)`, whose
+    it is not total: `utilisation.py` indexes `claim["id"]` bare over an
+    `01-claims/` document, and calls `list_json(run.claims_dir)`, whose
     `UsageError` is a ValueError rather than an OSError. Every shape here is a
     *readable* run -- a hand-edited artifact, or a directory permission -- which is
     exactly the class this module promises to render rather than crash on, and one
     of them escaping takes the whole page down.
 
-    Guarded in `summary.py`, not widened in `utilisation.py`: the gate and the
-    subcommand share that module's arithmetic, and changing what it raises is a
-    change to their contract.
+    These are guarded in `summary.py` rather than widened in `utilisation.py`,
+    which was the ruling for all of the measured shapes until issue #6 overturned
+    half of it: the three world-model *container* shapes were widened there,
+    because `claim-utilisation` and `gate-brief` are reports and a raise on a
+    readable run breaks the exit-code contract outright -- a report has no findings
+    channel to report a malformed document through, where a layer-2 checker at
+    least degrades to an `internal` finding. That reasoning does not reach the
+    `01-claims/` reads left here, and this page's marker is the surface that would
+    lose a signal if it did, so they stay.
     """
     if os.geteuid() == 0 and break_it is _claims_dir_is_unreadable:
         pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
@@ -1858,6 +1871,42 @@ def test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run(tmp_path,
         assert got.why == "01-claims/ or 01-world-model.json unreadable"
     finally:
         run.claims_dir.chmod(0o755)
+
+
+@pytest.mark.parametrize(
+    "break_it",
+    [
+        pytest.param(_group_member_is_a_string, id="group-member-a-string"),
+        pytest.param(_contradictions_member_is_a_string, id="contradiction-a-string"),
+        pytest.param(_collection_is_not_a_list, id="collection-not-a-list"),
+    ],
+)
+def test_utilisation_renders_over_a_world_model_container_it_could_not_walk(tmp_path, break_it):
+    """The three shapes that were `Malformed` markers here until issue #6.
+
+    Each was measured raising `AttributeError: 'str' object has no attribute 'get'`
+    out of `_cited_claim_ids`' walk over the world model's element groups, at exit
+    1 from `claim-utilisation` and from `gate-brief --gate 1` -- both reports, and
+    both ruled to exit clean on a readable run. So the walk skips a container it
+    cannot read, and this page renders the numbers it could compute rather than a
+    "present but unreadable" marker.
+
+    Which is a loss of signal on this page, and it is the one this project already
+    ruled on twice: naming a malformed document is `validate`'s job, layer 1 names
+    it precisely (`rubrica validate --stage reconcile-seal`), and a report that
+    says "malformed" by crashing is the least useful reading of a document. The
+    citations the unwalkable container held are simply not counted, so the loss
+    shows up as a number that disagrees with the file -- which is `brief._dicts`'
+    ruling, stated there.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    break_it(run)
+
+    got = summary.utilisation(run)
+
+    assert not isinstance(got, summary.Marker), f"a readable run still reports: {got}"
+    # And it reports over every input, so the page does not quietly shrink.
+    assert {a["artifact_id"] for a in got.per_artifact} == {"api-json", "notes-md", "trace-json"}
 
 
 def test_utilisation_absent_reads_differently_from_the_no_world_model_absence(tmp_path):

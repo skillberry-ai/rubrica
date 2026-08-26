@@ -36,6 +36,18 @@ def claim_utilisation(run: RunPaths) -> dict:
         payload = _quietly(path)
         if not isinstance(payload, dict):
             continue
+        # Deliberately *not* guarded, unlike the world-model reads in
+        # `_cited_claim_ids` below. A malformed `01-claims/` member raises here --
+        # `claim["id"]` on a string is `TypeError: string indices must be
+        # integers`, a claim dict with no `id` is `KeyError: 'id'`, `"claims": 7`
+        # is `TypeError: 'int' object is not iterable` -- and `summary.utilisation`
+        # catches them there to render "present but unreadable" on the run-summary
+        # page. That guard is in summary.py by ruling
+        # (`test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run`
+        # records it), so widening it here would delete a measured signal from
+        # another surface rather than add one. It is a live hole in this report's
+        # own exit-0 contract, measured and reported with issue #6's fix round; it
+        # is not this build's to close unilaterally.
         ids = [claim["id"] for claim in payload.get("claims", [])]
         used = sum(1 for claim_id in ids if claim_id in cited)
         artifacts.append(
@@ -59,7 +71,7 @@ def _cited_claim_ids(run: RunPaths) -> set[str] | None:
         return None
     cited: set[str] = set()
     for group in ("capabilities", "entities", "actors", "goals"):
-        for item in world.get(group, []):
+        for item in _elements(world.get(group)):
             cited.update(_claim_ids(item.get("claims")))
     # The three nested sites. `$defs/invariant`, `$defs/outcome_class` and
     # `$defs/gap` carried no `claims` array at all until issue #6, so an
@@ -69,20 +81,20 @@ def _cited_claim_ids(run: RunPaths) -> set[str] | None:
     # with 24 more appearing only inside prose -- 117 of 434 claims, 27% of
     # the corpus, that this function could not see. Walking the children is
     # what makes those citations structural rather than prose.
-    for capability in world.get("capabilities", []):
-        for outcome_class in capability.get("outcome_classes", []) or []:
+    for capability in _elements(world.get("capabilities")):
+        for outcome_class in _elements(capability.get("outcome_classes")):
             cited.update(_claim_ids(outcome_class.get("claims")))
-    for entity in world.get("entities", []):
-        for invariant in entity.get("invariants", []) or []:
+    for entity in _elements(world.get("entities")):
+        for invariant in _elements(entity.get("invariants")):
             cited.update(_claim_ids(invariant.get("claims")))
-    for gap in world.get("gaps", []) or []:
+    for gap in _elements(world.get("gaps")):
         cited.update(_claim_ids(gap.get("claims")))
     # `refs.check_world_model` (refs.py:464-467) already resolves contradictions[].claim_a
     # and claim_b as claim references -- it reports one as a finding if it does not
     # resolve. A definition of "cited" that excludes them would disagree with that
     # checker in the same module family, and would tell an input whose only surviving
     # contribution is a recorded contradiction that nothing cites it, which is false.
-    for contradiction in world.get("contradictions", []):
+    for contradiction in _elements(world.get("contradictions")):
         for side in ("claim_a", "claim_b"):
             claim_id = contradiction.get(side)
             # isinstance rather than `is not None`, for _claim_ids' reason below:
@@ -92,6 +104,38 @@ def _cited_claim_ids(run: RunPaths) -> set[str] | None:
             if isinstance(claim_id, str):
                 cited.add(claim_id)
     return cited
+
+
+def _elements(value) -> list[dict]:
+    """The dict members of a list of citing elements, or `[]` for anything else.
+
+    `_claim_ids`' sibling, for the *containers* rather than the members. Same
+    contract, same measurement, one level up: on a readable world model, every one
+    of `capabilities`, `entities`, `actors`, `goals`, `gaps`, `contradictions`,
+    `capabilities[].outcome_classes` and `entities[].invariants` set to `"nope"`
+    or `["nope"]` raised `AttributeError: 'str' object has no attribute 'get'`
+    here -- a bare string is the shape that does not fail loudly, since iterating
+    it yields characters that then reach `.get` -- and an integer raised
+    `TypeError: 'int' object is not iterable`. Both reports exited 1 with one
+    fabricated `[internal]` finding. Three of those eight containers -- `gaps`,
+    `outcome_classes` and `invariants` -- are walks issue #6 added, so those
+    crashes were through a path this build created rather than one it inherited.
+
+    Guarding here rather than at the gate that reads it is the point: a layer-2
+    checker that raises degrades to an `internal` finding at exit 1, which is bad
+    but is still a finding, while a **report** has no findings channel at all --
+    `claim-utilisation` and `gate-brief` must exit 0 on a readable run, so a raise
+    here is a violation of the exit-code contract rather than a strict reading of
+    a malformed document.
+
+    Not `refs._as_list` plus a local isinstance, which is how the checkers spell
+    this: `refs` imports `claim_utilisation`, so importing anything from `refs`
+    here is a circular import. `brief.py` can endorse that import and this module
+    cannot, which is why the guard is local and named for what it returns.
+    """
+    if not isinstance(value, list):
+        return []
+    return [member for member in value if isinstance(member, dict)]
 
 
 def _claim_ids(value) -> list[str]:

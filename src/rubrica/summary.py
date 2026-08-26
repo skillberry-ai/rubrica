@@ -719,20 +719,29 @@ def utilisation(run: RunPaths) -> Utilisation | Marker:
     report there means "the seal has not run", not "no input was cited", and a
     0-of-0 row on the page would assert the second.
 
-    **`claim_utilisation` is not total, and the call is guarded for it.** It is a
-    report with its own contract and its own callers, so it is guarded here rather
-    than widened there. Seven shapes of a *readable* run were measured escaping it
-    as exceptions, and this module's promise is that none of them raises:
+    **`claim_utilisation` is not total, and the call is guarded for it.** It reads
+    every `01-claims/` document to get each input's denominator, and it indexes
+    into those documents bare. These shapes of a *readable* run were measured
+    escaping it as exceptions, and this module's promise is that none of them
+    raises:
 
     - a `01-claims/` member of `claims[]` that is a string -- `TypeError: string
       indices must be integers`, from `utilisation.py`'s bare `claim["id"]`;
     - a claim dict with no `id` -- `KeyError: 'id'`, same line;
     - `"claims": 7` -- `TypeError: 'int' object is not iterable`;
     - `01-claims/` unreadable -- `UsageError` from `list_json`, a ValueError and
-      **not** an OSError, which is why the guard below cannot be `except OSError`;
-    - a world-model group member that is a string, `"contradictions": ["oops"]`,
-      and `"capabilities": "nope"` -- all three `AttributeError: 'str' object has
-      no attribute 'get'`, from `_cited_claim_ids`' bare `.get` over group members.
+      **not** an OSError, which is why the guard below cannot be `except OSError`.
+
+    Three world-model shapes used to be on that list -- a group member that is a
+    string, `"contradictions": ["oops"]`, `"capabilities": "nope"`, all three
+    `AttributeError: 'str' object has no attribute 'get'` out of
+    `_cited_claim_ids`. Issue #6 widened `utilisation.py` for those instead of
+    guarding them here, because `claim-utilisation` and `gate-brief` are reports
+    that must exit 0 on a readable run and neither has a findings channel to report
+    a malformed document through. They no longer reach this guard, and this page
+    renders the numbers computed over what the walk could read rather than a
+    marker; the `01-claims/` reads above are a different question, and this guard
+    is still the whole answer to it.
 
     The absence names both artifacts because either can be the unreadable one, and
     the reading is different from the no-world-model absence above: there, nothing

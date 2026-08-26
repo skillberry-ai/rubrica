@@ -753,6 +753,90 @@ def _mangle_every_claims_array(node, member) -> None:
             _mangle_every_claims_array(item, member)
 
 
+def _replace_container(world: dict, site: str, shape) -> None:
+    """Put `shape` where `site` names one of the containers `_cited_claim_ids` walks.
+
+    A site rather than a walk, unlike `_mangle_every_claims_array` above: the
+    member axis is one shape repeated at every `claims` array, while a container
+    is a *different* key at each level, and naming them is what makes a missed
+    level a red test rather than a silent pass.
+    """
+    if "[]." in site:
+        parent, child = site.split("[].")
+        for element in world[parent]:
+            element[child] = shape
+    else:
+        world[site] = shape
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        # Not a list at all -- a bare string is the one that does not fail loudly,
+        # since iterating it yields characters that then reach `.get`.
+        "nope",
+        7,
+        {"id": "clm-api-001"},
+        # A list whose elements are not the objects the walk expects.
+        ["nope"],
+        [None],
+    ],
+)
+@pytest.mark.parametrize(
+    "site",
+    [
+        "capabilities",
+        "entities",
+        "actors",
+        "goals",
+        "gaps",
+        "contradictions",
+        "capabilities[].outcome_classes",
+        "entities[].invariants",
+    ],
+)
+def test_gate_one_and_utilisation_survive_a_malformed_citation_container(tmp_path, site, shape):
+    """The container axis of the same defect the member axis above pins.
+
+    Measured before the fix, on readable runs: every one of these exits **1** from
+    both `claim-utilisation` and `gate-brief --gate 1` with
+    `AttributeError: 'str' object has no attribute 'get'` out of
+    `utilisation._cited_claim_ids`, and one fabricated `[internal]` finding on
+    stdout. `capabilities = "nope"` is the pre-existing walk; `gaps = "nope"`,
+    `outcome_classes = "nope"` and `invariants = "nope"` are walks issue #6 added,
+    so half of these are crashes through a path this branch created.
+
+    Both commands are reports, and CLAUDE.md's ruling for a report is that it
+    always exits clean on a readable run -- there is no findings channel through
+    which a report could say "this document is malformed", which is exactly why
+    guarding here is not the same question as `check_input_dispositions`, where a
+    raise degrades to an `internal` finding at exit 1.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    world = read_json(run.world_model)
+    # A gap first, because the golden world has none and `gaps` is one of the
+    # containers under test.
+    world["gaps"] = [
+        {
+            "id": "gap-hand-edited",
+            "subject": "billing",
+            "unknown": "whether a refund can exceed the original charge",
+            "why_it_matters": "the boundary case a suite would exercise",
+            "blocks": ["propose"],
+            "claims": ["clm-notes-001"],
+        }
+    ]
+    _replace_container(world, site, shape)
+    write_json(run.world_model, world)
+
+    assert cli.main(["claim-utilisation", "--run", str(run.root)]) == 0
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+    # And the report still reports: a guard that dropped the whole world model on
+    # one malformed container would render every input as zero-cited, which is a
+    # different false statement from the crash it replaced.
+    assert claim_utilisation(run)["artifacts"], "the report still lists every input"
+
+
 # --------------------------------------------------------------------------
 # Task 15: gate 0's three new sections -- the slice table, the
 # predicted-vs-observed surface divergence (spec section 4.1), and the summary
