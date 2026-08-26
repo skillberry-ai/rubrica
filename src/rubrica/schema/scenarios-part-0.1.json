@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "scenarios-part-0.1.json",
+  "title": "One propose member's batch of new scenarios",
+  "description": "What one rb-propose fan-out member wrote for its own batch, and nothing else. An empty scenarios array is a real record -- it says this member read its batch and could close none of it, which is what refusal conditions exist to produce -- so the array has no minItems, and refs.check_scenario_parts requires a file per batch rather than a non-empty one. The member never re-emits a sibling's scenarios or an earlier round's: propose-seal assembles 02-scenarios.json from every part, which is why this part is bounded while that document is not.",
+  "type": "object",
+  "required": ["schema_version", "round", "batch_id", "scenarios"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "round": {"type": "integer", "minimum": 1},
+    "batch_id": {"$ref": "world-model-0.1.json#/$defs/id"},
+    "scenarios": {
+      "type": "array",
+      "items": {"$ref": "scenarios-0.1.json#/$defs/scenario"}
+    }
+  }
+}

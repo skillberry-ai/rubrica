@@ -257,6 +257,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_set_limit.add_argument("--run", required=True)
     p_set_limit.add_argument("--max-rounds", type=int, default=None)
     p_set_limit.add_argument("--max-scenarios", type=int, default=None)
+    p_set_limit.add_argument("--max-scenario-part-bytes", type=int, default=None)
     p_set_limit.add_argument("--reason", required=True)
     return parser
 
@@ -617,14 +618,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "set-limit":
             run = _run_dir(args.run)
             # Its own UsageError catch, matching decide and record-stage just
-            # above: --max-rounds, --max-scenarios, and --reason are the
-            # orchestrator's own arguments, not a stage's output, so a bad one
-            # is a misconfigured harness rather than a repairable stage defect.
+            # above: --max-rounds, --max-scenarios, --max-scenario-part-bytes and
+            # --reason are the orchestrator's own arguments, not a stage's output,
+            # so a bad one is a misconfigured harness rather than a repairable
+            # stage defect.
             try:
                 set_limit(
                     run,
                     max_rounds=args.max_rounds,
                     max_scenarios=args.max_scenarios,
+                    max_scenario_part_bytes=args.max_scenario_part_bytes,
                     reason=args.reason,
                 )
             except (UsageError, OSError) as exc:

@@ -9,6 +9,8 @@ mandatory and lands in decisions.md alongside the old and new value.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from rubrica.artifacts import read_json, write_json
@@ -55,6 +57,101 @@ def test_setting_neither_limit_is_a_usage_error(tmp_path):
 
     with pytest.raises(UsageError):
         set_limit(run, reason="no limit named, so nothing to do")
+
+
+def test_the_no_limit_guard_names_every_limit_it_accepts(tmp_path):
+    """The third limit is folded into the *same* guard, not special-cased.
+
+    A `max_scenario_part_bytes` handled by its own early return would leave this
+    message naming two limits while three exist, and a caller reading it would
+    conclude the byte budget cannot be set here at all. Asserted on the message
+    rather than on the raise, because the raise above already passes with the
+    third keyword ignored entirely.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+
+    with pytest.raises(UsageError) as caught:
+        set_limit(run, reason="no limit named, so nothing to do")
+
+    for name in ("max_rounds", "max_scenarios", "max_scenario_part_bytes"):
+        assert name in str(caught.value), str(caught.value)
+
+
+def test_the_cli_reference_quotes_the_guard_message_verbatim(tmp_path):
+    """docs/reference/cli.md quotes this message, so it can drift silently.
+
+    Measured while adding the third limit: `set-limit`'s section quoted `set_limit
+    needs at least one of max_rounds or max_scenarios` as the exit-2 text, and
+    nothing failed when the message gained a third name -- a reader would have
+    matched the documented string against a message that no longer exists and
+    concluded the byte budget was not settable here. The guard message is derived
+    from one roster in `set_limit`, so pinning the *document* to the message is
+    the direction that cannot go stale.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+
+    with pytest.raises(UsageError) as caught:
+        set_limit(run, reason="no limit named, so nothing to do")
+
+    reference = Path(__file__).resolve().parents[2] / "docs" / "reference" / "cli.md"
+    # Line wrapping is the document's business, so compare on collapsed
+    # whitespace: cli.md breaks this sentence across two lines.
+    quoted = " ".join(reference.read_text(encoding="utf-8").split())
+    assert str(caught.value) in quoted, str(caught.value)
+
+
+def test_set_limit_records_the_part_byte_budget(tmp_path):
+    """The propose/score loop's per-member output budget, on the record.
+
+    Same channel as the other two limits: the manifest carries the new value and
+    decisions.md carries the reason, so lowering the budget for a probe run is a
+    decision a later reader can find rather than a silent hand edit.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+
+    set_limit(run, max_scenario_part_bytes=12000, reason="probe run, small batches")
+
+    manifest = read_json(run.manifest)
+    assert manifest["limits"]["max_scenario_part_bytes"] == 12000
+    decisions_text = run.decisions.read_text(encoding="utf-8")
+    assert "12000" in decisions_text
+    assert "probe run, small batches" in decisions_text
+    # The other two are untouched: this is a third key, not a replacement.
+    assert manifest["limits"]["max_rounds"] and manifest["limits"]["max_scenarios"]
+
+
+def test_the_manifest_still_validates_after_the_part_byte_budget_is_set(tmp_path):
+    """The optional third key must be a key manifest-0.1.json accepts.
+
+    `limits` is additionalProperties: false, so a budget written without the
+    schema property would make the run's own manifest invalid at the next
+    `validate --stage intake` -- a finding against an artifact no skill wrote.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+
+    set_limit(run, max_scenario_part_bytes=12000, reason="probe run, small batches")
+
+    assert validate_stage(run, "intake") == []
+
+
+def test_the_cli_passes_the_part_byte_budget_through(tmp_path):
+    """The flag reaches set_limit rather than being parsed and dropped."""
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+
+    code = main(
+        [
+            "set-limit",
+            "--run",
+            str(run.root),
+            "--max-scenario-part-bytes",
+            "12000",
+            "--reason",
+            "probe run, small batches",
+        ]
+    )
+
+    assert code == 0
+    assert read_json(run.manifest)["limits"]["max_scenario_part_bytes"] == 12000
 
 
 def test_a_reason_with_a_newline_is_a_usage_error(tmp_path):
@@ -153,7 +250,16 @@ def test_a_corrupt_limits_block_reaches_the_cli_as_exit_two(tmp_path, capsys):
 
 
 @pytest.mark.parametrize(
-    "argv_limit", [["--max-scenarios", "0"], ["--max-rounds", "-3"], ["--max-rounds", "0"]]
+    "argv_limit",
+    [
+        ["--max-scenarios", "0"],
+        ["--max-rounds", "-3"],
+        ["--max-rounds", "0"],
+        # The third limit goes through the same range guard: manifest-0.1.json
+        # puts minimum: 1 on it too, so a budget of 0 written here would surface
+        # later as a finding against a manifest no skill wrote.
+        ["--max-scenario-part-bytes", "0"],
+    ],
 )
 def test_the_cli_refuses_an_out_of_range_limit_at_exit_two(tmp_path, argv_limit, capsys):
     """Exit 2, on stderr: these are the orchestrator's own arguments, so a bad

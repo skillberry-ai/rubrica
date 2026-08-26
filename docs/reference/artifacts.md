@@ -473,6 +473,106 @@ forms — `compare`, `count`, `join`, `unique` — evaluated mechanically by
 (the multi-hop depths a goal is expected to be tested at, read by `rb-score`'s
 goal matrix).
 
+## The propose/score loop's parts
+
+The three entries below are the per-round, per-batch slices the two sealed
+documents that follow them — `scenarios` and `coverage` — are assembled from.
+They exist for one reason: **no prompt should write a document that grows with
+the world model's denominator.** A single `rb-propose` dispatch used to re-emit
+every scenario of every previous round, and a single `rb-score` dispatch used to
+re-emit that list plus both coverage matrices, so the response a model had to
+produce grew with the run rather than with the round's work — and on a real
+target it exceeded the harness's output cap, which truncates rather than fails.
+Each part below is bounded by its own batch instead, and code composes the whole.
+
+These three kinds are registered in `validate.ARTIFACT_SCHEMAS` and are **not
+yet in `validate.STAGE_ARTIFACTS`**: the schemas and the byte budget land ahead
+of the code that writes them, so `rubrica validate --stage propose` still gates
+the sealed `scenarios` document alone. The "written by" and "read by" lines
+below name the producer and readers each part is *designed* for, not a stage
+mapping or a checker that exists today — the paths, though, are the ones
+`paths.RunPaths` already resolves.
+
+Like the reconcile partials above, none of these schemas restates an element it
+shares with a sealed document: `scenarios-part` resolves
+`scenarios-0.1.json#/$defs/scenario`, and `score-part` resolves
+`coverage-0.1.json#/$defs/hole` and that schema's own `verdict` enum, through
+`validate._schema_registry`.
+
+## `batches`
+
+- **Schema:** `src/rubrica/schema/batches-0.1.json`
+- **Written by:** code, from the round's coverage report — not a prompt, for the
+  same reason `emit` is code: the partition must be reproducible, or a change in
+  a round's output cannot be attributed to the model that wrote it
+- **Read by:** the `propose` fan-out (each member is dispatched with one batch
+  id and reads its own entry), `check-refs`
+- **Path:** `02-batches.json` (`paths.RunPaths.batches`) — one file, carrying the
+  current round's partition; `round` says which round that is
+
+One round's closable holes, partitioned into batches whose projected output
+keeps a single `rb-propose` dispatch inside the harness output cap. A batch is a
+**writing unit, not a decision unit** — every closable hole reaches exactly one
+member, and which holes are closable is `rb-score`'s ruling rather than this
+partition's, so the partition can never quietly drop work.
+
+Fields worth knowing: `cap_bytes` (the per-member budget every batch was packed
+against, echoed here as `slices` echoes its own so a reader auditing one
+projection need not open the manifest); `bytes_per_scenario` (the estimate the
+projection used — a default until a sealed `02-scenarios.json` exists, the mean
+over that file afterwards, which is what makes the partition self-calibrating,
+and recorded so a reader can tell a changed estimate from a changed hole count
+rather than having to re-derive it);
+`batches[].projected_bytes` (`hole_refs` length times `bytes_per_scenario`,
+recomputed by `check-refs` so a batch cannot drift from its own header);
+`batches[].id` (code-minted, short and stable, because it is both a path segment
+and the prefix on the scenario ids its member mints). `batches` carries
+`minItems: 1` — a round with no closable hole produces no document at all, so an
+empty array here is a partition defect rather than a quiet round.
+
+## `scenarios-part`
+
+- **Schema:** `src/rubrica/schema/scenarios-part-0.1.json`
+- **Written by:** the `propose` fan-out, run as `rb-propose`, one part per batch
+- **Read by:** the code that seals `02-scenarios.json`; `check-refs`
+- **Path:** `02-scenarios/round-<N>/<batch-id>.json`
+  (`paths.RunPaths.scenario_part`)
+
+What one `propose` member wrote for its own batch, and nothing else — never a
+sibling's scenarios and never an earlier round's. This is the whole point: the
+part is bounded by its batch, while the document it is assembled into is not.
+
+Fields worth knowing: `batch_id` (which `02-batches/round-<N>.json` entry this
+part answers, so the seal can hold every batch to exactly one part);
+`scenarios[]` (each the same `$defs/scenario` the sealed document carries). The
+array has **no** `minItems`, deliberately: an empty one is a real record saying
+this member read its batch and could close none of it, which is what a refusal
+condition exists to produce.
+
+## `score-part`
+
+- **Schema:** `src/rubrica/schema/score-part-0.1.json`
+- **Written by:** `score`, run as `rb-score`, one part per round
+- **Read by:** the code that seals `03-coverage/round-<N>.json`; `check-refs`
+- **Path:** `03-score/round-<N>.json` (`paths.RunPaths.score_part`)
+
+Everything `rb-score` decides and nothing it can compute. The coverage matrices
+are **absent on purpose**: `rb-score`'s own Method already specifies both as
+pure functions of the world model and the scenario list, and `check-refs`
+recomputes them in checker form, so the seal computes them and this part carries
+only the judgment — the folds, the rejections, the hole reasons and the verdict.
+
+Fields worth knowing: `rulings[]` (one entry per scenario whose status *changes*
+this round — a scenario absent from every round's rulings keeps the `proposed`
+status its propose member gave it, which is why `status` here admits only
+`active`, `duplicate` and `rejected`; a ruling naming `proposed` would be a
+no-op that still had to be honoured); `duplicate_of` and `rejected_reason`
+(required with their respective statuses, the same conditional the `scenarios`
+schema applies); `holes[]` (the same `$defs/hole` the sealed report carries,
+each with the `reason` and `justification` that are judgment and cannot be
+computed); `verdict` (the same four values `coverage` defines, and still only
+`rb-orchestrate` acts on it).
+
 ## `scenarios`
 
 - **Schema:** `src/rubrica/schema/scenarios-0.1.json`

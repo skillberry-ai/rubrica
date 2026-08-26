@@ -494,13 +494,21 @@ recorded in `decisions.md`, so raising a ceiling is a decision on the record
 rather than a silent hand-edit.
 
 Required: `--run RUN`, `--reason REASON`. Optional: `--max-rounds
-MAX_ROUNDS`, `--max-scenarios MAX_SCENARIOS` — but **at least one of the two
-optional flags is required in practice.** Passing neither is a usage error
-(`set_limit needs at least one of max_rounds or max_scenarios`, exit 2), since
+MAX_ROUNDS`, `--max-scenarios MAX_SCENARIOS`, `--max-scenario-part-bytes
+MAX_SCENARIO_PART_BYTES` — but **at least one of the optional flags is required
+in practice.** Passing none of them is a usage error (`set_limit needs at least
+one of max_rounds, max_scenarios or max_scenario_part_bytes`, exit 2), since
 a change with nothing to change would append a `decisions.md` line announcing
 a decision that was never made. `--help` cannot show this: argparse has no way
-to express "at least one of these two", so the rule lives in `set_limit` and
+to express "at least one of these", so the rule lives in `set_limit` and
 surfaces only when you trip it.
+
+`--max-scenario-part-bytes` is the propose/score loop's per-member output
+budget, and it is the one limit a manifest may omit: a third *required* key
+under `limits` would have made every manifest already on disk schema-invalid,
+and `diff-runs`, `run-summary` and `gate-brief` all read those. Absent means the
+default the batch partition uses, so setting it here is how a smaller budget for
+a probe run gets onto the record rather than into an argument nobody kept.
 
 Prints the manifest path.
 

@@ -101,7 +101,12 @@
       "additionalProperties": false,
       "properties": {
         "max_rounds": { "type": "integer", "minimum": 1 },
-        "max_scenarios": { "type": "integer", "minimum": 1 }
+        "max_scenarios": { "type": "integer", "minimum": 1 },
+        "max_scenario_part_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-member output budget propose-batches packs against. Optional rather than required: making a third limit required would invalidate every manifest already on disk, which diff-runs, run-summary and gate-brief all read. Absent means rounds.DEFAULT_SCENARIO_PART_BYTES."
+        }
       }
     }
   },

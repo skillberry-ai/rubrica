@@ -106,6 +106,7 @@ def set_limit(
     *,
     max_rounds: int | None = None,
     max_scenarios: int | None = None,
+    max_scenario_part_bytes: int | None = None,
     reason: str,
     now: datetime | None = None,
 ) -> None:
@@ -119,19 +120,39 @@ def set_limit(
     value and the reason, so the next reader does not have to reconstruct it.
 
     `reason` is required and refused blank, on `decide`'s own reasoning: an
-    unexplained change is worse than no change. At least one of `max_rounds`
-    or `max_scenarios` must be given -- calling this with neither is a no-op
-    that would still cost a decisions.md line about nothing, so it is a usage
-    error instead, matching the same class of guard `decide` and `record_stage`
-    apply to their own arguments.
+    unexplained change is worse than no change. At least one of `max_rounds`,
+    `max_scenarios` or `max_scenario_part_bytes` must be given -- calling this
+    with none of them is a no-op that would still cost a decisions.md line about
+    nothing, so it is a usage error instead, matching the same class of guard
+    `decide` and `record_stage` apply to their own arguments.
+
+    `max_scenario_part_bytes` is the propose/score loop's per-member output
+    budget, and it is the one limit that may be absent from a manifest: making a
+    third `limits` key required would have made every manifest already under
+    `runs/` schema-invalid, and `diff-runs`, `run-summary` and `gate-brief` all
+    read those. Absent means `rounds.DEFAULT_SCENARIO_PART_BYTES`, so setting it
+    here is how a smaller budget gets onto the record rather than into an
+    argument nobody kept.
 
     This does not itself set `implied_size`'s number here or anywhere else --
     `sizing.implied_size` is a diagnostic nothing acts on (see its module
     docstring); this exists for the opposite direction, lowering the ceiling
     on a cheap probe run, with the reason on record instead of a silent edit.
     """
-    if max_rounds is None and max_scenarios is None:
-        raise UsageError("set_limit needs at least one of max_rounds or max_scenarios")
+    # One ordered roster of (key, requested value), read by all three loops below
+    # -- the no-op guard, the range check, and the apply-and-record pass. A third
+    # limit handled on its own branch would have to be added to each of them
+    # separately, and the first one forgotten would either accept a call that
+    # changes nothing, write an out-of-range budget, or apply a value with no
+    # decisions.md line: the exact failure this function exists to prevent.
+    requested: tuple[tuple[str, int | None], ...] = (
+        ("max_rounds", max_rounds),
+        ("max_scenarios", max_scenarios),
+        ("max_scenario_part_bytes", max_scenario_part_bytes),
+    )
+    if all(value is None for _, value in requested):
+        names = ", ".join(label for label, _ in requested[:-1])
+        raise UsageError(f"set_limit needs at least one of {names} or {requested[-1][0]}")
     # The integers, refused here rather than left for the manifest schema --
     # exactly what `record_stage` above does for `--model` and `--effort`, and
     # `intake()` for these same two limits, with the same reasoning and the same
@@ -149,7 +170,7 @@ def set_limit(
     # class of defect one step further out. bool is excluded because
     # isinstance(True, int) is True and `max_rounds=True` would write JSON
     # `true`, which is not an integer to the schema either.
-    for label, value in (("max_rounds", max_rounds), ("max_scenarios", max_scenarios)):
+    for label, value in requested:
         if value is None:
             continue
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
@@ -179,12 +200,15 @@ def set_limit(
         )
     limits = dict(raw_limits or {})
     changes = []
-    if max_rounds is not None:
-        changes.append(f"max_rounds {limits.get('max_rounds', '?')} -> {max_rounds}")
-        limits["max_rounds"] = max_rounds
-    if max_scenarios is not None:
-        changes.append(f"max_scenarios {limits.get('max_scenarios', '?')} -> {max_scenarios}")
-        limits["max_scenarios"] = max_scenarios
+    for label, value in requested:
+        if value is None:
+            continue
+        # '?' for the old value covers max_scenario_part_bytes' ordinary case: it
+        # is optional, so the first time it is set there is nothing to report as
+        # the previous value, and a fabricated default here would read as a change
+        # from a number the manifest never carried.
+        changes.append(f"{label} {limits.get(label, '?')} -> {value}")
+        limits[label] = value
     manifest["limits"] = limits
     # Two writes, and they are not transactional: nothing here makes the manifest
     # and decisions.md succeed or fail together, so a failure between them leaves

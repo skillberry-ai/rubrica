@@ -16,6 +16,7 @@ from tests.builders import (
     minimal_adoptions,
     minimal_agents,
     minimal_audit,
+    minimal_batches,
     minimal_capabilities_part,
     minimal_catalogue,
     minimal_claims,
@@ -32,6 +33,8 @@ from tests.builders import (
     minimal_outcomes_part,
     minimal_report,
     minimal_scenarios,
+    minimal_scenarios_part,
+    minimal_score_part,
     minimal_seed,
     minimal_slices,
     minimal_subjects,
@@ -95,6 +98,9 @@ MINIMAL_BUILDERS = {
     "entities-part": minimal_entities_part,
     "goals-part": minimal_goals_part,
     "gaps-part": minimal_gaps_part,
+    "batches": minimal_batches,
+    "scenarios-part": minimal_scenarios_part,
+    "score-part": minimal_score_part,
     "slices": minimal_slices,
     "objective": minimal_objective,
     "dispositions-part": minimal_dispositions_part,
@@ -663,3 +669,134 @@ def test_a_structurally_invalid_schema_is_a_usage_error_not_a_finding(tmp_path, 
     assert not isinstance(caught.value, SchemaError)
     # One line. SchemaError's own str is eleven, dumping the metaschema branch.
     assert "\n" not in str(caught.value)
+
+
+# The propose/score loop's part kinds. Registered here rather than only in
+# test_schemas_planning.py because the registration itself -- kind -> filename,
+# and the filename present as package data -- is what this module owns.
+@pytest.mark.parametrize("kind", ["batches", "scenarios-part", "score-part"])
+def test_the_new_round_kinds_resolve_to_a_shipped_schema(kind):
+    assert kind in ARTIFACT_SCHEMAS
+    assert (schema_dir() / ARTIFACT_SCHEMAS[kind]).is_file()
+
+
+def test_a_batches_document_validates(tmp_path):
+    path = tmp_path / "batches.json"
+    write_json(
+        path,
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "cap_bytes": 28000,
+            "bytes_per_scenario": 1600,
+            "batches": [
+                {"id": "b01", "hole_refs": ["cell:cap-a/oc-success"], "projected_bytes": 1600},
+            ],
+        },
+    )
+    assert validate_artifact(path, "batches") == []
+
+
+def test_a_batches_document_with_no_batches_is_refused(tmp_path):
+    # Zero batches means nothing to dispatch. propose-batches writes no
+    # document at all when there are no closable holes, so a batches file that
+    # exists and is empty is a partition defect rather than a quiet round.
+    path = tmp_path / "batches.json"
+    write_json(
+        path,
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "cap_bytes": 28000,
+            "bytes_per_scenario": 1600,
+            "batches": [],
+        },
+    )
+    assert validate_artifact(path, "batches") != []
+
+
+def test_a_scenarios_part_validates_and_carries_its_own_batch_id(tmp_path):
+    path = tmp_path / "scenarios-part.json"
+    write_json(path, {"schema_version": "0.1", "round": 1, "batch_id": "b01", "scenarios": []})
+    # An empty array is a real record: this member swept its batch and closed
+    # nothing, the same reading contradictions-part-0.1.json gives its own.
+    assert validate_artifact(path, "scenarios-part") == []
+
+
+def test_a_scenarios_part_holds_its_scenarios_to_the_shared_definition(tmp_path):
+    """The cross-file $ref both resolves and constrains.
+
+    The empty-array case above cannot reach it -- `items` is never applied to an
+    empty array, so scenarios-part-0.1.json would pass that test with its $ref
+    pointing at nothing. This is the fixture-cannot-reach weakness, and the two
+    directions here are the fix: minimal_scenarios_part carries a real scenario
+    (so the ref must resolve at all), and this document breaks it in a way only
+    scenarios-0.1.json#/$defs/scenario knows about.
+    """
+    payload = minimal_scenarios_part()
+    # `duplicate` without `duplicate_of`: a conditional that lives in the shared
+    # $def and nowhere in this part's own file.
+    payload["scenarios"][0]["status"] = "duplicate"
+    path = tmp_path / "scenarios-part.json"
+    write_json(path, payload)
+    assert validate_artifact(path, "scenarios-part") != []
+
+
+def test_a_score_part_verdict_is_the_coverage_enum(tmp_path):
+    """score-part's verdict $refs coverage-0.1.json's *property*, not a $def.
+
+    That is an unusual ref target -- a property subschema rather than a `$defs`
+    entry -- so it gets its own guard: a ref that silently resolved to nothing
+    would accept any string here, and the loop's whole control flow is this one
+    value. `halted_forever` is not one of the four the coverage report defines.
+    """
+    payload = minimal_score_part()
+    payload["verdict"] = "halted_forever"
+    path = tmp_path / "score-part.json"
+    write_json(path, payload)
+    assert validate_artifact(path, "score-part") != []
+
+
+def test_a_score_part_validates(tmp_path):
+    path = tmp_path / "score-part.json"
+    write_json(
+        path,
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "rulings": [{"scenario_id": "sc-b01-001", "status": "active"}],
+            "holes": [],
+            "verdict": "converged",
+        },
+    )
+    assert validate_artifact(path, "score-part") == []
+
+
+def test_a_fold_ruling_must_name_its_survivor(tmp_path):
+    path = tmp_path / "score-part.json"
+    write_json(
+        path,
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "holes": [],
+            "verdict": "converged",
+            "rulings": [{"scenario_id": "sc-b01-002", "status": "duplicate"}],
+        },
+    )
+    assert validate_artifact(path, "score-part") != []
+
+
+def test_a_rejection_ruling_must_name_a_reason(tmp_path):
+    path = tmp_path / "score-part.json"
+    write_json(
+        path,
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "holes": [],
+            "verdict": "converged",
+            "rulings": [{"scenario_id": "sc-b01-002", "status": "rejected"}],
+        },
+    )
+    assert validate_artifact(path, "score-part") != []

@@ -69,6 +69,13 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "entities-part": "entities-part-0.1.json",
     "goals-part": "goals-part-0.1.json",
     "gaps-part": "gaps-part-0.1.json",
+    # The propose/score loop's part kinds. Each is one dispatch's slice of a
+    # document that used to be emitted whole by a model, and every one of them
+    # $refs scenarios-0.1.json's or coverage-0.1.json's $defs rather than
+    # restating a scenario, a ruling or a hole.
+    "batches": "batches-0.1.json",
+    "scenarios-part": "scenarios-part-0.1.json",
+    "score-part": "score-part-0.1.json",
     # Config kinds. Human-authored inputs, not stage outputs, so they are
     # deliberately absent from STAGE_ARTIFACTS: no stage produces them and
     # `validate --stage X` must never look for them.
