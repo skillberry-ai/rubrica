@@ -318,6 +318,25 @@ def test_outcomes_harvests_from_claims_of_every_kind():
     assert "twice" in method
 
 
+def test_outcomes_says_what_an_underspecified_class_cites():
+    """`$defs/outcome_class` requires `claims` with `minItems: 1`, and
+    `underspecified` is the kind written precisely where no claim states the
+    behaviour -- so a pass told to write one, with nowhere named to point it,
+    either fabricates an id (which `refs.check_world_model` catches only after
+    the seal, at gate 1, against an artifact this pass finished long before) or
+    refuses a class §3 tells it to write. The rule that closes the gap: cite the
+    claims that establish the *operation* the class belongs to.
+
+    "cite" and "underspecified" were both in this section already, measured, so
+    "operation" is the token carrying the rule -- and Output is the section that
+    owns it because Method uses all three words for other purposes.
+    """
+    output = _flat("reconcile-outcomes", "2. Output")
+    assert "underspecified" in output
+    assert "operation" in output
+    assert "cite" in output
+
+
 def test_entities_requires_an_entity_for_a_capabilitys_described_response_shape():
     """Task 6 of the trajectory run dropped a claim that named all six fields of
     cancel_reservation's success payload -- confidence high, a JSON Pointer into

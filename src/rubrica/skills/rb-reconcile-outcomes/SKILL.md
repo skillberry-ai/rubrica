@@ -90,7 +90,17 @@ One `outcomes-part-0.1.json`-shaped document, written to `01-outcomes.json`
 (`outcomes_part`). It carries `schema_version: "0.1"` and an `outcomes` array;
 each entry is one `capability_id` and the `outcome_classes` for it, each class
 with an `id`, a `kind` from `success`, `empty`, `not_found`, `error` and
-`underspecified`, and a `description`.
+`underspecified`, a `description`, and its own `claims`.
+
+**An `underspecified` class carries `claims` like every other one, and what it
+cites is the operation, not the outcome.** Layer 1 requires at least one entry
+(`claim_refs` carries `minItems: 1`), and no claim states the behaviour you are
+recording as unstated -- so cite the claim or claims that establish the
+operation the class belongs to. They are not evidence *for* the outcome; they
+are the evidence that this outcome is expected of that operation and nowhere
+recorded. `rb-reconcile-gaps` makes the same move one granularity up, where a
+gap's claims are not evidence for the unknown but the claims that make the
+absence matter.
 
 **One entry per capability, and exactly one.** `refs.check_outcomes` reports
 any declared capability with no entry -- an unswept capability shrinks the
@@ -159,7 +169,11 @@ an oversight.
    real outcome class with a real cell in the denominator, and it is the
    honest record that this behaviour is unknown. Leaving the class out
    entirely says the opposite -- that the capability has no such case -- and
-   nothing downstream can tell the two apart.
+   nothing downstream can tell the two apart. Cite claims on it as you would on
+   any other class: the ones that establish the operation, per §2. Never an id
+   you invented to satisfy the requirement -- `refs.check_world_model` resolves
+   every citation after the seal, so a fabricated one costs a repair round at
+   gate 1 against an artifact you finished long before.
 
 4. **Fill in one `inputs_seen` row as you finish each claims file, not at the
    end.** A row assembled at the end from what you remember is a recollection
