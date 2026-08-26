@@ -1989,32 +1989,49 @@ def _scenario_part_findings(
             continue
         sid = _str_or_none(scenario.get("id"))
         named = sid if sid is not None else f"the scenario at /scenarios/{i}"
-        # BOTH axes a scenario credits coverage on, because both are what a
-        # sibling's member would otherwise have closed: goal_matrix credits a goal
-        # row from `goal_id`, capability_matrix credits a cell from
-        # `capability_refs`. A ref that no batch owns is not reported -- only one
-        # another batch owns -- so the clause bounds itself to the refs this round
-        # actually partitioned.
-        claimed: list[tuple[str, str]] = []
-        goal_id = _str_or_none(scenario.get("goal_id"))
-        if goal_id is not None:
-            claimed.append((f"/scenarios/{i}/goal_id", goal_ref(goal_id)))
-        for j, ref in enumerate(_as_list(scenario.get("capability_refs"))):
-            if not isinstance(ref, dict):
+        # `provenance.hole_refs` and nothing else, because that is where the member
+        # DECLARES which holes it wrote this scenario to close (rb-propose Method
+        # step 8), and scenarios-0.1.json requires it with minItems 1. It is the
+        # faithful analogue of the triage precedent: a dispositions part names a
+        # `candidate_id` and the seal refuses one outside the slice it rules on,
+        # because the candidate IS that fan-out's work unit. Here the work unit is
+        # a hole.
+        #
+        # `goal_id` and `capability_refs` are the ids a scenario NAMES, which is a
+        # different thing from the holes it TARGETS, and resolving them here was
+        # measured unsatisfiable rather than merely wrong (Ruling R21). A scenario
+        # closing one cell still has to carry a `goal_id` -- required, drawn from
+        # the world model's frozen list -- and that goal is not a hole assignment
+        # at all. `partition` chunks a sorted ref list and `cell:` sorts before
+        # `goal:`, so a cell-only batch is the normal shape: on a real
+        # write_batches partition of 20 cells and 2 goals (b01 = 17 cells, b02 = 3
+        # cells + 2 goals), resolving those two fields reported 19 of 22 CORRECT
+        # scenarios -- b01's 17 cell scenarios for naming the goal b02 owns, and
+        # b02's 2 goal scenarios for naming the cell b01 owns. The same parts
+        # against `provenance.hole_refs` report none.
+        #
+        # This stays a reference check, in layer 2's remit: does this ref name a
+        # hole this batch was given. Whether the scenario actually CLOSES it is
+        # semantic and nothing here judges it.
+        provenance = scenario.get("provenance")
+        declared = _as_list(provenance.get("hole_refs")) if isinstance(provenance, dict) else []
+        for j, ref in enumerate(declared):
+            pointer = f"/scenarios/{i}/provenance/hole_refs/{j}"
+            if not isinstance(ref, str):
+                report(pointer, f"hole reference is not a string: {ref!r}")
                 continue
-            capability_id = _str_or_none(ref.get("capability_id"))
-            outcome_class_id = _str_or_none(ref.get("outcome_class_id"))
-            if capability_id is None or outcome_class_id is None:
-                continue
-            claimed.append(
-                (
-                    f"/scenarios/{i}/capability_refs/{j}",
-                    cell_ref(capability_id, outcome_class_id),
-                )
-            )
-        for pointer, ref in claimed:
             owner = owners.get(ref)
-            if owner is not None and owner != batch_id:
+            if owner is None:
+                # A different defect from naming the wrong batch, and it needs its
+                # own message: no member at all was dispatched to close this hole,
+                # so the scenario is either closing something the round did not
+                # consider closable or naming a hole that does not exist.
+                report(
+                    pointer,
+                    f"scenario {named} targets {ref}, which round {round_n} assigns to no batch "
+                    f"at all, so no member -- {batch_id} included -- was dispatched to close it",
+                )
+            elif owner != batch_id:
                 report(
                     pointer,
                     f"scenario {named} targets {ref}, which round {round_n} assigns to batch "
@@ -2125,7 +2142,10 @@ def check_scenario_parts(run: RunPaths) -> list[Finding]:
     scenarios-part-0.1.json, hashes like any other, and reads as ordinary output;
     only the plan beside it says whose hole that was. It mirrors
     check_disposition_parts' clause 2, "a disposition naming a candidate outside
-    the slice its own part rules on".
+    the slice its own part rules on", and it mirrors it in the field it reads as
+    well as in the shape: that clause resolves the `candidate_id` a disposition
+    names because the candidate is the triage fan-out's work unit, and this one
+    resolves `provenance.hole_refs` because a hole is the propose fan-out's.
     """
     rounds = run.scenario_part_rounds()
     if not rounds:
