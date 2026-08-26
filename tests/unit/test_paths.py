@@ -405,3 +405,72 @@ def test_the_listing_methods_raise_a_usage_error_on_an_unreadable_directory(tmp_
     finally:
         for directory in directories:
             directory.chmod(0o755)
+
+
+def test_new_round_artifact_paths(tmp_path):
+    run = RunPaths(tmp_path)
+    assert run.batches == tmp_path / "02-batches.json"
+    assert run.scenario_parts_dir == tmp_path / "02-scenarios"
+    assert run.scenario_round_dir(1) == tmp_path / "02-scenarios" / "round-1"
+    assert run.scenario_part(2, "b01") == tmp_path / "02-scenarios" / "round-2" / "b01.json"
+    assert run.score_parts_dir == tmp_path / "03-score"
+    assert run.score_part(3) == tmp_path / "03-score" / "round-3.json"
+
+
+def test_score_part_rounds_reads_what_is_on_disk(tmp_path):
+    run = RunPaths(tmp_path)
+    run.score_parts_dir.mkdir()
+    for name in ("round-1.json", "round-10.json", "round-2.json", "notes.json"):
+        (run.score_parts_dir / name).write_text("{}", encoding="utf-8")
+    # Numeric, so round-10 does not sort between round-1 and round-2, and a file
+    # that is not a round is ignored rather than crashing the seal.
+    assert run.score_part_rounds() == [1, 2, 10]
+
+
+def test_round_numbers_must_be_positive(tmp_path):
+    run = RunPaths(tmp_path)
+    # Mirrors coverage_round's guard: a round of 0 or -1 is a caller bug, and a
+    # path built from one would silently address a directory nobody writes.
+    for bad in (0, -1):
+        with pytest.raises(ValueError):
+            run.scenario_round_dir(bad)
+        with pytest.raises(ValueError):
+            run.score_part(bad)
+
+
+def test_scenario_part_rejects_an_unsafe_batch_id(tmp_path):
+    run = RunPaths(tmp_path)
+    # Batch ids are code-minted, but this joins the same way disposition_part
+    # does and the guard is what stops an artifact-sourced id escaping the run.
+    with pytest.raises(UnsafeSegment):
+        run.scenario_part(1, "../../etc/passwd")
+
+
+def test_part_listings_are_empty_when_nothing_exists(tmp_path):
+    run = RunPaths(tmp_path)
+    assert run.scenario_part_rounds() == []
+    assert run.scenario_part_batch_ids(1) == []
+
+
+def test_part_listings_read_what_is_on_disk(tmp_path):
+    run = RunPaths(tmp_path)
+    for round_n, batch in ((1, "b01"), (1, "b02"), (2, "b01")):
+        part = run.scenario_part(round_n, batch)
+        part.parent.mkdir(parents=True, exist_ok=True)
+        part.write_text("{}", encoding="utf-8")
+    assert run.scenario_part_rounds() == [1, 2]
+    assert run.scenario_part_batch_ids(1) == ["b01", "b02"]
+    assert run.scenario_part_batch_ids(2) == ["b01"]
+
+
+def test_unsafe_scenario_part_names_are_listed_not_raised(tmp_path):
+    run = RunPaths(tmp_path)
+    # Same split unsafe_contradiction_part_names exists for: the id-listing
+    # accessor must not raise, because returning an unsafe id made the later
+    # scenario_part() call raise at a call site that cannot handle it.
+    d = run.scenario_round_dir(1)
+    d.mkdir(parents=True)
+    (d / "b01.json").write_text("{}", encoding="utf-8")
+    (d / "..bad.json").write_text("{}", encoding="utf-8")
+    assert run.scenario_part_batch_ids(1) == ["b01"]
+    assert run.unsafe_scenario_part_names(1) == ["..bad"]

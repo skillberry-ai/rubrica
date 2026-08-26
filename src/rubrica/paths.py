@@ -250,6 +250,78 @@ class RunPaths:
         return self.root / "02-scenarios.json"
 
     @property
+    def batches(self) -> Path:
+        return self.root / "02-batches.json"
+
+    @property
+    def scenario_parts_dir(self) -> Path:
+        return self.root / "02-scenarios"
+
+    def scenario_round_dir(self, round_n: int) -> Path:
+        if round_n < 1:
+            raise ValueError(f"round must be >= 1, got {round_n}")
+        return self.scenario_parts_dir / f"round-{round_n}"
+
+    def scenario_part(self, round_n: int, batch_id: str) -> Path:
+        return self.scenario_round_dir(round_n) / f"{safe_segment(batch_id)}.json"
+
+    def scenario_part_rounds(self) -> list[int]:
+        """Every round number that has a part directory, ascending.
+
+        Sorted numerically rather than lexically: round-10 must not sort between
+        round-1 and round-2, which is exactly what sorted() on the stem does.
+        """
+        rounds: list[int] = []
+        for entry in list_dir(self.scenario_parts_dir):
+            if not entry.is_dir() or not entry.name.startswith("round-"):
+                continue
+            suffix = entry.name[len("round-") :]
+            if suffix.isdigit():
+                rounds.append(int(suffix))
+        return sorted(rounds)
+
+    def _scenario_part_stems(self, round_n: int) -> list[str]:
+        return [p.stem for p in list_json(self.scenario_round_dir(round_n))]
+
+    def scenario_part_batch_ids(self, round_n: int) -> list[str]:
+        """The safe batch ids with a part in this round, sorted."""
+        return sorted(s for s in self._scenario_part_stems(round_n) if is_safe_segment(s))
+
+    def unsafe_scenario_part_names(self, round_n: int) -> list[str]:
+        """Part stems this package refuses to join into a path.
+
+        Split from scenario_part_batch_ids for the reason
+        unsafe_contradiction_part_names is split from subject_part_ids: an
+        id-listing accessor that raised made the failure surface at a call site
+        with no way to report it, and these belong in a finding instead.
+        """
+        return sorted(s for s in self._scenario_part_stems(round_n) if not is_safe_segment(s))
+
+    @property
+    def score_parts_dir(self) -> Path:
+        return self.root / "03-score"
+
+    def score_part(self, round_n: int) -> Path:
+        if round_n < 1:
+            raise ValueError(f"round must be >= 1, got {round_n}")
+        return self.score_parts_dir / f"round-{round_n}.json"
+
+    def score_part_rounds(self) -> list[int]:
+        """Every round number that has a score part, ascending.
+
+        Sorted numerically for the reason scenario_part_rounds is, and a file
+        whose stem is not round-<digits> is ignored rather than raising: this is
+        the accessor the seal iterates, and a stray file in the directory must
+        not be able to stop a round from being assembled.
+        """
+        rounds: list[int] = []
+        for path in list_json(self.score_parts_dir):
+            stem = path.stem
+            if stem.startswith("round-") and stem[len("round-") :].isdigit():
+                rounds.append(int(stem[len("round-") :]))
+        return sorted(rounds)
+
+    @property
     def coverage_dir(self) -> Path:
         return self.root / "03-coverage"
 
