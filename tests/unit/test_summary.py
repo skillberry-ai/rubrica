@@ -3250,12 +3250,22 @@ def test_flags_fire_stage_record_incomplete_and_exempt_the_code_stages(tmp_path)
 
 
 def test_flags_do_not_fire_stage_record_incomplete_when_every_stage_is_recorded(tmp_path):
-    """The negative half, and the only test that can catch an over-broad exemption.
+    """The negative half: a complete record silences the flag.
 
-    Every produced stage that is not a code stage is given a record, so the flag
-    must go silent. A `_CODE_STAGES` that had grown to swallow `extract` would
-    still pass the positive test above on the strength of `propose` alone; this one
-    and the derivation test are what close that.
+    Every produced stage that is not a code stage is given a record, so nothing is
+    owed and the flag must not fire. What that locks is the `- recorded` term:
+    dropping it leaves the flag firing on a fully recorded run, which is the one
+    mutation only this test kills.
+
+    **It cannot catch an over-broad `_CODE_STAGES`, and an earlier version of this
+    docstring claimed it could.** Measured both halves of that claim wrong: the
+    fixture here is built from `produced - summary._CODE_STAGES`, so it grows with
+    the exemption and the flag stays silent however broad the set gets; and the
+    positive test above does catch it, via `{"extract", "propose",
+    "reconcile-goals"} <= named`, as does
+    test_code_stages_is_exactly_the_stages_that_run_as_code. Recorded rather than
+    quietly deleted because this repo's comments cite measurements, and a miscited
+    one is worse than none.
     """
     from rubrica.artifacts import read_json, write_json
 
@@ -3372,11 +3382,49 @@ def test_every_flag_states_its_threshold(tmp_path, monkeypatch):
 
 
 def test_flags_are_unique_and_ordered_stably(tmp_path, monkeypatch):
-    """One row per rule, in a fixed order, so two renderings of a run diff cleanly."""
+    """One row per rule, in a fixed order, so two renderings of a run diff cleanly.
+
+    The order is pinned against a **literal** sequence, not against a second call
+    to `flags` on the same run. Measured: comparing the call to itself --
+    `ids == [f.id_ for f in summary.flags(run)]`, which is what this test asserted
+    first -- is satisfied by every deterministic implementation, and `return
+    found[::-1]` survived all 194 tests in this module. So did `return
+    sorted(found, key=lambda f: f.id_)`. The uniqueness half was already real
+    (`found + found[:1]` was killed); the order half was a predicate nobody had
+    watched fail.
+
+    The literal is the declaration order in `flags`, and that is deliberately the
+    thing under test rather than an alphabetical or a severity order: what a reader
+    diffing two renderings of the same run depends on is that the table does not
+    reshuffle, and the only way to state that independently of the implementation
+    is to write the sequence down.
+    """
     run = _run_with_every_flag(tmp_path, monkeypatch)
     ids = [f.id_ for f in summary.flags(run)]
     assert len(ids) == len(set(ids))
-    assert ids == [f.id_ for f in summary.flags(run)]
+    assert ids == [
+        "low-utilisation",
+        "uncited-artifacts",
+        "unresolved-contradictions",
+        "coverage-halted",
+        "difficulty-overstated",
+        "orphaned-temp",
+        "stage-record-incomplete",
+    ]
+
+
+def test_flags_keep_their_relative_order_on_a_partial_run(tmp_path):
+    """The same fixed order over a subset, because partial runs are the primary case.
+
+    A propose-level run with a stray temp file fires two of the seven flags, and
+    they must come out in the order they hold in the full table. Asserted
+    separately from the all-seven test above: a table whose order is fixed only
+    when every rule fires is not a fixed order, and 10 of the 11 runs measured at
+    design time would have rendered a subset.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    (run.root / "02-scenarios.json.tmp.1.x").write_text("{}", encoding="utf-8")
+    assert [f.id_ for f in summary.flags(run)] == ["orphaned-temp", "stage-record-incomplete"]
 
 
 def test_flags_on_an_empty_run_do_not_raise(tmp_path):
