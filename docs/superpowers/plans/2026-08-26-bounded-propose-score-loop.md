@@ -1780,7 +1780,14 @@ def _score_part(run, round_n, *, holes, verdict="continue", rulings=None):
 
 
 def test_seal_score_composes_a_schema_valid_coverage_document(tmp_path):
-    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=1))
+    world = _world(caps=1, ocs=1, goals=1)
+    # TWO expected depths, and without this the test cannot pass at all. With the
+    # default [1], the depth-1 scenario below COVERS goal-0 -- so the asserted
+    # goal_matrix.covered == 0 would be wrong, and seal_score would refuse the
+    # hole for naming a covered row. The hole is only legitimate because one
+    # depth of two is a partial row.
+    world["goals"][0]["expected_hop_depths"] = [1, 2]
+    run = _run_with_world(tmp_path, world)
     _part(run, 1, "b01", [_scenario("sc-b01-001")])
     _score_part(run, 1, holes=[
         {"ref": "goal:goal-0", "reason": "not_yet_attempted", "justification": "nobody yet"},
@@ -1789,6 +1796,10 @@ def test_seal_score_composes_a_schema_valid_coverage_document(tmp_path):
     path, findings = rounds.seal_score(run, round_n=1)
     assert findings == []
     assert path == run.coverage_round(1)
+    # Actually validate. A test whose name says "schema valid" and never reaches
+    # the validator is the shape of an assertion nobody has watched fail -- the
+    # same defect Task 3 already fixed, recurring here.
+    assert validate_artifact(path, "coverage") == []
     doc = read_json(path)
     assert doc["round"] == 1
     assert doc["verdict"] == "continue"
@@ -1861,14 +1872,19 @@ Expected: FAIL, `AttributeError: module 'rubrica.rounds' has no attribute 'capab
 Append to `src/rubrica/rounds.py`:
 
 ```python
-def _live_statuses() -> tuple[str, ...]:
+def _live_statuses() -> frozenset[str]:
     """Statuses that still count toward coverage: a test may yet ship for them.
 
-    Defined here rather than in Task 3 because this is where its first caller
-    arrives, and a helper with no caller is dead code a reviewer is right to
-    reject. Both matrices below and nothing else use it.
+    DELEGATES to refs.OPEN_STATUSES rather than re-spelling the set. That is the
+    one home for it -- refs.check_coverage computes its own live ids from it, and
+    dedupe.py and stability.py already import it -- so a second literal here is
+    exactly how the two would drift, with the matrices crediting a status the
+    checker does not count or the reverse.
+
+    Defined in this task rather than Task 3 because this is where its first caller
+    arrives; a helper with no caller is dead code a reviewer is right to reject.
     """
-    return ("proposed", "active")
+    return OPEN_STATUSES
 
 
 def capability_matrix(world: dict, scenarios: list[dict]) -> dict:
@@ -1974,6 +1990,20 @@ def progress(run: RunPaths, round_n: int, cap_matrix: dict) -> dict:
     then halt on progress it actually made.
     """
     now = _covered_cell_keys(cap_matrix)
+    if round_n > 1 and not run.coverage_round(round_n - 1).exists():
+        # REFUSED, not treated as round 1 (Ruling R20). A silent fall-through
+        # would reset rounds_without_progress to 0 and cost the loop its
+        # halt-on-no-progress signal -- which is exactly the failure rb-score's
+        # Method step 8 names in its own words, a loop that has stopped making
+        # progress running on to the round cap. It is reachable: seal_score
+        # writes nothing when it refuses. And it can only be reached by an
+        # orchestrator that skipped a round's seal entirely, which is an
+        # inconsistent run rather than a legitimate state. UsageError, not a
+        # Finding, because this document is code-written.
+        raise UsageError(
+            f"round {round_n}'s progress needs round {round_n - 1}'s coverage "
+            f"report, which is absent: {run.coverage_round(round_n - 1)}"
+        )
     previous = run.coverage_round(round_n - 1) if round_n > 1 else None
     if previous is None or not previous.exists():
         new_cells = len(now)
@@ -2055,7 +2085,15 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
     document = {
         "schema_version": "0.1",
         "round": round_n,
-        "denominator_version": world.get("denominator", {}).get("version", 1),
+        # Echoed, never defaulted -- the same defect Task 4 fixed in
+        # seal_scenarios, recurring here because this block was written
+        # separately. refs.check_coverage compares this to the world model's own
+        # denominator version for EQUALITY, so a default of 1 against a world
+        # model at version 2 produces a check-refs finding against a document
+        # code wrote, which no re-dispatch can repair.
+        "denominator_version": _object_or_refuse(
+            run.world_model, world["denominator"], ("version",), where="denominator"
+        )["version"],
         "capability_matrix": cap,
         "goal_matrix": goals,
         "holes": part["holes"],
