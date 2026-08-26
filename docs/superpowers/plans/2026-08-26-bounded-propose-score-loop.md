@@ -100,13 +100,14 @@ def test_scenario_part_rejects_an_unsafe_batch_id(tmp_path):
         run.scenario_part(1, "../../etc/passwd")
 
 
-def test_scenario_part_rounds_maps_an_unreadable_directory_to_usage_error(tmp_path):
-    # Both directions, because the exit-code contract turns on this one: an
-    # unreadable run must exit 2, and a bare OSError becomes an exit-1
-    # [internal] finding instead -- a misconfigured harness dressed as a
-    # repairable stage defect. The mode is restored in a finally so a failing
-    # assertion cannot leave an unreadable directory poisoning the rest of the
-    # suite.
+@pytest.mark.parametrize("mode", [0o000, 0o444])
+def test_the_round_part_listings_raise_a_usage_error_on_an_unreadable_directory(tmp_path, mode):
+    # Not an exit-code test: cli.py already maps a bare OSError to exit 2. What
+    # this pins is which path the message names -- the directory the accessor
+    # reads, not an arbitrary child of it -- and that the type matches
+    # _instance_dir_names so the two are indistinguishable to a caller. The mode
+    # is restored in a finally so a failing assertion cannot leave an unreadable
+    # directory poisoning the rest of the suite.
     run = RunPaths(tmp_path)
     run.scenario_parts_dir.mkdir()
     run.scenario_parts_dir.chmod(0o444)
@@ -159,7 +160,23 @@ Expected: FAIL, `AttributeError: 'RunPaths' object has no attribute 'batches'`.
 
 - [ ] **Step 3: Implement the accessors**
 
-In `src/rubrica/paths.py`, immediately after the existing `scenarios` property, add:
+In `src/rubrica/paths.py`, add this module-level constant beside the other module-level helpers — one definition, because two copies of a round-name rule drift (Ruling R7):
+
+```python
+# round-<n>, anchored, n >= 1 with no leading zero. Three deliberate choices:
+#   not str.isdigit() -- that is True for superscripts int() rejects, and the
+#     resulting bare ValueError reaches cli.py's catch-all as an exit-1
+#     [internal] finding;
+#   no leading zero -- round-01 beside round-1 would collapse to a duplicate
+#     round number, making the seal walk one round twice;
+#   no round-0 -- scenario_round_dir and score_part both refuse round_n < 1, so a
+#     listing that admitted round-0 would return a round no accessor can address.
+_ROUND_DIR = re.compile(r"round-[1-9][0-9]*")
+```
+
+`re` needs importing in `paths.py` if it is not already there. Use `fullmatch`, never `match`: `match` would accept `round-1junk`.
+
+Then, immediately after the existing `scenarios` property, add:
 
 ```python
     @property
@@ -184,23 +201,26 @@ In `src/rubrica/paths.py`, immediately after the existing `scenarios` property, 
         Sorted numerically rather than lexically: round-10 must not sort between
         round-1 and round-2, which is exactly what sorted() on the stem does.
         """
-        # The OSError wrapping is not decoration, and it is why this cannot be a
-        # bare list_dir + is_dir(). MEASURED on a mode-0o444 02-scenarios/: the
-        # unwrapped form raises PermissionError, which reaches cli.py's catch-all
-        # and becomes an [internal] finding at exit 1 -- telling the orchestrator
-        # "repairable stage defect, retry once" about a chmod problem no
-        # re-dispatch can fix. UsageError is the exit-2 mapping, and
-        # _instance_dir_names already does exactly this on the identical
-        # filesystem shape. Match its message, so the two are indistinguishable
-        # to a caller. (Ruling R6.)
+        # The OSError wrapping is message fidelity, not an exit-code repair, and
+        # the distinction is worth stating because an earlier draft of this
+        # comment got it wrong. cli.py's `except (OSError, UsageError,
+        # ArtifactError, UnknownStage)` already returns exit 2, so the unwrapped
+        # form did NOT become an exit-1 [internal] finding -- that failure mode
+        # existed and was closed by adding OSError there, which is what cli.py's
+        # own comment records. What the wrapping buys: a bare OSError names an
+        # arbitrary *child* (.../02-scenarios/round-1), where every sibling
+        # listing names the directory the accessor actually reads. That is the
+        # "name the right artifact" rule applied to a 2, and it makes this
+        # accessor indistinguishable from _instance_dir_names to a caller.
+        # (Ruling R6, rationale corrected.)
         rounds: list[int] = []
         try:
             for entry in list_dir(self.scenario_parts_dir):
                 if not entry.is_dir() or not entry.name.startswith("round-"):
                     continue
                 suffix = entry.name[len("round-") :]
-                if suffix.isdigit():
-                    rounds.append(int(suffix))
+                if _ROUND_DIR.fullmatch(entry.name):
+                    rounds.append(int(entry.name[len("round-") :]))
         except OSError as exc:
             raise UsageError(
                 f"cannot read run directory: {self.scenario_parts_dir} ({exc})"
@@ -240,12 +260,22 @@ In `src/rubrica/paths.py`, immediately after the existing `scenarios` property, 
         whose stem is not round-<digits> is ignored rather than raising: this is
         the accessor the seal iterates, and a stray file in the directory must
         not be able to stop a round from being assembled.
+
+        The match is a regex, not str.isdigit(). MEASURED: isdigit() is True for
+        characters int() then rejects -- "round-\u00b2" raised a bare ValueError,
+        which is neither OSError nor UsageError and so DOES reach cli.py's
+        catch-all as an exit-1 [internal] finding, the genuine version of the
+        misclassification the comment above once described wrongly. The regex
+        also rejects a leading zero rather than normalising it: round-01 beside
+        round-1 would otherwise yield [1, 1], and a duplicated round makes the
+        seal walk one round twice with every scenario id colliding. A directory
+        nobody writes is not a round, so it is refused rather than invented.
+        (Ruling R7.)
         """
         rounds: list[int] = []
         for path in list_json(self.score_parts_dir):
-            stem = path.stem
-            if stem.startswith("round-") and stem[len("round-") :].isdigit():
-                rounds.append(int(stem[len("round-") :]))
+            if _ROUND_DIR.fullmatch(path.stem):
+                rounds.append(int(path.stem[len("round-") :]))
         return sorted(rounds)
 ```
 
