@@ -16,6 +16,7 @@ import pytest
 from rubrica import brief, cli, survey
 from rubrica.artifacts import read_json, write_json
 from rubrica.paths import RunPaths, list_json
+from rubrica.utilisation import claim_utilisation
 from tests.toy import build_toy_catalogue_and_triage, build_toy_run
 
 CORPUS = Path(__file__).parent.parent / "fixtures" / "corpus-toy"
@@ -590,6 +591,76 @@ def test_gate_one_does_not_raise_on_hand_edited_reconcile_partials(tmp_path):
     # fan-out covered at exactly the moment a human is judging its coverage.
     assert f"{len(parts)} subjects swept, 1 contradictions recorded" in text
     assert "(no resolution): 1" in text
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        # Readable JSON every one of them, and all four are what a hand-edit at
+        # gate 1 produces from a list of claim ids.
+        {"a": 1},
+        ["clm-api-001"],
+        None,
+        7,
+    ],
+)
+def test_gate_one_and_utilisation_survive_a_non_string_claim_member(tmp_path, member):
+    """Measured before the fix, on a readable run whose world model carried
+    `"claims": [{"a": 1}]` on a gap: `utilisation._cited_claim_ids` raised
+    `TypeError: unhashable type: 'dict'` out of `set.update`, and cli.py turned
+    that into exit 1 with one fabricated `[internal]` finding -- for
+    `claim-utilisation` and for `gate-brief --gate 1`, which reads it. Both are
+    reports, and CLAUDE.md's ruling for a report is that it always exits 0 on a
+    readable run, so this is a contract violation rather than a strictness
+    question.
+
+    The mangle walks the document the way `refs._claim_refs_in` walks it rather
+    than naming the citation sites: issue #6 added three of them, and a site list
+    here would leave the next one unguarded and this test still green.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    world = read_json(run.world_model)
+    # A gap, because the golden world has none and `gaps[].claims` is the newest
+    # of the seven sites.
+    world["gaps"] = [
+        {
+            "id": "gap-hand-edited",
+            "subject": "billing",
+            "unknown": "whether a refund can exceed the original charge",
+            "why_it_matters": "the boundary case a suite would exercise",
+            "blocks": ["propose"],
+            "claims": ["clm-notes-001"],
+        }
+    ]
+    _mangle_every_claims_array(world, member)
+    for contradiction in world["contradictions"]:
+        # Both sides: check_world_model resolves each as a claim reference and
+        # `_cited_claim_ids` counts each, so leaving one intact would leave the
+        # input it names cited and the last assertion below unearned.
+        contradiction["claim_a"] = member
+        contradiction["claim_b"] = member
+    write_json(run.world_model, world)
+
+    assert claim_utilisation(run)["artifacts"], "the report still reports every input"
+    assert cli.main(["claim-utilisation", "--run", str(run.root)]) == 0
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+    # Nothing resolves any more, and the report says so rather than guessing: a
+    # non-string member is not a claim id, and counting it as one would be the
+    # same fabrication the exit code would have been.
+    assert all(entry["cited"] == 0 for entry in claim_utilisation(run)["artifacts"])
+
+
+def _mangle_every_claims_array(node, member) -> None:
+    """Replace every `claims` array anywhere in `node` with `[member]`."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "claims":
+                node[key] = [member]
+            else:
+                _mangle_every_claims_array(value, member)
+    elif isinstance(node, list):
+        for item in node:
+            _mangle_every_claims_array(item, member)
 
 
 # --------------------------------------------------------------------------

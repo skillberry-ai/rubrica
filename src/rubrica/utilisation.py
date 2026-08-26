@@ -60,7 +60,7 @@ def _cited_claim_ids(run: RunPaths) -> set[str] | None:
     cited: set[str] = set()
     for group in ("capabilities", "entities", "actors", "goals"):
         for item in world.get(group, []):
-            cited.update(item.get("claims", []) or [])
+            cited.update(_claim_ids(item.get("claims")))
     # The three nested sites. `$defs/invariant`, `$defs/outcome_class` and
     # `$defs/gap` carried no `claims` array at all until issue #6, so an
     # invariant's provenance had to go on its entity or into `description`
@@ -71,12 +71,12 @@ def _cited_claim_ids(run: RunPaths) -> set[str] | None:
     # what makes those citations structural rather than prose.
     for capability in world.get("capabilities", []):
         for outcome_class in capability.get("outcome_classes", []) or []:
-            cited.update(outcome_class.get("claims", []) or [])
+            cited.update(_claim_ids(outcome_class.get("claims")))
     for entity in world.get("entities", []):
         for invariant in entity.get("invariants", []) or []:
-            cited.update(invariant.get("claims", []) or [])
+            cited.update(_claim_ids(invariant.get("claims")))
     for gap in world.get("gaps", []) or []:
-        cited.update(gap.get("claims", []) or [])
+        cited.update(_claim_ids(gap.get("claims")))
     # `refs.check_world_model` (refs.py:464-467) already resolves contradictions[].claim_a
     # and claim_b as claim references -- it reports one as a finding if it does not
     # resolve. A definition of "cited" that excludes them would disagree with that
@@ -85,9 +85,44 @@ def _cited_claim_ids(run: RunPaths) -> set[str] | None:
     for contradiction in world.get("contradictions", []):
         for side in ("claim_a", "claim_b"):
             claim_id = contradiction.get(side)
-            if claim_id is not None:
+            # isinstance rather than `is not None`, for _claim_ids' reason below:
+            # `set.add` raises on an unhashable side exactly as `set.update` did
+            # on an unhashable member, and both sides are one hand-edit apart
+            # from the arrays above.
+            if isinstance(claim_id, str):
                 cited.add(claim_id)
     return cited
+
+
+def _claim_ids(value) -> list[str]:
+    """The string members of a `claims` array, or `[]` for anything else.
+
+    Measured on a readable toy run carrying `"claims": [{"a": 1}]` on a gap --
+    JSON that parses, and precisely what a hand-edit at gate 1 produces from a
+    list of ids: `set.update` raised `TypeError: unhashable type: 'dict'`, and
+    cli.py turned that into exit 1 with one fabricated `[internal]` finding for
+    `claim-utilisation` and for `gate-brief --gate 1`, which reads this report.
+    Both are reports, and a report always exits 0 on a readable run -- so that
+    was a violation of the exit-code contract, not a strictness question. Issue
+    #6 widened the exposure from four citation sites to seven and `gaps[].claims`
+    is the newest of them, but the shape was always reachable.
+
+    A non-list `claims` is dropped whole for `refs._as_list`'s measured reason,
+    and a bare string is the sharper case of it: `set.update("clm-api-001")` does
+    not raise at all, it iterates the string and adds each character, so a guard
+    on truthiness alone would have counted one hand-typed id as nine citations of
+    nothing.
+
+    Dropping the malformed member is the only thing this can do, on
+    `brief._dicts`' ruling: raising breaks the promise above, and inventing a
+    finding is layer 1's job -- `claim_refs` is an array of ids in
+    world-model-0.1.json, so `rubrica validate --stage reconcile-seal` names it
+    precisely. The dropped member shows up as a claim that resolves against
+    nothing, which is what it is.
+    """
+    if not isinstance(value, list):
+        return []
+    return [member for member in value if isinstance(member, str)]
 
 
 def _quietly(path):
