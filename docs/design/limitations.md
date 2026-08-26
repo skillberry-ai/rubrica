@@ -663,17 +663,35 @@ the `catalogue_facts` block as a whole took the count bound rather than the byte
 one: `max_candidates` limits how many `candidate_bytes` entries there can be,
 and no check anywhere asserts that `00-slices.json` fits one `Read`.
 
-What actually backstops it is `max_catalogue_bytes`, one level out.
-**Extrapolated from the spec's measured ratio and not measured** — the plan was
-10.95% of the
-catalogue on tau2, and treating that as linear is exactly the assumption a
-different corpus shape would break — its 1MiB default puts the plan at roughly
-115KB, about 2.28x inside the ceiling, and a catalogue of about 2.4 million bytes
-(2.28 MiB) would put the plan at the refusal itself. So raising
-`--max-catalogue-bytes` past that re-opens #3 **on the plan**, with the objective
-pass chunk-reading the artifact that exists to spare it exactly that, and no gate
-between the change and the symptom. The honest bound is a byte assertion on the
-plan; what exists is a ratio and a default.
+**What bounds the plan is the candidate count, and the dial to leave alone is
+therefore `--max-candidates`.** The plan costs about 117 bytes per candidate —
+51,792 over 443 on the spec's tau2 run, 118.6 on the re-run — and that rate does
+not care what the corpus weighs, so the arithmetic needs no linearity assumption
+about corpus shape. At the shipped `DEFAULT_MAX_CANDIDATES = 500`, above which
+`survey` refuses outright, the plan cannot exceed roughly 58,500 bytes: **4.5x
+inside the ceiling whatever the catalogue weighs.** Reaching the ceiling takes
+about 2,200 candidates at either density measured here, and the true figure moves
+inversely with per-candidate cost — dominated by how long candidate ids and paths
+are, so a corpus of short ids would push it higher and one of deep nested paths
+lower. Raise `--max-candidates` into the low thousands and #3 re-opens **on the
+plan**, with the objective pass chunk-reading the artifact that exists to spare
+it exactly that, and no gate between the change and the symptom.
+
+`max_catalogue_bytes` is a second, indirect path to the same place, and only
+indirect: it bounds the catalogue, which bounds the plan only through a
+corpus-shape-dependent ratio between bytes and candidates. **That half is
+extrapolated from the spec's measured ratio rather than measured** — the plan was
+10.95% of the catalogue on tau2, and treating that as linear is what a different
+corpus shape would break — but taken at face value its 1MiB default puts the plan
+near 112KB, about 2.28x inside the ceiling. That figure is unreachable at shipped
+defaults and the two numbers do not contradict each other: a 1MiB catalogue at
+tau2 density implies about 982 candidates, which the count cap of 500 already
+refuses, so the count guard binds first and the byte guard only ever matters once
+someone has raised it. It is the weaker guard of the two and
+should not be read as the operative one: a reader who raises `--max-candidates`
+to 5,000 while carefully leaving `--max-catalogue-bytes` alone has removed the
+bound that was actually holding. The honest fix is a byte assertion on the plan
+itself; what exists is a count cap and a rate.
 
 Recorded rather than parked-with-a-fix because the fix for the main claim is a
 dispatch, not a change: run the staged family against a parsec-class corpus and
@@ -1816,17 +1834,17 @@ and both are printed here because a ceiling figure whose perturbation is not
 quoted cannot be audited from the page — the same objection that got the
 misaimed sentence below printed. Appending a meaning-preserving clause to that
 fourth mention's own sentence, so that it ends "and a pass that spends it is
-never bounded again",
-takes the ceiling to **74**. Inserting one honest sentence earlier in the
-section — "A slice's label is a directory name, and a directory name is never a
-reading of what the files under it contain." ahead of the `excluded` paragraph —
-takes it to **106**. Both land *below* the shipped radius of 300, which is the
-part that matters: past its ceiling the predicate goes green against a skill
-whose Inputs section grants the opposite permission. Neither edit is one a
-reviewer would question, and the figure each produces depends entirely on where
-its new prohibition word lands. Nothing in the suite reports any of it, because
-the shipped prose still passes. A radius that is sound today is sound at the
-pleasure of prose nobody is watching for that effect.
+never bounded again", takes the ceiling to **74**. Inserting one honest sentence
+earlier in the section — "A slice's label is a directory name, and a directory
+name is never a reading of what the files under it contain." ahead of the
+`excluded` paragraph — takes it to **106**. Both land *below* the shipped radius
+of 300, which is the part that matters: past its ceiling the predicate goes
+green against a skill whose Inputs section grants the opposite permission.
+Neither edit is one a reviewer would question, and the figure each produces
+depends entirely on where its new prohibition word lands. Nothing in the suite
+reports any of it, because the shipped prose still passes. A radius that is
+sound today is sound at the pleasure of prose nobody is watching for that
+effect.
 
 **Neither probe direction can detect that.** Deletion and inversion are both run
 against the real prose at authoring time; soundness after some future honest
@@ -1840,7 +1858,9 @@ change fixed it in that one predicate.** `never` is a substring of `whenever`,
 and an inversion reading "yours to open whenever you like" passed at radius 300 —
 the inversion
 probe defeated by the vocabulary it was probing with. That predicate now matches
-on `\b` boundaries; the eleven plain predicates still match unanchored. The
+on `\b` boundaries; the eleven plain predicates still match unanchored — and if
+you run the grep this entry's heading was counted with, it still reports 13, two
+of which are the docstring mentions rather than assertions. The
 vocabulary is also narrower in practice than it reads: of its three
 alternatives — `never`, `not yours`, `do not` — only `never` occurs in the
 section at all, three times, so every distance and both band edges above belong
