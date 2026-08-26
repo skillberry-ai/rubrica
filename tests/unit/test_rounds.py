@@ -847,6 +847,92 @@ def test_the_seal_writes_nothing_when_no_part_exists(tmp_path):
     assert findings == []
 
 
+def test_a_round_directory_holding_no_part_is_still_the_not_run_branch(tmp_path):
+    # The discriminator is whether a PART exists, not whether a round directory
+    # does: an empty 02-scenarios/round-1/ is a dispatch that produced nothing,
+    # which is the never-ran case rather than the every-member-declined one.
+    run = _run_with_world(tmp_path, _world())
+    run.scenario_round_dir(1).mkdir(parents=True)
+    path, findings = rounds.seal_scenarios(run)
+    assert path is None
+    assert findings == []
+
+
+def test_every_member_declining_its_batch_seals_an_empty_document(tmp_path):
+    # The second, DIFFERENT terminal signal, and the reason the branch above is
+    # not `if not scenarios`: every member read its batch and could close none of
+    # it, which is a real outcome the refusal conditions exist to produce.
+    # Withholding the document would make an honest total refusal
+    # indistinguishable from a stage that never ran, and rb-score needs a
+    # document to read -- score computing a verdict over zero scenarios is how
+    # the loop learns it made no progress.
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [])
+    _part(run, 1, "b02", [])
+    path, findings = rounds.seal_scenarios(run)
+    assert findings == []
+    assert path == run.scenarios
+    doc = read_json(path)
+    assert doc["scenarios"] == []
+    assert doc["denominator_version"] == 1
+    # Schema-valid, not merely written: scenarios-0.1.json puts no minItems on
+    # `scenarios`, and this document is code output, so a layer-1 finding against
+    # it is unrepairable by any re-dispatch.
+    assert validate_artifact(path, "scenarios") == []
+
+
+def test_an_empty_seal_is_not_the_same_signal_as_an_empty_batch_plan(tmp_path):
+    # Three terminal signals, not two, and a reader must not collapse them:
+    # write_batches returning None says the worklist was empty before any member
+    # was dispatched, while the empty seal says members ran and declined.
+    run = _run_with_world(tmp_path, _world())
+    write_json(
+        run.coverage_latest,
+        {
+            "schema_version": "0.1",
+            "holes": [{"ref": "goal:goal-0", "reason": "unreachable", "justification": "x"}],
+        },
+    )
+    assert rounds.write_batches(run, round_n=1) is None
+    assert not run.batches(1).exists()
+    # No part was dispatched, so the seal is silent rather than empty.
+    assert rounds.seal_scenarios(run) == (None, [])
+
+
+def test_collect_scenarios_hands_back_rows_a_later_fold_cannot_reach(tmp_path, monkeypatch):
+    # The deepcopy per row. It is defensive rather than load-bearing today --
+    # read_json re-parses, so two collections are already unaliased -- so the
+    # only way to WATCH it fail is to make the alias real, which is exactly what
+    # a part-document cache added to this module later would do. Without the
+    # copy, `first` holds the cached document's own rows and the fold below
+    # rewrites them under a caller that had already read the list.
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    cache: dict[str, object] = {}
+    real = rounds.read_json
+
+    def cached(path):
+        return cache.setdefault(str(path), real(path))
+
+    monkeypatch.setattr(rounds, "read_json", cached)
+    first, findings = rounds.collect_scenarios(run)
+    assert findings == []
+    assert first[0]["status"] == "proposed"
+    _score_part(run, 1, [{"scenario_id": "sc-b01-001", "status": "active"}])
+    assert rounds.seal_scenarios(run)[1] == []
+    assert read_json(run.scenarios)["scenarios"][0]["status"] == "active"
+    assert first[0]["status"] == "proposed"
+    # DEEP, not dict(): measured, a shallow copy passes every assertion above,
+    # because _apply_rulings happens to touch only top-level keys today. It leaves
+    # provenance and capability_refs shared with the cached document, so the first
+    # nested write anyone adds reaches back into a caller's list in the same
+    # silence. Identity is the only direction that can see the difference.
+    second, _ = rounds.collect_scenarios(run)
+    assert first[0] is not second[0]
+    assert first[0]["provenance"] is not second[0]["provenance"]
+    assert first[0]["capability_refs"][0] is not second[0]["capability_refs"][0]
+
+
 def test_the_denominator_version_is_the_world_models_own(tmp_path):
     # Echoed, never defaulted: refs.check_scenarios compares this field to
     # world["denominator"]["version"] for equality, so a default of 1 against a

@@ -32,6 +32,7 @@ matrix. What this bounds is how much one response has to contain.
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
@@ -379,17 +380,28 @@ _STATUS_FIELDS: tuple[tuple[str, str], ...] = (
     ("rejected_reason", "rejected"),
 )
 
-# The reads in this module split by WHO WROTE the artifact, and the split is the
-# exit-code contract rather than a style choice. The world model and the sealed
-# scenario list are code output, so a malformed one is a misconfigured run and
-# `_object_or_refuse`/`_rows_with_string_id` raise the UsageError that maps to
-# exit 2 -- what closable_holes and bytes_per_scenario already do. The propose
-# and score parts are MODEL output, so a malformed one is a repairable stage
-# defect, and "a stage defect must never surface as 2" makes it a Finding on the
-# functions below instead. Both shapes still exist for the same underlying
-# reason: indexing a key bare out of a code step raises KeyError or TypeError,
-# which cli.py's catch-all reports as an exit-1 `[internal]` finding anchored on
-# the run root -- the wrong artifact, every time.
+# WHO WROTE THE ARTIFACT is what decides the exit code for a malformed one, and
+# that is the exit-code contract rather than a style choice. Do NOT tidy the two
+# shapes below back into one -- they answer different questions.
+#
+#   manifest.json (intake), 01-world-model.json (reconcile-seal) and
+#   02-scenarios.json (this module) are CODE output. No re-dispatch of any prompt
+#   can repair them, so reporting a repairable stage defect against one would be a
+#   lie to the orchestrator: it would spend its one retry rewriting an artifact no
+#   model wrote. These go through `_object_or_refuse`/`_rows_with_string_id`, which
+#   raise the UsageError cli.py maps to exit 2 -- what closable_holes,
+#   bytes_per_scenario and _cap_bytes already do.
+#
+#   The propose parts (02-scenarios/round-N/bNN.json) and the score parts
+#   (03-score/round-N.json) are MODEL output. A malformed one is exactly a
+#   repairable stage defect and the orchestrator has to be able to re-dispatch
+#   that one member, so it is a Finding at exit 1 NAMING THE PART -- never a
+#   UsageError, because "a stage defect must never surface as 2".
+#
+# Both shapes exist for the same underlying reason: indexing a key bare out of a
+# code step raises KeyError or TypeError, which cli.py's catch-all reports as an
+# exit-1 `[internal]` finding anchored on the run root -- the wrong artifact,
+# every time, and at the wrong exit code half the time.
 
 
 def collect_scenarios(run: RunPaths) -> tuple[list[dict], list[Finding]]:
@@ -450,7 +462,18 @@ def collect_scenarios(run: RunPaths) -> tuple[list[dict], list[Finding]]:
                     )
                     continue
                 seen[sid] = where
-                scenarios.append(scenario)
+                # Copied, not aliased, and this is NOT redundant with read_json
+                # re-parsing: _apply_rulings folds statuses in PLACE, and
+                # seal_scenarios runs twice per round (after propose so score has
+                # a document, again after score so instantiate sees the statuses).
+                # Any caller that collects once and reads the list either side of
+                # a fold -- which is the shape Task 5's matrices want -- would
+                # otherwise watch its own rows change under it. A deepcopy per row
+                # is nothing against the byte-identity guarantee this seal exists
+                # to hold; measured green in both directions today only because
+                # nothing yet caches a part document, which a cache added here
+                # later would silently undo.
+                scenarios.append(copy.deepcopy(scenario))
     return scenarios, findings
 
 
@@ -541,6 +564,36 @@ def _apply_rulings(run: RunPaths, scenarios: list[dict]) -> list[Finding]:
     return findings
 
 
+def _any_part_exists(run: RunPaths) -> bool:
+    """Whether any propose member wrote a part at all, in any round.
+
+    The discriminator between the loop's two DIFFERENT terminal signals, which a
+    scenario count of zero collapses into one:
+
+      * no part file anywhere -- propose was never dispatched, and seal_scenarios
+        writes nothing;
+      * a part per batch, every one carrying `scenarios: []` -- every member read
+        its batch and could close none of it, which is a real outcome the refusal
+        conditions exist to produce, and seal_scenarios seals an EMPTY document.
+
+    Sealing the second is what keeps an honest total refusal distinguishable from
+    a stage that never ran: rb-score needs a document to read, and score
+    computing its verdict over zero scenarios is how the loop learns it made no
+    progress. scenarios-0.1.json puts no `minItems` on `scenarios`, so the empty
+    document is schema-valid.
+
+    A third signal is `write_batches` returning None -- no closable hole, so
+    there was no round to run. Do not collapse it into either of the two above:
+    that one says the worklist was empty before any member was dispatched, while
+    the empty seal says members ran and declined.
+
+    Batch ids rather than `scenario_part_rounds()` alone, because the question is
+    whether a PART exists: a round directory that exists and holds no part file
+    is still the never-dispatched case.
+    """
+    return any(run.scenario_part_batch_ids(round_n) for round_n in run.scenario_part_rounds())
+
+
 def seal_scenarios(run: RunPaths) -> tuple[Path | None, list[Finding]]:
     """Assemble 02-scenarios.json from every propose part and every score ruling.
 
@@ -558,9 +611,11 @@ def seal_scenarios(run: RunPaths) -> tuple[Path | None, list[Finding]]:
         # Before the ruling pass, not merged with it: _apply_rulings' docstring
         # records the misattributed cascade that ordering produces.
         return None, findings
-    if not scenarios:
+    if not _any_part_exists(run):
         # Propose has not run. Not a refusal: reporting one would make the
-        # orchestrator retry a stage that was never dispatched.
+        # orchestrator retry a stage that was never dispatched. Note that this
+        # is NOT `if not scenarios` -- see _any_part_exists for the second,
+        # different terminal signal that test would have swallowed.
         return None, []
     findings = _apply_rulings(run, scenarios)
     if findings:
