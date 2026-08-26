@@ -664,34 +664,37 @@ one: `max_candidates` limits how many `candidate_bytes` entries there can be,
 and no check anywhere asserts that `00-slices.json` fits one `Read`.
 
 **What bounds the plan is the candidate count, and the dial to leave alone is
-therefore `--max-candidates`.** The plan costs about 117 bytes per candidate —
-51,792 over 443 on the spec's tau2 run, 118.6 on the re-run — and that rate does
-not care what the corpus weighs, so the arithmetic needs no linearity assumption
-about corpus shape. At the shipped `DEFAULT_MAX_CANDIDATES = 500`, above which
-`survey` refuses outright, the plan cannot exceed roughly 58,500 bytes: **4.5x
-inside the ceiling whatever the catalogue weighs.** Reaching the ceiling takes
-about 2,200 candidates at either density measured here, and the true figure moves
-inversely with per-candidate cost — dominated by how long candidate ids and paths
-are, so a corpus of short ids would push it higher and one of deep nested paths
-lower. Raise `--max-candidates` into the low thousands and #3 re-opens **on the
-plan**, with the objective pass chunk-reading the artifact that exists to spare
-it exactly that, and no gate between the change and the symptom.
+therefore `--max-candidates`.** The plan costs 116.9 to 118.6 bytes per
+candidate across the two runs measured — 51,792 over 443 candidates on the
+spec's tau2 run, 52,542 over 443 on the re-run, the count having held while the
+catalogue itself grew — and that rate does not care what the corpus weighs, so
+the arithmetic needs no linearity assumption about corpus shape. At the shipped
+`DEFAULT_MAX_CANDIDATES = 500`, above which `survey` refuses outright, the plan
+cannot exceed 58,500 to 59,300 bytes depending on that rate: **about 4.4x inside
+the ceiling whatever the catalogue weighs.** Reaching the ceiling takes about
+2,200 candidates at either density measured here, and the true figure moves
+inversely with per-candidate cost — dominated by how long candidate ids and
+paths are, so a corpus of short ids would push it higher and one of deep nested
+paths lower. Raise `--max-candidates` into the low thousands and #3 re-opens
+**on the plan**, with the objective pass chunk-reading the artifact that exists
+to spare it exactly that, and no gate between the change and the symptom.
 
 `max_catalogue_bytes` is a second, indirect path to the same place, and only
 indirect: it bounds the catalogue, which bounds the plan only through a
 corpus-shape-dependent ratio between bytes and candidates. **That half is
-extrapolated from the spec's measured ratio rather than measured** — the plan was
-10.95% of the catalogue on tau2, and treating that as linear is what a different
-corpus shape would break — but taken at face value its 1MiB default puts the plan
-near 112KB, about 2.28x inside the ceiling. That figure is unreachable at shipped
-defaults and the two numbers do not contradict each other: a 1MiB catalogue at
-tau2 density implies about 982 candidates, which the count cap of 500 already
-refuses, so the count guard binds first and the byte guard only ever matters once
-someone has raised it. It is the weaker guard of the two and
-should not be read as the operative one: a reader who raises `--max-candidates`
-to 5,000 while carefully leaving `--max-catalogue-bytes` alone has removed the
-bound that was actually holding. The honest fix is a byte assertion on the plan
-itself; what exists is a count cap and a rate.
+extrapolated from the spec's measured ratio rather than measured** — the plan
+was 10.95% of the catalogue on tau2, and treating that as linear is what a
+different corpus shape would break — but taken at face value its 1MiB default
+puts the plan near 112KB, about 2.28x inside the ceiling. That figure is
+unreachable at shipped defaults and the two numbers do not contradict each
+other: a 1MiB catalogue at tau2 density implies about 982 candidates, which the
+count cap of 500 already refuses, so the count guard binds first and the byte
+guard only ever matters once someone has raised `--max-candidates`. It is the
+weaker guard of the two and should not be read as the operative one: a reader
+who raises `--max-candidates` to 5,000 while carefully leaving
+`--max-catalogue-bytes` alone has removed the bound that was actually holding.
+The honest fix is a byte assertion on the plan itself; what exists is a count
+cap and a rate.
 
 Recorded rather than parked-with-a-fix because the fix for the main claim is a
 dispatch, not a change: run the staged family against a parsec-class corpus and
