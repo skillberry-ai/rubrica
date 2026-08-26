@@ -507,8 +507,7 @@ shares with a sealed document: `scenarios-part` resolves
   a round's output cannot be attributed to the model that wrote it
 - **Read by:** the `propose` fan-out (each member is dispatched with one batch
   id and reads its own entry), `check-refs`
-- **Path:** `02-batches.json` (`paths.RunPaths.batches`) — one file, carrying the
-  current round's partition; `round` says which round that is
+- **Path:** `02-batches/round-<N>.json` (`paths.RunPaths.batches`)
 
 One round's closable holes, partitioned into batches whose projected output
 keeps a single `rb-propose` dispatch inside the harness output cap. A batch is a
@@ -516,13 +515,21 @@ keeps a single `rb-propose` dispatch inside the harness output cap. A batch is a
 member, and which holes are closable is `rb-score`'s ruling rather than this
 partition's, so the partition can never quietly drop work.
 
+**One plan per round, not one per run.** The plan is what says which batch ids a
+round's parts are allowed to name, so a singleton file the next round overwrote
+would have the part checker validate round 1's parts against round 2's
+assignment — reporting correct parts as unexplained, and naming the wrong
+artifact while doing it. Every sibling artifact in this loop is per-round for the
+same reason, and `paths.RunPaths.batches_rounds()` is the listing that walks
+them.
+
 Fields worth knowing: `cap_bytes` (the per-member budget every batch was packed
 against, echoed here as `slices` echoes its own so a reader auditing one
 projection need not open the manifest); `bytes_per_scenario` (the estimate the
 projection used — a default until a sealed `02-scenarios.json` exists, the mean
 over that file afterwards, which is what makes the partition self-calibrating,
-and recorded so a reader can tell a changed estimate from a changed hole count
-rather than having to re-derive it);
+and what a reader comparing two rounds' batch sizes needs to tell a changed
+estimate from a changed hole count);
 `batches[].projected_bytes` (`hole_refs` length times `bytes_per_scenario`,
 recomputed by `check-refs` so a batch cannot drift from its own header);
 `batches[].id` (code-minted, short and stable, because it is both a path segment

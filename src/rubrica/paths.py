@@ -59,8 +59,9 @@ STAGES = (
 
 _SAFE_SEGMENT = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
-# The one definition of a round-part name, shared by scenario_part_rounds and
-# score_part_rounds so the two can never disagree about what counts as a round.
+# The one definition of a round-part name, shared by batches_rounds,
+# scenario_part_rounds and score_part_rounds so no two of them can disagree about
+# what counts as a round.
 #
 # A regex rather than str.isdigit(), because isdigit() is *wider* than int() in
 # one direction and equally wide in the other, and both hurt. Measured (codepoints
@@ -280,8 +281,39 @@ class RunPaths:
         return self.root / "02-scenarios.json"
 
     @property
-    def batches(self) -> Path:
-        return self.root / "02-batches.json"
+    def batches_dir(self) -> Path:
+        return self.root / "02-batches"
+
+    def batches(self, round_n: int) -> Path:
+        """This round's batch plan.
+
+        Per-round rather than a singleton `02-batches.json`, and the difference
+        is a checker's correctness rather than tidiness: check_scenario_parts
+        walks every round in scenario_part_rounds() and resolves each round's
+        batch roster from here, so one overwritten file would validate round 1's
+        parts against round 2's assignment -- emitting `no such batch` findings
+        against parts that are correct, and naming the wrong artifact while doing
+        it. This package has twice shipped a checker that named the wrong
+        artifact, which is why the plan is kept beside the parts it explains
+        rather than replaced by the next round's.
+        """
+        if round_n < 1:
+            raise ValueError(f"batches round must be >= 1, got {round_n}")
+        return self.batches_dir / f"round-{round_n}.json"
+
+    def batches_rounds(self) -> list[int]:
+        """Every round number that has a batch plan, ascending.
+
+        The same shape as score_part_rounds, down to ignoring a stem that is not
+        _ROUND_PART: a stray file in the directory must not be able to stop a
+        round from being read.
+        """
+        rounds: list[int] = []
+        for path in list_json(self.batches_dir):
+            match = _ROUND_PART.fullmatch(path.stem)
+            if match:
+                rounds.append(int(match.group(1)))
+        return sorted(rounds)
 
     @property
     def scenario_parts_dir(self) -> Path:

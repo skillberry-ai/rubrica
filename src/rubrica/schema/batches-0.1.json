@@ -17,7 +17,7 @@
     "bytes_per_scenario": {
       "type": "integer",
       "minimum": 1,
-      "description": "The estimate the projection used: rounds.DEFAULT_BYTES_PER_SCENARIO until a sealed 02-scenarios.json exists, and the mean over that file thereafter. Recorded because it is the term that makes the partition self-calibrating, and a reader comparing two rounds' batch sizes needs it to tell a changed estimate from a changed hole count."
+      "description": "The estimate the projection used: rounds.DEFAULT_BYTES_PER_SCENARIO until a sealed 02-scenarios.json exists, and the mean over that file thereafter. Recorded because it is the term that makes the partition self-calibrating, and a reader comparing two rounds' batch sizes needs it to tell a changed estimate from a changed hole count -- a comparison the layout supports because each round's plan is its own 02-batches/round-N.json rather than a singleton the next round overwrites."
     },
     "batches": {
       "type": "array",

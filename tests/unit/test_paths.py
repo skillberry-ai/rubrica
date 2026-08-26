@@ -409,7 +409,8 @@ def test_the_listing_methods_raise_a_usage_error_on_an_unreadable_directory(tmp_
 
 def test_new_round_artifact_paths(tmp_path):
     run = RunPaths(tmp_path)
-    assert run.batches == tmp_path / "02-batches.json"
+    assert run.batches_dir == tmp_path / "02-batches"
+    assert run.batches(1) == tmp_path / "02-batches" / "round-1.json"
     assert run.scenario_parts_dir == tmp_path / "02-scenarios"
     assert run.scenario_round_dir(1) == tmp_path / "02-scenarios" / "round-1"
     assert run.scenario_part(2, "b01") == tmp_path / "02-scenarios" / "round-2" / "b01.json"
@@ -425,6 +426,43 @@ def test_score_part_rounds_reads_what_is_on_disk(tmp_path):
     # Numeric, so round-10 does not sort between round-1 and round-2, and a file
     # that is not a round is ignored rather than crashing the seal.
     assert run.score_part_rounds() == [1, 2, 10]
+
+
+def test_batches_rounds_reads_what_is_on_disk(tmp_path):
+    """The batch plan is per-round, so its listing is pinned like the other two.
+
+    The zero-padded name is the case with teeth. A singleton 02-batches.json had
+    no listing at all, and the accessor that replaced it resolves the roster
+    check_scenario_parts holds each round's parts to -- so round-01 folded onto 1
+    would give round 1 two candidate plans, and whichever sorted last would
+    decide which batch ids that round's parts were allowed to name.
+    """
+    run = RunPaths(tmp_path)
+    run.batches_dir.mkdir()
+    for name in ("round-1.json", "round-10.json", "round-2.json", "notes.json", "round-01.json"):
+        (run.batches_dir / name).write_text("{}", encoding="utf-8")
+    # Numeric, so round-10 does not sort between round-1 and round-2; notes.json
+    # is ignored rather than crashing the read; and round-01 is rejected outright
+    # rather than normalised onto the 1 that is already here.
+    assert run.batches_rounds() == [1, 2, 10]
+
+
+def test_an_unreadable_batches_directory_is_a_usage_error(tmp_path):
+    """Exit 2, not an empty listing.
+
+    Same ruling as the other run-directory listings: an empty [] here would let a
+    caller conclude the run has no batch plans when it has plans it cannot read,
+    and report every round's parts as unexplained -- a stage defect fabricated
+    out of a permissions problem.
+    """
+    run = RunPaths(tmp_path)
+    run.batches_dir.mkdir()
+    run.batches_dir.chmod(0o000)
+    try:
+        with pytest.raises(UsageError, match="cannot read run directory"):
+            run.batches_rounds()
+    finally:
+        run.batches_dir.chmod(0o755)
 
 
 def test_scenario_part_rounds_ignores_entries_that_are_not_rounds(tmp_path):
@@ -471,8 +509,11 @@ def test_round_listings_reject_non_ascii_digits(tmp_path, name):
     (run.scenario_parts_dir / name).mkdir(parents=True)
     run.score_parts_dir.mkdir(parents=True)
     (run.score_parts_dir / f"{name}.json").write_text("{}", encoding="utf-8")
+    run.batches_dir.mkdir(parents=True)
+    (run.batches_dir / f"{name}.json").write_text("{}", encoding="utf-8")
     assert run.scenario_part_rounds() == []
     assert run.score_part_rounds() == []
+    assert run.batches_rounds() == []
 
 
 def test_leading_zero_rounds_are_rejected_not_normalised(tmp_path):
@@ -490,11 +531,14 @@ def test_leading_zero_rounds_are_rejected_not_normalised(tmp_path):
     for name in ("round-1", "round-01", "round-007", "round-0"):
         (run.scenario_parts_dir / name).mkdir(parents=True, exist_ok=True)
     run.score_parts_dir.mkdir(parents=True)
+    run.batches_dir.mkdir(parents=True)
     for name in ("round-1.json", "round-01.json", "round-007.json", "round-0.json"):
         (run.score_parts_dir / name).write_text("{}", encoding="utf-8")
+        (run.batches_dir / name).write_text("{}", encoding="utf-8")
     # Exactly one 1, not two: this is the assertion that fails on `\d+`.
     assert run.scenario_part_rounds() == [1]
     assert run.score_part_rounds() == [1]
+    assert run.batches_rounds() == [1]
 
 
 def test_round_numbers_must_be_positive(tmp_path):
@@ -512,6 +556,8 @@ def test_round_numbers_must_be_positive(tmp_path):
             run.scenario_round_dir(bad)
         with pytest.raises(ValueError, match=f"score round must be >= 1, got {bad}"):
             run.score_part(bad)
+        with pytest.raises(ValueError, match=f"batches round must be >= 1, got {bad}"):
+            run.batches(bad)
 
 
 def test_scenario_part_rejects_an_unsafe_batch_id(tmp_path):
