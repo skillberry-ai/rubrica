@@ -1004,8 +1004,8 @@ def bytes_per_scenario(run: RunPaths) -> int:
     # module's own phrase for the defect class it exists to close. It is the only
     # place here where a malformed artifact yields a plausible wrong NUMBER
     # rather than a refusal, so it goes through the same door as the rest.
-    sealed = _object_or_refuse(read_json(run.scenarios), run.scenarios, "scenarios")
-    scenarios = _rows_with_string_id(sealed["scenarios"], run.scenarios, "scenarios")
+    sealed = _object_or_refuse(run.scenarios, read_json(run.scenarios), ("scenarios",))
+    scenarios = _rows_with_string_id(run.scenarios, "scenarios", sealed["scenarios"])
     if not scenarios:
         return DEFAULT_BYTES_PER_SCENARIO
     total = sum(len(json.dumps(s, sort_keys=True)) for s in scenarios)
@@ -1100,6 +1100,20 @@ def write_batches(run: RunPaths, *, round_n: int) -> Path | None:
 ```
 
 Add `from pathlib import Path` to the imports — `write_batches` annotates `Path | None`.
+
+**`_object_or_refuse` and `_rows_with_string_id` are the shipped module's, and
+`src/rubrica/rounds.py` is authoritative for their signatures** — they were added
+during this task's review rounds to close the two guard findings, so the calls
+shown above are transcribed FROM the module rather than specifying it. They are:
+
+```python
+_object_or_refuse(path, payload, required=(), where="")      -> dict
+_rows_with_string_id(path, field, rows, key="id", *, min_rows=0) -> list[dict]
+```
+
+An earlier version of this plan had `path`/`payload` swapped and passed `required`
+as a bare string, which would have iterated its characters. Read the module, not
+this block, if the two ever disagree.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
