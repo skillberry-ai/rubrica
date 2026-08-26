@@ -589,9 +589,10 @@ import json
 import pytest
 
 from rubrica import rounds
-from rubrica.artifacts import read_json, write_json
+from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.errors import UsageError
 from rubrica.paths import RunPaths
+from rubrica.validate import validate_artifact
 
 
 def _world(caps: int = 2, ocs: int = 2, goals: int = 1) -> dict:
@@ -706,6 +707,10 @@ def test_write_batches_writes_a_schema_valid_document(tmp_path):
     run = _run_with_world(tmp_path, _world(caps=2, ocs=2, goals=1))
     path = rounds.write_batches(run, round_n=1)
     assert path == run.batches
+    # Actually validate, rather than only asserting fields: the kind is
+    # registered in Task 2, and a test named "schema valid" that never reaches
+    # the validator is the shape of an assertion nobody has watched fail.
+    assert validate_artifact(path, "batches") == []
     doc = read_json(path)
     assert doc["round"] == 1
     assert doc["cap_bytes"] == rounds.DEFAULT_SCENARIO_PART_BYTES
@@ -739,7 +744,9 @@ def test_write_batches_writes_nothing_when_no_hole_is_closable(tmp_path):
 
 def test_write_batches_reports_an_unreadable_world_model(tmp_path):
     run = RunPaths(tmp_path)
-    with pytest.raises(Exception):
+    # ArtifactError, not a bare Exception: a bare Exception also passes when the
+    # call under test has a typo, so it is an assertion that cannot fail.
+    with pytest.raises(ArtifactError):
         rounds.write_batches(run, round_n=1)
 ```
 
@@ -2331,7 +2338,26 @@ Replace the `"propose", "score",` lines with the five, and carry a comment in th
     "score-seal": ("coverage",),
 ```
 
-Check how `validate` resolves a per-slice artifact kind for the existing fan-out stages (`extract` → `claims`, `reconcile-contradict` → `contradictions-part`) and make `scenarios-part` and `score-part` resolve the same way; those two are per-round as well as per-slice, so if the existing mechanism assumes a single directory, extend it to take the round rather than special-casing these stages.
+`validate._artifact_paths` is a flat `if kind == ...` dispatch returning a list of paths, so per-round artifacts need **no signature change** — resolved by inspection on 2026-08-26 (Ruling R3). Add three branches, in the same shape as the existing `seed`/`expected` branches that already iterate an id accessor:
+
+```python
+    if kind == "batches":
+        # is_file(), NOT the always-return form catalogue/slices/subjects use.
+        # propose-batches legitimately writes nothing when no hole is closable,
+        # and that absence is how the loop learns it is over -- the always-return
+        # form would fail layer 1 on a correct terminal round. "Failed" is
+        # distinguished from "no holes" by the subcommand's exit code, which is 2
+        # on every real failure, not by this gate. (Ruling R2.)
+        return [run.batches] if run.batches.is_file() else []
+    if kind == "scenarios-part":
+        return [
+            run.scenario_part(r, b)
+            for r in run.scenario_part_rounds()
+            for b in run.scenario_part_batch_ids(r)
+        ]
+    if kind == "score-part":
+        return [run.score_part(r) for r in run.score_part_rounds()]
+```
 
 - [ ] **Step 3: Run the suite to see exactly what the cutover breaks**
 
@@ -2380,15 +2406,42 @@ Never hand-edit either output: both are byte-compared against a fresh render.
 - `CLAUDE.md`: the stage table gains five rows (`02a`–`03b`); the "one architectural rule" fan-out paragraph gains `batch_id` as a third slice-id kind alongside `artifact_id`, `subject_id` and `scenario_id`; the list of code stages (`intake`, `smoke`, `survey`, `triage-slices`, `triage-seal`, `reconcile-seal`) gains `propose-batches`, `propose-seal` and `score-seal`; and the sentence "Stages 02 and 03 are a loop bounded by `max_rounds`. Score *computes* the coverage verdict" needs the verdict clause kept and the stage numbers updated — score still computes the verdict, and `score-seal` composes the document that carries it.
 - `CLAUDE.md` is **not** ruff-excluded, so run `make check` after editing it.
 
-- [ ] **Step 7: Run everything**
+- [ ] **Step 7: Move both skill contract blocks (Ruling R1)**
+
+`skills.check_contract` compares a declared `schemas` list against `set(STAGE_ARTIFACTS[stage])` in **both** directions (`src/rubrica/skills.py:417-434`), so the instant Step 2 lands, `rb-propose`'s `schemas = ["scenarios"]` produces both an "is not gated on" and an "omits artifact kind(s) 'scenarios-part'" finding. The contracts are therefore part of this commit, not Task 9's. Replace the `## Contract` TOML block in each:
+
+`src/rubrica/skills/rb-propose/SKILL.md`:
+
+```toml
+stage = "propose"
+reads = ["manifest", "world_model", "batches", "coverage_latest"]
+writes = ["scenario_part"]
+schemas = ["scenarios-part"]
+invokes = ["validate"]
+```
+
+`src/rubrica/skills/rb-score/SKILL.md`:
+
+```toml
+stage = "score"
+reads = ["manifest", "world_model", "scenarios"]
+writes = ["score_part"]
+schemas = ["score-part"]
+invokes = ["dedupe-candidates", "validate"]
+```
+
+**Only the TOML blocks.** The prose rewrite is Task 9, which means this commit leaves each skill's contract one task ahead of its own sections. That is deliberate and bounded: nothing dispatches a skill mid-branch, and the alternative is committing with a gate red, which the Global Constraints forbid.
+
+- [ ] **Step 8: Run everything**
 
 Run: `make test && make check && uv run rubrica check-skills`
-Expected: all green, exit 0. `check-skills` will still pass here because the skills' contracts are untouched until Task 9 — if it fails now, a contract already names something this task renamed, and that is the signal to bring Task 9's contract edit forward rather than to weaken the check.
+Expected: all green, exit 0. If `check-skills` still fails, read the finding: it names the contract key and the kind, and the fix is in Step 7's blocks, never in the checker.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/rubrica/paths.py src/rubrica/validate.py tests/toy.py scripts/ docs/ CLAUDE.md
+git add src/rubrica/paths.py src/rubrica/validate.py tests/toy.py scripts/ docs/ CLAUDE.md \
+        src/rubrica/skills/rb-propose/SKILL.md src/rubrica/skills/rb-score/SKILL.md
 git commit -S -s -m "feat: Cut the pipeline over to the five-stage propose/score loop
 
 One commit because paths.STAGES is simultaneously the ordering, the on-disk
@@ -2416,7 +2469,9 @@ Assisted-By: Claude (Anthropic AI) <noreply@anthropic.com>"
 - Create: `src/rubrica/skills/rb-propose/SUPERSEDED.md`, `src/rubrica/skills/rb-score/SUPERSEDED.md`
 - Test: `tests/unit/test_skills_prose.py` (or whichever module already holds the prose predicates)
 
-- [ ] **Step 1: Rewrite `rb-propose`'s contract and all five sections**
+- [ ] **Step 1: Rewrite `rb-propose`'s five sections**
+
+**Its `## Contract` block already carries the new values — Task 8 Step 7 moved it, per Ruling R1, because `check-skills` compares `schemas` against `STAGE_ARTIFACTS` both ways and the cutover could not commit otherwise.** Do not edit the TOML again; verify it reads exactly as below and then rewrite the prose to match it.
 
 ```toml
 stage = "propose"
@@ -2434,7 +2489,9 @@ The prose changes, section by section:
 4. **Invariants** — the `max_scenarios` and `max_rounds` invariants stay. Add: every scenario's `capability_refs` and `goal_id` resolve to a hole ref in **this** batch (`refs.check_scenario_parts` enforces it), and the `batch_id` in the document matches the member's own.
 5. **Refusal conditions** — keep all four. Each must still name a trigger the member can detect from what it reads and an action it can take; a hole it cannot state a unique `discriminating_fact` for is still refusal condition 4, and the member now records that by writing a part with fewer scenarios than its batch has holes, which is a real record rather than a silent gap.
 
-- [ ] **Step 2: Rewrite `rb-score`'s contract and sections**
+- [ ] **Step 2: Rewrite `rb-score`'s sections**
+
+**Its `## Contract` block was also moved by Task 8 Step 7.** Verify it reads exactly as below; rewrite only the prose.
 
 ```toml
 stage = "score"
