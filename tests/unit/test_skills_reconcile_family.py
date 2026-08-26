@@ -128,6 +128,88 @@ def test_the_resolvers_forbid_convention_standing_in_for_evidence(stage):
     assert "even if `notes.md` had never been extracted at all" in inputs
 
 
+# The four passes that own a claim kind and therefore carry an inputs_seen
+# accounting. Derived from the schema rather than restated: a part schema that
+# gains the field joins this parametrization without anyone editing a literal.
+OWNING = tuple(
+    stage
+    for stage in FAMILY
+    if "inputs_seen"
+    in read_json(schema_dir() / ARTIFACT_SCHEMAS[STAGE_ARTIFACTS[stage][0]]).get("properties", {})
+)
+
+
+def test_the_owning_passes_are_the_four_with_a_claim_kind():
+    """A guard on the derivation above, not a restatement of it.
+
+    If a fifth partial gains inputs_seen, this fails and someone has to decide
+    whether that pass really owns a claim kind -- rb-reconcile-gaps owns none,
+    and giving it an accounting would assert a read coverage no output shape can
+    force.
+    """
+    assert OWNING == (
+        "reconcile-capabilities",
+        "reconcile-outcomes",
+        "reconcile-entities",
+        "reconcile-goals",
+    ), OWNING
+
+
+@pytest.mark.parametrize("stage", OWNING)
+def test_the_output_section_states_the_accounting_is_total_over_the_manifest(stage):
+    """Totality is the whole instrument, so the prose that describes it must say
+    which set it is total over. A pass told only to "record what you read"
+    records what it read, which is the artifact issue #6 already has.
+    """
+    output = _flat(stage, "2. Output")
+    assert "inputs_seen" in output
+    assert "manifest.inputs" in output
+    assert "every input" in output
+
+
+@pytest.mark.parametrize("stage", OWNING)
+def test_the_method_says_to_record_the_row_as_each_file_is_finished(stage):
+    """A row reconstructed at the end is a recollection of having read.
+
+    That is the distinction the accounting exists to draw, so the instruction
+    has to be about *when*, not only about *what*.
+
+    "not" is in every Method section already, measured; "as you finish" and "at
+    the end" are the two that carry the rule, and deleting the step turns both
+    red.
+    """
+    method = _flat(stage, "3. Method")
+    assert "as you finish" in method
+    assert "not" in method and "at the end" in method
+
+
+@pytest.mark.parametrize("stage", OWNING)
+def test_the_invariants_say_the_counts_are_recomputed_rather_than_trusted(stage):
+    """A pass that believes its numbers are taken on faith has no reason to
+    measure them. Naming the checker is what makes the obligation legible.
+
+    "check-refs" alone is satisfied by the run-both-commands paragraph that
+    already closes every §4, measured -- so "recomputes" and "own_kind_total"
+    are what this actually pins.
+    """
+    invariants = _flat(stage, "4. Invariants")
+    assert "check-refs" in invariants
+    assert "recomputes" in invariants
+    assert "own_kind_total" in invariants
+
+
+@pytest.mark.parametrize("stage", OWNING)
+def test_a_claims_file_that_cannot_be_read_is_a_refusal_not_a_guessed_count(stage):
+    """The one new refusal condition, and the one that can defeat the whole
+    change: a pass that guesses four numbers to satisfy the schema has produced
+    a clean artifact that means nothing.
+    """
+    refusals = _flat(stage, "5. Refusal conditions")
+    assert "could not read" in refusals
+    assert "guess" in refusals
+    assert "refuse" in refusals
+
+
 def test_subjects_instructs_over_assignment_rather_than_a_guess():
     """The cover's one safe direction. A claim in no subject is compared against
     nothing and the omission appears nowhere on disk -- refs.check_subjects
@@ -338,3 +420,21 @@ def test_gaps_carries_the_confabulation_refusal_as_the_last_close_reader():
     refusals = _flat("reconcile-gaps", "5. Refusal conditions")
     assert "confabulation under under-specification" in refusals
     assert "you are the last pass that reads the claims closely" in refusals
+
+
+def test_gaps_says_a_gap_cites_the_claims_that_make_the_absence_matter():
+    """rb-reconcile-gaps gets no accounting -- it owns no claim kind -- so the
+    gap's own claims array is the whole of what it gained. The distinction the
+    prose has to carry: the claims are not evidence *for* the unknown, they are
+    evidence the unknown matters.
+
+    Both tokens are scoped tighter than the obvious ones: bare "claims" and
+    "why_it_matters" were both already in this section before the array existed
+    ("built from claims that actually leave things unstated", and the field
+    list), so a predicate on either is green with the new paragraph deleted --
+    measured, which is why it names the array and the word the distinction turns
+    on instead.
+    """
+    output = _flat("reconcile-gaps", "2. Output")
+    assert "`claims` array" in output
+    assert "absence" in output

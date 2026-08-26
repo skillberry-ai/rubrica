@@ -92,6 +92,27 @@ from it: your `collection` names are the collections it fills, and your
 `machine:` invariants are re-evaluated against what it wrote. That is the
 consumer to keep in mind while writing -- not a reader.
 
+**The document also carries `inputs_seen`: one row per input, for every input
+`manifest.json` names.** Each row is `{artifact_id, own_kind_total, cited,
+dropped}`, plus a `note` whenever `dropped` is not zero. `own_kind_total` is
+how many `entity`-kind **and** `invariant`-kind claims that artifact's claims
+file holds -- the two kinds this pass is accountable for, counted together,
+because both come out of the same read -- `cited` is how many of them appear
+in a `claims` array you wrote, whether that array sits on the entity or on one
+of its invariants, and `dropped` is the rest.
+
+Total over `manifest.inputs`, which means **a row for every input including
+the ones holding no `entity` or `invariant` claim at all.** Those rows read
+`0/0/0` and need no note, so saying "this file held nothing of mine" costs one
+line. An input with no row is not a claim about that input; it is a gap in the
+accounting, and `check-refs` reports it as one.
+
+The `note` is where a drop stops being a number. "The disputed side of a
+contradiction recorded `unresolved`" and "restated by a claim I cited from
+another artifact" are both good reasons to drop a claim; a human reads them at
+gate 1, and they are the only record that the drop was a decision rather than
+an oversight.
+
 ## 3. Method
 
 1. **For every capability declared in `01-capabilities.json`, if any claim
@@ -139,6 +160,14 @@ consumer to keep in mind while writing -- not a reader.
    plainly in the `statement` when it is an inference rather than something
    any input said outright.
 
+4. **Fill in one `inputs_seen` row as you finish each claims file, not at the
+   end.** A row assembled at the end from what you remember is a recollection
+   of having read, and the difference between those two things is exactly what
+   this accounting exists to measure. Write the row while the file is in front
+   of you: the count of its claims of your kind, how many you cited, and -- if
+   you dropped any -- why, in one sentence. `manifest.json` names every input,
+   so you know how many rows there will be before you open the first one.
+
 ## 4. Invariants
 
 1. Every entity carries at least one `claims[]` entry, and every entry
@@ -166,6 +195,14 @@ consumer to keep in mind while writing -- not a reader.
 5. Entity `id`s and `collection` names are unique, and stable enough to be
    cited: `rb-instantiate` fills collections by name and `check-refs`
    evaluates invariants against them.
+
+6. `inputs_seen` has one row per input in `manifest.json`, and in every row
+   `cited + dropped == own_kind_total`. `rubrica check-refs` **recomputes**
+   both `own_kind_total` (from `01-claims/`) and `cited` (from the `claims`
+   arrays in this document), so neither is taken on your word: a count that
+   does not match is a finding naming this file, and a missing row is a
+   finding too. Nothing here judges *how much* you dropped -- that is a
+   human's reading at gate 1 -- only that the arithmetic is true.
 
 Before you report done, run
 `rubrica validate --stage reconcile-entities --run <run>` and then
@@ -214,3 +251,11 @@ seed, and an invented `machine:` invariant costs every correct one.
   input had ever been extracted. If the rule is a real one you inferred, write
   it as `prose:` and say what you inferred it from; if you cannot say, do not
   write it at all.
+
+- **A claims file you could not read.** Do not guess its `own_kind_total` to
+  complete the accounting: refuse, saying which file and what happened, and
+  stop. A guessed count is a number nobody measured presented as one somebody
+  did, and it defeats the whole point of the row -- a row you filled in
+  without opening the file is indistinguishable, in the artifact, from one you
+  filled in after reading it. A refusal here is recoverable; a fabricated
+  count is not, because nothing downstream can tell it from a real one.

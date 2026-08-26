@@ -65,6 +65,16 @@ it only if you believe that. A world model with zero gaps, built from claims
 that actually leave things unstated, has not reconciled anything -- it has
 erased the silence before anyone downstream got to see it.
 
+**Each gap also carries a `claims` array, and what it cites is not what you
+might expect.** A gap records what no input contains, so its claims cannot be
+evidence *for* the unknown -- there is none, which is the point. They are the
+claims that make the absence **matter**: the capability whose error behaviour
+nothing describes, the goal that needs a hop no claim supports. That is the
+`why_it_matters` field's evidence, made resolvable. Until this array existed a
+gap's evidence went into prose, and a run was measured whose gate-1 brief
+reported an input at 0 claims cited while a gap in the same brief rested its
+argument on one of that input's claims.
+
 `blocks` is the field with consequences. A gap that blocks nothing is
 informational; a gap whose `blocks` list contains `propose` is what makes the
 orchestrator halt before the round loop and ask for the missing artifact, and
@@ -135,6 +145,11 @@ knowledge it does not have.
 4. Nothing you write claims to resolve anything. Gaps record; they do not
    settle. A gap whose `unknown` reads as a decision is a resolution written
    in the one artifact that exists to record the absence of one.
+
+5. Every gap carries at least one `claims` entry, and every entry resolves to a
+   claim id that exists in `01-claims/`. Layer 1 enforces the first
+   (`claim_refs` carries `minItems: 1`); `refs.check_world_model` enforces the
+   second, after the seal.
 
 Before you report done, run
 `rubrica validate --stage reconcile-gaps --run <run>` and then

@@ -100,6 +100,26 @@ same capability it cannot see at all, because it compares sets of capability
 ids and two entries collapse to one member; `reconcile-seal` refuses to write a
 world model in that case, and it is the only place a duplicate is ever caught.
 
+**The document also carries `inputs_seen`: one row per input, for every input
+`manifest.json` names.** Each row is `{artifact_id, own_kind_total, cited,
+dropped}`, plus a `note` whenever `dropped` is not zero. `own_kind_total` is
+how many `outcome_class`-kind claims that artifact's claims file holds -- the
+kind this pass is accountable for -- `cited` is how many of them appear in a
+`claims` array you wrote, on an outcome class inside an `outcomes` record, and
+`dropped` is the rest.
+
+Total over `manifest.inputs`, which means **a row for every input including
+the ones holding no `outcome_class` claim at all.** Those rows read `0/0/0`
+and need no note, so saying "this file held nothing of mine" costs one line.
+An input with no row is not a claim about that input; it is a gap in the
+accounting, and `check-refs` reports it as one.
+
+The `note` is where a drop stops being a number. "The disputed side of a
+contradiction recorded `unresolved`" and "restated by a claim I cited from
+another artifact" are both good reasons to drop a claim; a human reads them at
+gate 1, and they are the only record that the drop was a decision rather than
+an oversight.
+
 ## 3. Method
 
 1. **For each capability in `01-capabilities.json`, enumerate its outcome
@@ -141,6 +161,14 @@ world model in that case, and it is the only place a duplicate is ever caught.
    entirely says the opposite -- that the capability has no such case -- and
    nothing downstream can tell the two apart.
 
+4. **Fill in one `inputs_seen` row as you finish each claims file, not at the
+   end.** A row assembled at the end from what you remember is a recollection
+   of having read, and the difference between those two things is exactly what
+   this accounting exists to measure. Write the row while the file is in front
+   of you: the count of its claims of your kind, how many you cited, and -- if
+   you dropped any -- why, in one sentence. `manifest.json` names every input,
+   so you know how many rows there will be before you open the first one.
+
 ## 4. Invariants
 
 1. Every capability declared in `01-capabilities.json` has exactly one entry
@@ -162,6 +190,14 @@ world model in that case, and it is the only place a duplicate is ever caught.
 4. Outcome-class `id`s are unique within their capability, and stable: every
    coverage cell downstream is named `cell:<capability_id>/<outcome_class_id>`,
    and `rb-propose` targets holes by that name.
+
+5. `inputs_seen` has one row per input in `manifest.json`, and in every row
+   `cited + dropped == own_kind_total`. `rubrica check-refs` **recomputes**
+   both `own_kind_total` (from `01-claims/`) and `cited` (from the `claims`
+   arrays in this document), so neither is taken on your word: a count that
+   does not match is a finding naming this file, and a missing row is a
+   finding too. Nothing here judges *how much* you dropped -- that is a
+   human's reading at gate 1 -- only that the arithmetic is true.
 
 Before you report done, run
 `rubrica validate --stage reconcile-outcomes --run <run>` and then
@@ -211,3 +247,11 @@ description plausible and none of it stated anywhere.
   `refs.check_outcomes` reports against your artifact, and it is not the
   channel for disagreeing with the previous pass: a capability with no
   supporting claim is a gap `rb-reconcile-gaps` audits for and records.
+
+- **A claims file you could not read.** Do not guess its `own_kind_total` to
+  complete the accounting: refuse, saying which file and what happened, and
+  stop. A guessed count is a number nobody measured presented as one somebody
+  did, and it defeats the whole point of the row -- a row you filled in
+  without opening the file is indistinguishable, in the artifact, from one you
+  filled in after reading it. A refusal here is recoverable; a fabricated
+  count is not, because nothing downstream can tell it from a real one.
