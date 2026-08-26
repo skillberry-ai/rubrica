@@ -100,6 +100,26 @@ def test_scenario_part_rejects_an_unsafe_batch_id(tmp_path):
         run.scenario_part(1, "../../etc/passwd")
 
 
+def test_scenario_part_rounds_maps_an_unreadable_directory_to_usage_error(tmp_path):
+    # Both directions, because the exit-code contract turns on this one: an
+    # unreadable run must exit 2, and a bare OSError becomes an exit-1
+    # [internal] finding instead -- a misconfigured harness dressed as a
+    # repairable stage defect. The mode is restored in a finally so a failing
+    # assertion cannot leave an unreadable directory poisoning the rest of the
+    # suite.
+    run = RunPaths(tmp_path)
+    run.scenario_parts_dir.mkdir()
+    run.scenario_parts_dir.chmod(0o444)
+    try:
+        with pytest.raises(UsageError):
+            run.scenario_part_rounds()
+    finally:
+        run.scenario_parts_dir.chmod(0o755)
+    # And the same call works once the mode is restored, so the test cannot pass
+    # by the call being broken outright.
+    assert run.scenario_part_rounds() == []
+
+
 def test_part_listings_are_empty_when_nothing_exists(tmp_path):
     run = RunPaths(tmp_path)
     assert run.scenario_part_rounds() == []
@@ -134,7 +154,7 @@ Check the imports already at the top of that module and add `UnsafeSegment` / `p
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `uv run pytest tests/unit/test_paths.py -k "round_artifact or round_numbers or scenario_part or part_listings or unsafe_scenario" -v`
+Run: `uv run pytest tests/unit/test_paths.py -k "round_artifact or round_numbers or scenario_part or score_part or part_listings or unsafe_scenario" -v` — the `score_part` alternative matters: without it the filter silently skips `test_score_part_rounds_reads_what_is_on_disk`, and a filter that quietly omits one of its own tests is how a red test goes unseen at the step whose whole job is watching it fail.
 Expected: FAIL, `AttributeError: 'RunPaths' object has no attribute 'batches'`.
 
 - [ ] **Step 3: Implement the accessors**
@@ -164,13 +184,27 @@ In `src/rubrica/paths.py`, immediately after the existing `scenarios` property, 
         Sorted numerically rather than lexically: round-10 must not sort between
         round-1 and round-2, which is exactly what sorted() on the stem does.
         """
+        # The OSError wrapping is not decoration, and it is why this cannot be a
+        # bare list_dir + is_dir(). MEASURED on a mode-0o444 02-scenarios/: the
+        # unwrapped form raises PermissionError, which reaches cli.py's catch-all
+        # and becomes an [internal] finding at exit 1 -- telling the orchestrator
+        # "repairable stage defect, retry once" about a chmod problem no
+        # re-dispatch can fix. UsageError is the exit-2 mapping, and
+        # _instance_dir_names already does exactly this on the identical
+        # filesystem shape. Match its message, so the two are indistinguishable
+        # to a caller. (Ruling R6.)
         rounds: list[int] = []
-        for entry in list_dir(self.scenario_parts_dir):
-            if not entry.is_dir() or not entry.name.startswith("round-"):
-                continue
-            suffix = entry.name[len("round-") :]
-            if suffix.isdigit():
-                rounds.append(int(suffix))
+        try:
+            for entry in list_dir(self.scenario_parts_dir):
+                if not entry.is_dir() or not entry.name.startswith("round-"):
+                    continue
+                suffix = entry.name[len("round-") :]
+                if suffix.isdigit():
+                    rounds.append(int(suffix))
+        except OSError as exc:
+            raise UsageError(
+                f"cannot read run directory: {self.scenario_parts_dir} ({exc})"
+            ) from exc
         return sorted(rounds)
 
     def _scenario_part_stems(self, round_n: int) -> list[str]:
