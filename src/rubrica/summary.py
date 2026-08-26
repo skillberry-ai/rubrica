@@ -740,8 +740,18 @@ def utilisation(run: RunPaths) -> Utilisation | Marker:
     that must exit 0 on a readable run and neither has a findings channel to report
     a malformed document through. They no longer reach this guard, and this page
     renders the numbers computed over what the walk could read rather than a
-    marker; the `01-claims/` reads above are a different question, and this guard
-    is still the whole answer to it.
+    marker.
+
+    **That contract argument reaches the `01-claims/` shapes above just as far**:
+    they take the same two reports to exit 1 on a readable run, and
+    `utilisation.py` says so beside the unguarded line. What kept them here is
+    scope and authorisation, not the contract -- issue #6 widened the world-model
+    walk and never touched the `01-claims/` path, the ruling being overturned was
+    written specifically about these shapes with this page's marker attached to
+    them, and only the world-model half was ruled in. So this guard is the whole
+    answer for them *for now*, and it is a known-wrong thing rather than a settled
+    one -- which belongs in `docs/design/limitations.md`, where this project keeps
+    what it knows is wrong, rather than only in a comment beside the code.
 
     The absence names both artifacts because either can be the unreadable one, and
     the reading is different from the no-world-model absence above: there, nothing
@@ -749,7 +759,7 @@ def utilisation(run: RunPaths) -> Utilisation | Marker:
     """
     try:
         report = _mapping(claim_utilisation(run))
-    except Exception:  # deliberate: the seven measured shapes named in the docstring
+    except Exception:  # deliberate: the 01-claims/ shapes named in the docstring
         return Malformed("claim utilisation", "01-claims/ or 01-world-model.json unreadable")
     artifacts = _dicts(report.get("artifacts"))
     if not artifacts:

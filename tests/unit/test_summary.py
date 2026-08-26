@@ -1853,9 +1853,18 @@ def test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run(tmp_path,
     because `claim-utilisation` and `gate-brief` are reports and a raise on a
     readable run breaks the exit-code contract outright -- a report has no findings
     channel to report a malformed document through, where a layer-2 checker at
-    least degrades to an `internal` finding. That reasoning does not reach the
-    `01-claims/` reads left here, and this page's marker is the surface that would
-    lose a signal if it did, so they stay.
+    least degrades to an `internal` finding.
+
+    **That reasoning reaches the shapes left here too**, and saying otherwise would
+    make this docstring the weaker of two records of one ruling: these four also
+    take both reports to exit 1 on a readable run, and `utilisation.py` states that
+    hole plainly beside the unguarded line. What keeps them here is scope and
+    authorisation -- issue #6 widened the world-model walk and never touched the
+    `01-claims/` path, the overturned ruling was written specifically about these
+    shapes with this page's marker attached, and only the world-model half was
+    ruled in. So this test pins current behaviour on a known-wrong thing rather
+    than a settled one, and the ruling that parks it belongs in
+    `docs/design/limitations.md` rather than in this docstring.
     """
     if os.geteuid() == 0 and break_it is _claims_dir_is_unreadable:
         pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
@@ -1907,6 +1916,12 @@ def test_utilisation_renders_over_a_world_model_container_it_could_not_walk(tmp_
     assert not isinstance(got, summary.Marker), f"a readable run still reports: {got}"
     # And it reports over every input, so the page does not quietly shrink.
     assert {a["artifact_id"] for a in got.per_artifact} == {"api-json", "notes-md", "trace-json"}
+    # A non-zero total citation count is what separates "skipped the one container
+    # it could not walk" from "skipped the world model entirely": each mutator here
+    # breaks exactly one container, and the assertions above all read `01-claims/`,
+    # so a guard that returned nothing for every container would satisfy them while
+    # rendering this page at 0% utilised.
+    assert got.cited > 0, f"the other containers' citations still count: {got}"
 
 
 def test_utilisation_absent_reads_differently_from_the_no_world_model_absence(tmp_path):

@@ -45,9 +45,14 @@ def claim_utilisation(run: RunPaths) -> dict:
         # page. That guard is in summary.py by ruling
         # (`test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run`
         # records it), so widening it here would delete a measured signal from
-        # another surface rather than add one. It is a live hole in this report's
-        # own exit-0 contract, measured and reported with issue #6's fix round; it
-        # is not this build's to close unilaterally.
+        # another surface rather than add one.
+        #
+        # The exit-0 contract argument that widened the world-model reads below
+        # reaches these reads just as far: they are the same breach, two reports at
+        # exit 1 on a readable run. What keeps them unguarded is scope, not the
+        # contract -- issue #6 widened the world-model walk and never touched this
+        # path -- so this is a live hole, and the ruling that parks it belongs in
+        # docs/design/limitations.md rather than only in a comment here.
         ids = [claim["id"] for claim in payload.get("claims", [])]
         used = sum(1 for claim_id in ids if claim_id in cited)
         artifacts.append(

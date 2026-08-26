@@ -175,6 +175,11 @@ def _count(value) -> int:
     disagreement is recoverable by reading the artifact, and layer 1 rejects the
     non-integer by name (`inputs-seen-0.1.json` requires an integer) while
     check_input_dispositions reports it against the row it sits on.
+
+    One JSON type slips through as itself rather than as 0: `isinstance(True, int)`
+    is True in Python, so `"cited": true` sums as 1. Left alone deliberately --
+    narrowing it would put a `bool` special case in a guard whose whole job is to
+    not be interesting, and layer 1 rejects the boolean either way.
     """
     return value if isinstance(value, int) else 0
 

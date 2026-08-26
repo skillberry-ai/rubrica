@@ -446,7 +446,11 @@ Like `claim-utilisation` below, it always exits clean on a readable run — it
 renders what it finds, including a stated absence, rather than raising, and
 is never the thing that turns a readable run into a defect finding. A run
 directory that cannot be read at all is a different failure and still exits
-2, on the same shared catch every other subcommand uses.
+2, on the same shared catch every other subcommand uses. One measured exception
+to that promise is open and on the record: a hand-edited `01-claims/` document —
+a `claims` value that is not an array, or a claim with no `id` — still raises out
+of the utilisation report this brief reads, taking both commands to exit 1. See
+[`docs/design/limitations.md`](../design/limitations.md).
 
 ```bash
 rubrica gate-brief --run runs/run-20260806-123005 --gate 1
@@ -459,7 +463,10 @@ cites — cited count, total count, and percent, per artifact.
 
 Required: `--run RUN`.
 
-**A report, not a gate: it always exits clean on a readable run.** The
+**A report, not a gate: it always exits clean on a readable run** — bar the one
+open exception recorded in
+[`docs/design/limitations.md`](../design/limitations.md), a hand-edited
+`01-claims/` document, which still raises and exits 1. The
 zero-utilisation *finding* that shares this module's arithmetic lives in
 `check-refs`, never here — this command surfaces the numbers for a human to
 read at gate 1, and an orchestrator reading its exit code can never mistake

@@ -1994,10 +1994,11 @@ def check_input_dispositions(run: RunPaths) -> list[Finding]:
             # same way.
             #
             # One behaviour change comes with the guard, and it is deliberate: a
-            # row *missing* `dropped` outright now fails the isinstance and no
-            # clause fires, where the `.get(key, 0)` default this replaced read it
-            # as 0 and could report the arithmetic. Layer 1 owns that absence --
-            # `dropped` is required and `"type": "integer"` in
+            # row *missing* `dropped` outright now fails the isinstance and this
+            # clause does not fire, where the `.get(key, 0)` default it replaced
+            # read the absence as 0 and could report the arithmetic. The two
+            # comparisons above are untouched and still report. Layer 1 owns the
+            # absence -- `dropped` is required and `"type": "integer"` in
             # inputs-seen-0.1.json -- and a property a deterministic gate already
             # enforces belongs to that gate, not to a second reading of it here
             # that would report the same defect against a different pointer.

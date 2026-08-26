@@ -681,6 +681,14 @@ def test_gate_one_read_coverage_does_not_raise_on_a_hand_edited_accounting(tmp_p
     # down with the edited one.
     goals = read_json(run.goals_part)["inputs_seen"]
     assert f"{run.goals_part.name}: {sum(row['cited'] for row in goals)}/" in section
+    # Both halves of the raw-vs-summed decision, which is otherwise only argued in a
+    # comment. The api-json row states `"own_kind_total": "5"` and `"cited": null`
+    # and prints them **verbatim**, because a reader who came here because a total
+    # looked wrong needs what the file says; the pass total above it counts only the
+    # row it can add, so it reads 1/1 from notes-md alone.
+    assert "api-json: None/5 cited, 5 dropped" in _row(section, "api-json")
+    assert "(no note)" in _row(section, "api-json"), "a drop with no note says so"
+    assert f"{run.capabilities_part.name}: 1/1 claims of capability cited" in section
 
 
 @pytest.mark.parametrize(
@@ -831,10 +839,15 @@ def test_gate_one_and_utilisation_survive_a_malformed_citation_container(tmp_pat
 
     assert cli.main(["claim-utilisation", "--run", str(run.root)]) == 0
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
-    # And the report still reports: a guard that dropped the whole world model on
-    # one malformed container would render every input as zero-cited, which is a
-    # different false statement from the crash it replaced.
-    assert claim_utilisation(run)["artifacts"], "the report still lists every input"
+    report = claim_utilisation(run)["artifacts"]
+    assert report, "the report still lists every input"
+    # And the citations the *other* containers hold still count. Each case breaks
+    # exactly one container, so this is the assertion that separates "skipped the
+    # container it could not walk" from "skipped the world model entirely" -- a
+    # guard returning `[]` for everything satisfies every line above it, since they
+    # all read 01-claims/, and would render every input as zero-cited. That is a
+    # different false statement from the crash it replaced, not a fix.
+    assert any(entry["cited"] for entry in report), f"only the bad container is skipped: {report}"
 
 
 # --------------------------------------------------------------------------
