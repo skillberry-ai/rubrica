@@ -151,6 +151,226 @@ def test_duplicate_capability_ids_are_reported(tmp_path):
     ]
 
 
+def _with_a_gap(world):
+    """`world` plus one gap, so /gaps/{i}/claims/{k} is reachable.
+
+    minimal_world_model seals `"gaps": []`, as does the golden toy fixture --
+    deliberately, since neither world has anything missing from it. Parametrising
+    only the two sites a gap-less fixture can reach is the *fixture-cannot-reach*
+    weakness this repo has measured, so the gap is injected here instead of being
+    given to a fixture that would then teach a skill the wrong world.
+    """
+    world["gaps"] = [
+        {
+            "id": "gap-1",
+            "subject": "error semantics",
+            "unknown": "what happens on an unknown controller",
+            "why_it_matters": "cannot build not_found scenarios",
+            "blocks": ["propose"],
+            "claims": ["clm-001"],
+        }
+    ]
+    return world
+
+
+def _at_outcome_class(world):
+    world["capabilities"][0]["outcome_classes"][0]["claims"] = ["clm-does-not-exist"]
+
+
+def _at_invariant(world):
+    world["entities"][0]["invariants"] = [
+        {
+            "id": "inv-1",
+            "statement": "job_id is unique",
+            "machine": {"form": "unique", "collection": "jobs", "field": "job_id"},
+            "claims": ["clm-does-not-exist"],
+        }
+    ]
+
+
+def _at_gap(world):
+    # The caller has already run _with_a_gap, so the gap is there to mutate.
+    world["gaps"][0]["claims"] = ["clm-does-not-exist"]
+
+
+@pytest.mark.parametrize(
+    ("site", "fabricate"),
+    [
+        ("/capabilities/0/outcome_classes/0/claims/0", _at_outcome_class),
+        ("/entities/0/invariants/0/claims/0", _at_invariant),
+        ("/gaps/0/claims/0", _at_gap),
+    ],
+    ids=["outcome-class", "invariant", "gap"],
+)
+def test_a_fabricated_claim_id_on_a_child_element_is_reported(tmp_path, site, fabricate):
+    """The mirror of the parent-element check, at the three sites issue #6 added.
+
+    Without this, a pass could satisfy the new `claims` requirement with an id it
+    invented, and layer 2 -- whose whole job is that every reference resolves --
+    would not look. One-directional as everywhere else in this module: that the
+    id exists, never that the claim supports the element.
+    """
+    run = _run(tmp_path)
+    world = _with_a_gap(minimal_world_model())
+    fabricate(world)
+    write_json(run.world_model, world)
+    findings = check_world_model(run)
+    assert any("clm-does-not-exist" in f.message for f in findings)
+    assert any(f.pointer == site for f in findings), (
+        f"reported, but not at {site}: {[f.pointer for f in findings]}"
+    )
+
+
+def test_a_resolvable_claim_id_on_every_child_element_is_clean(tmp_path):
+    """The green direction, and what stops the three above passing vacuously.
+
+    Each of them asserts a finding appears. A world model that was already
+    reported for some unrelated reason would satisfy that without the new sites
+    ever being walked, so the unmutated shape has to be known clean first.
+    """
+    run = _run(tmp_path)
+    world = _with_a_gap(minimal_world_model())
+    world["entities"][0]["invariants"] = [
+        {
+            "id": "inv-1",
+            "statement": "job_id is unique",
+            "machine": {"form": "unique", "collection": "jobs", "field": "job_id"},
+            "claims": ["clm-001"],
+        }
+    ]
+    write_json(run.world_model, world)
+    assert check_world_model(run) == []
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"gaps": None},
+        {"gaps": "not-a-list"},
+        {"gaps": [None]},
+        {"gaps": [{"id": "gap-1", "claims": "not-a-list"}]},
+        {"gaps": [{"id": "gap-1", "claims": [{}]}]},
+        {"gaps": [{"id": "gap-1"}]},
+    ],
+    ids=[
+        "null",
+        "not-a-list",
+        "list-of-non-dicts",
+        "claims-not-a-list",
+        "claims-holding-a-non-string",
+        "no-claims-key",
+    ],
+)
+def test_a_malformed_gaps_array_is_a_finding_or_nothing_never_a_crash(tmp_path, over):
+    """`gaps` was iterated by no checker in this module until issue #6.
+
+    So these shapes were all clean here, and a loop added without guards makes
+    them raise instead -- a repairable stage defect surfacing as exit 2, the one
+    thing the exit-code contract forbids. Measured before `_as_list` and the
+    `isinstance` guards went in: `{"gaps": null}` and `{"gaps": "x"}` both raised
+    AttributeError out of `check_world_model`, `claims: "nope"` reported one
+    `no such claim` finding per character, and `claims: [{}]` raised `TypeError:
+    unhashable type: 'dict'` from the membership test.
+
+    None of these documents is schema-valid. The point is that layer 2 must not be
+    the thing that discovers that by crashing, and must not invent a finding
+    against a shape it cannot read.
+    """
+    run = _run(tmp_path)
+    world = minimal_world_model()
+    world.update(over)
+    write_json(run.world_model, world)
+    findings = check_world_model(run)
+    assert isinstance(findings, list)
+    assert not any("/gaps/" in f.pointer for f in findings), (
+        f"a finding was fabricated against an unreadable gaps array: {findings}"
+    )
+
+
+def _non_string_claim_at_outcome_class(world):
+    world["capabilities"][0]["outcome_classes"][0]["claims"] = [{"a": 1}]
+
+
+def _non_string_claim_at_invariant(world):
+    world["entities"][0]["invariants"] = [
+        {
+            "id": "inv-1",
+            "statement": "job_id is unique",
+            "machine": {"form": "unique", "collection": "jobs", "field": "job_id"},
+            "claims": [{"a": 1}],
+        }
+    ]
+
+
+def _non_string_claim_at_gap(world):
+    _with_a_gap(world)["gaps"][0]["claims"] = [{"a": 1}]
+
+
+@pytest.mark.parametrize(
+    ("prefix", "mutate"),
+    [
+        ("/capabilities/0/outcome_classes/0/claims/", _non_string_claim_at_outcome_class),
+        ("/entities/0/invariants/0/claims/", _non_string_claim_at_invariant),
+        ("/gaps/0/claims/", _non_string_claim_at_gap),
+    ],
+    ids=["outcome-class", "invariant", "gap"],
+)
+def test_a_non_string_claim_entry_on_a_child_element_is_skipped_not_raised(
+    tmp_path, prefix, mutate
+):
+    """A dict where a claim id belongs, at each of issue #6's three sites.
+
+    Measured before the `isinstance(claim_id, str)` guards: every one of the three
+    raised `TypeError: unhashable type: 'dict'` from `claim_id not in
+    known_claims`. `cli.py`'s catch-all converts that to exit 1 with a generic
+    `internal` finding rather than exit 2 -- so it is not an exit-code violation,
+    but every other real finding in the world model is suppressed and replaced by a
+    message naming no artifact, which is the half of the rule that says a `1` must
+    name the *right* one.
+
+    Skipped rather than reported, deliberately: `claim_refs` items `$ref`
+    `#/$defs/id`, a patterned string, so layer 1 already rejects this document, and
+    a property a deterministic gate enforces belongs to that gate. The denominator
+    assertion is the control -- it proves the checker ran to completion and its
+    later findings survived, rather than the whole thing being swallowed.
+    """
+    run = _run(tmp_path)
+    world = minimal_world_model()
+    world["denominator"]["goals"] = 99
+    mutate(world)
+    write_json(run.world_model, world)
+
+    findings = check_world_model(run)
+    assert not any(f.pointer.startswith(prefix) for f in findings), (
+        f"a non-string claim entry was reported at {prefix}: {findings}"
+    )
+    assert any(f.pointer == "/denominator/goals" for f in findings), (
+        "the checker aborted: a finding it reaches after the claim loops is missing"
+    )
+
+
+def test_a_pointer_past_a_skipped_claim_entry_is_the_document_index(tmp_path):
+    """The reason the skip is a `continue` and not a filtered generator.
+
+    A layer-2 pointer has to address the position the entry actually occupies on
+    disk: `/gaps/0/claims/2` must mean the third element of that array, or a human
+    following it opens the file and lands on a different one. Filtering before
+    `enumerate` would renumber the survivors and report this finding at
+    `/gaps/0/claims/0`, which addresses a dict.
+    """
+    run = _run(tmp_path)
+    world = _with_a_gap(minimal_world_model())
+    # Two unreadable entries ahead of the fabricated id, so a renumbering is
+    # visible as a two-place shift rather than being masked by an off-by-nothing.
+    world["gaps"][0]["claims"] = [{}, 7, "clm-does-not-exist"]
+    write_json(run.world_model, world)
+
+    findings = check_world_model(run)
+    assert [(f.pointer, f.message) for f in findings] == [
+        ("/gaps/0/claims/2", "no such claim: clm-does-not-exist")
+    ]
+
+
 # -- scenarios ----------------------------------------------------------
 def test_consistent_scenarios_have_no_findings(tmp_path):
     assert check_scenarios(_run(tmp_path, scenarios=True)) == []

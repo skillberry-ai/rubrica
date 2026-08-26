@@ -78,14 +78,15 @@
     },
     "outcome_class": {
       "type": "object",
-      "required": ["id", "kind", "description"],
+      "required": ["id", "kind", "description", "claims"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "kind": {
           "enum": ["success", "empty", "not_found", "error", "underspecified"]
         },
-        "description": { "type": "string", "minLength": 1 }
+        "description": { "type": "string", "minLength": 1 },
+        "claims": { "$ref": "#/$defs/claim_refs" }
       }
     },
     "param": {
@@ -140,13 +141,14 @@
     },
     "invariant": {
       "type": "object",
-      "required": ["id", "statement"],
+      "required": ["id", "statement", "claims"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "statement": { "type": "string", "minLength": 1 },
         "machine": { "$ref": "#/$defs/machine" },
-        "prose": { "type": "string", "minLength": 1 }
+        "prose": { "type": "string", "minLength": 1 },
+        "claims": { "$ref": "#/$defs/claim_refs" }
       },
       "oneOf": [
         { "required": ["machine"], "not": { "required": ["prose"] } },
@@ -267,7 +269,7 @@
     },
     "gap": {
       "type": "object",
-      "required": ["id", "subject", "unknown", "why_it_matters", "blocks"],
+      "required": ["id", "subject", "unknown", "why_it_matters", "blocks", "claims"],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/id" },
@@ -282,7 +284,8 @@
             "enum": ["propose", "score", "instantiate", "challenge", "emit", "smoke"]
           }
         },
-        "suggested_input": { "type": "string" }
+        "suggested_input": { "type": "string" },
+        "claims": { "$ref": "#/$defs/claim_refs" }
       }
     }
   }

@@ -1697,6 +1697,74 @@ def check_world_model(run: RunPaths) -> list[Finding]:
                 if claim_id not in known_claims:
                     report(f"/{group}/{i}/claims/{j}", f"no such claim: {claim_id}")
 
+    # The three nested citation sites $defs/invariant, $defs/outcome_class and
+    # $defs/gap gained in issue #6, resolved on the same one-directional rule as
+    # every other reference in this module: that the id exists, never that the
+    # claim supports the element. Support is semantic and belongs to gate 1.
+    #
+    # Without these loops the requirement would be satisfiable with an invented
+    # id: `utilisation._cited_claim_ids` counts a child element's claims, so a
+    # fabricated one would raise an input's utilisation without any checker ever
+    # resolving it.
+    #
+    # `_as_list` at every level, `isinstance` on each element, and `isinstance` on
+    # each claim entry, because these loops reach shapes nothing reached before.
+    # `gaps` in particular was iterated by no checker at all, so every malformed
+    # spelling of it was clean here and an unguarded loop makes it raise instead.
+    # Three measurements, each of a real defect an earlier draft of this block had:
+    #
+    #   - `"gaps": null` and `"gaps": "x"` raised AttributeError out of a layer-2
+    #     gate -- a stage defect surfacing as exit 2, which the contract forbids.
+    #   - `outcome_class["claims"] = "nope"` reported four `no such claim` findings,
+    #     one per character: the wrong-artifact class this module has shipped once.
+    #   - `claims: [{"a": 1}]` at any of the three sites raised `TypeError:
+    #     unhashable type: 'dict'` from the `not in known_claims` test below.
+    #     `cli.py` converts that to exit 1 with a generic `internal` finding, so it
+    #     is not an exit-2 violation -- but every other real finding in that world
+    #     model is suppressed and replaced by a message naming nothing, which is the
+    #     specificity half of the same rule.
+    #
+    # A non-string claim entry is therefore skipped silently rather than reported,
+    # and that is deliberate: `claim_refs` items `$ref` `#/$defs/id`, a patterned
+    # string, so a non-string there is already a layer-1 failure -- and a property a
+    # deterministic gate enforces belongs to that gate, not to a second one.
+    for i, capability in enumerate(_as_list(world.get("capabilities"))):
+        if not isinstance(capability, dict):
+            continue
+        for j, outcome_class in enumerate(_as_list(capability.get("outcome_classes"))):
+            if not isinstance(outcome_class, dict):
+                continue
+            for k, claim_id in enumerate(_as_list(outcome_class.get("claims"))):
+                if not isinstance(claim_id, str):
+                    continue
+                if claim_id not in known_claims:
+                    report(
+                        f"/capabilities/{i}/outcome_classes/{j}/claims/{k}",
+                        f"no such claim: {claim_id}",
+                    )
+    for i, entity in enumerate(_as_list(world.get("entities"))):
+        if not isinstance(entity, dict):
+            continue
+        for j, invariant in enumerate(_as_list(entity.get("invariants"))):
+            if not isinstance(invariant, dict):
+                continue
+            for k, claim_id in enumerate(_as_list(invariant.get("claims"))):
+                if not isinstance(claim_id, str):
+                    continue
+                if claim_id not in known_claims:
+                    report(
+                        f"/entities/{i}/invariants/{j}/claims/{k}",
+                        f"no such claim: {claim_id}",
+                    )
+    for i, gap in enumerate(_as_list(world.get("gaps"))):
+        if not isinstance(gap, dict):
+            continue
+        for k, claim_id in enumerate(_as_list(gap.get("claims"))):
+            if not isinstance(claim_id, str):
+                continue
+            if claim_id not in known_claims:
+                report(f"/gaps/{i}/claims/{k}", f"no such claim: {claim_id}")
+
     for i, entity in enumerate(world.get("entities", [])):
         for j, relation in enumerate(entity.get("relations", [])):
             if relation["target_entity_id"] not in entity_ids:

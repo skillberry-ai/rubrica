@@ -11,6 +11,7 @@ from tests.builders import (
     minimal_seed,
     minimal_verdict,
 )
+from tests.toy import toy_world_model
 
 
 def _findings(tmp_path, kind, payload):
@@ -127,6 +128,97 @@ def test_verdict_notes_may_not_be_empty(tmp_path):
 def test_difficulty_overstated_is_the_only_flag(tmp_path):
     assert _findings(tmp_path, "verdict", minimal_verdict(flags=["too_easy"]))
     assert _findings(tmp_path, "verdict", minimal_verdict(flags=["difficulty_overstated"])) == []
+
+
+# -- world model: claims on the three child element defs (issue #6) ------
+def _world_with_a_gap() -> dict:
+    """The golden world model plus one gap, so all three sites are reachable.
+
+    `tests/fixtures/toy/` deliberately keeps `"gaps": []` -- the golden world
+    has nothing missing from it, and inventing a gap there would change what
+    the fixture teaches. So the gap is added here. Skipping the site instead
+    would be the *fixture-cannot-reach* weakness this repo has measured, at
+    exactly the def whose claims are the least obvious of the three.
+    """
+    world = toy_world_model()
+    world["gaps"] = [
+        {
+            "id": "gap-empty-comment-list",
+            "subject": "what get_ticket returns for a ticket with no comments",
+            "unknown": "whether the comments array comes back empty or the key is absent",
+            "why_it_matters": "an oracle over comments cannot be grounded either way",
+            "blocks": ["instantiate"],
+            # A gap's claims cite the evidence that the *absence matters*, not
+            # evidence of the fact that is missing: clm-api-006 is what
+            # promises the ticket together with its comments, which is what
+            # makes the silence about the empty case a hole rather than a
+            # non-question.
+            "claims": ["clm-api-006"],
+        }
+    ]
+    return world
+
+
+def test_a_world_model_with_claims_on_every_child_element_is_valid(tmp_path):
+    """The positive direction, and what stops the two below passing vacuously.
+
+    Both of those assert that a *finding* appears. A helper that was invalid
+    for some unrelated reason would satisfy them without the schema ever
+    requiring anything, so the shape they mutate has to be known-good first.
+    """
+    assert _findings(tmp_path, "world-model", _world_with_a_gap()) == []
+
+
+@pytest.mark.parametrize(
+    "pointer",
+    [
+        ("capabilities", 0, "outcome_classes", 0),
+        ("entities", 0, "invariants", 0),
+        ("gaps", 0),
+    ],
+)
+def test_a_child_element_without_claims_is_rejected(tmp_path, pointer):
+    """The three defs that had no `claims` array until issue #6.
+
+    `capability`, `entity`, `actor` and `goal` have always required one. These
+    three did not, and `additionalProperties: false` meant a pass could not
+    even record provenance voluntarily -- so an invariant's evidence went onto
+    its entity, or into `description` prose no counter reads.
+    """
+    world = _world_with_a_gap()
+    node = world
+    for key in pointer[:-1]:
+        node = node[key]
+    del node[pointer[-1]]["claims"]
+    assert _findings(tmp_path, "world-model", world), (
+        f"a child element at {pointer} with no claims was accepted"
+    )
+
+
+@pytest.mark.parametrize(
+    "pointer",
+    [
+        ("capabilities", 0, "outcome_classes", 0),
+        ("entities", 0, "invariants", 0),
+        ("gaps", 0),
+    ],
+)
+def test_a_child_element_with_an_empty_claims_array_is_rejected(tmp_path, pointer):
+    """minItems 1 comes from $defs/claim_refs, which these now $ref.
+
+    Both directions matter: "the key is present" is not the property. An empty
+    array is a pass declaring it has no evidence for an element it declared
+    anyway, which is the confabulation every refusal-conditions section warns
+    about.
+    """
+    world = _world_with_a_gap()
+    node = world
+    for key in pointer[:-1]:
+        node = node[key]
+    node[pointer[-1]]["claims"] = []
+    assert _findings(tmp_path, "world-model", world), (
+        f"an empty claims array at {pointer} was accepted"
+    )
 
 
 def test_every_registered_artifact_kind_now_has_a_schema_file():

@@ -48,9 +48,23 @@ def minimal_world_model(**over: Any) -> dict[str, Any]:
                 "operation": "query_aap2.find_jobs",
                 "binding": {"tool": "query_aap2", "fixed_args": {"action": "find_jobs"}},
                 "params": [{"name": "controller", "type": "string", "required": True}],
+                # Every outcome class carries `claims`, which $defs/outcome_class has
+                # required since issue #6. One id, the same the capability cites: this
+                # payload is the smallest thing the schema accepts, and clm-001 is the
+                # only claim minimal_claims declares.
                 "outcome_classes": [
-                    {"id": "oc-success", "kind": "success", "description": "jobs returned"},
-                    {"id": "oc-empty", "kind": "empty", "description": "no jobs match"},
+                    {
+                        "id": "oc-success",
+                        "kind": "success",
+                        "description": "jobs returned",
+                        "claims": ["clm-001"],
+                    },
+                    {
+                        "id": "oc-empty",
+                        "kind": "empty",
+                        "description": "no jobs match",
+                        "claims": ["clm-001"],
+                    },
                 ],
                 "claims": ["clm-001"],
                 "confidence": "high",

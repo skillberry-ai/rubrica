@@ -199,6 +199,11 @@ def test_structured_machine_invariant_is_valid(tmp_path):
                 "local_key": "job_id",
                 "foreign_key": "job_id",
             },
+            # $defs/invariant has required `claims` since issue #6. The one id
+            # minimal_claims declares: this test is about the `machine` form
+            # validating, so the rest of the invariant is the minimum the schema
+            # accepts rather than anything the test asserts on.
+            "claims": ["clm-001"],
         }
     ]
     path = tmp_path / "wm.json"

@@ -23,6 +23,31 @@ from rubrica.utilisation import _cited_claim_ids, claim_utilisation
 from tests.toy import build_toy_run
 
 
+def _strip_claim_refs(world: dict, doomed: set[str]) -> None:
+    """Drop every id in `doomed` from every citation site in `world`, in place.
+
+    Every site, including the three child ones $defs/invariant, $defs/outcome_class
+    and $defs/gap gained in issue #6. A stripper that walked only the four
+    top-level groups would leave the golden fixture still citing api-json from
+    its outcome classes -- so a test that means "nothing in the world model rests
+    on this input" would be asserting against a world model that plainly does,
+    and `check_claim_utilisation` would be right to stay quiet.
+    """
+    for group in ("capabilities", "entities", "actors", "goals"):
+        for item in world.get(group, []):
+            item["claims"] = [c for c in item.get("claims", []) if c not in doomed]
+    for capability in world.get("capabilities", []):
+        for outcome_class in capability.get("outcome_classes", []) or []:
+            outcome_class["claims"] = [
+                c for c in outcome_class.get("claims", []) if c not in doomed
+            ]
+    for entity in world.get("entities", []):
+        for invariant in entity.get("invariants", []) or []:
+            invariant["claims"] = [c for c in invariant.get("claims", []) if c not in doomed]
+    for gap in world.get("gaps", []) or []:
+        gap["claims"] = [c for c in gap.get("claims", []) if c not in doomed]
+
+
 def _blank_world_model_claim_refs(run: RunPaths, artifact_id: str) -> None:
     """Remove every reference to one artifact's claims from the world model.
 
@@ -32,9 +57,7 @@ def _blank_world_model_claim_refs(run: RunPaths, artifact_id: str) -> None:
     claims = json.loads((run.claims_dir / f"{artifact_id}.json").read_text(encoding="utf-8"))
     doomed = {c["id"] for c in claims["claims"]}
     world = json.loads(run.world_model.read_text(encoding="utf-8"))
-    for group in ("capabilities", "entities", "actors", "goals"):
-        for item in world.get(group, []):
-            item["claims"] = [c for c in item.get("claims", []) if c not in doomed]
+    _strip_claim_refs(world, doomed)
     run.world_model.write_text(json.dumps(world, indent=2) + "\n", encoding="utf-8")
 
 
@@ -85,9 +108,7 @@ def test_an_input_cited_only_through_a_contradiction_is_not_a_finding(tmp_path):
     claims = json.loads((run.claims_dir / "api-json.json").read_text(encoding="utf-8"))
     doomed = [c["id"] for c in claims["claims"]]
     world = json.loads(run.world_model.read_text(encoding="utf-8"))
-    for group in ("capabilities", "entities", "actors", "goals"):
-        for item in world.get(group, []):
-            item["claims"] = [c for c in item.get("claims", []) if c not in doomed]
+    _strip_claim_refs(world, set(doomed))
     world.setdefault("contradictions", []).append(
         {
             "claim_a": doomed[0],
@@ -107,9 +128,7 @@ def test_partial_utilisation_is_reported_but_is_not_a_finding(tmp_path):
     keep = claims["claims"][0]["id"]
     world = json.loads(run.world_model.read_text(encoding="utf-8"))
     doomed = {c["id"] for c in claims["claims"]} - {keep}
-    for group in ("capabilities", "entities", "actors", "goals"):
-        for item in world.get(group, []):
-            item["claims"] = [c for c in item.get("claims", []) if c not in doomed]
+    _strip_claim_refs(world, doomed)
     run.world_model.write_text(json.dumps(world, indent=2) + "\n", encoding="utf-8")
 
     entry = next(e for e in claim_utilisation(run)["artifacts"] if e["artifact_id"] == "api-json")

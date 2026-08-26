@@ -52,6 +52,22 @@ def test_the_subject_cover_names_every_claim_in_the_run():
     )
 
 
+def test_no_subject_names_the_same_claim_twice():
+    """The cover over-assigns across subjects, never within one.
+
+    A cover may put one claim under several subjects -- that is what
+    rb-reconcile-subjects is instructed to do when a claim bears on more than one
+    -- but a repeat inside a single subject's array says nothing a member could
+    act on. Reachable since issue #6 moved the fixture's outcome_class-kind
+    citations onto the outcome classes: clm-api-005 is on both of
+    cap-find-tickets' outcome classes, deliberately, and the capability's subject
+    covers what its outcome classes cite, so it arrives at that subject twice.
+    """
+    for subject in split_world_model()["subjects"]["subjects"]:
+        claims = subject["claims"]
+        assert len(claims) == len(set(claims)), f"{subject['id']} repeats a claim id: {claims}"
+
+
 def test_every_subject_has_a_contradictions_part():
     """Even an empty one. The file's existence is the record that the sweep
     visited that subject, which is the check the single-turn stage never had."""

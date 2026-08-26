@@ -1191,6 +1191,34 @@ def _sealed(run) -> dict:
     return json.loads(run.world_model.read_text(encoding="utf-8"))
 
 
+def _uncite_trace(sealed: dict) -> None:
+    """Drop every clm-trace-* citation from `sealed`, in place, at every site.
+
+    Every site, not just the four top-level groups: since issue #6 the golden
+    fixture cites clm-trace-001 on cap-find-tickets' `oc-none` outcome class,
+    where the evidence for an observed empty return belongs. A stripper that
+    walked only the parent arrays left it there, so `trace-json` stayed at 1 of 2
+    and the `uncited` list this exercises came back empty -- the same
+    fixture-cannot-reach shape the docstrings below already name.
+
+    Contradictions are cleared by the callers rather than here, because that is
+    the *other* half of what makes trace-json uncited and each caller says so.
+    """
+    for group in ("capabilities", "entities", "actors", "goals"):
+        for member in sealed[group]:
+            member["claims"] = [c for c in member["claims"] if not c.startswith("clm-trace-")]
+    for capability in sealed["capabilities"]:
+        for outcome_class in capability.get("outcome_classes", []):
+            outcome_class["claims"] = [
+                c for c in outcome_class["claims"] if not c.startswith("clm-trace-")
+            ]
+    for entity in sealed["entities"]:
+        for invariant in entity.get("invariants", []):
+            invariant["claims"] = [c for c in invariant["claims"] if not c.startswith("clm-trace-")]
+    for gap in sealed.get("gaps", []):
+        gap["claims"] = [c for c in gap["claims"] if not c.startswith("clm-trace-")]
+
+
 def test_world_model_counts_every_kind(tmp_path):
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     got = summary.world_model(run)
@@ -1359,9 +1387,7 @@ def test_utilisation_names_an_artifact_the_world_model_cites_nothing_of(tmp_path
 
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     sealed = _sealed(run)
-    for group in ("capabilities", "entities", "actors", "goals"):
-        for member in sealed[group]:
-            member["claims"] = [c for c in member["claims"] if not c.startswith("clm-trace-")]
+    _uncite_trace(sealed)
     sealed["contradictions"] = []
     write_json(run.world_model, sealed)
     assert validate_artifact(run.world_model, "world-model") == [], (
@@ -1464,6 +1490,11 @@ def test_gaps_carry_every_field_including_the_blocks_array(tmp_path):
             "unknown": "what get_ticket returns for an id that does not exist",
             "why_it_matters": "no scenario on the missing branch has a stated gold answer",
             "blocks": ["propose", "score"],
+            # A gap's `claims` cite the evidence that the absence *matters*, which
+            # is what $defs/gap has required since issue #6: clm-notes-004 is the
+            # claim that a missing id is an error at all, so a run with no stated
+            # gold answer for that branch is a hole rather than a non-question.
+            "claims": ["clm-notes-004"],
         },
         {
             "id": "gap-auth",
@@ -1471,6 +1502,9 @@ def test_gaps_carry_every_field_including_the_blocks_array(tmp_path):
             "unknown": "whether any call requires a token",
             "why_it_matters": "an unauthenticated seed may be exercising a different target",
             "blocks": ["instantiate"],
+            # clm-api-001 is the claim that the tool has a callable action at all --
+            # the fact whose silence about authentication is the gap.
+            "claims": ["clm-api-001"],
         },
     ]
     write_json(run.world_model, sealed)
@@ -1868,9 +1902,7 @@ def test_utilisation_exempts_a_zero_of_zero_input_the_gate_exempts(tmp_path):
     payload["claims"] = []
     write_json(emptied, payload)
     sealed = _sealed(run)
-    for group in ("capabilities", "entities", "actors", "goals"):
-        for member in sealed[group]:
-            member["claims"] = [c for c in member["claims"] if not c.startswith("clm-trace-")]
+    _uncite_trace(sealed)
     sealed["contradictions"] = []
     write_json(run.world_model, sealed)
     got = summary.utilisation(run)

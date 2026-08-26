@@ -285,20 +285,28 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
                         "id": "oc-found",
                         "kind": "success",
                         "description": "one or more tickets match the filters",
+                        # clm-api-005: "find_tickets returns a possibly-empty list of
+                        # matching tickets". The one claim covers both outcome classes,
+                        # and citing it twice is correct rather than sloppy -- an outcome
+                        # class's claims are the evidence for *that outcome*, not a
+                        # partition of the claim set.
+                        "claims": ["clm-api-005"],
                     },
                     {
                         "id": "oc-none",
                         "kind": "empty",
                         "description": "no ticket matches the filters",
+                        # clm-trace-001 is the observed empty return; clm-api-005 is the
+                        # stated "possibly-empty".
+                        "claims": ["clm-api-005", "clm-trace-001"],
                     },
                 ],
-                "claims": [
-                    "clm-api-001",
-                    "clm-api-005",
-                    "clm-trace-001",
-                    "clm-api-007",
-                    "clm-api-008",
-                ],
+                # The capability's own claims are the capability-kind ones only, now that
+                # the outcome_class-kind evidence sits on the outcome class it is about
+                # (issue #6). Before that, $defs/outcome_class had no `claims` array at
+                # all and was additionalProperties: false, so this list was the only
+                # place the evidence for an outcome could go.
+                "claims": ["clm-api-001", "clm-api-007", "clm-api-008"],
                 "confidence": "high",
             },
             {
@@ -311,14 +319,20 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
                         "id": "oc-detail",
                         "kind": "success",
                         "description": "the ticket and its comments, ordered by position",
+                        "claims": ["clm-api-006"],
                     },
                     {
                         "id": "oc-missing",
                         "kind": "not_found",
                         "description": "no ticket has that id, which is an error",
+                        # clm-notes-004, the *preferred_a* side of con-missing-semantics.
+                        # Its losing side, clm-trace-002, is deliberately not cited here:
+                        # the contradiction records it, and citing the side the resolution
+                        # rejected would model a disagreement as settled the other way.
+                        "claims": ["clm-notes-004"],
                     },
                 ],
-                "claims": ["clm-api-002", "clm-notes-004", "clm-api-006", "clm-api-009"],
+                "claims": ["clm-api-002", "clm-api-009"],
                 "confidence": "high",
             },
         ],
@@ -349,6 +363,9 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
                             "local_key": "ticket_id",
                             "foreign_key": "ticket_id",
                         },
+                        # clm-notes-005: "comment_count equals the number of comment
+                        # records on the ticket".
+                        "claims": ["clm-notes-005"],
                     },
                     {
                         "id": "inv-ticket-id-unique",
@@ -358,9 +375,14 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
                             "collection": "tickets",
                             "field": "ticket_id",
                         },
+                        # clm-notes-006, whose statement is this invariant verbatim.
+                        "claims": ["clm-notes-006"],
                     },
                 ],
-                "claims": ["clm-api-003", "clm-notes-005", "clm-notes-006"],
+                # Entity-kind only, for the same reason the capabilities above shed their
+                # outcome_class-kind claims: the invariant-kind evidence now sits on the
+                # invariant it states.
+                "claims": ["clm-api-003"],
             },
             {
                 "id": "ent-comment",
@@ -466,15 +488,50 @@ def split_world_model(
         """
         if not cited:
             return
-        subjects.append({"id": subject_id, "label": label, "claims": list(cited)})
+        # Deduplicated, order preserved. One claim can reach `cited` twice now that
+        # a capability's subject also covers what its outcome classes cite -- the
+        # golden world's clm-api-005 is on both of cap-find-tickets' outcome classes,
+        # deliberately, since an outcome class's claims are the evidence for *that*
+        # outcome rather than a partition. Repeating the id in a cover would say
+        # nothing a reader could act on.
+        subjects.append({"id": subject_id, "label": label, "claims": list(dict.fromkeys(cited))})
         for claim_id in cited:
             if claim_id in remaining:
                 remaining.remove(claim_id)
 
+    # A capability's subject covers what its outcome classes cite, and an entity's
+    # what its invariants cite. Since issue #6 those are the elements that hold the
+    # outcome_class- and invariant-kind evidence, and a cover built from the parent
+    # array alone would strand it: measured with the child arrays ignored, all six
+    # moved ids fell through to sub-uncited, and con-missing-semantics
+    # -- whose claim_a is oc-missing's clm-notes-004 -- followed them there, out of
+    # the subject that names the capability the disagreement is about.
     for capability in world["capabilities"]:
-        take(f"sub-{capability['id']}", capability["operation"], capability["claims"])
+        take(
+            f"sub-{capability['id']}",
+            capability["operation"],
+            [
+                *capability["claims"],
+                *(
+                    claim_id
+                    for outcome_class in capability["outcome_classes"]
+                    for claim_id in outcome_class["claims"]
+                ),
+            ],
+        )
     for entity in world["entities"]:
-        take(f"sub-{entity['id']}", entity["name"], entity["claims"])
+        take(
+            f"sub-{entity['id']}",
+            entity["name"],
+            [
+                *entity["claims"],
+                *(
+                    claim_id
+                    for invariant in entity.get("invariants", [])
+                    for claim_id in invariant["claims"]
+                ),
+            ],
+        )
     take(
         "sub-actors-and-goals",
         "who uses the target, and what for",
