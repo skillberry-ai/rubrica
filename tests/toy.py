@@ -504,15 +504,23 @@ def _inputs_seen(part: dict[str, Any], own_kinds: tuple[str, ...]) -> list[dict[
             "dropped": len(own) - cited,
         }
         if row["dropped"]:
-            # The toy's one drop, and it is the worked example the spec wants on
-            # the record: clm-trace-002 is the losing side of
+            # The toy's one drop today, and it is the worked example the spec
+            # wants on the record: clm-trace-002 is the losing side of
             # con-missing-semantics, resolved `preferred_a`. It is cited by the
             # contradiction and by no partial, so the outcomes pass's row for
             # trace-json reads 2/1/1 -- which is exactly the case a reader at
             # gate 1 should be able to tell apart from a file nobody opened.
+            #
+            # The note itself says none of that. This branch stamps one sentence
+            # on *any* non-zero drop, so a fixture edit that dropped a claim for
+            # an unrelated reason would put a false statement into the model
+            # answer every skill imitates -- schema-valid, and silent. The prose
+            # is therefore true of every drop by construction: a dropped claim is
+            # by definition one this partial does not cite. Which drop it is, and
+            # why, belongs in the comment above rather than in the artifact.
             row["note"] = (
-                "the side of a recorded contradiction that its resolution did not prefer; "
-                "cited by 01-contradictions/, deliberately not modelled here"
+                "read and deliberately not modelled in this partial; nothing this pass "
+                "wrote rests on it"
             )
         rows.append(row)
     return rows
