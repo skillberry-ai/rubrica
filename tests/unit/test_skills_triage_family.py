@@ -133,8 +133,11 @@ def test_the_objective_pass_declares_its_exact_contract():
     That the block is bounded by how many candidates a run admitted rather than
     by how large they are is a **code** fact, readable in slices.py and needing
     no measurement: candidate_bytes is one integer per candidate id, excluded is
-    capped at MAX_EXCLUDED_ENTRY_BYTES, and request and policy are fixed-size
-    verbatim copies.
+    capped at MAX_EXCLUDED_ENTRY_BYTES, and request and policy are
+    corpus-size-independent -- not fixed-size, since catalogue-0.1.json bounds
+    neither request.corpus_roots nor policy.operator_globs and takes
+    objective_note and scope_note as free text, but nothing in either grows with
+    how much corpus those roots contain, which is the property the bound needs.
 
     What two runs of the same corpus **observed** is narrower and is a
     controlled comparison only because the candidate count was the same 443 in

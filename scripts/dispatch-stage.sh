@@ -157,7 +157,7 @@ export PATH="$REPO/.venv/bin:$PATH"
 #                   human review surface, which is scored *against* the stages.
 #
 # Derived, not guessed: the union of every skill's `reads` is capabilities_part,
-# catalogue, claims_dir, contradictions_dir, coverage_latest, entities_part,
+# claims_dir, contradictions_dir, coverage_latest, entities_part,
 # expected, goals_part, input_file, manifest, outcomes_part, scenarios, seed,
 # subjects, verdict and world_model. Neither of these two is in it -- and, per
 # the block below, neither is read by check-refs, which is the constraint that

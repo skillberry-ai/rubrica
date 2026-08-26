@@ -648,8 +648,11 @@ def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path
     `reads` no longer names the catalogue at all. Measured on the tau2
     catalogue, that took the objective dispatch's input from 472,799 bytes to
     51,792 -- inside the harness's 256KB whole-file Read refusal, where the
-    catalogue was not -- and bounded it by max_candidates, since the block
-    costs 41.1 bytes per candidate. canonical_bytes sorts keys, so the block
+    catalogue was not -- and bounded it by max_candidates, since the block's
+    only term that grows with the run is `candidate_bytes`, at 41.1 bytes per
+    candidate on that catalogue. The rest is `excluded`, capped at
+    MAX_EXCLUDED_ENTRY_BYTES, plus verbatim `request` and `policy`, neither of
+    which grows with corpus size. canonical_bytes sorts keys, so the block
     and run_id both land ahead of the slices array: the 470KB seek for run_id
     that chunk-reading dispatches used to pay is gone as a consequence of the
     sort rather than as a special case.

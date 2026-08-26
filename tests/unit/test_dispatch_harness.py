@@ -183,8 +183,8 @@ def test_the_run_artifacts_a_stage_must_read_are_not_denied(settings):
 # triage-objective is a barrier pass (no slice id) reading only
 # 00-slices.json, so unlike `settings` above these two dispatch it directly
 # rather than through the `propose`-shaped fixture. It stands in for the family
-# here because its gate reads a file the pass itself does not, which is what
-# the second test needs.
+# here because a later `rubrica check-refs` reads a file this pass does not,
+# which is the asymmetry the second test needs.
 
 
 def test_the_triage_dispatch_denies_the_decisions_log(tmp_path):
@@ -206,7 +206,7 @@ def test_dispatch_hands_a_rule_member_its_slice_id():
     assert "Your slice_id" in script
 
 
-def test_the_triage_dispatch_does_not_deny_the_catalogue_it_must_read(tmp_path):
+def test_the_triage_dispatch_does_not_deny_a_path_check_refs_reads(tmp_path):
     """The mirror of the rule that cost two wrong denies: 2f93726 measured that
     denying a path check-refs reads makes a stage's own gate fabricate findings.
     triage-objective no longer reads the catalogue itself -- `catalogue_facts`

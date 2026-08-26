@@ -654,11 +654,32 @@ now fits one `Read` is measured and not in doubt. That a dispatch which *fits*
 produces a better **judgment** than one that died is the claim the whole design
 rests on, and it is the claim nothing here measures.
 
-Recorded rather than parked-with-a-fix because the fix is a dispatch, not a
-change: run the staged family against a parsec-class corpus and write what
-happened into the passes' `exercise.md` files. Until then, a reader who finds
-#3 closed should not infer that anyone watched `00-triage.json` get written on
-the corpus that killed the monolith.
+There is also a way for #3 to come back on the artifact that closed it, and
+nothing would report it. A shard is bounded in bytes — `DEFAULT_SLICE_BYTES` is
+64KB against the harness's 256KB whole-file `Read` refusal — and the plan is
+bounded only in *count*. The spec's own reason for giving `excluded.entries` a
+byte budget was that issue #8 is "a count cap without a character bound", and
+the `catalogue_facts` block as a whole took the count bound rather than the byte
+one: `max_candidates` limits how many `candidate_bytes` entries there can be,
+and no check anywhere asserts that `00-slices.json` fits one `Read`.
+
+What actually backstops it is `max_catalogue_bytes`, one level out.
+**Extrapolated from the spec's measured ratio and not measured** — the plan was
+10.95% of the
+catalogue on tau2, and treating that as linear is exactly the assumption a
+different corpus shape would break — its 1MiB default puts the plan at roughly
+115KB, about 2.28x inside the ceiling, and a catalogue of about 2.4 million bytes
+(2.28 MiB) would put the plan at the refusal itself. So raising
+`--max-catalogue-bytes` past that re-opens #3 **on the plan**, with the objective
+pass chunk-reading the artifact that exists to spare it exactly that, and no gate
+between the change and the symptom. The honest bound is a byte assertion on the
+plan; what exists is a ratio and a default.
+
+Recorded rather than parked-with-a-fix because the fix for the main claim is a
+dispatch, not a change: run the staged family against a parsec-class corpus and
+write what happened into the passes' `exercise.md` files. Until then, a reader
+who finds #3 closed should not infer that anyone watched `00-triage.json` get
+written on the corpus that killed the monolith.
 
 ### The loop's stopping rule is blind to goal-coverage progress
 
@@ -1781,20 +1802,21 @@ first-vacuous, so both edges of a band are inclusive and 747 is a radius that
 works. And the window is `body[max(0, at - radius) : at + radius]`, which is
 what makes the pairs below agree rather than look sloppy: a prohibition
 *following* the anchor needs `distance + len(token)` to fall inside it, while one
-*preceding* it needs `distance` exactly. That is why 28 characters goes green at 33 and 75 goes
-green at 80, both following, while the 15 of a leading prohibition goes green at
-15.
+*preceding* it needs `distance` exactly. That is why 28 characters goes green at
+33 and 75 goes green at 80, both following, while the 15 of a leading
+prohibition goes green at 15.
 
 **The upper edge is a property of the skill's prose, not of the test.** 747
 holds only because the section's fourth `shard` mention sits 743 characters from
 the section's next `never` — and by the rule above that is where 748 comes from,
 `743 + len("never")`, so the band's upper edge is derivable from the distance
 rather than resting on the sweep alone. Any honest edit that puts a prohibition
-word closer to any mention lowers it. Two were tried against the shipped file, and both are
-printed here because a ceiling figure whose perturbation is not quoted cannot be
-audited from the page — the same objection that got the misaimed sentence below
-printed. Appending a meaning-preserving clause to that fourth mention's own
-sentence, so that it ends "and a pass that spends it is never bounded again",
+word closer to any mention lowers it. Two were tried against the shipped file,
+and both are printed here because a ceiling figure whose perturbation is not
+quoted cannot be audited from the page — the same objection that got the
+misaimed sentence below printed. Appending a meaning-preserving clause to that
+fourth mention's own sentence, so that it ends "and a pass that spends it is
+never bounded again",
 takes the ceiling to **74**. Inserting one honest sentence earlier in the
 section — "A slice's label is a directory name, and a directory name is never a
 reading of what the files under it contain." ahead of the `excluded` paragraph —
@@ -1823,6 +1845,21 @@ vocabulary is also narrower in practice than it reads: of its three
 alternatives — `never`, `not yours`, `do not` — only `never` occurs in the
 section at all, three times, so every distance and both band edges above belong
 to one word.
+
+**Do not read that as "anchor the other eleven" — measured, a mechanical sweep
+would be actively wrong.** `test_the_rule_pass_keeps_the_digest_insufficient_refusal_rule`
+asserts `"reject" in body`, and that section's prose says "`check-refs`
+**rejects** your part": one substring hit, **zero** word-boundary hits, so
+anchoring it turns a predicate red against correct prose. Nor would anchoring
+reach the worst case — `…explains_predicted_surface_count_is_a_prediction`'s
+`"not" in body` has eight genuine `\bnot\b` hits in its section, so a boundary
+match changes nothing about how little it constrains. And the count of eleven
+misses a sibling shape: `_window_after` is called twice with an unanchored
+`prohibition = ("may not", "must not", "never", "not permitted", "is not
+yours")` tuple, which is the same substring hole inside a windowed predicate and
+is not what `grep -c "in body and"` counts. The owed fix is the change of unit
+below, not a sweep — a sweep is the cheap repair that looks like the fix and is
+measurably not one.
 
 **Two holes no radius and no boundary matching reaches**, both confirmed by
 construction rather than reasoned about. The first is a **negated** prohibition:
