@@ -2702,15 +2702,23 @@ RUBRICA_SCHEMA_DIR=/nonexistent uv run rubrica validate --stage propose --run "$
 
 The toy fixture cannot reach this defect class — re-emitting its scenario set was always cheap — so the only end-to-end evidence is a real corpus whose denominator produces more closable holes than one response can hold. `run-20260825-094033`'s world model is on disk and has 170 denominator rows and 86 closable holes, which is exactly the failing case. Running `propose-batches` against it costs nothing and should produce 6 batches; that alone verifies the partition against the measurement without dispatching anything.
 
+**`runs/` is gitignored, so it does not exist in a worktree** — verified when this plan's own worktree came up with `tests/unit/test_sizing.py:64` newly skipped for exactly that reason. Reach the run by absolute path in the main checkout instead of a relative one:
+
 ```bash
-uv run rubrica propose-batches --run runs/run-20260825-094033 --round 2
+RUN=/home/bnayahu/work/kaegis/rubrica/runs/run-20260825-094033
+uv run rubrica propose-batches --run "$RUN" --round 2
 python3 -c "
-import json; d=json.load(open('runs/run-20260825-094033/02-batches.json'))
+import json, os
+d = json.load(open(os.environ['RUN'] + '/02-batches.json'))
 print(len(d['batches']), 'batches', [len(b['hole_refs']) for b in d['batches']])
 print('max projection', max(b['projected_bytes'] for b in d['batches']), 'cap', d['cap_bytes'])"
 ```
 
-Expected: 6 batches, none projecting over `cap_bytes`. **Do not commit that run directory** — `runs/` is gitignored, and this is a read-only probe of a historical run whose artifacts are evidence.
+Expected: 6 batches, none projecting over `cap_bytes`.
+
+Two cautions. This **writes** `02-batches.json` into a historical run whose artifacts are the evidence behind this whole change, so copy the run to a scratch directory first and probe the copy — the numbers are identical and the original stays untouched. And **do not commit any run directory**: `runs/` is gitignored for this reason.
+
+If that run is not on the machine, the partition is still covered by `test_the_partition_keeps_every_batch_inside_the_budget` in Task 3, which asserts the same 86-holes-to-6-batches case from the measurement. Say which of the two was actually run — a synthetic test passing is not evidence about the real world model, and the sizing test's own skip message makes exactly that distinction.
 
 - [ ] **Step 6: Commit**
 
