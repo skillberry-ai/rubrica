@@ -268,10 +268,10 @@ def check_catalogue(run: RunPaths) -> list[Finding]:
 def _and_join(items: list[str]) -> str:
     """ "a and b" for two items, "a, b, and c" for more -- never a bare comma list.
 
-    Only ever called on candidate coverage overlaps, which are rare enough
-    (a hand-edited plan, not a normal `write_slices` output) that this exists
-    purely so the message reads as English rather than "a, b" for the common
-    two-item case.
+    Called on candidate coverage overlaps and on a hole ref assigned to more than
+    one batch. Both are rare enough (a hand-edited plan, not a normal
+    `write_slices` or `write_batches` output) that this exists purely so the
+    message reads as English rather than "a, b" for the common two-item case.
     """
     if len(items) <= 1:
         return ", ".join(items)
@@ -1778,6 +1778,464 @@ def check_claim_utilisation(run: RunPaths) -> list[Finding]:
     return out
 
 
+# Exactly the two statuses scenarios-0.1.json's enum carries that OPEN_STATUSES
+# does not, spelled out rather than derived as a complement: a status this module
+# has never seen (a hand-edit, a schema that grew) must not be silently counted
+# as discarded, which `not in OPEN_STATUSES` would do.
+_DISCARDED_STATUSES = frozenset({"duplicate", "rejected"})
+
+
+def _batch_plan_findings(
+    path: Path,
+    plan: dict,
+    round_n: int,
+    cells: set[tuple[str, str]] | None,
+    goal_ids: set[str] | None,
+) -> list[Finding]:
+    """One round's batch plan, checked.
+
+    Split out of check_batches so the per-round `report` closure does not capture
+    a loop variable, and so every finding is anchored on this round's own file.
+    """
+    out: list[Finding] = []
+
+    def report(pointer: str, message: str) -> None:
+        out.append(Finding(path, "refs", pointer, message))
+
+    declared_round = plan.get("round")
+    if declared_round != round_n:
+        report(
+            "/round",
+            f"declares round {declared_round!r} but is the plan for round {round_n}; the round "
+            "in the filename is the one the parts beside it were dispatched for",
+        )
+
+    # Both factors of the projection, and both guarded against a bool: `True` is
+    # an `int` in Python, so a bare isinstance would multiply by it and report a
+    # projection of 0 as if the plan had declared one.
+    per_scenario = plan.get("bytes_per_scenario")
+    have_per_scenario = isinstance(per_scenario, int) and not isinstance(per_scenario, bool)
+    cap = plan.get("cap_bytes")
+    have_cap = isinstance(cap, int) and not isinstance(cap, bool)
+
+    # ref -> every batch id that claimed it, one entry per occurrence. A list
+    # rather than a set for the reason _claim_index keeps one: the same ref twice
+    # in ONE batch costs a second dispatched write exactly as it does across two,
+    # and a set would hide it.
+    owners: dict[str, list[str]] = {}
+    batch_ids: list[str] = []
+    for i, batch in enumerate(_as_list(plan.get("batches"))):
+        if not isinstance(batch, dict):
+            continue
+        bid = _str_or_none(batch.get("id"))
+        if bid is not None:
+            batch_ids.append(bid)
+        # A batch with no usable id is still checked for its own arithmetic --
+        # the missing id is layer 1's finding -- so the message falls back to the
+        # pointer rather than printing `None` as if that were the batch's name.
+        label = f"batch {bid}" if bid is not None else f"the batch at /batches/{i}"
+        refs = _as_list(batch.get("hole_refs"))
+        projected = batch.get("projected_bytes")
+        if have_per_scenario:
+            expected = len(refs) * per_scenario
+            if projected != expected:
+                report(
+                    f"/batches/{i}/projected_bytes",
+                    f"{label} declares projected_bytes={projected!r} but {len(refs)} hole_refs "
+                    f"at bytes_per_scenario={per_scenario} is {expected}",
+                )
+        if (
+            have_cap
+            and isinstance(projected, int)
+            and not isinstance(projected, bool)
+            and projected > cap
+        ):
+            # Anchored on hole_refs, not on projected_bytes, and the split is the
+            # repair: a batch over budget holds too many holes, where a drifted
+            # projection holds the wrong number. Two findings sharing one pointer
+            # would leave a test unable to tell which one fired.
+            report(
+                f"/batches/{i}/hole_refs",
+                f"{label} projects {projected} bytes, over the cap_bytes={cap} budget it was "
+                "packed against, so one member's output would not fit the harness",
+            )
+        for j, ref in enumerate(refs):
+            pointer = f"/batches/{i}/hole_refs/{j}"
+            if not isinstance(ref, str):
+                report(pointer, f"hole reference is not a string: {ref!r}")
+                continue
+            if bid is not None:
+                owners.setdefault(ref, []).append(bid)
+            try:
+                kind, parts = parse_hole_ref(ref)
+            except ValueError as exc:
+                report(pointer, str(exc))
+                continue
+            # Resolved only when a world model was readable. An absent one is not
+            # this checker's finding -- validate_stage owns that -- and an
+            # unreadable one is check_readable's, which check_all short-circuits
+            # on before reaching here.
+            if kind == "cell" and cells is not None and parts not in cells:
+                report(pointer, f"hole reference names no real cell: {ref}")
+            if kind == "goal" and goal_ids is not None and parts[0] not in goal_ids:
+                report(pointer, f"hole reference names no real goal: {ref}")
+
+    for dupe in _dupes(batch_ids):
+        report(
+            "/batches",
+            f"duplicate batch id {dupe!r}; a batch id is a part filename "
+            "(02-scenarios/round-N/<id>.json), so two batches sharing one share a part",
+        )
+
+    for ref in sorted(owners):
+        holders = owners[ref]
+        distinct = sorted(set(holders))
+        if len(distinct) > 1:
+            report(
+                "/batches",
+                f"hole ref {ref!r} is assigned to {_and_join(distinct)}; this is a partition, "
+                "not a covering, so two members proposing against one hole is a guaranteed "
+                "duplicate that score then has to fold",
+            )
+        elif len(holders) > 1:
+            report(
+                "/batches",
+                f"hole ref {ref!r} appears {len(holders)} times in batch {distinct[0]}, so that "
+                "batch spends two of its own slots on one hole",
+            )
+    return out
+
+
+def check_batches(run: RunPaths) -> list[Finding]:
+    """Every round's batch plan: its arithmetic, its budget, and its hole refs.
+
+    Walks `run.batches_rounds()` rather than one file, and anchors every finding
+    on the round's own `02-batches/round-N.json`, so a defect in round 2's
+    partition never names round 1's plan.
+
+    An absent 02-batches/ is not a finding: a run that has not reached propose has
+    no plan to check, and reporting one there would spend the orchestrator's
+    single repair attempt on a phantom. An *unreadable* plan is a finding naming
+    that plan, never a silent skip -- a checker that returns nothing because it
+    could not read its input is the `01-claims/` incident in the module docstring
+    wearing a checker's clothes.
+
+    Nothing here is semantic. Whether the partition is a *good* one -- whether
+    these holes belong together in one dispatch -- is not a question layer 2 can
+    ask; whether each ref resolves and each projection recomputes is.
+    """
+    rounds = run.batches_rounds()
+    if not rounds:
+        return []
+    world = _load(run.world_model)
+    cells = _cells(world) if isinstance(world, dict) else None
+    goal_ids = (
+        {g["id"] for g in _as_list(world.get("goals")) if isinstance(g, dict) and "id" in g}
+        if isinstance(world, dict)
+        else None
+    )
+    out: list[Finding] = []
+    for round_n in rounds:
+        path = run.batches(round_n)
+        try:
+            plan = read_json(path)
+        except ArtifactError as exc:
+            out.append(Finding(path, "refs", "", str(exc)))
+            continue
+        if not isinstance(plan, dict):
+            out.append(Finding(path, "refs", "", "batch plan is not a JSON object"))
+            continue
+        out.extend(_batch_plan_findings(path, plan, round_n, cells, goal_ids))
+    return out
+
+
+def _scenario_part_findings(
+    path: Path, batch_id: str, round_n: int, owners: dict[str, str]
+) -> list[Finding]:
+    """One propose part, checked against the batch it was dispatched with.
+
+    Split out of check_scenario_parts for the reason _batch_plan_findings is: the
+    `report` closure must not capture a loop variable, and every finding here
+    belongs on this part rather than on 02-scenarios.json, which no member wrote.
+    """
+    try:
+        part = read_json(path)
+    except ArtifactError as exc:
+        return [Finding(path, "refs", "", str(exc))]
+    if not isinstance(part, dict):
+        return [Finding(path, "refs", "", "propose part is not a JSON object")]
+    out: list[Finding] = []
+
+    def report(pointer: str, message: str) -> None:
+        out.append(Finding(path, "refs", pointer, message))
+
+    # The field against the filename, for the reason check_contradiction_parts
+    # compares subject_id against its own stem: the filename is the batch the
+    # member was dispatched with, the field is the batch it believed it was
+    # working on, and a mismatch means one member wrote a sibling's slice. No
+    # schema can see it, because both documents are individually valid.
+    field = _str_or_none(part.get("batch_id"))
+    if field is not None and field != batch_id:
+        report("/batch_id", f"declares batch_id {field!r} but is the part for {batch_id!r}")
+    declared_round = part.get("round")
+    if declared_round != round_n:
+        report(
+            "/round",
+            f"declares round {declared_round!r} but sits in round {round_n}'s part directory",
+        )
+
+    for i, scenario in enumerate(_as_list(part.get("scenarios"))):
+        if not isinstance(scenario, dict):
+            continue
+        sid = _str_or_none(scenario.get("id"))
+        named = sid if sid is not None else f"the scenario at /scenarios/{i}"
+        # BOTH axes a scenario credits coverage on, because both are what a
+        # sibling's member would otherwise have closed: goal_matrix credits a goal
+        # row from `goal_id`, capability_matrix credits a cell from
+        # `capability_refs`. A ref that no batch owns is not reported -- only one
+        # another batch owns -- so the clause bounds itself to the refs this round
+        # actually partitioned.
+        claimed: list[tuple[str, str]] = []
+        goal_id = _str_or_none(scenario.get("goal_id"))
+        if goal_id is not None:
+            claimed.append((f"/scenarios/{i}/goal_id", goal_ref(goal_id)))
+        for j, ref in enumerate(_as_list(scenario.get("capability_refs"))):
+            if not isinstance(ref, dict):
+                continue
+            capability_id = _str_or_none(ref.get("capability_id"))
+            outcome_class_id = _str_or_none(ref.get("outcome_class_id"))
+            if capability_id is None or outcome_class_id is None:
+                continue
+            claimed.append(
+                (
+                    f"/scenarios/{i}/capability_refs/{j}",
+                    cell_ref(capability_id, outcome_class_id),
+                )
+            )
+        for pointer, ref in claimed:
+            owner = owners.get(ref)
+            if owner is not None and owner != batch_id:
+                report(
+                    pointer,
+                    f"scenario {named} targets {ref}, which round {round_n} assigns to batch "
+                    f"{owner}, not to {batch_id} that wrote this part; a member that wandered "
+                    "into a sibling's holes writes a part byte-identical to one that did not, "
+                    "so this is the only layer that can see it",
+                )
+    return out
+
+
+def _scenario_round_findings(run: RunPaths, round_n: int) -> list[Finding]:
+    """One round's part directory against that round's own batch plan."""
+    out: list[Finding] = []
+    round_dir = run.scenario_round_dir(round_n)
+    # An unsafe stem cannot be a batch id, so it is not in scenario_part_batch_ids
+    # and scenario_part() cannot be asked for it. Reported as an ordinary finding
+    # for the reason check_contradiction_parts gives: an UnsafeSegment reaching
+    # cli.py would become exit 2 and take every other finding in the run with it.
+    for name in run.unsafe_scenario_part_names(round_n):
+        out.append(
+            Finding(
+                round_dir,
+                "refs",
+                "",
+                f"propose part {name!r} is not a usable batch id: a batch id must start with a "
+                "letter or digit and contain only letters, digits, dots, dashes, and underscores",
+            )
+        )
+    plan_path = run.batches(round_n)
+    try:
+        plan = read_json(plan_path)
+    except ArtifactError as exc:
+        out.append(
+            Finding(
+                plan_path,
+                "refs",
+                "",
+                f"{exc}; round {round_n} has propose parts, so the plan they were dispatched "
+                "from must be beside them -- without it no part can be checked against the "
+                "batch that owns its holes",
+            )
+        )
+        return out
+    if not isinstance(plan, dict):
+        out.append(Finding(plan_path, "refs", "", "batch plan is not a JSON object"))
+        return out
+
+    roster: set[str] = set()
+    # First declarer wins: a ref in two batches is check_batches' finding, and
+    # restating it here as an own-batch violation would report one plan defect
+    # twice and send the repair at a part instead of at the partition.
+    owners: dict[str, str] = {}
+    for batch in _as_list(plan.get("batches")):
+        if not isinstance(batch, dict):
+            continue
+        bid = _str_or_none(batch.get("id"))
+        if bid is None:
+            continue
+        roster.add(bid)
+        for ref in _as_list(batch.get("hole_refs")):
+            if isinstance(ref, str):
+                owners.setdefault(ref, bid)
+
+    on_disk = set(run.scenario_part_batch_ids(round_n))
+    for bid in sorted(roster - on_disk):
+        out.append(
+            Finding(
+                round_dir,
+                "refs",
+                "",
+                f"batch {bid} of round {round_n} has no propose part on disk; every batch needs "
+                "one, even one recording that its member could close nothing",
+            )
+        )
+    for bid in sorted(on_disk - roster):
+        out.append(
+            Finding(
+                run.scenario_part(round_n, bid),
+                "refs",
+                "",
+                f"propose part for batch {bid}, which round {round_n}'s batch plan does not "
+                "declare",
+            )
+        )
+    for bid in sorted(on_disk):
+        out.extend(_scenario_part_findings(run.scenario_part(round_n, bid), bid, round_n, owners))
+    return out
+
+
+def check_scenario_parts(run: RunPaths) -> list[Finding]:
+    """One propose part per batch, and every scenario inside its own batch.
+
+    **Meaningful only once every fan-out member has finished.** Every batch
+    without a part is reported from the moment 02-scenarios/round-N/ exists, so
+    mid-fan-out most of them are missing by construction -- exactly the caveat
+    check_verdicts and check_contradiction_parts carry, and for the same reason.
+    There is no stage-scoped check-refs: check_all runs every checker the run has
+    inputs for.
+
+    Each round's roster comes from that round's own `run.batches(round_n)`, never
+    from one shared plan: a singleton overwritten by round 2 would have round 1's
+    parts checked against round 2's assignment, reporting a missing batch for
+    every correct part after the first and naming the wrong artifact while doing
+    it.
+
+    The own-batch clause is the one check here that overlaps no other layer. A
+    member that proposed against a sibling's hole produces a part that satisfies
+    scenarios-part-0.1.json, hashes like any other, and reads as ordinary output;
+    only the plan beside it says whose hole that was. It mirrors
+    check_disposition_parts' clause 2, "a disposition naming a candidate outside
+    the slice its own part rules on".
+    """
+    rounds = run.scenario_part_rounds()
+    if not rounds:
+        return []
+    out: list[Finding] = []
+    for round_n in rounds:
+        out.extend(_scenario_round_findings(run, round_n))
+    return out
+
+
+def _score_part_findings(
+    path: Path, round_n: int, status_of: dict[str, Any] | None
+) -> list[Finding]:
+    """One score part's rulings against the sealed scenario list."""
+    try:
+        part = read_json(path)
+    except ArtifactError as exc:
+        return [Finding(path, "refs", "", str(exc))]
+    if not isinstance(part, dict):
+        return [Finding(path, "refs", "", "score part is not a JSON object")]
+    out: list[Finding] = []
+
+    def report(pointer: str, message: str) -> None:
+        out.append(Finding(path, "refs", pointer, message))
+
+    declared_round = part.get("round")
+    if declared_round != round_n:
+        report("/round", f"declares round {declared_round!r} but is the part for round {round_n}")
+    for i, ruling in enumerate(_as_list(part.get("rulings"))):
+        if not isinstance(ruling, dict):
+            continue
+        sid = _str_or_none(ruling.get("scenario_id"))
+        if sid is None:
+            continue
+        if status_of is not None and sid not in status_of:
+            report(
+                f"/rulings/{i}/scenario_id",
+                f"rules on {sid}, which 02-scenarios.json does not carry",
+            )
+        target = _str_or_none(ruling.get("duplicate_of"))
+        if target is None:
+            continue
+        if target == sid:
+            # Reported and then skipped: once a ruling folds a scenario onto
+            # itself, its target's status says nothing further, and a second
+            # finding on the same pointer would leave a test unable to tell which
+            # clause fired.
+            report(
+                f"/rulings/{i}/duplicate_of",
+                f"folds {sid} onto itself, so nothing survives the fold",
+            )
+            continue
+        if status_of is None:
+            continue
+        if target not in status_of:
+            report(
+                f"/rulings/{i}/duplicate_of",
+                f"folds {sid} onto {target}, which 02-scenarios.json does not carry",
+            )
+        elif status_of.get(target) in _DISCARDED_STATUSES:
+            report(
+                f"/rulings/{i}/duplicate_of",
+                f"folds {sid} onto {target}, which is itself {status_of[target]} in the sealed "
+                "document, so neither ships and every cell the two claimed is a hole again",
+            )
+    return out
+
+
+def check_score_parts(run: RunPaths) -> list[Finding]:
+    """Every round's score rulings against the sealed scenario list.
+
+    Reads the *sealed* 02-scenarios.json rather than the propose parts, because
+    that is the document a ruling has to resolve against and the one score-seal
+    folds it into. A fold chain -- a ruling folding A onto B while B is itself
+    `duplicate` or `rejected` -- leaves no shipped test for either scenario's
+    cells, and nothing else reports it: check_scenarios asks only whether
+    `duplicate_of` resolves, never what the target's own status is.
+
+    A finding names the part, not 02-scenarios.json, because the part is what a
+    re-dispatch of that round's rb-score can actually repair -- the sealed
+    document is code output.
+
+    Statuses are read as of the seal, which is what makes the fold-chain clause
+    honest across rounds: a later round may overturn an earlier ruling
+    (rb-score's Output sanctions exactly that), and if it rejects the scenario an
+    earlier fold pointed at, the earlier fold is *now* a chain with no shipped
+    test at its end. Reporting it is the point, not a false positive.
+
+    Reports nothing until 03-score/ holds a round part, and reads the sealed
+    document only if it is there: a score part is written after the propose seal,
+    so an absent 02-scenarios.json means the run is in a state no ruling can be
+    resolved against, which is validate_stage's finding rather than this one's.
+    """
+    rounds = run.score_part_rounds()
+    if not rounds:
+        return []
+    sealed = _load(run.scenarios)
+    status_of: dict[str, Any] | None = None
+    if isinstance(sealed, dict):
+        status_of = {
+            s["id"]: s.get("status")
+            for s in _as_list(sealed.get("scenarios"))
+            if isinstance(s, dict) and isinstance(s.get("id"), str)
+        }
+    out: list[Finding] = []
+    for round_n in rounds:
+        out.extend(_score_part_findings(run.score_part(round_n), round_n, status_of))
+    return out
+
+
 def check_scenarios(run: RunPaths) -> list[Finding]:
     """Scenario references into the world model, and internal consistency."""
     scenarios_doc = _load(run.scenarios)
@@ -2696,6 +3154,9 @@ def check_all(run: RunPaths) -> list[Finding]:
     findings.extend(check_outcomes(run))
     findings.extend(check_world_model(run))
     findings.extend(check_claim_utilisation(run))
+    findings.extend(check_batches(run))
+    findings.extend(check_scenario_parts(run))
+    findings.extend(check_score_parts(run))
     findings.extend(check_scenarios(run))
     findings.extend(check_coverage(run))
     findings.extend(check_instances(run))
