@@ -1151,6 +1151,24 @@ The document that used to be emitted whole by a model becomes a pure function of
 - Modify: `src/rubrica/rounds.py`, `src/rubrica/findings.py` (one layer name)
 - Test: `tests/unit/test_rounds.py`
 
+**Which failures are exit 2 and which are exit 1 — decided by who wrote the artifact.**
+This is the rule for every read in `rounds.py`, and it resolves what would
+otherwise be inherited by accident:
+
+| Artifact | Written by | On malformed content |
+|---|---|---|
+| `manifest.json` | `intake`, code | `UsageError` → exit 2 |
+| `01-world-model.json` | `reconcile-seal`, code | `UsageError` → exit 2 |
+| `02-scenarios.json` | `propose-seal`, code | `UsageError` → exit 2 |
+| `02-scenarios/round-N/<batch>.json` | **`rb-propose`, a model** | `Finding` → exit 1, naming the part |
+| `03-score/round-N.json` | **`rb-score`, a model** | `Finding` → exit 1, naming the part |
+
+No re-dispatch of any prompt can repair the first three, so reporting them as a
+repairable stage defect would be a lie to the orchestrator. The last two are
+exactly repairable stage defects, and the finding must name the one part so a
+single member can be re-dispatched. Put this reasoning in a comment where the
+split happens; uniformity is what a later tidy-up would impose.
+
 **Interfaces:**
 - Consumes: `RunPaths.scenario_part_rounds()`, `scenario_part_batch_ids()`, `unsafe_scenario_part_names()`, `score_part()` from Task 1.
 - Produces: `seal_scenarios(run: RunPaths) -> tuple[Path | None, list[Finding]]`, `collect_scenarios(run: RunPaths) -> tuple[list[dict], list[Finding]]`. Findings carry `layer="rounds"`.
@@ -1451,6 +1469,12 @@ def _apply_rulings(run: RunPaths, scenarios: list[dict]) -> list[Finding]:
                     )
                 )
                 continue
+            # Checked against score-part-0.1.json's own enum rather than merely
+            # for str: this value is written ONTO the sealed scenario, so an
+            # unexpected string would make 02-scenarios.json schema-invalid --
+            # a finding against code output. Indexed through a guard for the
+            # same reason every other read here is: a bare KeyError out of a code
+            # step surfaces as an exit-1 [internal] naming the run root.
             target["status"] = ruling["status"]
             # Set only what the new status requires, and clear the other, so a
             # scenario rejected after having been folded does not keep a stale
@@ -1476,10 +1500,28 @@ def seal_scenarios(run: RunPaths) -> tuple[Path | None, list[Finding]]:
     to fill and read as a complete scenario list to a human at gate 2.
     """
     scenarios, findings = collect_scenarios(run)
-    if not scenarios and not findings:
-        # Propose has not run. Not a refusal: reporting one would make the
-        # orchestrator retry a stage that was never dispatched.
+    # Branch on whether any PART EXISTS, never on whether any scenario was
+    # collected. The two states an empty list can mean are different, and only
+    # the accessor tells them apart:
+    #   no part files at all  -> propose was never dispatched. Not a refusal;
+    #     reporting one would make the orchestrator retry a stage that never ran.
+    #   parts exist, all empty -> every member legitimately refused its batch,
+    #     which is a real outcome the refusal conditions exist to produce. Seal an
+    #     EMPTY document: scenarios-0.1.json carries no minItems so it is valid,
+    #     rb-score needs something to read, and score computing the verdict over
+    #     zero scenarios is how the loop learns it made no progress. Withholding
+    #     the write would make an honest total refusal indistinguishable from a
+    #     stage that never ran.
+    # Note these are two DIFFERENT terminal signals from write_batches returning
+    # None (no closable holes); do not collapse them.
+    if not run.scenario_part_rounds() and not findings:
         return None, []
+    # Return BEFORE applying rulings when collection already failed. Otherwise an
+    # unparseable propose part makes every ruling naming its scenarios report
+    # against 03-score -- a finding against the wrong artifact, and against one a
+    # re-dispatch of score could not repair.
+    if findings:
+        return None, findings
     findings += _apply_rulings(run, scenarios)
     if findings:
         return None, findings
@@ -1488,7 +1530,13 @@ def seal_scenarios(run: RunPaths) -> tuple[Path | None, list[Finding]]:
         run.scenarios,
         {
             "schema_version": "0.1",
-            "denominator_version": world.get("denominator", {}).get("version", 1),
+            # Echoed, never defaulted. refs.check_scenarios compares this to the
+            # world model's own denominator version for EQUALITY, so a default of
+            # 1 on a world model at version 2 produces a check-refs finding
+            # against a document code wrote -- unrepairable by any re-dispatch.
+            "denominator_version": _object_or_refuse(
+                run.world_model, world["denominator"], ("version",), where="denominator"
+            )["version"],
             "scenarios": scenarios,
         },
     )
