@@ -128,7 +128,12 @@ def test_the_objective_pass_declares_its_exact_contract():
     """The brief's contract, verbatim: the plan alone -- never the catalogue,
     the shards, or a per-slice dispositions part. The catalogue left this list
     when 00-slices.json started carrying the facts this pass needs: reading
-    472,799 bytes for the 21KB it used was the residual half of issue #3."""
+    472,799 bytes for the 21KB it used was the residual half of issue #3.
+    Those absolutes are the tau2 catalogue this design was measured against; a
+    re-run of the same corpus later measured 480,399 bytes against a 21,041-byte
+    facts block. The catalogue figure moves with the checkout, the facts block
+    barely does -- it is bounded by how many candidates the run admitted rather
+    than by how large they are, which is the whole point."""
     skill = _objective()
     assert skill.contract["stage"] == "triage-objective"
     assert skill.contract["reads"] == ["slices"]
