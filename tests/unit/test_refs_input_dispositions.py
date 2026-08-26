@@ -104,6 +104,26 @@ def test_arithmetic_that_does_not_close_is_reported(tmp_path):
     assert "cited + dropped" in findings[0].message
 
 
+def test_a_non_integer_count_reports_rather_than_raising(tmp_path):
+    """A malformed count is layer 1's finding, but layer 2 must survive reading it.
+
+    check_all has no ordering guarantee that layer 1 rejected the document first.
+    Measured before the arithmetic clause was guarded: `"cited": "2"` in
+    01-outcomes.json raised `TypeError: can only concatenate str (not "int") to
+    str`, which cli.py converts into exit 1 with one generic `[internal]` finding
+    -- every other real finding in the run lost, and nothing naming the artifact
+    to repair. The guard is on that clause alone, so the two recomputations above
+    it still report: silence here would be the other half of the same defect.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    path, part = _rows(run)
+    row = next(r for r in part["inputs_seen"] if r["cited"])
+    row["cited"] = str(row["cited"])
+    write_json(path, part)
+    findings = refs.check_input_dispositions(run)
+    assert [f.pointer for f in findings] == [f"/inputs_seen/{part['inputs_seen'].index(row)}/cited"]
+
+
 def test_a_deleted_claims_file_is_not_this_checkers_finding(tmp_path):
     """A `1` must name the right artifact.
 
@@ -116,9 +136,34 @@ def test_a_deleted_claims_file_is_not_this_checkers_finding(tmp_path):
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     (run.claims_dir / "trace-json.json").unlink()
     findings = refs.check_input_dispositions(run)
-    assert findings, "the rows still declare counts for a file that is gone"
+    # The exact set, not just "some finding and no forbidden one": the two
+    # negatives below hold identically for a variant that emitted a *differently
+    # worded* absence finding anchored on 01-claims/, which is the thing this test
+    # names as forbidden. Measured: exactly two, both against the outcomes part,
+    # because trace-json is the only input whose own-kind claims any pass cited.
+    # The row's own arithmetic still closes (2 = 1 + 1), so the third clause is
+    # silent -- a row can be internally consistent and still be about a file that
+    # is gone, which is why the recomputation is the instrument and the
+    # arithmetic is only bookkeeping on top of it.
+    assert len(findings) == 2, [str(f) for f in findings]
+    assert [(f.artifact, f.pointer) for f in findings] == [
+        (run.outcomes_part, "/inputs_seen/2/own_kind_total"),
+        (run.outcomes_part, "/inputs_seen/2/cited"),
+    ], [str(f) for f in findings]
     assert all("no such claim" not in f.message for f in findings)
     assert all(f.artifact != run.claims_dir for f in findings)
+
+
+def test_check_all_reaches_this_checker(tmp_path):
+    """check_all runs every checker the run has inputs for, so a checker that is
+    written but not wired in is invisible to `rubrica check-refs`."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    path, part = _rows(run)
+    part["inputs_seen"].append(
+        {"artifact_id": "input-invented-999", "own_kind_total": 0, "cited": 0, "dropped": 0}
+    )
+    write_json(path, part)
+    assert any("input-invented-999" in f.message for f in refs.check_all(run))
 
 
 def test_a_row_that_cited_nothing_is_not_a_finding_when_the_arithmetic_holds(tmp_path):

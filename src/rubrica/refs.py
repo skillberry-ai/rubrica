@@ -177,7 +177,12 @@ def _claims_by_artifact(run: RunPaths) -> dict[str, list[dict]]:
 
     Keyed on the payload's own `artifact_id` rather than the filename, because
     that is the field every other checker resolves against and a mismatch
-    between the two is check_manifest's finding, not this reader's.
+    between the two is check_manifest's finding, not this reader's. Not silently,
+    though: a claims file whose payload names an artifact the manifest does not
+    register lands under a key no accounting row can name, so
+    check_input_dispositions reports a consequential own_kind_total disagreement
+    against the partial as well, and one defect ends up naming two artifacts.
+    check_manifest's is the finding to repair from.
     """
     out: dict[str, list[dict]] = {}
     for path in list_json(run.claims_dir):
@@ -1937,12 +1942,23 @@ def check_input_dispositions(run: RunPaths) -> list[Finding]:
                 )
                 continue
             # A claims file that is absent or unreadable contributes no claims, so
-            # this counts 0 for it and reports only the disagreement it genuinely
-            # sees. Reporting the absence itself belongs to the checker that owns
-            # 01-claims/ -- check-refs over an unreadable claims directory once
-            # produced four fabricated `no such claim` findings against a correct
-            # world model, and naming the wrong artifact is what sends the
-            # orchestrator's one bounded repair at a file that is fine.
+            # this counts 0 for it and reports only the count disagreement it
+            # genuinely sees against the partial.
+            #
+            # An *unreadable* claims file is check_readable's finding, by name. An
+            # *absent* one is deliberately nobody's: check_manifest checks the
+            # manifest-to-claims direction only, because "a registered input with
+            # no claims file yet is the normal state during the extract fan-out",
+            # and this checker must not become the place it is reported for the
+            # same reason -- the reconcile partials do not exist during that
+            # fan-out, so a row's disagreement is the only signal here, and it is
+            # a true one: a row declaring counts for a file that is gone is wrong
+            # whatever became of the file. Inferring the absence *from* the
+            # disagreement is what this must not do. check-refs over an unreadable
+            # claims directory once produced four fabricated `no such claim`
+            # findings against a correct world model, and naming the wrong
+            # artifact is what sends the orchestrator's one bounded repair at a
+            # file that is fine.
             own = [
                 claim
                 for claim in by_artifact.get(artifact_id, [])
@@ -1962,7 +1978,24 @@ def check_input_dispositions(run: RunPaths) -> list[Finding]:
                     f"declared cited={row.get('cited')} for {artifact_id} but this "
                     f"artifact's claims appear {actual_cited} time(s) in this part",
                 )
-            if row.get("cited", 0) + row.get("dropped", 0) != row.get("own_kind_total"):
+            # Only this clause is guarded on the reads being integers, and that
+            # asymmetry is the point: the two comparisons above are `!=` against a
+            # recomputed int, which a string or a None fails cleanly and reports,
+            # so a malformed row still produces findings rather than falling
+            # silent. Addition does not fail cleanly. Measured on a real toy run,
+            # `"cited": "2"` in 01-outcomes.json raised `TypeError: can only
+            # concatenate str (not "int") to str` out of this line; cli.py turns
+            # that into exit 1 with one generic `[internal]` finding, so every
+            # other real finding in the run is lost -- the specificity failure
+            # check_world_model's guard block above records the same measurement
+            # for. check_all has no ordering guarantee that layer 1 rejected the
+            # document first (_as_list's docstring states the rule), and
+            # check_verdicts' declared-vs-found comparison guards both sides this
+            # same way.
+            counts = [row.get(key) for key in ("cited", "dropped", "own_kind_total")]
+            if all(isinstance(value, int) for value in counts) and (
+                counts[0] + counts[1] != counts[2]
+            ):
                 report(
                     f"/inputs_seen/{i}",
                     f"cited + dropped does not equal own_kind_total for {artifact_id}",
