@@ -45,6 +45,17 @@ _ERROR_KEYS = ("error", "exception", "traceback", "stack_trace")
 # was kept for.
 _ERROR_SUBSTRINGS = ("exception", "error")
 _SKELETON_DEPTH = 3
+# What `_source_digest` actually has a parser for. `intake._SOURCE_SUFFIXES`
+# classifies eight languages as `source_code`, which is true of the files; this is
+# the one whose grammar `ast` reads. Measured on the parsec corpus
+# (run-20260826-090456): 135 of 135 `.py` candidates parsed and 0 of 5 `.js` did --
+# a split falling exactly on the language boundary, which is not something file
+# contents do. The cause is the language and not the characters: four of those
+# five files name a unicode character in their SyntaxError, but pure-ASCII
+# JavaScript fails `ast.parse` identically, so a fix aimed at the unicode would
+# leave the defect intact. This set grows only when a parser for that language
+# lands; until then its suffix takes the prose route below.
+_PARSEABLE_SUFFIXES = {".py"}
 _MAX_NAMES = 64
 # The development corpus carries a 1191-key pricing table as one JSON file
 # (classified "other"). Recursing into every key produced a
@@ -339,6 +350,11 @@ def _prose_digest(text: str, body_chars: int) -> dict:
 def _source_digest(text: str) -> dict:
     """Top-level names only, via ast -- never a regex over source.
 
+    Python only. `ast` reads one of the eight suffixes `intake` classifies as
+    source code, and `digest_for_path` routes the other seven to its prose
+    fallback, so `parse_failed` below means "these bytes are not valid Python"
+    and never "this digester has no parser for this language".
+
     `assignments` is the field a projection brief depends on: such a brief can only
     say "the schemas are the literals named TOOL_DEFINITIONS" if triage can see
     that name, and defs and classes alone do not carry it.
@@ -561,7 +577,33 @@ def digest_for_path(path: Path, kind: str, *, body_chars: int) -> dict:
     if kind == "design_doc":
         return _prose_digest(text, body_chars)
     if kind == "source_code":
-        return _source_digest(text)
+        suffix = path.suffix.lower()
+        if suffix in _PARSEABLE_SUFFIXES:
+            return _source_digest(text)
+        # No parser for this language. Prose rather than a bare flag, for the
+        # reason `digest_for_path`'s JSON fallback below already states: give
+        # triage something it can rule on and let it decline if that is not
+        # enough. Measured on parsec's `static/app.js`, 101,483 bytes: `lines`
+        # 2650, a 2000-char `body_head` at the first real statement, and
+        # `digest_truncated` true. `unsupported_language` names the suffix
+        # because a reader must be able to tell "this digester has no parser"
+        # from "these bytes are broken" -- conflating the two put a digester bug
+        # into a gate-0 brief as a 101KB corpus gap, in language a human
+        # reviewer had no way to challenge.
+        result = _prose_digest(text, body_chars)
+        # `headings` means markdown headings, and `_prose_digest` keeps it
+        # complete rather than truncated on purpose. Over a `#`-commented
+        # language that is every comment line, unbounded in comment count:
+        # measured, 500 Ruby comment lines produce 500 headings and 21,890 bytes
+        # in one candidate row, against the 65,536-byte slice a row may not
+        # exceed without `survey` exiting 2. Six of the seven suffixes routed
+        # here use `//` and would collect an empty list, so the field earns
+        # nothing in either direction. Dropped here rather than bounded in
+        # `_prose_digest`, which must keep the complete outline it gives a
+        # `design_doc`.
+        del result["headings"]
+        result["unsupported_language"] = suffix
+        return result
     try:
         payload = json.loads(text)
     except (json.JSONDecodeError, RecursionError):

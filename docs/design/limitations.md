@@ -1395,6 +1395,41 @@ smaller. That narrows the single point of failure in order to buy bytes; the
 clamp exists to make a bound enforceable, not to make digests thinner across the
 board.
 
+### Only Python has a source parser, so the other declared languages digest as prose rather than structure
+
+`intake._SOURCE_SUFFIXES` classifies eight suffixes as `source_code`, and
+`_source_digest` reads exactly one of them: it parses with Python's `ast`, and
+its own docstring forbids the regex scanner that would be the cheap way to widen
+it. So a `.ts`, `.tsx`, `.js`, `.go`, `.rs`, `.java` or `.rb` candidate reaches
+triage as `lines`, a `body_head` and `unsupported_language`, never as the
+`defs` / `classes` / `assignments` a projection brief wants.
+
+Until 2026-08-26 it was worse than thin: those files recorded `parse_failed:
+true`, which asserts the bytes are broken. Measured on the parsec corpus
+(`run-20260826-090456`): 135 of 135 `.py` candidates parsed and 0 of 5 `.js`
+did, a split falling exactly on the language boundary, and `node --check`
+accepted every one of the five. Both gate-0 deficiencies in that run, plus two
+projection proposals, were downstream of the flag — each attributing to the
+corpus a 101KB gap the digester had created, in language a human reviewer had no
+way to challenge. The triage passes were not at fault: `digest_insufficient` is
+the honest disposition for a candidate whose digest says only that it could not
+be read.
+
+The prose route and the `unsupported_language` marker are the mitigation, not
+the fix: a reader can now tell "this digester has no parser" from "these bytes
+are broken", and a triage pass has something it can rule on. What is still owed
+is a language-aware digest, and it is a spec rather than a patch — no regex, one
+real parser per language, and everything it emits inside this module's
+bounded-output discipline. Two things a patch round must not miss: the
+`headings` field is deliberately complete rather than truncated, so it is
+dropped on this route (500 Ruby comment lines measured to 500 headings and
+21,890 bytes in one candidate row, against the 65,536-byte cap a row may not
+exceed without `survey` exiting 2); and `_source_digest` bounds nothing at all
+today — `defs`, `classes`, `assignments` and `imports` have no entry cap — so a
+parser over a file like parsec's 101KB `static/app.js`, which carries on the
+order of 144 top-level names, needs a cap and a visible truncation flag in the
+`keys_truncated` / `skeleton_nodes_truncated` / `role_keys_truncated` family.
+
 ---
 
 ## Before you file a bug against the check layers or the CLI

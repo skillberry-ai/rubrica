@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 
 from rubrica import digest
+from rubrica.intake import classify
 
 
 def test_prose_carries_the_full_heading_outline(tmp_path):
@@ -50,6 +51,93 @@ def test_source_carries_top_level_assignments_not_only_defs(tmp_path):
     assert result["defs"] == ["build"]
     assert result["classes"] == ["Registry"]
     assert result["imports"] == ["json", "typing"]
+    # Python has a parser, so neither fallback marker may appear. Without
+    # these, a regression routing `.py` into the prose branch would leave
+    # every test below green.
+    assert "unsupported_language" not in result
+    assert "parse_failed" not in result
+
+
+def test_a_javascript_file_digests_as_prose_rather_than_a_parse_failure(tmp_path):
+    """`_source_digest` parses with Python's `ast`, so it can only read `.py`.
+
+    Measured on the parsec corpus (run-20260826-090456): 135 of 135 `.py`
+    candidates parsed and 0 of 5 `.js` did, a split that falls exactly on the
+    language boundary rather than on anything the bytes contain. The seven
+    suffixes without a parser therefore take the prose route, which a triage
+    pass can rule on, instead of a bare flag it cannot.
+    """
+    path = tmp_path / "app.js"
+    path.write_text(
+        "// Render the choice list.\n"
+        "import { describe } from 'vitest';\n"
+        "export function renderChoice(opts) {\n"
+        "  return opts.map(o => o.label);\n"
+        "}\n"
+        "export class Exporter { toCSV(rows) { return rows.join(','); } }\n",
+        encoding="utf-8",
+    )
+    # Through the real path: the file is still classified as source code, because
+    # it is source code. Only the digester's route changes.
+    assert classify(path) == "source_code"
+    result = digest.digest_for_path(path, classify(path), body_chars=2000)
+
+    assert result["unsupported_language"] == ".js"
+    # The whole point: valid JavaScript is not a parse failure, and a digest that
+    # said so put a digester bug into a gate-0 brief as a corpus gap.
+    assert "parse_failed" not in result
+    assert result["lines"] == 6
+    assert "renderChoice" in result["body_head"]
+    assert result["digest_truncated"] is False
+
+
+def test_the_unsupported_route_turns_on_the_language_not_on_the_characters(tmp_path):
+    """Four of the five parsec `.js` failures named a unicode character, which
+    makes the defect look like an encoding problem. It is not: pure-ASCII,
+    idiomatic JavaScript fails `ast.parse` identically. This pins the em-dash as
+    a red herring, so a later fix aimed at the characters cannot look sufficient.
+    """
+    path = tmp_path / "pure.js"
+    path.write_text("export function f(a) { return a.map(x => x + 1); }\n", encoding="utf-8")
+    result = digest.digest_for_path(path, "source_code", body_chars=2000)
+    assert result["unsupported_language"] == ".js"
+    assert "parse_failed" not in result
+
+
+def test_a_python_file_that_genuinely_does_not_parse_still_says_parse_failed(tmp_path):
+    """`parse_failed` keeps its name and narrows to what it says. It is the one
+    reading a caller cannot get any other way -- a `.py` file whose bytes the
+    parser rejects -- and it must stay distinguishable from a language this
+    digester has no parser for at all.
+    """
+    path = tmp_path / "broken.py"
+    path.write_text("def f(\n", encoding="utf-8")
+    result = digest.digest_for_path(path, "source_code", body_chars=2000)
+    assert result["parse_failed"] is True
+    # The two markers are mutually exclusive by construction: this is a Python
+    # file and Python has a parser, so nothing here is unsupported.
+    assert "unsupported_language" not in result
+
+
+def test_an_unsupported_source_file_carries_no_heading_outline(tmp_path):
+    """`_prose_digest`'s `headings` means markdown headings, and is deliberately
+    complete rather than truncated. A `#`-commented language would therefore put
+    every comment line in the candidate row, unbounded in comment count:
+    measured, 500 Ruby comment lines produce 500 headings and 21,890 bytes,
+    against the 65,536-byte one-slice cap that makes `survey` exit 2 on an
+    oversized row. Six of the seven unsupported suffixes use `//` and would
+    collect an empty list, so the field earns nothing either way.
+    """
+    path = tmp_path / "reservation.rb"
+    path.write_text(
+        "\n".join([f"# comment line {i}" for i in range(500)] + ["class Reservation", "end"]),
+        encoding="utf-8",
+    )
+    result = digest.digest_for_path(path, "source_code", body_chars=2000)
+    assert result["unsupported_language"] == ".rb"
+    assert "headings" not in result
+    # The row cannot grow with comment count: what remains is the bounded set.
+    assert set(result) == {"lines", "body_head", "digest_truncated", "unsupported_language"}
 
 
 def test_a_json_document_carries_a_structural_skeleton(tmp_path):
