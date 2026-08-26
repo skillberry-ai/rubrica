@@ -60,7 +60,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from rubrica import brief, reconcile, refs, seal, skills, slices, survey, triage
+from rubrica import brief, reconcile, refs, seal, skills, slices, summary, survey, triage
 from rubrica.artifacts import ArtifactError, read_json
 from rubrica.dedupe import candidate_pairs
 from rubrica.emit import emit_run
@@ -105,6 +105,7 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("decide", "append one orchestrator decision to the run's decisions.md"),
     ("claim-utilisation", "per-artifact share of claims the world model cites"),
     ("gate-brief", "compose the existing reports into the human surface at one gate"),
+    ("run-summary", "render one run as a single self-contained HTML page"),
     ("set-limit", "change a manifest limit, with the reason recorded in decisions.md"),
 )
 
@@ -238,6 +239,19 @@ def _build_parser() -> argparse.ArgumentParser:
     # and a second spelling of the gate set is a thing to forget. Gate 0 was added
     # after the other three, which is the update this would have missed.
     p_brief.add_argument("--gate", required=True, type=int, choices=brief.GATES)
+
+    p_summary = parsers["run-summary"]
+    p_summary.add_argument("--run", required=True)
+    # Defaulted rather than required: the page's home is the run it describes,
+    # and an operator rendering one run after another should not have to name a
+    # path each time. -o is for the case where the run directory is read-only.
+    p_summary.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        metavar="PATH",
+        help="where to write the page (default: <run>/run-summary.html)",
+    )
 
     p_set_limit = parsers["set-limit"]
     p_set_limit.add_argument("--run", required=True)
@@ -577,6 +591,26 @@ def main(argv: list[str] | None = None) -> int:
             # set is already rejected before this line is reached, on the same
             # SystemExit(2) path every other bad argument takes.
             print(brief.gate_brief(_run_dir(args.run), args.gate))
+            return CLEAN
+
+        if args.command == "run-summary":
+            # The same ruling as claim-utilisation and gate-brief above: this
+            # composes what the run already contains, so it is never the thing
+            # that turns a readable run into exit 1. Every artifact the page
+            # reads is optional and an absent one renders as a stated absence,
+            # so a run that stopped at extract is a page saying so, not a
+            # finding -- which is why there is no _report call on this path.
+            run = _run_dir(args.run)
+            destination = Path(args.output) if args.output else run.root / "run-summary.html"
+            # No local catch: an OSError from write_text -- a read-only
+            # destination, a missing parent -- is the filesystem refusing, and
+            # the shared handler below already maps that to USAGE. Catching it
+            # here to return FINDINGS would be the 2-as-1 inversion this
+            # module's docstring says it closed.
+            destination.write_text(summary.run_summary(run), encoding="utf-8")
+            # The path, not the page: the page is a file an operator opens, and
+            # 300KB of markup on a terminal is not a report.
+            print(destination)
             return CLEAN
 
         if args.command == "set-limit":

@@ -13,7 +13,7 @@ import os
 
 import pytest
 
-from rubrica import summary
+from rubrica import cli, summary
 from rubrica.paths import STAGES, RunPaths
 from tests.toy import build_toy_run
 
@@ -4215,3 +4215,92 @@ def test_summary_html_reads_exactly_one_artifact_and_names_it():
     ]
     assert reads == ['text = run.decisions.read_text(encoding="utf-8")'], reads
     assert "decisions.md" in summary_html.__doc__
+
+
+# The six CLI tests below are strengthened past the shapes that were *measured*
+# satisfiable by a wrong wiring. Each mutation and its result:
+#
+#   deleting `destination.write_text(...)`  -- the command writes nothing, still
+#     exits 0 and still prints a path -- left the two "exits clean" tests green,
+#     because a bare `code == 0` says nothing about a file. Both now read the
+#     page back.
+#   `print("run-summary.html")` instead of the destination left the path test
+#     green, because the substring is present whether or not the printed path is
+#     the one written. It now pins the exact line.
+#   writing to *both* the explicit `-o` path and the default left the -o test
+#     green, because `out.exists()` cannot see the extra file. It now pins the
+#     default's absence.
+#   and the exit-2 test passed before `run-summary` was a subcommand at all, on
+#     argparse's SystemExit(2) path. It now pins the message `_run_dir` produces.
+
+
+def test_cli_writes_the_page_into_the_run_by_default(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    code = cli.main(["run-summary", "--run", str(run.root)])
+    assert code == 0
+    written = run.root / "run-summary.html"
+    assert written.exists()
+    text = written.read_text(encoding="utf-8")
+    assert text.startswith("<!doctype html>")
+    # The whole page and nothing else: run_summary is a pure function of the run
+    # directory, so equality here catches a wiring that renders a stub, truncates
+    # the write, or hands the renderer some other path.
+    assert text == summary.run_summary(run)
+
+
+def test_cli_prints_the_path_it_wrote(tmp_path, capsys):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    capsys.readouterr()  # drop whatever the fixture build wrote
+    cli.main(["run-summary", "--run", str(run.root)])
+    assert capsys.readouterr().out == f"{run.root / 'run-summary.html'}\n"
+
+
+def test_cli_honours_an_explicit_output_path(tmp_path, capsys):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    out = tmp_path / "elsewhere" / "page.html"
+    out.parent.mkdir()
+    capsys.readouterr()  # drop whatever the fixture build wrote
+    assert cli.main(["run-summary", "--run", str(run.root), "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8").startswith("<!doctype html>")
+    # The printed path follows -o. Pinned here as well as in the default case,
+    # because printing the default unconditionally is invisible to every other
+    # assertion: printing a path creates no file for them to see.
+    assert capsys.readouterr().out == f"{out}\n"
+    # -o redirects rather than adds. The flag exists for a read-only run
+    # directory, so writing there anyway would defeat its only purpose.
+    assert not (run.root / "run-summary.html").exists()
+
+
+def test_cli_exits_clean_on_a_run_that_stopped_early(tmp_path):
+    """A report is never a gate: the 10-of-11 partial case must exit 0.
+
+    And it must exit 0 having written a page that *states* the absences, which is
+    the behaviour cli.md promises for this case -- not merely an exit code.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+    assert cli.main(["run-summary", "--run", str(run.root)]) == 0
+    page = (run.root / "run-summary.html").read_text(encoding="utf-8")
+    assert page.startswith("<!doctype html>")
+    assert page.endswith("</body></html>")
+    assert "Not present: 01-world-model.json" in page
+
+
+def test_cli_exits_clean_on_an_almost_empty_run(tmp_path):
+    empty = tmp_path / "run-empty"
+    empty.mkdir()
+    assert cli.main(["run-summary", "--run", str(empty)]) == 0
+    page = (empty / "run-summary.html").read_text(encoding="utf-8")
+    assert page.startswith("<!doctype html>")
+    assert page.endswith("</body></html>")
+    # Not even a manifest, and still a whole page: every section is present and
+    # says what it looked for.
+    assert "Not present: manifest.json" in page
+
+
+def test_cli_exits_two_on_a_missing_run_directory(tmp_path, capsys):
+    missing = tmp_path / "nope"
+    assert cli.main(["run-summary", "--run", str(missing)]) == 2
+    # The 2 has to come from _run_dir's check rather than from argparse rejecting
+    # an unknown subcommand: measured, this assertion on the exit code alone
+    # passed before `run-summary` was wired at all.
+    assert f"run directory does not exist: {missing}" in capsys.readouterr().err
