@@ -64,6 +64,16 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .spine li.yes { font-weight: 600; } .spine li.no { opacity: .45; }
 .cell.yes { background: #2a72; } .cell.no { background: #c602; }
 .matrix td.cell { white-space: nowrap; font-size: 12px; }
+/* The goal grid's four states. `yes` and `no` reuse the cell matrix's tints --
+   same question, same answer -- and the two extra ones are what a goal-by-depth
+   cell can be that a capability cell cannot: reached at a depth the goal never
+   asked for, and a depth that is simply not this goal's business. Each also
+   carries a mark and a title, per the `.hole-reason` rule below: colour alone
+   never carries a distinction on this page. */
+.gcell.yes { background: #2a72; } .gcell.no { background: #c602; }
+.gcell.off { background: #85f3; } .gcell.na { opacity: .35; }
+.matrix td.gcell, .matrix th.gcell { white-space: nowrap; font-size: 12px;
+    text-align: center; font-variant-numeric: tabular-nums; }
 .scroll { overflow-x: auto; }
 .mono { font-family: ui-monospace, monospace; font-size: 12px; }
 /* An unreachable hole is a closed question; every other reason is an open one a
@@ -676,6 +686,81 @@ def _matrix(cells) -> str:
     )
 
 
+# The four states a goal-by-hop-depth cell can be in, each as (class, mark, title).
+# A table rather than a chain of conditionals in the loop, because the property the
+# tests lock is that all four are *distinguishable* -- and two of them differ from
+# their neighbour only in the title, which is exactly the pair a hand-written
+# conditional collapses. `{d}` is the depth.
+_GOAL_STATES: dict[tuple[bool, bool], tuple[str, str, str]] = {
+    (True, True): ("yes", "\u2713", "covered at hop depth {d}"),
+    (True, False): ("no", "\u2717", "expected at hop depth {d}, no scenario reached it"),
+    # Not an open slot and not a covered one. Measured on `run-20260825-094033`:
+    # `goal-slack-draft` has `present: [1]` against `expected: [2, 3]`, is `covered:
+    # false`, and carries no hole saying why -- so this cell is the only place on
+    # the page that fact appears at all.
+    (False, True): (
+        "off",
+        "\u26a0",
+        "a scenario reached hop depth {d}, which this goal does not expect",
+    ),
+    (False, False): ("na", "\u00b7", "not expected at hop depth {d}"),
+}
+
+
+def _goal_matrix(goals) -> str:
+    """The goal matrix: one row per goal, one column per hop depth, four states.
+
+    **A real grid, where the capability matrix deliberately is not one.** `_matrix`
+    above refuses the cross product because an outcome class belongs to one
+    capability, so 37x148 would be 97% padding. Here the columns are hop depths,
+    which `coverage-0.1.json` bounds to 1..5 -- so the grid is at most five columns
+    wide however large the world model is, and it is dense: on
+    `run-20260825-094033`, 22 goals over three depths, 66 cells with nothing
+    padded.
+
+    Drawn because the grid shape is what makes one particular failure legible.
+    `docs/design/limitations.md` records, at "The loop's stopping rule is blind to
+    goal-coverage progress", that after round 2 each of nine uncovered goals was
+    missing exactly one hop depth and always the deepest. Fourteen of the 22 goals
+    on that run have a scenario and are still uncovered. As a row of two comma
+    lists that is a diff a reader does by eye; as a column of open cells under
+    `hop 3` it is the first thing they see.
+
+    Columns are the union of every depth in *either* list, ascending. The union
+    rather than the expected depths alone is what gives the `off` state a column at
+    all, and ascending because hop depth is a magnitude -- `hop 3` left of `hop 1`
+    reads as a rendering bug. Rows keep `latest.json`'s own order, the same ruling
+    `_matrix` records.
+    """
+    depths = sorted({d for goal in goals for d in (*goal.expected, *goal.present)})
+    head = "".join(f'<th class="gcell">hop {esc(d)}</th>' for d in depths)
+    rows = []
+    for goal in goals:
+        ids = ", ".join(goal.scenario_ids)
+        # The scenarios belong to the row, never to a cell: `goal_matrix` records
+        # them per goal and says nothing about which one reached which depth, so a
+        # cell title claiming that would be the page asserting what the document
+        # does not.
+        first = (
+            f'<td class="mono" title="{esc(ids) if ids else "no scenario covers this goal"}">'
+            f"{esc(goal.goal_id)}</td>"
+        )
+        expected, present = set(goal.expected), set(goal.present)
+        tds = []
+        for depth in depths:
+            css, mark, title = _GOAL_STATES[(depth in expected, depth in present)]
+            # The depth is printed in the cell as well as in the column heading:
+            # the grid scrolls sideways at five columns on a narrow window, and a
+            # bare tick with the heading off-screen names nothing.
+            label = f"{esc(depth)}&nbsp;{mark}" if css != "na" else mark
+            tds.append(f'<td class="gcell {css}" title="{esc(title.format(d=depth))}">{label}</td>')
+        rows.append(f"<tr>{first}" + "".join(tds) + "</tr>")
+    return (
+        '<div class="scroll"><table class="matrix"><thead><tr><th>goal</th>'
+        f"{head}</tr></thead><tbody>\n" + "\n".join(rows) + "\n</tbody></table></div>"
+    )
+
+
 def _coverage(run: RunPaths):
     got = summary.coverage(run)
     if isinstance(got, Marker):
@@ -770,6 +855,21 @@ def _coverage(run: RunPaths):
         )
     else:
         parts.append('<p class="absent">latest.json carries no capability cell.</p>')
+    parts.append(f"<h3>Goal matrix ({esc(len(got.goals))} goals)</h3>")
+    if got.goals:
+        parts.append(_goal_matrix(got.goals))
+        parts.append(
+            '<p class="note">One row per goal, one column per hop depth: '
+            "<b>&#10003;</b> covered, <b>&#10007;</b> expected and unreached, "
+            "<b>&#9888;</b> reached at a depth the goal does not expect, "
+            "<b>&middot;</b> not expected. A goal counts as covered only when every "
+            "expected depth is reached, so a row of one tick and one cross is an "
+            "uncovered goal that already has a scenario. The first cell names the "
+            "scenarios covering the goal &mdash; the document records those per goal, "
+            "not per depth.</p>"
+        )
+    else:
+        parts.append('<p class="absent">latest.json carries no goal row.</p>')
     parts.append(f"<h3>Open holes at the last round ({esc(len(got.holes))})</h3>")
     # Said at the heading rather than left to the column: a reader comparing this
     # count against the matrix's is comparing two different denominators, and the

@@ -456,8 +456,9 @@ rubrica claim-utilisation --run runs/run-20260806-123005
 Renders one run directory as a single self-contained HTML page: the stage spine,
 the manifest's inputs and per-stage record, the objective verdict and grouped
 dispositions, world-model counts and claim utilisation, the coverage
-progression and capability matrix, one line per scenario joined to its verdict
-and emitted package, and the rule-based flags.
+progression with both of `latest.json`'s matrices &mdash; capability cells, and
+goals by hop depth &mdash; one line per scenario joined to its verdict and
+emitted package, and the rule-based flags.
 
 Required: `--run RUN`. Optional: `-o PATH` / `--output PATH` — where to write
 the page, defaulting to `<run>/run-summary.html`.

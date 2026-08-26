@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import pytest
 
@@ -2029,6 +2030,114 @@ def test_coverage_exposes_matrix_cells_with_their_scenarios(tmp_path):
     assert [c.scenario_ids for c in got.cells if c.scenario_ids], "and they name their scenarios"
 
 
+def test_coverage_exposes_goal_rows_with_their_depths_and_scenarios(tmp_path):
+    """The goal matrix is `latest`'s, row for row, and a round document's is a decoy.
+
+    Field by field against the document rather than by count, for the reason the
+    cell test above gives: `hop_depths_present` and `hop_depths_expected` are the
+    same `$defs/hop_depths` type, so a builder that read one into the other would
+    satisfy every count-and-type assertion. Swapping them is the defect that
+    matters most here -- it would turn every open depth into a covered one, which
+    is the exact reading the matrix exists to prevent.
+
+    The toy converges with both goals covered at their only expected depth, so one
+    row is edited before the read: with the fixture untouched, a builder hard-coding
+    `covered=True` and `present=expected` was measured surviving this test.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    latest = read_json(run.coverage_latest)
+    open_row = latest["goal_matrix"]["rows"][1]
+    open_row["covered"] = False
+    open_row["hop_depths_present"] = []
+    open_row["hop_depths_expected"] = [2, 3]
+    write_json(run.coverage_latest, latest)
+    decoy = {
+        "goal_id": "goal-decoy",
+        "scenario_ids": [],
+        "hop_depths_present": [],
+        "hop_depths_expected": [1],
+        "covered": False,
+    }
+    write_json(
+        run.coverage_round(1),
+        _round_doc(latest, goal_matrix={"rows": [decoy], "covered": 0, "total": 1, "pct": 0}),
+    )
+    got = summary.coverage(run)
+    assert [(g.goal_id, g.scenario_ids, g.present, g.expected, g.covered) for g in got.goals] == [
+        (
+            m["goal_id"],
+            m["scenario_ids"],
+            m["hop_depths_present"],
+            m["hop_depths_expected"],
+            m["covered"],
+        )
+        for m in latest["goal_matrix"]["rows"]
+    ]
+    assert "goal-decoy" not in {g.goal_id for g in got.goals}
+    assert [g for g in got.goals if g.covered], "covered goals read as covered"
+    assert [g for g in got.goals if not g.covered], "and the open one as open"
+    assert [g for g in got.goals if g.expected != g.present], "and a missing depth is visible"
+
+
+def test_coverage_keeps_a_hop_depth_present_that_the_goal_does_not_expect(tmp_path):
+    """A scenario landing at an unexpected depth survives into the row.
+
+    Measured on `run-20260825-094033`: `goal-slack-draft` carries `present: [1]`
+    against `expected: [2, 3]`, so a scenario reached it three hops shallower than
+    anything asked for. `covered` is false and no hole says why, which makes the
+    two depth lists the only record of it -- an implementation that intersected
+    `present` with `expected`, which reads like tidying, would erase the one signal
+    this row has.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    latest = read_json(run.coverage_latest)
+    latest["goal_matrix"]["rows"][0]["hop_depths_present"] = [1, 4]
+    write_json(run.coverage_latest, latest)
+    assert summary.coverage(run).goals[0].present == [1, 4]
+
+
+@pytest.mark.parametrize("bad", ["two", 2, None, {"1": 1}])
+def test_coverage_reads_a_hop_depth_list_that_is_not_a_list_as_empty(tmp_path, bad):
+    """A non-list where a depth array belongs contributes no depth.
+
+    The same shape `_strings` and `_dicts` exist for, one level further in: a
+    hand-edited `"hop_depths_present": "two"` is iterable, and iterating it would
+    yield the *characters* `t`, `w`, `o` as three hop depths of a 22-goal matrix.
+    A bare `2` and a `None` are not iterable at all and would raise instead.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    latest = read_json(run.coverage_latest)
+    latest["goal_matrix"]["rows"][0]["hop_depths_present"] = bad
+    write_json(run.coverage_latest, latest)
+    got = summary.coverage(run)
+    assert got.goals[0].present == []
+    assert got.goals[0].expected == [1], "the sibling list is untouched"
+
+
+def test_coverage_does_not_read_a_boolean_as_a_hop_depth(tmp_path):
+    """`True` is an `int` in Python, and a hop depth column must not print it.
+
+    `isinstance(True, int)` is true, so the obvious member test admits a
+    hand-edited `[true, 2]` and renders a column headed `hop True`. Excluded
+    explicitly rather than by a numeric range, because the depth a column is
+    headed with is the value read here and `bool` is the one int subclass that
+    formats as a word.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    latest = read_json(run.coverage_latest)
+    latest["goal_matrix"]["rows"][0]["hop_depths_expected"] = [True, 2, False]
+    write_json(run.coverage_latest, latest)
+    assert summary.coverage(run).goals[0].expected == [2]
+
+
 def test_coverage_reads_holes_with_reason_and_justification(tmp_path):
     """Both fields, in document order -- the justification is the half a reader acts on.
 
@@ -2254,6 +2363,7 @@ def test_coverage_survives_a_field_that_is_the_wrong_type(tmp_path, field, bad):
         assert got.cells == []
     if field == "goal_matrix":
         assert (row.goals_covered, row.goals_total) == (0, 0)
+        assert got.goals == []
     if field == "progress":
         assert (row.new_cells, row.rounds_without_progress) == (None, None)
     if field == "holes":
@@ -3925,6 +4035,123 @@ def test_render_marks_each_matrix_cell_covered_or_not(tmp_path):
     assert 'class="cell yes"' in html
     assert 'class="cell no"' in html
     assert 'title="scn-open, scn-blocked"' in html
+
+
+def _goal_states(run):
+    """The toy's goal matrix rewritten to hold all four cell states, and the page.
+
+    Every state has to be manufactured, because the fixture cannot reach them: the
+    toy converges with two goals each covered at their single expected depth, so an
+    unedited run draws one `yes` per row and nothing else -- a renderer emitting
+    `cell yes` unconditionally passes over it. Written once and shared, because the
+    three tests below assert on the same four states from different angles and
+    three copies of this setup would be three chances for them to drift apart.
+
+    The resulting union of depths is `{1, 2, 3}`:
+
+    | goal | 1 | 2 | 3 |
+    |---|---|---|---|
+    | `goal-locate` | covered | not expected | not expected |
+    | `goal-explain` | not expected | expected, unreached | reached, unexpected |
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    latest = read_json(run.coverage_latest)
+    rows = latest["goal_matrix"]["rows"]
+    rows[1]["covered"] = False
+    rows[1]["hop_depths_expected"] = [2]
+    rows[1]["hop_depths_present"] = [3]
+    write_json(run.coverage_latest, latest)
+    return summary.run_summary(run)
+
+
+def test_render_draws_a_goal_matrix_column_per_hop_depth_in_either_list(tmp_path):
+    """The columns are the union of expected and present, not just expected.
+
+    A depth reached but not expected is the one state that has no column if the
+    header is built from `hop_depths_expected` alone -- and it is the state the
+    matrix is most worth drawing for, so the union is the property asserted rather
+    than the column count. Depth 3 below appears in no `hop_depths_expected` on the
+    page.
+
+    Sorted ascending, which `test_render_is_byte_identical_across_two_calls` needs
+    a *stable* order for and a reader needs an *ascending* one for: hop depth is a
+    magnitude, and `hop 3` left of `hop 1` reads as a rendering bug.
+    """
+    html = _goal_states(build_toy_run(tmp_path / "runs", upto="challenge"))
+    # Read off the header rather than substring-matched, so the assertion is over
+    # the columns and their order and not over the `class` the heading carries: a
+    # pinned attribute here would break on a styling change that draws exactly the
+    # same three columns.
+    head = re.search(r"<thead><tr><th>goal</th>(.*?)</tr></thead>", html)
+    assert head, "the goal matrix draws a header row"
+    assert re.findall(r">hop (\d+)<", head.group(1)) == ["1", "2", "3"]
+    assert "Goal matrix (2 goals" in html
+
+
+def test_render_draws_the_four_goal_cell_states_apart(tmp_path):
+    """Covered, open, unexpected and not-applicable are four renderings, not two.
+
+    The capability matrix has two states because a cell either is or is not
+    covered. A goal-by-depth grid has two more, and collapsing either of them
+    loses a fact: an unexpected depth folded into `covered` claims a goal was
+    reached as designed, and folded into `not covered` it disappears entirely,
+    while a depth the goal never expected is not an open slot and must not be
+    counted by eye as one.
+    """
+    html = _goal_states(build_toy_run(tmp_path / "runs", upto="challenge"))
+    for state in ("yes", "no", "off", "na"):
+        assert f'class="gcell {state}"' in html, f"the {state} state is drawn"
+
+
+def test_render_states_each_goal_cell_in_words_not_colour_alone(tmp_path):
+    """Every state says what it is in text, per the page's existing colour rule.
+
+    The rule is `_CSS`' own, written at `.hole-reason`: weight and a rule carry a
+    distinction, never colour alone. A four-state grid is where that is easiest to
+    break, because four tints are cheaper to emit than four titles -- so each cell
+    carries its meaning on the title and the legend spells the marks out. Asserted
+    against the *titles*, since a legend alone leaves a reader counting cells
+    against a key.
+    """
+    html = _goal_states(build_toy_run(tmp_path / "runs", upto="challenge"))
+    for phrase in (
+        "covered at hop depth 1",
+        "expected at hop depth 2, no scenario reached it",
+        "a scenario reached hop depth 3, which this goal does not expect",
+        "not expected at hop depth 2",
+    ):
+        assert f'title="{phrase}"' in html, phrase
+
+
+def test_render_names_the_scenarios_covering_a_goal(tmp_path):
+    """The first column carries the goal and its scenarios, as the cell matrix does.
+
+    `goal_matrix` records `scenario_ids` per *goal*, never per depth -- which is
+    why they belong to the row rather than to a cell, and why no cell title may
+    claim a particular scenario reached a particular depth. The document does not
+    say that.
+    """
+    html = _goal_states(build_toy_run(tmp_path / "runs", upto="challenge"))
+    assert 'title="scn-open, scn-empty, scn-missing"' in html
+
+
+def test_render_says_so_when_latest_carries_no_goal_row(tmp_path):
+    """An empty `rows` renders a sentence, not an empty table.
+
+    The sibling of the capability matrix's absence line, and the state a run whose
+    world model has no goal at all ends in. A bare `<table>` with a header and no
+    body reads as a rendering failure rather than as a run with nothing to draw.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    latest = read_json(run.coverage_latest)
+    latest["goal_matrix"]["rows"] = []
+    write_json(run.coverage_latest, latest)
+    html = summary.run_summary(run)
+    assert "latest.json carries no goal row" in html
+    assert "Goal matrix (0 goals" in html
 
 
 def test_render_labels_the_round_hole_count_apart_from_the_terminal_holes(tmp_path):

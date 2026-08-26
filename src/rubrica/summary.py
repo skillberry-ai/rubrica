@@ -393,6 +393,29 @@ def _as_int(value) -> int:
         return 0
 
 
+def _ints(value) -> list[int]:
+    """The int members of `value`, or `[]` if it is not a list at all.
+
+    `_strings`' and `_dicts`' sibling for the one field family whose elements are
+    numbers: a goal row's `hop_depths_present` and `hop_depths_expected`. The
+    measured failure is theirs exactly -- a hand-edited `"hop_depths_present":
+    "two"` is iterable, and iterating it yields the characters `t`, `w`, `o`, each
+    of which would head a column of the goal matrix.
+
+    **`bool` is excluded here and deliberately not in `_as_int` above.** The two
+    differ because the value is *displayed* rather than summed: `isinstance(True,
+    int)` is true, so the plain member test admits `[true, 2]` and draws a column
+    headed `hop True`. A malformed count rendering as 1 is a wrong number a reader
+    can catch against its neighbours; a column headed with a word is a rendering
+    bug wearing a document's clothes. Excluded by type rather than by the schema's
+    1..5 range, because a depth outside that range is a `score` defect for
+    `validate` to name and dropping it here would hide it.
+    """
+    if not isinstance(value, list):
+        return []
+    return [member for member in value if isinstance(member, int) and not isinstance(member, bool)]
+
+
 @dataclass(frozen=True)
 class InputRow:
     artifact_id: str
@@ -888,6 +911,25 @@ class Cell:
 
 
 @dataclass(frozen=True)
+class GoalRow:
+    goal_id: str
+    scenario_ids: list[str]
+    # `present` and `expected` rather than the document's `hop_depths_present` and
+    # `hop_depths_expected`: the pair is read together at every call site, and the
+    # long names made the renderer's set arithmetic unreadable. The *document*
+    # keeps its field names; this is the in-memory shape.
+    present: list[int]
+    expected: list[int]
+    # Carried as `score` wrote it rather than recomputed from the two lists. The
+    # arithmetic looks obvious -- covered iff `expected` is a subset of `present` --
+    # and it is `rb-score`'s to own: a page that recomputed it would report its own
+    # opinion of coverage and silently agree with the document on every run where
+    # the two happen to match. If they ever diverge, that is a score defect, and
+    # this field is what makes it visible rather than what hides it.
+    covered: bool
+
+
+@dataclass(frozen=True)
 class Hole:
     ref: str
     reason: str
@@ -899,6 +941,7 @@ class Coverage:
     rounds: list[RoundRow]
     terminal_verdict: str
     cells: list[Cell]
+    goals: list[GoalRow]
     holes: list[Hole]
     # None in three situations that share one return value: no world model yet, a
     # world model `implied_size` could not read, and the one shape measured
@@ -1005,6 +1048,7 @@ def coverage(run: RunPaths) -> Coverage | Marker:
     rows.sort(key=lambda r: _as_int(r.round_))
 
     caps = _mapping(latest.get("capability_matrix"))
+    goals_matrix = _mapping(latest.get("goal_matrix"))
     cells = [
         Cell(
             capability_id=str(member.get("capability_id", "")),
@@ -1013,6 +1057,19 @@ def coverage(run: RunPaths) -> Coverage | Marker:
             scenario_ids=_strings(member.get("scenario_ids")),
         )
         for member in _dicts(caps.get("cells"))
+    ]
+    # `latest`'s, for the reason the cells are: it is the state the run ended in.
+    # Document order, like the cells and the holes -- re-sorting would make the
+    # page disagree with the file a reader opens beside it.
+    goals = [
+        GoalRow(
+            goal_id=str(member.get("goal_id", "")),
+            scenario_ids=_strings(member.get("scenario_ids")),
+            present=_ints(member.get("hop_depths_present")),
+            expected=_ints(member.get("hop_depths_expected")),
+            covered=bool(member.get("covered")),
+        )
+        for member in _dicts(goals_matrix.get("rows"))
     ]
     holes = [
         Hole(
@@ -1037,6 +1094,7 @@ def coverage(run: RunPaths) -> Coverage | Marker:
         # the fact this field names.
         terminal_verdict=str(latest.get("verdict", "")),
         cells=cells,
+        goals=goals,
         holes=holes,
         implied=implied,
     )
