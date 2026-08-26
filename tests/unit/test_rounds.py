@@ -737,11 +737,13 @@ def test_a_ruling_with_no_usable_scenario_id_is_a_finding_not_a_traceback(tmp_pa
     # third rule breached against an artifact no re-dispatch can repair.
     run = _run_with_world(tmp_path, _world())
     _part(run, 1, "b01", [_scenario("sc-b01-001")])
-    # Pointer, not the word "scenario_id" in the message: a message pin on a
-    # field name the pointer already carries is what broke in review, and it is
-    # the fifth instance of that class on this branch. The two pointers differ
-    # because a ruling that is not an object at all has no /scenario_id member to
-    # point at, so the guard is split and the table records which fires.
+    # Pointer, not the word "scenario_id" in the message. The trap: a pin on
+    # message prose breaks on a meaning-preserving reword, and a field name the
+    # pointer already carries is the first thing a reword drops -- so pin the
+    # pointer, or a value echo from the fixture, and never a prose word. The two
+    # pointers differ because a ruling that is not an object at all has no
+    # /scenario_id member to point at, so the guard is split and the table
+    # records which fires.
     for bad, pointer in (
         ({}, "/rulings/0/scenario_id"),
         ({"status": "active"}, "/rulings/0/scenario_id"),
@@ -770,9 +772,10 @@ def test_a_ruling_status_outside_the_parts_own_enum_is_a_finding(tmp_path):
         {"scenario_id": "sc-b01-001", "status": "ACTIVE"},
     ):
         _score_part(run, 1, [bad])
-        # The pointer, for the reason the test above gives: a reviewer reworded
-        # this message meaning-preservingly, dropping the field name the pointer
-        # already carried, and the old `"status" in f.message` pin went red.
+        # The pointer, for the reason the test above gives, and this is the case
+        # that proved it: a reviewer reworded this message meaning-preservingly,
+        # dropping the field name the pointer already carried, and the old
+        # `"status" in f.message` pin went red.
         assert [f.pointer for f in _refuse(run, bad)] == ["/rulings/0/status"], bad
     assert not run.scenarios.exists()
 
