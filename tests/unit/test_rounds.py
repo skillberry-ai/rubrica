@@ -12,7 +12,7 @@ import re
 
 import pytest
 
-from rubrica import rounds
+from rubrica import refs, rounds
 from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.errors import UsageError
 from rubrica.paths import RunPaths
@@ -549,15 +549,24 @@ def _scenario(sid, *, round_n=1, goal="goal-0", status="proposed", refs=None, de
     }
 
 
-def _score_part(run, round_n, rulings, verdict="continue"):
+def _score_part(run, round_n, rulings=None, *, holes=None, verdict="continue"):
+    """One score part, whichever half of it the test under way cares about.
+
+    `rulings` stays positional because the seal_scenarios tests below read as a
+    list of rulings and nothing else, while `holes` is keyword-only because the
+    seal_score tests name both halves. One helper rather than two: the two would
+    write the same four fields, and a second definition of this name would shadow
+    the first for every test after it -- silently, since the shadowed calls are
+    positional and would only fail on the argument count.
+    """
     write_json(
         run.score_part(round_n),
         {
             "schema_version": "0.1",
             "round": round_n,
-            "holes": [],
+            "holes": [] if holes is None else holes,
             "verdict": verdict,
-            "rulings": rulings,
+            "rulings": [] if rulings is None else rulings,
         },
     )
 
@@ -1059,3 +1068,551 @@ def test_a_world_model_with_no_denominator_version_is_a_usage_error(tmp_path):
         with pytest.raises(UsageError, match=pin):
             rounds.seal_scenarios(run)
         assert not run.scenarios.exists()
+
+
+def test_a_capability_cell_lists_every_claimant_but_is_covered_only_by_a_live_one():
+    # Asymmetric on purpose, and rb-score's Method step 4 is where it comes
+    # from: scenario_ids lists the scenarios *claiming* the cell, covered is
+    # true only if one of them is proposed or active. A cell claimed only by
+    # folded or rejected scenarios is a hole again, because no test will ship.
+    world = _world(caps=1, ocs=1, goals=0)
+    refs_to = [{"capability_id": "cap-0", "outcome_class_id": "cap-0-oc-0"}]
+    scenarios = [
+        _scenario("sc-001", status="duplicate", refs=refs_to),
+        _scenario("sc-002", status="rejected", refs=refs_to),
+    ]
+    matrix = rounds.capability_matrix(world, scenarios)
+    assert matrix["cells"][0]["scenario_ids"] == ["sc-001", "sc-002"]
+    assert matrix["cells"][0]["covered"] is False
+    assert matrix == {"cells": matrix["cells"], "covered": 0, "total": 1, "pct": 0.0}
+
+    scenarios.append(_scenario("sc-003", status="active", refs=refs_to))
+    matrix = rounds.capability_matrix(world, scenarios)
+    assert matrix["cells"][0]["covered"] is True
+    assert matrix["covered"] == 1 and matrix["pct"] == 1.0
+
+
+def test_every_declared_cell_appears_even_with_no_scenarios():
+    # The dangerous direction, per Method step 4: a matrix holding only the
+    # cells some scenario happens to claim reports 100% of a denominator it
+    # shrank to fit. Enumerate from the world model, never from the scenarios.
+    matrix = rounds.capability_matrix(_world(caps=2, ocs=2, goals=0), [])
+    assert matrix["total"] == 4
+    assert matrix["covered"] == 0
+    assert matrix["pct"] == 0.0
+    assert [c["capability_id"] for c in matrix["cells"]] == [
+        "cap-0",
+        "cap-0",
+        "cap-1",
+        "cap-1",
+    ]
+
+
+def test_a_goal_row_carries_only_live_scenarios():
+    # Method step 5: leaving a duplicate in a goal row credits the goal with a
+    # depth no shipped test reaches.
+    world = _world(caps=1, ocs=1, goals=1)
+    world["goals"][0]["expected_hop_depths"] = [1, 2]
+    scenarios = [
+        _scenario("sc-001", status="active", depth=1),
+        _scenario("sc-002", status="duplicate", depth=2),
+    ]
+    row = rounds.goal_matrix(world, scenarios)["rows"][0]
+    assert row["scenario_ids"] == ["sc-001"]
+    assert row["hop_depths_present"] == [1]
+    assert row["hop_depths_expected"] == [1, 2]
+    # A goal exercised at one depth of two is a partial row, not a covered one.
+    assert row["covered"] is False
+
+
+def test_a_goal_is_covered_only_when_every_expected_depth_is_present():
+    world = _world(caps=1, ocs=1, goals=1)
+    world["goals"][0]["expected_hop_depths"] = [1, 2]
+    scenarios = [
+        _scenario("sc-001", status="active", depth=1),
+        _scenario("sc-002", status="active", depth=2),
+    ]
+    row = rounds.goal_matrix(world, scenarios)["rows"][0]
+    assert row["hop_depths_present"] == [1, 2]
+    assert row["covered"] is True
+
+
+def test_expected_hop_depths_are_copied_not_trimmed():
+    # Method step 5 says copied, not re-derived and not trimmed to what the
+    # scenarios reached -- trimming is how a partial row looks complete.
+    world = _world(caps=1, ocs=1, goals=1)
+    world["goals"][0]["expected_hop_depths"] = [3, 1]
+    row = rounds.goal_matrix(world, [])["rows"][0]
+    assert row["hop_depths_expected"] == [1, 3]
+    assert row["covered"] is False
+
+
+def test_an_empty_denominator_gives_pct_zero_not_a_zero_division():
+    empty = {
+        "schema_version": "0.1",
+        "capabilities": [],
+        "goals": [],
+        "denominator": {"capability_cells": 0, "goals": 0, "version": 1},
+    }
+    assert rounds.capability_matrix(empty, [])["pct"] == 0.0
+    assert rounds.goal_matrix(empty, [])["pct"] == 0.0
+
+
+def test_the_live_status_set_is_the_one_refs_recomputes_coverage_against(tmp_path):
+    # One home, not two spellings that agree today. refs.check_coverage builds
+    # its own live_ids from OPEN_STATUSES and reports every row a seal marks
+    # covered whose every credit is dead, so a second spelling here would make
+    # this module write a document check-refs then refuses -- with the
+    # disagreement invisible in either file. The identity pin is the cheap half;
+    # the round trip below is what would catch a wrapper that widened the set.
+    assert rounds._live_statuses() is refs.OPEN_STATUSES
+
+    run = _run_with_world(tmp_path, _world(caps=2, ocs=1, goals=1))
+    survivor = _scenario("sc-b01-001")
+    folded = _scenario(
+        "sc-b01-002", refs=[{"capability_id": "cap-1", "outcome_class_id": "cap-1-oc-0"}]
+    )
+    _part(run, 1, "b01", [survivor, folded])
+    _score_part(
+        run,
+        1,
+        rulings=[
+            {"scenario_id": "sc-b01-001", "status": "active"},
+            {
+                "scenario_id": "sc-b01-002",
+                "status": "duplicate",
+                "duplicate_of": "sc-b01-001",
+            },
+        ],
+        # cap-1's only claimant is the fold, so no test ships for that cell and
+        # it is a hole again -- the asymmetry _live_statuses names.
+        holes=[
+            {
+                "ref": "cell:cap-1/cap-1-oc-0",
+                "reason": "not_yet_attempted",
+                "justification": "its only claimant was folded",
+            }
+        ],
+    )
+    rounds.seal_scenarios(run)
+    path, findings = rounds.seal_score(run, round_n=1)
+    assert findings == []
+    assert validate_artifact(path, "coverage") == []
+    assert refs.check_coverage(run) == []
+    assert read_json(path)["capability_matrix"]["covered"] == 1
+
+
+def test_round_one_progress_counts_the_cells_it_covered(tmp_path):
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=2, goals=0))
+    matrix = rounds.capability_matrix(
+        read_json(run.world_model),
+        [
+            _scenario(
+                "sc-001",
+                status="active",
+                refs=[{"capability_id": "cap-0", "outcome_class_id": "cap-0-oc-0"}],
+            ),
+        ],
+    )
+    assert rounds.progress(run, 1, matrix) == {
+        "new_cells_this_round": 1,
+        "rounds_without_progress": 0,
+    }
+
+
+def test_round_one_that_covered_nothing_starts_the_no_progress_count(tmp_path):
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=2, goals=0))
+    matrix = rounds.capability_matrix(read_json(run.world_model), [])
+    assert rounds.progress(run, 1, matrix) == {
+        "new_cells_this_round": 0,
+        "rounds_without_progress": 1,
+    }
+
+
+def test_new_cells_is_a_set_difference_not_a_count_difference(tmp_path):
+    # Method step 8: "covered now and were *not* covered before". A count
+    # difference reports zero when one cell is gained and another lost, which
+    # is real progress the loop would then halt on.
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=2, goals=0))
+    write_json(
+        run.coverage_round(1),
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "denominator_version": 1,
+            "capability_matrix": {
+                "cells": [
+                    {
+                        "capability_id": "cap-0",
+                        "outcome_class_id": "cap-0-oc-0",
+                        "scenario_ids": ["sc-001"],
+                        "covered": True,
+                    },
+                    {
+                        "capability_id": "cap-0",
+                        "outcome_class_id": "cap-0-oc-1",
+                        "scenario_ids": [],
+                        "covered": False,
+                    },
+                ],
+                "covered": 1,
+                "total": 2,
+                "pct": 0.5,
+            },
+            "goal_matrix": {"rows": [], "covered": 0, "total": 0, "pct": 0.0},
+            "holes": [],
+            "verdict": "continue",
+            "progress": {"new_cells_this_round": 1, "rounds_without_progress": 0},
+        },
+    )
+    now = rounds.capability_matrix(
+        read_json(run.world_model),
+        [
+            _scenario(
+                "sc-002",
+                status="active",
+                round_n=2,
+                refs=[{"capability_id": "cap-0", "outcome_class_id": "cap-0-oc-1"}],
+            ),
+        ],
+    )
+    assert now["covered"] == 1  # same count as round 1
+    assert rounds.progress(run, 2, now)["new_cells_this_round"] == 1
+    assert rounds.progress(run, 2, now)["rounds_without_progress"] == 0
+
+
+def test_a_round_with_no_new_cell_increments_the_prior_no_progress_count(tmp_path):
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    write_json(
+        run.coverage_round(1),
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "denominator_version": 1,
+            "capability_matrix": {"cells": [], "covered": 0, "total": 0, "pct": 0.0},
+            "goal_matrix": {"rows": [], "covered": 0, "total": 0, "pct": 0.0},
+            "holes": [],
+            "verdict": "continue",
+            "progress": {"new_cells_this_round": 0, "rounds_without_progress": 1},
+        },
+    )
+    matrix = rounds.capability_matrix(read_json(run.world_model), [])
+    assert rounds.progress(run, 2, matrix)["rounds_without_progress"] == 2
+
+
+def test_a_prior_coverage_document_of_the_wrong_shape_cannot_baseline_a_round(tmp_path):
+    # 03-coverage/round-N.json is seal_score's own code output, so a malformed
+    # one is a hand-edit no re-dispatch could repair -- exit 2, not a finding.
+    # Every case here reaches `prior[...]` or `carried + 1` bare without the
+    # guards, which cli.py's catch-all would report as an exit-1 [internal]
+    # finding against the RUN ROOT.
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    matrix = rounds.capability_matrix(read_json(run.world_model), [])
+    fine = {"rounds_without_progress": 0}
+    for payload, expected in (
+        (["cells"], "is not a JSON object"),
+        ({"progress": fine}, "missing required field(s): ['capability_matrix']"),
+        ({"capability_matrix": 7, "progress": fine}, "capability_matrix is not a JSON object"),
+        (
+            {"capability_matrix": {"cells": "one"}, "progress": fine},
+            "capability_matrix.cells is not an array",
+        ),
+        (
+            {
+                "capability_matrix": {"cells": [{"capability_id": "cap-0", "covered": True}]},
+                "progress": fine,
+            },
+            "non-empty string outcome_class_id",
+        ),
+        (
+            {"capability_matrix": {"cells": []}, "progress": {}},
+            "missing required field(s): ['rounds_without_progress']",
+        ),
+        (
+            {"capability_matrix": {"cells": []}, "progress": {"rounds_without_progress": "two"}},
+            "must be an integer >= 0: found 'two'",
+        ),
+        (
+            {"capability_matrix": {"cells": []}, "progress": {"rounds_without_progress": True}},
+            "must be an integer >= 0: found True",
+        ),
+    ):
+        write_json(run.coverage_round(1), payload)
+        with pytest.raises(UsageError, match=re.escape(expected)):
+            rounds.progress(run, 2, matrix)
+
+
+def test_seal_score_composes_a_schema_valid_coverage_document(tmp_path):
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=1))
+    # Two expected depths against the one the scenario reaches, so the goal row
+    # is partial and the hole below justifies it. With the fixture's single
+    # expected depth the scenario covers the goal outright, which would make that
+    # hole name a covered row -- the refusal three tests down, not this one.
+    world = read_json(run.world_model)
+    world["goals"][0]["expected_hop_depths"] = [1, 2]
+    write_json(run.world_model, world)
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    _score_part(
+        run,
+        1,
+        holes=[
+            {"ref": "goal:goal-0", "reason": "not_yet_attempted", "justification": "nobody yet"}
+        ],
+        verdict="continue",
+        rulings=[{"scenario_id": "sc-b01-001", "status": "active"}],
+    )
+    rounds.seal_scenarios(run)
+    path, findings = rounds.seal_score(run, round_n=1)
+    assert findings == []
+    assert path == run.coverage_round(1)
+    assert validate_artifact(path, "coverage") == []
+    doc = read_json(path)
+    assert doc["round"] == 1
+    assert doc["verdict"] == "continue"
+    assert doc["capability_matrix"]["covered"] == 1
+    assert doc["goal_matrix"]["covered"] == 0
+    assert doc["holes"] == [
+        {"ref": "goal:goal-0", "reason": "not_yet_attempted", "justification": "nobody yet"},
+    ]
+    # latest.json is a code-written copy, so it cannot drift from round-N.json
+    # the way two model writes of "identical content" can.
+    assert run.coverage_latest.read_bytes() == path.read_bytes()
+
+
+def test_the_score_seal_echoes_the_world_models_denominator_version(tmp_path):
+    # Invariant 7, and the reason seal_scenarios refuses to default its own copy:
+    # refs.check_coverage compares this field to the world model's for EQUALITY,
+    # so a fallback of 1 is a check-refs finding against a document this code
+    # just wrote, unrepairable by any re-dispatch.
+    world = _world(caps=1, ocs=1, goals=0)
+    world["denominator"]["version"] = 2
+    run = _run_with_world(tmp_path, world)
+    _part(run, 1, "b01", [_scenario("sc-b01-001", status="active")])
+    _score_part(run, 1, verdict="converged")
+    rounds.seal_scenarios(run)
+    path, findings = rounds.seal_score(run, round_n=1)
+    assert findings == []
+    assert read_json(path)["denominator_version"] == 2
+
+
+def test_a_world_model_with_no_denominator_version_cannot_be_scored(tmp_path):
+    world = _world(caps=1, ocs=1, goals=0)
+    del world["denominator"]["version"]
+    run = _run_with_world(tmp_path, world)
+    _score_part(run, 1, verdict="converged")
+    # Written by hand rather than sealed, because seal_scenarios refuses the same
+    # absence one step earlier -- this leaves seal_score the only thing under test.
+    write_json(
+        run.scenarios,
+        {
+            "schema_version": "0.1",
+            "denominator_version": 1,
+            "scenarios": [_scenario("sc-b01-001", status="active")],
+        },
+    )
+    with pytest.raises(UsageError, match=re.escape("denominator is missing required")):
+        rounds.seal_score(run, round_n=1)
+    assert not run.coverage_round(1).exists()
+
+
+def test_a_capability_with_no_outcome_classes_cannot_shrink_the_scored_denominator(tmp_path):
+    # The one arithmetic error rb-score's refusal conditions rank above every
+    # other: a report reading 100% against a denominator it quietly shrank. Left
+    # unguarded, cap-1 contributes zero cells, the matrix reads 1 of 1 covered
+    # with no hole owed, and the seal is clean.
+    world = _world(caps=2, ocs=1, goals=0)
+    world["capabilities"][1]["outcome_classes"] = []
+    run = _run_with_world(tmp_path, world)
+    _part(run, 1, "b01", [_scenario("sc-b01-001", status="active")])
+    _score_part(run, 1, verdict="converged")
+    rounds.seal_scenarios(run)
+    with pytest.raises(
+        UsageError, match=re.escape("capabilities[cap-1].outcome_classes has 0 entries")
+    ):
+        rounds.seal_score(run, round_n=1)
+    assert not run.coverage_round(1).exists()
+
+
+def test_a_sealed_scenario_list_of_the_wrong_shape_cannot_be_scored(tmp_path):
+    # bytes_per_scenario's measurement, arriving at the other reader of the same
+    # file: a string `scenarios` is iterable, so without the guard every matrix
+    # here is computed over its characters.
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    _score_part(
+        run,
+        1,
+        holes=[
+            {"ref": "cell:cap-0/cap-0-oc-0", "reason": "not_yet_attempted", "justification": "x"}
+        ],
+    )
+    write_json(
+        run.scenarios,
+        {"schema_version": "0.1", "denominator_version": 1, "scenarios": "eighteen scenarios"},
+    )
+    with pytest.raises(UsageError, match=re.escape("scenarios is not an array")):
+        rounds.seal_score(run, round_n=1)
+    assert not run.coverage_round(1).exists()
+
+
+def test_seal_score_refuses_an_uncovered_row_with_no_hole(tmp_path):
+    # refs.check_coverage checks both directions after the fact; the seal
+    # refuses before the write, because a coverage document missing a hole is
+    # otherwise perfectly assemblable and reads as complete at gate 2.
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=1))
+    _part(run, 1, "b01", [])
+    _score_part(run, 1, holes=[])
+    rounds.seal_scenarios(run)
+    path, findings = rounds.seal_score(run, round_n=1)
+    assert path is None
+    assert not run.coverage_round(1).exists()
+    assert not run.coverage_latest.exists()
+    refs_named = " ".join(f.message for f in findings)
+    assert "cell:cap-0/cap-0-oc-0" in refs_named
+    assert "goal:goal-0" in refs_named
+    assert {(f.layer, f.pointer) for f in findings} == {("rounds", "/holes")}
+
+
+def test_seal_score_refuses_a_hole_naming_a_covered_row(tmp_path):
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    _part(run, 1, "b01", [_scenario("sc-b01-001", status="active")])
+    _score_part(
+        run,
+        1,
+        holes=[
+            {"ref": "cell:cap-0/cap-0-oc-0", "reason": "not_yet_attempted", "justification": "x"}
+        ],
+        verdict="converged",
+    )
+    rounds.seal_scenarios(run)
+    path, findings = rounds.seal_score(run, round_n=1)
+    assert path is None
+    assert any("cell:cap-0/cap-0-oc-0" in f.message for f in findings)
+
+
+def test_seal_score_refuses_a_hole_naming_a_row_the_world_model_does_not_have(tmp_path):
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    _part(run, 1, "b01", [_scenario("sc-b01-001", status="active")])
+    _score_part(
+        run,
+        1,
+        holes=[{"ref": "cell:cap-9/nope", "reason": "unreachable", "justification": "x"}],
+        verdict="converged",
+    )
+    rounds.seal_scenarios(run)
+    path, findings = rounds.seal_score(run, round_n=1)
+    assert path is None
+    assert any("cap-9" in f.message for f in findings)
+
+
+def test_seal_score_refuses_a_missing_score_part(tmp_path):
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    _part(run, 1, "b01", [_scenario("sc-b01-001", status="active")])
+    rounds.seal_scenarios(run)
+    path, findings = rounds.seal_score(run, round_n=1)
+    assert path is None
+    assert [(f.layer, f.pointer) for f in findings] == [("rounds", "")]
+    assert "missing artifact" in findings[0].message
+
+
+def test_a_score_part_that_is_not_a_json_object_names_the_document_root(tmp_path):
+    # Split from the field checks for the reason _apply_rulings splits its own:
+    # `/holes` does not resolve in a part that is not an object at all. Left
+    # unsplit, `part.get("holes")` raises AttributeError out of a code step.
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    _part(run, 1, "b01", [_scenario("sc-b01-001", status="active")])
+    rounds.seal_scenarios(run)
+    write_json(run.score_part(1), ["holes"])
+    path, findings = rounds.seal_score(run, round_n=1)
+    assert path is None
+    assert [(f.layer, f.pointer) for f in findings] == [("rounds", "")]
+
+
+def test_a_score_part_missing_holes_or_a_verdict_names_each_field_it_lacks(tmp_path):
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    _part(run, 1, "b01", [_scenario("sc-b01-001", status="active")])
+    rounds.seal_scenarios(run)
+    write_json(run.score_part(1), {"schema_version": "0.1", "round": 1, "rulings": []})
+    path, findings = rounds.seal_score(run, round_n=1)
+    assert path is None
+    assert sorted(f.pointer for f in findings) == ["/holes", "/verdict"]
+    assert {f.layer for f in findings} == {"rounds"}
+
+
+def test_a_hole_with_no_usable_ref_is_a_finding_not_a_traceback(tmp_path):
+    # 03-score/round-N.json is MODEL output, so this is exit 1 naming the part
+    # rather than the exit 2 the world model's own defects get: re-dispatching
+    # score alone is exactly the repair. Left unguarded, `hole["ref"]` raises
+    # TypeError on the first case and KeyError on the second.
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    _part(run, 1, "b01", [_scenario("sc-b01-001", status="active")])
+    rounds.seal_scenarios(run)
+    rest = {"reason": "unreachable", "justification": "x"}
+    for holes, pointer in (
+        ([7], "/holes/0"),
+        ([rest], "/holes/0/ref"),
+        ([{"ref": "", **rest}], "/holes/0/ref"),
+        ([{"ref": 3, **rest}], "/holes/0/ref"),
+        ([{"ref": "cell:cap-0/cap-0-oc-0", **rest}, 7], "/holes/1"),
+    ):
+        _score_part(run, 1, holes=holes, verdict="converged")
+        path, findings = rounds.seal_score(run, round_n=1)
+        assert path is None, holes
+        assert [(f.layer, f.pointer) for f in findings] == [("rounds", pointer)], holes
+        assert not run.coverage_round(1).exists(), holes
+
+
+def test_the_score_seal_is_idempotent(tmp_path):
+    # The byte-identity guarantee this module exists for, at its second seal: the
+    # matrices are recomputed from the same parts, and progress reads round N-1
+    # rather than its own output, so nothing here can drift on a second call.
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    _score_part(
+        run, 1, rulings=[{"scenario_id": "sc-b01-001", "status": "active"}], verdict="converged"
+    )
+    rounds.seal_scenarios(run)
+    first = rounds.seal_score(run, round_n=1)[0].read_bytes()
+    assert rounds.seal_score(run, round_n=1)[0].read_bytes() == first
+
+
+def test_a_re_score_after_a_rejection_reopens_the_row_the_scenario_credited(tmp_path):
+    # Invariant 5, and the reason the arithmetic moved into code at all: recompute
+    # without the status edit and the row keeps covered:true on the strength of a
+    # test that will never ship. Here the recompute is not a step score can skip.
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    _score_part(
+        run, 1, rulings=[{"scenario_id": "sc-b01-001", "status": "active"}], verdict="converged"
+    )
+    rounds.seal_scenarios(run)
+    before = read_json(rounds.seal_score(run, round_n=1)[0])
+    assert before["capability_matrix"]["cells"][0]["covered"] is True
+    assert before["holes"] == []
+
+    # rb-challenge found the scenario ambiguous, so score is re-dispatched for the
+    # same round and rules on it again.
+    _score_part(
+        run,
+        1,
+        rulings=[
+            {"scenario_id": "sc-b01-001", "status": "rejected", "rejected_reason": "ambiguous"}
+        ],
+        holes=[
+            {
+                "ref": "cell:cap-0/cap-0-oc-0",
+                "reason": "not_yet_attempted",
+                "justification": "its only scenario was rejected as ambiguous",
+            }
+        ],
+        verdict="continue",
+    )
+    rounds.seal_scenarios(run)
+    path, findings = rounds.seal_score(run, round_n=1)
+    assert findings == []
+    after = read_json(path)
+    cell = after["capability_matrix"]["cells"][0]
+    # Still listed as a claimant -- the asymmetry -- but no longer covered.
+    assert cell["scenario_ids"] == ["sc-b01-001"]
+    assert cell["covered"] is False
+    assert after["capability_matrix"]["pct"] == 0.0
+    assert refs.check_coverage(run) == []
