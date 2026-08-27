@@ -1173,9 +1173,15 @@ def test_a_goal_is_covered_only_when_every_expected_depth_is_present():
     assert row["covered"] is True
 
 
-def test_expected_hop_depths_are_copied_not_trimmed():
-    # Method step 5 says copied, not re-derived and not trimmed to what the
+def test_expected_hop_depths_come_from_the_goal_not_from_the_scenarios():
+    # rb-score's goal-matrix step requires the expected depths be taken from the
+    # goal's own expected_hop_depths rather than re-derived or trimmed to what the
     # scenarios reached -- trimming is how a partial row looks complete.
+    #
+    # The rule is cited, not its wording and not its step number: this comment
+    # named a word ("copied") that a later edit of the skill replaced with
+    # "comes from ... unchanged", leaving a citation that resolved to nothing
+    # while the test kept passing.
     world = _world(caps=1, ocs=1, goals=1)
     world["goals"][0]["expected_hop_depths"] = [3, 1]
     row = rounds.goal_matrix(world, [])["rows"][0]

@@ -162,10 +162,18 @@ def test_output_requires_the_batch_prefixed_scenario_id():
     no paraphrase, so `sc-` is safe to pin.
 
     The cost half is anchored on `propose-seal`, a code identifier with no
-    paraphrase, plus a wide alternation for what it does about the clash.
+    paraphrase, plus an alternation for what it does about the clash.
     `collision|collide` alone was measured red against "colliding" and against
     "clash" -- both of which state the rule perfectly -- which is a phrase pin
     wearing a semantic requirement's clothes.
+
+    The alternation covers the *consequence* and deliberately not the arithmetic.
+    A first draft of this fix also admitted `twice` and `same id`, and that was
+    measured GREEN against a contrived unrelated sentence -- "`propose-seal` reads
+    each part twice while composing the sealed document" -- which the narrow pin
+    had correctly called red. Widening until nothing breaks a pin is the failure
+    mode this whole class of test is about, and it is reachable from the fix as
+    easily as from the original.
     """
     owning = [
         block
@@ -174,8 +182,7 @@ def test_output_requires_the_batch_prefixed_scenario_id():
     ]
     assert owning, "no Output block ties the scenario id it must mint to its own batch id"
     assert any(
-        "propose-seal" in block
-        and re.search(r"refus|reject|collid|collision|clash|same id|twice", block, re.I)
+        "propose-seal" in block and re.search(r"refus|reject|collid|clash", block, re.I)
         for block in owning
     ), (
         "that block must say what the prefix prevents and what ignoring it costs: the seal "

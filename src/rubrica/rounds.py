@@ -928,8 +928,11 @@ def progress(run: RunPaths, round_n: int, cap_matrix: dict) -> dict:
         # Round 1's absent prior document is the LEGITIMATE case, and it must not
         # be collapsed with the absence refused just below. There is no earlier
         # round that could have covered anything, so every covered cell is new by
-        # definition -- Method step 8 says exactly that ("in round 1 it is 0 if
-        # this round covered a cell and 1 if it covered none").
+        # definition, and no round can have passed without progress yet. rb-score's
+        # progress step states both round-1 values, and the rule rather than its
+        # wording is what is cited here: the previous version of this comment
+        # quoted a sentence the skill has since reworded, and quoted the
+        # rounds_without_progress half of it to justify the new_cells line.
         new_cells = len(now)
         return {
             "new_cells_this_round": new_cells,
