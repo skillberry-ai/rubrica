@@ -479,14 +479,18 @@ def test_open_questions_carries_unknown_verbatim_and_drops_the_internals(tmp_pat
     assert [q.id for q in found] == ["gap-001", "gap-002"]
     assert found[1].unknown == "What get_ticket returns for an unknown ticket_id"
     assert found[1].subject == "get_ticket"
-    # The two internal fields reach no attribute of the record. Asserted over
-    # every field rather than by naming two, so a third internal field added to
-    # the schema later cannot arrive here unnoticed.
+    # Two assertions, because they catch different things and the first alone was
+    # measured to overstate its reach. The prose loop reads every field of the
+    # record, but the strings it hunts are values *this fixture* carries, so it
+    # only proves that no internal field the schema has today reaches an
+    # attribute. The set equality is what closes the general case: any fourth
+    # field arriving on the record fails it, whether or not the fixture happens
+    # to populate the field it came from. It also subsumes the two `hasattr`
+    # checks it replaced.
     rendered = " ".join(str(v) for q in found for v in vars(q).values())
     for leaked in ("propose", "score", "instantiate", "outcome class", "ground truth"):
         assert leaked not in rendered
-    assert not hasattr(found[0], "why_it_matters")
-    assert not hasattr(found[0], "blocks")
+    assert set(vars(found[0])) == {"id", "subject", "unknown"}
 
 
 def test_open_questions_renders_a_gap_that_cites_no_claim(tmp_path):

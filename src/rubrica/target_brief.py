@@ -126,8 +126,8 @@ def _input_sources(run: RunPaths) -> dict[str, tuple[str, str]]:
         source_path = record.get("source_path")
         kind = record.get("kind")
         out[artifact_id] = (
-            source_path if isinstance(source_path, str) else "",
-            kind if isinstance(kind, str) else "",
+            _text(source_path),
+            _text(kind),
         )
     return out
 
@@ -180,8 +180,8 @@ def source_index(run: RunPaths) -> dict[str, SourceRef] | Marker:
                 # artifact: it names *something* the reader can chase, where a
                 # blank names nothing. Never a constructed path.
                 path=_shorten(source, prefix) if source else (artifact_id or ""),
-                locator=locator if isinstance(locator, str) else "",
-                quote=quote if isinstance(quote, str) else "",
+                locator=_text(locator),
+                quote=_text(quote),
                 kind=kind,
             )
     return index
@@ -354,7 +354,7 @@ def inputs_read(run: RunPaths) -> list[InputGroup] | Marker:
         artifact_id = record.get("artifact_id")
         source = record.get("source_path")
         kind = record.get("kind")
-        kind = kind if isinstance(kind, str) else ""
+        kind = _text(kind)
         if isinstance(source, str) and source:
             # The fragment is cut, which is the whole point of this group: an
             # input is not a file, and grouping on the raw `source_path` would
@@ -367,7 +367,7 @@ def inputs_read(run: RunPaths) -> list[InputGroup] | Marker:
             # `len(files) + slices` is this group's arithmetic against the
             # manifest and a dropped record makes the count disagree with the
             # file silently -- which is the worse of the two failures.
-            path = artifact_id if isinstance(artifact_id, str) else ""
+            path = _text(artifact_id)
         # `os.sep`, not a literal: `_shorten` and `_common_prefix` do their
         # filesystem-path arithmetic on this same string three lines up, and one
         # spelling in one flow is the point -- a consistency change, not a
