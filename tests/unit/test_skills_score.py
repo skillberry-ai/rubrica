@@ -58,16 +58,31 @@ def method_step(number: int) -> str:
 
 
 def invariant(number: int) -> str:
-    """One numbered Invariants item, whitespace-normalised.
+    """One numbered Invariants item, whitespace-normalised, paragraphs included.
 
-    `blocks(INVARIANTS)` is the right unit here -- each invariant is one
-    paragraph -- but the index of a given number is not stable across edits, so
-    the block is found by its own number. Normalised for `method_step`'s reason.
+    Scoped on the item's own numbered boundary, the way `method_step` is, and
+    deliberately not on `blocks(INVARIANTS)`: an invariant is one *item*, which
+    happens to be one paragraph today and may be three after a reword, and a
+    blank-line-scoped helper would then hand back only its first paragraph. The
+    failure that produces is silent and inverted -- the assertion sees less prose
+    than the file holds and reports the rule missing -- which is the
+    reformat-breaks-a-pin mirror failure CLAUDE.md names in the same breath as the
+    vacuous predicate, and the reason a guard that cries wolf gets deleted along
+    with the protection it carried. Measured: inserting a blank line inside
+    Invariant 1 keeps the binding test green here and turned it red before.
+
+    The boundary marker is a line beginning `<n>. `, where `method_step` looks for
+    `<n>. **`, because Invariants items are not bolded. Continuation lines in this
+    section are indented three spaces, so no wrapped line can be mistaken for the
+    next item.
     """
-    for block in blocks(INVARIANTS):
-        if block.lstrip().startswith(f"{number}. "):
-            return re.sub(r"\s+", " ", block)
-    raise AssertionError(f"no invariant {number} in the {INVARIANTS} section")
+    section = section_body(load(SKILL), INVARIANTS)
+    start = section.index(f"\n{number}. ")
+    try:
+        end = section.index(f"\n{number + 1}. ", start)
+    except ValueError:
+        end = len(section)
+    return re.sub(r"\s+", " ", section[start:end])
 
 
 def test_the_contract_matches_the_stage_gate():
