@@ -49,8 +49,24 @@ STAGES = (
     "reconcile-goals",
     "reconcile-gaps",
     "reconcile-seal",
+    # The propose/score loop, engineered as substeps for the reason the triage
+    # and reconcile families are. propose-batches and both seals are code, so
+    # they carry no skill and no manifest.stages entry, and their absence there
+    # is not a finding.
+    #
+    # The two seals sort after the passes they seal, and propose-seal sorts
+    # before score because score reads 02-scenarios.json: this tuple is the
+    # documentation of that ordering, and placing either seal earlier would draw
+    # both generated diagrams with a seal running before its own inputs.
+    #
+    # Stages 02a through 03b are a loop bounded by max_rounds, and the whole
+    # loop repeats -- not just propose and score. score-seal computes the
+    # coverage verdict's document; only the orchestrator acts on the verdict.
+    "propose-batches",
     "propose",
+    "propose-seal",
     "score",
+    "score-seal",
     "instantiate",
     "challenge",
     "emit",
@@ -58,6 +74,37 @@ STAGES = (
 )
 
 _SAFE_SEGMENT = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+
+# The one definition of a round-part name, shared by batches_rounds,
+# scenario_part_rounds and score_part_rounds so no two of them can disagree about
+# what counts as a round.
+#
+# A regex rather than str.isdigit(), because isdigit() is *wider* than int() in
+# one direction and equally wide in the other, and both hurt. Measured (codepoints
+# spelled out rather than pasted: U+0663 is right-to-left and reorders the rest of
+# a comment line in most editors):
+#
+#   - U+00B2, superscript two. isdigit() is True, int() raises a bare ValueError.
+#     That is neither OSError nor UsageError, so unlike an unreadable directory it
+#     is *not* in cli.py's exit-2 tuple -- it reaches the catch-all and becomes an
+#     exit-1 [internal] finding, telling the orchestrator to repair a stage over a
+#     directory name. Latent until a subcommand calls these, and closed here
+#     rather than left to whichever caller first does.
+#   - U+FF11 and U+0663, fullwidth one and Arabic-Indic three. isdigit() and int()
+#     BOTH accept them, so no amount of guarding int() helps: a filter built on
+#     either alone silently counts rounds 1 and 3 from names nothing ever wrote.
+#
+# re's `\d` is Unicode-wide too, so the explicit [0-9] class is load-bearing --
+# `[1-9]\d{0,}` looks like the same pattern and accepts round-1<U+0663> as 13.
+#
+# `[1-9][0-9]*` rather than `\d+` on purpose, and this is a ruling, not an
+# oversight: round-01 is REJECTED, not normalised to 1. `\d+` accepts it and
+# int() folds it onto the same number, so round-01 beside round-1 yields
+# [1, 1] -- a duplicated round makes a caller walk one round twice and every
+# scenario id collide. Normalising would invent a round from a directory nobody
+# writes; rejecting says the truth, that the name is not one of ours. It also
+# excludes round-0, which the round_n >= 1 guards already refuse to build.
+_ROUND_PART = re.compile(r"round-([1-9][0-9]*)")
 
 
 class UnsafeSegment(ValueError):
@@ -248,6 +295,131 @@ class RunPaths:
     @property
     def scenarios(self) -> Path:
         return self.root / "02-scenarios.json"
+
+    @property
+    def batches_dir(self) -> Path:
+        return self.root / "02-batches"
+
+    def batches(self, round_n: int) -> Path:
+        """This round's batch plan.
+
+        Per-round rather than a singleton `02-batches.json`, and the difference
+        is a checker's correctness rather than tidiness: check_scenario_parts
+        walks every round in scenario_part_rounds() and resolves each round's
+        batch roster from here, so one overwritten file would validate round 1's
+        parts against round 2's assignment -- emitting `no such batch` findings
+        against parts that are correct, and naming the wrong artifact while doing
+        it. This package has twice shipped a checker that named the wrong
+        artifact, which is why the plan is kept beside the parts it explains
+        rather than replaced by the next round's.
+        """
+        if round_n < 1:
+            raise ValueError(f"batches round must be >= 1, got {round_n}")
+        return self.batches_dir / f"round-{round_n}.json"
+
+    def batches_rounds(self) -> list[int]:
+        """Every round number that has a batch plan, ascending.
+
+        The same shape as score_part_rounds, down to ignoring a stem that is not
+        _ROUND_PART: a stray file in the directory must not be able to stop a
+        round from being read.
+        """
+        rounds: list[int] = []
+        for path in list_json(self.batches_dir):
+            match = _ROUND_PART.fullmatch(path.stem)
+            if match:
+                rounds.append(int(match.group(1)))
+        return sorted(rounds)
+
+    @property
+    def scenario_parts_dir(self) -> Path:
+        return self.root / "02-scenarios"
+
+    def scenario_round_dir(self, round_n: int) -> Path:
+        if round_n < 1:
+            raise ValueError(f"scenario round must be >= 1, got {round_n}")
+        return self.scenario_parts_dir / f"round-{round_n}"
+
+    def scenario_part(self, round_n: int, batch_id: str) -> Path:
+        return self.scenario_round_dir(round_n) / f"{safe_segment(batch_id)}.json"
+
+    def scenario_part_rounds(self) -> list[int]:
+        """Every round number that has a part directory, ascending.
+
+        Sorted numerically rather than lexically: round-10 must not sort between
+        round-1 and round-2, which is exactly what sorted() on the stem does.
+
+        Names that are not _ROUND_PART are skipped rather than raising -- a stray
+        02-scenarios/notes.json, a round-x/, a plain file named round-3 -- for
+        the reason score_part_rounds gives: this is what the seal iterates, and
+        one stray entry must not stop a real round from being assembled.
+        """
+        rounds: list[int] = []
+        try:
+            for entry in list_dir(self.scenario_parts_dir):
+                match = _ROUND_PART.fullmatch(entry.name)
+                if match and entry.is_dir():
+                    rounds.append(int(match.group(1)))
+        except OSError as exc:
+            # The same catch _instance_dir_names carries, for the same reason:
+            # list_dir converts the failure of listing this directory, but a
+            # directory that can be listed and not stat'ed through (mode 0o444)
+            # makes `entry.is_dir()` on a *child* raise instead, and list_dir
+            # never touches the child.
+            #
+            # This is message fidelity, not an exit-code repair: cli.py's
+            # `except (OSError, UsageError, ArtifactError, UnknownStage)` already
+            # maps both to exit 2. What the bare error got wrong is *which
+            # artifact it named* -- it names an arbitrary child it happened to
+            # stat first (.../02-scenarios/round-1) where every sibling listing
+            # names the directory the accessor actually reads. Same exception
+            # type and the same message shape as _instance_dir_names, so a
+            # caller cannot tell the two apart.
+            raise UsageError(
+                f"cannot read run directory: {self.scenario_parts_dir} ({exc})"
+            ) from exc
+        return sorted(rounds)
+
+    def _scenario_part_stems(self, round_n: int) -> list[str]:
+        return [p.stem for p in list_json(self.scenario_round_dir(round_n))]
+
+    def scenario_part_batch_ids(self, round_n: int) -> list[str]:
+        """The safe batch ids with a part in this round, sorted."""
+        return sorted(s for s in self._scenario_part_stems(round_n) if is_safe_segment(s))
+
+    def unsafe_scenario_part_names(self, round_n: int) -> list[str]:
+        """Part stems this package refuses to join into a path.
+
+        Split from scenario_part_batch_ids for the reason
+        unsafe_contradiction_part_names is split from subject_part_ids: an
+        id-listing accessor that raised made the failure surface at a call site
+        with no way to report it, and these belong in a finding instead.
+        """
+        return sorted(s for s in self._scenario_part_stems(round_n) if not is_safe_segment(s))
+
+    @property
+    def score_parts_dir(self) -> Path:
+        return self.root / "03-score"
+
+    def score_part(self, round_n: int) -> Path:
+        if round_n < 1:
+            raise ValueError(f"score round must be >= 1, got {round_n}")
+        return self.score_parts_dir / f"round-{round_n}.json"
+
+    def score_part_rounds(self) -> list[int]:
+        """Every round number that has a score part, ascending.
+
+        Sorted numerically for the reason scenario_part_rounds is, and a file
+        whose stem is not _ROUND_PART is ignored rather than raising: this is
+        the accessor the seal iterates, and a stray file in the directory must
+        not be able to stop a round from being assembled.
+        """
+        rounds: list[int] = []
+        for path in list_json(self.score_parts_dir):
+            match = _ROUND_PART.fullmatch(path.stem)
+            if match:
+                rounds.append(int(match.group(1)))
+        return sorted(rounds)
 
     @property
     def coverage_dir(self) -> Path:

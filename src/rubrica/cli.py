@@ -60,7 +60,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from rubrica import brief, reconcile, refs, seal, skills, slices, summary, survey, triage
+from rubrica import brief, reconcile, refs, rounds, seal, skills, slices, summary, survey, triage
 from rubrica.artifacts import ArtifactError, read_json
 from rubrica.dedupe import candidate_pairs
 from rubrica.emit import emit_run
@@ -94,6 +94,9 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("validate", "schema-validate one stage's output"),
     ("check-refs", "cross-artifact and reachability checks"),
     ("reconcile-seal", "assemble the reconcile partials into one world model"),
+    ("propose-batches", "partition a round's closable holes into byte-bounded batches"),
+    ("propose-seal", "assemble the propose parts and score rulings into the scenario list"),
+    ("score-seal", "compute the coverage matrices and compose the round's report"),
     ("dedupe-candidates", "propose candidate duplicate scenario pairs as JSON"),
     ("emit", "compile accepted instances into Harbor packages"),
     ("smoke", "run the emitted suite against the agent roster"),
@@ -108,6 +111,38 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("run-summary", "render one run as a single self-contained HTML page"),
     ("set-limit", "change a manifest limit, with the reason recorded in decisions.md"),
 )
+
+
+def _round_number(raw: str) -> int:
+    """`--round`'s argparse type: a round is numbered from 1, and 0 is a usage error.
+
+    Checked here rather than left to `RunPaths.batches`/`score_part`, which raise a
+    bare `ValueError` for the same input. That `ValueError` is neither `UsageError`
+    nor `ArtifactError`, so it falls through to main()'s catch-all and becomes an
+    exit-1 `[internal]` finding -- a fabricated stage defect against a run that is
+    fine, and the orchestrator spends its one repair attempt re-dispatching a
+    prompt whose output was never read. A round number arrives from argv, so a bad
+    one is a *usage* error: exit 2.
+
+    The check is duplicated rather than moved, deliberately. RunPaths' bare
+    `ValueError` matches its pre-existing `coverage_round`, and one round accessor
+    raising a different class from the rest of them would be a worse defect than
+    the same rule being stated in two layers -- the outer one for argv, the inner
+    one for every caller that is not the CLI.
+
+    argparse turns an ArgumentTypeError into its own usage error, which main()'s
+    SystemExit handler already maps to exit 2 with the message on stderr, so this
+    needs no branch of its own below.
+    """
+    try:
+        value = int(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"a round number must be an integer, got {raw!r}"
+        ) from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"rounds are numbered from 1, got {value}")
+    return value
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -200,6 +235,27 @@ def _build_parser() -> argparse.ArgumentParser:
     # found on disk would let the denominator move without one on the record.
     p_reconcile_seal.add_argument("--denominator-version", type=int, default=1)
 
+    p_batches = parsers["propose-batches"]
+    p_batches.add_argument("--run", required=True)
+    # Passed rather than inferred, on reconcile-seal's --denominator-version
+    # reasoning just above: a command that incremented a round it found on disk
+    # would let the loop advance without a decision on the record, and
+    # decisions.md is where a round is accounted for. _round_number rather than
+    # int, so a round below 1 is exit 2 here instead of an exit-1 [internal]
+    # finding out of RunPaths' bare ValueError.
+    p_batches.add_argument("--round", type=_round_number, required=True)
+
+    p_propose_seal = parsers["propose-seal"]
+    # No --round: the seal is a pure function of every part in every round, so
+    # there is no round for a caller to name. That is what lets it run twice per
+    # round -- after propose and again after score -- with no way for the second
+    # run to disagree with the first.
+    p_propose_seal.add_argument("--run", required=True)
+
+    p_score_seal = parsers["score-seal"]
+    p_score_seal.add_argument("--run", required=True)
+    p_score_seal.add_argument("--round", type=_round_number, required=True)
+
     p_smoke = parsers["smoke"]
     p_smoke.add_argument("--run", required=True)
     p_smoke.add_argument("--agents", required=True, metavar="PATH")
@@ -257,6 +313,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_set_limit.add_argument("--run", required=True)
     p_set_limit.add_argument("--max-rounds", type=int, default=None)
     p_set_limit.add_argument("--max-scenarios", type=int, default=None)
+    p_set_limit.add_argument("--max-scenario-part-bytes", type=int, default=None)
     p_set_limit.add_argument("--reason", required=True)
     return parser
 
@@ -527,6 +584,49 @@ def main(argv: list[str] | None = None) -> int:
                 print(world)
             return _report(findings)
 
+        # The loop's three code steps. No catch of their own, on purpose: every
+        # artifact they refuse to trust divides by WHO WROTE IT, and rounds.py
+        # already draws that line for them. manifest.json, 01-world-model.json,
+        # 02-scenarios.json and 03-coverage/round-N.json are code output, so a
+        # malformed one raises the UsageError the shared except below maps to
+        # exit 2 -- no re-dispatch of any prompt could repair it. The propose
+        # parts and the score parts are model output, so a malformed one comes
+        # back as a Finding naming that part: exit 1, one line each, repairable
+        # by re-dispatching that one member. Catching anything here would
+        # collapse the two.
+        if args.command == "propose-batches":
+            run = _run_dir(args.run)
+            path = rounds.write_batches(run, round_n=args.round)
+            if path is None:
+                # Exit 0 with a message, not a finding: no closable hole is a
+                # fact about the run, and the orchestrator branches on it to
+                # stop the loop rather than to repair a stage. A finding here
+                # would send it to re-dispatch a propose member that has
+                # nothing wrong with it and no batch to read.
+                print("no closable holes: there is no propose round to dispatch")
+                return CLEAN
+            print(path)
+            return CLEAN
+
+        if args.command == "propose-seal":
+            run = _run_dir(args.run)
+            path, findings = rounds.seal_scenarios(run)
+            # `path is None` is two different states here and neither is an
+            # error: findings were reported and nothing was written, or no
+            # propose part exists yet at all. seal_scenarios' docstring keeps
+            # them apart; this print just declines to name a file that was
+            # never written.
+            if path is not None:
+                print(path)
+            return _report(findings)
+
+        if args.command == "score-seal":
+            run = _run_dir(args.run)
+            path, findings = rounds.seal_score(run, round_n=args.round)
+            if path is not None:
+                print(path)
+            return _report(findings)
+
         if args.command == "smoke":
             run = _run_dir(args.run)
             # An inner catch so the failure is handled next to the call that
@@ -617,14 +717,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "set-limit":
             run = _run_dir(args.run)
             # Its own UsageError catch, matching decide and record-stage just
-            # above: --max-rounds, --max-scenarios, and --reason are the
-            # orchestrator's own arguments, not a stage's output, so a bad one
-            # is a misconfigured harness rather than a repairable stage defect.
+            # above: --max-rounds, --max-scenarios, --max-scenario-part-bytes and
+            # --reason are the orchestrator's own arguments, not a stage's output,
+            # so a bad one is a misconfigured harness rather than a repairable
+            # stage defect.
             try:
                 set_limit(
                     run,
                     max_rounds=args.max_rounds,
                     max_scenarios=args.max_scenarios,
+                    max_scenario_part_bytes=args.max_scenario_part_bytes,
                     reason=args.reason,
                 )
             except (UsageError, OSError) as exc:

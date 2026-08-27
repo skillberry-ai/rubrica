@@ -327,6 +327,7 @@ def _header(run: RunPaths):
         ("schema_version", got.schema_version),
         ("max_rounds", got.max_rounds),
         ("max_scenarios", got.max_scenarios),
+        ("max_scenario_part_bytes", got.max_scenario_part_bytes),
     )
     parts = [_kv_table(fields)]
     if got.stages:

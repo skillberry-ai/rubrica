@@ -39,8 +39,11 @@ def test_stages_are_in_pipeline_order():
         "reconcile-goals",
         "reconcile-gaps",
         "reconcile-seal",
+        "propose-batches",
         "propose",
+        "propose-seal",
         "score",
+        "score-seal",
         "instantiate",
         "challenge",
         "emit",
@@ -405,3 +408,262 @@ def test_the_listing_methods_raise_a_usage_error_on_an_unreadable_directory(tmp_
     finally:
         for directory in directories:
             directory.chmod(0o755)
+
+
+def test_new_round_artifact_paths(tmp_path):
+    run = RunPaths(tmp_path)
+    assert run.batches_dir == tmp_path / "02-batches"
+    assert run.batches(1) == tmp_path / "02-batches" / "round-1.json"
+    assert run.scenario_parts_dir == tmp_path / "02-scenarios"
+    assert run.scenario_round_dir(1) == tmp_path / "02-scenarios" / "round-1"
+    assert run.scenario_part(2, "b01") == tmp_path / "02-scenarios" / "round-2" / "b01.json"
+    assert run.score_parts_dir == tmp_path / "03-score"
+    assert run.score_part(3) == tmp_path / "03-score" / "round-3.json"
+
+
+def test_score_part_rounds_reads_what_is_on_disk(tmp_path):
+    run = RunPaths(tmp_path)
+    run.score_parts_dir.mkdir()
+    for name in ("round-1.json", "round-10.json", "round-2.json", "notes.json"):
+        (run.score_parts_dir / name).write_text("{}", encoding="utf-8")
+    # Numeric, so round-10 does not sort between round-1 and round-2, and a file
+    # that is not a round is ignored rather than crashing the seal.
+    assert run.score_part_rounds() == [1, 2, 10]
+
+
+def test_batches_rounds_reads_what_is_on_disk(tmp_path):
+    """The batch plan is per-round, so its listing is pinned like the other two.
+
+    The zero-padded name is the case with teeth. A singleton 02-batches.json had
+    no listing at all, and the accessor that replaced it resolves the roster
+    check_scenario_parts holds each round's parts to -- so round-01 folded onto 1
+    would give round 1 two candidate plans, and whichever sorted last would
+    decide which batch ids that round's parts were allowed to name.
+    """
+    run = RunPaths(tmp_path)
+    run.batches_dir.mkdir()
+    for name in ("round-1.json", "round-10.json", "round-2.json", "notes.json", "round-01.json"):
+        (run.batches_dir / name).write_text("{}", encoding="utf-8")
+    # Numeric, so round-10 does not sort between round-1 and round-2; notes.json
+    # is ignored rather than crashing the read; and round-01 is rejected outright
+    # rather than normalised onto the 1 that is already here.
+    assert run.batches_rounds() == [1, 2, 10]
+
+
+def test_an_unreadable_batches_directory_is_a_usage_error(tmp_path):
+    """Exit 2, not an empty listing.
+
+    Same ruling as the other run-directory listings: an empty [] here would let a
+    caller conclude the run has no batch plans when it has plans it cannot read,
+    and report every round's parts as unexplained -- a stage defect fabricated
+    out of a permissions problem.
+    """
+    run = RunPaths(tmp_path)
+    run.batches_dir.mkdir()
+    run.batches_dir.chmod(0o000)
+    try:
+        with pytest.raises(UsageError, match="cannot read run directory"):
+            run.batches_rounds()
+    finally:
+        run.batches_dir.chmod(0o755)
+
+
+def test_scenario_part_rounds_ignores_entries_that_are_not_rounds(tmp_path):
+    """The stray-tolerance the docstring claims, exercised.
+
+    Matches score_part_rounds' notes.json case, and covers all three branches
+    the filter has: a file that is not a round at all, a round- name whose
+    suffix is not a number, and a round- name that is a plain *file* rather
+    than the directory a round part is.
+    """
+    run = RunPaths(tmp_path)
+    real = run.scenario_part(1, "b01")
+    real.parent.mkdir(parents=True)
+    real.write_text("{}", encoding="utf-8")
+    (run.scenario_parts_dir / "notes.json").write_text("{}", encoding="utf-8")
+    (run.scenario_parts_dir / "round-x").mkdir()
+    # A *file* named round-3, which is what a half-written run or a hand-edit
+    # leaves behind. It matches the name pattern and is still not a round.
+    (run.scenario_parts_dir / "round-3").write_text("{}", encoding="utf-8")
+    assert run.scenario_part_rounds() == [1]
+
+
+@pytest.mark.parametrize("name", ["round-²", "round-1²", "round-１", "round-٣", "round-1٣"])
+def test_round_listings_reject_non_ascii_digits(tmp_path, name):
+    r"""str.isdigit() is wider than int(), in both directions.
+
+    Measured, U+00B2 (superscript two): isdigit() is True and int() raises a bare
+    ValueError. Unlike an unreadable directory, that one is NOT in cli.py's exit-2
+    tuple, so it reaches the catch-all and becomes an exit-1 [internal] finding
+    over a directory name -- the misclassification the exit-code contract forbids.
+
+    U+FF11 and U+0663 (fullwidth one, Arabic-Indic three) are the mirror: isdigit()
+    and int() BOTH accept them, so guarding int() cannot help, and the older filter
+    silently invented rounds 1 and 3 from names nothing ever wrote.
+
+    The last case puts U+0663 in the *tail*, and it is here because writing this
+    predicate the other way round found the hole: `[1-9]\d{0,}` reads as a
+    meaning-preserving rewrite of `[1-9][0-9]*` and is not one, because re's `\d`
+    is Unicode-wide -- it matches that name and int() then returns 13, inventing a
+    round no digit-by-digit reading of the name contains. The explicit [0-9] class
+    is what refuses it, so the class is load-bearing and pinned here.
+    """
+    run = RunPaths(tmp_path)
+    (run.scenario_parts_dir / name).mkdir(parents=True)
+    run.score_parts_dir.mkdir(parents=True)
+    (run.score_parts_dir / f"{name}.json").write_text("{}", encoding="utf-8")
+    run.batches_dir.mkdir(parents=True)
+    (run.batches_dir / f"{name}.json").write_text("{}", encoding="utf-8")
+    assert run.scenario_part_rounds() == []
+    assert run.score_part_rounds() == []
+    assert run.batches_rounds() == []
+
+
+def test_leading_zero_rounds_are_rejected_not_normalised(tmp_path):
+    r"""round-01 is not round 1, and must not become it.
+
+    The ruling _ROUND_PART records: `\d+` accepts round-01 and int() folds it
+    onto 1, so round-01 beside round-1 yields [1, 1] -- and a duplicated round
+    makes a caller walk one round twice and collide every scenario id it mints.
+    Rejecting is the honest answer, since nothing in this package ever writes a
+    zero-padded round; normalising would invent a round from a name that is not
+    ours. round-0 goes the same way, which is what the round_n >= 1 guards
+    already refuse to build.
+    """
+    run = RunPaths(tmp_path)
+    for name in ("round-1", "round-01", "round-007", "round-0"):
+        (run.scenario_parts_dir / name).mkdir(parents=True, exist_ok=True)
+    run.score_parts_dir.mkdir(parents=True)
+    run.batches_dir.mkdir(parents=True)
+    for name in ("round-1.json", "round-01.json", "round-007.json", "round-0.json"):
+        (run.score_parts_dir / name).write_text("{}", encoding="utf-8")
+        (run.batches_dir / name).write_text("{}", encoding="utf-8")
+    # Exactly one 1, not two: this is the assertion that fails on `\d+`.
+    assert run.scenario_part_rounds() == [1]
+    assert run.score_part_rounds() == [1]
+    assert run.batches_rounds() == [1]
+
+
+def test_round_numbers_must_be_positive(tmp_path):
+    run = RunPaths(tmp_path)
+    # Mirrors coverage_round's guard: a round of 0 or -1 is a caller bug, and a
+    # path built from one would silently address a directory nobody writes.
+    #
+    # `match=` rather than a bare pytest.raises(ValueError): UsageError and
+    # UnsafeSegment are both ValueError subclasses, so the unnarrowed form would
+    # have passed on an unreadable directory or a rejected segment -- the wrong
+    # failure entirely. The message is also what names the domain, so each
+    # accessor is pinned to its own text rather than to a shared one.
+    for bad in (0, -1):
+        with pytest.raises(ValueError, match=f"scenario round must be >= 1, got {bad}"):
+            run.scenario_round_dir(bad)
+        with pytest.raises(ValueError, match=f"score round must be >= 1, got {bad}"):
+            run.score_part(bad)
+        with pytest.raises(ValueError, match=f"batches round must be >= 1, got {bad}"):
+            run.batches(bad)
+
+
+def test_scenario_part_rejects_an_unsafe_batch_id(tmp_path):
+    run = RunPaths(tmp_path)
+    # Batch ids are code-minted, but this joins the same way disposition_part
+    # does and the guard is what stops an artifact-sourced id escaping the run.
+    with pytest.raises(UnsafeSegment):
+        run.scenario_part(1, "../../etc/passwd")
+
+
+def test_part_listings_are_empty_when_nothing_exists(tmp_path):
+    run = RunPaths(tmp_path)
+    assert run.scenario_part_rounds() == []
+    assert run.scenario_part_batch_ids(1) == []
+
+
+def test_part_listings_read_what_is_on_disk(tmp_path):
+    run = RunPaths(tmp_path)
+    for round_n, batch in ((1, "b01"), (1, "b02"), (2, "b01")):
+        part = run.scenario_part(round_n, batch)
+        part.parent.mkdir(parents=True, exist_ok=True)
+        part.write_text("{}", encoding="utf-8")
+    assert run.scenario_part_rounds() == [1, 2]
+    assert run.scenario_part_batch_ids(1) == ["b01", "b02"]
+    assert run.scenario_part_batch_ids(2) == ["b01"]
+
+
+def test_unsafe_scenario_part_names_are_listed_not_raised(tmp_path):
+    run = RunPaths(tmp_path)
+    # Same split unsafe_contradiction_part_names exists for: the id-listing
+    # accessor must not raise, because returning an unsafe id made the later
+    # scenario_part() call raise at a call site that cannot handle it.
+    d = run.scenario_round_dir(1)
+    d.mkdir(parents=True)
+    (d / "b01.json").write_text("{}", encoding="utf-8")
+    (d / "..bad.json").write_text("{}", encoding="utf-8")
+    assert run.scenario_part_batch_ids(1) == ["b01"]
+    assert run.unsafe_scenario_part_names(1) == ["..bad"]
+
+
+@pytest.mark.parametrize("mode", [0o000, 0o444])
+def test_the_round_part_listings_raise_a_usage_error_on_an_unreadable_directory(tmp_path, mode):
+    """The new round-part listings, held to the same ruling as every other one.
+
+    This pins message fidelity, not an exit code. cli.py's `except (OSError,
+    UsageError, ArtifactError, UnknownStage)` already maps both the bare
+    PermissionError and the UsageError to exit 2, so the conversion changes no
+    exit code -- the earlier claim that it did described a cli.py that predates
+    the commit which added OSError to that tuple.
+
+    What it does change is *which artifact the error names*. Observed before the
+    fix: `PermissionError ... '<run>/02-scenarios/round-1'`, naming an arbitrary
+    child the loop happened to stat first, where every sibling listing names the
+    directory the accessor actually reads. That is CLAUDE.md's "a finding must
+    name the right artifact" rule applied to a 2, and it is what makes this
+    accessor indistinguishable from _instance_dir_names to a caller.
+
+    Both modes, because they fail in different places. At 0o000 the listing
+    itself raises and list_dir/list_json converts it. At 0o444 the listing
+    succeeds and stat'ing a *child* is what raises -- which list_dir cannot
+    convert because it never touches the child, so scenario_part_rounds carries
+    its own catch the way _instance_dir_names does.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = RunPaths(tmp_path)
+    # A round directory holding a *.json child, because that is what both
+    # listings really read: scenario_part_rounds stats round-1 as a child of
+    # 02-scenarios/, and the batch-id listings stat b01.json inside it. Without
+    # each of those children the 0o444 stat that raises is never reached and the
+    # listing comes back empty instead.
+    part = run.scenario_part(1, "b01")
+    part.parent.mkdir(parents=True)
+    part.write_text("{}", encoding="utf-8")
+    run.score_parts_dir.mkdir(parents=True)
+    run.score_part(1).write_text("{}", encoding="utf-8")
+
+    directories = (run.scenario_parts_dir, run.scenario_round_dir(1), run.score_parts_dir)
+    calls = (
+        run.scenario_part_rounds,
+        lambda: run.scenario_part_batch_ids(1),
+        lambda: run.unsafe_scenario_part_names(1),
+        run.score_part_rounds,
+    )
+    # Innermost first, so the parent is still traversable while the child's mode
+    # is being set -- and restored outermost first in the finally for the same
+    # reason, which is why a failed assertion cannot leave the tree unreadable.
+    for directory in reversed(directories):
+        directory.chmod(mode)
+    try:
+        for call in calls:
+            # UsageError is a ValueError, so a bare PermissionError would not
+            # satisfy this -- pytest.raises does not match sibling exceptions.
+            with pytest.raises(UsageError, match="cannot read run directory"):
+                call()
+    finally:
+        for directory in directories:
+            directory.chmod(0o755)
+
+    # And the same four calls answer normally once the modes are back: without
+    # this the test would pass just as well if the accessors were broken outright
+    # and raised UsageError on a perfectly readable run.
+    assert run.scenario_part_rounds() == [1]
+    assert run.scenario_part_batch_ids(1) == ["b01"]
+    assert run.unsafe_scenario_part_names(1) == []
+    assert run.score_part_rounds() == [1]

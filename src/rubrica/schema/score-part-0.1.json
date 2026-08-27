@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "score-part-0.1.json",
+  "title": "One score dispatch's judgments",
+  "description": "Everything rb-score decides and nothing it can compute. The coverage matrices are absent on purpose: rb-score's own Method specifies both as pure functions of the world model and the scenario list, and refs.py already recomputes them in checker form, so score-seal computes them and this part carries only the folds, the rejections, the hole reasons and the verdict. Measured on run-20260825-094033: this replaces a 24,613-byte scenarios re-emit and a 61,342-byte coverage document written twice.",
+  "type": "object",
+  "required": ["schema_version", "round", "rulings", "holes", "verdict"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "round": {"type": "integer", "minimum": 1},
+    "rulings": {
+      "type": "array",
+      "description": "One entry per scenario whose status changes in this round. A scenario absent from every round's rulings keeps the status its propose member gave it, which is `proposed`. An empty array is a real record: it says score promoted nothing and folded nothing. `status` deliberately omits `proposed`: a ruling exists to change a status, and `proposed` is what a scenario already carries out of its propose member, so a ruling naming it would be a no-op that still had to be honoured.",
+      "items": {
+        "type": "object",
+        "required": ["scenario_id", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "scenario_id": {"$ref": "world-model-0.1.json#/$defs/id"},
+          "status": {
+            "enum": ["active", "duplicate", "rejected"],
+            "description": "Restated rather than $ref-ed, and that asymmetry with rejected_reason below is deliberate: this is a proper SUBSET of the sealed scenario's status enum, which also admits `proposed`. A $ref would widen it back, and the whole point of the narrower set is that a ruling naming `proposed` would be a no-op that still had to be honoured. rejected_reason has no such subtraction, so it is shared."
+          },
+          "duplicate_of": {"$ref": "world-model-0.1.json#/$defs/id"},
+          "rejected_reason": {
+            "$ref": "scenarios-0.1.json#/$defs/scenario/properties/rejected_reason",
+            "description": "The sealed scenario's own enum, resolved through validate._schema_registry rather than copied. score-seal writes a ruling's rejected_reason straight onto the scenario it names, so a copy that fell behind would either make a reason unrecordable in a part or make the assembled 02-scenarios.json schema-invalid -- a finding against an artifact code wrote, which no repair prompt can fix. A property subschema is a legal $ref target, the same way `verdict` below resolves coverage-0.1.json#/properties/verdict."
+          }
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"status": {"const": "duplicate"}}, "required": ["status"]},
+            "then": {"required": ["duplicate_of"]}
+          },
+          {
+            "if": {"properties": {"status": {"const": "rejected"}}, "required": ["status"]},
+            "then": {"required": ["rejected_reason"]}
+          }
+        ]
+      }
+    },
+    "holes": {
+      "type": "array",
+      "items": {"$ref": "coverage-0.1.json#/$defs/hole"},
+      "description": "One entry per uncovered row, carrying the reason and justification that are judgment and cannot be computed. score-seal refuses to compose a coverage document if an uncovered row has no hole here, or a hole here names a row the computed matrices show as covered -- the both-directions check refs.check_coverage already makes after the fact."
+    },
+    "verdict": {"$ref": "coverage-0.1.json#/properties/verdict"}
+  }
+}

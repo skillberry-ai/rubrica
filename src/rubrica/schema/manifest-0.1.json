@@ -81,7 +81,8 @@
           "reconcile-subjects", "reconcile-contradict", "reconcile-capabilities",
           "reconcile-outcomes", "reconcile-entities", "reconcile-goals",
           "reconcile-gaps", "reconcile-seal",
-          "propose", "score", "instantiate", "challenge", "emit", "smoke"
+          "propose-batches", "propose", "propose-seal", "score", "score-seal",
+          "instantiate", "challenge", "emit", "smoke"
         ]
       },
       "additionalProperties": {
@@ -101,7 +102,12 @@
       "additionalProperties": false,
       "properties": {
         "max_rounds": { "type": "integer", "minimum": 1 },
-        "max_scenarios": { "type": "integer", "minimum": 1 }
+        "max_scenarios": { "type": "integer", "minimum": 1 },
+        "max_scenario_part_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-member output budget propose-batches packs against. Optional rather than required: making a third limit required would invalidate every manifest already on disk, which diff-runs, run-summary and gate-brief all read. Absent means rounds.DEFAULT_SCENARIO_PART_BYTES."
+        }
       }
     }
   },

@@ -126,6 +126,14 @@ def test_it_declares_every_artifact_its_branches_read():
     `check-refs` never compares the value to anything, and `emit` reports a
     `re-seed` only at stage 6 and a `reject` not at all).
 
+    `batches` joined it for the same shape of reason once `propose` became a
+    fan-out: the roster of that fan-out is the batch ids `propose-batches` mints
+    in code and writes to `02-batches/round-N.json`, a member cannot be
+    dispatched without being told which one is its own, and nothing else
+    surfaces those ids. What the orchestrator may take from that document is
+    still only the ids -- a batch's `hole_refs` are the member's to read out of
+    the same file -- but the read itself is a requirement, not a convenience.
+
     Set equality rather than `<=`: `check_contract` only verifies each entry is
     a public `RunPaths` attribute, so both dropping `verdict` again and quietly
     widening this list to an artifact no requirement needs would otherwise pass
@@ -135,6 +143,7 @@ def test_it_declares_every_artifact_its_branches_read():
     assert set(load(SKILL).contract["reads"]) == {
         "manifest",
         "world_model",
+        "batches",
         "scenarios",
         "coverage_latest",
         "verdict",
@@ -158,6 +167,14 @@ def test_it_invokes_every_subcommand_the_loop_needs():
         "check-refs",
         "record-stage",
         "decide",
+        # The loop's three code steps. Without propose-batches there is no
+        # fan-out roster, without propose-seal no scenario list for score to
+        # read, and without score-seal no coverage document to branch on -- so
+        # an orchestrator that does not know they exist cannot run a round at
+        # all, which is exactly what this set is for.
+        "propose-batches",
+        "propose-seal",
+        "score-seal",
         "dedupe-candidates",
         "emit",
         "smoke",
@@ -261,10 +278,19 @@ def test_it_states_all_three_exit_codes_and_what_each_means():
 def test_it_states_the_repair_is_bounded_to_one_attempt():
     """Strengthened during Task 13's fix round. The original was
     `("once" in body or "one repair" in body) and "halt" in body`: measured,
-    "once" occurs 13 times in unrelated prose ("get this right once", "two
-    members appending at once"), "halt" 43 times, and "one repair" is in the
-    frontmatter `description:` line -- so deleting the whole bounded-repair
-    rule left all eleven tests green.
+    "once" and "halt" both occur many times over in unrelated prose -- "once"
+    carries the dispatch protocol's own advice and the re-seed budget, and "halt"
+    is what five different rules do -- and "one repair" is in the frontmatter
+    `description:` line, so deleting the whole bounded-repair rule left all
+    eleven tests green.
+
+    The two phrases this paragraph used to quote, and the count beside them, were
+    dropped when the propose fan-out landed. One of them lived in the paragraph
+    arguing that propose could not be a fan-out, which is gone, so the count was
+    no longer true and the quotation sent a reader looking for text that is not
+    there -- and the other is hard-wrapped in the skill, so grepping for it fails
+    even though the sentence is still on the page. Neither was load-bearing: the
+    measurement's point is that the tokens are common, not how common.
 
     What has to be stated is the bound itself: the *same* stage, re-dispatched
     *once*, and no third attempt.

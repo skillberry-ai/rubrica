@@ -713,3 +713,53 @@ def minimal_adoptions(**over: Any) -> dict[str, Any]:
     }
     payload.update(over)
     return payload
+
+
+def minimal_batches(**over: Any) -> dict[str, Any]:
+    # The hole this batch owns is taken from minimal_coverage's own uncovered
+    # cell, so the projection is over a hole the coverage report actually
+    # reports rather than an invented ref that happens to match the pattern.
+    hole = minimal_coverage()["holes"][0]["ref"]
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "round": 1,
+        "cap_bytes": 28000,
+        "bytes_per_scenario": 1600,
+        # One batch, not zero: batches-0.1.json puts minItems: 1 here because
+        # propose-batches writes no document at all when no hole is closable.
+        "batches": [{"id": "b01", "hole_refs": [hole], "projected_bytes": 1600}],
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_scenarios_part(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "round": 1,
+        "batch_id": minimal_batches()["batches"][0]["id"],
+        # One scenario, sliced out of minimal_scenarios, so the part carries
+        # exactly the shape scenarios-0.1.json#/$defs/scenario accepts -- which
+        # is also what proves the cross-file $ref resolves at all.
+        "scenarios": minimal_scenarios()["scenarios"],
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_score_part(**over: Any) -> dict[str, Any]:
+    coverage = minimal_coverage()
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "round": coverage["round"],
+        # The status change this round made, and nothing computable: no
+        # matrices, no scenario re-emit.
+        "rulings": [{"scenario_id": minimal_scenarios()["scenarios"][0]["id"], "status": "active"}],
+        # Sliced out of minimal_coverage, for the same reason
+        # minimal_scenarios_part slices its scenario: the holes are the same
+        # $defs/hole the sealed coverage report carries.
+        "holes": coverage["holes"],
+        "verdict": coverage["verdict"],
+    }
+    payload.update(over)
+    return payload

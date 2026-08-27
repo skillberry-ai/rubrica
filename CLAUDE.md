@@ -50,9 +50,10 @@ path. No conversational context is threaded through. If a stage needs a fact it
 reads it from an artifact, or it does not have it.
 
 Fan-out members get a fourth thing: the id of their own slice (`artifact_id`,
-`subject_id`, `scenario_id`). Never a sibling's, and never the slice's
-*contents* — `rb-reconcile-contradict` gets a `subject_id` and reads that
-subject's claim list out of `01-subjects.json` itself.
+`subject_id`, `batch_id`, `scenario_id`). Never a sibling's, and never the
+slice's *contents* — `rb-reconcile-contradict` gets a `subject_id` and reads that
+subject's claim list out of `01-subjects.json` itself, and `rb-propose` gets a
+`batch_id` and reads that batch's `hole_refs` out of `02-batches/round-N.json`.
 
 The orchestrator may append exactly two things to a re-dispatch, both verbatim
 machine text, never paraphrased: a repair's gate findings, and a re-seed's
@@ -82,8 +83,11 @@ finding's clothes.
 | `01g` | reconcile-goals | `rb-reconcile-goals` | validate · check-refs |
 | `01h` | reconcile-gaps | `rb-reconcile-gaps` | validate · check-refs |
 | `01i` | reconcile-seal | code — `rubrica reconcile-seal` assembles the partials | validate · check-refs · **human gate 1** |
-| `02` | propose | `rb-propose` | validate |
-| `03` | score | `rb-score` — barrier | validate · check-refs · **human gate 2** |
+| `02a` | propose-batches | code — partitions the round's closable holes | validate |
+| `02b` | propose | `rb-propose` — fan-out, one per batch | validate |
+| `02c` | propose-seal | code — assembles the parts into `02-scenarios.json` | validate |
+| `03a` | score | `rb-score` — barrier | validate |
+| `03b` | score-seal | code — computes the matrices, composes the report | validate · check-refs · **human gate 2** |
 | `04` | instantiate | `rb-instantiate` — fan-out, one per active scenario | validate · check-refs |
 | `05` | challenge | `rb-challenge` — fan-out, one per instance | validate · check-refs · **human gate 3** |
 | `06` | emit | `rb-emit` — thin wrapper over `rubrica emit` | validate · check-refs |
@@ -116,9 +120,14 @@ ahead of the `00-inputs/` and `manifest.json` that `intake` mints once gate 0
 has passed. The numbering stays intake's, not theirs, because intake is still
 what fixes the run's identity.
 
-Stages 02 and 03 are a loop bounded by `max_rounds`. Score *computes* the
-coverage verdict (`continue` / `converged` / `halted_no_progress` /
-`halted_round_cap`); only the orchestrator acts on it.
+Stages 02a through 03b are a loop bounded by `max_rounds`, and the whole of it
+repeats — not just `propose` and `score`. Score *computes* the coverage verdict
+(`continue` / `converged` / `halted_no_progress` / `halted_round_cap`) and
+`score-seal` composes the document that carries it; only the orchestrator acts on
+it. `propose-seal` runs twice a round, and the repeat is load-bearing: it is a
+pure function of the parts and the rulings, so the second run is what folds this
+round's rulings in before `score-seal` reads the document for what each live
+scenario credits.
 
 **Gate 0 is different in kind from the others.** Gates 1 through 3 review a
 judgment made from evidence already in the run; a human overturning one of them
@@ -135,9 +144,9 @@ gates 1 through 3, and writes `decisions.md`. It never runs `survey`, never
 dispatches any pass of the triage family, and never holds gate 0 — all three are
 finished before it is ever dispatched.
 
-`intake`, `smoke`, `survey`, `triage-slices`, `triage-seal`, and `reconcile-seal`
-are code, so they have no skill and no `manifest.stages` entry. Their absence
-there is not a finding.
+`intake`, `smoke`, `survey`, `triage-slices`, `triage-seal`, `reconcile-seal`,
+`propose-batches`, `propose-seal`, and `score-seal` are code, so they have no
+skill and no `manifest.stages` entry. Their absence there is not a finding.
 
 ## The exit-code contract — load-bearing, do not weaken
 

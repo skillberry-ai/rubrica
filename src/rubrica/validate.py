@@ -76,6 +76,20 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     # `validate --stage X` must never look for. _schema_registry globs the
     # directory and registers by filename, so the cross-file $ref resolves
     # without an entry.
+    #
+    # The propose/score loop's part kinds. Each is one dispatch's slice of a
+    # document that used to be emitted whole by a model, and none of them restates
+    # an element it shares with a sealed document: they resolve into
+    # scenarios-0.1.json and coverage-0.1.json instead. Two of those refs target a
+    # *property* subschema rather than a $defs entry, which is a legal target and
+    # the one available here -- and score-part's `status` is a deliberate
+    # restatement rather than a ref, because it is a proper SUBSET of the sealed
+    # scenario's enum. artifacts.md's "The propose/score loop's parts" section
+    # argues both, and the ref/restatement split is the rule to cite rather than
+    # any one schema's wording.
+    "batches": "batches-0.1.json",
+    "scenarios-part": "scenarios-part-0.1.json",
+    "score-part": "score-part-0.1.json",
     # Config kinds. Human-authored inputs, not stage outputs, so they are
     # deliberately absent from STAGE_ARTIFACTS: no stage produces them and
     # `validate --stage X` must never look for them.
@@ -118,8 +132,15 @@ STAGE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "reconcile-goals": ("goals-part",),
     "reconcile-gaps": ("gaps-part",),
     "reconcile-seal": ("world-model",),
-    "propose": ("scenarios",),
-    "score": ("coverage",),
+    "propose-batches": ("batches",),
+    # propose now writes only its own batch's part. The stage that produces the
+    # accumulating 02-scenarios.json is propose-seal, which is code.
+    "propose": ("scenarios-part",),
+    "propose-seal": ("scenarios",),
+    # score writes only what it decides; the matrices and the report around them
+    # are score-seal's, which is why the "coverage" kind moved off this row.
+    "score": ("score-part",),
+    "score-seal": ("coverage",),
     "instantiate": ("seed", "expected"),
     "challenge": ("verdict",),
     "emit": ("suite-expected",),
@@ -366,6 +387,29 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         return [run.goals_part]
     if kind == "gaps-part":
         return [run.gaps_part]
+    if kind == "batches":
+        # Iterated, and so empty when no round has a plan -- NOT the
+        # always-return form catalogue/slices/subjects use. propose-batches
+        # legitimately writes nothing when no hole is closable, and that absence
+        # is how the loop learns it is over. What the iterated form buys is that
+        # the finding, when there is one, names a plan that EXISTS: this function
+        # has no round number, so the always-return form could only ever invent a
+        # path. It does NOT stop layer 1 firing on a terminal round -- an empty
+        # list still reaches validate_stage's "produced no batches artifact" arm
+        # against the run root, which is why the orchestrator gates this stage
+        # only when a plan was written (pinned by
+        # test_the_batches_gate_over_a_run_with_no_plan_names_the_run_root).
+        # "Failed" is distinguished from "no holes" by the subcommand's exit code,
+        # which is 2 on every real failure, not by this gate. (Rulings R2, R9.)
+        return [run.batches(r) for r in run.batches_rounds()]
+    if kind == "scenarios-part":
+        return [
+            run.scenario_part(r, b)
+            for r in run.scenario_part_rounds()
+            for b in run.scenario_part_batch_ids(r)
+        ]
+    if kind == "score-part":
+        return [run.score_part(r) for r in run.score_part_rounds()]
     raise KeyError(f"unknown artifact kind {kind!r}")
 
 

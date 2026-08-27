@@ -108,7 +108,24 @@ PHASES: list[dict] = [
     dict(
         verb="cover",
         note=["scenarios, round", "after round"],
-        stages=["propose", "score"],
+        stages=[
+            "propose-batches",
+            "propose",
+            "propose-seal",
+            "score",
+            "score-seal",
+        ],
+        # Folded for the reason the triage and reconcile families are, and the
+        # unfolded list above stays complete so the partition test still sees
+        # every stage. Two prefixes rather than five names because `phase()`
+        # draws one line per entry from a fixed BOX_H -- three fit, five spill
+        # past the bottom edge -- and because the batcher and the two seals are
+        # not concepts a newcomer needs: at this altitude the phase is "propose,
+        # then score, until coverage stops improving". Note the prefixes carry no
+        # trailing dash: `propose` and `score` are themselves stages, so a
+        # dashed prefix would leave each of them drawing its own line beside its
+        # own family.
+        folds=["propose", "score"],
         gate=2,
         loop="until coverage stops improving",
     ),

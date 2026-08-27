@@ -1,13 +1,14 @@
 ---
 name: rb-score
-description: Judge this round's scenarios -- folding the pairs that are one test, promoting the rest -- then compute the coverage matrices against the frozen denominator, justify every uncovered row with a hole, and report the verdict the orchestrator acts on.
+description: Judge this round's scenarios -- folding the pairs that are one test, promoting the rest -- then justify every row the frozen denominator will show uncovered with a hole, and report the verdict the orchestrator acts on. Judgments only: score-seal computes the matrices.
 ---
 
 # rb-score
 
-You are dispatched once per round, after `rb-propose` has appended this
-round's scenarios and before the orchestrator decides whether to run another
-round. You are the second of this pipeline's two barriers: like
+You are dispatched once per round, after this round's `rb-propose` members
+have written their parts and `rubrica propose-seal` has assembled them into
+`02-scenarios.json`, and before the orchestrator decides whether to run
+another round. You are the second of this pipeline's two barriers: like
 `rb-reconcile-subjects` you run alone, with every scenario in the run visible in one
 context at once, because the two judgments this stage exists to make -- is
 this pair of scenarios the same test, and is this row of the denominator
@@ -16,34 +17,37 @@ actually covered -- cannot be made from any single scenario's slice.
 Two things make this the stage to get right. You are the only stage that may
 promote a scenario out of `proposed`, or fold one, so a promotion you skip is
 a test that never gets built and a fold you get wrong is either a lost cell
-or a wasted instantiate. And the numbers you write into
-`03-coverage/latest.json` are what every later claim about this suite is
-measured against: a percentage
-that disagrees with the matrix under it is not a cosmetic error, it is a run
-reporting coverage of a surface it never touched, with both gates green.
+or a wasted instantiate. And the coverage document every later claim about
+this suite is measured against is computed from exactly two things -- the rows
+the world model declares, and the statuses your rulings leave behind -- so a
+promotion or a fold you get wrong does not merely mislabel one scenario, it
+moves those numbers, in a document that will agree with itself either way.
 
 ## Contract
 
 ```toml
 stage = "score"
-reads = ["manifest", "world_model", "scenarios"]
-writes = ["scenarios", "coverage_round", "coverage_latest"]
-schemas = ["coverage"]
-invokes = ["dedupe-candidates", "validate", "check-refs"]
+reads = ["manifest", "world_model", "scenarios", "batches"]
+writes = ["score_part"]
+schemas = ["score-part"]
+invokes = ["dedupe-candidates", "validate"]
 ```
 
 ## 1. Inputs
 
-You read exactly the three artifacts this skill's contract names under
-`reads`: `manifest.json` (`manifest`), `01-world-model.json` (`world_model`)
-and `02-scenarios.json` (`scenarios`). The world model is frozen input -- its
+You read exactly the four artifacts this skill's contract names under
+`reads`: `manifest.json` (`manifest`), `01-world-model.json` (`world_model`),
+`02-scenarios.json` (`scenarios`) and this round's batch plan
+`02-batches/round-<N>.json` (`batches`). The world model is frozen input -- its
 `capabilities` with their `outcome_classes`, its `goals` with their
 `expected_hop_depths`, its
-`gaps`, and its `denominator` are the entire universe your matrices may
-describe, and you never amend any of it. The scenarios file is the run's
-whole scenario history, every round of it, and it is the one artifact you
-both read and write, because the status transitions this stage owns are
-edits to scenarios somebody else wrote.
+`gaps`, and its `denominator` are the entire universe the coverage matrices
+may describe, and you never amend any of it. The scenarios file is the run's
+whole scenario history, every round of it, and `rubrica propose-seal`
+assembled it out of the propose members' parts. You read it and you do not
+write it: the status transitions this stage owns are recorded as *rulings* in
+your own part, and `propose-seal` folds each one onto the scenario it names the
+next time it runs.
 
 Being the barrier means you legitimately see *every* scenario, not one
 cluster's worth, and that is the design rather than a leak: judging whether
@@ -64,8 +68,8 @@ earlier *run* is not evidence about this one.
 
 **There is one exception, and it is a whole kind of dispatch rather than an edge
 case.** You can be re-dispatched *after* `rb-challenge` has judged this round's
-instances, to record a rejection the adversary found and recompute coverage
-against it. When that happens the orchestrator appends to your prompt each
+instances, to record a rejection the adversary found and reopen the rows it
+credited. When that happens the orchestrator appends to your prompt each
 rejected `scenario_id` together with that verdict's `uniquely_determined` and
 `derivable_without_guessing` values and its `notes`, quoted from the verdict file.
 That appended text **is** evidence about this run, and acting on it is the work
@@ -82,9 +86,19 @@ configuration, a bound on the loop rather than a fact about the system under
 test, so nothing you write may treat it as evidence about the target the way
 the world model is evidence about the target.
 
+The batch plan is in your `reads` for one thing too, and it is an **address**
+rather than context: which round this dispatch is scoring. It is the same thing
+each `rb-propose` member takes from it, and the reason a plan is a legitimate
+read for a stage that closes no hole -- the round a plan is filed under is not a
+judgment about the target, so nothing in it can reach a ruling of yours. Its
+`batches` array and every `hole_refs` in it belong to the members that were
+dispatched against them; you neither work a batch nor check that one was worked,
+and a hole you write is justified from the matrices you derive, never from a
+batch's roster.
+
 You are dispatched with no memory of any conversation that came before you,
 and nothing you write here carries forward as memory either. Whatever you
-need has to be derivable from the three artifacts you read, from this
+need has to be derivable from the four artifacts you read, from this
 document, from the command in Method step 1, or from a notice the orchestrator
 appended to *this* dispatch -- those four and nothing else. On an ordinary
 scoring dispatch the first three are the whole of it. The fourth is there
@@ -92,13 +106,34 @@ because of the one thing you may be asked to do that your artifacts genuinely
 cannot tell you: a `rb-challenge` rejection lives in a file you do not read, so
 it reaches you as appended text or it does not reach you at all. In particular,
 **nobody tells you which round this is**: the round you are scoring is the
-highest `round` tag among the scenarios in `02-scenarios.json`, because
-`rb-propose` tags every scenario it writes with the round that wrote it.
-Every quantity in `progress` is derivable the same way, from those round
-tags, which is why you never need to read back a coverage document from an
-earlier round -- Method step 8 spells out the derivation. Deriving it beats
-reading it: a stale `latest.json` from a round that was scored and then
-re-proposed against would silently answer the wrong question.
+highest-numbered `round-<N>.json` under `02-batches/`, and that document's own
+`round` field states it. That is the rule each `rb-propose` member follows for
+the same question, and it is the rule for the same reason -- the plan is the
+round's own address, filed once per round by code before any member ran.
+
+**Do not derive the round from the scenarios' `round` tags instead**, and the
+reason is a state this pipeline sanctions rather than a hypothetical one. When
+every propose member of a round honestly declines its batch -- which is exactly
+what `rb-propose`'s refusal conditions exist to produce -- the seal writes a
+scenario list carrying no scenario tagged with that round. The highest tag on
+disk is then an earlier round's, or on a first round there is none at all.
+Scoring by tag would
+write your part into `03-score/round-<N-1>.json`, overwriting rulings that round
+already carries, and `rubrica score-seal --round N` would then refuse a part it
+cannot find -- reporting a defect against you for writing exactly where you were
+told to. The plan exists for every round that was dispatched, declined or not,
+so the derivation above holds in that state and in every other.
+
+Whether this round made progress is a *different* derivation, and that one does
+run over the round tags and the statuses beside them, which is what Method
+step 8 spells out and why no coverage document is in your `reads`. You do not
+write the `progress` numbers -- `rubrica score-seal` computes them, and it reads
+the previous
+round's own `03-coverage/round-<N-1>.json` rather than `latest.json`, because
+`latest.json` is rewritten by every re-score and would silently answer for a
+round that was scored and then re-proposed against. What you need the
+derivation for is the verdict in Method step 9, which turns on whether this
+round added a cell.
 
 There is a second boundary that is easier to miss: what you may *know*. A
 fold, a promotion, and a hole reason may rest only on what the world model
@@ -129,48 +164,102 @@ otherwise would have you making rulings on evidence you do not have.
 
 ## 2. Output
 
-Two things, in three files.
+One `score-part-0.1.json`-shaped document, written to
+`03-score/round-<N>.json` (`score_part`) for the round you derived in
+section 1. It carries `schema_version: "0.1"`, `round`, `rulings`, `holes` and
+`verdict` -- all five required, an incomplete part being a validation failure
+rather than a smaller one. Everything in it is a judgment; nothing in it is a
+number that could be computed from the artifacts you read.
 
-**The updated `02-scenarios.json` (`scenarios`).** The same document you
-read, with the same `schema_version`, the same `denominator_version`, and
-the same scenarios in the same order. You never add a scenario -- creation
-is `rb-propose`'s and only `rb-propose`'s -- and you never remove or
-renumber one. The only fields that may differ from what you read are
-`status` and the fields a status requires: `duplicate_of` on a scenario you
-mark `duplicate`, and `rejected_reason` (one of `ambiguous`,
-`not_derivable`, `wrong_label`, `out_of_scope`, `blocked_by_gap`) on one you
-mark `rejected`. Both are schema-required for their status, so a fold
-without a survivor named is a validation failure rather than a partial
-ruling. A scenario an earlier round already judged keeps the judgment it
+**`rulings`: one entry per scenario whose status changes.** Each names a
+`scenario_id`, the `status` you are giving it -- `active`, `duplicate` or
+`rejected`, and those three only -- plus the field that status requires:
+`duplicate_of` on a fold, naming the survivor, and `rejected_reason` (one of
+`ambiguous`, `not_derivable`, `wrong_label`, `out_of_scope`, `blocked_by_gap`)
+on a rejection. Both are schema-required for their status, so a fold without a
+survivor named is a validation failure rather than a partial ruling.
+
+A scenario you rule on nothing about is absent from `rulings` and keeps the
+status its propose member gave it, which is `proposed`. `proposed` is
+deliberately not one of the three values a ruling may carry: a ruling exists to
+*change* a status, so one naming `proposed` would be a no-op that still had to
+be honoured. An empty `rulings` array is a real record -- it says you promoted
+nothing and folded nothing -- and it is a bad one to write by accident, because
+a scenario left `proposed` is not instantiated, not emitted, and not counted as
+a test that exists.
+
+**One ruling per scenario in one part.** `propose-seal` refuses a part that
+rules on the same `scenario_id` twice: one dispatch contradicting itself is a
+defect, and the sealed document would carry only the last of the two, silently.
+The refusal is scoped to a single part on purpose -- a *later round's* part
+overturning an earlier ruling is exactly what the paragraph below sanctions, so
+a run-wide register would refuse the supported case along with the defect.
+
+**`holes`: one entry per row the matrices will show uncovered**, each naming a
+`ref` (`cell:<capability_id>/<outcome_class_id>` or `goal:<goal_id>`), a
+`reason` and a `justification`. This is the half of the report no code can
+compute, which is why it is here and the matrices are not: whether a row is
+covered is arithmetic over the statuses, but *why* an uncovered row is
+uncovered, and whether a later round could close it, is the judgment
+`rb-propose` then reads as its worklist.
+
+**`verdict`: the state of the loop**, computed in Method step 9 and acted on by
+the orchestrator. `rubrica score-seal` copies it into the coverage document
+untouched, so what you write is what the orchestrator branches on.
+
+**What this part does *not* carry, and why that is not a demotion.** No
+`capability_matrix`, no `goal_matrix`, no `covered`/`total`/`pct`, no
+`progress`, and no `denominator_version`: `rubrica score-seal` computes all of
+them from the world model's rows and the statuses your rulings leave, composes
+`03-coverage/round-<N>.json` around your holes and your verdict, and publishes
+`latest.json` as a byte copy of it. None of that arithmetic was ever judgment --
+`refs._check_matrix_arithmetic` already recomputed every one of those numbers
+from the rows beneath them -- and a document composed in code cannot report a
+percentage that disagrees with the matrix under it, which is the one failure no
+gate could catch from the document alone. What is left in your part is judgment
+only, and Method steps 4 through 6 are still yours to *derive*, because step 7
+cannot justify a row you have not worked out is uncovered.
+
+A scenario an earlier round already judged keeps the judgment it
 already has -- **unless this dispatch carries a rejection notice naming it**,
 in which case changing that judgment is precisely what you are here to do. Read
 the rule as "do not re-open a ruling that nothing new bears on", never as
 "statuses are frozen after the round that set them".
 
-**One `coverage-0.1.json`-shaped document, written twice**: to
-`03-coverage/round-<N>.json` (`coverage_round`) and to
-`03-coverage/latest.json` (`coverage_latest`), with identical content. It
-carries `schema_version: "0.1"`, `round`, `denominator_version`,
-`capability_matrix`, `goal_matrix`, `holes`, `progress`, and `verdict` --
-all eight required, an incomplete report being a validation failure rather
-than a smaller report.
+**A re-dispatch rewrites this round's part rather than adding to it, and that is
+the one place this stage can lose work it has already done.**
+`03-score/round-<N>.json` is one document per round, and `propose-seal`
+reassembles `02-scenarios.json` out of the propose parts and the score parts
+alone -- no status survives anywhere else. So a re-dispatch that writes only the
+new rejection un-promotes everything that round had promoted: those scenarios
+fall back to `proposed`, and a `proposed` scenario is not instantiated, not
+emitted and not counted, with nothing reporting the loss as a loss. Reconstruct
+what is still in force from the statuses in front of you -- every scenario
+`02-scenarios.json` carries as `active`, `duplicate` or `rejected` is one some
+dispatch ruled on -- and restate each as a ruling in the part you are writing,
+with the notice's rejections replacing the ruling for the ids they name rather
+than joining it, since Invariant 4 allows each scenario exactly one ruling per
+part. Restating a ruling costs nothing: `propose-seal` writes the status
+straight onto the scenario, so applying the same one twice is the same
+document. Omitting one costs the promotion.
 
-**`03-coverage/` does not exist on round 1, and creating it is not your
-job.** Nothing in `src/rubrica/` mkdirs it -- your `Write` creates it,
-parents and all, on the first round and re-uses it on every later one. **Do
+**`03-score/` does not exist on round 1, and creating it is not your job.**
+Nothing in `src/rubrica/` mkdirs it -- your `Write` creates it, parents and
+all, on the first round and re-uses it on every later one. **Do
 not reach for `mkdir`.** This project's dispatch allows `rubrica *` through
 Bash and nothing else, so the command lands on an approval prompt that
 `claude -p` cannot answer.
 
-Note what that document has no room for: every object in the coverage schema
-is `additionalProperties: false`, and the only free-text field anywhere in it
-is a hole's `justification`. So the report cannot carry an essay explaining
+Note what your part has no room for: every object in the score-part schema is
+`additionalProperties: false`, and the only free-text field anywhere in it is a
+hole's `justification`. So it cannot carry an essay explaining
 itself, and it does not need to -- the `verdict` has to be *entailed* by the
-matrices and the `holes` you wrote, so that a reader recomputes it from the
-document rather than taking your word for it. Anything you need to say that
-the schema has no field for -- an ambiguous pair you deliberately kept, a
-cell the scenario list claims and the world model does not have -- belongs in
-what you report back to the orchestrator, which records it in `decisions.md`.
+holes you wrote and the rows they leave, so that a reader recomputes it from
+the composed document rather than taking your word for it. Anything you need to
+say that the schema has no field for -- an ambiguous pair you deliberately
+kept, a cell the scenario list claims and the world model does not have --
+belongs in what you report back to the orchestrator, which records it in
+`decisions.md`.
 
 ## 3. Method
 
@@ -241,18 +330,27 @@ what you report back to the orchestrator, which records it in `decisions.md`.
    yours, and a notice that had already picked from it would be the
    conclusion-passing the orchestrator's own rules forbid.
 
-   Do this **before** you rebuild the matrices, because the recompute in steps 4
-   through 7 reads the statuses you just wrote and Invariant 5 depends on it.
-   Know which half of the job each gate covers, because they are asymmetric:
-   recompute without the status edit and every row the rejected scenario credits
-   keeps `covered: true` on the strength of a test that will never ship --
-   `emit` prunes the package silently, `check-refs` exits 0, and you will report
-   success. Do the status edit and skip the recompute and
-   `refs.check_coverage` names the row immediately. So the edit nothing checks is
-   the one to be deliberate about, and both halves belong to this one dispatch.
+   Settle the rulings **before** you work out which rows come out uncovered,
+   because steps 4 through 7 read the statuses your rulings leave and Invariant
+   5 depends on it. Both halves belong to this one part: the ruling that
+   rejects a scenario, and the hole that justifies the row the rejection
+   reopens. `rubrica score-seal` refuses to compose the report when it has one
+   without the other -- "`cell:x/y` is uncovered and no hole justifies it", or
+   "hole names `cell:x/y`, which the computed matrices show as covered" -- and
+   it writes nothing when it refuses, so the omission stops the round instead of
+   shipping a number. That is what the split bought: the same omission used to
+   leave `covered: true` on the strength of a test that will never ship, with
+   `emit` pruning the package silently, `check-refs` exiting 0, and this stage
+   reporting success.
 
-4. **Build `capability_matrix`: one cell per capability x outcome-class pair
-   in the world model.** **Every** pair, none omitted and none invented --
+4. **Work out `capability_matrix`: one cell per capability x outcome-class
+   pair in the world model.** You do not write it -- `rubrica score-seal`
+   computes both matrices and every summary number beneath them -- and that is
+   not a demotion: the arithmetic was never judgment, and
+   `refs._check_matrix_arithmetic` already recomputed all of it from the rows.
+   You still have to derive it, because step 7 asks you to justify every row
+   that comes out uncovered and you cannot name those rows without working out
+   which they are. **Every** pair, none omitted and none invented --
    `refs.check_coverage` reports both directions by name, and the omission
    is the dangerous one, because a matrix holding only the cells some
    scenario happens to claim reports 100% of a denominator it shrank to fit.
@@ -265,30 +363,37 @@ what you report back to the orchestrator, which records it in `decisions.md`.
    or `active`. A cell claimed only by scenarios you folded or turned down
    is not covered: no test will ship for it, so it is a hole again (step 7).
 
-5. **Build `goal_matrix`: one row per goal in the world model**, again every
-   one, none invented. `hop_depths_expected` is copied from that goal's
-   `expected_hop_depths` -- copied, not re-derived and not trimmed to what
-   the scenarios reached. `hop_depths_present` is the set of `hop_depth`
-   values of the scenarios in that row's `scenario_ids`. `covered` is true if
-   and only if the row has a live scenario **and** every expected depth is
-   present.
+5. **Work out `goal_matrix`: one row per goal in the world model**, again
+   every one, none invented -- and again `score-seal` is what writes it, from the
+   same two inputs, so every rule below is a rule about the derivation you make
+   rather than about a document you produce. `hop_depths_expected` comes from
+   that goal's `expected_hop_depths` unchanged -- not re-derived and not trimmed
+   to what the scenarios reached. `hop_depths_present` is the set of `hop_depth`
+   values of the scenarios in that row's `scenario_ids`. `covered` comes out
+   true if and only if the row has a live scenario **and** every expected depth
+   is present.
 
    A goal exercised at one depth of two is a partial row, and calling it
    covered is how a goal denominator reaches 100% without ever testing the
    hard half of the goal -- the multi-hop half, which is the half the whole
    suite exists to probe. Because `hop_depths_present` is *derived from this
    row's membership*, a goal row's `scenario_ids` carries the scenarios that
-   still count -- `proposed` or `active` -- and not the ones you folded or
-   turned down: leaving a `duplicate` in a goal row credits the goal with a
+   still count -- `proposed` or `active` -- and not the ones your rulings folded
+   or turned down: a `duplicate` left in a goal row credits the goal with a
    depth no shipped test reaches, and `refs.check_coverage` recomputes
-   `hop_depths_present` from whatever ids it finds there.
+   `hop_depths_present` from whatever ids it finds there. That rule is one your
+   *rulings* have to satisfy, since they are the only input to it you control:
+   the seal builds each row's membership from the statuses they leave.
 
-6. **Compute `covered`, `total` and `pct` for both matrices from the rows
+6. **Know what `covered`, `total` and `pct` will come to, from the rows
    themselves.** `total` is the number of rows, `covered` the number marked
    covered, `pct` their quotient (`0.0` when `total` is 0).
-   `refs._check_matrix_arithmetic` recomputes all three from the rows you
-   wrote and reports each disagreement separately, so these are a checkable
-   claim about your own output rather than a summary you are trusted on.
+   `refs._check_matrix_arithmetic` recomputes all three from the rows of the
+   composed document and reports each disagreement separately -- which is
+   exactly why this arithmetic is the seal's to write rather than yours: a
+   claim nobody has to be trusted on does not need a prompt behind it. What you
+   need from it is the row count that tells you how much of the surface your
+   holes have to account for.
 
 7. **Justify every uncovered row with a hole, and give no hole for a covered
    row.** `refs.check_coverage` checks both directions: without the first, a
@@ -315,22 +420,47 @@ what you report back to the orchestrator, which records it in `decisions.md`.
    When every row is covered, the honest `holes` is the empty array. Do not
    invent a hole to look thorough: a hole naming a covered row is a finding,
    and a fabricated one sends the next round to work on a cell that is
-   already tested.
+   already tested. `score-seal` copies each hole's `reason` and `justification`
+   through untouched, so the words you write here are the words `rb-propose`
+   reads next round -- and it checks the pairing both ways before it composes
+   anything, which is Invariant 6.
 
-8. **Fill `progress`: `new_cells_this_round` and
-   `rounds_without_progress`.** Both are derived from the round tags on the
-   scenarios, which is why you need no earlier coverage document.
-   `new_cells_this_round` is the number of capability cells that are covered
-   now and were *not* covered before this round -- that is, no live scenario
-   from an earlier round credits them. `rounds_without_progress` is the
-   number of consecutive most-recent rounds that added no new cell by that
-   same test -- so in round 1 it is 0 if this round covered a cell and 1 if
-   it covered none, and `new_cells_this_round` in round 1 is simply the count
-   of covered capability cells, goal rows not being cells. These two numbers
-   are what `halted_no_progress` is computed from, so a
+8. **Work out whether this round added a cell, because step 9's verdict turns
+   on it.** `new_cells_this_round` is the number of capability cells that are
+   covered now and were *not* covered before this round;
+   `rounds_without_progress` is the number of consecutive most-recent rounds
+   that added no new cell by that same test. **You write neither number** --
+   `rubrica score-seal` computes both, taking the baseline from the previous
+   round's own `03-coverage/round-<N-1>.json` -- but `halted_no_progress` is
+   yours to compute, so you have to reach the same reading it does, and it is
+   derivable from the round tags and statuses in front of you.
+
+   The derivation has one subtlety, and it is the whole of the rule: read
+   "covered before this round" against the statuses **as you found them**,
+   before your own rulings. A cell was already covered if some scenario tagged
+   with an earlier round credits it and is still `proposed` or `active` in
+   `02-scenarios.json` as you read it. Take the reading *after* your own
+   rulings instead and it goes wrong in exactly the case this loop exists to
+   handle: fold an earlier round's scenario into one of this round's claiming
+   the same cell, and no *live* earlier-round scenario credits that cell any
+   more, so the cell reads as new -- when it was covered when the earlier round
+   was scored and nothing about the tested surface changed. That is the
+   inflation this step has always warned about, arriving through the evaluation
+   point rather than through the count.
+
+   Read as you found it, the round-tag derivation and the seal's baseline agree,
+   including after a rejection. A scenario some earlier dispatch already marked
+   `rejected` is not live in the document you read; the row it credited was
+   reopened when that rejection was recorded, and the seal's baseline document
+   was recomputed then too -- so a scenario closing that row now is genuinely
+   new by both readings.
+
+   Round 1 has nothing earlier: every covered capability cell is new, and
+   `rounds_without_progress` is 0 if this round covered a cell and 1 if it
+   covered none. Goal rows are not cells and do not count here.
    `new_cells_this_round` inflated by counting cells an earlier round already
-   covered is how a loop that has stopped making progress runs to the round
-   cap anyway.
+   covered is how a loop that has stopped making progress runs to the round cap
+   anyway, which is what the evaluation point above protects.
 
 9. **Compute `verdict`.** It is *computed here* and *acted on by the
    orchestrator*: this stage does not decide to iterate, does not dispatch
@@ -349,79 +479,117 @@ what you report back to the orchestrator, which records it in `decisions.md`.
    - `continue` -- none of the above: closable holes remain, this round made
      progress, and the cap has room.
 
-10. **Write the same document to `03-coverage/round-<N>.json` and to
-    `03-coverage/latest.json`.** Both, with identical content -- not the
-    round file with a symlink, not a summary in one and the full report in
-    the other. `validate --stage score` requires `latest.json` **by name**,
-    and `refs.check_coverage` returns no findings at all when it is absent,
-    while `refs.check_limits` silently skips its coverage-round check (it
-    still reports every scenario-round and `max_scenarios` finding): a score
-    stage that wrote the round file and forgot the pointer used to pass both
-    gates with every coverage check bypassed. Write the round file for the
-    history and `latest.json` for every stage and gate that reads "the
-    current coverage", and keep them byte-identical.
+   `score-seal` copies this value into the coverage document untouched and
+   nothing downstream recomputes it, so the verdict the orchestrator branches
+   on is the one you wrote. It has to be entailed by your own `holes` and the
+   rows they leave: `continue` with no `not_yet_attempted` hole among them, or
+   `converged` with one, is a single part contradicting itself.
+
+10. **Write your part to `03-score/round-<N>.json`.** One document, carrying
+    the `rulings`, the `holes` and the `verdict` -- and nothing you derived on
+    the way to them. `<N>` is the round you derived in section 1, and
+    `refs.check_score_parts` compares the `round` field against the filename,
+    so a part cannot sit in one round and claim another. You do not write
+    `02-scenarios.json`, `03-coverage/round-<N>.json` or
+    `03-coverage/latest.json`: `propose-seal` folds your rulings into the first,
+    and `score-seal` composes the other two, publishing `latest.json` as a byte
+    copy of the round file rather than as a second composition that could drift
+    from it.
 
 ## 4. Invariants
 
-1. `capability_matrix.cells` has exactly one cell per world-model capability
-   x outcome-class pair -- no pair of the denominator missing, and no cell
-   naming a capability or outcome class the world model does not declare.
+1. The capability rows you reason over are exactly the world model's: one per
+   capability x outcome-class pair it declares -- no pair of the denominator
+   missing, and none naming a capability or outcome class the world model does
+   not declare. Enumerate them from `capabilities` and their `outcome_classes`,
+   never from the scenario list: `score-seal` enumerates the same set from the
+   same file, so a hole set derived from the scenarios instead disagrees with
+   the matrices it has to pair up with, and `refs.check_coverage` reports both
+   directions by name.
 
-2. `goal_matrix.rows` has exactly one row per world-model goal, on the same
-   terms: none omitted, none invented.
+2. The goal rows are exactly the world model's `goals`, on the same terms:
+   none omitted, none invented.
 
-3. `covered`, `total` and `pct` agree with the rows in both matrices.
+3. Your reading of `covered`, `total` and `pct` agrees with the rows you
+   derived it from. You write none of the three -- they are what tells you how
+   much of the surface your holes have to account for --
+   and `refs._check_matrix_arithmetic` recomputes all three from the rows of
+   the composed document.
 
-4. Every `scenario_ids[]` entry, in either matrix, names a scenario that
-   exists in `02-scenarios.json`.
+4. Every ruling names a `scenario_id` that `02-scenarios.json` actually
+   carries, and **no two rulings in one part name the same scenario.**
+   `refs.check_score_parts` reports a ruling on a scenario the sealed document
+   does not carry; `propose-seal` refuses a part that rules on one scenario
+   twice, because a single dispatch contradicting itself is a defect and the
+   sealed document would otherwise carry only the last of the two. Across two
+   *rounds* the same pair is legitimate -- that is a later round overturning an
+   earlier ruling, which section 2 sanctions outright.
 
-5. A row marked `covered` is credited to at least one scenario that is still
-   `proposed` or `active`. A rejection reopens the row, so a row whose every
-   credit is `rejected` or `duplicate` must be recomputed as uncovered and
-   justified as a hole -- including when the rejection came from
-   `rb-challenge` after this round and you are re-scoring because of it.
-   Leaving the old `covered: true` in place is coverage that is confidently
-   wrong with both gates green, which is why `refs.check_coverage` reports
-   it by name.
+5. A row the matrices will mark `covered` is credited to at least one scenario
+   that is still `proposed` or `active` once your rulings are folded in. A
+   rejection reopens the row, so a row whose every credit is `rejected` or
+   `duplicate` is recomputed as uncovered and must be justified as a hole in
+   this same part -- including when the rejection came from
+   `rb-challenge` after this round and you are re-scoring because of it. The
+   ruling without the hole is coverage that would be confidently wrong, which
+   is why `refs.check_coverage` reports it by name and `score-seal` refuses to
+   compose the report at all.
 
-6. Every uncovered row has exactly one hole, and no covered row has one.
+6. Every row the matrices will show uncovered has exactly one hole, and no hole
+   names a row they will show covered. This is the invariant that decides
+   whether the round produces a coverage document at all: `score-seal` checks
+   both directions against the matrices it just computed and writes nothing
+   when either fails, naming the ref it could not reconcile.
 
-7. `denominator_version` equals the world model's `denominator.version`. If
-   you believe that version is wrong, that is something to report, not
-   something to fix by writing a different number.
+7. `denominator_version` is not a field of your part, and there is therefore no
+   number here for you to get wrong: `score-seal` echoes the world model's
+   `denominator.version` onto the report it composes. If you believe that
+   version is wrong, that is still something to report rather than something to
+   fix by writing a different one.
 
 8. `round` does not exceed `manifest.limits.max_rounds`.
    `refs.check_limits` reports a coverage document scored for a round past
    the cap.
 
-9. Every scenario you mark `duplicate` carries `duplicate_of` naming a
-   scenario that exists and that is not itself a `duplicate`. A chain of
+9. Every scenario you rule `duplicate` carries `duplicate_of` naming a
+   scenario that exists and that is not itself a `duplicate` or a `rejected`
+   one. `refs.check_score_parts` reports a fold onto a scenario the sealed
+   document does not carry, a fold onto the scenario itself, and a fold onto
+   one that is already discarded: a chain of
    folds ends at a survivor, or the cell it claimed has no live credit at
    all.
 
-10. `03-coverage/latest.json` and `03-coverage/round-<N>.json` have
-    identical content.
+Before you report done, run `rubrica validate --stage score --run <run>`,
+where `<run>` is the run directory you were dispatched with. `--run` is
+required: without it the command exits 2 on a usage error and tells you
+nothing about your artifact. If it reports a finding against what you just
+wrote, that is not a finding to pass along -- it is your own defect to fix.
+Repair the part and validate again; report success only once
+`rubrica validate --stage score --run <run>` exits clean.
 
-Before you report done, run `rubrica validate --stage score --run <run>` and
-then `rubrica check-refs --run <run>`, where `<run>` is the run directory you
-were dispatched with. `--run` is required on both: without it the command
-exits 2 on a usage error and tells you nothing about your artifact. Either one
-reporting a finding against what you just wrote is not a finding to pass along
--- it is your own defect to fix. Repair the artifact and run both again;
-report success only once `rubrica validate --stage score --run <run>` and
-`rubrica check-refs --run <run>` both exit clean.
+**Do not run `check-refs`, and note that it is not in your `invokes`.** Your
+part alone cannot be checked against a coverage document `score-seal` has not
+composed yet, and its rulings resolve against a `02-scenarios.json` that will
+not carry them until `propose-seal` runs again -- so every checker that bears
+on your output is reporting on artifacts that do not exist at the moment you
+finish. A stage invoking a checker over artifacts it has not produced is the
+shape that generated fabricated findings before. The orchestrator runs
+`check-refs` after the seals, which is where those findings are real.
 
 ## 5. Refusal conditions
 
 Every condition below is one where the correct output is not a tidier
 report. The pull on this stage is arithmetical rather than narrative: the
-tempting error is not an invented story, it is a number nudged into
-agreement -- a cell dropped so the matrix balances, a percentage adjusted to
-match a total, a hole labelled as closable so the loop keeps looking
-productive. A report that shows a partial matrix honestly is worth more than
-one that reads 100% against a denominator it quietly shrank, because every
-later judgment in this pipeline is measured against these numbers and none
-of them re-derives the denominator.
+tempting error is not an invented story, it is a judgment nudged until the
+numbers come out better -- a row dropped from the derivation so the surface
+looks smaller, a fold made so a cell stops needing a hole, a hole labelled as
+closable so the loop keeps looking productive. Moving the arithmetic into
+`score-seal` took the *transcription* of a wrong number away from you; it did
+not take away the rulings that produce one, and a part whose holes honestly
+account for a partial surface is worth more than one whose rulings were chosen
+to make that surface read 100%, because every later judgment in this pipeline
+is measured against the document composed from your part and none of them
+re-derives the denominator.
 
 - **A candidate pair is genuinely ambiguous -- arguably the same test,
   arguably not.** Keep both `active`, and say why in what you report for the
@@ -441,18 +609,25 @@ of them re-derives the denominator.
   honestly seed, and the run will burn its cap without closing anything.
 
 - **The scenario list claims a cell the world model does not have.** Do not
-  invent the cell to make the matrix balance, and do not quietly drop the
-  claim. Leave the matrix as the world model defines it and report the
-  mismatch: `check-refs` layer 2 will name the scenario's dangling
-  `capability_refs` entry, and the real finding is upstream -- the propose
-  stage produced a scenario against a cell that does not exist, which no
-  amount of arithmetic here can repair.
+  write a hole for that cell to make the accounting balance, and do not
+  quietly drop the claim either. The rows are the world model's, so reason
+  over them as it defines them and report the mismatch: `check-refs` layer 2
+  will name the scenario's dangling `capability_refs` entry, and the real
+  finding is upstream -- a propose member produced a scenario against a cell
+  that does not exist, which no ruling of yours can repair. `score-seal`
+  refuses a hole naming a ref the world model does not declare, so writing one
+  would stop the round while still pointing at the wrong stage.
 
-- **Your computed `pct` disagrees with the matrix you just wrote.**
-  Recompute it from the rows rather than adjusting the number to match your
-  expectation. A hand-adjusted total is the one defect that makes every
-  downstream percentage meaningless, and it is invisible to any reader who
-  does not recount the rows -- which is why `refs._check_matrix_arithmetic`
-  recounts them and reports `covered`, `total`, and `pct` separately. The
-  same holds for a `covered` flag: if the flag and the row's own
-  `scenario_ids` disagree, fix the flag, never the count.
+- **Your `holes` or your `verdict` disagrees with the rows you derived.** A
+  row you know will come out uncovered with no hole beside it, a hole on a row
+  your own rulings leave covered, or a `verdict` the hole set does not entail:
+  in every case redo the derivation from the world model's rows and the
+  statuses your rulings leave, and never adjust the hole set or the verdict to
+  match the answer you expected. This is the last place in the loop where such
+  a disagreement is still repairable by a judgment: `score-seal` refuses to
+  compose a report from a part that carries one, and it names the ref rather
+  than guessing which half you meant. What you must not do is pick the reading
+  that produces the tidier number -- your rulings and your holes go into a
+  document that will agree with itself either way, and
+  `refs._check_matrix_arithmetic` recounting `covered`, `total` and `pct`
+  cannot tell that a fold should never have been made.

@@ -532,11 +532,12 @@ file, which records how wide the reachable surface already is.
 
 Most of the pipeline's skills carry an `exercise.md` beside their `SKILL.md`,
 each recording what **one** measured dispatch actually did. The prompt passes of
-the `triage-*` and `reconcile-*` families are the exception, and the entries
-below say what that costs. An exercise record is the only behavioural evidence
-this project has, and one sample is one sample: a prompt that refused correctly
-once, or built a sound world model once, has not thereby been shown to do so
-reliably.
+the `triage-*` and `reconcile-*` families are the exception, and so are
+`rb-propose` and `rb-score`, whose records describe a shape those stages no
+longer have; the entries below say what each costs. An exercise record is the
+only behavioural evidence this project has, and one sample is one sample: a
+prompt that refused correctly once, or built a sound world model once, has not
+thereby been shown to do so reliably.
 
 `rubrica diff-runs` exists for exactly this measurement — per-stage stability
 across two runs — and the measurement has not been taken. The two real-target
@@ -940,6 +941,312 @@ will refuse to use, so the schema change comes first. Raising it also changes
 the propose/score loop's cost profile, which is a deliberate decision rather
 than a default worth flipping quietly. `rubrica set-limit` is how you raise it
 for one run, with the reason recorded in `decisions.md`.
+
+### The propose/score loop's per-response bound, and the term the issue blamed
+
+The loop is bounded by a code partition now. This entry is here for the
+arithmetic behind that — because the issue that reported the failure diagnosed
+it wrongly and the next reader would too — and for the terms that are still not
+bounded.
+
+`rb-propose` declared `scenarios` under both `reads` and `writes`, so round N's
+response had to carry rounds 1..N-1 as well as its own new scenarios, and
+`rb-score` re-emitted the same growing document to apply its status
+transitions. Round 2 of `run-20260825-094033` never wrote at all: 3.57 USD and
+31 minutes across eight turns, ending on *"Claude's response exceeded the 32000
+output token maximum"* — the API error quoted into that run's `decisions.md`,
+which is the only record of that number anywhere in this project.
+
+Measured against that run's surviving artifacts:
+
+| term | bytes |
+|---|---|
+| re-emit of round 1's 18 scenarios | 24,613 |
+| 86 closable holes at the sealed file's 1,162-byte mean | 99,932 |
+| one response | 124,545, about 35,600 output tokens |
+
+**The re-emit was 20% of that, and the round's own batch was the other 80%.**
+The issue concluded the opposite — that the cap binds on how large round 1
+was — and named `run-20260823-112746` as the counter-example. That run
+cleared round 2 with **4** closable holes against this run's 86. The two runs'
+round-1 documents differ by roughly a factor of two; their closable-hole counts
+differ by more than twenty. So the deterministic `append-scenarios` the issue
+leaned toward would have removed the minority contributor and left the 99,932
+bytes untouched, on a term that scales with the world model's denominator.
+**Anyone reaching for "just append incrementally" is reaching for the 20%.**
+
+What replaced it: `propose-batches` cuts the closable holes into batches whose
+projected output stays inside `max_scenario_part_bytes`, `rb-propose` writes
+one part per batch, and the seals own the accumulating document. Measured by
+running `propose-batches --round 2` over a copy of that run, those 86 holes
+become **four** batches of 24, 24, 24 and 14, the largest projecting 27,888
+bytes against the 28,000-byte default.
+
+Three precisions, because each is a place a re-derivation goes wrong:
+
+- **Four batches, not six.** Six is what the uncalibrated 1,600-byte estimate
+  gives, and it is what the partition's sizing test asserts and what the design
+  record predicted. The estimate self-calibrates to the sealed file's own mean
+  as soon as one exists — 1,162 bytes here — which at round 2 it does. Read the
+  test's figure as a property of the default, not as this run's measurement.
+- **That mean is over compact `json.dumps` serializations**, the spelling
+  `rounds.bytes_per_scenario` uses, because what is bounded is one *response*
+  and a model emitting a scenario does not pay for the seal's indentation. The
+  same 18 scenarios occupy 24,613 bytes on disk at indent 2.
+- **The two comparison figures are both looser than they look.**
+  `02-scenarios.json` measures 24,613 bytes today; the run's own log recorded
+  24,607 at the moment round 2 failed, because the score re-dispatch that
+  recorded the sc-001 rejection rewrote the file afterwards. And the comparison
+  run's 17,669-byte document, from which the issue's "1.4×" came, is that run's
+  file *after* round 2; its round-1 document was 11 scenarios and about 12,577
+  bytes. Both corrections widen the gap the argument rests on rather than
+  narrowing it, and the 20% share holds under every one of the three figures.
+
+#### Score's hole justifications are still linear in the denominator
+
+`rb-score` writes judgments only now — its rulings, its holes, its verdict —
+and `score-seal` computes both matrices and composes the coverage document in
+code. What is left is one justification per uncovered row: **35,773 of that
+document's 59,631 serialized bytes** at 170 denominator rows, which is 148
+capability cells plus 22 goals, or roughly 10k output tokens at the 3.5 bytes
+per token this repo estimates with. That estimate is **unpinned in both
+directions**, and the consequence is structural rather than cosmetic: the budget
+guard constrains a *ratio* between the byte budget and the token ceiling, and only
+the budget side is defended by a test — so a future editor could loosen the guard
+by moving `rounds.BYTES_PER_TOKEN` rather than the budget, and nothing would go
+red. Pinning it needs a real file tokenized against the model's own tokenizer,
+which no test here can do offline, so it stays stated rather than closed.
+
+The dispatch it replaced emitted about 147 KB — the 24,613-byte scenario re-emit
+plus a 61,342-byte coverage document written twice.
+
+That is a fourfold reduction and it fits comfortably. **It is still linear in
+the denominator**, and a target roughly three times this one re-approaches the
+cap even at the ceiling the entry below pins.
+
+Left linear deliberately. A hole's `reason` and `justification` are judgment,
+so they cannot move into code the way the matrices did; and bounding them would
+mean sharding score, which would break the barrier property that lets it fold
+duplicates and compute coverage with every scenario in one context. Sharding
+score was considered and rejected for that reason, so the way to re-open this
+is a design for folding duplicates across shards — not a smaller budget.
+
+#### The output ceiling is declared now, and it is keyed on the model
+
+Before this change `CLAUDE_CODE_MAX_OUTPUT_TOKENS` appeared in no script,
+source module, skill or reference document here, and was unset in the
+environment — so the ceiling the loop actually ran under was not recoverable
+from the tree at any later date. `scripts/dispatch-stage.sh` now pins it at
+64000.
+
+The 32,000 it died at was never a fixed Claude Code default. Measured on
+2026-08-27 against a local recorder that answered `400`, so nothing generated
+and the sweep cost nothing: Claude Code 2.1.247 puts a **model-keyed** default
+on the wire — 64000 for the id `--model sonnet` resolves to, **32000** for
+`aws/claude-sonnet-4-6`, 64000 for `aws/claude-opus-5`. A value that is set
+passes through verbatim; 999999 clamps to 128000; and a 643,240-byte request
+body still carried 64000, so the client does not shrink the ceiling to fit what
+is left of the context window. The 32,000 in that run's `decisions.md` matches
+the sonnet-4-class default exactly, which is what identifies it as the
+harness's default for that resolution rather than a model limit or anything
+this project set.
+
+One shape is still unmeasured and cannot be reached for free: `max_tokens` on a
+later turn of a session that **succeeds**. A `400` ends the session at turn 1,
+so a recorder never sees turn 8. It is corroborated rather than established —
+the failing dispatch enforced 32,000 after eight turns. What the endpoint
+enforces beyond accepting the field is open for the same kind of reason:
+LiteLLM or Bedrock may cap silently rather than reject, and a `200` on a
+four-token reply cannot distinguish the two.
+
+Parked there because what was owed was a **declaration**, not headroom. The
+structural bound is the partition above; a ceiling raised without it removes
+nothing, and the pinned value is deliberately not the clamp, since the higher
+it goes the more it leans on the server-side term nobody has established.
+
+#### `--model sonnet` does not resolve to a model this account may use
+
+Measured 2026-08-27, one request each: `claude-sonnet-5`, which `--model
+sonnet` resolves to, is refused **403 `team_model_access_denied`**; the granted
+ids include `aws/claude-sonnet-4-6`, `aws/claude-opus-4-5` and
+`aws/claude-opus-5`, and `aws/claude-sonnet-4-6` answers 200. So a dispatch
+through `scripts/dispatch-stage.sh` at its default `RUBRICA_MODEL` fails before
+any stage runs, and the runbook path fails at turn 0 today.
+
+The sting is the pairing. The workaround —
+`RUBRICA_MODEL=aws/claude-sonnet-4-6` — is exactly the resolution whose own
+default ceiling is 32,000, the number round 2 died at. The pin above is what
+stops that workaround from silently reintroducing the failure, so on this
+machine the pin matters more rather than less.
+
+Parked as an environment fact rather than a code change: `scripts/` is not
+where a model alias belongs, and pinning one there would bake one account's
+grant list into the harness. Recorded so that a future "the harness is broken"
+hunt finds it already known.
+
+#### Neither pass of the loop has behavioural evidence for its new shape
+
+`rb-propose` and `rb-score` each still carry the `exercise.md` of a dispatch of
+the shape this change replaced, each now beside a `SUPERSEDED.md` naming which
+shape it recorded. That is the `rb-reconcile/` precedent and it is kept for the
+same reason: relocating or rewriting such a record would assert that a dispatch
+of the *new* shape did what the old one actually did.
+
+So the propose/score loop now sits where the `triage-*` and `reconcile-*`
+families already sit — no behavioural evidence for the prompt that actually
+ships. Those two families keep their own entries in this file; this one
+cross-references them rather than absorbing them, so a reader after the whole
+list still has three entries to read and not one.
+
+Re-recording is deferred on cost, and it cannot be done against the toy world:
+the fixture cannot reach this defect class, because re-emitting its scenario
+set was always cheap. It needs a corpus whose denominator produces more
+closable holes than one response can hold, which is what `run-20260825-094033`
+was.
+
+#### The double write had already drifted, and no gate could see it
+
+`rb-score`'s Output section used to require one coverage document written
+twice, to `03-coverage/round-N.json` and `03-coverage/latest.json`, "with
+identical content". On `run-20260825-094033` the model wrote it twice and
+paraphrased itself: `latest.json` 61,342 bytes, `round-1.json` 61,338. Same 151
+holes, same ref set, same order — three justifications differ, and in one way
+only. `round-1.json` spells the arrow `→` where `latest.json` writes "to": four
+arrows, each three UTF-8 bytes becoming four, which is the whole four-byte
+difference.
+
+**No layer could see it.** `refs.check_coverage` reads `coverage_latest` and
+nothing else, so that run passed `validate --stage score` and `check-refs` with
+two documents on disk that disagreed. The divergence landed in
+`justification` — the one field in that schema a model authors — which is
+exactly where a human at gate 2 reads and exactly where no mechanical check
+can adjudicate. It is harmless here, and that is the point: the same
+mechanism at the same invisibility would equally admit two documents whose
+justifications disagree substantively, with both gates green and the run
+reporting one thing to a human and another to the archive.
+
+Closed by construction rather than by instruction — `score-seal` serializes one
+document object twice, so a second composition does not exist. **What is closed
+is the authoring, not the invisibility:** `refs.check_coverage` still reads
+`latest.json` alone, so a `round-N.json` edited by hand afterwards diverges from
+it exactly as silently as the two paraphrases did, and this entry's own argument
+is about the invisibility rather than about who wrote the divergence.
+
+Recorded here because the design record argued only that such an instruction
+*could* drift,
+which is now understated: it did drift, on the only real run there was. A dated
+record is not edited to track a later measurement, so this is where that
+correction lives.
+
+#### The golden coverage matrix was wrong, and only code recomputing it exposed it
+
+`tests/toy.py`'s hand-written `toy_coverage()` listed `["scn-open",
+"scn-blocked"]` for `cap-find-tickets`/`oc-found` and omitted `scn-open-dup` —
+which names that exact cell in its own `capability_refs` and therefore *claims*
+it. `rb-score`'s Method is explicit that a cell lists every scenario claiming
+it and that `covered` alone carries live-versus-dead, so a folded claimant
+belongs in the list. The fixture inverted the rule, and a test assertion had
+codified the inversion. Both were corrected when `score-seal` took the
+composition over, along with the id ordering the seal now fixes.
+
+`CLAUDE.md` calls that fixture the model answer a skill imitates, so for as
+long as it stood it taught the opposite of the asymmetry that rule exists to
+state. It was invisible for exactly as long as a *prompt* transcribed the
+matrix: nothing recomputed it, so nothing could disagree with it. Moving the
+arithmetic into code is what exposed it, which is the clearest argument that
+change made for itself.
+
+What stays open is the general form: **a golden expectation nothing recomputes
+is unchecked, not verified.** The rest of the toy fixture is hand-written the
+same way, and `scn-empty`'s `answer_excludes` below is a standing defect of
+exactly this kind. Parked as a habit rather than as a task: the answer is to
+prefer an expectation something derives independently, not to sweep the fixture
+once and declare it clean.
+
+#### `max_scenarios` has no owner between the batch partition and the sealed document
+
+The partition bounds a *member's response in bytes*, and `rb-propose`'s
+invariant scopes a member to its own batch's holes at one scenario per hole.
+Neither term is the run-total ceiling: `max_scenarios` is enforced downstream
+by `refs.check_limits`, against the open count in the sealed
+`02-scenarios.json`. So a round can be planned and dispatched past the ceiling,
+and the finding arrives after the seal, named against the sealed document
+rather than against the plan. `--round` sits the same way with respect to
+`max_rounds`: validated for shape at the CLI, and compared against the limit
+only later, by the same checker, against a scenario's round tag.
+
+One precision, so the gap is not read as wider than it is: `rb-propose` does
+compare its own batch's `hole_refs` against `max_scenarios` and declines the
+excess when one batch alone names more holes than the run's whole ceiling
+allows. What nobody sums is the batches and rounds together, and `rounds.py`
+reads neither limit.
+
+Left there deliberately in both cases. A fan-out member cannot see a run-wide
+count — the `max_scenarios` refusal that asked it to was rewritten to that
+batch-local comparison for exactly that reason — and a dispatch-time check would
+duplicate a bound a deterministic gate already holds, which is the question this
+project asks of every proposed `reads` addition. The cost if that is wrong is
+spent dispatches: a round that overshoots is discovered after its members have
+written.
+
+#### An unreadable model-written part is exit 2, and that is the ruling
+
+`artifacts.read_json` converts `FileNotFoundError`, `UnicodeDecodeError` and
+`JSONDecodeError` into the `ArtifactError` every seal turns into a `Finding`
+against the part that carries the defect. A `PermissionError` is none of the
+three, so it reaches `cli.py`'s `OSError` handler and exits **2**. Measured: a
+propose part at mode `000` surfaces as a misconfigured run rather than as a
+repairable defect naming that part.
+
+**Ruled correct rather than parked as a defect.** The exit-code contract splits on
+whether a re-dispatch could repair the artifact, and re-dispatching the member
+that wrote a file nobody can read would not change its mode: that is the
+"unreadable or misconfigured run" the `2` exists for, and the same reading
+`refs.py`'s own unreadable-input rule already takes. The gap was that
+`docs/reference/cli.md`'s `propose-seal` enumeration said neither way, so a reader
+could not tell the ruling from an oversight; it now states it. Recorded here
+because the ruling is the durable part — anyone who re-finds the `PermissionError`
+should find it already decided rather than convert it to a `Finding` and weaken
+the split.
+
+#### `check_batches` has no totality half, where `check_slices` has one
+
+`refs.check_slices` checks the partition **both ways**: every shard is named by
+the plan, and every catalogue candidate lands in exactly one slice ("no slice
+covers `<cid>`"). `refs.check_batches` and `_batch_plan_findings` check only the
+first direction — each `hole_ref` resolves to a declared cell or goal, no ref is
+claimed twice, each projection recomputes, each batch fits the cap. **Nothing
+compares the plan's refs against the closable holes in
+`03-coverage/latest.json`**, so a plan that silently dropped a closable hole
+passes layer 2, and the hole is never dispatched to any member — the same shape
+the slice checker reports by name.
+
+Lower severity than it sounds, and both halves of why are worth keeping: the plan
+is **code output**, written by `rounds.write_batches` from that same coverage
+document, and `rounds.partition` is chunk-adjacent code a sizing test already
+exercises, so a drop would be a code defect rather than a prompt's. But this is
+the one asymmetry against a precedent the design record explicitly cites — the
+batch is to a writing dispatch what a slice is to a reading one — so it is
+registered rather than dismissed. Closing it means `check_batches` reading
+`03-coverage/latest.json`, which is a new input for that checker and a decision
+about whether layer 2 re-derives a code partition's worklist.
+
+#### A seal that refuses leaves the previous round's scenarios in place
+
+`rounds.seal_scenarios` writes nothing when it reports a finding, which is
+right: a half-assembled scenario list would clear layer 1 on the fields it did
+fill and read as a complete list to a human at gate 2. But the previous round's
+`02-scenarios.json` stays on disk, carrying no round tag of its own, so that
+human can read it as this round's. What is recoverable is indirect — the
+`round` field on each scenario, and the round `rubrica gate-brief` prints out
+of the coverage document.
+
+Parked on where the fix belongs rather than on whether there is one. Deleting
+the stale document would destroy the only scenario list the run has, on a
+failure that is repairable by re-dispatching one member; announcing the refusal
+at the gate is a `gate-brief` change, and `gate-brief` is a report over what
+exists rather than a party to the seal. Until one of those is chosen, read a
+gate-2 brief taken after a failed seal as describing the round before it.
 
 ### The orchestrator has no lever for `effort`
 

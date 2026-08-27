@@ -19,6 +19,7 @@ from tests.toy import (
     ARTIFACT_IDS,
     INPUT_FILES,
     SIDS,
+    TOY_BATCH_ID,
     TOY_DIR,
     build_toy_run,
     toy_claims,
@@ -267,17 +268,37 @@ def test_the_resolved_pair_is_no_longer_a_candidate():
     assert candidate_pairs(toy_scenarios()["scenarios"]) == []
 
 
-def test_the_folded_scenario_is_credited_in_neither_matrix():
-    """A folded scenario's credit belongs to the scenario it was folded into. If
-    it appeared in a cell's scenario_ids, refs.check_coverage's live-credit rule
-    would still pass -- scn-open is live -- so nothing would catch it, and the
-    matrix would imply two tests cover a cell that ships one.
+def test_the_folded_scenario_claims_its_cell_and_credits_no_goal_row():
+    """The two matrices treat a folded scenario differently, and that asymmetry is
+    rb-score's Method rather than an inconsistency to tidy away.
+
+    Step 4: a capability cell's `scenario_ids` lists every scenario *claiming* it,
+    folded and rejected included, and `covered` alone carries the live/dead
+    distinction -- "a cell claimed only by scenarios you folded or turned down is
+    not covered". Step 5: a goal row's `scenario_ids` carries only what still
+    counts, because `hop_depths_present` is derived from that membership and
+    leaving a `duplicate` in credits the goal with a depth no shipped test
+    reaches.
+
+    This assertion previously required `scn-open-dup` in neither, which is where
+    the fixture disagreed with the seal that now composes this document: it
+    inverted step 4 outright, and taught the cell to hide a claimant. Both
+    directions are pinned here, because the interesting failure is the cell
+    dropping the folded claimant while every other number stays right.
     """
     coverage = toy_coverage()
-    credited = {
-        sid for cell in coverage["capability_matrix"]["cells"] for sid in cell["scenario_ids"]
-    } | {sid for row in coverage["goal_matrix"]["rows"] for sid in row["scenario_ids"]}
-    assert "scn-open-dup" not in credited
+    cells = {
+        (c["capability_id"], c["outcome_class_id"]): c
+        for c in coverage["capability_matrix"]["cells"]
+    }
+    claimed = cells[("cap-find-tickets", "oc-found")]
+    assert "scn-open-dup" in claimed["scenario_ids"], (
+        "the cell must list the folded claimant; covered, not the list, is what "
+        "says no test ships for it"
+    )
+    assert claimed["covered"], "scn-open is live in this cell, so it stays covered"
+    goal_credited = {sid for row in coverage["goal_matrix"]["rows"] for sid in row["scenario_ids"]}
+    assert "scn-open-dup" not in goal_credited
 
 
 def test_the_open_scenario_count_stays_within_the_manifest_cap():
@@ -338,7 +359,29 @@ def test_the_default_writes_every_artifact_through_challenge(tmp_path):
     assert not run.suite_dir.exists(), "challenge is the last checkpoint this fixture models"
 
 
-def test_upto_propose_writes_every_scenario_proposed_with_no_duplicate_of(tmp_path):
+def test_upto_propose_writes_the_batch_plan_and_the_part_and_seals_nothing(tmp_path):
+    """The state check_scenario_parts and scenarios-part-0.1.json are tested
+    against: every part written, nothing assembled.
+
+    The absence of 02-scenarios.json is the half that shows the checkpoint
+    stopped where it says. It is also the state a hand exercise of rb-propose
+    needs, because a run already carrying the sealed list cannot show whether a
+    member read the plan or the document.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="propose")
+    assert run.batches(1).exists()
+    assert run.batches_rounds() == [1]
+    assert run.scenario_part_rounds() == [1]
+    assert run.scenario_part_batch_ids(1) == [TOY_BATCH_ID]
+    part = read_json(run.scenario_part(1, TOY_BATCH_ID))
+    assert part["batch_id"] == TOY_BATCH_ID
+    assert {s["id"] for s in part["scenarios"]} == set(ALL_SCENARIO_IDS)
+    assert not run.scenarios.exists(), "propose seals nothing; propose-seal does"
+    assert not run.score_parts_dir.exists()
+    assert not run.coverage_dir.exists()
+
+
+def test_upto_propose_seal_writes_every_scenario_proposed_with_no_duplicate_of(tmp_path):
     """A run handed to the score stage with every scenario already `active` --
     and the near-duplicate already folded -- cannot show whether score
     promoted anything or ruled on the duplicate. Read back the artifact
@@ -346,12 +389,53 @@ def test_upto_propose_writes_every_scenario_proposed_with_no_duplicate_of(tmp_pa
     that produced it: the point is to check the file on disk, not to check the
     helper against itself.
     """
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     scenarios = read_json(run.scenarios)["scenarios"]
     assert {s["id"] for s in scenarios} == set(ALL_SCENARIO_IDS)
     for scenario in scenarios:
         assert scenario["status"] == "proposed", scenario["id"]
         assert "duplicate_of" not in scenario, scenario["id"]
+    assert not run.coverage_dir.exists()
+
+
+def test_upto_score_writes_the_rulings_and_leaves_the_statuses_unfolded(tmp_path):
+    """score's own output is 03-score/round-N.json and nothing else.
+
+    The unfolded statuses are asserted as well as the absent coverage
+    directory, because the fold is `propose-seal`'s second run rather than
+    score's write: a fixture that folded here would let a test of the seal pass
+    against a run that never needed it.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="score")
+    assert run.score_part_rounds() == [1]
+    part = read_json(run.score_part(1))
+    assert part["verdict"] == "converged"
+    assert {r["scenario_id"] for r in part["rulings"]} == set(ALL_SCENARIO_IDS)
+    assert not run.coverage_dir.exists()
+    statuses = {s["id"]: s["status"] for s in read_json(run.scenarios)["scenarios"]}
+    assert set(statuses.values()) == {"proposed"}
+
+
+def test_upto_score_seal_folds_the_duplicate_and_composes_the_coverage_document(tmp_path):
+    """The end state of one round: the rulings applied, and the report composed
+    from them by rounds.seal_score rather than written here.
+
+    Both sealed documents are compared against their answer keys byte for byte.
+    That is the property this fixture's move through the seals had to preserve:
+    the route to the golden world changed, the golden world did not.
+    """
+    from rubrica.artifacts import canonical_bytes
+
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
+    assert run.scenarios.read_bytes() == canonical_bytes(toy_scenarios())
+    assert run.coverage_round(1).read_bytes() == canonical_bytes(toy_coverage())
+    assert run.coverage_latest.read_bytes() == run.coverage_round(1).read_bytes()
+    by_id = {s["id"]: s for s in read_json(run.scenarios)["scenarios"]}
+    assert by_id["scn-open-dup"]["status"] == "duplicate"
+    assert by_id["scn-open-dup"]["duplicate_of"] == "scn-open"
+    for sid in SIDS:
+        assert by_id[sid]["status"] == "active", sid
+        assert "duplicate_of" not in by_id[sid], sid
 
 
 @pytest.mark.parametrize("bad_upto", ["bogus-stage", "emit", "survey"])

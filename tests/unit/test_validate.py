@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from tests.builders import (
     minimal_adoptions,
     minimal_agents,
     minimal_audit,
+    minimal_batches,
     minimal_capabilities_part,
     minimal_catalogue,
     minimal_claims,
@@ -32,6 +34,8 @@ from tests.builders import (
     minimal_outcomes_part,
     minimal_report,
     minimal_scenarios,
+    minimal_scenarios_part,
+    minimal_score_part,
     minimal_seed,
     minimal_slices,
     minimal_subjects,
@@ -95,6 +99,9 @@ MINIMAL_BUILDERS = {
     "entities-part": minimal_entities_part,
     "goals-part": minimal_goals_part,
     "gaps-part": minimal_gaps_part,
+    "batches": minimal_batches,
+    "scenarios-part": minimal_scenarios_part,
+    "score-part": minimal_score_part,
     "slices": minimal_slices,
     "objective": minimal_objective,
     "dispositions-part": minimal_dispositions_part,
@@ -540,13 +547,16 @@ def test_a_report_over_no_tasks_is_rejected(tmp_path):
     assert validate_stage(run, "smoke") != [], "the smoke gate must not pass over no tasks"
 
 
-# -- the coverage stage's two artifacts ------------------------------------
-def test_the_score_stage_reports_a_coverage_directory_with_no_latest(tmp_path):
+# -- score-seal's two coverage artifacts ------------------------------------
+# The "coverage" kind is score-seal's gate, not score's: score writes only the
+# rulings, the holes and the verdict, and the matrices and the report around them
+# are the seal's arithmetic.
+def test_the_score_seal_reports_a_coverage_directory_with_no_latest(tmp_path):
     """Every coverage check added in Tasks 2 and 4 was bypassable without this.
 
     _artifact_paths globbed 03-coverage/*.json, so round-1.json alone satisfied
     the gate -- while refs.check_limits and refs.check_coverage both read
-    coverage_latest and return [] when it is absent. A score stage that wrote the
+    coverage_latest and return [] when it is absent. A score-seal that wrote the
     round file and forgot the pointer passed both gates with every coverage
     check skipped.
     """
@@ -559,14 +569,14 @@ def test_the_score_stage_reports_a_coverage_directory_with_no_latest(tmp_path):
     write_json(run.coverage_round(1), minimal_coverage())
     assert not run.coverage_latest.exists()
 
-    findings = validate_stage(run, "score")
+    findings = validate_stage(run, "score-seal")
 
     assert len(findings) == 1, [str(f) for f in findings]
     assert findings[0].artifact == run.coverage_latest
     assert "missing artifact" in findings[0].message
 
 
-def test_the_score_stage_still_validates_the_round_files(tmp_path):
+def test_the_score_seal_still_validates_the_round_files(tmp_path):
     """Requiring latest.json must not stop the round files being checked."""
     from rubrica.artifacts import write_json
     from rubrica.paths import RunPaths
@@ -577,13 +587,13 @@ def test_the_score_stage_still_validates_the_round_files(tmp_path):
     write_json(run.coverage_latest, minimal_coverage())
     write_json(run.coverage_round(1), minimal_coverage(schema_version="0.9"))
 
-    findings = validate_stage(run, "score")
+    findings = validate_stage(run, "score-seal")
 
     assert len(findings) == 1, [str(f) for f in findings]
     assert findings[0].artifact == run.coverage_round(1)
 
 
-def test_the_score_stage_is_clean_with_latest_and_its_rounds(tmp_path):
+def test_the_score_seal_is_clean_with_latest_and_its_rounds(tmp_path):
     from rubrica.artifacts import write_json
     from rubrica.paths import RunPaths
     from rubrica.validate import validate_stage
@@ -592,17 +602,17 @@ def test_the_score_stage_is_clean_with_latest_and_its_rounds(tmp_path):
     run = RunPaths(tmp_path)
     write_json(run.coverage_latest, minimal_coverage())
     write_json(run.coverage_round(1), minimal_coverage())
-    assert validate_stage(run, "score") == []
+    assert validate_stage(run, "score-seal") == []
 
 
-def test_the_score_stage_reports_a_run_with_no_coverage_directory(tmp_path):
+def test_the_score_seal_reports_a_run_with_no_coverage_directory(tmp_path):
     """No 03-coverage/ at all is still "produced no coverage artifact"."""
     from rubrica.paths import RunPaths
     from rubrica.validate import validate_stage
 
     run = RunPaths(tmp_path)
     run.root.mkdir(parents=True, exist_ok=True)
-    findings = validate_stage(run, "score")
+    findings = validate_stage(run, "score-seal")
     assert len(findings) == 1
     assert "produced no coverage artifact" in findings[0].message
 
@@ -668,3 +678,256 @@ def test_a_structurally_invalid_schema_is_a_usage_error_not_a_finding(tmp_path, 
     assert not isinstance(caught.value, SchemaError)
     # One line. SchemaError's own str is eleven, dumping the metaschema branch.
     assert "\n" not in str(caught.value)
+
+
+# The propose/score loop's part kinds. Registered here rather than only in
+# test_schemas_planning.py because the registration itself -- kind -> filename,
+# and the filename present as package data -- is what this module owns.
+@pytest.mark.parametrize("kind", ["batches", "scenarios-part", "score-part"])
+def test_the_new_round_kinds_resolve_to_a_shipped_schema(kind):
+    assert kind in ARTIFACT_SCHEMAS
+    assert (schema_dir() / ARTIFACT_SCHEMAS[kind]).is_file()
+
+
+def test_a_batches_document_validates(tmp_path):
+    path = tmp_path / "batches.json"
+    write_json(
+        path,
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "cap_bytes": 28000,
+            "bytes_per_scenario": 1600,
+            "batches": [
+                {"id": "b01", "hole_refs": ["cell:cap-a/oc-success"], "projected_bytes": 1600},
+            ],
+        },
+    )
+    assert validate_artifact(path, "batches") == []
+
+
+def test_a_batches_document_with_no_batches_is_refused(tmp_path):
+    # Zero batches means nothing to dispatch. propose-batches writes no
+    # document at all when there are no closable holes, so a batches file that
+    # exists and is empty is a partition defect rather than a quiet round.
+    path = tmp_path / "batches.json"
+    write_json(
+        path,
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "cap_bytes": 28000,
+            "bytes_per_scenario": 1600,
+            "batches": [],
+        },
+    )
+    assert validate_artifact(path, "batches") != []
+
+
+def test_the_batches_gate_walks_the_rounds_that_have_a_plan(tmp_path):
+    """`_artifact_paths("batches")` iterates `batches_rounds()`, so two rounds are
+    two gated documents anchored on their own files rather than one shared path.
+
+    Per-round is the whole reason the plan is not a singleton: a `02-batches.json`
+    overwritten by round 2 would have round 1's parts checked against round 2's
+    assignment. Round 3 is written broken and round 2 correct, so a gate that
+    validated only the first or only the last would come back green.
+    """
+    from rubrica.paths import RunPaths
+    from rubrica.validate import validate_stage
+
+    run = RunPaths(tmp_path)
+    plan = {
+        "schema_version": "0.1",
+        "round": 2,
+        "cap_bytes": 28000,
+        "bytes_per_scenario": 1600,
+        "batches": [{"id": "b01", "hole_refs": ["cell:cap-a/oc-success"], "projected_bytes": 1600}],
+    }
+    write_json(run.batches(2), plan)
+    write_json(run.batches(3), dict(plan, round=3, batches=[]))
+    findings = validate_stage(run, "propose-batches")
+    assert [f.artifact for f in findings] == [run.batches(3)], [str(f) for f in findings]
+
+
+def test_the_batches_gate_over_a_run_with_no_plan_names_the_run_root(tmp_path):
+    """The iterated resolver returns `[]` when no round has a plan, and
+    `validate_stage`'s "produced no X artifact" arm then fires against the run
+    root.
+
+    **So this gate must not be run on a terminal round.** `propose-batches` writes
+    no document at all when no hole is closable, which is how the loop learns it is
+    over -- and this is what that state costs if the gate is run anyway, which is
+    why `rb-orchestrate`'s loop step 1 gates only when a plan was written.
+
+    Pinned rather than left implicit, because Task 8's brief and its Ruling R2 both
+    justified the iterated resolver by claiming it "would" avoid failing layer 1 on
+    a correct terminal round -- and it does not. What it actually avoids is naming a
+    `02-batches/round-N.json` that was never written, since `_artifact_paths` has no
+    round number to build one from. The resolver's own comment now says so; this
+    test is what keeps the two from drifting apart again.
+    """
+    from rubrica.paths import RunPaths
+    from rubrica.validate import validate_stage
+
+    run = RunPaths(tmp_path)
+    run.root.mkdir(parents=True, exist_ok=True)
+    findings = validate_stage(run, "propose-batches")
+    assert [f.artifact for f in findings] == [run.root]
+    assert "produced no batches artifact" in findings[0].message
+
+
+def test_a_batch_projecting_zero_bytes_is_refused(tmp_path):
+    """`minimum: 1`, because 0 is unreachable by the formula the field states.
+
+    projected_bytes is hole_refs length times bytes_per_scenario, and both factors
+    carry their own floor -- minItems: 1 and minimum: 1 -- so a product of 0 can
+    only come from a partition that did not compute what it claims to have
+    computed. Layer 1 refuses it outright rather than leaving the sole objection
+    to a recompute a run may never reach.
+    """
+    payload = minimal_batches()
+    payload["batches"][0]["projected_bytes"] = 0
+    path = tmp_path / "batches.json"
+    write_json(path, payload)
+    assert validate_artifact(path, "batches") != []
+
+
+def test_a_scenarios_part_validates_and_carries_its_own_batch_id(tmp_path):
+    path = tmp_path / "scenarios-part.json"
+    write_json(path, {"schema_version": "0.1", "round": 1, "batch_id": "b01", "scenarios": []})
+    # An empty array is a real record: this member swept its batch and closed
+    # nothing, the same reading contradictions-part-0.1.json gives its own.
+    assert validate_artifact(path, "scenarios-part") == []
+
+
+def test_a_scenarios_part_holds_its_scenarios_to_the_shared_definition(tmp_path):
+    """The cross-file $ref both resolves and constrains.
+
+    The empty-array case above cannot reach it -- `items` is never applied to an
+    empty array, so scenarios-part-0.1.json would pass that test with its $ref
+    pointing at nothing. This is the fixture-cannot-reach weakness, and the two
+    directions here are the fix: minimal_scenarios_part carries a real scenario
+    (so the ref must resolve at all), and this document breaks it in a way only
+    scenarios-0.1.json#/$defs/scenario knows about.
+    """
+    payload = minimal_scenarios_part()
+    # `duplicate` without `duplicate_of`: a conditional that lives in the shared
+    # $def and nowhere in this part's own file.
+    payload["scenarios"][0]["status"] = "duplicate"
+    path = tmp_path / "scenarios-part.json"
+    write_json(path, payload)
+    assert validate_artifact(path, "scenarios-part") != []
+
+
+@pytest.mark.parametrize(
+    "reason,expected_findings",
+    [("out_of_scope", False), ("because_i_said_so", True)],
+)
+def test_a_score_part_rejected_reason_is_the_scenario_enum(tmp_path, reason, expected_findings):
+    """score-part's rejected_reason $refs the sealed scenario's own enum.
+
+    Both directions in one parametrization, because neither alone proves the ref
+    *binds*: the valid case shows it resolves at all (an unresolvable ref raises
+    out of iter_errors rather than returning findings), and the invalid case shows
+    it constrains. Before this predicate existed nothing reached the enum at all
+    -- every other score-part case here rules `active`, and minimal_score_part
+    carries no rejected_reason -- so the five values could have been a copy that
+    had silently fallen behind scenarios-0.1.json.
+
+    The drift this closes is concrete: score-seal writes a ruling's
+    rejected_reason straight onto the scenario it names, so a sixth value on one
+    side alone would either make the ruling unrecordable in a part or make the
+    assembled 02-scenarios.json schema-invalid -- a finding against an artifact
+    code wrote, and no repair prompt fixes one of those.
+    """
+    payload = minimal_score_part()
+    payload["rulings"] = [
+        {"scenario_id": "sc-b01-002", "status": "rejected", "rejected_reason": reason}
+    ]
+    path = tmp_path / "score-part.json"
+    write_json(path, payload)
+    assert bool(validate_artifact(path, "score-part")) is expected_findings
+
+
+def test_the_score_part_status_enum_is_a_subset_of_the_scenario_status_enum(tmp_path):
+    """The one deliberate non-$ref in these part schemas, pinned as a subset.
+
+    `status` is restated rather than shared *because* it subtracts `proposed`: a
+    ruling exists to change a status, and `proposed` is what a scenario already
+    carries out of its propose member. A $ref would widen the part back to the
+    value it exists to exclude, so this asserts both halves -- proper subset, and
+    `proposed` specifically absent -- rather than leaving the asymmetry with
+    rejected_reason above readable only as an oversight.
+    """
+    scenario = json.loads(
+        (schema_dir() / ARTIFACT_SCHEMAS["scenarios"]).read_text(encoding="utf-8")
+    )
+    part = json.loads((schema_dir() / ARTIFACT_SCHEMAS["score-part"]).read_text(encoding="utf-8"))
+    sealed = set(scenario["$defs"]["scenario"]["properties"]["status"]["enum"])
+    ruling = set(part["properties"]["rulings"]["items"]["properties"]["status"]["enum"])
+
+    assert ruling < sealed, "score-part's status is no longer a proper subset of the scenario's"
+    assert sealed - ruling == {"proposed"}, (
+        "the subtraction has changed; `proposed` is the only value a ruling may not name"
+    )
+
+
+def test_a_score_part_verdict_is_the_coverage_enum(tmp_path):
+    """score-part's verdict $refs coverage-0.1.json's *property*, not a $def.
+
+    That is an unusual ref target -- a property subschema rather than a `$defs`
+    entry -- so it gets its own guard: a ref that silently resolved to nothing
+    would accept any string here, and the loop's whole control flow is this one
+    value. `halted_forever` is not one of the four the coverage report defines.
+    """
+    payload = minimal_score_part()
+    payload["verdict"] = "halted_forever"
+    path = tmp_path / "score-part.json"
+    write_json(path, payload)
+    assert validate_artifact(path, "score-part") != []
+
+
+def test_a_score_part_validates(tmp_path):
+    path = tmp_path / "score-part.json"
+    write_json(
+        path,
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "rulings": [{"scenario_id": "sc-b01-001", "status": "active"}],
+            "holes": [],
+            "verdict": "converged",
+        },
+    )
+    assert validate_artifact(path, "score-part") == []
+
+
+def test_a_fold_ruling_must_name_its_survivor(tmp_path):
+    path = tmp_path / "score-part.json"
+    write_json(
+        path,
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "holes": [],
+            "verdict": "converged",
+            "rulings": [{"scenario_id": "sc-b01-002", "status": "duplicate"}],
+        },
+    )
+    assert validate_artifact(path, "score-part") != []
+
+
+def test_a_rejection_ruling_must_name_a_reason(tmp_path):
+    path = tmp_path / "score-part.json"
+    write_json(
+        path,
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "holes": [],
+            "verdict": "converged",
+            "rulings": [{"scenario_id": "sc-b01-002", "status": "rejected"}],
+        },
+    )
+    assert validate_artifact(path, "score-part") != []

@@ -130,8 +130,9 @@ Required: `--run RUN`, `--stage`, one of `survey`, `triage-slices`,
 `triage-objective`, `triage-rule`, `triage-audit`, `triage-seal`, `intake`,
 `extract`, `reconcile-subjects`, `reconcile-contradict`,
 `reconcile-capabilities`, `reconcile-outcomes`, `reconcile-entities`,
-`reconcile-goals`, `reconcile-gaps`, `reconcile-seal`, `propose`, `score`,
-`instantiate`, `challenge`, `emit`, `smoke` — `paths.STAGES`, in order.
+`reconcile-goals`, `reconcile-gaps`, `reconcile-seal`, `propose-batches`,
+`propose`, `propose-seal`, `score`, `score-seal`, `instantiate`, `challenge`,
+`emit`, `smoke` — `paths.STAGES`, in order.
 
 Exits 0 clean, or 1 with one finding per line on stdout.
 
@@ -244,6 +245,181 @@ owns — not the seal.
 
 ```bash
 rubrica reconcile-seal --run runs/run-20260806-123005
+```
+
+## Running the propose/score loop
+
+Stages 02 and 03 are a loop, and these three are its code steps: one partitions
+the round's worklist before `rb-propose` is dispatched, and two assemble what the
+propose and score members wrote. All three are code for the reason `emit` and both
+other seals are code — two runs with identical parts must produce byte-identical
+output, or variance stops being attributable to the stage that caused it.
+
+Which artifact a malformed input is blamed on follows **who wrote it**, and that
+is the exit-code contract rather than a preference. `manifest.json`,
+`01-world-model.json`, `02-scenarios.json` and `03-coverage/round-N.json` are code
+output, so a malformed one is exit 2: no re-dispatch of any prompt could repair it.
+The propose parts (`02-scenarios/round-N/<batch>.json`) and the score parts
+(`03-score/round-N.json`) are model output, so a malformed one is exit 1 naming
+that part, which is exactly a repairable stage defect.
+
+### `rubrica propose-batches`
+
+Partitions this round's closable holes into `02-batches/round-N.json`, so one
+propose member writes one batch's scenarios rather than the whole growing
+document. A batch is a *writing* unit exactly as a triage slice is a *reading*
+unit, and nothing here decides anything: which holes are closable is `rb-score`'s
+ruling, every closable hole reaches some member, and a human at gate 2 still sees
+the whole coverage matrix.
+
+Required: `--run RUN` and `--round N`. `--round` is passed rather than inferred,
+on `reconcile-seal`'s `--denominator-version` reasoning: a command that
+incremented a round it found on disk would let the loop advance without an
+orchestrator decision on the record, and `decisions.md` is where a round is
+accounted for. Rounds are numbered from 1, so `--round 0` is a usage error.
+
+Reads `01-world-model.json` for the worklist on round 1 — every capability ×
+outcome-class cell and every goal, because round 1 has no coverage report and that
+is the normal shape rather than a missing file — and from round 2 reads
+`03-coverage/latest.json`, taking its `not_yet_attempted` holes only. The other
+hole reasons are not closable by proposing: `unreachable` and `out_of_scope` are
+cells the suite is not trying to cover, and `blocked_by_gap` means the world model
+does not yet support a scenario there.
+
+The per-batch budget is `limits.max_scenario_part_bytes` from `manifest.json` when
+it is set — `rubrica set-limit` writes it — and otherwise the default per-member
+output budget in `rounds.DEFAULT_SCENARIO_PART_BYTES`. The per-scenario estimate
+is self-calibrating: the mean serialized size of the scenarios already in
+`02-scenarios.json`, falling back to `rounds.DEFAULT_BYTES_PER_SCENARIO` when
+there are none. A budget below one scenario's estimate is refused rather than
+clamped, and the refusal names where the budget came from, because clamping to one
+hole per batch would emit a batch that cannot fit its own projection — a cap that
+does not bind, silently.
+
+Prints the path to the plan and exits 0. **When no hole is closable it writes
+nothing, prints `no closable holes: there is no propose round to dispatch`, and
+still exits 0** — that is the loop's normal terminal state, not an error, and a
+finding there would send the orchestrator to repair a propose member that has
+nothing wrong with it and no batch to read. It reports no findings at all, so it
+never exits 1: an unreadable or malformed `01-world-model.json`, `manifest.json`,
+`02-scenarios.json` or `03-coverage/latest.json`, and a budget below one scenario,
+are all exit 2. A hole whose `ref` or `reason` is missing, or is not a non-empty
+string, is refused rather than skipped — the empty string is refused too, and it
+*is* a string — because a skipped hole shrinks the worklist in
+silence — and a worklist that empties that way is indistinguishable from the
+`no closable holes` outcome above, which the orchestrator reads as the end of the
+loop.
+
+```bash
+rubrica propose-batches --run runs/run-20260806-123005 --round 1
+# runs/run-20260806-123005/02-batches/round-1.json
+```
+
+### `rubrica propose-seal`
+
+Assembles `02-scenarios.json` from every propose part in every round, then folds
+in every status ruling the score parts carry. A pure function of those parts: it
+never reads its own output, which is what lets it run twice per round — after
+propose, so score has a document to read, and again after score, so instantiate
+sees the statuses — with no way for the second run to disagree with the first.
+
+Required: `--run RUN`, and nothing else. There is no `--round`, because the seal
+is a function of every round's parts rather than of one round.
+
+Reads every `02-scenarios/round-N/<batch>.json`, every `03-score/round-N.json` for
+its `rulings`, and `01-world-model.json` for the `denominator.version` it echoes
+onto the sealed document. Writes `02-scenarios.json` and prints its path.
+
+Exits 1, one finding per line on stdout, naming the part at fault: a part that is
+unparseable, not a JSON object, or carrying no `scenarios` array; a scenario that
+is not an object or has no string id; two parts claiming one scenario id, which
+has to be caught here because members mint their own ids and the merged array
+would simply carry the collision twice; a score part that is unparseable, is not
+an object, or carries no `rulings` array; and a ruling that is not an object, has
+no string `scenario_id`, carries a status outside the ruling enum, omits the field
+that status requires, or names a scenario no propose part wrote. Two rulings for
+one scenario **within one part** are also a finding — one score dispatch
+contradicting itself, and the sealed document would carry only the last of the two
+— while the same pair across two parts is a later round overturning an earlier
+ruling, which is supported and applied in ascending round order. It
+**writes nothing at all** when it reports any of them, for the reason
+`triage-seal` writes nothing: a half-assembled document would clear layer 1 for
+the fields it did manage to fill and read as a complete scenario list to a human
+at gate 2.
+
+A part that exists but cannot be *read* — mode `000`, say — is exit **2**, not a
+finding: `read_json` converts a missing, undecodable or unparseable file into an
+`ArtifactError` this command turns into a finding, and a `PermissionError` is none
+of those, so it surfaces as the misconfigured-run code. The ruling is deliberate
+and it is the register's — an unreadable file is a broken *run* rather than a
+repairable stage defect, and re-dispatching the member that wrote it would not
+change the mode.
+
+One exit-1 case names the round **directory**, `02-scenarios/round-N/`, rather than
+a part: a file in it whose name is not a safe path segment. That is the one
+exception to "naming the part at fault" above, and it has to be — the offending
+name is precisely what this package will not join into a path, so there is no part
+path to put in the finding.
+
+Two clean outcomes print no path, and they are different states rather than one.
+No part anywhere means propose was never dispatched, so there is nothing to seal —
+exit 0, and reporting a finding would make the orchestrator retry a stage that
+never ran. A part per batch each carrying `scenarios: []` is the opposite: every
+member read its batch and could close none of it, which is a real outcome the
+refusal conditions exist to produce, and that seals an empty document.
+
+```bash
+rubrica propose-seal --run runs/run-20260806-123005
+# runs/run-20260806-123005/02-scenarios.json
+```
+
+### `rubrica score-seal`
+
+Composes `03-coverage/round-N.json` from the round's score part and publishes it
+as `03-coverage/latest.json`. The matrices are **computed here** rather than read
+from the score part, so a percentage cannot disagree with the matrix beneath it —
+a failure no gate could catch from the document alone. What score decides is
+copied through untouched: each hole's `reason` and `justification`, and the
+`verdict`. `latest.json` is a byte copy of the same composed document rather than
+a second composition, so the two cannot drift.
+
+Required: `--run RUN` and `--round N`, on the same reasoning `propose-batches`
+gives for its own `--round`; rounds are numbered from 1 there too.
+
+Reads `03-score/round-N.json`, `01-world-model.json` for the declared cells, goals
+and `denominator.version`, `02-scenarios.json` for what each live scenario credits
+(absent is legitimate — score computing its verdict over zero scenarios is how the
+loop learns it made no progress), and `03-coverage/round-(N-1).json` for the
+progress baseline. `new_cells_this_round` is a set difference against that
+baseline, not a difference of counts, because a count reports zero when one cell
+is gained and another lost and the loop would then halt on progress it made.
+Round 1's absent prior document is the legitimate case; a later round's missing one
+is refused, since a skipped seal would erase the accumulated
+`rounds_without_progress` and no repair prompt can produce a file only this
+command writes.
+
+Exits 1, one finding per line naming `03-score/round-N.json`, when that part is
+absent, unparseable or not an object, carries no `holes` array or no `verdict`
+string, carries a `verdict` or a hole `reason` outside the enum
+`coverage-0.1.json` declares for it, has a hole with no string `ref`, names a hole
+the world model does not declare, names a hole the computed matrices show as
+covered, or leaves an uncovered row with no hole to justify it. The two enum
+refusals are there for the reason `propose-seal` whitelists a ruling's `status`:
+both values are copied onto the coverage document untouched, and that document is
+code output, so an arbitrary string would make an artifact no re-dispatch can
+repair fail its own schema. It **writes nothing at all** in those
+cases — including no `latest.json` — for the reason `propose-seal` writes nothing.
+Those last three overlap `check-refs`' own coverage check deliberately: that check
+reports after the fact over any coverage document, including one this command
+never composed.
+
+The verdict is copied, never computed here: `continue`, `converged`,
+`halted_no_progress` and `halted_round_cap` are `rb-score`'s ruling, and only the
+orchestrator acts on it.
+
+```bash
+rubrica score-seal --run runs/run-20260806-123005 --round 1
+# runs/run-20260806-123005/03-coverage/round-1.json
 ```
 
 ## Feeding a stage
@@ -521,13 +697,21 @@ recorded in `decisions.md`, so raising a ceiling is a decision on the record
 rather than a silent hand-edit.
 
 Required: `--run RUN`, `--reason REASON`. Optional: `--max-rounds
-MAX_ROUNDS`, `--max-scenarios MAX_SCENARIOS` — but **at least one of the two
-optional flags is required in practice.** Passing neither is a usage error
-(`set_limit needs at least one of max_rounds or max_scenarios`, exit 2), since
+MAX_ROUNDS`, `--max-scenarios MAX_SCENARIOS`, `--max-scenario-part-bytes
+MAX_SCENARIO_PART_BYTES` — but **at least one of the optional flags is required
+in practice.** Passing none of them is a usage error (`set_limit needs at least
+one of max_rounds, max_scenarios or max_scenario_part_bytes`, exit 2), since
 a change with nothing to change would append a `decisions.md` line announcing
 a decision that was never made. `--help` cannot show this: argparse has no way
-to express "at least one of these two", so the rule lives in `set_limit` and
+to express "at least one of these", so the rule lives in `set_limit` and
 surfaces only when you trip it.
+
+`--max-scenario-part-bytes` is the propose/score loop's per-member output
+budget, and it is the one limit a manifest may omit: a third *required* key
+under `limits` would have made every manifest already on disk schema-invalid,
+and `diff-runs`, `run-summary` and `gate-brief` all read those. Absent means the
+default the batch partition uses, so setting it here is how a smaller budget for
+a probe run gets onto the record rather than into an argument nobody kept.
 
 Prints the manifest path.
 

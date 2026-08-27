@@ -23,6 +23,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from rubrica import rounds
 from rubrica.artifacts import read_json, sha256_of, write_json
 from rubrica.intake import classify, intake
 from rubrica.paths import RunPaths
@@ -824,15 +825,27 @@ def toy_scenarios(**over: Any) -> dict[str, Any]:
     return payload
 
 
-def _scenarios_before_score() -> dict[str, Any]:
-    """02-scenarios.json as rb-propose would have left it: every scenario
-    `proposed`, none marked `duplicate_of` yet.
+# The one batch this world's round 1 partitions into, and it is a derived fact
+# rather than a choice: the golden world declares four cells and two goals, so
+# rounds.closable_holes returns six refs on a run with no coverage document, and
+# rounds.partition packs 28000 // 1600 = 17 refs per batch against the default
+# budget. Named here because the part filename is this id and every scenario in
+# the part has to target a hole this batch owns. Nothing trusts this comment:
+# build_toy_run asserts write_batches returned round 1's plan, and
+# test_upto_propose_writes_the_batch_plan_and_the_part_and_seals_nothing asserts
+# scenario_part_batch_ids(1) is exactly this id -- so a partition that grew to two
+# batches fails there rather than leaving a stale constant behind.
+TOY_BATCH_ID = "b01"
 
-    Used only by build_toy_run(upto="propose"). A run handed to the score stage
-    with every scenario already `active` -- and the near-duplicate already
-    folded -- cannot show whether score promoted anything or ruled on the
-    duplicate; this is what makes that state reachable as its own fixture
-    rather than only as toy_scenarios()'s post-score result.
+
+def _proposed_scenarios() -> list[dict[str, Any]]:
+    """Every scenario as its propose member wrote it: `proposed`, never folded.
+
+    A fold and a promotion are rb-score's rulings, which arrive in
+    03-score/round-1.json and are applied by rounds.seal_scenarios -- so a part
+    carrying either would be a fixture teaching a propose member to do the next
+    stage's job. `status: "proposed"` with no `duplicate_of` is the only shape
+    rb-propose's own Output section allows.
     """
     scenarios = []
     for scenario in _SCENARIOS:
@@ -840,11 +853,71 @@ def _scenarios_before_score() -> dict[str, Any]:
         scenario["status"] = "proposed"
         scenario.pop("duplicate_of", None)
         scenarios.append(scenario)
-    return {
+    return scenarios
+
+
+def toy_scenario_part(**over: Any) -> dict[str, Any]:
+    """Round 1's single propose part: every scenario, all in one batch.
+
+    One part rather than several, and the reason is the golden world rather than
+    convenience: `scn-open` and `scn-open-dup` both target
+    `cell:cap-find-tickets/oc-found`, and refs.check_scenario_parts reports a
+    scenario whose `provenance.hole_refs` name a hole the round assigned to a
+    *sibling* batch. Splitting these two across two members would therefore make
+    the golden fixture carry a finding -- and the pair exists precisely so
+    dedupe.candidate_pairs has something to judge, so it cannot be split either.
+
+    The order is `_SCENARIOS`' order, and it is load-bearing:
+    rounds.collect_scenarios preserves a part's own order, so this is what fixes
+    the byte order of the sealed 02-scenarios.json.
+    """
+    payload: dict[str, Any] = {
         "schema_version": "0.1",
-        "denominator_version": 1,
-        "scenarios": scenarios,
+        "round": 1,
+        "batch_id": TOY_BATCH_ID,
+        "scenarios": _proposed_scenarios(),
     }
+    payload.update(over)
+    return payload
+
+
+def toy_score_part(**over: Any) -> dict[str, Any]:
+    """Round 1's score part: the rulings, no holes, and the verdict.
+
+    Everything rb-score decides and nothing it can compute. The matrices that
+    used to sit in this fixture are rounds.seal_score's arithmetic now, which is
+    why `toy_coverage()` below is still the golden coverage document but no
+    longer anything this builder writes: the seal composes it, and
+    test_toy_fixture holds the two to each other.
+
+    `holes` is empty because every row of this world's denominator is covered --
+    the same single statement toy_coverage()'s docstring makes, and seal_score
+    refuses a part whose holes and computed matrices disagree in either
+    direction, so a hole added here without a matching uncovered row would be
+    caught rather than sealed.
+    """
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "round": 1,
+        "rulings": [
+            # Promotions first, in _SCENARIOS order, then the fold: a ruling only
+            # exists to CHANGE a status, so every scenario named here is one the
+            # sealed document must not carry as `proposed`.
+            {"scenario_id": "scn-open", "status": "active"},
+            {"scenario_id": "scn-empty", "status": "active"},
+            {"scenario_id": "scn-blocked", "status": "active"},
+            {"scenario_id": "scn-missing", "status": "active"},
+            {
+                "scenario_id": "scn-open-dup",
+                "status": "duplicate",
+                "duplicate_of": "scn-open",
+            },
+        ],
+        "holes": [],
+        "verdict": "converged",
+    }
+    payload.update(over)
+    return payload
 
 
 def toy_coverage(**over: Any) -> dict[str, Any]:
@@ -853,6 +926,21 @@ def toy_coverage(**over: Any) -> dict[str, Any]:
     A hole here would have to name a covered row, which refs.check_coverage
     reports in both directions -- so "fully covered" and "no holes" are one
     statement, not two.
+
+    No longer written by build_toy_run: rounds.seal_score composes the coverage
+    document from toy_score_part() now, and this stays as the answer key that
+    composition is held to (test_toy_fixture compares the two byte for byte).
+    Two entries below were corrected when the seal took over, and both are the
+    fixture moving toward rb-score's own Method rather than away from it:
+
+      * `cell:cap-find-tickets/oc-found` now lists scn-open-dup among its
+        `scenario_ids`. Method step 4 says a cell lists every scenario *claiming*
+        it and marks `covered` from whether any of them is live -- so a folded
+        claimant belongs in the list, and omitting it taught the opposite of the
+        asymmetry the step exists to state.
+      * every id list is sorted. Method step 4 does not ask for an order, so the
+        seal fixes one: two runs with identical parts must produce byte-identical
+        output, and check_coverage compares these as sets either way.
     """
     payload: dict[str, Any] = {
         "schema_version": "0.1",
@@ -863,7 +951,7 @@ def toy_coverage(**over: Any) -> dict[str, Any]:
                 {
                     "capability_id": "cap-find-tickets",
                     "outcome_class_id": "oc-found",
-                    "scenario_ids": ["scn-open", "scn-blocked"],
+                    "scenario_ids": ["scn-blocked", "scn-open", "scn-open-dup"],
                     "covered": True,
                 },
                 {
@@ -893,7 +981,7 @@ def toy_coverage(**over: Any) -> dict[str, Any]:
             "rows": [
                 {
                     "goal_id": "goal-locate",
-                    "scenario_ids": ["scn-open", "scn-empty", "scn-missing"],
+                    "scenario_ids": ["scn-empty", "scn-missing", "scn-open"],
                     "hop_depths_present": [1],
                     "hop_depths_expected": [1],
                     "covered": True,
@@ -1334,8 +1422,18 @@ _UPTO_STAGES: tuple[str, ...] = (
     # helper this module already has too many requests for.
     "reconcile-gaps",
     "reconcile-seal",
+    # Four checkpoints across the loop rather than five: "propose" is every part
+    # written with nothing sealed -- the state check_scenario_parts and the
+    # part schemas are tested against -- and "propose-seal" is the assembled
+    # scenario list score reads. "score" is the judgments with no report yet,
+    # and "score-seal" is the coverage document every later stage and gate 2
+    # read. "propose-batches" gets no checkpoint: nothing stops there, and a
+    # checkpoint nobody stops at is a helper this module already has too many
+    # requests for.
     "propose",
+    "propose-seal",
     "score",
+    "score-seal",
     "instantiate",
     "challenge",
 )
@@ -1373,12 +1471,15 @@ def build_toy_run(
     either. `upto=None` (the default) writes everything this fixture knows how
     to write, through challenge.
 
-    `upto="propose"` is the one stage whose content differs from the
-    steady-state artifact rather than just stopping early: it writes every
-    scenario `proposed` with no `duplicate_of`, via _scenarios_before_score(),
-    because a fixture handed to the score stage with the duplicate already
-    folded could never show whether score did the folding or found nothing to
-    do.
+    The loop's four checkpoints differ from each other in what is SEALED rather
+    than in what was authored: `upto="propose"` leaves round 1's batch plan and
+    its one propose part on disk with no 02-scenarios.json at all,
+    `upto="propose-seal"` adds the assembled scenario list with every scenario
+    still `proposed`, `upto="score"` adds the rulings with no coverage document,
+    and `upto="score-seal"` folds those rulings and composes the report. Both
+    sealed documents come from rounds.seal_scenarios and rounds.seal_score, never
+    from a literal here -- a fixture that hand-wrote one could disagree with the
+    seal, and this fixture is the model answer a skill imitates.
 
     An `upto` outside _UPTO_STAGES raises rather than silently building
     everything or silently building nothing: a typoed stage name silently
@@ -1440,16 +1541,46 @@ def build_toy_run(
     assert sealed == run.world_model
     if stop < _UPTO_INDEX["propose"]:
         return run
-    if stop == _UPTO_INDEX["propose"]:
-        write_json(run.scenarios, _scenarios_before_score())
+
+    # propose-batches is code and has no checkpoint of its own, so its plan comes
+    # from the real write_batches rather than from a literal here. That is not
+    # tidiness: refs.check_scenario_parts resolves every scenario's
+    # provenance.hole_refs against this round's batch roster, so a hand-written
+    # plan could disagree with the partition the code would actually have
+    # produced and the golden fixture would carry a finding for it.
+    plan = rounds.write_batches(run, round_n=1)
+    assert plan == run.batches(1), f"the toy world must partition into one round-1 plan: {plan}"
+    write_json(run.scenario_part(1, TOY_BATCH_ID), toy_scenario_part())
+    if stop < _UPTO_INDEX["propose-seal"]:
         return run
 
-    write_json(run.scenarios, toy_scenarios())
+    # Sealed by the real seal for the reason intake and rubrica.reconcile.seal
+    # are real above: 02-scenarios.json is code output, and a fixture that
+    # hand-wrote it could disagree with the seal every later stage's copy came
+    # from. seal_scenarios is a pure function of the parts and the rulings, so
+    # calling it here and again below is the same call the orchestrator makes
+    # twice per round -- once so score has a document to read, once so
+    # instantiate sees the statuses.
+    sealed, findings = rounds.seal_scenarios(run)
+    assert not findings, f"the toy propose part must seal cleanly: {findings}"
+    assert sealed == run.scenarios
     if stop < _UPTO_INDEX["score"]:
         return run
 
-    write_json(run.coverage_round(1), toy_coverage())
-    write_json(run.coverage_latest, toy_coverage())
+    write_json(run.score_part(1), toy_score_part())
+    if stop < _UPTO_INDEX["score-seal"]:
+        return run
+
+    # The second seal of the round, and the order matters: the rulings have to be
+    # folded into 02-scenarios.json before seal_score computes the matrices, or
+    # scn-open-dup would still be `proposed` and would credit
+    # cell:cap-find-tickets/oc-found as a live scenario nothing will ever ship.
+    sealed, findings = rounds.seal_scenarios(run)
+    assert not findings, f"the toy score rulings must fold cleanly: {findings}"
+    assert sealed == run.scenarios
+    coverage, findings = rounds.seal_score(run, round_n=1)
+    assert not findings, f"the toy score part must seal cleanly: {findings}"
+    assert coverage == run.coverage_round(1)
     if stop < _UPTO_INDEX["instantiate"]:
         return run
 

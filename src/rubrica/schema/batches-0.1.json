@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "batches-0.1.json",
+  "title": "One round's propose batches",
+  "description": "propose-batches' (code) output: the closable holes of this round, partitioned into batches whose projected output keeps one rb-propose dispatch inside the harness output cap. A batch is a writing unit, not a decision unit -- every closable hole reaches a member, and which holes are closable is rb-score's ruling, not this partition's. Measured on run-20260825-094033: 86 closable holes at a 1,162-byte mean scenario is 99,932 bytes of new scenarios, and on top of that the 24,613-byte re-emit of every earlier round the single-document shape obliged -- ~124KB in one response against a 32,000-token cap.",
+  "type": "object",
+  "required": ["schema_version", "round", "cap_bytes", "bytes_per_scenario", "batches"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "round": {"type": "integer", "minimum": 1},
+    "cap_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The per-member output budget every batch was packed against. Echoed here, as slices-0.1.json echoes its own cap, so a reader auditing one batch's projection against the budget need not open the manifest."
+    },
+    "bytes_per_scenario": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The estimate the projection used: rounds.DEFAULT_BYTES_PER_SCENARIO until a sealed 02-scenarios.json exists, and the mean over that file thereafter. Recorded because it is the term that makes the partition self-calibrating, and a reader comparing two rounds' batch sizes needs it to tell a changed estimate from a changed hole count -- a comparison the layout supports because each round's plan is its own 02-batches/round-N.json rather than a singleton the next round overwrites."
+    },
+    "batches": {
+      "type": "array",
+      "minItems": 1,
+      "description": "At least one: propose-batches writes no document at all when no hole is closable, so an empty array here is a partition defect rather than a round with nothing to do.",
+      "items": {
+        "type": "object",
+        "required": ["id", "hole_refs", "projected_bytes"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "world-model-0.1.json#/$defs/id",
+            "description": "Code-minted (b01, b02, ...), short and stable, because it is a path segment: 02-scenarios/round-N/<id>.json joins it through safe_segment, and it prefixes the scenario ids the member mints so two members cannot collide."
+          },
+          "hole_refs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "coverage-0.1.json#/$defs/hole_ref"},
+            "description": "The holes this batch owns, in the same cell:/goal: vocabulary the coverage report uses. A batch with none would give its member nothing to close, so this floor mirrors the outer array's."
+          },
+          "projected_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "hole_refs length times bytes_per_scenario. refs.check_batches recomputes it, so a batch cannot drift from its own header -- but `minimum: 1` rather than 0, because both factors carry their own floor (hole_refs has minItems: 1, bytes_per_scenario has minimum: 1) and a product of 0 is therefore unreachable by the stated formula. Layer 1 refuses it here rather than leaving the only objection to a recompute the run may not reach."
+          }
+        }
+      }
+    }
+  }
+}

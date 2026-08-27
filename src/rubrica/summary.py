@@ -253,8 +253,11 @@ def _stage_evidence(run: RunPaths) -> dict[str, tuple[Path, ...]]:
         "reconcile-goals": (run.goals_part,),
         "reconcile-gaps": (run.gaps_part,),
         "reconcile-seal": (run.world_model,),
-        "propose": (run.scenarios,),
-        "score": (run.coverage_dir,),
+        "propose-batches": (run.batches_dir,),
+        "propose": (run.scenario_parts_dir,),
+        "propose-seal": (run.scenarios,),
+        "score": (run.score_parts_dir,),
+        "score-seal": (run.coverage_dir,),
         "instantiate": (run.instances_dir,),
         "challenge": (run.verdicts_dir,),
         "emit": (run.suite_dir,),
@@ -300,6 +303,14 @@ class Header:
     # or invent a number. Whatever is there is rendered as what is there.
     max_rounds: object
     max_scenarios: object
+    # The third limit, and the only optional one: manifest-0.1.json does not
+    # require it, so an absent value means rounds.DEFAULT_SCENARIO_PART_BYTES
+    # rather than "no bound". Surfaced here because it is the dial that decides
+    # how finely a round's holes were partitioned, and two runs whose scenario
+    # counts differ for that reason alone were otherwise indistinguishable on
+    # this page -- `_val` renders the absence explicitly, so a reader can tell a
+    # run that set it from one that took the default.
+    max_scenario_part_bytes: object
     stages: list[StageRecord]
 
 
@@ -345,6 +356,7 @@ def header(run: RunPaths) -> Header | Marker:
         schema_version=str(payload.get("schema_version", "")),
         max_rounds=limits.get("max_rounds"),
         max_scenarios=limits.get("max_scenarios"),
+        max_scenario_part_bytes=limits.get("max_scenario_part_bytes"),
         stages=stages,
     )
 
@@ -1297,7 +1309,8 @@ def scenarios(run: RunPaths) -> list[ScenarioRow] | Marker:
 # them -- CLAUDE.md states their absence there is not a finding.
 #
 # Measured, not assumed: `set(STAGES) - {every skill's declared stage}` is
-# exactly {intake, reconcile-seal, smoke, survey, triage-seal, triage-slices}.
+# exactly {intake, propose-batches, propose-seal, reconcile-seal, score-seal,
+# smoke, survey, triage-seal, triage-slices}.
 # Note `emit` is NOT in it -- rb-emit is a thin wrapper over `rubrica emit`, so
 # emit does get a manifest.stages entry and must stay accusable. Hardcoding the
 # set here got that wrong once;
@@ -1310,7 +1323,17 @@ def scenarios(run: RunPaths) -> list[ScenarioRow] | Marker:
 # here would make one flag on a page about a *run* depend on the skills directory
 # the reader happens to have configured.
 _CODE_STAGES = frozenset(
-    {"intake", "reconcile-seal", "smoke", "survey", "triage-seal", "triage-slices"}
+    {
+        "intake",
+        "propose-batches",
+        "propose-seal",
+        "reconcile-seal",
+        "score-seal",
+        "smoke",
+        "survey",
+        "triage-seal",
+        "triage-slices",
+    }
 )
 
 

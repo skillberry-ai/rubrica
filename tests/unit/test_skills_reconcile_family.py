@@ -47,13 +47,13 @@ def _world_schema():
     return read_json(schema_dir() / ARTIFACT_SCHEMAS["world-model"])
 
 
-def test_the_family_is_the_eight_stages_between_extract_and_propose():
+def test_the_family_is_the_eight_stages_between_extract_and_propose_batches():
     """Guards the derivation above, and the ordering the passes depend on:
     outcomes quantifies over capabilities' output, gaps audits all of them, and
     the seal runs last. A reordering here is a real change to what each pass can
     read, not a cosmetic one.
     """
-    assert STAGES[STAGES.index("extract") + 1 : STAGES.index("propose")] == (
+    assert STAGES[STAGES.index("extract") + 1 : STAGES.index("propose-batches")] == (
         "reconcile-subjects",
         "reconcile-contradict",
         "reconcile-capabilities",
