@@ -17,7 +17,7 @@ page restyle a document already sent to somebody outside the project.
 
 **Its own marker prose.** `summary_html` says `Not present: 01-world-model.json`,
 which is right for an operator and meaningless to an owner; here the same fact
-reads "We have not got far enough to describe this yet."
+reads "We do not have this on file, so this section is empty."
 
 **Nothing this module's own prose puts on the page names a stage, a gate, an
 artifact or rubrica itself,** and
@@ -164,9 +164,16 @@ def _marker(body: Marker, terse: bool) -> str:
     The artifact name is dropped deliberately: an owner cannot act on
     `01-world-model.json`, and the operator page beside this one already names it.
     The two markers stay two sentences for `summary_html._marker`'s reason -- one
-    is work not yet done, the other is a defect -- because spelling both the same
-    way is what let one page say a stage had produced an artifact and that the
-    artifact was not there.
+    is something we do not have, the other something we have and could not read back
+    -- because spelling both the same way is what let one page say a stage had
+    produced an artifact and that the artifact was not there.
+
+    Neither sentence says how far the work has got. The draft's did ("we have not got
+    far enough"), and it was measured on a run root at mode 000, where the run may
+    well be finished and merely unreadable: the page cannot tell the difference, so it
+    states what it has on file, which is the thing it does know. "Yet" was also the
+    entire difference between the two terse markers, so dropping it from one obliged
+    rewording that one rather than leaving the pair a word apart.
 
     `terse` is only ever True for a section whose marker is the one the page banner
     above it states, which is the five world-model-backed sections and no others.
@@ -182,8 +189,8 @@ def _marker(body: Marker, terse: bool) -> str:
             "so this section is incomplete.</p>"
         )
     if terse:
-        return f'<p class="absent">Nothing to show here yet — {_SEE_BANNER}.</p>'
-    return '<p class="absent">We have not got far enough to describe this yet.</p>'
+        return f'<p class="absent">Nothing on file here — {_SEE_BANNER}.</p>'
+    return '<p class="absent">We do not have this on file, so this section is empty.</p>'
 
 
 def _body(body, terse: bool) -> str:
@@ -658,9 +665,9 @@ def _description_banner(head) -> str:
         )
     if isinstance(head, Marker):
         return (
-            '<p class="banner">We have not got far enough into this work to '
-            "describe your system yet, so the sections below are empty. What we "
-            "read is the part that is worth your time on this copy.</p>"
+            '<p class="banner">We do not have a description of your system on '
+            "file, so the sections below are empty. What we read is the part that "
+            "is worth your time on this copy.</p>"
         )
     return ""
 

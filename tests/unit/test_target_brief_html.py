@@ -313,7 +313,7 @@ def test_page_states_a_marker_instead_of_dropping_the_section(tmp_path):
     run = build_toy_run(tmp_path, upto="extract")
     page = target_brief_html.render(run)
     assert "What we believe" in page
-    assert "not got far enough" in page
+    assert "We do not have a description of your system on file" in page
     # An operator's artifact name is not something an owner can act on.
     assert "01-world-model.json" not in page
 
@@ -325,7 +325,7 @@ def test_page_states_the_partial_run_once_and_still_shows_every_section(tmp_path
     pointing at the banner, so nothing silently disappears."""
     run = build_toy_run(tmp_path, upto="extract")
     page = target_brief_html.render(run)
-    assert page.count("not got far enough") == 1
+    assert page.count("We do not have a description of your system on file") == 1
     assert page.count("see the note at the top of this page") == 5
     for heading in (
         "Where our sources disagree",
@@ -895,22 +895,21 @@ def test_page_states_that_it_could_not_place_a_belief_rather_than_leaving_it_bla
     assert 'class="banner"' not in page
 
 
-def test_page_says_it_has_not_got_far_enough_when_the_record_of_what_it_read_is_absent(
-    tmp_path,
-):
+def test_page_says_it_does_not_have_the_record_of_what_it_read_on_file(tmp_path):
     """The Absent, non-terse marker -- Ruling 3's sentence, quoted in the module
     docstring, and reachable only through `_group_a` on a run whose `manifest.json`
     is absent while the description is readable.
 
     The review measured it dead under the whole suite: a `raise` in its place, 88
-    passed. The test that looked like its guard asserts `"not got far enough" in
-    page` on an `upto="extract"` run, where that phrase comes from
-    `_description_banner`'s different sentence -- substring-of-message, and the reason
-    this test unlinks the manifest on a *sealed* run instead."""
+    passed. The test that looked like its guard asserted a phrase the old wording
+    shared with `_description_banner`'s different sentence, on an `upto="extract"` run
+    where only the banner rendered -- substring-of-message, and the reason this test
+    unlinks the manifest on a *sealed* run instead. The two sentences now share no
+    phrase, which closes the shape rather than only this instance of it."""
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     run.manifest.unlink()
     page = target_brief_html.render(run)
-    assert "We have not got far enough to describe this yet." in page
+    assert "We do not have this on file, so this section is empty." in page
     # Absent and Malformed are two facts. Neither the Malformed sentence nor the
     # terse form of either is on this page, so the sentence above is this marker's
     # and not any other's.
@@ -943,10 +942,10 @@ def test_page_banners_an_unreadable_description_and_marks_each_section_malformed
     assert "could not read it back, so the sections below are empty" in page
     assert "a fault at our end and not a statement about your system" in page
     assert page.count("Nothing to show here — ") == 5
-    # Not the Absent prose: "yet" is the whole difference between the two terse
-    # markers, and the banner's own sentence differs from the Absent banner's.
-    assert "Nothing to show here yet" not in page
-    assert "not got far enough" not in page
+    # Not the Absent prose: the two terse markers are separate sentences rather than
+    # one word apart, and the banner's own sentence differs from the Absent banner's.
+    assert "Nothing on file here" not in page
+    assert "We do not have a description of your system on file" not in page
     # The positive control: `What we read` reads the manifest, which is readable, so
     # the five above are five sections and not the whole page.
     assert "notes.md" in page
