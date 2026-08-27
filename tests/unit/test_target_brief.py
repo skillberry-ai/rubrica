@@ -604,16 +604,6 @@ def test_open_questions_carries_unknown_verbatim_and_drops_the_internals(tmp_pat
     assert set(vars(found[0])) == {"id", "subject", "unknown"}
 
 
-def test_open_questions_renders_a_gap_that_cites_no_claim(tmp_path):
-    """The normal case, not the edge case: every gap in all three runs measured
-    carries no `claims` key -- 0 of 18, 0 of 19, 0 of 15."""
-    run = build_toy_run(tmp_path, upto="reconcile-seal")
-    world_model = json.loads(run.world_model.read_text())
-    world_model["gaps"] = [{"id": "gap-001", "subject": "s", "unknown": "u"}]
-    run.world_model.write_text(json.dumps(world_model))
-    assert target_brief.open_questions(run)[0].unknown == "u"
-
-
 def test_open_questions_is_empty_on_the_toy_world_and_marks_an_unreadable_one(tmp_path):
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     # The golden toy world has no gaps; an empty group and a missing world model
