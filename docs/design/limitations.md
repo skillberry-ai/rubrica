@@ -980,13 +980,19 @@ run that covers its goals can converge on a suite that drives nothing.
 The only thing standing between a run and that outcome is a human reading the
 fenced banner `gate-brief --gate 1` prints when no capability is bound. That is
 deliberate rather than an oversight, and the alternative was built and taken back
-out: a `check-refs` finding at the seal was implemented and reverted, because a
-`1` from `check-refs` tells `rb-orchestrate` "a repairable stage defect, spend
-the one repair attempt", and no re-dispatch can add a binding at all:
-`rb-reconcile-capabilities`' section 5 tells the pass to leave `binding` off
-rather than guess a tool name, so the pass did the right thing and nothing
-downstream can supply one. `check-refs` also runs before gate 1, so the finding
-would have halted a correct run ahead of the gate it was written to be read at.
+out. **A `check-refs` finding at the seal was designed, implemented in `ae1b74e`,
+and reverted in `11a6c25`.** This is the live account of why it is not there, so
+that its absence is not read as an oversight and re-proposed. It miscategorised its
+own condition: a `1` from `check-refs` tells
+`rb-orchestrate` "a repairable stage defect, spend the one repair attempt", and no
+re-dispatch can add a binding at all — `rb-reconcile-capabilities`' section 5 tells
+the pass to leave `binding` off rather than guess a tool name, so the pass did the
+right thing and nothing downstream can supply one. `check-refs` also runs *before*
+gate 1, so the finding halted a correct run ahead of the gate it was written to be
+read at — 19 of 24 capabilities' worth on `run-20260827-070444`. **The reason is the
+exit-1 semantics, not a change of mind about visibility**, so do not re-propose it
+on the grounds that the exclusion deserves an earlier signal — the layer for that
+is the one CLAUDE.md keeps for reports that always exit clean on a readable run.
 
 **Why it is parked: choosing between the two honest fixes needs a measurement
 this branch did not make.** The mechanical guard is cheap and obvious — have the
@@ -1422,14 +1428,19 @@ which is worth more than the line it costs.
 
 ### `binding` is tool-shaped, so real agent-level behaviour can be neither driven nor counted
 
-`capability.binding` is `{tool, fixed_args}`. `emit.bindings` keeps a capability
-that declares a binding and drops one that does not, and `emit.call_spec` then
-reads `binding["tool"]` unguarded — so `binding.tool` is the predicate
-`refs.drivable_cells` keys the coverage denominator on, one notch tighter than
-`emit.bindings`' own truthiness test. For most undrivable capabilities that is
-the right predicate: a `pyproject.toml` dependency declaration is not target
-behaviour at all, and a JSON-RPC surface on an `http-sse` run is genuinely out
-of reach.
+`capability.binding` is `{tool, fixed_args}`, and `binding.tool` is the predicate
+`refs.drivable_cells` keys the coverage denominator on. It is **one notch tighter
+than `emit.bindings`, not identical to it**, and the difference is worth stating
+because the obvious reading is wrong: `emit.bindings` tests the binding *object*'s
+truthiness (`emit.py:66`) and drops the capability outright, while `emit.call_spec`
+then reads `binding["tool"]` unguarded (`emit.py:79`). The two therefore disagree
+on exactly one shape — a binding present with no `tool` — and that shape crashes
+`call_spec`, so it belongs outside the denominator rather than inside the suite.
+Do not "align" them.
+
+For most undrivable capabilities that predicate is the right one: a
+`pyproject.toml` dependency declaration is not target behaviour at all, and a
+JSON-RPC surface on an `http-sse` run is genuinely out of reach.
 
 For one group it is the wrong answer, and narrowing the denominator is what
 makes that group invisible. Measured on `run-20260827-070444`, the 37 excluded
@@ -1492,8 +1503,10 @@ issue #17's third suggestion. It is parked for a different reason than this
 entry: it is a prompt change that only a paid dispatch can validate, and
 entangling it with the arithmetic would have blocked a deterministic fix behind
 that dispatch. Do not read the two numbers as one — 10 is how many cite the file
-at all, 4 is how many rest on nothing else — and the conflation is not
-hypothetical: it shipped once on this branch and had to be corrected.
+at all, 4 is how many rest on nothing else. The two have been conflated once
+already, in a write-up that gave the second count as five and then listed four
+ids; both figures here are re-measured off the run named above, and this is the
+live record of them.
 
 ### Whether the gateway's contended connection pool is per-API-key or global is unknown
 
