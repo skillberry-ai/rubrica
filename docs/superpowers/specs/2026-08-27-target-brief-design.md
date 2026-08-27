@@ -192,10 +192,27 @@ plain text (parsec's `gap-001` opens "cost-tools-003: subscriptions_queried fiel
 presence…"), so an unreferenceable id makes the prose unresolvable; and because
 nothing structural comes back (§5), a prose reply needs a handle to name.
 
-**A. We read these files — did we miss anything?** From `manifest.inputs`:
-`source_path` relative to its common prefix, grouped by `kind` and directory, with
-counts shown and the file list collapsed. parsec is 269 files across
-`source_code`, `design_doc` and `trace`.
+**A. We read these files — did we miss anything?** From `manifest.inputs`,
+grouped by `kind` and directory, with counts shown and the file list collapsed.
+
+Two things measured about `source_path` shape this group, and getting either
+wrong would put a false sentence at the top of the document:
+
+- **It is absolute, and on rubrica's machine.** All three runs share a prefix of
+  `/home/agent/runs/<target>`, which is where the corpus was staged and is not a
+  path any owner recognises. The shared prefix is stripped so what remains is the
+  owner's own tree — `src/tools/aap2.py`, not `/home/agent/runs/parsec/src/tools/aap2.py`.
+- **An input is not a file.** A `#/NN` fragment marks one slice of a sliced
+  artifact, and parsec's **269 inputs are 199 distinct files** because its 71
+  `trace` inputs are 71 slices of a single capture. reservation-service's 25
+  inputs are 11 files. So the group counts files, collapsing on the path before
+  the `#`, and reports slices separately — "1 trace file, read as 71 recorded
+  calls". Counting inputs would tell parsec's owners we read 269 files when we
+  read 199, and would list one trace 71 times.
+
+parsec's files then group as 129 `source_code`, 42 `design_doc`, 27 `other` and
+1 `trace` — `other` included rather than dropped, since a document we could not
+classify is exactly the kind an owner should be told we read.
 
 This group is first on purpose. It is the one question the pipeline structurally
 cannot ask itself: gate 0 decides what the run can ever know, and
