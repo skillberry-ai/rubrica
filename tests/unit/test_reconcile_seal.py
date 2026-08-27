@@ -114,6 +114,178 @@ def test_the_denominator_counts_distinct_cells_not_a_sum_of_counts(tmp_path):
     assert [f for f in refs.check_world_model(run) if f.pointer.startswith("/denominator")] == []
 
 
+# The two capability shapes the drivable-denominator tests below are built from,
+# as functions rather than module constants so a test that mutates one cannot
+# reach the next test's copy. Claim ids are the toy run's real ones
+# (tests/toy.py::split_world_model): an unresolvable id would make
+# check_world_model report a claim finding, and the identity test would then be
+# measuring that instead of the denominator.
+def _bound_capability() -> dict:
+    return {
+        "id": "cap-bound",
+        "operation": "search",
+        "params": [],
+        "binding": {"tool": "search_restaurants", "fixed_args": {}},
+        "claims": ["clm-api-001"],
+        "confidence": "high",
+    }
+
+
+# The shape 19 of 24 capabilities had on the measured run: a real claim, no tool
+# anyone could name from it. rb-reconcile-capabilities' refusal conditions
+# require exactly this rather than a guessed tool.
+def _unbound_capability() -> dict:
+    return {
+        "id": "cap-unbound",
+        "operation": "integrate with Keycloak",
+        "params": [],
+        "claims": ["clm-api-001"],
+        "confidence": "medium",
+    }
+
+
+def _bound_outcomes() -> dict:
+    return {
+        "capability_id": "cap-bound",
+        "outcome_classes": [
+            {"id": "oc-ok", "kind": "success", "description": "d", "claims": ["clm-api-005"]},
+            {"id": "oc-empty", "kind": "empty", "description": "d", "claims": ["clm-api-005"]},
+        ],
+    }
+
+
+def _unbound_outcomes() -> dict:
+    return {
+        "capability_id": "cap-unbound",
+        "outcome_classes": [
+            {
+                "id": "oc-ok",
+                "kind": "underspecified",
+                "description": "d",
+                "claims": ["clm-api-005"],
+            },
+        ],
+    }
+
+
+def _run_ready_to_seal_with(tmp_path, *, capabilities: list[dict], outcomes: list[dict]):
+    """A toy run at extract with only the capabilities and outcomes parts swapped.
+
+    Built off split_world_model rather than hand-authored so the entities, actors,
+    goals, gaps, contradictions and the subject cover stay the golden ones. Those
+    cite real claims, and the cover has to stay total -- otherwise
+    check_world_model and check_subjects report findings of their own and the
+    identity assertion below would be measuring one of those instead of the
+    denominator. The other payload keys of the two swapped parts (`schema_version`,
+    `inputs_seen`) are preserved for the same reason: the part is still the part.
+    """
+    run = build_toy_run(tmp_path, upto="extract")
+    parts = split_world_model()
+    parts["capabilities"] = {**parts["capabilities"], "capabilities": capabilities}
+    parts["outcomes"] = {**parts["outcomes"], "outcomes": outcomes}
+    _write_parts(run, parts)
+    return run
+
+
+def test_the_sealed_denominator_counts_only_drivable_cells(tmp_path):
+    """Issue 17. The denominator is frozen at the seal by design, so a wrong one
+    is not corrected later -- it is scored against for the rest of the run and
+    recorded in every coverage document.
+
+    Measured on run-20260827-070444: 24 capabilities, 5 bound, denominator 56
+    against 19 drivable cells, and `rubrica check-refs` exited 0 on it.
+    """
+    run = _run_ready_to_seal_with(
+        tmp_path,
+        capabilities=[_bound_capability(), _unbound_capability()],
+        outcomes=[_bound_outcomes(), _unbound_outcomes()],
+    )
+
+    path, findings = reconcile.seal(run)
+
+    assert findings == []
+    world = read_json(path)
+    # Two drivable cells, not the three the world model declares. Both numbers are
+    # read off the sealed artifact rather than through refs, so the test is not
+    # asserting the implementation against itself.
+    declared = {(c["id"], oc["id"]) for c in world["capabilities"] for oc in c["outcome_classes"]}
+    assert len(declared) == 3, "the fixture must declare a cell the suite cannot drive"
+    assert world["denominator"]["capability_cells"] == 2
+    # The unbound capability is still IN the world model. It is not a lie, and
+    # some such capabilities are real surfaces worth recording -- it just stops
+    # setting the target coverage is scored against.
+    assert {c["id"] for c in world["capabilities"]} == {"cap-bound", "cap-unbound"}
+    # version is a per-run amendment counter, not an arithmetic generation, so
+    # narrowing the arithmetic must not move it.
+    assert world["denominator"]["version"] == 1
+    # Layer 1 still passes: narrowing a count changes no shape.
+    assert validate.validate_artifact(run.world_model, "world-model") == []
+
+
+def test_check_world_model_agrees_with_the_narrowed_seal(tmp_path):
+    """The seal writes this field and check_world_model recomputes it, which makes
+    it an identity. Both spellings had to change in one commit or every sealed
+    world model reports a finding against itself -- the hazard issue 17's own
+    suggested patch named and then reintroduced one layer down.
+    """
+    run = _run_ready_to_seal_with(
+        tmp_path,
+        capabilities=[_bound_capability(), _unbound_capability()],
+        outcomes=[_bound_outcomes(), _unbound_outcomes()],
+    )
+    path, findings = reconcile.seal(run)
+    assert findings == []
+    assert path == run.world_model
+    # Scoped to the denominator rather than asserting no findings at all: a later
+    # task in this branch makes check_world_model report every unbound capability,
+    # and this fixture has one by construction. What this test is about is that the
+    # seal's arithmetic and the check's recomputation agree.
+    assert [f for f in refs.check_world_model(run) if "/denominator/" in f.pointer] == []
+
+
+def test_the_drivable_denominator_counts_distinct_cells_not_a_sum(tmp_path):
+    """The narrowed arithmetic has to stay a *set* over distinct pairs, exactly as
+    the wide one was: a bound capability whose outcomes record repeats an
+    outcome-class id is one cell, not two.
+
+    Nothing else in the pipeline stands between that repeat and this count.
+    world-model-0.1.json puts no uniqueItems on outcome_classes, and reconcile.seal
+    refuses a duplicate *capability* record in the outcomes part but nothing at all
+    for a repeated outcome-class id inside one record -- so the guard
+    docs/design/limitations.md records has to live here, in the consumer that
+    writes len(...) into the frozen field. Measured red against a seal spelled
+    `sum(len(c["outcome_classes"]) for c in capabilities if the binding names a
+    tool)`: it writes 2 where the check recomputes 1.
+
+    The two descriptions differ, so a whole-object uniqueItems would not have
+    caught this either -- the repeat is in the id alone.
+    """
+    repeated_outcomes = {
+        "capability_id": "cap-bound",
+        "outcome_classes": [
+            {"id": "oc-ok", "kind": "success", "description": "first", "claims": ["clm-api-005"]},
+            {"id": "oc-ok", "kind": "empty", "description": "second", "claims": ["clm-api-005"]},
+        ],
+    }
+    run = _run_ready_to_seal_with(
+        tmp_path,
+        capabilities=[_bound_capability()],
+        outcomes=[repeated_outcomes],
+    )
+
+    path, findings = reconcile.seal(run)
+
+    assert findings == []
+    world = read_json(path)
+    # What the naive sum would have written, stated as the fixture property rather
+    # than recomputed through refs: one bound capability, two outcome-class entries.
+    assert len(repeated_outcomes["outcome_classes"]) == 2, (
+        "the fixture must reach the case where a sum and a set differ"
+    )
+    assert world["denominator"]["capability_cells"] == 1
+    assert [f for f in refs.check_world_model(run) if "/denominator/" in f.pointer] == []
+
+
 def test_the_denominator_version_can_be_bumped_for_an_amendment(tmp_path):
     """An amendment costs an explicit orchestrator decision and a version bump.
     The seal takes the bumped number rather than inventing or incrementing one,

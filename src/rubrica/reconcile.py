@@ -54,6 +54,7 @@ from pathlib import Path
 from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths, list_json
+from rubrica.refs import drivable_cells
 
 # (RunPaths attribute, the payload keys inside that partial) in the order the
 # passes run, so a run missing several partials names the earliest pass first --
@@ -296,24 +297,26 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
         "gaps": parts["gaps_part"]["gaps"],
         "denominator": {
             "version": denominator_version,
-            # *Distinct* (capability_id, outcome_class_id) pairs, counted off the
-            # joined capabilities so the number cannot disagree with the cells it
-            # describes. A set, not a sum of per-capability outcome-class counts,
-            # because refs.check_world_model recomputes this field as
-            # len(refs._cells(world)) and refs._cells is a set comprehension. That
-            # recomputation makes the field an identity: whatever is written here
-            # has to be what the check derives, or check-refs reports a finding
-            # against a world model this seal had just produced. The two spellings
-            # agree until a capability id or an outcome-class id repeats, at which
-            # point a sum is simply the wrong number -- so do not "simplify" this
-            # back to sum(len(c["outcome_classes"]) for c in capabilities).
-            "capability_cells": len(
-                {
-                    (capability["id"], outcome_class["id"])
-                    for capability in capabilities
-                    for outcome_class in capability["outcome_classes"]
-                }
-            ),
+            # *Distinct* (capability_id, outcome_class_id) pairs among the
+            # capabilities that declare a tool binding -- the cells this suite can
+            # actually be scored against, not every cell the model declares. A
+            # capability with no binding cannot be driven through the target:
+            # emit.bindings drops it outright, so a cell on one is a target no
+            # emitted test could ever hit. Measured on run-20260827-070444, before
+            # this narrowed: 37 of 56 cells (66%) sat on unbound capabilities and
+            # both gate layers exited 0 on the result.
+            #
+            # refs.drivable_cells and not a local comprehension, because
+            # refs.check_world_model recomputes this field through that same
+            # function. The recomputation is what makes the field an identity:
+            # whatever is written here has to be what the check derives, or
+            # check-refs reports a finding against a world model this seal had just
+            # produced. A set and not a sum for the reason
+            # `docs/design/limitations.md` records under "One precision": the two
+            # agree only until a capability id or an outcome-class id repeats, at
+            # which point a sum is simply the wrong number -- so do not "simplify"
+            # this into sum(len(c["outcome_classes"]) for c in bound capabilities).
+            "capability_cells": len(drivable_cells({"capabilities": capabilities})),
             "goals": len(parts["goals_part"]["goals"]),
         },
     }

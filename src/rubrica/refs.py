@@ -1914,12 +1914,16 @@ def check_world_model(run: RunPaths) -> list[Finding]:
                 report(f"/contradictions/{i}/{side}", f"no such claim: {contradiction[side]}")
 
     denominator = world.get("denominator", {})
-    actual_cells = len(_cells(world))
+    # drivable_cells, not _cells: the denominator counts what the suite can be
+    # scored against, while _cells stays wide because it resolves references. The
+    # seal writes len() of this same function, which is what keeps the field an
+    # identity rather than two spellings that can drift.
+    actual_cells = len(drivable_cells(world))
     if denominator.get("capability_cells") != actual_cells:
         report(
             "/denominator/capability_cells",
             f"declared capability_cells={denominator.get('capability_cells')} but the world "
-            f"model declares {actual_cells} capability x outcome-class cells",
+            f"model declares {actual_cells} drivable capability x outcome-class cells",
         )
     actual_goals = len(world.get("goals", []))
     if denominator.get("goals") != actual_goals:
