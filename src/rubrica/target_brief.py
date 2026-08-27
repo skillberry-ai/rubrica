@@ -310,6 +310,16 @@ def inputs_read(run: RunPaths) -> list[InputGroup] | Marker:
     # and for an unreadable one alike, so it cannot tell the two facts apart. This
     # is `summary.py`'s spelling of that test (`header`, `inputs`), so the two
     # pages cannot disagree about which fact a run is showing.
+    #
+    # The two reads can also diverge, and the `_input_sources` one is kept anyway:
+    # it drops a record whose `artifact_id` is not a string and collapses
+    # duplicate ids, where the loop below walks every record. That difference
+    # reaches only `prefix`, where it fails open into rendering an unstripped
+    # staging path -- the one outcome `_common_prefix` exists to prevent. Deriving
+    # `prefix` from `records` instead would close that and is still the wrong fix,
+    # because `source_index` shortens against the `_input_sources` basis: two bases
+    # would let one file render `src/x.py` here and `x.py` in an evidence row, and
+    # a page the owner is asked to ratify must not spell one path two ways.
     payload = _mapping(_quietly(run.manifest))
     if not payload:
         return _absent_or_malformed(run.manifest, "manifest.json", "nothing could be read from it")
@@ -337,8 +347,18 @@ def inputs_read(run: RunPaths) -> list[InputGroup] | Marker:
             # manifest and a dropped record makes the count disagree with the
             # file silently -- which is the worse of the two failures.
             path = artifact_id if isinstance(artifact_id, str) else ""
-        directory, _, name = path.rpartition("/")
-        seen.setdefault((kind, directory), []).append(name or path)
+        # `os.sep`, not a literal: `_shorten` and `_common_prefix` do their
+        # filesystem-path arithmetic on this same string three lines up, and one
+        # spelling in one flow is the point -- a consistency change, not a
+        # measured one, and behaviour-preserving on posix.
+        #
+        # Plain `name`: `rpartition` already returns the whole path as `name` when
+        # there is no separator, so an `or path` fallback is dead everywhere the
+        # pipeline can reach and live only on a trailing-slash `source_path`,
+        # where it would set both `directory` and the name to the directory and a
+        # renderer joining the two would print `dir/dir/`.
+        directory, _, name = path.rpartition(os.sep)
+        seen.setdefault((kind, directory), []).append(name)
     groups = []
     for (kind, directory), names in sorted(seen.items()):
         files = tuple(sorted(set(names)))
