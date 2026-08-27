@@ -2804,8 +2804,23 @@ def check_coverage(run: RunPaths) -> list[Finding]:
     # `seen - drivable` rather than `seen - cells`: a matrix row on an undrivable
     # cell is now also wrong, because that cell belongs in the holes instead. This
     # tightens the invented-cell direction rather than loosening it.
-    for invented in sorted(seen - drivable):
-        report("/capability_matrix/cells", f"matrix invents cell {cell_ref(*invented)}")
+    #
+    # Two messages, not one, because they are two different defects and only one
+    # of them is an invention. A declared-but-undrivable cell is one the human at
+    # gate 2 will find sitting in 01-world-model.json, so telling them the matrix
+    # "invents" it reads as the checker being wrong rather than the document --
+    # 37 rows' worth on run-20260827-070444 before the matrix itself narrowed.
+    # `cells` is the wide set, so membership in it is exactly the partition:
+    # inside, the world model declares the cell and the matrix scored a row it
+    # should have left to the holes; outside, no capability declares the pair.
+    for extra in sorted(seen - drivable):
+        if extra in cells:
+            report(
+                "/capability_matrix/cells",
+                f"matrix scores undrivable cell {cell_ref(*extra)}; it belongs in the holes",
+            )
+        else:
+            report("/capability_matrix/cells", f"matrix invents cell {cell_ref(*extra)}")
     for i, cell in enumerate(matrix_cells):
         for j, sid in enumerate(cell.get("scenario_ids", [])):
             if sid not in scenario_ids:

@@ -1,16 +1,10 @@
 """Layer 2 over the bounded propose/score loop's staged parts.
 
-check_batches, check_scenario_parts and check_score_parts, plus both directions
-of check_coverage's matrix completeness. Those last ones sit here rather than
-beside check_coverage's other tests in test_refs_planning.py because this file's
-own `_run_with_world_for_refs` already has to bind cap-0 to satisfy that very
-clause, so the guard lives beside the fixture that depends on it.
-
-The load-bearing checker is check_scenario_parts, for its own-batch clause: a
-member that proposed against a sibling's hole writes a part that is schema-valid,
-hashes like any other, and is byte-identical to one that stayed inside its batch,
-so no schema and no digest can see it. Only the plan beside it says whose hole
-that was.
+check_batches, check_scenario_parts and check_score_parts. The load-bearing one
+is check_scenario_parts' own-batch clause: a member that proposed against a
+sibling's hole writes a part that is schema-valid, hashes like any other, and is
+byte-identical to one that stayed inside its batch, so no schema and no digest
+can see it. Only the plan beside it says whose hole that was.
 
 That clause resolves `provenance.hole_refs` -- where the member declares which
 holes it wrote a scenario to close -- and NOT `goal_id` or `capability_refs`,
@@ -32,7 +26,6 @@ import json
 from rubrica import refs, rounds
 from rubrica.artifacts import write_json
 from rubrica.paths import RunPaths
-from tests.builders import minimal_coverage, minimal_world_model
 
 
 def _run_with_world_for_refs(tmp_path):
@@ -55,9 +48,14 @@ def _run_with_world_for_refs(tmp_path):
         {
             "schema_version": "0.1",
             "denominator": {"capability_cells": 1, "goals": 1, "version": 1},
-            # Bound for the reason test_rounds._world is: check_coverage holds the
-            # capability matrix to the DRIVABLE cells, so an unbound cap-0 would make
-            # this fixture's one matrix row read as an invented cell.
+            # Bound for the reason test_rounds._world is: the drivable cell set is
+            # what reconcile-seal counts into the denominator (reconcile.py:319) and
+            # what check_coverage holds the capability matrix to, so an unbound cap-0
+            # would leave this fixture with no drivable cell at all. No test in this
+            # module reaches either -- none of the runs below writes a coverage
+            # document, so check_coverage returns at its first guard -- so the
+            # binding is insurance for a test added later, not a dependency of one
+            # already written here.
             "capabilities": [
                 {
                     "id": "cap-0",
@@ -1008,187 +1006,3 @@ def test_check_all_runs_check_score_parts(tmp_path):
     assert any(
         f.artifact == run.score_part(1) and "sc-ghost" in f.message for f in refs.check_all(run)
     )
-
-
-# --------------------------------------------------------------------------
-# check_coverage's matrix completeness, against the drivable cells
-# --------------------------------------------------------------------------
-
-
-def _coverage_run_with(tmp_path, *, capabilities, matrix_cells, holes):
-    """A run holding just the two documents check_coverage compares.
-
-    `goals=[]` and an empty goal matrix, so the goal half contributes nothing and
-    a finding these tests see came from the capability half. No scenarios file is
-    written: check_coverage defaults to an empty scenario list, and no row here is
-    marked covered, so nothing needs a live scenario to credit.
-
-    `minimal_world_model`'s `denominator` is left at its default rather than
-    recomputed against `capabilities`. check_coverage never reads
-    `denominator.capability_cells` -- it compares only
-    `coverage.denominator_version` against `world.denominator.version` -- and a
-    check_coverage test must not depend on check_world_model's arithmetic.
-    """
-    run = RunPaths(tmp_path)
-    write_json(run.world_model, minimal_world_model(capabilities=capabilities, goals=[]))
-    covered = sum(1 for c in matrix_cells if c["covered"])
-    write_json(
-        run.coverage_latest,
-        minimal_coverage(
-            capability_matrix={
-                "cells": matrix_cells,
-                "covered": covered,
-                "total": len(matrix_cells),
-                "pct": (covered / len(matrix_cells)) if matrix_cells else 0.0,
-            },
-            goal_matrix={"rows": [], "covered": 0, "total": 0, "pct": 0.0},
-            holes=holes,
-        ),
-    )
-    return run
-
-
-def test_check_coverage_accepts_a_matrix_of_drivable_cells_with_holes_on_the_rest(tmp_path):
-    """The fabricated-finding guard for issue 17's narrowing.
-
-    check_coverage compared matrix rows against the WIDE cell set, so a matrix
-    that correctly enumerates only drivable cells reported one 'matrix omits
-    cell' finding per undrivable cell -- 37 of them on run-20260827-070444,
-    against a document that was right. That is the class CLAUDE.md's rule about a
-    `1` naming the right artifact exists over.
-
-    The undrivable cell is still carried, as an `unreachable` hole, so nothing
-    disappears from the report. Its ref has to RESOLVE, which is why _cells stays
-    wide.
-    """
-    run = _coverage_run_with(
-        tmp_path,
-        capabilities=[
-            {
-                "id": "cap-bound",
-                "binding": {"tool": "t", "fixed_args": {}},
-                "outcome_classes": [{"id": "oc-ok"}],
-            },
-            {"id": "cap-unbound", "outcome_classes": [{"id": "oc-ok"}]},
-        ],
-        matrix_cells=[
-            # Drivable cells only -- what rounds.capability_matrix produces once
-            # the narrowing this guard precedes lands.
-            {
-                "capability_id": "cap-bound",
-                "outcome_class_id": "oc-ok",
-                "scenario_ids": [],
-                "covered": False,
-            },
-        ],
-        holes=[
-            {
-                "ref": "cell:cap-bound/oc-ok",
-                "reason": "not_yet_attempted",
-                "justification": "no scenario proposed yet",
-            },
-            {
-                "ref": "cell:cap-unbound/oc-ok",
-                "reason": "unreachable",
-                "justification": "capability declares no binding.tool",
-            },
-        ],
-    )
-
-    findings = refs.check_coverage(run)
-
-    assert [f.message for f in findings] == []
-
-
-def test_check_coverage_still_reports_a_matrix_that_omits_a_drivable_cell(tmp_path):
-    """The other direction, so the narrowed comparison is not narrowed into
-    vacuity: dropping a DRIVABLE cell from the matrix is still a finding. Without
-    this, a matrix holding only the cells some scenario happened to claim would
-    report 100% of a denominator it shrank to fit -- the failure
-    rounds.capability_matrix' docstring ranks first.
-    """
-    run = _coverage_run_with(
-        tmp_path,
-        capabilities=[
-            {
-                "id": "cap-bound",
-                "binding": {"tool": "t", "fixed_args": {}},
-                "outcome_classes": [{"id": "oc-ok"}, {"id": "oc-empty"}],
-            },
-        ],
-        matrix_cells=[
-            {
-                "capability_id": "cap-bound",
-                "outcome_class_id": "oc-ok",
-                "scenario_ids": [],
-                "covered": False,
-            },
-        ],
-        holes=[
-            {
-                "ref": "cell:cap-bound/oc-ok",
-                "reason": "not_yet_attempted",
-                "justification": "no scenario yet",
-            }
-        ],
-    )
-
-    findings = refs.check_coverage(run)
-
-    assert any("matrix omits cell cell:cap-bound/oc-empty" in f.message for f in findings)
-    assert [f.pointer for f in findings if "matrix omits cell" in f.message] == [
-        "/capability_matrix/cells"
-    ]
-
-
-def test_check_coverage_reports_a_matrix_row_on_an_undrivable_cell(tmp_path):
-    """The invented-cell direction, which this narrowing TIGHTENS.
-
-    Against the wide set a row on an undrivable cell resolved and passed. It is a
-    finding now: that cell sits outside the scored surface, so it belongs in the
-    holes rather than in the matrix, and a row there puts an undrivable cell back
-    into the denominator every percentage is measured against.
-    """
-    run = _coverage_run_with(
-        tmp_path,
-        capabilities=[
-            {
-                "id": "cap-bound",
-                "binding": {"tool": "t", "fixed_args": {}},
-                "outcome_classes": [{"id": "oc-ok"}],
-            },
-            {"id": "cap-unbound", "outcome_classes": [{"id": "oc-ok"}]},
-        ],
-        matrix_cells=[
-            {
-                "capability_id": "cap-bound",
-                "outcome_class_id": "oc-ok",
-                "scenario_ids": [],
-                "covered": False,
-            },
-            {
-                "capability_id": "cap-unbound",
-                "outcome_class_id": "oc-ok",
-                "scenario_ids": [],
-                "covered": False,
-            },
-        ],
-        holes=[
-            {
-                "ref": "cell:cap-bound/oc-ok",
-                "reason": "not_yet_attempted",
-                "justification": "no scenario yet",
-            },
-            {
-                "ref": "cell:cap-unbound/oc-ok",
-                "reason": "unreachable",
-                "justification": "capability declares no binding.tool",
-            },
-        ],
-    )
-
-    findings = refs.check_coverage(run)
-
-    assert [(f.pointer, f.message) for f in findings if "invents cell" in f.message] == [
-        ("/capability_matrix/cells", "matrix invents cell cell:cap-unbound/oc-ok")
-    ]

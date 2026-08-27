@@ -40,6 +40,80 @@ def _scored_run(tmp_path, *, coverage):
     return run
 
 
+def _coverage_run_with(tmp_path, *, capabilities, matrix_cells, holes):
+    """A run holding just the two documents check_coverage's matrix clause reads.
+
+    `_run` and `_scored_run` above both take minimal_world_model whole, and these
+    fixtures need a world model with a bound and an unbound capability in it, which
+    is the distinction the matrix clause turns on.
+
+    `goals=[]` and an empty goal matrix, so the goal half contributes nothing and
+    a finding these tests see came from the capability half. No scenarios file is
+    written: check_coverage defaults to an empty scenario list, and no row here is
+    marked covered, so nothing needs a live scenario to credit.
+
+    `minimal_world_model`'s `denominator` is left at its default rather than
+    recomputed against `capabilities`. check_coverage never reads
+    `denominator.capability_cells` -- it compares only
+    `coverage.denominator_version` against `world.denominator.version` -- and a
+    check_coverage test must not depend on check_world_model's arithmetic.
+    """
+    run = RunPaths(tmp_path)
+    write_json(run.world_model, minimal_world_model(capabilities=capabilities, goals=[]))
+    covered = sum(1 for c in matrix_cells if c["covered"])
+    write_json(
+        run.coverage_latest,
+        minimal_coverage(
+            capability_matrix={
+                "cells": matrix_cells,
+                "covered": covered,
+                "total": len(matrix_cells),
+                "pct": (covered / len(matrix_cells)) if matrix_cells else 0.0,
+            },
+            goal_matrix={"rows": [], "covered": 0, "total": 0, "pct": 0.0},
+            holes=holes,
+        ),
+    )
+    return run
+
+
+def _bound(cap_id, *outcome_ids):
+    return {
+        "id": cap_id,
+        "binding": {"tool": "t", "fixed_args": {}},
+        "outcome_classes": [{"id": oc} for oc in outcome_ids],
+    }
+
+
+def _unbound(cap_id, *outcome_ids):
+    """A capability with no `binding` at all -- undrivable, and so outside the
+    denominator, but still declared, so its cells stay in the wide `_cells` set."""
+    return {"id": cap_id, "outcome_classes": [{"id": oc} for oc in outcome_ids]}
+
+
+def _row(cap_id, oc_id):
+    return {
+        "capability_id": cap_id,
+        "outcome_class_id": oc_id,
+        "scenario_ids": [],
+        "covered": False,
+    }
+
+
+def _hole(ref, reason, justification):
+    return {"ref": ref, "reason": reason, "justification": justification}
+
+
+def _matrix_findings(findings):
+    """Only the two matrix-completeness messages, by pointer.
+
+    Scoped rather than substring-filtered so the hole reconciliation's own
+    findings -- which fire on some of these fixtures for legitimate reasons --
+    cannot satisfy or mask an assertion about this clause.
+    """
+    return [f.message for f in findings if f.pointer == "/capability_matrix/cells"]
+
+
 # -- hole refs ----------------------------------------------------------
 def test_cell_and_goal_refs_round_trip():
     assert parse_hole_ref(cell_ref("cap-a", "oc-b")) == ("cell", ("cap-a", "oc-b"))
@@ -480,6 +554,115 @@ def test_a_coverage_matrix_inventing_a_cell_is_reported(tmp_path):
     assert [f.message for f in findings] == [
         "matrix invents cell cell:cap-ghost/oc-success",
         "cell:cap-ghost/oc-success is uncovered but no hole justifies it",
+    ]
+
+
+def test_check_coverage_accepts_a_matrix_of_drivable_cells_with_holes_on_the_rest(tmp_path):
+    """The fabricated-finding guard for issue 17's narrowing.
+
+    check_coverage compared matrix rows against the WIDE cell set, so a matrix
+    that correctly enumerates only drivable cells reported one 'matrix omits
+    cell' finding per undrivable cell -- 37 of them on run-20260827-070444,
+    against a document that was right. That is the class CLAUDE.md's rule about a
+    `1` naming the right artifact exists over.
+
+    The undrivable cell is still carried, as an `unreachable` hole, so nothing
+    disappears from the report. Its ref has to RESOLVE, which is why _cells stays
+    wide: narrow that resolution and this test goes red on 'hole names no real
+    cell'.
+    """
+    run = _coverage_run_with(
+        tmp_path,
+        capabilities=[_bound("cap-bound", "oc-ok"), _unbound("cap-unbound", "oc-ok")],
+        # Drivable cells only -- what rounds.capability_matrix produces once the
+        # narrowing this guard precedes lands.
+        matrix_cells=[_row("cap-bound", "oc-ok")],
+        holes=[
+            _hole("cell:cap-bound/oc-ok", "not_yet_attempted", "no scenario proposed yet"),
+            _hole("cell:cap-unbound/oc-ok", "unreachable", "capability declares no binding.tool"),
+        ],
+    )
+
+    findings = check_coverage(run)
+
+    assert [f.message for f in findings] == []
+
+
+def test_check_coverage_still_reports_a_matrix_that_omits_a_drivable_cell(tmp_path):
+    """The other direction, so the narrowed comparison is not narrowed into
+    vacuity: dropping a DRIVABLE cell from the matrix is still a finding. Without
+    this, a matrix holding only the cells some scenario happened to claim would
+    report 100% of a denominator it shrank to fit -- the failure
+    rounds.capability_matrix' docstring ranks first.
+    """
+    run = _coverage_run_with(
+        tmp_path,
+        capabilities=[_bound("cap-bound", "oc-ok", "oc-empty")],
+        matrix_cells=[_row("cap-bound", "oc-ok")],
+        holes=[_hole("cell:cap-bound/oc-ok", "not_yet_attempted", "no scenario yet")],
+    )
+
+    findings = check_coverage(run)
+
+    assert _matrix_findings(findings) == ["matrix omits cell cell:cap-bound/oc-empty"]
+
+
+def test_check_coverage_reports_a_matrix_row_on_an_undrivable_cell(tmp_path):
+    """The invented-cell direction, which this narrowing TIGHTENS.
+
+    Against the wide set a row on an undrivable cell resolved and passed. It is a
+    finding now: that cell sits outside the scored surface, so it belongs in the
+    holes rather than in the matrix, and a row there puts an undrivable cell back
+    into the denominator every percentage is measured against.
+
+    Its own message, not 'matrix invents cell': the cell IS declared, and a human
+    at gate 2 told the matrix invented something they can find in
+    01-world-model.json reads that as the checker being wrong.
+    """
+    run = _coverage_run_with(
+        tmp_path,
+        capabilities=[_bound("cap-bound", "oc-ok"), _unbound("cap-unbound", "oc-ok")],
+        matrix_cells=[_row("cap-bound", "oc-ok"), _row("cap-unbound", "oc-ok")],
+        holes=[
+            _hole("cell:cap-bound/oc-ok", "not_yet_attempted", "no scenario yet"),
+            _hole("cell:cap-unbound/oc-ok", "unreachable", "capability declares no binding.tool"),
+        ],
+    )
+
+    findings = check_coverage(run)
+
+    assert _matrix_findings(findings) == [
+        "matrix scores undrivable cell cell:cap-unbound/oc-ok; it belongs in the holes"
+    ]
+
+
+def test_check_coverage_separates_an_undrivable_row_from_an_invented_one(tmp_path):
+    """The partition itself, in one document, because `seen - drivable` holds both
+    kinds and only the wide `_cells` set tells them apart. A single message for the
+    pair would make the two indistinguishable in a gate-2 report, where one is a
+    row that should have been a hole and the other is a row naming nothing.
+    """
+    run = _coverage_run_with(
+        tmp_path,
+        capabilities=[_bound("cap-bound", "oc-ok"), _unbound("cap-unbound", "oc-ok")],
+        matrix_cells=[
+            _row("cap-bound", "oc-ok"),
+            _row("cap-unbound", "oc-ok"),
+            # No capability declares this pair at all.
+            _row("cap-ghost", "oc-nope"),
+        ],
+        holes=[
+            _hole("cell:cap-bound/oc-ok", "not_yet_attempted", "no scenario yet"),
+            _hole("cell:cap-unbound/oc-ok", "unreachable", "capability declares no binding.tool"),
+        ],
+    )
+
+    findings = check_coverage(run)
+
+    # Sorted by pair, so the ghost precedes the unbound capability.
+    assert _matrix_findings(findings) == [
+        "matrix invents cell cell:cap-ghost/oc-nope",
+        "matrix scores undrivable cell cell:cap-unbound/oc-ok; it belongs in the holes",
     ]
 
 
