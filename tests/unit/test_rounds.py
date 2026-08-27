@@ -819,11 +819,18 @@ def test_a_ruling_status_outside_the_parts_own_enum_is_a_finding(tmp_path):
     # no-op that still had to be honoured -- so it is refused here as well.
     run = _run_with_world(tmp_path, _world())
     _part(run, 1, "b01", [_scenario("sc-b01-001")])
+    # The last two rows are unhashable, and no other row here can reach the defect
+    # they pin: a `frozenset` membership test HASHES its operand, so `status: []`
+    # raised TypeError out of this code step and surfaced as an exit-1 `[internal]`
+    # finding on the run root instead of one naming `/rulings/0/status`. `[]` and
+    # `{}` are the whole of the reachable set -- JSON has no other unhashable value.
     for bad in (
         {"scenario_id": "sc-b01-001"},
         {"scenario_id": "sc-b01-001", "status": "proposed"},
         {"scenario_id": "sc-b01-001", "status": 7},
         {"scenario_id": "sc-b01-001", "status": "ACTIVE"},
+        {"scenario_id": "sc-b01-001", "status": []},
+        {"scenario_id": "sc-b01-001", "status": {}},
     ):
         _score_part(run, 1, [bad])
         # The pointer, for the reason the test above gives, and this is the case
@@ -1738,7 +1745,13 @@ def test_a_hole_reason_outside_the_coverage_enum_is_a_finding_and_writes_nothing
     _part(run, 1, "b01", [_scenario("sc-b01-001", status="proposed", refs=[])])
     rounds.seal_scenarios(run)
     cell = "cell:cap-0/cap-0-oc-0"
-    for reason in ("because_i_said_so", "", "not_yet_attempted ", None, 7):
+    # `[]` and `{}` are in this list for a reason the rest of it cannot reach: a
+    # `frozenset` membership test HASHES its operand, so an unhashable value raised
+    # TypeError out of this code step and became an exit-1 `[internal]` finding on
+    # the run root rather than a finding naming this hole. Every other entry here
+    # is hashable, so the first version of this list was blind to it. They are also
+    # the whole of the reachable set -- JSON carries no other unhashable value.
+    for reason in ("because_i_said_so", "", "not_yet_attempted ", None, 7, [], {}):
         _score_part(
             run,
             1,

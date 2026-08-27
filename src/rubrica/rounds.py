@@ -636,7 +636,15 @@ def _apply_rulings(run: RunPaths, scenarios: list[dict]) -> list[Finding]:
                 continue
             ruled[sid] = i
             status = ruling.get("status")
-            if status not in _RULING_STATUSES:
+            # The `isinstance` is the same door _hole_refs puts in front of a hole's
+            # reason, and for the same measured reason rather than for symmetry: a
+            # `frozenset` membership test hashes its operand, so `status: []` or
+            # `status: {}` raised TypeError here and surfaced as an exit-1
+            # `[internal]` finding on the RUN ROOT instead of a finding naming
+            # `/rulings/N/status`. Pre-existing rather than introduced with the
+            # whitelist, and closed alongside its sibling because the two are one
+            # line apart in kind.
+            if not isinstance(status, str) or status not in _RULING_STATUSES:
                 # Checked rather than indexed bare, and checked against the enum
                 # rather than against `str`: see _RULING_STATUSES for both halves.
                 findings.append(
@@ -1056,7 +1064,16 @@ def _hole_refs(path: Path, holes: list) -> tuple[set[str], list[Finding]]:
             findings.append(Finding(path, "rounds", f"/holes/{i}/ref", "hole has no string ref"))
             continue
         reason = hole.get("reason")
-        if reason not in _HOLE_REASONS:
+        # `isinstance` FIRST, and it is not redundant with the membership test:
+        # `x in frozenset(...)` HASHES x, so an unhashable JSON value raises
+        # TypeError out of a code step instead of answering False. Measured
+        # before this door: `reason: []` and `reason: {}` each produced an exit-1
+        # `[internal]` finding anchored on the RUN ROOT -- the same breach every
+        # other guard in this module exists to close, and against a MODEL-written
+        # part whose defect has to name `/holes/N/reason` so a re-dispatch of
+        # score can repair it. `[]` and `{}` are the whole of the reachable set,
+        # since they are the only unhashable values JSON can carry.
+        if not isinstance(reason, str) or reason not in _HOLE_REASONS:
             # Whitelisted, not merely type-checked: seal_score copies this value
             # onto the coverage document it writes, so see _HOLE_REASONS for the
             # who-wrote-it argument and the measurement.
