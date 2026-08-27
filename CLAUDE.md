@@ -231,6 +231,20 @@ are judgments rather than list entries:
   `unresolved` first. Gate 1's read coverage is **per pass, not per input**: each
   owning pass's own-kind claims cited over total, and under it only the input rows
   that dropped a claim, each beside the `note` the drop required.
+  `target-brief` is a report too, and the one written for somebody outside the
+  project: it renders a run's description of the *target* — not of the run — for the
+  people who own that target, asking them to correct it. Three ranked asks lead, the
+  full description sits collapsed beneath, and every statement names the file it was
+  read from. Two things about it are load-bearing rather than stylistic: prose
+  written by a stage is **selected and relabelled, never rewritten**, since an owner
+  correcting a sentence we paraphrased would be correcting our paraphrase; and no
+  stage, gate, artifact or mention of rubrica reaches the page *in this project's own
+  wording*, which two tests enforce because a recipient reading about
+  `01-world-model.json` has been handed the wrong question — a claim id inside a
+  sentence we selected ships as written, which is that same rule seen from the other
+  side. It is the one report that exits **0** on an unreadable `01-claims/` rather
+  than 2 — it has no number to be quietly wrong, so it says at the top that it could
+  not cite its sources and describes the target anyway.
 - `survey` is `intake`'s counterpart for the corpus path: it walks a corpus,
   digests each candidate, and mints the run, but writes `00-catalogue.json`
   instead of a manifest — there is nothing to extract from yet, because nothing

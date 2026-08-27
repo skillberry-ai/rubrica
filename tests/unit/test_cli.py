@@ -18,6 +18,7 @@ from tests.builders import (
     minimal_scenarios,
     minimal_world_model,
 )
+from tests.toy import build_toy_run
 from tests.unit.test_refs_states import build_state
 from tests.unit.test_smoke_subprocess import COMPETENT, TOOLLESS
 
@@ -965,3 +966,79 @@ def test_triage_slices_exits_zero_and_prints_the_plan(tmp_path, capsys):
     out, err = capsys.readouterr()
     assert "s01" in out
     assert err == ""
+
+
+# `target-brief`: the run's description of the target, written for its owners.
+# Six CLI tests, each pinning a wiring mistake rather than the exit code alone --
+# run-summary's six above are the model, and the same mutations are what they were
+# strengthened past: a handler that writes nothing still exits 0 and still prints a
+# path, so every test that claims a page was written reads the file back.
+def test_target_brief_writes_the_page_and_prints_its_path(tmp_path, capsys):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    assert main(["target-brief", "--run", str(run.root)]) == 0
+    printed = capsys.readouterr().out.strip()
+    destination = run.root / "target-brief.html"
+    assert printed == str(destination)
+    # The path, not the page: markup on a terminal is not a report.
+    assert "<!doctype html>" not in printed
+    assert destination.read_text(encoding="utf-8").startswith("<!doctype html>")
+
+
+def test_target_brief_honours_output(tmp_path, capsys):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    destination = tmp_path / "elsewhere" / "brief.html"
+    destination.parent.mkdir()
+    assert main(["target-brief", "--run", str(run.root), "-o", str(destination)]) == 0
+    assert capsys.readouterr().out.strip() == str(destination)
+    assert destination.exists()
+    # And only there: writing to both the explicit destination and the default
+    # leaves the assertion above green, which is the mutation run-summary's own
+    # -o test was measured satisfiable by.
+    assert not (run.root / "target-brief.html").exists()
+
+
+def test_target_brief_exits_clean_on_a_run_that_stopped_early(tmp_path, capsys):
+    """A report, not a gate. A partial run is a page saying so, never a finding --
+    the same ruling as claim-utilisation, gate-brief and run-summary."""
+    run = build_toy_run(tmp_path, upto="extract")
+    assert main(["target-brief", "--run", str(run.root)]) == 0
+    assert (run.root / "target-brief.html").exists()
+
+
+def test_target_brief_exits_clean_when_the_claims_cannot_be_read(tmp_path):
+    """Deliberately different from claim-utilisation and gate-brief, which exit 2
+    on this. Those two report *numbers* a human acts on, and an empty utilisation
+    table is the one reading gate 1 must never be handed. This page reports the
+    target's own description with a banner saying the citations are missing, so
+    there is no number to be quietly wrong."""
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.claims_dir.chmod(0o000)
+    try:
+        assert main(["target-brief", "--run", str(run.root)]) == 0
+    finally:
+        run.claims_dir.chmod(0o755)
+    assert 'class="banner"' in (run.root / "target-brief.html").read_text(encoding="utf-8")
+
+
+def test_target_brief_maps_an_unwritable_destination_to_usage(tmp_path, capsys):
+    """USAGE, not FINDINGS: the filesystem refusing is not a stage defect, and the
+    inversion this closes is the one cli.py's docstring names."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    unwritable = tmp_path / "no" / "x.html"
+    assert main(["target-brief", "--run", str(run.root), "-o", str(unwritable)]) == 2
+    out, err = capsys.readouterr()
+    # A 2 must never carry a fabricated finding on stdout, and it must say what
+    # refused -- a bare exit code is satisfied by argparse rejecting the
+    # subcommand's name, which is how this test passed before the wiring existed.
+    assert out == ""
+    assert str(unwritable) in err
+
+
+def test_target_brief_rejects_a_missing_run(tmp_path, capsys):
+    missing = tmp_path / "nope"
+    assert main(["target-brief", "--run", str(missing)]) == 2
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert str(missing) in err

@@ -386,11 +386,11 @@ rubrica decide --run runs/run-20260806-123005 \
 ## The human's own reports
 
 A few subcommands serve the human holding a gate rather than a stage. Most of
-them — `gate-brief`, `claim-utilisation` and `run-summary` — only compose or
-report what the run already contains; `set-limit` is the odd one out and
-*writes*, changing a manifest limit and appending its reason to `decisions.md`.
-None of them is itself a gate: none can turn a readable run into a defect
-finding.
+them — `gate-brief`, `claim-utilisation`, `run-summary` and `target-brief` —
+only compose or report what the run already contains; `set-limit` is the odd one
+out and *writes*, changing a manifest limit and appending its reason to
+`decisions.md`. None of them is itself a gate: none can turn a readable run into
+a defect finding.
 
 ### `rubrica gate-brief`
 
@@ -421,7 +421,10 @@ as one rather than rendered as silence. The sweep reports counts, not the
 contradictions themselves, so a non-zero `unresolved` is the cue to open
 `01-contradictions/`. The world model's gaps and triage's open deficiencies
 follow, each listed by its id and its prose statement, since pairing them is a
-human's call and no mechanical check exists for it.
+human's call and no mechanical check exists for it. The brief then closes by
+naming `target-brief` below, with this run already substituted into the command:
+gate 1 is where the world model is ratified, so it is the only gate whose brief
+points at the page that asks the target's owners whether the description is true.
 
 Two coverage figures follow the sweep, and they measure different things.
 **Claim utilisation is per input** — how much of one artifact's claims the world
@@ -512,6 +515,50 @@ read-only run directory.
 
 ```bash
 rubrica run-summary --run runs/run-20260806-123005
+```
+
+### `rubrica target-brief`
+
+Renders one run's *description of the target* as a single self-contained HTML
+page, written for the people who own that target and asking them to correct it.
+Three ranked asks lead: the files we read, the places our sources disagreed and
+which side we took, and what we could not tell from what we read. Beneath them,
+collapsed, the description itself — what it can do, what data it holds, who uses
+it — each statement carrying the file it was read from.
+
+Required: `--run RUN`. Optional: `-o PATH` / `--output PATH` — where to write
+the page, defaulting to `<run>/target-brief.html`.
+
+**A report, not a gate: it always exits clean on a readable run.** It goes one
+step further than `run-summary` there, on purpose. An unreadable `01-claims/`
+exits 2 out of `claim-utilisation` and `gate-brief`, because an empty utilisation
+table is the one reading a human at gate 1 must never be handed; this page has no
+number to be quietly wrong, so it states at the top that it could not read where
+each statement came from and renders the description anyway.
+
+Nothing **this page's own prose** names is a stage, a gate, an artifact or
+rubrica itself, and two tests fail the suite rather than let one back in. That
+claim is deliberately about our chrome and not about every string on the page:
+prose written by a stage is *selected and relabelled, never rewritten* — an owner
+correcting a sentence we paraphrased would be correcting our paraphrase — so a
+claim id inside a selected sentence ships as written, and on a real run many do.
+What the two tests hold is the wording this project chose, because a recipient
+asked "does this accurately describe your system?" who is instead reading about
+`01-world-model.json` has been handed the wrong question.
+
+The page carries no JavaScript at all, unlike `run-summary`: it is meant to be
+sent out of the project, and an attachment opened behind a corporate proxy or by
+a reader with scripts off must still read. It is otherwise self-contained the
+same way — inline CSS, no external asset, no network — and unlike `run-summary`
+it links to no sibling artifact, so it reads identically wherever it is written
+or forwarded.
+
+There is no place on it to record an approval, deliberately: it asks whether the
+description is true, and whether a ratification is worth collecting is a question
+the conversations this report exists for have not answered yet.
+
+```bash
+rubrica target-brief --run runs/run-20260806-123005
 ```
 
 ### `rubrica set-limit`

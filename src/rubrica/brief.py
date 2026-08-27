@@ -758,6 +758,16 @@ def _gate_1(run: RunPaths) -> str:
         else:
             lines.append("  (none open)")
 
+    # The one place a human at gate 1 certainly looks. Gate 1 ratifies the world
+    # model, so it is the only gate at which "send this description to the people
+    # who own the target and ask whether it is true" is the next action -- and a
+    # report nobody knows exists is a report nobody runs.
+    lines.append("")
+    lines.append(
+        f"To ask the target's owners whether this description is right:\n"
+        f"  rubrica target-brief --run {run.root}"
+    )
+
     return "\n".join(lines) + "\n"
 
 

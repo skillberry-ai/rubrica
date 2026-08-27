@@ -885,3 +885,19 @@ def personas(run: RunPaths) -> list[Persona] | Marker:
             )
         )
     return out
+
+
+def page(run: RunPaths) -> str:
+    """The whole page. One entry point, so callers never import the markup half.
+
+    Imported here rather than at module scope, exactly as `summary.run_summary`
+    does it: `target_brief_html` imports this module for its dataclasses, so a
+    top-level import would be circular.
+
+    Named `page` rather than `target_brief` because `target_brief.target_brief`
+    stutters at every call site; the subcommand's name lives in `cli.SUBCOMMANDS`
+    and does not need repeating here.
+    """
+    from rubrica import target_brief_html
+
+    return target_brief_html.render(run)
