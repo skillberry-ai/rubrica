@@ -198,16 +198,25 @@ def closable_holes(run: RunPaths) -> list[str]:
     missing file -- rb-propose's Inputs section says so outright -- so every
     DRIVABLE capability x outcome-class cell and every goal is open by default and
     the worklist is enumerated from the world model. Drivable, not declared: a
-    capability with no binding.tool cannot be closed by proposing at all, and from
-    round 2 the same cell arrives as an `unreachable` hole this function already
-    filters out, so the two branches would otherwise disagree on round 1 alone.
+    capability with no binding.tool cannot be closed by proposing at all, so
+    offering the cell spends a round producing a scenario rb-instantiate cannot
+    seed and emit drops.
 
     From round 2 the report's holes are the worklist, filtered to
-    `not_yet_attempted`. The other three reasons are not closable by proposing,
-    however good the scenario: `unreachable` and `out_of_scope` are cells the
-    suite is not trying to cover, and `blocked_by_gap` means the world model
-    does not yet support a scenario there, so proposing anyway produces one
-    rb-instantiate cannot honestly seed.
+    `not_yet_attempted` and then to the drivable cells. The other three reasons are
+    not closable by proposing, however good the scenario: `unreachable` and
+    `out_of_scope` are cells the suite is not trying to cover, and `blocked_by_gap`
+    means the world model does not yet support a scenario there, so proposing
+    anyway produces one rb-instantiate cannot honestly seed.
+
+    Both filters are needed on that branch and neither subsumes the other. The
+    reason filter catches score's own `unreachable` and `out_of_scope` holes on an
+    undrivable cell; it does not catch a `not_yet_attempted` one, and score can
+    write those -- rb-score's Method describes its capability rows as one per
+    declared capability x outcome-class pair without mentioning `binding`, and
+    seal_score's injection defers to a hole score wrote for the same cell by
+    design. The drivability filter is what closes that path, so an undrivable cell
+    is closable in no round rather than in every round but the first.
 
     `capabilities`, `goals` and `holes` are required rather than defaulted, and
     that matches layer 1 exactly -- world-model-0.1.json and coverage-0.1.json
@@ -217,22 +226,35 @@ def closable_holes(run: RunPaths) -> list[str]:
     world = _object_or_refuse(
         run.world_model, read_json(run.world_model), ("capabilities", "goals")
     )
+    # Hoisted above the branch because BOTH branches drop the undrivable cells, and
+    # filtering one of them only is what made round 2 reinstate what round 1 had
+    # closed: score may hole an undrivable cell `not_yet_attempted`, which the reason
+    # filter below passes, so the cell came back into the worklist one round after
+    # being kept out of it.
+    #
+    # _declared_cells is called unfiltered on purpose: it is the door that refuses a
+    # capability with no outcome_classes, and an UNBOUND capability missing them is
+    # exactly as malformed as a bound one. Filter the enumeration afterwards, so
+    # narrowing the worklist cannot narrow the check.
+    #
+    # And called BEFORE drivable_cells, which is why it is bound to a name here
+    # rather than left inline as the comprehension's iterable: this door turns a
+    # malformed `capabilities` or `outcome_classes` into a UsageError naming the
+    # world model, while drivable_cells is a bare comprehension over the same
+    # keys. Measured with the two the other way round -- `"capabilities": 7` came
+    # back as a TypeError out of drivable_cells instead of the "is not an array"
+    # refusal, which from a code step names the run root and not the artifact
+    # carrying the defect.
+    #
+    # Hoisting therefore also means the round-2 branch refuses a malformed
+    # `capabilities` or `outcome_classes` that it previously walked straight past,
+    # never having enumerated the world model at all. That is a widening and it is
+    # deliberate: 01-world-model.json does not become well-formed because a coverage
+    # document exists beside it, and the silent-zero-cells failure _declared_cells
+    # documents is worth the same door on every round, not only the first.
+    declared = _declared_cells(run, world)
+    drivable = drivable_cells(world)
     if not run.coverage_latest.exists():
-        # _declared_cells is called unfiltered on purpose: it is the door that
-        # refuses a capability with no outcome_classes, and an UNBOUND capability
-        # missing them is exactly as malformed as a bound one. Filter the
-        # enumeration afterwards, so narrowing the worklist cannot narrow the check.
-        #
-        # And called BEFORE drivable_cells, which is why it is bound to a name here
-        # rather than left inline as the comprehension's iterable: this door turns a
-        # malformed `capabilities` or `outcome_classes` into a UsageError naming the
-        # world model, while drivable_cells is a bare comprehension over the same
-        # keys. Measured with the two the other way round -- `"capabilities": 7` came
-        # back as a TypeError out of drivable_cells instead of the "is not an array"
-        # refusal, which from a code step names the run root and not the artifact
-        # carrying the defect.
-        declared = _declared_cells(run, world)
-        drivable = drivable_cells(world)
         refs: list[str] = [
             f"cell:{cap_id}/{oc_id}"
             for cap_id, oc_id in declared
@@ -277,6 +299,19 @@ def closable_holes(run: RunPaths) -> list[str]:
     holes = coverage["holes"]
     for key in ("ref", "reason"):
         holes = _rows_with_string_id(run.coverage_latest, "holes", holes, key)
+    # The refs form of what this branch excludes, spelled the way seal_score spells
+    # its own `undrivable_refs` so the two cannot drift: the cells the world model
+    # declares and the target cannot drive. Computed here rather than beside
+    # `drivable` above because only this branch needs it -- round 1 has the pairs
+    # themselves and tests membership positively.
+    #
+    # Subtracted rather than intersected, and the difference is load-bearing: this
+    # drops exactly the declared-but-undrivable refs, leaving a `cell:` ref no
+    # capability declares at all alone. Keeping only the drivable refs would swallow
+    # that one too, and a hole ref resolving to nothing is a coverage-document defect
+    # check-refs is the layer to report -- the same division of labour the round-1
+    # branch draws.
+    undrivable_refs = {f"cell:{cap_id}/{oc_id}" for cap_id, oc_id in set(declared) - drivable}
     # Deduped, and the duplicate is not this module's defect: coverage-0.1.json
     # puts no `uniqueItems` on `holes`, so two identical not_yet_attempted refs
     # are a score-stage defect arriving from upstream. The COST is here, though
@@ -285,7 +320,30 @@ def closable_holes(run: RunPaths) -> list[str]:
     # code that can drop it before it is paid for in dispatches. A `set` rather
     # than a refusal because a duplicate has an unambiguous correct reading,
     # unlike the malformed shapes above; sorted() was already collapsing order.
-    return sorted({hole["ref"] for hole in holes if hole["reason"] == "not_yet_attempted"})
+    return sorted(
+        {
+            hole["ref"]
+            for hole in holes
+            if hole["reason"] == "not_yet_attempted"
+            # An undrivable cell is not closable by proposing in ANY round, and the
+            # reason filter beside this does not reach it: score writes the hole
+            # itself as `not_yet_attempted` -- rb-score's Method describes its
+            # capability rows as one per declared pair with no mention of `binding`
+            # -- and seal_score's injection defers to score's hole for the same cell
+            # on purpose, so the mechanical `unreachable` never replaces it. Without
+            # this clause round 2 handed rb-propose back precisely the cells round 1
+            # had kept from it, at the cost the design cites as the whole price of
+            # the defect: a scenario rb-instantiate cannot seed and emit drops.
+            #
+            # This does omit the hole from the worklist while the coverage document
+            # still shows it `not_yet_attempted`, so the worklist alone does not say
+            # why nobody worked the cell. Two places do: the hole stays in the
+            # document a human reads at gate 2, and check_world_model names every
+            # unbound capability at gate 1, which is where the cell's undrivability
+            # is a finding rather than an inference.
+            and hole["ref"] not in undrivable_refs
+        }
+    )
 
 
 def bytes_per_scenario(run: RunPaths) -> int:

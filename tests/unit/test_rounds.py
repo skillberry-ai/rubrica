@@ -165,6 +165,126 @@ def test_later_rounds_take_only_the_not_yet_attempted_holes(tmp_path):
     assert rounds.closable_holes(run) == ["cell:cap-0/cap-0-oc-0", "goal:goal-0"]
 
 
+def test_closable_holes_does_not_offer_an_undrivable_cell_on_round_two(tmp_path):
+    """The residual case the reason filter cannot reach, and the one that made the
+    round-1 filter a one-round reprieve rather than a fix.
+
+    score's own hole wins over seal_score's injected `unreachable` by design, and
+    rb-score's Method describes its capability rows as one per declared pair with no
+    mention of `binding` -- so a `not_yet_attempted` hole on an undrivable cell is a
+    document this pipeline really produces. It passes the reason filter, so without
+    the drivability filter round 2 handed rb-propose back exactly the cell round 1
+    had kept from it.
+
+    `not_yet_attempted` on BOTH cells is the point: the existing coverage of the
+    score-authored-hole path uses `out_of_scope`, which the reason filter already
+    drops, so nothing exercised this until here.
+    """
+    run = _run_with_capabilities(
+        tmp_path,
+        capabilities=[
+            {
+                "id": "cap-bound",
+                "binding": {"tool": "t", "fixed_args": {}},
+                "outcome_classes": [{"id": "oc-ok"}],
+            },
+            {"id": "cap-unbound", "outcome_classes": [{"id": "oc-ok"}]},
+        ],
+        goals=[{"id": "g-1", "expected_hop_depths": [1]}],
+    )
+    write_json(
+        run.coverage_latest,
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "denominator_version": 1,
+            "capability_matrix": {"cells": [], "covered": 0, "total": 0, "pct": 0.0},
+            "goal_matrix": {"rows": [], "covered": 0, "total": 0, "pct": 0.0},
+            "progress": {"new_cells_this_round": 0, "rounds_without_progress": 0},
+            "verdict": "continue",
+            "holes": [
+                {
+                    "ref": "cell:cap-bound/oc-ok",
+                    "reason": "not_yet_attempted",
+                    "justification": "x",
+                },
+                {
+                    "ref": "cell:cap-unbound/oc-ok",
+                    "reason": "not_yet_attempted",
+                    "justification": "score holed it itself, so the injection deferred to this",
+                },
+                {"ref": "goal:g-1", "reason": "not_yet_attempted", "justification": "x"},
+            ],
+        },
+    )
+
+    assert rounds.closable_holes(run) == ["cell:cap-bound/oc-ok", "goal:g-1"]
+
+
+def test_a_round_two_hole_ref_no_capability_declares_is_still_offered(tmp_path):
+    """The direction the drivability filter must not overreach into: subtracting the
+    declared-but-undrivable cells leaves a ref naming no cell at all alone.
+
+    Dropping that one here would swallow a coverage-document defect silently, and
+    check-refs is the layer that reports it -- the same division the round-1 branch's
+    comment draws. Measured, because a filter written as "keep only drivable refs"
+    rather than "drop the undrivable ones" passes every other test in this module
+    while quietly closing that hole.
+    """
+    run = _run_with_capabilities(
+        tmp_path,
+        capabilities=[
+            {
+                "id": "cap-bound",
+                "binding": {"tool": "t", "fixed_args": {}},
+                "outcome_classes": [{"id": "oc-ok"}],
+            },
+        ],
+        goals=[],
+    )
+    write_json(
+        run.coverage_latest,
+        {
+            "schema_version": "0.1",
+            "holes": [
+                {"ref": "cell:cap-ghost/oc-ok", "reason": "not_yet_attempted", "justification": "x"}
+            ],
+        },
+    )
+
+    assert rounds.closable_holes(run) == ["cell:cap-ghost/oc-ok"]
+
+
+def test_a_malformed_world_model_refuses_on_round_two_as_well(tmp_path):
+    """The widening the drivability filter brought with it, pinned rather than left
+    to be discovered.
+
+    The round-2 branch used never to enumerate the world model at all, so a
+    capability with no outcome_classes reached it and was ignored: only round 1 had
+    the door. Both branches now need the declared cells, so both get the refusal --
+    01-world-model.json does not become well-formed because a coverage document
+    exists beside it, and the silent-zero-cells failure the door exists for is
+    reachable on any round.
+
+    Named on the world model and not the coverage report, because the coverage report
+    here is fine.
+    """
+    run = RunPaths(tmp_path)
+    write_json(run.world_model, {"capabilities": [{"id": "cap-0"}], "goals": []})
+    write_json(
+        run.coverage_latest,
+        {
+            "schema_version": "0.1",
+            "holes": [
+                {"ref": "cell:cap-0/oc-0", "reason": "not_yet_attempted", "justification": "x"}
+            ],
+        },
+    )
+
+    with pytest.raises(UsageError, match=r"capabilities\[cap-0\]"):
+        rounds.closable_holes(run)
+
+
 def test_the_scenario_byte_estimate_falls_back_before_any_round_lands(tmp_path):
     run = _run_with_world(tmp_path, _world())
     assert rounds.bytes_per_scenario(run) == rounds.DEFAULT_BYTES_PER_SCENARIO
@@ -568,9 +688,11 @@ def test_duplicate_cells_in_the_world_model_cost_one_batch_slot(tmp_path):
             "schema_version": "0.1",
             "goals": [],
             # Bound, for _world()'s reason: the round-1 worklist enumerates
-            # DRIVABLE cells, so an unbound pair would collapse to nothing and this
-            # test would pass on the empty list rather than on the dedupe it is
-            # about. The duplicate id is the point and survives the binding --
+            # DRIVABLE cells, so an unbound pair collapses to nothing and this test
+            # goes red on the empty list -- red for a reason that has nothing to do
+            # with the dedupe it exists to measure, which is not the vacuity class
+            # but is just as useless. Measured: that is exactly how it failed on the
+            # narrowing. The duplicate id is the point and survives the binding --
             # drivable_cells is a set of pairs, so it collapses them the same way.
             "capabilities": [
                 {
