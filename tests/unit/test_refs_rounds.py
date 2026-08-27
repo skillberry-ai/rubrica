@@ -48,7 +48,16 @@ def _run_with_world_for_refs(tmp_path):
         {
             "schema_version": "0.1",
             "denominator": {"capability_cells": 1, "goals": 1, "version": 1},
-            "capabilities": [{"id": "cap-0", "outcome_classes": [{"id": "cap-0-oc-0"}]}],
+            # Bound for the reason test_rounds._world is: check_coverage holds the
+            # capability matrix to the DRIVABLE cells, so an unbound cap-0 would make
+            # this fixture's one matrix row read as an invented cell.
+            "capabilities": [
+                {
+                    "id": "cap-0",
+                    "binding": {"tool": "tool_0", "fixed_args": {}},
+                    "outcome_classes": [{"id": "cap-0-oc-0"}],
+                }
+            ],
             "actors": [{"id": "a"}],
             "goals": [{"id": "goal-0", "actor_id": "a", "expected_hop_depths": [1]}],
         },

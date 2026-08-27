@@ -25,7 +25,15 @@ def _minimal(tmp_path):
         {
             "schema_version": "0.1",
             "denominator": {"capability_cells": 1, "goals": 1, "version": 1},
-            "capabilities": [{"id": "cap-0", "outcome_classes": [{"id": "cap-0-oc-0"}]}],
+            "capabilities": [
+                {
+                    "id": "cap-0",
+                    # Bound for the reason test_rounds._world is: the loop's code
+                    # steps enumerate drivable cells.
+                    "binding": {"tool": "tool_0", "fixed_args": {}},
+                    "outcome_classes": [{"id": "cap-0-oc-0"}],
+                }
+            ],
             "goals": [{"id": "goal-0", "expected_hop_depths": [1]}],
         },
     )

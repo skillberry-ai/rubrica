@@ -26,6 +26,13 @@ def _world(caps: int = 2, ocs: int = 2, goals: int = 1) -> dict:
         "capabilities": [
             {
                 "id": f"cap-{c}",
+                # Bound, because capability_matrix and closable_holes enumerate
+                # DRIVABLE cells: a capability with no binding.tool contributes
+                # nothing to either, and every cell count below would drop to zero
+                # for a reason that has nothing to do with what these tests measure.
+                # A distinct tool per capability, so a test that ever asserts on the
+                # binding sees which capability it came from.
+                "binding": {"tool": f"tool_{c}", "fixed_args": {}},
                 "outcome_classes": [{"id": f"cap-{c}-oc-{o}"} for o in range(ocs)],
             }
             for c in range(caps)
