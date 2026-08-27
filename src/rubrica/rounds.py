@@ -40,7 +40,13 @@ from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths
-from rubrica.refs import OPEN_STATUSES
+
+# `_cells` is private and reached from here deliberately, named in the import line
+# rather than through the module so the coupling is visible where a reader looks
+# for it: seal_score needs BOTH halves of refs' cell split -- the wide set to know
+# which cells the world model DECLARES, and the narrow one to know which of them a
+# scenario could be driven through.
+from rubrica.refs import OPEN_STATUSES, _cells, drivable_cells
 
 # The measured maximum scenario on run-20260825-094033 was 1,579 serialized
 # bytes against a 1,162 mean. The estimate rounds up to the max rather than the
@@ -1100,6 +1106,12 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
     the document alone. What score decides is copied through untouched: each
     hole's reason and justification, and the verdict.
 
+    The document's holes are score's plus one computed `unreachable` entry per
+    cell the world model declares and the matrix cannot score -- see the comment
+    on `undrivable` below. "Copied through untouched" still holds of every hole
+    score wrote: the computed ones are deduped against score's refs, and score
+    wins the collision.
+
     latest.json is a byte copy rather than a second composition, which retires
     the "written twice with identical content" instruction that could only ever
     drift. `write_json` is canonical, so one `document` object written to both
@@ -1179,14 +1191,59 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
     cap = capability_matrix(world, scenarios)
     goals = goal_matrix(world, scenarios)
 
+    # Every cell the world model declares that the scored matrix leaves out.
+    # rb-score's Method defines `unreachable` as "no scenario could exercise this
+    # row against this target at all", and a capability with no binding.tool is
+    # exactly that: emit.call_spec reads binding["tool"] unguarded, so no emitted
+    # test could ever hit the cell. Computed here rather than asked of the prompt
+    # because binding absence is a fact on disk and not a judgment -- and
+    # score-seal already owns the matrices for the same reason.
+    #
+    # The report therefore still accounts for every declared cell: the matrix
+    # carries the drivable ones and these holes carry the rest, which is what
+    # keeps the narrowed denominator an honest denominator rather than a silent
+    # cap. Measured on run-20260827-070444: 37 of 56 cells, all undrivable.
+    undrivable = sorted(_cells(world) - drivable_cells(world))
+    undrivable_refs = {f"cell:{cap_id}/{oc_id}" for cap_id, oc_id in undrivable}
+    injected = [
+        {
+            "ref": f"cell:{cap_id}/{oc_id}",
+            "reason": "unreachable",
+            "justification": (
+                f"capability {cap_id!r} declares no binding.tool, so emit cannot turn it into a "
+                "tool call and no scenario could exercise this row against the target"
+            ),
+        }
+        for cap_id, oc_id in undrivable
+        # Deduped against what score wrote, and score wins: seal_score's contract
+        # is that every hole's reason and justification is copied through
+        # untouched, and out_of_scope is a defensible reading a prompt may prefer
+        # for the same cell. `holed` is the score part's refs, not the merged
+        # document's, so this is the only place the two can collide.
+        if f"cell:{cap_id}/{oc_id}" not in holed
+    ]
+
+    # Split out from `every_row` below, because the three checks that follow ask
+    # two different questions and the answers stopped coinciding: `scored_rows` is
+    # what the matrices score, `every_row` is what the world model DECLARES, and
+    # once the matrix carries drivable rows only the second is strictly larger.
+    scored_rows = {f"cell:{c['capability_id']}/{c['outcome_class_id']}" for c in cap["cells"]}
+    scored_rows |= {f"goal:{r['goal_id']}" for r in goals["rows"]}
     uncovered = {
         f"cell:{c['capability_id']}/{c['outcome_class_id']}"
         for c in cap["cells"]
         if not c["covered"]
     }
     uncovered |= {f"goal:{r['goal_id']}" for r in goals["rows"] if not r["covered"]}
-    every_row = {f"cell:{c['capability_id']}/{c['outcome_class_id']}" for c in cap["cells"]}
-    every_row |= {f"goal:{r['goal_id']}" for r in goals["rows"]}
+    # The undrivable cells count as declared, because this set backs the "which
+    # the world model does not declare" finding below and the world model DOES
+    # declare them -- they are simply not scored rows. Without this, a
+    # score-authored hole on an undrivable cell is refused with a message that is
+    # false, and a correct document never gets written. `uncovered` deliberately
+    # does NOT grow the same way: only a drivable row has to be justified by a
+    # hole of score's, and the undrivable ones are justified by the injection
+    # above.
+    every_row = scored_rows | undrivable_refs
 
     for ref in sorted(holed - every_row):
         findings.append(
@@ -1200,7 +1257,12 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
     # Parenthesised rather than relying on `-` binding tighter than `&`, which it
     # does: the unbracketed form reads as the wrong grouping to everyone who has
     # to go and check the table.
-    for ref in sorted(holed & (every_row - uncovered)):
+    #
+    # `scored_rows`, not `every_row`, and the two differ by exactly the undrivable
+    # cells: an undrivable cell is not a matrix row at all, so no matrix can show
+    # it covered. Written with every_row, the very refs the line above now accepts
+    # as declared would come straight back out of this one as "covered".
+    for ref in sorted(holed & (scored_rows - uncovered - undrivable_refs)):
         findings.append(
             Finding(
                 path,
@@ -1209,7 +1271,11 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
                 f"hole names {ref}, which the computed matrices show as covered",
             )
         )
-    for ref in sorted(uncovered - holed):
+    # `- undrivable_refs` as well as `- holed`, because the document's holes are
+    # score's plus the injected ones and every undrivable cell is in one or the
+    # other by construction. Only a DRIVABLE uncovered row is still score's to
+    # justify, which is the sense in which this set does not grow.
+    for ref in sorted(uncovered - holed - undrivable_refs):
         findings.append(
             Finding(path, "rounds", "/holes", f"{ref} is uncovered and no hole justifies it")
         )
@@ -1222,7 +1288,9 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
         "denominator_version": denominator["version"],
         "capability_matrix": cap,
         "goal_matrix": goals,
-        "holes": part["holes"],
+        # score's own holes first and in their order, then the computed ones, so a
+        # reader at gate 2 sees what the prompt decided before what code added.
+        "holes": [*part["holes"], *injected],
         "progress": progress(run, round_n, cap),
         "verdict": part["verdict"],
     }

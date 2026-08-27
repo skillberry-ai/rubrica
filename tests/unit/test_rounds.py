@@ -1633,6 +1633,195 @@ def test_seal_score_refuses_a_hole_naming_a_row_the_world_model_does_not_have(tm
     assert any("cap-9" in f.message for f in findings)
 
 
+def _score_run_with(tmp_path, *, capabilities, score_holes):
+    """A run whose world model declares exactly `capabilities`, scored with
+    exactly `score_holes`.
+
+    Built on `_world()` rather than beside it so schema_version, the denominator
+    shape and the goal shape stay one definition. `goals=0`, because everything
+    below is about cells and a goal row would need its own hole to stay quiet.
+    No scenario list is written -- absence is legitimate (seal_score's own comment
+    says so) and it leaves every drivable cell uncovered, which is the state a
+    hole has to justify.
+    """
+    world = _world(caps=1, ocs=1, goals=0)
+    world["capabilities"] = capabilities
+    # Kept honest rather than left at _world's caps*ocs. seal_score never reads
+    # this field -- it echoes only `version` -- but a fixture whose frozen count
+    # disagrees with its own capability list teaches the narrowed arithmetic
+    # wrong to the next reader, which is how the three unbound builders fac2f9f
+    # had to correct got there in the first place.
+    world["denominator"]["capability_cells"] = len(refs.drivable_cells(world))
+    run = _run_with_world(tmp_path, world)
+    _score_part(run, 1, holes=score_holes)
+    # seal_score door-checks only `holes` (list) and `verdict` (str), so a part
+    # missing `round` or `rulings` would work here while being a document this
+    # pipeline could never produce. Validated so the fixture cannot drift out of
+    # schema in silence.
+    assert validate_artifact(run.score_part(1), "score-part") == []
+    return run
+
+
+def test_seal_score_accounts_for_undrivable_cells_as_unreachable_holes(tmp_path):
+    """rb-score's Method already defines `unreachable` as "no scenario could
+    exercise this row against this target at all". An unbound capability is
+    exactly that, mechanically -- binding absence is a fact on disk, not a
+    judgment -- so score-seal computes these rather than asking the prompt for
+    them.
+
+    Nothing disappears from the report: the matrix carries the drivable rows and
+    the holes carry the rest, so a human at gate 2 still sees every cell the
+    world model declares.
+    """
+    run = _score_run_with(
+        tmp_path,
+        capabilities=[
+            {
+                "id": "cap-bound",
+                "binding": {"tool": "t", "fixed_args": {}},
+                "outcome_classes": [{"id": "oc-ok"}],
+            },
+            {"id": "cap-unbound", "outcome_classes": [{"id": "oc-ok"}, {"id": "oc-empty"}]},
+        ],
+        score_holes=[
+            {
+                "ref": "cell:cap-bound/oc-ok",
+                "reason": "not_yet_attempted",
+                "justification": "no scenario yet",
+            },
+        ],
+    )
+
+    path, findings = rounds.seal_score(run, round_n=1)
+
+    assert findings == []
+    doc = read_json(path)
+    injected = {h["ref"]: h for h in doc["holes"] if h["reason"] == "unreachable"}
+    assert set(injected) == {"cell:cap-unbound/oc-ok", "cell:cap-unbound/oc-empty"}
+    # Named in terms a human at gate 2 can act on: which capability, and what
+    # about it makes the cell undrivable.
+    assert "binding" in injected["cell:cap-unbound/oc-ok"]["justification"]
+    assert "cap-unbound" in injected["cell:cap-unbound/oc-ok"]["justification"]
+    # The prompt's own hole is copied through untouched, which is what
+    # seal_score's docstring promises about everything score decides.
+    assert {
+        "ref": "cell:cap-bound/oc-ok",
+        "reason": "not_yet_attempted",
+        "justification": "no scenario yet",
+    } in doc["holes"]
+    # And the document is still one layer 1 accepts, since these holes reach it
+    # without ever passing through score-part's schema.
+    assert validate_artifact(path, "coverage") == []
+
+
+def test_seal_score_leaves_a_score_authored_hole_on_an_undrivable_cell_alone(tmp_path):
+    """What score decides is copied through untouched -- seal_score's docstring.
+
+    If the prompt already justified an undrivable cell -- with any reason, and
+    `out_of_scope` is a defensible one -- the injection must not overwrite it or
+    sit beside it as a second account of the same cell. Deduped by ref, and score
+    wins.
+    """
+    run = _score_run_with(
+        tmp_path,
+        capabilities=[
+            {
+                "id": "cap-bound",
+                "binding": {"tool": "t", "fixed_args": {}},
+                "outcome_classes": [{"id": "oc-ok"}],
+            },
+            {"id": "cap-unbound", "outcome_classes": [{"id": "oc-ok"}]},
+        ],
+        score_holes=[
+            {
+                "ref": "cell:cap-bound/oc-ok",
+                "reason": "not_yet_attempted",
+                "justification": "no scenario yet",
+            },
+            {
+                "ref": "cell:cap-unbound/oc-ok",
+                "reason": "out_of_scope",
+                "justification": "deployment concern, deliberately outside this suite",
+            },
+        ],
+    )
+
+    path, findings = rounds.seal_score(run, round_n=1)
+
+    assert findings == []
+    doc = read_json(path)
+    matching = [h for h in doc["holes"] if h["ref"] == "cell:cap-unbound/oc-ok"]
+    assert len(matching) == 1
+    assert matching[0]["reason"] == "out_of_scope"
+
+
+def test_seal_score_does_not_call_a_score_hole_on_an_undrivable_cell_undeclared(tmp_path):
+    """seal_score's `holed - every_row` check says "the world model does not
+    declare" that ref. Once the matrix enumerates drivable cells only, an
+    undrivable cell is absent from the matrix while the world model DOES declare
+    it -- so without the `every_row` extension the message is false and the
+    finding blocks a document that is correct.
+    """
+    run = _score_run_with(
+        tmp_path,
+        capabilities=[
+            {
+                "id": "cap-bound",
+                "binding": {"tool": "t", "fixed_args": {}},
+                "outcome_classes": [{"id": "oc-ok"}],
+            },
+            {"id": "cap-unbound", "outcome_classes": [{"id": "oc-ok"}]},
+        ],
+        score_holes=[
+            {
+                "ref": "cell:cap-bound/oc-ok",
+                "reason": "not_yet_attempted",
+                "justification": "no scenario yet",
+            },
+            {
+                "ref": "cell:cap-unbound/oc-ok",
+                "reason": "unreachable",
+                "justification": "no tool binding",
+            },
+        ],
+    )
+
+    _, findings = rounds.seal_score(run, round_n=1)
+
+    assert [f.message for f in findings] == []
+
+
+def test_seal_score_still_reports_a_hole_naming_a_cell_no_capability_declares(tmp_path):
+    """The direction that must survive the loosening: a ref matching neither a
+    drivable row nor an undrivable cell is still undeclared, so the check above
+    is not vacuous.
+    """
+    run = _score_run_with(
+        tmp_path,
+        capabilities=[
+            {
+                "id": "cap-bound",
+                "binding": {"tool": "t", "fixed_args": {}},
+                "outcome_classes": [{"id": "oc-ok"}],
+            },
+        ],
+        score_holes=[
+            {
+                "ref": "cell:cap-bound/oc-ok",
+                "reason": "not_yet_attempted",
+                "justification": "no scenario yet",
+            },
+            {"ref": "cell:cap-ghost/oc-ok", "reason": "unreachable", "justification": "invented"},
+        ],
+    )
+
+    _, findings = rounds.seal_score(run, round_n=1)
+
+    assert any(
+        "cell:cap-ghost/oc-ok" in f.message and "does not declare" in f.message for f in findings
+    )
+
+
 def test_seal_score_refuses_a_missing_score_part(tmp_path):
     run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
     _part(run, 1, "b01", [_scenario("sc-b01-001", status="active")])

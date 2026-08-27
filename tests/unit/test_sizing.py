@@ -179,6 +179,75 @@ def test_the_formula_is_pinned_on_synthetic_numbers(tmp_path):
     assert at_gate_2["ceiling_binding"] is False
 
 
+def test_implied_size_does_not_subtract_unreachable_holes(tmp_path):
+    """The one arithmetic trap the narrowed denominator opens. `implied_size`
+    subtracts `blocked_by_gap` holes from the denominator, and score-seal now
+    writes an `unreachable` hole for every undrivable cell -- but those cells are
+    ALREADY outside `denominator.capability_cells`, so subtracting them here too
+    would under-report the implied size twice over.
+
+    Pinned on numbers this test controls, the way
+    test_the_formula_is_pinned_on_synthetic_numbers above is, and built the same
+    way rather than through a second builder.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal", max_scenarios=16)
+    write_json(
+        run.world_model,
+        {
+            "schema_version": "0.1",
+            "target": {"name": "synthetic", "interface": "mcp"},
+            "capabilities": [],
+            "entities": [],
+            "actors": [],
+            "goals": [
+                {
+                    "id": "goal-a",
+                    "actor_id": "act-a",
+                    "statement": "a",
+                    "expected_hop_depths": [1, 2],
+                    "claims": [],
+                },
+            ],
+            "contradictions": [],
+            "gaps": [],
+            # Already narrowed to the drivable cells by the seal, which is exactly
+            # why the unreachable hole below must not be subtracted again.
+            "denominator": {"version": 1, "capability_cells": 10, "goals": 1},
+        },
+    )
+    write_json(
+        run.coverage_latest,
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "denominator_version": 1,
+            "capability_matrix": {"cells": [], "covered": 0, "total": 10, "pct": 0.0},
+            "goal_matrix": {"rows": [], "covered": 0, "total": 1, "pct": 0.0},
+            "holes": [
+                {
+                    "ref": "cell:cap-unbound/oc-ok",
+                    "reason": "unreachable",
+                    "justification": "no binding.tool",
+                },
+                {
+                    "ref": "cell:cap-bound/oc-gap",
+                    "reason": "blocked_by_gap",
+                    "justification": "world model lacks it",
+                    "gap_id": "gap-1",
+                },
+            ],
+            "progress": {"new_cells_this_round": 0, "rounds_without_progress": 1},
+            "verdict": "continue",
+        },
+    )
+
+    size = sizing.implied_size(run)
+
+    # One blocked cell subtracted, the unreachable one ignored: 10 + 2 - 1 = 11.
+    assert size["blocked_cells"] == 1
+    assert size["denominator"] == 11
+
+
 def test_implied_size_is_none_before_a_world_model_exists(tmp_path):
     """A run stopped at extract legitimately has no world model yet; this is
     the same absence-is-not-a-defect ruling claim_utilisation already makes,
