@@ -233,13 +233,16 @@ are judgments rather than list entries:
   that dropped a claim, each beside the `note` the drop required.
   `target-brief` is a report too, and the one written for somebody outside the
   project: it renders a run's description of the *target* — not of the run — for the
-  people who own that target, asking them to correct it. Three ranked asks lead, the
-  full description sits collapsed beneath, and every statement names the file it was
-  read from. Two things about it are load-bearing rather than stylistic: prose
-  written by a stage is **selected and relabelled, never rewritten**, since an owner
-  correcting a sentence we paraphrased would be correcting our paraphrase; and no
-  stage, gate, artifact or mention of rubrica reaches the page *in this project's own
-  wording*, which two tests enforce because a recipient reading about
+  people who own that target, asking them to correct it. Three ranked asks lead, and
+  the full description sits collapsed beneath — what it can do, what data it holds,
+  who uses it — each of *its* statements carrying the file it was read from, which is
+  the scope [`docs/reference/cli.md`](docs/reference/cli.md) states: a gap carries no
+  provenance by design, and two branches say outright that we could not name a file.
+  Two things about it are load-bearing rather than stylistic: prose written by a stage
+  is **selected and relabelled, never rewritten**, since an owner correcting a
+  sentence we paraphrased would be correcting our paraphrase; and no stage, gate,
+  artifact or mention of rubrica reaches the page *in this project's own wording*,
+  which two tests enforce because a recipient reading about
   `01-world-model.json` has been handed the wrong question — a claim id inside a
   sentence we selected ships as written, which is that same rule seen from the other
   side. It exits **0** on an unreadable `01-claims/` where `claim-utilisation` and
