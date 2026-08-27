@@ -236,8 +236,10 @@ are judgments rather than list entries:
   people who own that target, asking them to correct it. Three ranked asks lead, and
   the full description sits collapsed beneath — what it can do, what data it holds,
   who uses it — each of *its* statements carrying the file it was read from, which is
-  the scope [`docs/reference/cli.md`](docs/reference/cli.md) states: a gap carries no
-  provenance by design, and two branches say outright that we could not name a file.
+  the scope [`docs/reference/cli.md`](docs/reference/cli.md) states. The asks above it
+  are not held to it and were never meant to be: a gap names no file by design, and
+  where we could not work out which file something came from the page says so instead
+  of guessing.
   Two things about it are load-bearing rather than stylistic: prose written by a stage
   is **selected and relabelled, never rewritten**, since an owner correcting a
   sentence we paraphrased would be correcting our paraphrase; and no stage, gate,

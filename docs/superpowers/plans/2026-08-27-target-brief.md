@@ -22,6 +22,19 @@ artifact or is arithmetic over artifacts; nothing dispatches a model.
 
 Every task's requirements implicitly include this section.
 
+**Three things below were superseded during execution, and the shipped code is the
+answer, not this document.** (1) The Absent marker no longer says "We have not got far
+enough to describe this yet" — that sentence claimed progress we cannot know when the
+truth is only that a file would not read, so it states what we have on file instead;
+the test body asserting the old phrasing would fail today. (2) The no-identifier claim
+is scoped to the page's *own* prose, not to the page: prose this feature selects from
+the run ships verbatim, claim ids included, because an owner correcting a sentence we
+paraphrased would be correcting our paraphrase. (3) The legend glosses the idiom a
+stage writes ("no claim addresses …") as well as our own "Not addressed" label, and
+leads the first ask rather than sitting inside the collapsed description. Each change
+has its ruling on the record; `docs/reference/cli.md` and the modules' own comments are
+current where this document is not.
+
 - **Commit form, both flags, every time: `git commit -S -s`.** `-s` is the
   `Signed-off-by` DCO trailer, `-S` the cryptographic signature. **If signing
   fails, stop and report it** — never fall back to an unsigned commit, never

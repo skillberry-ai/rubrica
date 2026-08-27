@@ -486,8 +486,10 @@ def inputs_read(run: RunPaths) -> list[InputGroup] | Marker:
             # still group as one file, which is that decision unchanged.
             #
             # Which part of the path is the file is `_file_and_piece`'s single
-            # ruling for all four sites that ask -- here, `_taken` below, and
-            # `target_brief_html`'s `_side_html` and `_files_html`.
+            # ruling for all three sites that ask -- here, `_taken` below, and
+            # `target_brief_html`'s `_side_html`. `_files_html` is deliberately not
+            # one of them and says so in its own docstring: it asks only whether a
+            # path can be named at all, which `.strip()` answers.
             #
             # The raw `source_path` is what survives when there is no piece to
             # drop, including a path with nothing nameable in it: this group's
@@ -496,8 +498,8 @@ def inputs_read(run: RunPaths) -> list[InputGroup] | Marker:
             # record read as a *slice* of the first -- measured, `""` and `" "` in
             # one group rendered "1 more we could not name" under a "read as 3
             # pieces" tail, where they are two records and no slice of anything.
-            # So the row keeps its own string and `_files_html` asks the same
-            # helper whether it can be named.
+            # So the row keeps its own string, and the nameability question that
+            # `_files_html` asks stays its own.
             name, piece = _file_and_piece(source)
             path = _shorten(name if piece else source, prefix)
         else:

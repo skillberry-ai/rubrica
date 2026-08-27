@@ -327,6 +327,13 @@ def test_page_states_the_partial_run_once_and_still_shows_every_section(tmp_path
     page = target_brief_html.render(run)
     assert page.count("We do not have a description of your system on file") == 1
     assert page.count("see the note at the top of this page") == 5
+    # The words in front of that suffix, which the count above cannot reach: every
+    # wording shares the suffix, so reverting this sentence to the progress-claiming
+    # "Nothing to show here yet" left the whole suite green -- substring-of-message,
+    # measured. What the page must never do is tell an owner how far our work has got
+    # when all we know is that a file would not read.
+    assert page.count("Nothing on file here — ") == 5
+    assert "not got far enough" not in page
     for heading in (
         "Where our sources disagree",
         "What we could not tell",
@@ -386,10 +393,10 @@ def test_page_carries_the_legend_only_when_a_phrasing_it_glosses_appears(tmp_pat
     neither our `Not addressed` label nor the idiom a stage writes, so the legend is
     off, and each mutation below turns it on by itself.
 
-    The idiom is the trigger that matters. Measured on run-20260826-090456: 110
-    occurrences of `No claim`, against a label the same page never uses -- so a
-    legend glossing only the label was a legend for the phrasing the recipient meets
-    least."""
+    The idiom is the trigger that matters. Case-folded on run-20260826-090456's
+    page: `no claim` 122 times against our own `not addressed` 41. Both are used, the
+    idiom three times as often, so a legend glossing only the label explained the
+    phrasing the recipient meets less."""
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     assert 'class="legend"' not in target_brief_html.render(run)
     world_model = json.loads(run.world_model.read_text())

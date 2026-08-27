@@ -98,10 +98,18 @@ dd { margin: .15rem 0 .15rem 1.2rem; }
 #
 # Two phrasings, not one. `_NOT_ADDRESSED` is our own label, and the draft legend
 # glossed only that -- but the idiom a stage writes into its prose is the one a
-# recipient meets far more often: 110 occurrences of `No claim` on
-# run-20260826-090456's page, the bulk of them inside the tier-1 "What we could not
-# tell" ask. Glossing the label alone left the phrasing that does the damage
-# unexplained, and put the gloss below it besides.
+# recipient meets far more often. Case-folded on run-20260826-090456's page and binned
+# between the page's own headings: `no claim` 122 times against `not addressed` 41, and
+# both land overwhelmingly in the collapsed "What we believe, in full" section -- 115
+# and 40 respectively, against 7 and 1 in the "What we could not tell" ask. So the
+# label is used, and used heavily: it is what fired the earlier version of this legend
+# on both real runs. Glossing it alone still left the more common phrasing unexplained,
+# and the gloss sat at the head of that collapsed section, below the occurrences
+# already standing in the ask above it.
+#
+# State the fold when quoting those counts. Two reviews of this feature reported 110
+# and 117 for the same page because one counted `No claim` capitalised and the other
+# did not.
 #
 # The idiom is matched on `no claim` rather than on a whole sentence because the
 # stages write it at least three ways -- "No claim addresses ...", "No claim
