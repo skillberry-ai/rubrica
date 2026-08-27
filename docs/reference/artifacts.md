@@ -427,7 +427,7 @@ Fields worth knowing: `outcomes[].outcome_classes[].kind` (the same five-value
 enum the world model uses — `success`, `empty`, `not_found`, `error`,
 `underspecified`; `underspecified` is the one that records "nothing addresses
 this", which is not the same as silence, and dropping it costs the coverage
-denominator a column for every capability);
+denominator a column for every capability the target can be driven on);
 `outcomes[].outcome_classes[].claims` (required and non-empty, as on every other
 element — and for an `underspecified` class it is the claims that establish the
 *operation* the class belongs to, since evidence for an outcome nothing states
@@ -713,11 +713,18 @@ an `outcome_class_id` — the coverage cell this scenario is meant to close);
 - **Path:** `03-coverage/round-<N>.json`, `03-coverage/latest.json`
 
 One round's coverage report against the frozen `denominator`: a
-`capability_matrix` (capability × outcome-class cells, each `covered` or not,
-with the `scenario_ids` that cover it), a `goal_matrix` (same shape, per
-goal), a list of uncovered `holes` (each with a `reason` — `not_yet_
+`capability_matrix` (the **drivable** capability × outcome-class cells — those
+whose capability declares a `binding.tool` — each `covered` or not, with the
+`scenario_ids` that cover it), a `goal_matrix` (same shape, per goal), a list of
+uncovered `holes` (each with a `reason` — `not_yet_
 attempted`, `unreachable`, `out_of_scope`, or `blocked_by_gap`, the last
 requiring a `gap_id`), `progress` counters, and the round's `verdict`.
+
+Matrix and holes together account for every cell the world model declares, not
+just the scored ones: `score-seal` writes one computed `unreachable` hole for each
+declared cell the target cannot be driven on, so a narrowed matrix is a narrowed
+denominator rather than a silent cap. A hole `rb-score` wrote for the same cell
+wins over the computed one.
 
 Fields worth knowing: `verdict` (`continue`, `converged`, `halted_no_progress`,
 or `halted_round_cap` — *computed* by `rb-score` and copied through here; only

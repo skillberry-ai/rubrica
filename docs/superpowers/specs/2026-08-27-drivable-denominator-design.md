@@ -50,10 +50,13 @@ task count, unrelated. The complete reader set is `reconcile.py` (writes),
 (2026-08-25, `interface: agent`, executive-agent corpus) already had 9 unbound
 capabilities contributing 36 of 148 cells. All four accounting commits
 (`86fbdf2`, `b9de5d5`, `4888c54`, `fad7971`) landed 2026-08-26. So the *class* is
-structural. The *magnitude* on this corpus is accounting-driven: `pyproject-toml`
-feeds 10 of the 19 unbound capabilities, five resting on nothing else
-(`cap-keycloak`, `cap-langchain-community`, `cap-ollama-backend`,
-`cap-openai-backend`). That distinction matters -- it means the arithmetic fix
+structural. The *magnitude* on this corpus is accounting-driven: of the 19 unbound
+capabilities, **10 cite `pyproject-toml` among their claims and 4 cite nothing
+else** (`cap-keycloak`, `cap-langchain-community`, `cap-ollama-backend`,
+`cap-openai-backend`). Those are two different counts, and this line originally
+gave the second as five while listing four ids; both numbers are re-measured
+against `run-20260827-070444`. That distinction matters -- it means the
+arithmetic fix
 addresses the class and a separate prompt change addresses the magnitude, and it
 removes any argument for reverting commits that work.
 
@@ -70,8 +73,13 @@ mechanises.
 | C -- real agent-level behaviour | 4 | 8 | `cap-empty-search-guidance`, observed in trajectory 5 | **wrong** |
 
 `binding.tool` is therefore right for 29 of 37 cells and wrong for 8. It is
-chosen anyway, because it is exactly the predicate `emit.bindings` applies: the
-narrowed denominator equals what the pipeline can actually ship today, which is
+chosen anyway, because it is **one notch tighter** than the predicate
+`emit.bindings` applies -- not identical to it, as this line first claimed.
+`emit.bindings` tests the binding *object*'s truthiness (`emit.py:66`) while
+`emit.call_spec` then reads `binding["tool"]` unguarded (`emit.py:79`), so the two
+disagree on exactly one shape, a binding present with no `tool`, and that shape
+crashes `call_spec`. Keying on `binding.tool` therefore makes the narrowed
+denominator equal what the pipeline can actually ship today, which is
 the honest scoring target. Group C is not hidden -- it is recorded as a
 limitation (see below) rather than silently absorbed.
 
@@ -94,9 +102,11 @@ the wide set and scoring needs the narrow one.
 - `refs.drivable_cells(world)` -- those whose capability declares
   `binding.tool`. **New.** The scoring set.
 
-Both are set comprehensions over distinct pairs. `limitations.md:1330` records
-why: a per-capability sum agrees with the set only until an id repeats, at which
-point the sum is simply the wrong number.
+Both are set comprehensions over distinct pairs. `limitations.md`'s "One
+precision" paragraph, under the coverage-denominator entry, records why: a
+per-capability sum agrees with the set only until an id repeats, at which point
+the sum is simply the wrong number. (Cited by heading rather than by line, which
+is how it was first written; the line has since moved.)
 
 ### Four consumers narrow together
 
@@ -168,6 +178,21 @@ Three reporting changes. None asserts a cause code cannot compute.
    hand-edit a frozen, sealed artifact. This is the "no silent caps" discipline
    the repository already applies: a bounded-coverage decision is logged where it
    is made.
+
+   **This one did not ship. Reporting change 2 is the sole surface.** The finding
+   was implemented (`ae1b74e`) and taken back out (`11a6c25`), because it
+   miscategorised its own condition: `check-refs` exit 1 tells `rb-orchestrate` "a
+   repairable stage defect, spend the one repair attempt", and an unbound
+   capability is repairable by no re-dispatch at all --
+   `rb-reconcile-capabilities`' section 5 tells the pass to leave `binding` off
+   rather than guess a tool name, so the pass did the right thing and nothing
+   downstream can add one. `check-refs` also runs *before* human gate 1, so the
+   finding halted a correct run ahead of the gate it was designed to be read at,
+   19 of 24 capabilities' worth on `run-20260827-070444`. **The reason is the
+   exit-1 semantics, not a change of mind about visibility** -- so do not
+   re-propose the finding on the grounds that the exclusion deserves an earlier
+   signal. The layer for that is the one CLAUDE.md keeps for reports that always
+   exit clean on a readable run, which is `gate-brief`.
 2. **A `gate-brief` gate-1 listing**: each excluded capability with its cell
    count, `operation`, and citing inputs read off `01-claims/`. That makes the
    real cause legible without claiming it -- a human reading it sees that 10 of
@@ -185,9 +210,10 @@ Three reporting changes. None asserts a cause code cannot compute.
 
 Every capability in `toy/`, `toy-gap/` and `toy-contradiction/` is bound, so the
 narrowing is a no-op on all three fixtures. That is convenient -- no fixture
-churn, and the parked ruling about the recorded denominators
-(`limitations.md:1305-1340`) is undisturbed -- but it also means **no existing
-test reaches the unbound path.** New tests must construct one.
+churn, and the parked ruling about the recorded denominators (`limitations.md`,
+"The coverage denominator is arithmetic done by code") is undisturbed -- but it
+also means **no existing test reaches the unbound path.** New tests must
+construct one.
 
 - `drivable_cells` and `_cells` diverge on a mixed world model, and the
   seal-check identity holds across it.

@@ -26,10 +26,14 @@ One capability × outcome-class pair, and the unit coverage is counted in. Each
 `capability_matrix.cells[]` entry names a `capability_id`, an
 `outcome_class_id`, the `scenario_ids` that reach it, and a boolean `covered`
 (`src/rubrica/schema/coverage-0.1.json`); the goal matrix counts `rows` the same
-way for goals. How many cells exist is fixed by `denominator.capability_cells`
-before the first round runs, so "coverage" here always means a fraction of a
-frozen set — never a judgment that enough tests exist. A cell that is not
-covered is recorded as a `hole`, with a reason for why not.
+way for goals. How many cells are *counted* is fixed by
+`denominator.capability_cells` before the first round runs, so "coverage" here
+always means a fraction of a frozen set — never a judgment that enough tests
+exist. **Declared and counted are not the same set.** Only the cells whose
+capability declares a `binding.tool` are drivable through the target, and only
+those are scored; the rest are declared, unscored, and accounted for as computed
+`unreachable` holes. A cell that is not covered is recorded as a `hole` either
+way, with a reason for why not.
 
 ## claim
 
@@ -88,9 +92,11 @@ about the corpus.
 ## denominator
 
 The coverage denominator, computed once by `reconcile-seal` — code, not a
-prompt — and frozen at a `version` for the rest of the run. `denominator.capability_cells` counts
-capability × outcome-class pairs, and `denominator.goals` counts goals
-(`src/rubrica/schema/world-model-0.1.json`). Every later coverage report
+prompt — and frozen at a `version` for the rest of the run.
+`denominator.capability_cells` counts the **drivable** capability × outcome-class
+pairs, those whose capability declares a `binding.tool`, and `denominator.goals`
+counts goals (`src/rubrica/schema/world-model-0.1.json`). Goals are not narrowed:
+a goal is closable with no binding anywhere. Every later coverage report
 carries the same `denominator_version` it was computed against, so a round
 cannot silently change what "covered" means partway through.
 

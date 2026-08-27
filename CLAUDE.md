@@ -232,8 +232,9 @@ are judgments rather than list entries:
   human gate: at gate 0 the objective verdict, the predicted-vs-observed surface
   divergence, grouped declines, the slice table and every group the slicer split
   across more than one slice; the reconcile sweep plus per-input utilisation,
-  per-pass read coverage and implied size at gate 1; the coverage matrix at gate
-  2; the verdict tally at gate 3.
+  per-pass read coverage, the capabilities the coverage denominator excludes and
+  implied size at gate 1; the coverage matrix at gate 2; the verdict tally at gate
+  3.
   Gate 1's sweep is an **aggregate, not a per-subject tally** — how many subjects
   cover how many claims, how many subjects were swept, how many contradictions
   were recorded, and, only when any were, the tally by `resolution` with

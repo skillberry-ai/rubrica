@@ -942,6 +942,70 @@ the propose/score loop's cost profile, which is a deliberate decision rather
 than a default worth flipping quietly. `rubrica set-limit` is how you raise it
 for one run, with the reason recorded in `decisions.md`.
 
+### A run with no drivable capability at all still spends its round budget, on goals alone
+
+`rounds.closable_holes` narrows the capability half of the worklist to
+`refs.drivable_cells`, and leaves the goal half unconditional — every goal the
+world model declares is open on round 1 whatever the bindings say. So the
+behaviour on a world model where *no* capability declares a `binding.tool`
+depends entirely on whether it also declares a goal, and the two outcomes are
+nothing like each other. **Measured, both directions, by running
+`propose-batches` against a one-capability world model with the binding
+removed:**
+
+- with `goals: []` the worklist is empty, `propose-batches` prints `no closable
+  holes: there is no propose round to dispatch` and exits 0 having written
+  nothing. The loop stops.
+- with one goal present it writes `02-batches/round-1.json` carrying that goal's
+  hole ref and exits 0. **The loop continues, and every round of it proposes
+  goal-only scenarios against no capability surface.**
+
+Nothing mechanical stops the second shape, and the layers a reader would expect
+to catch it each decline for their own reason — read off the schemas and the
+checks, not measured through a dispatch. `scenarios-0.1.json` puts `minItems: 1`
+on `capability_refs`, so every scenario must name a cell, and on this world model
+every cell it can name is undrivable — but `refs._check_reachability` only
+forbids an *instance* from exercising more than its scenario claimed, and never
+requires the claimed cells to be exercised at all. `expected-0.1.json` puts no
+`minItems` on `trajectory.operations`, and `emit` reports an unbound capability
+only where an instance's `expected` actually names one, so an instance carrying
+data-kind assertions and no operations clears every layer and emits. The coverage
+document reports capability coverage as 0 of 0 rows at 0.0% —
+`rounds._summarise` returns 0.0 rather than dividing by zero — with every
+declared cell accounted for as a computed `unreachable` hole. And `rb-score`'s
+Method step 9 defines `converged` as "every hole left is `unreachable`,
+`out_of_scope`, or `blocked_by_gap` … whether or not the matrices read 100%", so a
+run that covers its goals can converge on a suite that drives nothing.
+
+The only thing standing between a run and that outcome is a human reading the
+fenced banner `gate-brief --gate 1` prints when no capability is bound. That is
+deliberate rather than an oversight, and the alternative was built and taken back
+out: a `check-refs` finding at the seal was implemented and reverted, because a
+`1` from `check-refs` tells `rb-orchestrate` "a repairable stage defect, spend
+the one repair attempt", and no re-dispatch can add a binding at all:
+`rb-reconcile-capabilities`' section 5 tells the pass to leave `binding` off
+rather than guess a tool name, so the pass did the right thing and nothing
+downstream can supply one. `check-refs` also runs before gate 1, so the finding
+would have halted a correct run ahead of the gate it was written to be read at.
+
+**Why it is parked: choosing between the two honest fixes needs a measurement
+this branch did not make.** The mechanical guard is cheap and obvious — have the
+loop refuse a round when `drivable_cells` is empty, the way it already refuses
+one when no hole is closable. Whether it is *right* is the open question, and it
+turns on the entry further down this section, "`binding` is tool-shaped, so real
+agent-level behaviour can be neither driven nor counted": an all-unbound world
+model is exactly what a purely conversational target produces, and for such a target
+goal-only scenarios may be not a degenerate case but the only coverage the
+pipeline can express. A guard would forbid the one thing that target admits; an
+accepted bound lets a genuinely empty run burn its whole budget. Nobody has
+emitted a suite from an all-unbound run and watched `suite/verify.py` score it,
+so there is no evidence on which side to rule, and a guard added on reasoning
+alone would foreclose the question rather than settle it. Until that run exists
+the bound is accepted and named: the banner states the condition, and a human at
+gate 1 is the guard. Two things not to do meanwhile — do not make the banner
+assert that the loop halts, because with goals present it does not, and do not
+promote it to a `check-refs` finding for the reason the revert records.
+
 ### The propose/score loop's per-response bound, and the term the issue blamed
 
 The loop is bounded by a code partition now. This entry is here for the
@@ -1308,11 +1372,11 @@ capability × outcome-class pairs it had actually written. `refs.check_world_mod
 checked exactly that: a number a prompt wrote, against the model that same prompt
 wrote. `reconcile-seal` now computes both fields while assembling the partials,
 and the check still recomputes both — `capability_cells` as
-`len(refs._cells(world))`, `goals` as the length of the model's `goals` array —
-against numbers the same code derived from the same lists. **For any world model
-this pipeline now produces, both comparisons are identities.** They can fail only
-if `reconcile.seal` and `refs.py` come to disagree about the arithmetic, or if
-somebody hand-edits a sealed world model.
+`len(refs.drivable_cells(world))`, `goals` as the length of the model's `goals`
+array — against numbers the same code derived from the same lists. **For any
+world model this pipeline now produces, both comparisons are identities.** They
+can fail only if `reconcile.seal` and `refs.py` come to disagree about the
+arithmetic, or if somebody hand-edits a sealed world model.
 
 The scope of that sentence is load-bearing, because the tree still holds world
 models the pipeline did not produce. `tests/fixtures/toy-contradiction/recorded/`
@@ -1320,21 +1384,27 @@ and `tests/fixtures/toy-gap/recorded/` are committed output of the superseded
 single-dispatch `rb-reconcile`, denominators included, and
 `tests/unit/test_refusals_live.py` recomputes the cell count against one of them
 — so over a recording, `check_world_model` and that live assertion are still
-genuine checks of a number a prompt wrote. The check did not become vacuous; it
-became vacuous *for new runs*. Re-recording either fixture against the
-`reconcile-*` family would close the last place this property is measured on a
-prompt, which is a reason to keep the recordings as they are rather than to
-refresh them for tidiness.
+genuine checks of a number a prompt wrote. That survived the denominator being
+narrowed to drivable cells only because every capability in both recordings
+declares a `binding.tool`, so the narrow count and the wide one coincide over
+them. A recording carrying an unbound capability would not be so lucky: the
+superseded prompt's invariant was the *wide* count, so the check would report a
+finding against a number correct by the rule that recording was written under.
+The check did not become vacuous; it became vacuous *for new runs*. Re-recording
+either fixture against the `reconcile-*` family would close the last place this
+property is measured on a prompt, which is a reason to keep the recordings as
+they are rather than to refresh them for tidiness.
 
 One precision, because getting it wrong is how that identity would break in the
 direction nobody notices: `capability_cells` counts **distinct**
-`(capability_id, outcome_class_id)` pairs. `refs._cells` is a set comprehension
-and the check compares against its length, so the seal builds the same set. A sum
-of per-capability outcome-class counts agrees with it only until a capability id
-or an outcome-class id repeats, at which point the sum is simply the wrong
-number; the seal carries a comment saying not to "simplify" it back into one. Do
-not describe this field as a total of outcome classes anywhere — the total is the
-spelling that diverges.
+`(capability_id, outcome_class_id)` pairs. `refs.drivable_cells` is a set
+comprehension and the check compares against its length, so the seal calls that
+same function rather than building a set of its own. A sum of per-capability
+outcome-class counts agrees with it only until a capability id or an
+outcome-class id repeats, at which point the sum is simply the wrong number; the
+seal carries a comment saying not to "simplify" it back into one. Do not describe
+this field as a total of outcome classes anywhere — the total is the spelling that
+diverges.
 
 The ruling is that this is the right trade, for the reason that makes `emit` code:
 arithmetic is not judgment. Which outcome classes a capability has is judgment and
@@ -1349,6 +1419,81 @@ is not rediscovered as a hole in layer 2 and closed by moving the count back int
 a pass. Keeping the identity is deliberate: as an identity it still catches a
 hand-edited world model and a divergence between the two spellings of the count,
 which is worth more than the line it costs.
+
+### `binding` is tool-shaped, so real agent-level behaviour can be neither driven nor counted
+
+`capability.binding` is `{tool, fixed_args}`. `emit.bindings` keeps a capability
+that declares a binding and drops one that does not, and `emit.call_spec` then
+reads `binding["tool"]` unguarded — so `binding.tool` is the predicate
+`refs.drivable_cells` keys the coverage denominator on, one notch tighter than
+`emit.bindings`' own truthiness test. For most undrivable capabilities that is
+the right predicate: a `pyproject.toml` dependency declaration is not target
+behaviour at all, and a JSON-RPC surface on an `http-sse` run is genuinely out
+of reach.
+
+For one group it is the wrong answer, and narrowing the denominator is what
+makes that group invisible. Measured on `run-20260827-070444`, the 37 excluded
+cells fall into three causes that no code can tell apart, because the
+classification is semantic and layer 2 never mechanises those:
+
+| Cause | Capabilities | Cells |
+|---|---|---|
+| not target behaviour — `cap-keycloak`, a `pyproject.toml` dependency | 10 | 18 |
+| a real surface on another interface — `cap-a2a-task-create`, JSON-RPC on an `http-sse` run | 5 | 11 |
+| real agent-level behaviour that is not a single tool call | 4 | 8 |
+
+The third row is what this entry is about: `cap-empty-search-guidance`,
+`cap-text-io`, `cap-multi-turn` and `cap-langgraph-routing`.
+`cap-empty-search-guidance` is the clearest of the four — its operation is "When
+`search_restaurants` returns no results, offer to search other cuisines or
+nearby cities", reverse-engineered from a captured trajectory. That is what the
+agent says *after* a tool returns, not a tool invocation, so there is no tool
+name to put in a binding and nothing for `emit` to drive.
+
+Where the line falls between that row and the one above it is **editorial, and
+the counts are only as firm as the line.** `cap-langgraph-routing` is the
+borderline member: internal graph routing is attested by a trajectory capture
+but is not obviously observable through the declared `http-sse` surface, and
+moving it into the first row leaves 3 capabilities and 6 cells. Two further
+precisions before the 8 is read as 8 shippable tests: 4 of those cells are
+`underspecified` outcome classes, so 4 `success` cells are what a second binding
+kind would make expressible today, and no run has emitted a test against any of
+them, so nothing here measures that such a test would score anything.
+
+The consequence is that the pipeline structurally cannot emit a test for
+non-tool agent behaviour, and the narrowed denominator now excludes that
+behaviour rather than reporting that it cannot reach it. What keeps the exclusion
+visible is entirely report-shaped — **no gate reports it on a correctly sealed
+run.** `gate-brief --gate 1` lists every unbound capability with its cell count,
+its `operation` and the inputs its claims rest on; `score-seal` writes one
+computed `unreachable` hole per undrivable cell into the round's coverage
+document, which a reader meets at gate 2. `refs.check_world_model` fires only
+when a *sealed* `capability_cells` disagrees with the drivable count, which is a
+stale or hand-edited field and not this. `emit` still reports an unbound
+capability at stage 06, but only one an instance's `expected` actually names, and
+the narrowing keeps those cells out of the worklist — so on a well-behaved run
+that report does not fire either.
+
+**Why it is parked.** The fix is a second binding kind — a conversational turn
+rather than a tool call — and it reaches much further than the denominator: the
+world-model schema, `emit`, and the emitted verifier contract that
+`suite/verify.py` executes. That is a change to what a shipped test *is*, and it
+wants its own design rather than a field added under a denominator fix. The
+narrowing is still the right move meanwhile, because the alternative is scoring
+against cells nothing can drive. What the narrowing must not do is imply those
+cells are junk, which is why they are written down here.
+
+**Not the same question as the magnitude, which has no entry of its own.** On
+the same run 10 of the 19 unbound capabilities cite `pyproject-toml` among their
+claims and 4 cite nothing else (`cap-keycloak`, `cap-langchain-community`,
+`cap-ollama-backend`, `cap-openai-backend`) — dependency lines promoted to
+capabilities, which is an `rb-reconcile-capabilities` accounting question and
+issue #17's third suggestion. It is parked for a different reason than this
+entry: it is a prompt change that only a paid dispatch can validate, and
+entangling it with the arithmetic would have blocked a deterministic fix behind
+that dispatch. Do not read the two numbers as one — 10 is how many cite the file
+at all, 4 is how many rest on nothing else — and the conflation is not
+hypothetical: it shipped once on this branch and had to be corrected.
 
 ### Whether the gateway's contended connection pool is per-API-key or global is unknown
 

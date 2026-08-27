@@ -194,13 +194,19 @@ label can never assert something true only of a different scenario's world —
 it cannot reach another scenario's seed at all.
 
 **The denominator check.** `denominator.capability_cells`, frozen once by
-`reconcile-seal`, must equal the real number of capability × outcome-class
-pairs the world model declares. A miscount here corrupts every coverage
-percentage computed downstream, and nothing else in the pipeline would
-notice — the numbers would simply be confidently wrong from that point on.
-Now that the count is arithmetic done by code rather than a claim a prompt
-made about its own output, this check is closer to an identity than it was;
-`docs/design/limitations.md` records what that costs.
+`reconcile-seal`, must equal the real number of **drivable** capability ×
+outcome-class pairs the world model declares — the pairs whose capability also
+declares a `binding.tool`, which is what `emit` needs to turn the capability into
+a tool call. A cell on a capability with no binding is a scoring target no
+emitted test could ever hit, so counting it inflates the denominator the whole
+experiment is scored against; `score-seal` accounts for each one as a computed
+`unreachable` hole instead. A miscount here corrupts every coverage percentage
+computed downstream, and nothing else in the pipeline would notice — the numbers
+would simply be confidently wrong from that point on. Now that the count is
+arithmetic done by code rather than a claim a prompt made about its own output,
+this check is closer to an identity than it was;
+`docs/design/limitations.md` records what that costs, and what the drivability
+predicate cannot express.
 
 ## The skill contract
 

@@ -48,7 +48,7 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   what makes this listing matter is its timing rather than any uniqueness: the
   same exclusion is reported twice more, and both are too late to act on.
   `seal_score` writes one `unreachable` hole per undrivable cell into the round's
-  coverage document (rounds.py:1317-1327), which a reader meets at gate 2, and
+  coverage document (rounds.py:1325-1335), which a reader meets at gate 2, and
   `emit` names a single unbound capability per instance at stage 06
   (emit.py:99-107, documented in world-model-0.1.json). Gate 1 precedes propose,
   so a reader who does not act here has the loop spend every round against the
@@ -119,14 +119,15 @@ SPLIT_HEADER = "Groups split across more than one slice"
 # Gate 1's excluded-capability section header, named for the three above's reason:
 # it is the anchor a reader and a test both scope to. What this section reports is
 # reported twice more and both times too late -- `seal_score` writes one
-# `unreachable` hole per undrivable cell (rounds.py:1317-1327), read at gate 2, and
+# `unreachable` hole per undrivable cell (rounds.py:1325-1335), read at gate 2, and
 # `emit` names one capability per instance at stage 06 (emit.py:99-107) -- so what
 # this listing has over both is that gate 1 precedes propose, and a reader here can
-# still act. That timing is also why the design's paired `check-refs` finding was
-# removed in 11a6c25:
-# `check-refs` runs before this gate and its exit 1 tells the orchestrator to spend
-# its one repair attempt on a stage, which cannot add a binding a pass was told not
-# to guess.
+# still act. The design's paired `check-refs` finding was removed in 11a6c25 for a
+# different reason than timing, and the two must not be conflated: a `1` from
+# `check-refs` tells the orchestrator to spend its one repair attempt on a stage,
+# and no re-dispatch adds a binding `rb-reconcile-capabilities` was told to leave
+# off rather than guess -- so the finding miscategorised its own condition. Its
+# running before this gate is what made that fatal rather than merely wrong.
 EXCLUDED_HEADER = "Capabilities excluded from the denominator (no tool binding)"
 
 
@@ -333,9 +334,16 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
         )
     else:
         # The loudest thing this brief says, and the volume is the point: gate 1
-        # precedes propose, so a reader here is the only person who can still tell a
-        # world model with no drivable surface from a run that converged, and a
-        # number in a table is not enough to make them look.
+        # precedes propose, so a reader here is the last person who can act before
+        # the loop spends its rounds -- and on the one shape that halts, `goals: []`
+        # with nothing bound, gate 1 is also the only place anyone can tell a world
+        # model with no drivable surface from a run that converged, because the loop
+        # stops before a coverage document exists. Scoped to that shape on purpose:
+        # with goals present the loop runs, seal_score writes its `unreachable` holes
+        # with the "declares no binding.tool" justification, and
+        # summary_html._hole_reason sets those apart from the open ones -- so a gate-2
+        # reader can tell the two apart as well, only later and after the spend.
+        # A number in a table is not enough to make anyone look either way.
         #
         # Phrased off the binding count rather than off the cell count, which the
         # line below may not have: `_cell_counts` returns None on a malformed

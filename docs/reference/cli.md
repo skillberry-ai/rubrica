@@ -278,13 +278,26 @@ incremented a round it found on disk would let the loop advance without an
 orchestrator decision on the record, and `decisions.md` is where a round is
 accounted for. Rounds are numbered from 1, so `--round 0` is a usage error.
 
-Reads `01-world-model.json` for the worklist on round 1 — every capability ×
-outcome-class cell and every goal, because round 1 has no coverage report and that
-is the normal shape rather than a missing file — and from round 2 reads
-`03-coverage/latest.json`, taking its `not_yet_attempted` holes only. The other
-hole reasons are not closable by proposing: `unreachable` and `out_of_scope` are
-cells the suite is not trying to cover, and `blocked_by_gap` means the world model
-does not yet support a scenario there.
+Reads `01-world-model.json` for the worklist on round 1 — every **drivable**
+capability × outcome-class cell and every goal, because round 1 has no coverage
+report and that is the normal shape rather than a missing file. Drivable, not
+declared: a capability with no `binding.tool` cannot be closed by proposing at
+all, since `emit.call_spec` has no tool name to build the call from, so offering
+the cell spends a round on a scenario `emit` will drop. Goals are not filtered,
+so a world model with no binding anywhere still has a worklist for as long as it
+declares a goal.
+
+From round 2 it reads `03-coverage/latest.json`, taking its `not_yet_attempted`
+holes and then subtracting the refs of the declared-but-undrivable cells. The
+other hole reasons are not closable by proposing: `unreachable` and `out_of_scope`
+are cells the suite is not trying to cover, and `blocked_by_gap` means the world
+model does not yet support a scenario there. Both filters are needed and neither
+subsumes the other, since score may hole an undrivable cell `not_yet_attempted`
+and the reason filter passes that. The second one **subtracts** rather than
+keeping only the drivable refs, and the difference is load-bearing: a `cell:` ref
+naming a cell the world model does not declare at all stays in the worklist,
+because that is a coverage-document defect for `check-refs` to report rather than
+something to swallow here.
 
 The per-batch budget is `limits.max_scenario_part_bytes` from `manifest.json` when
 it is set — `rubrica set-limit` writes it — and otherwise the default per-member
@@ -382,6 +395,17 @@ a failure no gate could catch from the document alone. What score decides is
 copied through untouched: each hole's `reason` and `justification`, and the
 `verdict`. `latest.json` is a byte copy of the same composed document rather than
 a second composition, so the two cannot drift.
+
+The hole list is the one place this command adds to what score wrote. The
+capability matrix scores the **drivable** cells only — those whose capability
+declares a `binding.tool` — so for every other declared cell this command writes
+a computed `unreachable` hole saying the capability declares none and `emit`
+cannot turn it into a tool call. Matrix plus holes therefore still account for
+every cell the world model declares, which is what keeps a narrowed denominator a
+denominator rather than a silent cap. It is computed rather than asked of the
+prompt because binding absence is a fact on disk and not a judgment, and a hole
+score wrote for the same cell wins: `rb-score` may prefer `out_of_scope` there,
+and the copied-through rule above outranks the injection.
 
 Required: `--run RUN` and `--round N`, on the same reasoning `propose-batches`
 gives for its own `--round`; rounds are numbered from 1 there too.
@@ -631,8 +655,20 @@ finding that was to have accompanied that narrowing was removed for
 miscategorising its own condition — a `1` from `check-refs` buys one stage
 re-dispatch, and no re-dispatch adds a binding `rb-reconcile-capabilities` is told
 to leave off rather than guess.
-Both numbers print either way, on the sweep's argument: "all N capabilities are
-drivable" is a strong claim, and rendering it as silence hides it. Nothing here
+
+On a run sealed **before** that narrowing the two cell counts on the page differ,
+and that is correct rather than contradictory: this section computes the drivable
+count from the world model's own capabilities, while the implied-size line reads
+the sealed `denominator.capability_cells` off disk. `check-refs` does report *that*
+disagreement by name — a different finding from the removed one above, raised
+against a stale sealed field rather than against the absent bindings — and
+re-running `reconcile-seal` over the same partials rewrites the field. A run sealed
+since the narrowing is consistent, and the two numbers agree.
+
+Both counts this section prints — how many capabilities are drivable, and how many
+cells the denominator keeps — print either way, on the sweep's argument: "all N
+capabilities are drivable" is a strong claim, and rendering it as silence hides
+it. Nothing here
 says *why* a binding is absent — on the one run this was measured against the
 three causes were a dependency declaration that is not target behaviour, a real
 surface on another interface, and real agent-level behaviour `binding`'s tool

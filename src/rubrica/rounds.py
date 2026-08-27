@@ -203,20 +203,28 @@ def closable_holes(run: RunPaths) -> list[str]:
     seed and emit drops.
 
     From round 2 the report's holes are the worklist, filtered to
-    `not_yet_attempted` and then to the drivable cells. The other three reasons are
-    not closable by proposing, however good the scenario: `unreachable` and
-    `out_of_scope` are cells the suite is not trying to cover, and `blocked_by_gap`
-    means the world model does not yet support a scenario there, so proposing
-    anyway produces one rb-instantiate cannot honestly seed.
+    `not_yet_attempted` and then with the declared-but-undrivable refs SUBTRACTED.
+    Subtracted, not narrowed to the drivable set, and
+    test_a_round_two_hole_ref_no_capability_declares_is_still_offered pins the
+    difference: a `cell:` ref no capability declares at all is left in the worklist
+    rather than swallowed, because a hole ref resolving to nothing is a
+    coverage-document defect and check-refs is the layer that reports it. The other
+    three reasons are not closable by proposing, however good the scenario:
+    `unreachable` and `out_of_scope` are cells the suite is not trying to cover, and
+    `blocked_by_gap` means the world model does not yet support a scenario there, so
+    proposing anyway produces one rb-instantiate cannot honestly seed.
 
     Both filters are needed on that branch and neither subsumes the other. The
     reason filter catches score's own `unreachable` and `out_of_scope` holes on an
     undrivable cell; it does not catch a `not_yet_attempted` one, and score can
-    write those -- rb-score's Method describes its capability rows as one per
-    declared capability x outcome-class pair without mentioning `binding`, and
-    seal_score's injection defers to a hole score wrote for the same cell by
-    design. The drivability filter is what closes that path, so an undrivable cell
-    is closable in no round rather than in every round but the first.
+    write those -- the prompt the measured documents were scored by (5cd2358) stated
+    the wide rule in BOTH Method step 4 and Invariant 1, with the string `binding`
+    nowhere in the file, and seal_score's injection defers to a hole score wrote for
+    the same cell by design. The Method since d6786a4 names the undrivable case and
+    calls `not_yet_attempted` the one wrong reason there, but no dispatch has
+    measured that it obeys, so the drivability filter is what closes that path
+    either way -- an undrivable cell is closable in no round rather than in every
+    round but the first.
 
     `capabilities`, `goals` and `holes` are required rather than defaulted, and
     that matches layer 1 exactly -- world-model-0.1.json and coverage-0.1.json
@@ -327,11 +335,12 @@ def closable_holes(run: RunPaths) -> list[str]:
             if hole["reason"] == "not_yet_attempted"
             # An undrivable cell is not closable by proposing in ANY round, and the
             # reason filter beside this does not reach it: score writes the hole
-            # itself as `not_yet_attempted` -- rb-score's Method as of 5cd2358,
-            # which is the prompt the documents behind this clause were scored by,
-            # described its capability rows as one per declared pair, and the string
-            # `binding` appeared nowhere in that file (`git show
-            # 5cd2358:src/rubrica/skills/rb-score/SKILL.md | grep -c binding` is 0).
+            # itself as `not_yet_attempted` -- rb-score as of 5cd2358, which is the
+            # prompt the documents behind this clause were scored by, described its
+            # capability rows as one per declared pair in Method step 4 AND in
+            # Invariant 1, and the string `binding` appeared nowhere in that file
+            # (`git show 5cd2358:src/rubrica/skills/rb-score/SKILL.md | grep -c
+            # binding` is 0).
             # The Method since d6786a4 names the undrivable case and calls
             # `not_yet_attempted` the one wrong reason there, but no dispatch has
             # measured that it obeys, so this clause stays whatever the prompt says

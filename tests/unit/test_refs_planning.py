@@ -986,9 +986,11 @@ def test_drivable_cells_keeps_only_cells_whose_capability_names_a_tool():
 
 
 def test_drivable_cells_counts_distinct_pairs_rather_than_summing():
-    """limitations.md:1330 -- a sum of per-capability outcome-class counts agrees
-    with the set only until an id repeats, at which point the sum is the wrong
-    number. A repeated outcome-class id is schema-legal.
+    """limitations.md's "One precision" paragraph, under the coverage-denominator
+    entry -- a sum of per-capability outcome-class counts agrees with the set only
+    until an id repeats, at which point the sum is the wrong number. A repeated
+    outcome-class id is schema-legal. Cited by heading and not by line number,
+    because the line moved once already.
     """
     world = {
         "capabilities": [
