@@ -649,6 +649,15 @@ human is already deciding whether the input set was right.
    reason `rb-reconcile-subjects` is the first. It writes
    `03-score/round-N.json`: the rulings, the holes and the verdict, and nothing
    it can compute. Gate with `validate --stage score`.
+
+   **You tell it no round number, and it does not need one:** it derives the
+   round the same way each `rb-propose` member does, from the highest-numbered
+   `round-N.json` under `02-batches/`. Do not append the round to the dispatch.
+   The two named exceptions above are the only text this document lets you append,
+   and a round number is neither a finding nor a verdict field quoted from the
+   file that holds it -- while the plan already carries the answer for every round
+   that was dispatched, including one whose members all declined and therefore
+   left no scenario tagged with it.
 5. **`rubrica propose-seal --run RUN` again, code.** The same command a second
    time, and the repeat is load-bearing rather than belt-and-braces: the seal is
    a pure function of the parts and the rulings, so this run is what folds this

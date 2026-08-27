@@ -27,7 +27,7 @@ moves those numbers, in a document that will agree with itself either way.
 
 ```toml
 stage = "score"
-reads = ["manifest", "world_model", "scenarios"]
+reads = ["manifest", "world_model", "scenarios", "batches"]
 writes = ["score_part"]
 schemas = ["score-part"]
 invokes = ["dedupe-candidates", "validate"]
@@ -35,9 +35,10 @@ invokes = ["dedupe-candidates", "validate"]
 
 ## 1. Inputs
 
-You read exactly the three artifacts this skill's contract names under
-`reads`: `manifest.json` (`manifest`), `01-world-model.json` (`world_model`)
-and `02-scenarios.json` (`scenarios`). The world model is frozen input -- its
+You read exactly the four artifacts this skill's contract names under
+`reads`: `manifest.json` (`manifest`), `01-world-model.json` (`world_model`),
+`02-scenarios.json` (`scenarios`) and this round's batch plan
+`02-batches/round-<N>.json` (`batches`). The world model is frozen input -- its
 `capabilities` with their `outcome_classes`, its `goals` with their
 `expected_hop_depths`, its
 `gaps`, and its `denominator` are the entire universe the coverage matrices
@@ -85,9 +86,19 @@ configuration, a bound on the loop rather than a fact about the system under
 test, so nothing you write may treat it as evidence about the target the way
 the world model is evidence about the target.
 
+The batch plan is in your `reads` for one thing too, and it is an **address**
+rather than context: which round this dispatch is scoring. It is the same thing
+each `rb-propose` member takes from it, and the reason a plan is a legitimate
+read for a stage that closes no hole -- the round a plan is filed under is not a
+judgment about the target, so nothing in it can reach a ruling of yours. Its
+`batches` array and every `hole_refs` in it belong to the members that were
+dispatched against them; you neither work a batch nor check that one was worked,
+and a hole you write is justified from the matrices you derive, never from a
+batch's roster.
+
 You are dispatched with no memory of any conversation that came before you,
 and nothing you write here carries forward as memory either. Whatever you
-need has to be derivable from the three artifacts you read, from this
+need has to be derivable from the four artifacts you read, from this
 document, from the command in Method step 1, or from a notice the orchestrator
 appended to *this* dispatch -- those four and nothing else. On an ordinary
 scoring dispatch the first three are the whole of it. The fourth is there
@@ -95,12 +106,29 @@ because of the one thing you may be asked to do that your artifacts genuinely
 cannot tell you: a `rb-challenge` rejection lives in a file you do not read, so
 it reaches you as appended text or it does not reach you at all. In particular,
 **nobody tells you which round this is**: the round you are scoring is the
-highest `round` tag among the scenarios in `02-scenarios.json`, because
-`rb-propose` tags every scenario it writes with the round that wrote it.
-Whether this round made progress is derivable the same way, from those round
-tags and the statuses beside them, which is what Method step 8 spells out and
-why no coverage document is in your `reads`. You do not write the `progress`
-numbers -- `rubrica score-seal` computes them, and it reads the previous
+highest-numbered `round-<N>.json` under `02-batches/`, and that document's own
+`round` field states it. That is the rule each `rb-propose` member follows for
+the same question, and it is the rule for the same reason -- the plan is the
+round's own address, filed once per round by code before any member ran.
+
+**Do not derive the round from the scenarios' `round` tags instead**, and the
+reason is a state this pipeline sanctions rather than a hypothetical one. When
+every propose member of a round honestly declines its batch -- which is exactly
+what `rb-propose`'s refusal conditions exist to produce -- the seal writes a
+scenario list carrying no scenario tagged with that round. The highest tag on
+disk is then an earlier round's, or on a first round there is none at all.
+Scoring by tag would
+write your part into `03-score/round-<N-1>.json`, overwriting rulings that round
+already carries, and `rubrica score-seal --round N` would then refuse a part it
+cannot find -- reporting a defect against you for writing exactly where you were
+told to. The plan exists for every round that was dispatched, declined or not,
+so the derivation above holds in that state and in every other.
+
+Whether this round made progress is a *different* derivation, and that one does
+run over the round tags and the statuses beside them, which is what Method
+step 8 spells out and why no coverage document is in your `reads`. You do not
+write the `progress` numbers -- `rubrica score-seal` computes them, and it reads
+the previous
 round's own `03-coverage/round-<N-1>.json` rather than `latest.json`, because
 `latest.json` is rewritten by every re-score and would silently answer for a
 round that was scored and then re-proposed against. What you need the

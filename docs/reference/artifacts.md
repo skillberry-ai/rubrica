@@ -522,7 +522,10 @@ beside the shared `rejected_reason` it sits next to.
   partition must be reproducible, or a change in a round's output cannot be
   attributed to the model that wrote it
 - **Read by:** the `propose` fan-out (each member is dispatched with one batch
-  id and reads its own entry), `check-refs`
+  id and reads its own entry), `score` (for the **round number only** — the
+  highest-numbered plan on disk is the round being scored, which stays derivable
+  in the round every member declined and left no scenario tagged with it),
+  `check-refs`
 - **Path:** `02-batches/round-<N>.json` (`paths.RunPaths.batches`)
 
 One round's closable holes, partitioned into batches whose projected output

@@ -17,7 +17,7 @@ from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
 
 SKILL = skills_dir() / "rb-score" / "SKILL.md"
 
-OUTPUT, METHOD, INVARIANTS = SECTIONS[1], SECTIONS[2], SECTIONS[3]
+INPUTS, OUTPUT, METHOD, INVARIANTS = SECTIONS[0], SECTIONS[1], SECTIONS[2], SECTIONS[3]
 
 
 def _coverage_schema():
@@ -61,6 +61,74 @@ def test_the_contract_matches_the_stage_gate():
     skill = load(SKILL)
     assert skill.contract["stage"] == "score"
     assert set(skill.contract["schemas"]) == set(STAGE_ARTIFACTS["score"])
+
+
+def test_it_derives_its_round_from_the_batch_plan_and_not_from_the_scenario_tags():
+    """The round has to stay derivable in the state Ruling R18 sanctioned.
+
+    The rule used to be "the highest `round` tag among the scenarios", which was
+    true while `rb-propose` appended to `02-scenarios.json` every round. It stopped
+    being true when the seal took the document over: every member of a round can
+    honestly decline its batch -- which the refusal conditions exist to produce and
+    `seal_scenarios` deliberately seals as an empty or unchanged document -- and no
+    scenario is then tagged with that round. Measured on a constructed run: round
+    2's members all decline, the tags are `[1]`, the tag rule gives round 1, and
+    the part lands on `03-score/round-1.json`, overwriting round 1's rulings; then
+    `score-seal --round 2` exits 1 on a part that is not there, blaming score for a
+    wrong-round part it was instructed to write. In the total-refusal case at round
+    1 no round is derivable at all. `refs.check_score_parts` is silent throughout,
+    because the misrouted part is internally consistent -- this is the defect class
+    with no mechanical gate, a prompt instructing what the code refuses.
+
+    So the property is: the block that owns "which round this is" derives it from
+    `02-batches/`, and the section states the declined-round case rather than
+    leaving the reader to discover it. `test_rounds.py`'s state pin is the other
+    half -- it asserts the two derivations actually disagree in that state, which
+    is what makes this prose rule about something reachable.
+
+    The negative pin is normalised, for the reason the Method step 8 pin below is:
+    the sentence it forbids is hard-wrapped in the file it came from, so a raw-text
+    check for it would be blind to a reinstatement in the form a reinstatement
+    actually takes.
+    """
+    assert "batches" in load(SKILL).contract["reads"], (
+        "the round derivation reads 02-batches/, so the plan has to be in `reads`; "
+        "check_contract holds these names to RunPaths attributes"
+    )
+    # Scoped by `02-batches`, a path with no paraphrase, rather than by a phrase
+    # about being told the round: a first draft selected the owning block on
+    # "which round this is" and was measured RED against a meaning-preserving
+    # reword ("nobody hands you a round number"), which is a phrase pin wearing a
+    # semantic requirement's clothes -- the failure this module's other pins
+    # already record.
+    owning = [block for block in blocks(INPUTS) if "02-batches" in block]
+    assert owning, "the Inputs section never names the batch plan the round comes from"
+    assert any(
+        re.search(r"highest|largest|greatest|latest|last", block, re.I)
+        and re.search(r"\bround", block)
+        for block in owning
+    ), (
+        "some Inputs block must name 02-batches/ as the round's own address -- the highest "
+        "plan on disk -- and not merely as one more artifact this stage may open"
+    )
+    inputs = re.sub(r"\s+", " ", section_body(load(SKILL), INPUTS))
+    assert "highest `round` tag among the scenarios" not in inputs, (
+        "the round-tag derivation is back, and it is unsatisfiable in the round every "
+        "propose member declined"
+    )
+    # A co-occurrence inside one block, not two searches over the section: "round
+    # tag" appears again where Method step 8's progress derivation is introduced,
+    # so a section-wide pair would be satisfied by a different rule's prose.
+    declined = [
+        block
+        for block in blocks(INPUTS)
+        if re.search(r"round.{0,4} tags?", block, re.I) and re.search(r"declin|refus", block, re.I)
+    ]
+    assert declined, (
+        "the section must say why the round tags are not the address -- the round every "
+        "member declined leaves none, and a rule stated without the state it exists for "
+        "is one a later editor reverts"
+    )
 
 
 def test_it_writes_only_its_own_part_and_neither_coverage_file():
