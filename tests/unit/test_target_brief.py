@@ -115,6 +115,14 @@ def test_source_index_returns_a_marker_when_claims_cannot_be_read(tmp_path):
         # every path in the run -- leaking the staging path this helper exists to
         # strip.
         (["#/0", "/a/b/one.py", "/a/b/two.py"], "/a/b"),
+        # A whitespace-only source_path among real ones. `" "` is truthy, so the
+        # truthiness filter let it through to commonpath, where it counts as a
+        # *relative* path and raises against the absolute ones -- turning shortening
+        # off for the whole run. Measured on a toy page: every row of `What we read`
+        # and the disagreement's side line rendered the absolute staging path of the
+        # machine rubrica ran on, which is the one outcome this function exists to
+        # prevent.
+        ([" ", "/a/b/one.py", "/a/b/two.py"], "/a/b"),
     ],
 )
 def test_common_prefix(files, expected):
@@ -757,3 +765,27 @@ def test_headline_keeps_notes_where_a_pass_wrote_them(tmp_path):
 def test_headline_marks_a_missing_world_model(tmp_path):
     run = build_toy_run(tmp_path, upto="extract")
     assert isinstance(target_brief.headline(run), Absent)
+
+
+def test_inputs_read_keeps_a_hash_that_belongs_to_the_filename(tmp_path):
+    """Only a JSON pointer is the slicer's fragment. `intake.py:333` writes a slice
+    as `<container>#<json_pointer>` and a pointer always begins `/`, so a `#`
+    followed by anything else is part of the name the owner gave the file.
+
+    Measured pre-fix: the row read `notes`, a file the run never read, in the one
+    section whose entire ask is "did we read the right files"."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    manifest = json.loads(run.manifest.read_text())
+    manifest["inputs"] = [
+        {"artifact_id": "n2", "kind": "design_doc", "source_path": "/corpus/docs/notes#2.md"},
+        {"artifact_id": "t-41", "kind": "trace", "source_path": "/corpus/docs/capture.json#/41"},
+        {"artifact_id": "t-44", "kind": "trace", "source_path": "/corpus/docs/capture.json#/44"},
+    ]
+    run.manifest.write_text(json.dumps(manifest))
+    groups = {g.kind: g for g in target_brief.inputs_read(run)}
+    assert (groups["design_doc"].files, groups["design_doc"].slices) == (("notes#2.md",), 0)
+    # The positive control in the same test: two real slices of one capture still
+    # group as one file with the second counted away, so the clause tells the two
+    # shapes apart rather than switching the collapse off. parsec's 71 slices of one
+    # capture are what that behaviour is for.
+    assert (groups["trace"].files, groups["trace"].slices) == (("capture.json",), 1)

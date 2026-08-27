@@ -77,7 +77,12 @@ def _common_prefix(files: list[str]) -> str:
     # paths rendered whole. `intake.py:333` builds its fragment from a `Path`,
     # which never stringifies empty, so the pipeline cannot produce that shape;
     # a hand-edited manifest can, and it fails open with no marker and no finding.
-    real = sorted({base for base in (f.partition("#")[0] for f in files) if base})
+    # `.strip()`, not truthiness: a `source_path` of `" "` partitions to `" "`,
+    # which is truthy, reaches `commonpath`, raises, and fails open to no
+    # shortening at all -- measured, the absolute staging path of the machine
+    # rubrica ran on then shipped onto a page addressed outside this project,
+    # which is the one outcome this function exists to prevent.
+    real = sorted({base for base in (f.partition("#")[0].strip() for f in files) if base})
     if not real:
         return ""
     try:
@@ -439,8 +444,18 @@ def inputs_read(run: RunPaths) -> list[InputGroup] | Marker:
         if isinstance(source, str) and source:
             # The fragment is cut, which is the whole point of this group: an
             # input is not a file, and grouping on the raw `source_path` would
-            # list one capture once per recorded call.
-            path = _shorten(source.partition("#")[0], prefix)
+            # list one capture once per recorded call. 71 slices of one capture
+            # still group as one file, which is that decision unchanged.
+            #
+            # Only a JSON pointer counts as a fragment, though. `intake.py:333`
+            # writes a slice as `<container>#<json_pointer>` and a pointer always
+            # begins `/`, so a `#` anywhere else belongs to the owner's own
+            # filename: measured, `notes#2.md` was listed as `notes`, in the one
+            # section whose entire ask is "did we read the right files". Same
+            # clause, same reason, as `target_brief_html._side_html`'s.
+            base, sep, piece = source.partition("#")
+            sliced = bool(sep and base and piece.startswith("/"))
+            path = _shorten(base if sliced else source, prefix)
         else:
             # The artifact id, for the reason SourceRef.path takes it: it names
             # something chaseable where a blank names nothing. A record with

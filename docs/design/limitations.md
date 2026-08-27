@@ -458,6 +458,42 @@ Parked rather than fixed for the reason the entry above gives for gaps: every
 candidate fix is a self-report. The honest instrument for whether a file was
 opened is the transcript — `scripts/audit-reads.sh` over a real dispatch.
 
+### Some gaps are written for rubrica's own reviewer, and the page the owner reads ships them verbatim
+
+A gap's `unknown` is prose `rb-reconcile-gaps` composes freely, and on a real run
+some of it is addressed to us rather than to the system's owner. Measured while
+rendering three real runs for the owner-facing page: on `run-20260826-090456`, 6 of
+the 18 questions read that way — two of the six are "This gap is already resolved by
+`ctr-aap2-agent-003` … Recorded here only because …" and "For every capability in
+`01-capabilities.json` whose `outcome_classes` includes an 'error' class …". The
+reader-facing page selects `unknown` verbatim, so all six reach it, naming rubrica's
+artifacts and its claim and contradiction ids to a reader who has never seen either.
+
+They are not wrong as gaps. They are correct output aimed at the wrong reader, and
+the page's whole question is "does this accurately describe your system?" — which a
+question about `01-capabilities.json` cannot be answered against. Everything else on
+that page relabels or drops our vocabulary for exactly this reason: input kinds are
+relabelled, a marker never names the artifact behind it, and the one id the renderer
+chooses to print is labelled `(our reference: …)` so the owner can tell whose word it
+is. A gap written for us defeats all three, and no gate objects: the gap resolves,
+its `claims` cite ids that exist, and nothing mechanical can see who a sentence is
+addressed to.
+
+**Why it is parked rather than fixed:** the fix cannot live in the renderer. Filtering
+there is either paraphrasing prose a stage wrote — the one thing that page must never
+do, because a sentence we composed and presented as our description of the owner's
+system is a fabrication in the way an invented quote is — or dropping a question on a
+mechanical proxy such as "mentions one of our filenames", which drops genuine
+questions: an owner-facing gap may legitimately quote a corpus filename, and what
+separates these six from the rest is who they address. That is semantics, and
+inventing a mechanical check for a semantic property is what this project declines to
+do wherever else the same shape appears. So the fix belongs to `rb-reconcile-gaps`'
+prompt — a gap's `unknown` should be a question whose answer can come from outside
+the pipeline — and it is that skill's change to make, not the reader's.
+
+What this means for you: **read a run's gaps before that page is sent.** They are the
+one section whose prose was never written with the recipient in mind.
+
 ### Every directory a fan-out writes into is created by a member's `Write`, and until 2026-08-23 nothing told the member so
 
 Of a run's directories, `grep -rn mkdir src/rubrica/` creates `run.root`,

@@ -6,18 +6,33 @@ rather than reasoned about: the toy target is `{"interface": "mcp", "name":
 capabilities that share the handle `query_tickets`, two entities, one actor, one
 contradiction resolved `preferred_a`, and no gaps.
 
-Two tests here are the page's premise rather than coverage --
-`test_page_never_shows_a_rubrica_identifier` and
-`test_page_never_names_a_stage_a_gate_or_an_artifact`. A failure in either is prose
-to reword, never an assertion to relax: a recipient asked "does this describe your
-system?" who is instead reading about `01-world-model.json` has been handed the
-wrong question.
+Three tests here are the page's premise rather than coverage --
+`test_page_never_shows_a_rubrica_identifier`,
+`test_the_pages_own_prose_never_names_a_stage_a_gate_or_an_artifact` and
+`test_selected_prose_carrying_one_of_our_ids_reaches_the_page_unrewritten`.
+
+The first two hold of this module's *own chrome*, on a corpus whose prose carries no
+identifier of ours -- which is what the toy is, measured: `open_questions` is `[]` and
+no `clm-`-shaped string reaches the page. They are not a property of a real page. The
+controller measured run-20260825-094033's page at about forty distinct `clm-...` ids
+and 119 occurrences of `claim`, every one of them inside prose a stage wrote, which
+this feature ships verbatim because rewriting it is the one thing the document must
+not do. The third test pins that sanctioned exception, so the two above cannot be
+read as a promise the page does not make.
+
+A failure in the first two is prose to reword, never an assertion to relax: a
+recipient asked "does this describe your system?" who is instead reading about
+`01-world-model.json` has been handed the wrong question.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+
+import pytest
 
 from rubrica import target_brief_html
 from tests.toy import build_toy_run
@@ -227,10 +242,16 @@ def test_page_states_an_unnamed_input_file_rather_than_an_empty_row(tmp_path):
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     manifest = json.loads(run.manifest.read_text())
     manifest["inputs"].append({"artifact_id": "", "source_path": "", "kind": "design_doc"})
+    # A whitespace-only path is the same defect one `.strip()` further out, and it is
+    # schema-conforming where the empty one is not: measured pre-fix, this record
+    # rendered `<span class="file"> </span>` in this listing -- the stray punctuation
+    # `_files_html`'s docstring says it exists to prevent.
+    manifest["inputs"].append({"artifact_id": "sp", "source_path": " ", "kind": "design_doc"})
     run.manifest.write_text(json.dumps(manifest))
     page = target_brief_html.render(run)
-    assert "1 more we could not name" in page
+    assert "2 more we could not name" in page
     assert '<span class="file"></span>' not in page
+    assert '<span class="file"> </span>' not in page
     # The positive control: the named file in the very same group still renders.
     assert "notes.md" in page
 
@@ -244,7 +265,11 @@ def test_page_labels_an_outcome_that_carries_no_description(tmp_path):
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
     assert "we did not record what happens" in page
-    assert "On success:</em></dd>" not in page
+    # The colon sits outside the emphasis, so the brief's drafted `<em>label:</em>`
+    # shape would print `On success:</em>`. The string this line carried before the
+    # review -- `On success:</em></dd>` -- matched neither rendering: the drafted one
+    # put a space and the description after `</em>`, so it asserted nothing.
+    assert "On success:</em>" not in page
     # The positive control: the sibling outcome, whose description is intact,
     # still renders as label plus description.
     assert "no ticket matches the filters" in page
@@ -323,6 +348,8 @@ def test_page_states_an_unreadable_input_record_in_full_rather_than_pointing_up(
     marker is the one the banner states. `What we read` reads the run's own record
     of what it read, not the description, so its marker is a second fact and says
     the whole thing in place."""
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     run.manifest.chmod(0o000)
     try:
@@ -340,6 +367,8 @@ def test_page_banners_an_unreadable_claims_directory_once(tmp_path):
     """Task 1 returns a marker rather than an empty index, so the page must say
     the citations are missing rather than render as a confident description with
     no sources."""
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     run.claims_dir.chmod(0o000)
     try:
@@ -386,9 +415,17 @@ def test_page_renders_a_lone_surrogate_rather_than_failing_to_write(tmp_path):
 
 
 def test_page_never_shows_a_rubrica_identifier(tmp_path):
-    """The whole premise: about the target, not about rubrica. Any id shape
-    reaching the page is a builder leaking, and this is the net that catches one
-    no per-builder test thought to look for."""
+    """No id shape in anything this module puts on the page itself.
+
+    Scoped to the toy deliberately, and the scope is the finding the review made
+    against this docstring: `open_questions` is `[]` on the golden build, so the one
+    place the renderer *chooses* to print an id of ours -- `(our reference: ...)`,
+    where `subject` is an `ent-... / inv-...` pair in 10 of 12 gaps on
+    run-20260816-172810 -- is not reached from here at all. It is reached, and
+    asserted, in
+    `test_selected_prose_carrying_one_of_our_ids_reaches_the_page_unrewritten`.
+    What this test holds is that no builder leaks one into a page built from prose
+    that has none."""
     page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
     leaked = re.findall(r"\b(?:clm|cap|ent|act|goal|gap|con|oc|art)-[a-z0-9-]+", page)
     assert leaked == [], leaked
@@ -408,7 +445,17 @@ def test_page_drops_the_target_name_rather_than_showing_the_run_directory(tmp_pa
     assert "<h1>ticketq</h1>" in target_brief_html.render(full)
 
 
-def test_page_never_names_a_stage_a_gate_or_an_artifact(tmp_path):
+def test_the_pages_own_prose_never_names_a_stage_a_gate_or_an_artifact(tmp_path):
+    """The renderer's own chrome, measured on a corpus whose prose carries none of
+    these words: no heading, label or sentence this module writes names a stage, a
+    gate, an artifact or rubrica itself.
+
+    Not a property of a real page, and the name says so. `claim` occurs 119 times on
+    run-20260825-094033's page, all of it inside prose a stage wrote and this feature
+    ships verbatim -- see the module docstring, and
+    `test_selected_prose_carrying_one_of_our_ids_reaches_the_page_unrewritten` for the
+    sanctioned exception pinned rather than assumed. What this test can hold, and
+    does, is that the words are not ours."""
     page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal")).lower()
     for word in (
         "reconcile",
@@ -453,6 +500,8 @@ def test_page_says_it_could_not_resolve_a_side_rather_than_dropping_it(tmp_path)
     """Ruling 7: an unreadable record of where we read things must never render as
     a positive statement that no evidence exists. With no sources resolvable both
     sides of the toy's disagreement say so, and the banner above says why."""
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
     # The positive control: with the record readable, both sides name their file.
@@ -648,3 +697,227 @@ def test_page_labels_a_slice_of_a_file_rather_than_juxtaposing_the_fragment(tmp_
     # The positive control again, on the same page: the unsliced sibling is
     # untouched by the fragment-only branch.
     assert "notes.md</span> (at #error-behaviour)" in page
+
+
+def test_page_keeps_a_hash_in_the_owners_own_filename_whole(tmp_path):
+    """A `#` in a filename is not the slicer's fragment.
+
+    `intake.py:333` writes a sliced input's `source_path` as
+    `<container>#<json_pointer>`, and a JSON pointer always begins `/`, so a `#`
+    followed by anything else belongs to the name the owner gave the file. Nothing
+    forbids one there.
+
+    Measured on the pre-fix renderer, with the toy's trace input renamed
+    `notes#2.md`: the disagreement's side line read `<span class="file">notes</span>
+    (piece #2.md, at #/spans/1/output)` and the `What we read` listing said `notes`.
+    Two fabrications in the two sections whose whole ask is "did we read the right
+    files" -- a file of that name we never read, and a piece of it that does not
+    exist."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    manifest = json.loads(run.manifest.read_text())
+    trace = next(r for r in manifest["inputs"] if r["kind"] == "trace")
+    original = trace["source_path"]
+    trace["source_path"] = original.replace("trace.json", "notes#2.md")
+    run.manifest.write_text(json.dumps(manifest))
+    page = target_brief_html.render(run)
+    # Both places the name reaches: the listing of what we read, and the side of the
+    # disagreement the trace states. Two, so neither can be the one that passes.
+    assert page.count('<span class="file">notes#2.md</span>') == 2
+    assert "piece #2.md" not in page
+    assert '<span class="file">notes</span>' not in page
+    # The positive control, in the same test: a real slicer fragment on the same path
+    # is still labelled a piece and still collapses to one file, so the clause tells
+    # the two shapes apart rather than switching the labelling off.
+    trace["source_path"] = original + "#/spans/1"
+    run.manifest.write_text(json.dumps(manifest))
+    page = target_brief_html.render(run)
+    assert "(piece #/spans/1, at #/spans/1/output)" in page
+    assert '<span class="file">trace.json</span>' in page
+
+
+def test_page_states_that_it_could_not_place_a_belief_rather_than_leaving_it_blank(
+    tmp_path,
+):
+    """`Provenance.files` empty renders a sentence, not nothing.
+
+    Reached with `01-claims/` *removed* rather than unreadable, which is the case
+    that has no banner over it: `paths.list_dir` returns `[]` for a missing directory,
+    so `source_index` returns `{}` and `_sources_banner` stays silent. Measured
+    pre-fix on exactly this run: five `<dd></dd>` rows and no banner anywhere, so a
+    reader met five beliefs about their system with the space where our evidence goes
+    left empty -- which reads as us having none.
+
+    Saying it is safe in both directions because `world-model-0.1.json`'s
+    `$defs/claim_refs` is `minItems: 1`: an element that conforms cites at least one
+    claim, so an empty `files` can only mean we failed to resolve them."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    # The positive control, on the golden run: the same rows carry a file, so the
+    # sentence below is one this page states only when it cannot name one.
+    assert 'From <span class="file">api.json</span>' in page
+    assert "could not work out which of your files" not in page
+    shutil.rmtree(run.claims_dir)
+    page = target_brief_html.render(run)
+    assert page.count("We could not work out which of your files this came from.") == 5
+    assert "<dd></dd>" not in page
+    # The condition the run is in: no banner fired, which is why the sentence has to
+    # stand on its own rather than point up at one.
+    assert 'class="banner"' not in page
+
+
+def test_page_says_it_has_not_got_far_enough_when_the_record_of_what_it_read_is_absent(
+    tmp_path,
+):
+    """The Absent, non-terse marker -- Ruling 3's sentence, quoted in the module
+    docstring, and reachable only through `_group_a` on a run whose `manifest.json`
+    is absent while the description is readable.
+
+    The review measured it dead under the whole suite: a `raise` in its place, 88
+    passed. The test that looked like its guard asserts `"not got far enough" in
+    page` on an `upto="extract"` run, where that phrase comes from
+    `_description_banner`'s different sentence -- substring-of-message, and the reason
+    this test unlinks the manifest on a *sealed* run instead."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.manifest.unlink()
+    page = target_brief_html.render(run)
+    assert "We have not got far enough to describe this yet." in page
+    # Absent and Malformed are two facts. Neither the Malformed sentence nor the
+    # terse form of either is on this page, so the sentence above is this marker's
+    # and not any other's.
+    assert "could not read it back" not in page
+    assert "see the note at the top of this page" not in page
+    # The positive control: the description is intact and rendered, so one section
+    # says what it has not got to while the rest of the page describes the target.
+    assert "query_tickets.get_ticket" in page
+
+
+def test_page_banners_an_unreadable_description_and_marks_each_section_malformed(
+    tmp_path,
+):
+    """The whole Malformed world-model path: `_description_banner`'s Malformed branch
+    and `_marker`'s terse Malformed branch, both measured dead by the review (a
+    `raise` in either, 35 passed).
+
+    Its sibling at `test_page_states_the_partial_run_once_and_still_shows_every_
+    section` is the Absent half of the same shape, and the two prose sets share no
+    sentence -- which is the global rule that Absent and Malformed are two facts, as
+    a pair of tests rather than as a comment."""
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.world_model.chmod(0o000)
+    try:
+        page = target_brief_html.render(run)
+    finally:
+        run.world_model.chmod(0o644)
+    assert "could not read it back, so the sections below are empty" in page
+    assert "a fault at our end and not a statement about your system" in page
+    assert page.count("Nothing to show here — ") == 5
+    # Not the Absent prose: "yet" is the whole difference between the two terse
+    # markers, and the banner's own sentence differs from the Absent banner's.
+    assert "Nothing to show here yet" not in page
+    assert "not got far enough" not in page
+    # The positive control: `What we read` reads the manifest, which is readable, so
+    # the five above are five sections and not the whole page.
+    assert "notes.md" in page
+
+
+def test_selected_prose_carrying_one_of_our_ids_reaches_the_page_unrewritten(tmp_path):
+    """The sanctioned exception to the two tests above, pinned rather than assumed.
+
+    Two shapes, one test. An id inside prose a stage wrote ships verbatim, because
+    "selected and relabelled, never rewritten" is this feature's constraint and a
+    filter narrow enough to be safe would drop genuine questions. And `subject` --
+    an `ent-... / inv-...` pair in 10 of 12 gaps on run-20260816-172810 -- reaches the
+    page inside `(our reference: ...)`, which is ours by choice: 47 of 49 subjects
+    across the three recordings are the only stable handle a commenting owner can
+    quote back at us, and the label names it as ours rather than passing it off as
+    the target's vocabulary."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    # The control the pair above never had: on a build whose gaps are empty, neither
+    # shape is on the page at all, so what follows is the gap arriving and not the
+    # renderer printing ids of its own accord.
+    assert "our reference" not in page
+    assert "clm-" not in page
+    world_model = json.loads(run.world_model.read_text())
+    world_model["gaps"] = [
+        {
+            "id": "gap-close",
+            "subject": "ent-ticket / inv-close-once",
+            "unknown": "Nothing we read says whether clm-notes-004 still holds after a reopen.",
+            "blocks": [],
+        }
+    ]
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    assert "Nothing we read says whether clm-notes-004 still holds after a reopen." in page
+    assert "(our reference: ent-ticket / inv-close-once)" in page
+
+
+def test_page_heads_an_operation_on_its_handle_when_the_operation_string_is_blank(
+    tmp_path,
+):
+    """`capability.operation` is `minLength: 1`, which admits `" "`: schema-conforming,
+    truthy, and enough to shadow a handle the run did read. Measured pre-fix, the
+    entry headed itself `<dt> </dt><dd>Called as: query_tickets</dd>` -- a blank name
+    where every other empty field in this module is a stated absence.
+
+    `target_brief._rules` stripped for this exact hole one module over, which is the
+    precedent rather than a new rule."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    # The positive control: with a real `operation`, that string heads the entry.
+    assert "<dt>query_tickets.find_tickets</dt>" in page
+    world_model = json.loads(run.world_model.read_text())
+    world_model["capabilities"][0]["operation"] = " "
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    assert "<dt> </dt>" not in page
+    assert "<dt>query_tickets</dt>" in page
+    # And the sibling operation, untouched, still heads itself on its own string --
+    # so the fallback is one entry's and not the whole list collapsing onto handles.
+    assert "<dt>query_tickets.get_ticket</dt>" in page
+
+
+def test_page_drops_a_headline_field_that_holds_only_whitespace(tmp_path):
+    """Three `minLength: 1` strings that admit `" "`. Measured pre-fix, with all
+    three set to one space: `<h1> </h1>`, `<p class="meta">Reached over  .</p>` and an
+    empty `<p> </p>` -- three visible blanks at the top of the page, where the
+    no-name branch exists to say what the page is about instead."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    # The positive controls: the golden headline renders all of what it has.
+    assert "<h1>ticketq</h1>" in page
+    assert '<p class="meta">Reached over mcp.</p>' in page
+    world_model = json.loads(run.world_model.read_text())
+    world_model["target"]["name"] = " "
+    world_model["target"]["interface"] = " "
+    world_model["target"]["notes"] = " "
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    assert "<h1> </h1>" not in page
+    assert "Reached over" not in page
+    assert "<p> </p>" not in page
+    # The fallback the stripped name falls back to, so the `<h1>` is not simply gone.
+    assert "<h1>The system we are describing</h1>" in page
+
+
+def test_page_states_a_field_whose_type_we_did_not_record(tmp_path):
+    """`Field.type` can be `""` on a world model that fails layer 1, which is a model
+    this feature exists to render rather than to reject. Measured pre-fix:
+    `Fields: ticket_id (), queue (string), ...` -- a bare pair of brackets, which
+    reads as a rendering fault rather than as something we did not record, where the
+    sibling outcome path states its absence in words."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    # The positive control: with a type, the type is parenthesised after the name.
+    assert "Fields: ticket_id (integer)," in page
+    world_model = json.loads(run.world_model.read_text())
+    world_model["entities"][0]["fields"][0]["type"] = ""
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    assert "ticket_id ()" not in page
+    # The name still ships, and its typed siblings in the same list are untouched --
+    # so the brackets go and nothing else does.
+    assert "Fields: ticket_id, queue (string)," in page

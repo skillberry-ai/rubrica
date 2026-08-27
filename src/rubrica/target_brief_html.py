@@ -199,12 +199,25 @@ def _provenance(prov) -> str:
     exists to avoid.
     """
     if not prov.files:
-        return ""
+        # Stated, not silent. Measured with `01-claims/` *removed* rather than
+        # unreadable -- `paths.list_dir` returns `[]` for a missing directory, so
+        # `source_index` returns `{}` and no banner fires -- this rendered five
+        # blank `<dd></dd>` rows, and read alone a blank provenance asserts to the
+        # owner that no document of theirs states the sentence above it. That is
+        # what `target_brief._refs`' docstring argues is intolerable.
+        #
+        # The prose is safe in both directions because `world-model-0.1.json`'s
+        # `$defs/claim_refs` is `minItems: 1`: a conforming element always cites at
+        # least one claim, so an empty `files` can only ever mean we failed to
+        # resolve them and never that the element legitimately rests on nothing.
+        # No pointer to the page banner either -- on the path that produces this,
+        # there is no banner to point at.
+        return '<span class="src">We could not work out which of your files this came from.</span>'
     files = ", ".join(f'<span class="file">{esc(f)}</span>' for f in prov.files)
     if prov.single_source:
         text = f"From {files}"
     else:
-        kinds = ", ".join(_kind(esc(k)) for k in prov.kinds)
+        kinds = ", ".join(esc(_kind(k)) for k in prov.kinds)
         text = f"From {len(prov.files)} sources ({kinds}): {files}"
     if prov.disputed:
         text += ' — <span class="disputed">our sources disagree about this</span>'
@@ -222,7 +235,7 @@ def _files_html(files) -> str:
     on a real run. So it is counted here -- an empty monospace span in a comma list
     renders as stray punctuation, and the count is the honest form of the same fact.
     """
-    named = [f for f in files if f]
+    named = [f for f in files if f.strip()]
     missing = len(files) - len(named)
     shown = ", ".join(f'<span class="file">{esc(f)}</span>' for f in named)
     if not missing:
@@ -312,9 +325,17 @@ def _side_html(refs, label: str) -> str:
         # is dropped -- `_shorten` keeps the fragment precisely because it is the
         # only thing telling 71 slices of one capture apart.
         base, sep, piece = ref.path.partition("#")
+        # Only a JSON pointer is the slicer's fragment. `intake.py:333` writes a
+        # slice as `<container>#<json_pointer>`, and a pointer always begins `/` --
+        # which is why the measurements above are `#/10` and `#/126`. Without that
+        # clause a `#` in the owner's own filename was read as a slice: the review
+        # measured `notes#2.md` rendering as `notes` followed by `(piece #2.md, at
+        # #error-behaviour)`, which names a file we never read and a piece that does
+        # not exist. Nothing forbids a `#` in a filename, so the guard is the fix.
+        #
         # A path that is *only* a fragment has no file to separate it from, so it
         # stays verbatim rather than being labelled as a piece of nothing.
-        sliced = bool(sep and base)
+        sliced = bool(sep and base and piece.startswith("/"))
         where = f'<span class="file">{esc(base if sliced else ref.path)}</span>'
         # One parenthesis, not two in a row: the piece and the locator are both
         # "where inside your material this is", and reading them as one clause is
@@ -462,7 +483,12 @@ def _operations(run: RunPaths):
         # own tooling calls, where the title is ours composed from two fields. It
         # goes only when `operations` has already fallen back to the sentence for
         # want of a `binding.tool`, which is when the two are the same string.
-        title = op.sentence or op.handle
+        # `.strip()` on both: `capability.operation` is `minLength: 1`, which admits
+        # `" "`, and an unstripped space is truthy -- measured, it shadowed
+        # `query_tickets` and headed the entry with a blank `<dt> </dt>` while every
+        # other empty field in this module is a stated absence.
+        # `target_brief._rules` stripped for this exact hole one module over.
+        title = op.sentence.strip() or op.handle.strip()
         called = f"<dd>Called as: {esc(op.handle)}</dd>" if op.handle and op.handle != title else ""
         blocks.append(
             f"<dt>{esc(title)}</dt>{called}{params}{outcomes}<dd>{_provenance(op.provenance)}</dd>"
@@ -488,7 +514,14 @@ def _data_types(run: RunPaths):
             # two things called a Ticket.
             rows.append(f'<dd>Held as: <span class="ident">{esc(kind.collection)}</span></dd>')
         if kind.fields:
-            fields = ", ".join(f"{esc(f.name)} ({esc(f.type)})" for f in kind.fields)
+            # The type is parenthesised only when there is one. Measured, an empty
+            # `type` rendered `ticket_id ()`, where the sibling outcome path states
+            # its absence -- and a bare pair of brackets reads as a rendering fault
+            # rather than as something we did not record.
+            fields = ", ".join(
+                f"{esc(f.name)} ({esc(f.type)})" if f.type.strip() else esc(f.name)
+                for f in kind.fields
+            )
             rows.append(f"<dd>Fields: {fields}</dd>")
         for relation in kind.relations:
             rows.append(f"<dd>Related to: {esc(relation)}</dd>")
@@ -607,9 +640,14 @@ def render(run: RunPaths) -> str:
     # the brief's draft used: measured, that is `run-20260827-115248`, which is
     # rubrica's identifier for the work rather than anything the recipient has seen
     # -- and a page whose `<h1>` is that has handed them the wrong subject.
-    name = head.name if known else ""
-    interface = head.interface if known else ""
-    notes = head.notes if known else ""
+    name = head.name.strip() if known else ""
+    # `.strip()` on all three: the schema's `minLength: 1` admits `" "`, and
+    # measured, a whitespace-only `interface` rendered `Reached over  .`, a
+    # whitespace-only `notes` an empty `<p> </p>`, and a whitespace-only `name` an
+    # `<h1>` holding one space where the no-name branch says what the page is about.
+    # Stripping what is displayed is not rewriting it.
+    interface = head.interface.strip() if known else ""
+    notes = head.notes.strip() if known else ""
     # The subject of every sentence about the target, so one branch decides it
     # rather than each sentence guessing.
     subject = f"<strong>{esc(name)}</strong>" if name else "your system"
