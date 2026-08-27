@@ -712,9 +712,15 @@ def test_a_real_write_batches_partition_reports_nothing(tmp_path):
         {
             "schema_version": "0.1",
             "denominator": {"capability_cells": caps * ocs, "goals": goals, "version": 1},
+            # Bound, because closable_holes enumerates DRIVABLE cells: unbound
+            # capabilities leave the partition holding the two goals alone, which is
+            # a single batch and cannot show the cell-only batch this test exists to
+            # produce. The binding also keeps `capability_cells` above honest at
+            # caps * ocs.
             "capabilities": [
                 {
                     "id": f"cap-{c}",
+                    "binding": {"tool": f"tool_{c}", "fixed_args": {}},
                     "outcome_classes": [{"id": f"cap-{c}-oc-{o}"} for o in range(ocs)],
                 }
                 for c in range(caps)

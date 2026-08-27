@@ -47,6 +47,27 @@ def _run_with_world(tmp_path, world: dict) -> RunPaths:
     return run
 
 
+def _run_with_capabilities(tmp_path, *, capabilities, goals) -> RunPaths:
+    """A run whose world model declares exactly `capabilities` and `goals`.
+
+    Built on `_world()` rather than beside it so schema_version and the
+    denominator shape stay one definition -- the argument `_score_run_with`
+    below makes for the same reason. The frozen count is recomputed through
+    `refs.drivable_cells` because `closable_holes` never reads that field, but a
+    fixture whose denominator disagrees with its own capability list teaches the
+    narrowed arithmetic wrong to the next reader.
+    """
+    world = _world(caps=1, ocs=1, goals=0)
+    world["capabilities"] = capabilities
+    world["goals"] = goals
+    world["denominator"] = {
+        "capability_cells": len(refs.drivable_cells(world)),
+        "goals": len(goals),
+        "version": 1,
+    }
+    return _run_with_world(tmp_path, world)
+
+
 def test_round_one_treats_every_cell_and_goal_as_open(tmp_path):
     # No coverage report exists in round 1, which is the normal shape rather
     # than a missing file: rb-propose's own Inputs section says to treat every
@@ -59,6 +80,53 @@ def test_round_one_treats_every_cell_and_goal_as_open(tmp_path):
         "cell:cap-1/cap-1-oc-1",
         "goal:goal-0",
     ]
+
+
+def test_closable_holes_does_not_offer_an_undrivable_cell_on_round_one(tmp_path):
+    """Round 1 enumerates the worklist from the world model, so an undrivable cell
+    became a hole rb-propose was told to close -- and rb-instantiate could not
+    honestly seed. rb-reconcile-capabilities' own step already says a scenario on
+    an unbound capability "costs a shipped test".
+    """
+    run = _run_with_capabilities(
+        tmp_path,
+        capabilities=[
+            {
+                "id": "cap-bound",
+                "binding": {"tool": "t", "fixed_args": {}},
+                "outcome_classes": [{"id": "oc-ok"}],
+            },
+            {"id": "cap-unbound", "outcome_classes": [{"id": "oc-ok"}]},
+        ],
+        goals=[{"id": "g-1", "expected_hop_depths": [1]}],
+    )
+
+    assert rounds.closable_holes(run) == ["cell:cap-bound/oc-ok", "goal:g-1"]
+
+
+def test_closable_holes_still_refuses_a_capability_with_no_outcome_classes(tmp_path):
+    """The door stays wide. `_declared_cells` raises on a capability missing
+    outcome_classes -- measured: such a capability contributed zero cells in
+    silence, and a world model of only those made write_batches return None,
+    manufacturing the loop's normal terminal state out of a malformed artifact.
+    Filtering by binding must not skip that check for an unbound capability, so
+    the filter goes on the enumeration and never on the door.
+    """
+    run = _run_with_capabilities(
+        tmp_path,
+        capabilities=[
+            {
+                "id": "cap-bound",
+                "binding": {"tool": "t", "fixed_args": {}},
+                "outcome_classes": [{"id": "oc-ok"}],
+            },
+            {"id": "cap-unbound"},  # no outcome_classes at all
+        ],
+        goals=[],
+    )
+
+    with pytest.raises(UsageError, match="outcome_classes"):
+        rounds.closable_holes(run)
 
 
 def test_later_rounds_take_only_the_not_yet_attempted_holes(tmp_path):
@@ -499,9 +567,22 @@ def test_duplicate_cells_in_the_world_model_cost_one_batch_slot(tmp_path):
         {
             "schema_version": "0.1",
             "goals": [],
+            # Bound, for _world()'s reason: the round-1 worklist enumerates
+            # DRIVABLE cells, so an unbound pair would collapse to nothing and this
+            # test would pass on the empty list rather than on the dedupe it is
+            # about. The duplicate id is the point and survives the binding --
+            # drivable_cells is a set of pairs, so it collapses them the same way.
             "capabilities": [
-                {"id": "cap-0", "outcome_classes": [{"id": "oc-0"}, {"id": "oc-0"}]},
-                {"id": "cap-0", "outcome_classes": [{"id": "oc-0"}]},
+                {
+                    "id": "cap-0",
+                    "binding": {"tool": "tool_0", "fixed_args": {}},
+                    "outcome_classes": [{"id": "oc-0"}, {"id": "oc-0"}],
+                },
+                {
+                    "id": "cap-0",
+                    "binding": {"tool": "tool_0", "fixed_args": {}},
+                    "outcome_classes": [{"id": "oc-0"}],
+                },
             ],
         },
     )
@@ -543,9 +624,14 @@ def test_a_string_scenarios_array_cannot_produce_a_projection_that_does_not_bind
         {
             "schema_version": "0.1",
             "goals": [],
+            # Bound, for _world()'s reason: the 86 closable holes asserted below
+            # are DRIVABLE cells, and unbound capabilities would make that count 0 --
+            # which is the state this test's whole point is to distinguish a real
+            # projection from.
             "capabilities": [
                 {
                     "id": f"cap-{i:02d}",
+                    "binding": {"tool": f"tool_{i:02d}", "fixed_args": {}},
                     "outcome_classes": [{"id": f"cap-{i:02d}-oc-0"}],
                 }
                 for i in range(86)
@@ -1211,6 +1297,62 @@ def test_every_declared_cell_appears_even_with_no_scenarios():
     ]
 
 
+def test_capability_matrix_enumerates_only_drivable_cells():
+    """pct has to divide by the same number the denominator holds, or one run
+    carries two disagreeing denominators -- the flaw in issue 17's own suggested
+    patch, which narrowed the seal and left the matrix at 56.
+    """
+    world = {
+        "capabilities": [
+            {
+                "id": "cap-bound",
+                "binding": {"tool": "t", "fixed_args": {}},
+                "outcome_classes": [{"id": "oc-ok"}, {"id": "oc-empty"}],
+            },
+            {"id": "cap-unbound", "outcome_classes": [{"id": "oc-ok"}]},
+        ],
+        "goals": [],
+    }
+    matrix = rounds.capability_matrix(world, [])
+
+    assert matrix["total"] == 2
+    assert {(c["capability_id"], c["outcome_class_id"]) for c in matrix["cells"]} == {
+        ("cap-bound", "oc-ok"),
+        ("cap-bound", "oc-empty"),
+    }
+
+
+def test_capability_matrix_pct_divides_by_drivable_cells():
+    """The arithmetic the whole issue is about: one covered drivable cell out of
+    one is 100%, not 50% because an undrivable cell sits beside it.
+    """
+    world = {
+        "capabilities": [
+            {
+                "id": "cap-bound",
+                "binding": {"tool": "t", "fixed_args": {}},
+                "outcome_classes": [{"id": "oc-ok"}],
+            },
+            {"id": "cap-unbound", "outcome_classes": [{"id": "oc-ok"}]},
+        ],
+        "goals": [],
+    }
+    scenarios = [
+        {
+            "id": "s-1",
+            # `active`, not the brief's `accepted`: refs.OPEN_STATUSES is
+            # {proposed, active}, so an `accepted` scenario is dead for coverage
+            # and this test would have measured 0 covered of 1 -- passing on the
+            # total while saying nothing about pct.
+            "status": "active",
+            "capability_refs": [{"capability_id": "cap-bound", "outcome_class_id": "oc-ok"}],
+        }
+    ]
+    matrix = rounds.capability_matrix(world, scenarios)
+
+    assert (matrix["covered"], matrix["total"], matrix["pct"]) == (1, 1, 1.0)
+
+
 def test_a_goal_row_carries_only_live_scenarios():
     # Method step 5: leaving a duplicate in a goal row credits the goal with a
     # depth no shipped test reaches.
@@ -1757,24 +1899,23 @@ def test_seal_score_leaves_a_score_authored_hole_on_an_undrivable_cell_alone(tmp
 
 def test_seal_score_does_not_call_a_score_hole_on_an_undrivable_cell_undeclared(tmp_path):
     """seal_score's `holed - every_row` check says "the world model does not
-    declare" that ref. Once the matrix enumerates drivable cells only, an
+    declare" that ref. `capability_matrix` enumerates drivable cells only, so an
     undrivable cell is absent from the matrix while the world model DOES declare
-    it -- so without the `every_row` extension the message is false and the
+    it -- and without the `every_row` extension the message is false and the
     finding blocks a document that is correct.
 
-    **This assertion cannot fail as the pipeline stands**, and that is recorded
-    here rather than left for a reader to discover: `capability_matrix` still
-    enumerates every declared cell, so cap-unbound/oc-ok is in `cap["cells"]` and
-    lands in `every_row` whether or not the extension exists. It passes for a
-    reason unrelated to what it guards, which is this repo's named weakness class,
-    so it is a guard for the state the next task creates and not for this one.
+    **This guard is live, and it was not when it was written.** That history is
+    recorded here rather than left for a reader to discover: the matrix still
+    enumerated every declared cell then, so cap-unbound/oc-ok landed in `every_row`
+    whether or not the extension existed, and this docstring said the assertion
+    could not fail until the matrix narrowed. The matrix has since narrowed, so the
+    wide-matrix reason it used to pass for is gone.
 
-    Measured rather than reasoned: with `capability_matrix` narrowed to
-    `refs.drivable_cells` in place and `every_row = scored_rows | undrivable_refs`
-    cut back to `scored_rows`, this test failed with `hole names
-    cell:cap-unbound/oc-ok, which the world model does not declare` -- the exact
-    false message above. Both mutations were reverted; nothing in the tree carries
-    them.
+    Measured rather than reasoned, and measured again against the narrowed matrix:
+    with `every_row = scored_rows | undrivable_refs` cut back to `scored_rows`, this
+    test fails with `hole names cell:cap-unbound/oc-ok, which the world model does
+    not declare` -- the exact false message above. The mutation was reverted;
+    nothing in the tree carries it.
     """
     run = _score_run_with(
         tmp_path,

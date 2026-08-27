@@ -196,8 +196,11 @@ def closable_holes(run: RunPaths) -> list[str]:
 
     Round 1 has no coverage report, and that is the normal shape rather than a
     missing file -- rb-propose's Inputs section says so outright -- so every
-    capability x outcome-class cell and every goal is open by default and the
-    worklist is enumerated from the world model.
+    DRIVABLE capability x outcome-class cell and every goal is open by default and
+    the worklist is enumerated from the world model. Drivable, not declared: a
+    capability with no binding.tool cannot be closed by proposing at all, and from
+    round 2 the same cell arrives as an `unreachable` hole this function already
+    filters out, so the two branches would otherwise disagree on round 1 alone.
 
     From round 2 the report's holes are the worklist, filtered to
     `not_yet_attempted`. The other three reasons are not closable by proposing,
@@ -215,8 +218,29 @@ def closable_holes(run: RunPaths) -> list[str]:
         run.world_model, read_json(run.world_model), ("capabilities", "goals")
     )
     if not run.coverage_latest.exists():
+        # _declared_cells is called unfiltered on purpose: it is the door that
+        # refuses a capability with no outcome_classes, and an UNBOUND capability
+        # missing them is exactly as malformed as a bound one. Filter the
+        # enumeration afterwards, so narrowing the worklist cannot narrow the check.
+        #
+        # And called BEFORE drivable_cells, which is why it is bound to a name here
+        # rather than left inline as the comprehension's iterable: this door turns a
+        # malformed `capabilities` or `outcome_classes` into a UsageError naming the
+        # world model, while drivable_cells is a bare comprehension over the same
+        # keys. Measured with the two the other way round -- `"capabilities": 7` came
+        # back as a TypeError out of drivable_cells instead of the "is not an array"
+        # refusal, which from a code step names the run root and not the artifact
+        # carrying the defect.
+        declared = _declared_cells(run, world)
+        drivable = drivable_cells(world)
         refs: list[str] = [
-            f"cell:{cap_id}/{oc_id}" for cap_id, oc_id in _declared_cells(run, world)
+            f"cell:{cap_id}/{oc_id}"
+            for cap_id, oc_id in declared
+            # An undrivable cell is not closable by proposing: rb-instantiate could
+            # not seed it and emit would drop the test, so offering it spends a
+            # round to produce nothing. This is the same judgment the coverage
+            # branch below already makes for `unreachable`.
+            if (cap_id, oc_id) in drivable
         ]
         refs.extend(
             f"goal:{goal['id']}"
@@ -821,15 +845,27 @@ def capability_matrix(world: dict, scenarios: list[dict]) -> dict:
       folded and the rejected, while `covered` is true only if one of them is
       still live. The asymmetry is deliberate: a cell claimed only by scenarios
       that will never ship is a hole again.
+    * Enumerate the DRIVABLE cells, not every declared one. A capability with no
+      binding.tool cannot be driven through the target -- emit.bindings drops it --
+      so a row for it is a scored target no emitted test could hit, and pct would
+      divide by a number the denominator does not hold. seal_score records those
+      cells as `unreachable` holes instead, so the report still accounts for all of
+      them. Measured on run-20260827-070444: 37 of 56 rows were undrivable.
 
     Pure, so it cannot refuse a malformed world model -- it has no path to name.
     `_declared_cells` is that door, and `seal_score` calls it first.
     """
     live_statuses = _live_statuses()
     live = {s["id"] for s in scenarios if s.get("status") in live_statuses}
+    # Computed once outside the loop rather than re-derived per cell: it is a set
+    # comprehension over the whole capability list, and the membership test below
+    # is what the narrowing is.
+    drivable = drivable_cells(world)
     cells = []
     for cap in world.get("capabilities", []):
         for oc in cap.get("outcome_classes", []):
+            if (cap["id"], oc["id"]) not in drivable:
+                continue
             claimants = sorted(
                 s["id"]
                 for s in scenarios
@@ -1240,9 +1276,11 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
     # declare them -- they are simply not scored rows. Without this, the moment the
     # matrix stops scoring an undrivable cell a score-authored hole on it is
     # refused with a message that is false, and a correct document never gets
-    # written; measured under exactly that narrowing, and the test that pins it is
+    # written; measured under exactly that narrowing before it landed, and the test
+    # that pins it is
     # test_seal_score_does_not_call_a_score_hole_on_an_undrivable_cell_undeclared,
-    # whose docstring records that it cannot fail until then.
+    # which the narrowing armed -- its docstring records both the measurement and
+    # the round it spent unable to fail.
     #
     # `uncovered` deliberately does NOT grow the same way: only a drivable row has
     # to be justified by a hole of score's, and the undrivable ones are justified
@@ -1267,10 +1305,14 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
     # matrix actually scores can earn it. Written with `every_row`, every ref the
     # check above now accepts as declared comes straight back out of this one as
     # "covered" -- measured, and it is why every_row could not simply be widened
-    # in place. No `- undrivable_refs` term beside it: once the matrix scores
-    # drivable rows only the two sets are disjoint and it would be dead, and while
-    # the matrix is still wide it would suppress a finding that is true, since a
-    # wide matrix really does mark the cell covered when a scenario credits it.
+    # in place. No `- undrivable_refs` term beside it: the matrix scores drivable
+    # rows only, so the two sets are disjoint and the term would be dead. It would
+    # also have been wrong to add while the matrix was still wide, where it would
+    # have suppressed a finding that was true -- measured on run-20260827-070444
+    # with the wide matrix in place, a live scenario crediting
+    # cell:cap-a2a-http-server/oc-a2a-server-error earned this finding against
+    # score's own `unreachable` hole on the same cell, because the wide matrix
+    # really did mark it covered. Narrowing the matrix is what ended that.
     for ref in sorted(holed & (scored_rows - uncovered)):
         findings.append(
             Finding(
