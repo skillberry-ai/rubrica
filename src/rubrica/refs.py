@@ -261,8 +261,13 @@ def drivable_cells(world: dict) -> set[tuple[str, str]]:
     cell in the denominator", which is a narrower question with a different right
     answer.
 
-    Keyed on `binding.tool` because that is exactly the predicate emit.bindings
-    applies (emit.py:60), so the denominator equals what the pipeline can ship.
+    Keyed on `binding.tool`, one notch tighter than `emit.bindings`' truthiness
+    test on the binding object (emit.py:66) because `emit.call_spec` then reads
+    `binding["tool"]` unguarded (emit.py:79) -- so the denominator equals what the
+    pipeline can actually ship, not merely what it retains. The two predicates
+    disagree on exactly one shape, a binding present with no `tool`, and do not
+    "align" them: that shape crashes call_spec, so it belongs outside the
+    denominator rather than inside the suite.
     Measured on run-20260827-070444: 24 capabilities, 5 bound, 37 of 56 cells
     counted against a suite that could never contain them, with both gate layers
     exiting 0.
