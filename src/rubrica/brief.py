@@ -45,12 +45,16 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   that wrote no readable accounting gets a line too, saying so: a pass silently
   missing from a block of four is the anomaly a reader is at this gate to notice.
   The capabilities the coverage denominator *excludes* are listed here too, and
-  this is the only place the excluded *set* is reported -- and the only report of
-  it before a gate that can still act on it. `emit` names a single unbound
-  capability far later and per instance (emit.py:99-107, documented in
-  world-model-0.1.json), by which point the run is past every human gate. Issue 17
-  narrowed `denominator.capability_cells` to the cells a scenario can be driven
-  through, and the finding that was to have accompanied it miscategorised its own
+  what makes this listing matter is its timing rather than any uniqueness: the
+  same exclusion is reported twice more, and both are too late to act on.
+  `seal_score` writes one `unreachable` hole per undrivable cell into the round's
+  coverage document (rounds.py:1317-1327), which a reader meets at gate 2, and
+  `emit` names a single unbound capability per instance at stage 06
+  (emit.py:99-107, documented in world-model-0.1.json). Gate 1 precedes propose,
+  so a reader who does not act here has the loop spend every round against the
+  narrowed denominator before either of those two says a word. Issue 17 narrowed
+  `denominator.capability_cells` to the cells a scenario can be driven through,
+  and the finding that was to have accompanied it miscategorised its own
   condition -- `check-refs` exit 1 buys one stage re-dispatch, which cannot add a
   binding `rb-reconcile-capabilities` was told not to guess. Both numbers print
   either way, for the sweep's reason. Nothing here classifies *why* a binding is
@@ -113,10 +117,13 @@ SLICES_HEADER = "Slices the triage family read"
 SPLIT_HEADER = "Groups split across more than one slice"
 
 # Gate 1's excluded-capability section header, named for the three above's reason:
-# it is the anchor a reader and a test both scope to. This section is the only
-# report of the excluded *set*, and the only report of it at a gate that can still
-# act -- `emit` names one unbound capability at a time, far later (emit.py:99-107).
-# The design's paired `check-refs` finding was removed in 11a6c25, because
+# it is the anchor a reader and a test both scope to. What this section reports is
+# reported twice more and both times too late -- `seal_score` writes one
+# `unreachable` hole per undrivable cell (rounds.py:1317-1327), read at gate 2, and
+# `emit` names one capability per instance at stage 06 (emit.py:99-107) -- so what
+# this listing has over both is that gate 1 precedes propose, and a reader here can
+# still act. That timing is also why the design's paired `check-refs` finding was
+# removed in 11a6c25:
 # `check-refs` runs before this gate and its exit 1 tells the orchestrator to spend
 # its one repair attempt on a stage, which cannot add a binding a pass was told not
 # to guess.
@@ -325,33 +332,47 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
             f"{len(unbound)} are excluded below"
         )
     else:
-        # The loudest thing this brief says, and the volume is the point. With no
-        # drivable cell, round 1's worklist is empty and `propose-batches` exits 0
-        # printing "no closable holes" -- which is also what a genuinely converged
-        # round prints. Gate 1 precedes propose, so a reader here is the only
-        # person who can still tell those two apart, and a number in a table is
-        # not enough to make them look.
-        lines.append(
-            f"  *** NOTHING IS DRIVABLE: 0 of {len(capabilities)} capabilities declare "
-            "binding.tool. ***"
-        )
+        # The loudest thing this brief says, and the volume is the point: gate 1
+        # precedes propose, so a reader here is the only person who can still tell a
+        # world model with no drivable surface from a run that converged, and a
+        # number in a table is not enough to make them look.
+        #
         # Phrased off the binding count rather than off the cell count, which the
         # line below may not have: `_cell_counts` returns None on a malformed
         # document, and "the denominator is 0 cells" would then be a number this
         # report does not have. "No capability is bound" is computable either way,
         # and it is the premise the rest of the sentence needs.
         #
-        # Two fenced lines of under 100 characters rather than one of 215: a banner
-        # that wraps stops being a banner. At 80 or 120 columns the long version put
-        # its closing `***` mid-paragraph and read as prose from the second visual
-        # line down, which costs exactly the loudness these two lines exist for.
+        # The "no closable holes" clause is conditional, and measured. With nothing
+        # bound and `goals: []`, `propose-batches` prints "no closable holes: there
+        # is no propose round to dispatch" and exits 0 -- the loop's normal terminal
+        # state reached from an entirely undrivable world model. But goal holes are
+        # closable independently of any binding: on the same world model with the
+        # toy's two goals restored, `propose-batches` wrote `02-batches/round-1.json`
+        # and the loop continued, proposing against goals with no capability surface
+        # underneath. Both readings are bad and only the second is survivable, so the
+        # rendering must not assert the halt as a certainty.
+        #
+        # Each line stays under 100 characters: a banner that wraps stops being a
+        # banner. Measured at 215 on the first draft, where the closing `***` landed
+        # mid-paragraph at 80 and 120 columns and everything after the first visual
+        # line read as prose -- which costs exactly the loudness these lines exist
+        # for. How the warning splits across them is editorial; the fence is not.
         lines.append(
-            "  *** With nothing bound, round 1 has no closable holes and propose-batches "
-            "exits 0 saying so. ***"
+            f"  *** NOTHING IS DRIVABLE: 0 of {len(capabilities)} capabilities declare "
+            "binding.tool. ***"
         )
         lines.append(
-            "  *** No drivable surface at all: NOT a converged run, and the suite it "
-            "leads to is empty. ***"
+            "  *** No cell is drivable, so no scenario can exercise a capability against "
+            "the target. ***"
+        )
+        lines.append(
+            '  *** If nothing else is closable either, propose-batches exits 0 with "no '
+            'closable holes". ***'
+        )
+        lines.append(
+            "  *** That is NOT a converged run: the suite it leads to has no capability "
+            "coverage. ***"
         )
 
     counts = _cell_counts(world)

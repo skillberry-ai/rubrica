@@ -619,15 +619,18 @@ partial carrying an accounting at all says so instead.
 
 Gate 1 also lists **the capabilities the coverage denominator excludes** — every
 capability declaring no `binding.tool`, with the cells it would have added, its
-`operation`, and the inputs whose claims it rests on. This is the only place the
-excluded **set** is reported, and the only report of it before a gate that can
-still act on it — `emit` names a single unbound capability far later and per
-instance, by which point every human gate is behind the run.
-`denominator.capability_cells` counts the cells a scenario can actually be driven
-through, and the `check-refs` finding that was to have accompanied that narrowing
-was removed for miscategorising its own condition — a `1` from `check-refs` buys
-one stage re-dispatch, and no re-dispatch adds a binding
-`rb-reconcile-capabilities` is told to leave off rather than guess.
+`operation`, and the inputs whose claims it rests on. Its timing is what makes it
+matter, not uniqueness: the same exclusion surfaces twice more, and both are too
+late to act on. `score-seal` writes one `unreachable` hole per undrivable cell into
+the round's coverage document, which a reader meets at gate 2, and `emit` names a
+single unbound capability per instance at stage 06. Gate 1 precedes propose, so a
+reader who does not act here spends every round of the loop against the narrowed
+denominator before either of those says a word. `denominator.capability_cells`
+counts the cells a scenario can actually be driven through, and the `check-refs`
+finding that was to have accompanied that narrowing was removed for
+miscategorising its own condition — a `1` from `check-refs` buys one stage
+re-dispatch, and no re-dispatch adds a binding `rb-reconcile-capabilities` is told
+to leave off rather than guess.
 Both numbers print either way, on the sweep's argument: "all N capabilities are
 drivable" is a strong claim, and rendering it as silence hides it. Nothing here
 says *why* a binding is absent — on the one run this was measured against the
@@ -638,8 +641,12 @@ the citing inputs are printed and the grouping is left to the reader. The remedy
 is named, because a reader at this gate is the last person who can act on it: add
 `binding.tool` and `binding.fixed_args`, or accept the reduced surface and record
 that decision. A world model in which *nothing* is drivable is called out
-separately and loudly, since it reaches `propose-batches` as an empty worklist and
-prints the same "no closable holes" a genuinely converged round does.
+separately and loudly, in a fenced banner: with no binding anywhere and no goal
+left to close, `propose-batches` prints the same `no closable holes` a genuinely
+converged round prints and exits 0, and gate 1 is the last place a human can tell
+those two apart. The banner states that condition rather than asserting the halt,
+because a goal hole is closable with no binding anywhere — an all-unbound world
+model with goals keeps proposing, against no capability surface at all.
 
 Required: `--run RUN`, `--gate {0,1,2,3}`.
 

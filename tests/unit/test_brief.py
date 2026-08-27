@@ -1271,13 +1271,17 @@ def test_gate_zero_reports_an_unreadable_dispositions_directory_as_a_broken_run(
 # --- Gate 1: the capabilities the denominator excludes ------------------------
 #
 # Issue 17 narrowed `denominator.capability_cells` to the cells a scenario can
-# actually be driven through, and this listing is the *only* place an excluded
-# capability is ever reported: the spec's paired `check-refs` finding was removed
-# in 11a6c25 because `check-refs` runs before gate 1, its exit 1 means "a
-# repairable stage defect, spend the one repair attempt", and an unbound
-# capability is not repairable by re-dispatch -- so the finding halted correct
-# runs before the gate it was meant to be read at. `gate-brief` is a report, not
-# a gate, which is why every test below also pins exit 0.
+# actually be driven through, and this listing is the last report of an excluded
+# capability a human can still act on -- not the only one. `seal_score` writes an
+# `unreachable` hole per undrivable cell (rounds.py:1317-1327) and `emit` names one
+# capability per instance (emit.py:99-107), but the first is read at gate 2 and the
+# second at stage 06, by which point the loop has already spent its rounds against
+# the narrowed denominator. The spec's paired `check-refs` finding was removed in
+# 11a6c25 because `check-refs` runs before gate 1, its exit 1 means "a repairable
+# stage defect, spend the one repair attempt", and an unbound capability is not
+# repairable by re-dispatch -- so the finding halted correct runs before the gate it
+# was meant to be read at. `gate-brief` is a report, not a gate, which is why every
+# test below also pins exit 0.
 
 
 def _unbound_capabilities() -> list[dict]:
@@ -1337,15 +1341,16 @@ def _unbound_capabilities() -> list[dict]:
 def _with_pyproject_claims(run: RunPaths) -> None:
     """One extra input asserting the claim `cap-keycloak` rests on.
 
-    A new input rather than one of the toy's three, because the citing input is
-    the only mechanical clue this listing can offer about *why* a binding is
-    absent: on run-20260827-070444, 10 of the 19 excluded capabilities cite
-    `pyproject-toml` and 4 of those cite nothing else -- and all 4 are dependency
-    declarations read as target behaviour rather than surfaces the target has,
-    `cap-keycloak` among them, which is why it is this fixture's row. A fixture whose
-    unbound capability cited the same input as the bound ones could not tell a
-    rendering that resolves each claim to its input from one that prints a
-    constant.
+    A new input rather than one of the toy's three, because the citing input is the
+    one clue about *why* a binding is absent that this listing does not take on
+    trust: the `operation` beside it is prose a reconcile pass wrote, while the
+    input is resolved from `01-claims/` at read time. On run-20260827-070444, 10 of
+    the 19 excluded capabilities cite `pyproject-toml` and 4 of those cite nothing
+    else -- and all 4 are dependency declarations read as target behaviour rather
+    than surfaces the target has, `cap-keycloak` among them, which is why it is this
+    fixture's row. A fixture whose unbound capability cited the same input as the
+    bound ones could not tell a rendering that resolves each claim to its input from
+    one that prints a constant.
     """
     write_json(
         run.claims("pyproject-toml"),
@@ -1387,10 +1392,20 @@ def _unbound_run(tmp_path) -> RunPaths:
 def _wholly_unbound_run(tmp_path) -> RunPaths:
     """A schema-valid world model in which *nothing* is drivable.
 
-    Not a hypothetical: after the narrowing this world model yields an empty
-    round-1 worklist, so `propose-batches` exits 0 printing "no closable holes"
-    -- the loop's normal terminal state. Gate 1 precedes propose, so this listing
-    is the only thing that shows a human what happened.
+    Not a hypothetical, and measured on this fixture rather than reasoned. It keeps
+    the toy's two goals, and goal holes are closable with no binding anywhere: run
+    `propose-batches --round 1` against it and it writes `02-batches/round-1.json`
+    and the loop continues, proposing against goals with no capability surface
+    underneath. Drop the goals (`goals: []`, `denominator.goals: 0`, still
+    schema-valid) and the same run prints "no closable holes: there is no propose
+    round to dispatch" and exits 0 -- the loop's normal terminal state, reached from
+    an entirely undrivable world model.
+
+    Gate 1 precedes propose, which is what makes the listing worth reading here
+    rather than later: in the halting case nothing downstream is ever written, so no
+    coverage document carries the `unreachable` holes and `emit` never runs. That is
+    a claim about that case, not about every run -- with goals present, gate 2's
+    coverage document does report the same cells.
     """
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     _with_pyproject_claims(run)
@@ -1464,10 +1479,14 @@ def test_gate_one_says_so_when_every_capability_is_drivable(tmp_path):
 
 
 def test_gate_one_makes_a_wholly_undrivable_world_model_impossible_to_miss(tmp_path):
-    """The zero-drivable case reaches `propose-batches` as "no closable holes",
-    which is also what a genuinely converged round prints. A reader at gate 1 is
-    the only person who can still tell those apart, so the rendering must not let
-    the distinction sit inside a table of counts."""
+    """With no binding anywhere and nothing else left to close, `propose-batches`
+    prints the same "no closable holes" a genuinely converged round prints. A reader
+    at gate 1 is the last one who can tell those apart, so the rendering must not
+    let the distinction sit inside a table of counts.
+
+    The condition is stated rather than the halt asserted, and `_wholly_unbound_run`
+    records why: this fixture's own goals keep the loop going, so a rendering that
+    promised the halt would be wrong on the fixture it is measured against."""
     run = _wholly_unbound_run(tmp_path)
     section = _section(brief.gate_brief(run, 1), brief.EXCLUDED_HEADER)
 
@@ -1476,7 +1495,13 @@ def test_gate_one_makes_a_wholly_undrivable_world_model_impossible_to_miss(tmp_p
     # reword goes red for no reason. The fence is the rendering decision under
     # test, so it is what the assertion holds.
     banner = [line for line in section.splitlines() if line.strip().startswith("***")]
-    assert len(banner) == 3, f"expected three fenced lines, got {banner}"
+    # `>= 2` rather than `== 3`: how many lines the warning takes is the same
+    # editorial choice the comment below already concedes, and a four-line split
+    # (better at 80 columns) or a two-line merge under 100 would go red for no
+    # requirement's sake. The alarm has to lead and the rest has to follow it, which
+    # is what two lines is the floor for; the per-line fence and width assertions
+    # below carry the rest of the requirement.
+    assert len(banner) >= 2, f"expected the alarm and at least one line under it, got {banner}"
 
     loud, *follow = banner
     # The one phrase that IS pinned, deliberately: the requirement is words a reader
