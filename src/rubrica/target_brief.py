@@ -110,6 +110,44 @@ def _shorten(path: str, prefix: str) -> str:
     return base + sep + fragment
 
 
+def _file_and_piece(path: str) -> tuple[str, str]:
+    """One recorded source path as the file it names and the piece inside it.
+
+    The one home for the sliced-path rule, because this page had three call sites
+    for it and only two spellings: `inputs_read` and `target_brief_html._side_html`
+    each carried the clause, `_taken` carried none, and the site with none shipped
+    `We went with traces_parsec-agent-metrics_20260713_115226.json#/11.` -- three
+    of the 25 resolution lines on `run-20260826-090456`, each naming a path the
+    owner cannot open, while `_side_html` spelled the same source correctly two
+    paragraphs above it on the same page. A document asking somebody whether it is
+    true must not spell one of their files two ways.
+
+    `piece` carries its `#` and is `""` unless the path is sliced, so a caller that
+    labels the piece needs no second parse. Only a JSON pointer counts as one:
+    `intake.py:333` writes a sliced input's `source_path` as
+    `<container>#<json_pointer>` and a pointer always begins `/`, so a `#` anywhere
+    else belongs to the owner's own filename. Without that clause `notes#2.md` was
+    listed as `notes` in the section whose whole ask is "did we read the right
+    files", and rendered as a piece `#2.md` that does not exist -- both measured.
+    A path that is *only* a fragment ("#/0") has no file to separate the pointer
+    from, so it comes back whole rather than as a piece of nothing -- and so does
+    one whose container is nothing but whitespace (" #/1"), which is the same shape
+    a space further on. Splitting that one would hand a caller a blank filename and
+    a piece of it, which is the pair of blanks this helper exists to stop.
+
+    `file` is `""` when there is nothing nameable in the whole path, which is the
+    second thing every caller needs to know: a `source_path` of `" "` is truthy, and
+    it reached the page as a blank `<span class="file">` and as `We went with  .` --
+    two blanks in one section, measured on a hand-edited world model. `""` is what a
+    caller tests to say so in words instead. `.strip()` decides nameability and
+    nothing else strips: what can be named ships exactly as it was recorded.
+    """
+    base, sep, piece = path.partition("#")
+    if sep and base.strip() and piece.startswith("/"):
+        return base, sep + piece
+    return (path if path.strip() else ""), ""
+
+
 def _text(value) -> str:
     """`value` when it is a string, else `""`.
 
@@ -442,20 +480,26 @@ def inputs_read(run: RunPaths) -> list[InputGroup] | Marker:
         kind = record.get("kind")
         kind = _text(kind)
         if isinstance(source, str) and source:
-            # The fragment is cut, which is the whole point of this group: an
+            # The piece is dropped, which is the whole point of this group: an
             # input is not a file, and grouping on the raw `source_path` would
             # list one capture once per recorded call. 71 slices of one capture
             # still group as one file, which is that decision unchanged.
             #
-            # Only a JSON pointer counts as a fragment, though. `intake.py:333`
-            # writes a slice as `<container>#<json_pointer>` and a pointer always
-            # begins `/`, so a `#` anywhere else belongs to the owner's own
-            # filename: measured, `notes#2.md` was listed as `notes`, in the one
-            # section whose entire ask is "did we read the right files". Same
-            # clause, same reason, as `target_brief_html._side_html`'s.
-            base, sep, piece = source.partition("#")
-            sliced = bool(sep and base and piece.startswith("/"))
-            path = _shorten(base if sliced else source, prefix)
+            # Which part of the path is the file is `_file_and_piece`'s single
+            # ruling for all four sites that ask -- here, `_taken` below, and
+            # `target_brief_html`'s `_side_html` and `_files_html`.
+            #
+            # The raw `source_path` is what survives when there is no piece to
+            # drop, including a path with nothing nameable in it: this group's
+            # arithmetic is `len(files) + slices` against the manifest, and
+            # collapsing two unreadable paths onto one blank name made the second
+            # record read as a *slice* of the first -- measured, `""` and `" "` in
+            # one group rendered "1 more we could not name" under a "read as 3
+            # pieces" tail, where they are two records and no slice of anything.
+            # So the row keeps its own string and `_files_html` asks the same
+            # helper whether it can be named.
+            name, piece = _file_and_piece(source)
+            path = _shorten(name if piece else source, prefix)
         else:
             # The artifact id, for the reason SourceRef.path takes it: it names
             # something chaseable where a blank names nothing. A record with
@@ -521,8 +565,15 @@ def _side(value, index: dict[str, SourceRef]) -> tuple[SourceRef, ...]:
 
     `_side_ids` reads the two shapes, so this cannot disagree with
     `disputed_claim_ids` about which ids a side names.
+
+    `sorted(set(...))`, matching `_taken` immediately below: a hand-edited
+    `"claim_a": ["clm-notes-004", "clm-notes-004"]` rendered the same file quoting
+    the same line twice under one side -- measured -- and the argument is less the
+    duplicate than that the two adjacent functions read one list two ways. The
+    schema requires a string here, so ordering is the hand-edited list's alone and
+    sorting it is the deterministic answer.
     """
-    return tuple(index[c] for c in _side_ids(value) if c in index)
+    return tuple(index[c] for c in sorted(set(_side_ids(value))) if c in index)
 
 
 def _taken(resolution: str, side_a, side_b) -> str:
@@ -544,8 +595,20 @@ def _taken(resolution: str, side_a, side_b) -> str:
         # is that we could not tell, and a sentence here would assert a decision
         # nobody made.
         return ""
-    files = sorted({ref.path for ref in chosen if ref.path})
+    # The file, never the raw `ref.path`: this sentence tells the owner which of
+    # their own sources we believed, so it has to name something they can open --
+    # `_file_and_piece` owns that rule and records what shipped without it. Two
+    # slices of one capture collapse to the one filename here, which is right for
+    # a sentence about which file we went with and is why the piece is dropped
+    # rather than labelled: `_side_html` above has already shown both sides piece
+    # by piece, and this line is the decision over them.
+    names = (_file_and_piece(ref.path)[0] for ref in chosen)
+    files = sorted({name for name in names if name})
     if not files:
+        # Reached now by a side that resolves to nothing *and* by one whose paths
+        # name nothing readable -- `We went with  .` was the second case before
+        # `_file_and_piece` answered it, and this sentence is already the true one
+        # for it: we took a side and cannot say which file states it.
         return _UNRESOLVED_SIDE
     return "We went with " + ", ".join(files) + "."
 

@@ -516,6 +516,44 @@ def test_page_says_it_could_not_resolve_a_side_rather_than_dropping_it(tmp_path)
     assert "One side is stated in:" not in page
 
 
+def test_page_says_a_side_is_stated_in_a_file_it_could_not_name(tmp_path):
+    """A whitespace-only `source_path` rendered a blank `<span class="file">` beside
+    a quote from it -- measured on a hand-edited manifest, and reachable only there
+    because `SourceRef.path` falls back to the artifact id. The phrase is
+    `_files_html`'s, which already counts the files it could not name one section
+    above, so nothing new is invented for it.
+
+    Every assertion is scoped to the disagreement section. The same hand-edited path
+    also reaches a tier-2 provenance line through `Provenance.files`, which this
+    round does not cover -- a page-wide assertion here would pin that as intended.
+    """
+
+    def disagreement(page):
+        start = page.index("Where our sources disagree")
+        return page[start : page.index("What we could not tell", start)]
+
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    section = disagreement(target_brief_html.render(run))
+    # The positive control: with the path readable the side names the file and the
+    # phrase below is nowhere on the page.
+    assert '<span class="file">notes.md</span>' in section
+    assert "a file we could not name" not in section
+    manifest = json.loads(run.manifest.read_text())
+    for record in manifest["inputs"]:
+        if record["artifact_id"] == "notes-md":
+            record["source_path"] = "   "
+    run.manifest.write_text(json.dumps(manifest))
+    section = disagreement(target_brief_html.render(run))
+    assert "a file we could not name (at #error-behaviour)" in section
+    # No blank in either place the section had one: the side line, and the sentence
+    # under it that read `We went with  .`.
+    assert not re.search(r'<span class="file">\s*</span>', section)
+    assert not re.search(r"We went with\s+\.", section)
+    # The quote is still shown, so the side is stated rather than dropped for want
+    # of a filename.
+    assert "an id no ticket has is an **error**" in section
+
+
 def test_page_states_each_empty_belief_rather_than_rendering_an_empty_list(tmp_path):
     """Four `not found` branches no golden run reaches, because the toy world has
     inputs, capabilities, entities and an actor. Each is a sentence rather than an

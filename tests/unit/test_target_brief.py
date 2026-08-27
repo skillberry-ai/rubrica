@@ -140,6 +140,38 @@ def test_shorten_keeps_the_slice_fragment():
     assert target_brief._shorten("/other/tool.py", "/a/b") == "/other/tool.py"
 
 
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        # The ordinary source path: no piece, and the file is the whole string.
+        ("src/tool.py", ("src/tool.py", "")),
+        # The slicer's own shape, `intake.py:333`'s `<container>#<json_pointer>`.
+        ("capture.json#/41", ("capture.json", "#/41")),
+        # A `#` the owner put in their own filename. Read as a piece, this named a
+        # file we never read (`notes`) and a piece that does not exist (`#2.md`).
+        ("notes#2.md", ("notes#2.md", "")),
+        # A pointer with no container has no file to separate it from, so it stays
+        # whole rather than being labelled a piece of nothing.
+        ("#/0", ("#/0", "")),
+        # Nothing nameable: `" "` is truthy, and it reached the page as a blank
+        # `<span class="file">` and as `We went with  .`.
+        (" ", ("", "")),
+        ("", ("", "")),
+        # A pointer whose container is nothing but whitespace: the same shape as the
+        # fragment-only path above, one space further on, so it comes back whole for
+        # the same reason. Split, it would hand the caller a blank filename and a
+        # piece of it -- the pair of blanks the rule exists to stop.
+        (" #/1", (" #/1", "")),
+    ],
+)
+def test_file_and_piece(path, expected):
+    """The one home for the sliced-path rule, which had two spellings and three
+    call sites -- and the site with none shipped
+    `We went with traces_parsec-agent-metrics_20260713_115226.json#/11.` on
+    run-20260826-090456, naming a path the owner cannot open."""
+    assert target_brief._file_and_piece(path) == expected
+
+
 def test_provenance_counts_distinct_files_and_kinds(tmp_path):
     """The discriminator that replaced the derivation badge. Measured: 13 of
     executive-agent's 37 operations rest on a design document alone, and 28 of
@@ -404,6 +436,77 @@ def test_taken_says_so_when_the_chosen_side_resolves_to_nothing():
     # sides names its file, so the sentence is chosen by which side was taken
     # rather than returned for every input that has an empty side anywhere.
     assert target_brief._taken("preferred_b", (), b) == "We went with src/tool.py."
+
+
+def test_taken_names_the_file_a_slice_came_out_of_rather_than_the_slice(tmp_path):
+    """The resolution line tells the owner which of *their* files we believed, so it
+    has to name one they can open.
+
+    Measured on run-20260826-090456 before the fix: 3 of its 25 resolution lines
+    read `We went with traces_parsec-agent-metrics_20260713_115226.json#/11.` and
+    the two nearby, while `_side_html` two paragraphs above rendered the same source
+    as `traces_....json (piece #/11)`. One page spelling one file two ways.
+
+    Reached by pointing the *manifest* at a sliced `source_path` rather than by
+    editing `tests/fixtures/toy/`: the golden world's one contradiction resolves
+    `preferred_a` onto `notes.md`, an unsliced input, and CLAUDE.md treats an edit
+    to that fixture as higher-risk than an edit to source.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    manifest = json.loads(run.manifest.read_text())
+    # The control, taken before the mutation: the chosen side already names this
+    # file, so what the mutation changes is the *shape of the path* and not which
+    # side won.
+    assert target_brief.disputes(run)[0].taken == "We went with notes.md."
+    for record in manifest["inputs"]:
+        if record["artifact_id"] == "notes-md":
+            record["source_path"] = record["source_path"] + "#/11"
+    run.manifest.write_text(json.dumps(manifest))
+    dispute = target_brief.disputes(run)[0]
+    assert dispute.taken == "We went with notes.md."
+    # And the piece is not lost on the way: `SourceRef.path` still carries it, which
+    # is what `_side_html` labels and what tells 71 slices of one capture apart. The
+    # sentence drops it; the record does not.
+    assert [ref.path for ref in dispute.side_a] == ["notes.md#/11"]
+
+
+def test_taken_says_it_could_not_name_the_file_rather_than_going_with_nothing(tmp_path):
+    """`We went with  .` -- measured on a hand-edited world model, and the sentence
+    that already covers it says we took a side and could not resolve which file
+    states it. Reachable only by hand-editing, because `SourceRef.path` falls back
+    to the artifact id when the manifest registers no path at all."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    manifest = json.loads(run.manifest.read_text())
+    # The control: with the path readable the sentence names the file, so the
+    # sentence below is this shape's and not one returned for every run.
+    assert target_brief.disputes(run)[0].taken == "We went with notes.md."
+    for record in manifest["inputs"]:
+        if record["artifact_id"] == "notes-md":
+            record["source_path"] = "   "
+    run.manifest.write_text(json.dumps(manifest))
+    assert target_brief.disputes(run)[0].taken == (
+        "We took one side, but could not resolve which file states it."
+    )
+
+
+def test_side_drops_a_duplicate_id_the_way_taken_does(tmp_path):
+    """A hand-edited `"claim_a": ["clm-notes-004", "clm-notes-004"]` rendered the
+    same file quoting the same line twice under one side -- measured. The argument
+    is less the duplicate than that `_side` and `_taken`, one function apart, read
+    one list two ways."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["contradictions"][0]["claim_a"] = ["clm-notes-004", "clm-notes-004"]
+    run.world_model.write_text(json.dumps(world_model))
+    assert [ref.claim_id for ref in target_brief.disputes(run)[0].side_a] == ["clm-notes-004"]
+    # The control: two *distinct* ids on one side both survive, so the line above is
+    # a duplicate collapsing and not a side truncated to its first ref.
+    world_model["contradictions"][0]["claim_a"] = ["clm-notes-004", "clm-api-001"]
+    run.world_model.write_text(json.dumps(world_model))
+    assert [ref.claim_id for ref in target_brief.disputes(run)[0].side_a] == [
+        "clm-api-001",
+        "clm-notes-004",
+    ]
 
 
 def test_disputes_keeps_a_contradiction_whose_claims_do_not_resolve(tmp_path):

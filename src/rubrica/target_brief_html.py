@@ -237,6 +237,12 @@ def _files_html(files) -> str:
     disagree with the listing silently. Task 3 measured exactly one such blank row
     on a real run. So it is counted here -- an empty monospace span in a comma list
     renders as stray punctuation, and the count is the honest form of the same fact.
+
+    `.strip()` rather than `target_brief._file_and_piece`, which is the nameability
+    rule the disagreement section asks: measured over every shape that reaches this
+    listing the two agree, because `inputs_read` has already dropped any piece it
+    could name a file for, and routing a bare filename back through a rule about
+    container-plus-pointer paths would judge `x#/1` on `x` while printing `x#/1`.
     """
     named = [f for f in files if f.strip()]
     missing = len(files) - len(named)
@@ -327,25 +333,26 @@ def _side_html(refs, label: str) -> str:
         # into it, so the two are separated and only the index is labelled. Nothing
         # is dropped -- `_shorten` keeps the fragment precisely because it is the
         # only thing telling 71 slices of one capture apart.
-        base, sep, piece = ref.path.partition("#")
-        # Only a JSON pointer is the slicer's fragment. `intake.py:333` writes a
-        # slice as `<container>#<json_pointer>`, and a pointer always begins `/` --
-        # which is why the measurements above are `#/10` and `#/126`. Without that
-        # clause a `#` in the owner's own filename was read as a slice: the review
-        # measured `notes#2.md` rendering as `notes` followed by `(piece #2.md, at
-        # #error-behaviour)`, which names a file we never read and a piece that does
-        # not exist. Nothing forbids a `#` in a filename, so the guard is the fix.
         #
-        # A path that is *only* a fragment has no file to separate it from, so it
-        # stays verbatim rather than being labelled as a piece of nothing.
-        sliced = bool(sep and base and piece.startswith("/"))
-        where = f'<span class="file">{esc(base if sliced else ref.path)}</span>'
+        # Which part is the file is `target_brief._file_and_piece`'s ruling, not a
+        # second reading of the same path here: it owns the JSON-pointer clause and
+        # the measurements behind it, and the sentence under these two sides now
+        # names the file through the same helper, so one source cannot be spelled
+        # two ways on one page.
+        base, piece = target_brief._file_and_piece(ref.path)
+        # A path with nothing nameable in it rendered as a blank
+        # `<span class="file">` -- measured on a hand-edited world model, reachable
+        # only there because `SourceRef.path` falls back to the artifact id. The
+        # phrase is `_files_html`'s, which already counts the files it could not
+        # name in the section above, so the absence is stated in words this page
+        # already uses rather than in a new sentence.
+        where = f'<span class="file">{esc(base)}</span>' if base else "a file we could not name"
         # One parenthesis, not two in a row: the piece and the locator are both
         # "where inside your material this is", and reading them as one clause is
         # why they are joined rather than emitted as separate spans.
         inside = []
-        if sliced:
-            inside.append(f"piece {esc(sep + piece)}")
+        if piece:
+            inside.append(f"piece {esc(piece)}")
         if ref.locator:
             inside.append(f"at {esc(ref.locator)}")
         if inside:
