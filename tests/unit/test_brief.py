@@ -8,6 +8,7 @@ pairing (spec section 10) has both halves to render.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -636,6 +637,40 @@ def test_gate_one_reports_read_coverage_per_pass(tmp_path):
     assert [line for line in section.splitlines() if line.startswith("    ")] == [row]
 
 
+def test_gate_one_read_coverage_names_a_pass_that_wrote_no_accounting(tmp_path):
+    """A pass missing from this block is the anomaly a reader is here to notice, so
+    it has to be printed rather than skipped.
+
+    The loop used to `continue` on a partial with no readable `inputs_seen`, and
+    the "nothing to report" line only fires when *every* pass is absent -- so
+    three passes rendering and one omitted rendered as a complete brief with no
+    signal at all. Both branches are exercised, because they are the two states a
+    reader acts on differently: a partial that was never written is a run that
+    stopped, and one that is there carrying nothing readable is a defect
+    `rubrica validate --stage X` will name.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    surviving = read_json(run.capabilities_part)["inputs_seen"]
+
+    # Deleted: the partial is not there at all.
+    run.goals_part.unlink()
+    # Present and readable, but with nothing this block can sum.
+    run.entities_part.write_text("{}", encoding="utf-8")
+
+    section = _section(brief.gate_brief(run, 1), "Read coverage, per pass")
+
+    assert f"{run.goals_part.name}: no accounting (not written yet)" in section
+    assert f"{run.entities_part.name}: no accounting (present," in section
+    # The control: the two passes that *did* write an accounting still render
+    # their rate, so this is naming the omissions rather than replacing the block.
+    cited = sum(row["cited"] for row in surviving)
+    total = sum(row["own_kind_total"] for row in surviving)
+    assert f"{run.capabilities_part.name}: {cited}/{total} claims of capability cited" in section
+    assert "nothing to report" not in section, (
+        "the all-four-absent line must not fire while two passes rendered"
+    )
+
+
 def test_gate_one_read_coverage_is_quiet_before_the_partials_exist(tmp_path):
     """gate-brief is a report, not a gate: it exits 0 on a readable run, so a run
     stopped before any reconcile pass has written its partial must render a line
@@ -854,12 +889,17 @@ def test_an_unreadable_claims_directory_is_exit_2_from_both_reports(tmp_path):
     """The shape that must **not** be guarded into an exit 0, pinned as a test
     rather than only argued in a docstring.
 
-    Every other readable-run shape in this file is a report contract violation to be
-    closed: a hand-edited document takes `claim-utilisation` and `gate-brief` to exit
-    1, and they are reports, so that is a defect. An unreadable `01-claims/` is a
-    different kind. `paths.list_json` raises `UsageError`, `cli.py` maps it to **exit
-    2** alongside OSError, and the exit-code contract's ruling for a filesystem
-    problem *is* 2 -- the harness pointed at something broken, not a stage defect.
+    The other readable-run shapes in this file assert exit **0** -- issue #6 closed
+    them by widening the world-model containers `utilisation._cited_claim_ids`
+    walks. The report contract violation still open is a hand-edited `01-claims/`
+    document, which takes both reports to exit 1 on a readable run; its shapes are
+    parked in `docs/design/limitations.md` and exercised as `summary.Malformed`
+    markers by
+    `tests/unit/test_summary.py::test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run`,
+    not here. An unreadable `01-claims/` is a different kind: `paths.list_json`
+    raises `UsageError`, `cli.py` maps it to **exit 2** alongside OSError, and the
+    exit-code contract's ruling for a filesystem problem *is* 2 -- the harness
+    pointed at something broken, not a stage defect.
 
     Guarding it inside `utilisation.py` the way the world-model walk was guarded
     would turn this into an exit 0 reporting empty utilisation over claims nobody
@@ -871,6 +911,8 @@ def test_an_unreadable_claims_directory_is_exit_2_from_both_reports(tmp_path):
     whose docstring already claimed this behaviour for `01-claims/` without pinning
     it.
     """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     run.claims_dir.chmod(0o000)
     try:
@@ -1215,6 +1257,8 @@ def test_gate_zero_reports_an_unreadable_dispositions_directory_as_a_broken_run(
     `05-verdicts/` both already behave this way. Pinned here so the behaviour
     is a measured decision rather than an accident of which helper was reached.
     """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
     run = _staged_and_sealed_run(tmp_path)
     run.dispositions_dir.chmod(0o000)
     try:

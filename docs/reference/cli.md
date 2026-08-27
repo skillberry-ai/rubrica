@@ -437,8 +437,9 @@ number cannot say which pass did the citing, so one diligent pass masks another'
 skipped file. Under each pass, only the rows that dropped a claim are printed,
 each beside the `note` the drop required; a run's accounting is total over
 `manifest.inputs`, so most rows read `0/0/0` and printing them would bury the one
-line a human is at this gate to rule on. A run with no partial carrying an
-accounting yet says so instead.
+line a human is at this gate to rule on. A pass whose partial is absent or
+carries no readable rows is named as such rather than omitted, and a run with no
+partial carrying an accounting at all says so instead.
 
 Required: `--run RUN`, `--gate {0,1,2,3}`.
 

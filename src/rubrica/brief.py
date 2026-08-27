@@ -41,17 +41,24 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   #6 measured a run where averaging it across every citing pass reported 33.6%
   while one pass was citing 110 of 135 claims of its own kind and another 2 of
   38. Each pass's own-kind rate is its own line, and only the rows that dropped
-  a claim are printed under it, each beside the note the drop required.
+  a claim are printed under it, each beside the note the drop required. A pass
+  that wrote no readable accounting gets a line too, saying so: a pass silently
+  missing from a block of four is the anomaly a reader is at this gate to notice.
 - **Gates 2 and 3** render what already exists: the coverage verdict, and the
   challenge stage's verdict tallies.
 
-`gate_brief` never raises on a readable run's *content* -- every artifact it
-reads is optional, and its absence renders as a stated absence rather than an
-exception, on the same ruling that already governs `claim_utilisation`: a
-report is never a gate, so it always exits 0. A run directory that cannot be
-read at all is a different failure (the harness pointed at something broken),
-and is left to raise -- `cli.py`'s shared catch maps that to exit 2 like every
-other subcommand's.
+`gate_brief` treats a readable run's *content* as something to render, never to
+raise on -- every artifact it reads is optional, and its absence renders as a
+stated absence rather than an exception, on the same ruling that already governs
+`claim_utilisation`: a report is never a gate, so it exits 0. One measured
+exception to that promise is open and on the record, and it arrives through this
+module's own unguarded `claim_utilisation(run)` call in `_gate_1`: three
+hand-edited `01-claims/` shapes raise out of that report, taking
+`gate-brief --gate 1` to exit 1 with them. `docs/design/limitations.md` records
+which shapes and why the half that was closed did not reach this one. A run
+directory that cannot be read at all is a different failure (the harness pointed
+at something broken), and is left to raise -- `cli.py`'s shared catch maps that
+to exit 2 like every other subcommand's.
 """
 
 from __future__ import annotations
@@ -645,6 +652,21 @@ def _gate_1(run: RunPaths) -> str:
         path = getattr(run, attribute)
         rows = _dicts(_mapping(_quietly(path)).get("inputs_seen"))
         if not rows:
+            # Named rather than skipped. A bare `continue` dropped the pass out
+            # of the block entirely, and the "nothing to report" line below only
+            # fires when *all four* are absent -- so three passes rendering and
+            # one omitted read as a complete brief, with the omission being the
+            # anomaly a reader is here to notice. `is_file` separates the two
+            # cases a reader would act on differently: a partial that has not
+            # been written yet is a run that stopped, and one that is there
+            # carrying no readable rows is a defect
+            # `rubrica validate --stage X` will name.
+            state = (
+                "present, but unreadable or carrying no inputs_seen rows"
+                if path.is_file()
+                else "not written yet"
+            )
+            lines.append(f"  {path.name}: no accounting ({state})")
             continue
         rendered = True
         cited = sum(_count(row.get("cited")) for row in rows)
