@@ -19,12 +19,15 @@ page restyle a document already sent to somebody outside the project.
 which is right for an operator and meaningless to an owner; here the same fact
 reads "We have not got far enough to describe this yet."
 
-**Nothing on this page names a stage, a gate, an artifact, a claim id or rubrica
-itself,** and `test_page_never_names_a_stage_a_gate_or_an_artifact` plus
-`test_page_never_shows_a_rubrica_identifier` fail the suite rather than let one
-back in. That is not tidiness: a recipient asked "does this describe your system?"
-who is instead reading about `01-world-model.json` has been handed the wrong
-question.
+**Nothing this module's own prose puts on the page names a stage, a gate, an
+artifact or rubrica itself,** and
+`test_the_pages_own_prose_never_names_a_stage_a_gate_or_an_artifact` plus
+`test_page_never_shows_a_rubrica_identifier` fail the suite rather than let one back
+in. The claim is deliberately about our own chrome and not about the page as a whole:
+prose this module *selects* from the run ships as written, ids and all, for the reason
+the next paragraph gives. That is not tidiness: a recipient asked "does this describe
+your system?" who is instead reading about `01-world-model.json` has been handed the
+wrong question.
 
 One id shape can still reach the page and is accepted rather than suppressed.
 `SourceRef.path` falls back to the artifact id when the manifest does not register
