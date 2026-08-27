@@ -498,10 +498,22 @@ def _operations(run: RunPaths):
         # `query_tickets` and headed the entry with a blank `<dt> </dt>` while every
         # other empty field in this module is a stated absence.
         # `target_brief._rules` stripped for this exact hole one module over.
-        title = op.sentence.strip() or op.handle.strip()
-        called = f"<dd>Called as: {esc(op.handle)}</dd>" if op.handle and op.handle != title else ""
+        #
+        # The handle is stripped once here rather than tested raw below, because
+        # `operations` falls the handle back to the `operation` string when there is
+        # no `binding.tool`: with `operation: " "` and no binding, both are `" "`, so
+        # the raw test was truthy against a stripped title and the entry shipped
+        # `<dt></dt><dd>Called as:  </dd>` -- two blanks in one entry, measured. When
+        # nothing in either field is nameable the absence is stated in the heading,
+        # and the parameters, outcomes and sources below it still say what the
+        # operation does: an unrecorded name is no reason to drop a fact the owner
+        # can still recognise the operation by.
+        handle = op.handle.strip()
+        title = op.sentence.strip() or handle
+        called = f"<dd>Called as: {esc(handle)}</dd>" if handle and handle != title else ""
+        heading = esc(title) if title else "One operation whose name we did not record"
         blocks.append(
-            f"<dt>{esc(title)}</dt>{called}{params}{outcomes}<dd>{_provenance(op.provenance)}</dd>"
+            f"<dt>{heading}</dt>{called}{params}{outcomes}<dd>{_provenance(op.provenance)}</dd>"
         )
     return f"<dl>{''.join(blocks)}</dl>"
 

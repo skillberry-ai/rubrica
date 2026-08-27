@@ -918,6 +918,37 @@ def test_page_heads_an_operation_on_its_handle_when_the_operation_string_is_blan
     assert "<dt>query_tickets.get_ticket</dt>" in page
 
 
+def test_page_states_an_operation_it_could_not_name_rather_than_heading_it_blank(tmp_path):
+    """The blank-`operation` case above still had a `binding.tool` to fall back to.
+    With the binding gone as well, `operations` falls the handle back to the same
+    `" "`, and both fields are whitespace at once.
+
+    Measured pre-fix, that entry shipped `<dt></dt><dd>Called as:  </dd>` -- an
+    unheaded entry followed by a blank name, on a page whose reader has nobody to ask
+    what the entry was. The heading states the absence instead, and what the
+    operation does is still rendered beneath it."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["capabilities"][0]["operation"] = " "
+    world_model["capabilities"][0].pop("binding", None)
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    assert "<dt></dt>" not in page
+    assert "<dt> </dt>" not in page
+    # `Called as:` with nothing after it is the second blank, and it goes because the
+    # handle it would print is the same unnameable string as the title.
+    assert not re.search(r"Called as:\s*</dd>", page)
+    assert "One operation whose name we did not record" in page
+    # The entry is still an entry: the parameters the run did read are under the
+    # stated absence, so the fact survives the missing name.
+    assert "<dt>One operation whose name we did not record</dt><dd>Takes:" in page
+    # The positive control, on the golden world: neither the stated absence nor a
+    # blank heading is on a page whose operations both have names.
+    clean = target_brief_html.render(build_toy_run(tmp_path / "clean", upto="reconcile-seal"))
+    assert "One operation whose name we did not record" not in clean
+    assert "<dt>query_tickets.find_tickets</dt>" in clean
+
+
 def test_page_drops_a_headline_field_that_holds_only_whitespace(tmp_path):
     """Three `minLength: 1` strings that admit `" "`. Measured pre-fix, with all
     three set to one space: `<h1> </h1>`, `<p class="meta">Reached over  .</p>` and an
