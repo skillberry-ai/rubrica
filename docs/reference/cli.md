@@ -529,10 +529,10 @@ it — each statement carrying the file it was read from.
 Required: `--run RUN`. Optional: `-o PATH` / `--output PATH` — where to write
 the page, defaulting to `<run>/target-brief.html`.
 
-**A report, not a gate: it always exits clean on a readable run.** It goes one
-step further than `run-summary` there, on purpose. An unreadable `01-claims/`
-exits 2 out of `claim-utilisation` and `gate-brief`, because an empty utilisation
-table is the one reading a human at gate 1 must never be handed; this page has no
+**A report, not a gate: it always exits clean on a readable run.** It goes further
+than `claim-utilisation` and `gate-brief` there, on purpose: an unreadable
+`01-claims/` exits 2 out of both, because an empty utilisation table is the one
+reading a human at gate 1 must never be handed. This page has no
 number to be quietly wrong, so it states at the top that it could not read where
 each statement came from and renders the description anyway.
 
@@ -542,6 +542,9 @@ claim is deliberately about our chrome and not about every string on the page:
 prose written by a stage is *selected and relabelled, never rewritten* — an owner
 correcting a sentence we paraphrased would be correcting our paraphrase — so a
 claim id inside a selected sentence ships as written, and on a real run many do.
+One id is the page's own rather than a stage's: an open question we cannot phrase
+without one carries `(our reference: ...)`, because a recipient replying about it
+needs something to name it by.
 What the two tests hold is the wording this project chose, because a recipient
 asked "does this accurately describe your system?" who is instead reading about
 `01-world-model.json` has been handed the wrong question.

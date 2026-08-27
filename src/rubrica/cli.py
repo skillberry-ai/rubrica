@@ -643,11 +643,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "target-brief":
             # A report, the same ruling as claim-utilisation, gate-brief and
             # run-summary: it composes what the run already contains and is never
-            # the thing that turns a readable run into exit 1. It goes one step
-            # further than run-summary, deliberately: an unreadable 01-claims/
-            # exits 2 out of claim-utilisation and gate-brief, because an empty
-            # utilisation table is the one reading a human at gate 1 must never be
-            # handed -- but this page has no number to be quietly wrong, so it
+            # the thing that turns a readable run into exit 1. It goes further than
+            # claim-utilisation and gate-brief, deliberately: an unreadable
+            # 01-claims/ exits 2 out of both, because an empty utilisation table is
+            # the one reading a human at gate 1 must never be handed. run-summary
+            # already exits 0 here, measured, so it is not the foil this contrast
+            # wants -- but this page has no number to be quietly wrong, so it
             # banners the missing citations and still exits 0.
             run = _run_dir(args.run)
             destination = Path(args.output) if args.output else run.root / "target-brief.html"

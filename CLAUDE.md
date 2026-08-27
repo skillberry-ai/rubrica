@@ -242,9 +242,11 @@ are judgments rather than list entries:
   wording*, which two tests enforce because a recipient reading about
   `01-world-model.json` has been handed the wrong question — a claim id inside a
   sentence we selected ships as written, which is that same rule seen from the other
-  side. It is the one report that exits **0** on an unreadable `01-claims/` rather
-  than 2 — it has no number to be quietly wrong, so it says at the top that it could
-  not cite its sources and describes the target anyway.
+  side. It exits **0** on an unreadable `01-claims/` where `claim-utilisation` and
+  `gate-brief` exit 2 — it has no number to be quietly wrong, so it says at the top
+  that it could not cite its sources and describes the target anyway. `run-summary`
+  exits 0 there too, so this is a contrast with the two reports that compute a
+  number, not a property unique to this one.
 - `survey` is `intake`'s counterpart for the corpus path: it walks a corpus,
   digests each candidate, and mints the run, but writes `00-catalogue.json`
   instead of a manifest — there is nothing to extract from yet, because nothing

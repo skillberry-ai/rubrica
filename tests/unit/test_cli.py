@@ -970,7 +970,8 @@ def test_triage_slices_exits_zero_and_prints_the_plan(tmp_path, capsys):
 
 # `target-brief`: the run's description of the target, written for its owners.
 # Six CLI tests, each pinning a wiring mistake rather than the exit code alone --
-# run-summary's six above are the model, and the same mutations are what they were
+# run-summary's six in test_summary.py are the model (its CLI tests are module-local;
+# these are here, where most subcommands' are), and the same mutations are what they were
 # strengthened past: a handler that writes nothing still exits 0 and still prints a
 # path, so every test that claims a page was written reads the file back.
 def test_target_brief_writes_the_page_and_prints_its_path(tmp_path, capsys):
@@ -981,7 +982,14 @@ def test_target_brief_writes_the_page_and_prints_its_path(tmp_path, capsys):
     assert printed == str(destination)
     # The path, not the page: markup on a terminal is not a report.
     assert "<!doctype html>" not in printed
-    assert destination.read_text(encoding="utf-8").startswith("<!doctype html>")
+    page = destination.read_text(encoding="utf-8")
+    assert page.startswith("<!doctype html>")
+    # And *this* page. `<!doctype html>` opens summary_html's too, so on its own it is
+    # satisfied by any page the handler could have been miswired to: substituting
+    # `summary.run_summary(run)` for `target_brief.page(run)` left the whole suite
+    # green but for one root-skipped test. The title is the discriminator, and it is
+    # also the first thing the recipient reads.
+    assert "<title>ticketq — does this describe your system?</title>" in page
 
 
 def test_target_brief_honours_output(tmp_path, capsys):
@@ -997,7 +1005,7 @@ def test_target_brief_honours_output(tmp_path, capsys):
     assert not (run.root / "target-brief.html").exists()
 
 
-def test_target_brief_exits_clean_on_a_run_that_stopped_early(tmp_path, capsys):
+def test_target_brief_exits_clean_on_a_run_that_stopped_early(tmp_path):
     """A report, not a gate. A partial run is a page saying so, never a finding --
     the same ruling as claim-utilisation, gate-brief and run-summary."""
     run = build_toy_run(tmp_path, upto="extract")
