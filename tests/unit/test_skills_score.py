@@ -57,6 +57,19 @@ def method_step(number: int) -> str:
     return re.sub(r"\s+", " ", section[start:end])
 
 
+def invariant(number: int) -> str:
+    """One numbered Invariants item, whitespace-normalised.
+
+    `blocks(INVARIANTS)` is the right unit here -- each invariant is one
+    paragraph -- but the index of a given number is not stable across edits, so
+    the block is found by its own number. Normalised for `method_step`'s reason.
+    """
+    for block in blocks(INVARIANTS):
+        if block.lstrip().startswith(f"{number}. "):
+            return re.sub(r"\s+", " ", block)
+    raise AssertionError(f"no invariant {number} in the {INVARIANTS} section")
+
+
 def test_the_contract_matches_the_stage_gate():
     skill = load(SKILL)
     assert skill.contract["stage"] == "score"
@@ -394,3 +407,44 @@ def test_output_says_a_re_dispatch_must_restate_the_rulings_it_replaces():
         "that block must say the replacement part has to restate the rulings still in force, "
         "or the hazard is stated with no action a dispatched model can take"
     )
+
+
+def test_the_capability_rows_are_conditioned_on_the_binding_where_they_are_defined():
+    """The recorded upstream cause of the round-2 reinstatement, guarded at both
+    places that state the rule.
+
+    Until d6786a4 the string `binding` appeared nowhere in this file, while Method
+    step 4 and Invariant 1 both told the model to derive one row per declared
+    capability x outcome-class pair -- and `score-seal` enumerates the drivable
+    subset. `rounds.closable_holes`' drivability clause cites that silence as why
+    it has to filter mechanically: a score part written to the wide rule puts
+    `not_yet_attempted` on a cell no `emit` call can reach, and `seal_score`'s
+    dedupe lets score's hole win. The filter stays either way, since no dispatch
+    has measured the prompt -- but a reword that silently restored the
+    binding-blind instruction would take away the only thing addressing the cause,
+    and `check-skills` cannot see it: it validates contract names and the five
+    section headings, never what the prose says.
+
+    Scoped to the two units that own the rule, not to `load(SKILL).body`, because
+    `binding.tool` also appears in step 7's `unreachable` bullet -- so a
+    whole-document substring check is satisfied by prose that says nothing about
+    which rows to derive, which is the vacuity CLAUDE.md records for
+    `"refusal" in body.lower()`.
+
+    Three tokens per unit rather than a phrase pin: what must hold is that the
+    unit naming `outcome_classes` as the enumeration source also names the
+    predicate that narrows it and the reason the excluded cells are accounted for.
+    Reordering or rewording any of the three keeps it green; dropping the
+    narrowing, or narrowing without saying where the rest go, fails.
+    """
+    for label, text in (("Method step 4", method_step(4)), ("Invariant 1", invariant(1))):
+        assert "outcome_classes" in text, f"{label} no longer names the enumeration source"
+        assert "binding.tool" in text, (
+            f"{label} tells the model to derive its capability rows without naming "
+            "`binding.tool`, which is the binding-blind instruction rounds.closable_holes' "
+            "drivability clause records as the cause of the round-2 reinstatement"
+        )
+        assert "unreachable" in text, (
+            f"{label} narrows the rows without saying the excluded cells are accounted for as "
+            "`unreachable` holes, which turns the narrowed surface into a silent cap"
+        )

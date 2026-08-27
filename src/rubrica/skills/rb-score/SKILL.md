@@ -365,11 +365,13 @@ belongs in what you report back to the orchestrator, which records it in
    interface -- but they are not rows to score. `score-seal` writes one computed
    `unreachable` hole for each of them, so the report still accounts for every
    cell the world model declares. A hole of your own on the same cell wins over
-   the computed one, which is exactly why `unreachable` is the only honest
-   reason to give there: `not_yet_attempted` on such a cell hands the next round
-   a row no scenario can close. `refs.check_coverage` reports a matrix row on
-   one by name -- "matrix scores undrivable cell `cell:x/y`; it belongs in the
-   holes". Read the capability in front of you and decide; do not try to
+   the computed one, which is exactly why `not_yet_attempted` is the one wrong
+   reason to give there: it hands the next round a row no scenario can close.
+   `unreachable` is the reason that fits the mechanical fact, and `out_of_scope`
+   is a defensible reading when the row is one this suite would not have covered
+   anyway. `refs.check_coverage` reports a matrix row on one of these cells by
+   name -- "matrix scores undrivable cell `cell:x/y`; it belongs in the holes".
+   Read the capability in front of you and decide; do not try to
    reproduce `denominator.capability_cells`, which is not yours to compute and
    which `check-refs` already recomputes for the human at gate 1.
 

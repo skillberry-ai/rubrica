@@ -1940,47 +1940,6 @@ def check_world_model(run: RunPaths) -> list[Finding]:
             f"declared goals={denominator.get('goals')} but the world model declares "
             f"{actual_goals}",
         )
-
-    # An unbound capability is a bounded-coverage decision, so it is reported where
-    # it is made rather than five stages later. Until this existed the earliest
-    # signal was emit.py:105 at stage 06 -- after propose, score, instantiate and
-    # challenge had all run against the frozen denominator, and after gates 1, 2
-    # and 3 -- and its remediation ("add binding.tool and binding.fixed_args in the
-    # world model") asks a human to hand-edit a sealed artifact, which is not a
-    # repair anything downstream can make.
-    #
-    # A finding and not a refusal: the world model is not malformed, and the
-    # capability is not a lie. Of the 37 cells excluded on run-20260827-070444, 8
-    # were real agent-level behaviour `binding`'s tool shape cannot express at all,
-    # so an unbound capability can be a surface worth recording. It simply cannot
-    # set the target coverage is scored against, and a human at gate 1 is who
-    # decides what to do about that.
-    #
-    # Iterated over `capabilities` and not over the excluded cells, which is what
-    # makes it fire at the boundary: an all-unbound world model has no drivable
-    # cell at all, so a loop over `drivable_cells(world)` would say nothing on
-    # exactly the run that most needs it. Measured after 528cb98, such a world
-    # model with `goals: []` yields an empty round-1 worklist, so `propose-batches`
-    # exits 0 printing "no closable holes" -- the loop's *normal* terminal state,
-    # reached from a schema-valid and entirely undrivable world model. Gate 1
-    # precedes propose, so this is the only place a human sees that.
-    for i, cap in enumerate(world.get("capabilities", [])):
-        # `(cap.get("binding") or {})`, drivable_cells' spelling for drivable_cells'
-        # reason: an explicit `binding: null` is what a hand-edit at gate 1
-        # produces, and `cap.get("binding", {})` returns None and raises
-        # AttributeError on the chained `.get`.
-        if (cap.get("binding") or {}).get("tool"):
-            continue
-        # A set of ids rather than `len(outcome_classes)`, for drivable_cells'
-        # reason: the number reported has to be the number of cells the denominator
-        # excluded, and a repeated outcome-class id contributes one cell there.
-        classes = len({oc["id"] for oc in cap.get("outcome_classes", []) if "id" in oc})
-        report(
-            f"/capabilities/{i}",
-            f"capability {cap.get('id')!r} declares no binding.tool, so its {classes} "
-            "outcome-class cells cannot be driven through the target and are excluded from "
-            "denominator.capability_cells",
-        )
     return out
 
 

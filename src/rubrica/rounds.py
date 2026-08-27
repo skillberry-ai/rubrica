@@ -327,24 +327,37 @@ def closable_holes(run: RunPaths) -> list[str]:
             if hole["reason"] == "not_yet_attempted"
             # An undrivable cell is not closable by proposing in ANY round, and the
             # reason filter beside this does not reach it: score writes the hole
-            # itself as `not_yet_attempted` -- the prompt that produced that
-            # document described its capability rows as one per declared pair with
-            # no mention of `binding` anywhere in the file, and while rb-score's
-            # Method now names the undrivable case and calls `unreachable` its only
-            # honest reason, no dispatch has measured that it obeys, so this clause
-            # stays whatever the prompt says -- and seal_score's injection defers to
-            # score's hole for the same cell on purpose, so the mechanical
-            # `unreachable` never replaces it. Without this clause round 2 handed
-            # rb-propose back precisely the cells round 1 had kept from it, at the
-            # cost the design cites as the whole price of the defect: a scenario
-            # rb-instantiate cannot seed and emit drops.
+            # itself as `not_yet_attempted` -- rb-score's Method as of 5cd2358,
+            # which is the prompt the documents behind this clause were scored by,
+            # described its capability rows as one per declared pair, and the string
+            # `binding` appeared nowhere in that file (`git show
+            # 5cd2358:src/rubrica/skills/rb-score/SKILL.md | grep -c binding` is 0).
+            # The Method since d6786a4 names the undrivable case and calls
+            # `not_yet_attempted` the one wrong reason there, but no dispatch has
+            # measured that it obeys, so this clause stays whatever the prompt says
+            # -- and seal_score's injection defers to score's hole for the same cell
+            # on purpose, so the mechanical `unreachable` never replaces it. Without
+            # this clause round 2 handed rb-propose back precisely the cells round 1
+            # had kept from it, at the cost the design cites as the whole price of
+            # the defect: a scenario rb-instantiate cannot seed and emit drops.
             #
             # This does omit the hole from the worklist while the coverage document
             # still shows it `not_yet_attempted`, so the worklist alone does not say
-            # why nobody worked the cell. Two places do: the hole stays in the
-            # document a human reads at gate 2, and check_world_model names every
-            # unbound capability at gate 1, which is where the cell's undrivability
-            # is a finding rather than an inference.
+            # why nobody worked the cell. The hole itself stays in the document a
+            # human reads at gate 2, and that is what accounts for it.
+            #
+            # `check-refs` deliberately does not also report it, and that was tried
+            # and reverted rather than never considered: exit 1 tells rb-orchestrate
+            # "a repairable stage defect, spend the one repair attempt", and an
+            # unbound capability is repairable by no re-dispatch at all --
+            # rb-reconcile-capabilities' section 5 tells the pass to leave `binding`
+            # off rather than guess a tool name, so the pass did the right thing and
+            # nothing downstream can add one. `check-refs` runs after reconcile-seal
+            # and *before* HUMAN GATE 1, so a finding there halted the run ahead of
+            # the gate it was meant to be read at -- 19 of 24 capabilities' worth on
+            # run-20260827-070444. An earlier signal belongs on the layer CLAUDE.md
+            # keeps for exactly this, the reports that always exit clean on a
+            # readable run: gate-brief, not check-refs.
             and hole["ref"] not in undrivable_refs
         }
     )
