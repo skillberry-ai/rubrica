@@ -210,8 +210,13 @@ class Provenance:
         return len(self.files) == 1
 
 
-def disputed_claim_ids(world_model: dict) -> frozenset[str]:
-    """Every claim id either side of a contradiction names.
+def _side_ids(value) -> list[str]:
+    """The claim ids one side of a contradiction names -- `claim_a` or `claim_b`.
+
+    One home for the two-branch rule, because both readers of a contradiction's
+    sides need it: `disputed_claim_ids` below, which only wants the ids, and
+    `_side` further down, which resolves them. A second spelling of one rule is
+    how two reports come to disagree about one run.
 
     The schema *requires* a string: `contradiction` lists `claim_a` and `claim_b`
     in `required`, both `$ref`-ing `$defs/id`, which is `{"type": "string"}`. So a
@@ -228,6 +233,15 @@ def disputed_claim_ids(world_model: dict) -> frozenset[str]:
     is why the string branch exists. (The character explosion is the failure
     `_strings` was written to *prevent*, described in its own docstring; an earlier
     revision of this comment transposed it onto `_strings` itself and was wrong.)
+    """
+    return [value] if isinstance(value, str) else _strings(value)
+
+
+def disputed_claim_ids(world_model: dict) -> frozenset[str]:
+    """Every claim id either side of a contradiction names.
+
+    Each side is read through `_side_ids` above, which owns the string-or-list
+    rule and records why the two branches both exist.
 
     `_mapping` guards the read for the reason `_input_sources` above guards its
     own: a world model that parses but is not an object made this raise
@@ -237,11 +251,7 @@ def disputed_claim_ids(world_model: dict) -> frozenset[str]:
     out: set[str] = set()
     for contradiction in _dicts(_mapping(world_model).get("contradictions")):
         for side in ("claim_a", "claim_b"):
-            value = contradiction.get(side)
-            if isinstance(value, str):
-                out.add(value)
-            else:
-                out.update(_strings(value))
+            out.update(_side_ids(contradiction.get(side)))
     return frozenset(out)
 
 
@@ -371,3 +381,112 @@ def inputs_read(run: RunPaths) -> list[InputGroup] | Marker:
             )
         )
     return groups
+
+
+# `resolution` -> the sentence that follows a resolved disagreement. Only the two
+# that need no file name live here; `preferred_a` and `preferred_b` are answered
+# by naming the side, in `_taken` below.
+_BOTH_POSSIBLE = "We are treating both as possible."
+_UNRESOLVED_SIDE = "We took one side, but could not resolve which file states it."
+
+
+@dataclass(frozen=True)
+class Dispute:
+    """One contradiction, with both sides resolved to places in the target.
+
+    `nature` is carried verbatim. It is the sentence an owner acts on, and the
+    world model writes it in their terms already -- "the design document states
+    three actions; the tool module states four". `rationale` is deliberately not
+    here: it is dense with claim ids and argues the case to a reader who already
+    accepts the framing, and it stays available in `run-summary`.
+    """
+
+    id: str
+    nature: str
+    resolution: str
+    taken: str
+    side_a: tuple[SourceRef, ...]
+    side_b: tuple[SourceRef, ...]
+
+
+def _side(value, index: dict[str, SourceRef]) -> tuple[SourceRef, ...]:
+    """One side of a contradiction, resolved. A string or a list of ids.
+
+    `_side_ids` reads the two shapes, so this cannot disagree with
+    `disputed_claim_ids` about which ids a side names.
+    """
+    return tuple(index[c] for c in _side_ids(value) if c in index)
+
+
+def _taken(resolution: str, side_a, side_b) -> str:
+    """Which side was taken, as a sentence naming the file.
+
+    Not "we went with the code": that needs code-ness inferred from `kind`, and
+    the kinds measured do not support it -- reservation-service's capabilities
+    each span `design_doc`, `mcp_tool_schema`, `source_code` and `trace` at once.
+    A path the owner can open needs no inference and is checkable.
+    """
+    if resolution == "both_possible":
+        return _BOTH_POSSIBLE
+    if resolution == "preferred_a":
+        chosen = side_a
+    elif resolution == "preferred_b":
+        chosen = side_b
+    else:
+        # `unresolved`, or a value the enum does not cover. Group B's whole point
+        # is that we could not tell, and a sentence here would assert a decision
+        # nobody made.
+        return ""
+    files = sorted({ref.path for ref in chosen if ref.path})
+    if not files:
+        return _UNRESOLVED_SIDE
+    return "We went with " + ", ".join(files) + "."
+
+
+def disputes(run: RunPaths) -> list[Dispute] | Marker:
+    """Every contradiction the world model records, both sides resolved.
+
+    Ordered by id. Ranking by blast radius -- how many elements rest on a disputed
+    claim -- would order better and the inputs already exist in `provenance`, but
+    it is the one piece of genuinely new analysis in this design and shipping it
+    unmeasured is how a report starts asserting a judgment it did not earn.
+    """
+    payload = _mapping(_quietly(run.world_model))
+    if not payload:
+        # `Malformed` rather than `[]` on a world model that parses to `{}`, and
+        # that is the right way round: `[]` would tell the target's owner we found
+        # no disagreements in their system, where the truth is that we could not
+        # read a world model at all.
+        return _absent_or_malformed(
+            run.world_model, "01-world-model.json", "nothing could be read from it"
+        )
+    index = source_index(run)
+    # The marker is dropped here on purpose. An unreadable `01-claims/` turns every
+    # side into `()`, which read alone would assert to the owner that nothing in
+    # their system states either half -- so it is only safe because the renderer
+    # calls `source_index` itself and puts that same marker up as a run-level
+    # banner over the whole page. Returning a marker from here instead would lose
+    # the contradictions, which are readable and are the part an owner acts on.
+    refs = index if isinstance(index, dict) else {}
+    out = []
+    for record in _dicts(payload.get("contradictions")):
+        identifier = record.get("id")
+        nature = record.get("nature")
+        resolution = record.get("resolution")
+        resolution = resolution if isinstance(resolution, str) else ""
+        side_a = _side(record.get("claim_a"), refs)
+        side_b = _side(record.get("claim_b"), refs)
+        out.append(
+            Dispute(
+                id=identifier if isinstance(identifier, str) else "",
+                # Verbatim, and `""` rather than a stand-in sentence when the
+                # field is missing: the renderer says it could not read the
+                # description, which is true, where invented prose would not be.
+                nature=nature if isinstance(nature, str) else "",
+                resolution=resolution,
+                taken=_taken(resolution, side_a, side_b),
+                side_a=side_a,
+                side_b=side_b,
+            )
+        )
+    return sorted(out, key=lambda d: d.id)

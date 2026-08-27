@@ -326,3 +326,127 @@ def test_inputs_read_marks_an_absent_manifest_absent_and_a_broken_one_malformed(
     assert broken.what == "manifest.json"
     run.manifest.unlink()
     assert isinstance(target_brief.inputs_read(run), Absent)
+
+
+def test_disputes_renders_nature_verbatim_and_resolves_both_sides(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    recorded = json.loads(run.world_model.read_text())["contradictions"][0]
+    found = target_brief.disputes(run)
+    assert [d.id for d in found] == ["con-missing-semantics"]
+    dispute = found[0]
+    # Verbatim, compared against the artifact rather than a copied string, so the
+    # assertion cannot rot into agreeing with a paraphrase.
+    assert dispute.nature == recorded["nature"]
+    assert dispute.resolution == "preferred_a"
+    assert [r.claim_id for r in dispute.side_a] == ["clm-notes-004"]
+    assert [r.claim_id for r in dispute.side_b] == ["clm-trace-002"]
+    # Each side arrives as a file the owner can open, with the quoted line.
+    assert dispute.side_a[0].path == "notes.md"
+    assert dispute.side_a[0].quote.startswith("`get_ticket` with an id no ticket has")
+    assert dispute.side_b[0].path == "trace.json"
+
+
+def test_side_reads_a_list_of_ids_as_well_as_the_conformant_single_string():
+    """Both branches of the shared `_side_ids` helper, reached through `_side`.
+
+    The list branch is unreachable from the toy world model, whose sides are the
+    conformant strings, so without this the tolerance `_side_ids` exists to
+    provide is fixture-cannot-reach on this call path -- and the silent-drop
+    failure its docstring records was measured on exactly this shape.
+    """
+    index = {
+        "clm-one": target_brief.SourceRef("clm-one", "notes.md", "L1", "", "design_doc"),
+        "clm-two": target_brief.SourceRef("clm-two", "src/tool.py", "L2", "", "source_code"),
+    }
+    assert [r.claim_id for r in target_brief._side("clm-one", index)] == ["clm-one"]
+    assert [r.claim_id for r in target_brief._side(["clm-one", "clm-two"], index)] == [
+        "clm-one",
+        "clm-two",
+    ]
+    # An id nothing defines drops out, and the resolvable neighbour beside it is
+    # the control: without it, an empty tuple would also satisfy an
+    # implementation that resolves nothing at all.
+    assert [r.claim_id for r in target_brief._side(["clm-ghost", "clm-two"], index)] == ["clm-two"]
+    # Neither a non-string nor a hand-edited non-list invents a ref.
+    assert target_brief._side(7, index) == ()
+    assert target_brief._side(None, index) == ()
+
+
+def test_taken_names_the_file_rather_than_inferring_the_kind():
+    """ "We went with the code" needs a code-ness heuristic that fails on the mixed
+    kinds measured -- reservation-service's capabilities span four at once. A file
+    the owner can open needs no inference."""
+    a = (target_brief.SourceRef("clm-a", "notes.md", "L1", "", "design_doc"),)
+    b = (target_brief.SourceRef("clm-b", "src/tool.py", "L2", "", "source_code"),)
+    assert target_brief._taken("preferred_a", a, b) == "We went with notes.md."
+    assert target_brief._taken("preferred_b", a, b) == "We went with src/tool.py."
+    assert target_brief._taken("both_possible", a, b) == "We are treating both as possible."
+    # Unresolved carries no sentence: group B's whole point is that we could not
+    # tell, and a sentence there would assert a decision nobody made.
+    assert target_brief._taken("unresolved", a, b) == ""
+
+
+def test_taken_says_so_when_the_chosen_side_resolves_to_nothing():
+    """Never a bare "We went with ." -- the sentence states its own hole."""
+    b = (target_brief.SourceRef("clm-b", "src/tool.py", "L2", "", "source_code"),)
+    assert target_brief._taken("preferred_a", (), b) == (
+        "We took one side, but could not resolve which file states it."
+    )
+    # The control for the hole above: the *other* resolution over the same two
+    # sides names its file, so the sentence is chosen by which side was taken
+    # rather than returned for every input that has an empty side anywhere.
+    assert target_brief._taken("preferred_b", (), b) == "We went with src/tool.py."
+
+
+def test_disputes_keeps_a_contradiction_whose_claims_do_not_resolve(tmp_path):
+    """The nature prose is the payload; the sides are corroboration. Dropping the
+    record because a citation dangles would hide a real disagreement, and a
+    dangling citation is check-refs' finding rather than this page's."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["contradictions"][0]["claim_a"] = "clm-ghost"
+    run.world_model.write_text(json.dumps(world_model))
+    dispute = target_brief.disputes(run)[0]
+    assert dispute.side_a == ()
+    # The controls for that empty side, and what says it is one dangling id
+    # rather than an index that resolved nothing at all: side_b runs through the
+    # same `_side` against the same index and still arrives as a file.
+    assert [r.claim_id for r in dispute.side_b] == ["clm-trace-002"]
+    assert dispute.side_b[0].path == "trace.json"
+    assert dispute.nature  # still there, still rendered
+    assert dispute.taken == "We took one side, but could not resolve which file states it."
+
+
+def test_disputes_orders_by_id_and_reports_an_unreadable_world_model(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    first = dict(world_model["contradictions"][0])
+    world_model["contradictions"] = [
+        {**first, "id": "con-zebra"},
+        {**first, "id": "con-alpha"},
+    ]
+    run.world_model.write_text(json.dumps(world_model))
+    assert [d.id for d in target_brief.disputes(run)] == ["con-alpha", "con-zebra"]
+    run.world_model.write_text("{ not json")
+    broken = target_brief.disputes(run)
+    assert isinstance(broken, Malformed)
+    # The artifact the marker names, not just that a marker came back: CLAUDE.md's
+    # third exit-code rule is that a report must name the *right* artifact, and an
+    # unreadable `01-claims/` reaches this same function through `source_index`.
+    assert broken.what == "01-world-model.json"
+    run.world_model.unlink()
+    assert isinstance(target_brief.disputes(run), Absent)
+
+
+def test_disputes_is_empty_rather_than_absent_when_the_target_has_none(tmp_path):
+    """An empty list and a missing world model are different facts, and the
+    renderer says different things about them."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    # The control, before the field is emptied: this run does record a
+    # disagreement, so the `[]` below is the emptied field being read and not a
+    # builder that finds nothing in any run at all.
+    assert len(target_brief.disputes(run)) == 1
+    world_model = json.loads(run.world_model.read_text())
+    world_model["contradictions"] = []
+    run.world_model.write_text(json.dumps(world_model))
+    assert target_brief.disputes(run) == []
