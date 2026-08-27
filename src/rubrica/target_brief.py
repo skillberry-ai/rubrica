@@ -22,7 +22,7 @@ from dataclasses import dataclass
 # Private helpers from three siblings, deliberately: `summary.py` imports the
 # same four out of `brief.py` for the reason stated there, which is that a second
 # spelling of one rule is how two reports come to disagree about one run.
-from .brief import _dicts, _mapping, _quietly
+from .brief import _dicts, _mapping, _quietly, _strings
 from .paths import RunPaths
 from .refs import _claims_by_artifact
 from .summary import Marker, _absent_or_malformed
@@ -174,3 +174,74 @@ def source_index(run: RunPaths) -> dict[str, SourceRef] | Marker:
                 kind=kind,
             )
     return index
+
+
+@dataclass(frozen=True)
+class Provenance:
+    """What an element rests on, in the three terms that measurably discriminate.
+
+    The first design badged each element with its claims' `derivation` -- "your
+    documents state this" / "we read this off your code". Measured per element it
+    reads the same on every row: all 39 parsec capabilities, all 30 entities, all
+    26 goals and both actors come out `stated`, because `derivation` records
+    whether *an artifact asserted* the fact and source code is an artifact that
+    asserts things. Capability `confidence` is worse -- all 39 `high`. A badge
+    that never varies is not neutral in a document someone is asked to ratify: it
+    implies a distinction was checked.
+
+    These three vary. Across the three runs measured: capabilities resting on one
+    source are 4 of 39, **13 of 37**, and 0 of 5; entities on one source are **28
+    of 30**, 18 of 18, 1 of 4; capabilities a contradiction touches are 6 of 39,
+    **16 of 37**, 2 of 5. And each states something an owner can act on without
+    knowing what rubrica is -- 13 of executive-agent's 37 operations rest on a
+    design document alone, with no schema, no code and no trace behind them.
+    """
+
+    files: tuple[str, ...]
+    kinds: tuple[str, ...]
+    disputed: bool
+
+    @property
+    def single_source(self) -> bool:
+        """Whether exactly one file is behind this element.
+
+        A property rather than a stored field so it cannot disagree with `files`.
+        """
+        return len(self.files) == 1
+
+
+def disputed_claim_ids(world_model: dict) -> frozenset[str]:
+    """Every claim id either side of a contradiction names.
+
+    Both spellings are read. The committed recordings write each side as a single
+    claim id string, nothing in the schema forbids a list, and a `str` fed through
+    `_strings` would contribute one entry per character -- which is how an element
+    citing `clm-notes-004` would come out undisputed while five single letters
+    came out disputed.
+    """
+    out: set[str] = set()
+    for contradiction in _dicts(world_model.get("contradictions")):
+        for side in ("claim_a", "claim_b"):
+            value = contradiction.get(side)
+            if isinstance(value, str):
+                out.add(value)
+            else:
+                out.update(_strings(value))
+    return frozenset(out)
+
+
+def provenance(claim_ids, index: dict[str, SourceRef], disputed: frozenset[str]) -> Provenance:
+    """What the claims behind one element rest on.
+
+    `disputed` is computed from the ids themselves rather than from the resolved
+    refs: an element every one of whose claims is unresolvable has no files to
+    show, and losing its dispute marker at the same time would hide the more
+    important of the two facts.
+    """
+    ids = [c for c in claim_ids if isinstance(c, str)]
+    resolved = [index[c] for c in ids if c in index]
+    return Provenance(
+        files=tuple(sorted({r.path for r in resolved if r.path})),
+        kinds=tuple(sorted({r.kind for r in resolved if r.kind})),
+        disputed=any(c in disputed for c in ids),
+    )

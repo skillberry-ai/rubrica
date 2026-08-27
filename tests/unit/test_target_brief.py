@@ -130,3 +130,71 @@ def test_shorten_keeps_the_slice_fragment():
     # A prefix that is not actually a parent leaves the path alone rather than
     # slicing characters off its front.
     assert target_brief._shorten("/other/tool.py", "/a/b") == "/other/tool.py"
+
+
+def test_provenance_counts_distinct_files_and_kinds(tmp_path):
+    """The discriminator that replaced the derivation badge. Measured: 13 of
+    executive-agent's 37 operations rest on a design document alone, and 28 of
+    parsec's 30 data shapes were seen in exactly one file."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    index = target_brief.source_index(run)
+    # clm-api-001 is in api.json (mcp_tool_schema); clm-notes-002 in notes.md
+    # (design_doc). Two files, two kinds.
+    across = target_brief.provenance(["clm-api-001", "clm-notes-002"], index, frozenset())
+    assert across.files == ("api.json", "notes.md")
+    assert across.kinds == ("design_doc", "mcp_tool_schema")
+    assert across.single_source is False
+    # The three claims cap-find-tickets cites are all in api.json.
+    within = target_brief.provenance(
+        ["clm-api-001", "clm-api-007", "clm-api-008"], index, frozenset()
+    )
+    assert within.files == ("api.json",)
+    assert within.single_source is True
+
+
+def test_provenance_marks_an_element_a_contradiction_touches(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    index = target_brief.source_index(run)
+    world_model = json.loads(run.world_model.read_text())
+    disputed = target_brief.disputed_claim_ids(world_model)
+    # The toy contradiction is con-missing-semantics, claim_a clm-notes-004
+    # against claim_b clm-trace-002.
+    assert disputed == {"clm-notes-004", "clm-trace-002"}
+    assert target_brief.provenance(["clm-notes-004"], index, disputed).disputed is True
+    assert target_brief.provenance(["clm-api-001"], index, disputed).disputed is False
+
+
+def test_disputed_claim_ids_reads_a_side_written_as_a_string_or_a_list():
+    """The committed recordings write each side as one claim id; nothing forbids a
+    list, and a `str` iterated as a list contributes one character per entry."""
+    as_string = {"contradictions": [{"claim_a": "clm-one", "claim_b": "clm-two"}]}
+    assert target_brief.disputed_claim_ids(as_string) == {"clm-one", "clm-two"}
+    as_list = {"contradictions": [{"claim_a": ["clm-one", "clm-three"], "claim_b": ["clm-two"]}]}
+    assert target_brief.disputed_claim_ids(as_list) == {"clm-one", "clm-two", "clm-three"}
+    # Hand-edited shapes that must not raise and must not invent an id.
+    assert target_brief.disputed_claim_ids({"contradictions": "nope"}) == frozenset()
+    assert target_brief.disputed_claim_ids({"contradictions": [{"claim_a": 7}]}) == frozenset()
+    assert target_brief.disputed_claim_ids({}) == frozenset()
+
+
+def test_provenance_of_an_unresolvable_id_names_no_file_but_still_reports_disputed():
+    """Provenance is arithmetic over what resolved; dispute is a property of the id
+    itself. An element whose claims are all unresolvable must not silently lose its
+    disputed marker as well as its files."""
+    result = target_brief.provenance(["clm-ghost"], {}, frozenset({"clm-ghost"}))
+    assert result.files == ()
+    assert result.kinds == ()
+    assert result.disputed is True
+
+
+def test_provenance_ignores_non_string_members_of_a_claims_array(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    index = target_brief.source_index(run)
+    assert target_brief.provenance([7, None, {}], {}, frozenset()).files == ()
+    # The positive control, and without it this test asserts nothing: an
+    # implementation returning no files for any input at all satisfies the
+    # absence above. The string member has to survive the same filter that drops
+    # its three neighbours -- which is also what says the filter is a type test
+    # rather than a length test on the array.
+    mixed = target_brief.provenance([7, "clm-api-001", None, {}], index, frozenset())
+    assert mixed.files == ("api.json",)
