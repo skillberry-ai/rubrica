@@ -165,8 +165,11 @@ def test_provenance_marks_an_element_a_contradiction_touches(tmp_path):
 
 
 def test_disputed_claim_ids_reads_a_side_written_as_a_string_or_a_list():
-    """The committed recordings write each side as one claim id; nothing forbids a
-    list, and a `str` iterated as a list contributes one character per entry."""
+    """The schema requires each side to be a single id string, so the string branch
+    is the conformant path and the list branch is tolerance for a hand-edit made
+    after layer 1 passed. `_strings` is what reads the list, because it drops a
+    non-string member rather than raising -- which is what the `{"claim_a": 7}`
+    case below pins."""
     as_string = {"contradictions": [{"claim_a": "clm-one", "claim_b": "clm-two"}]}
     assert target_brief.disputed_claim_ids(as_string) == {"clm-one", "clm-two"}
     as_list = {"contradictions": [{"claim_a": ["clm-one", "clm-three"], "claim_b": ["clm-two"]}]}
@@ -184,13 +187,16 @@ def test_provenance_of_an_unresolvable_id_names_no_file_but_still_reports_disput
     result = target_brief.provenance(["clm-ghost"], {}, frozenset({"clm-ghost"}))
     assert result.files == ()
     assert result.kinds == ()
+    # Zero files is not one file: `single_source` reads off `files`, and an
+    # element with nothing behind it must not badge as resting on a single source.
+    assert result.single_source is False
     assert result.disputed is True
 
 
 def test_provenance_ignores_non_string_members_of_a_claims_array(tmp_path):
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     index = target_brief.source_index(run)
-    assert target_brief.provenance([7, None, {}], {}, frozenset()).files == ()
+    assert target_brief.provenance([7, None, {}], index, frozenset()).files == ()
     # The positive control, and without it this test asserts nothing: an
     # implementation returning no files for any input at all satisfies the
     # absence above. The string member has to survive the same filter that drops
@@ -198,3 +204,49 @@ def test_provenance_ignores_non_string_members_of_a_claims_array(tmp_path):
     # rather than a length test on the array.
     mixed = target_brief.provenance([7, "clm-api-001", None, {}], index, frozenset())
     assert mixed.files == ("api.json",)
+
+
+def test_disputed_claim_ids_tolerates_a_world_model_that_is_not_an_object():
+    """A report never raises on readable content, and a world model is hand-edited
+    at a human gate -- which is exactly when a non-object appears. Bare `.get`
+    raised AttributeError on both shapes below, measured.
+
+    The truthy string is the case `brief._mapping`'s docstring records as measured
+    at gates 0, 1 and 2; `[]` is here as well because bare `.get` raises on a
+    non-object whether it is truthy or falsy, and the `x or {}` idiom `_mapping`
+    replaced would have masked exactly the falsy half.
+    """
+    assert target_brief.disputed_claim_ids([]) == frozenset()
+    assert target_brief.disputed_claim_ids("nope-a-truthy-string") == frozenset()
+    # The positive control: an object still reads, so the guard above cannot be a
+    # blanket "return nothing" that would hide every real contradiction too.
+    readable = {"contradictions": [{"claim_a": "clm-one", "claim_b": "clm-two"}]}
+    assert target_brief.disputed_claim_ids(readable) == {"clm-one", "clm-two"}
+
+
+def test_provenance_counts_two_slices_of_one_file_as_two_sources():
+    """A ruling, not an accident. `intake.py:333` writes a sliced input's
+    source_path as `<container>#<json_pointer>`, so two slices of one capture reach
+    `files` as two entries and the element is not single-source. That is what "how
+    many sources back this" asks: parsec's 71 trace inputs are 71 slices of one
+    capture and 71 independent observations of the target, and collapsing them
+    would tell an owner that 71 recorded interactions are one piece of evidence.
+
+    A synthetic index because the toy run has no sliced input -- `tests/toy.py`'s
+    `#/...` strings are evidence *locators*, not source_path fragments -- so
+    without this the whole fragment behaviour is fixture-cannot-reach.
+    """
+    index = {
+        "clm-one": target_brief.SourceRef(
+            claim_id="clm-one", path="trace.json#/12", locator="#/0", quote="", kind="trace"
+        ),
+        "clm-two": target_brief.SourceRef(
+            claim_id="clm-two", path="trace.json#/41", locator="#/0", quote="", kind="trace"
+        ),
+    }
+    result = target_brief.provenance(["clm-one", "clm-two"], index, frozenset())
+    assert result.files == ("trace.json#/12", "trace.json#/41")
+    # One kind, because both slices are the same kind of file. The two counts are
+    # independent, and this is the case that says so.
+    assert result.kinds == ("trace",)
+    assert result.single_source is False

@@ -213,14 +213,29 @@ class Provenance:
 def disputed_claim_ids(world_model: dict) -> frozenset[str]:
     """Every claim id either side of a contradiction names.
 
-    Both spellings are read. The committed recordings write each side as a single
-    claim id string, nothing in the schema forbids a list, and a `str` fed through
-    `_strings` would contribute one entry per character -- which is how an element
-    citing `clm-notes-004` would come out undisputed while five single letters
-    came out disputed.
+    The schema *requires* a string: `contradiction` lists `claim_a` and `claim_b`
+    in `required`, both `$ref`-ing `$defs/id`, which is `{"type": "string"}`. So a
+    list fails layer 1, the string branch is the conformant path, and the list
+    branch is tolerance for a hand-edit made after validation passed -- which is
+    the shape a human gate invites.
+
+    `_strings` reads that branch because it *drops* a non-string member instead of
+    raising, which is what the `{"claim_a": 7}` case pins. It does not explode a
+    string into characters: it returns `[]` for anything that is not a list
+    (`brief.py:165-167`), so routing a conformant string through it would drop the
+    id **silently** -- measured, an element citing `clm-notes-004` came out
+    undisputed and the id vanished. That silent drop, not a character explosion,
+    is why the string branch exists. (The character explosion is the failure
+    `_strings` was written to *prevent*, described in its own docstring; an earlier
+    revision of this comment transposed it onto `_strings` itself and was wrong.)
+
+    `_mapping` guards the read for the reason `_input_sources` above guards its
+    own: a world model that parses but is not an object made this raise
+    `AttributeError`, and this module's contract is that a report never raises on
+    readable content.
     """
     out: set[str] = set()
-    for contradiction in _dicts(world_model.get("contradictions")):
+    for contradiction in _dicts(_mapping(world_model).get("contradictions")):
         for side in ("claim_a", "claim_b"):
             value = contradiction.get(side)
             if isinstance(value, str):
@@ -237,6 +252,16 @@ def provenance(claim_ids, index: dict[str, SourceRef], disputed: frozenset[str])
     refs: an element every one of whose claims is unresolvable has no files to
     show, and losing its dispute marker at the same time would hide the more
     important of the two facts.
+
+    Two slices of one file count as two sources, deliberately. `intake.py:333`
+    writes a sliced input's `source_path` as `<container>#<json_pointer>`, so
+    `files` holds `trace.json#/12` and `trace.json#/41` separately and such an
+    element is not `single_source`. That is what "how many sources back this"
+    asks: parsec's 71 trace inputs are 71 slices of one capture and 71
+    independent observations of the target, and collapsing them on the container
+    would tell an owner that 71 recorded interactions are one piece of evidence.
+    `kinds` does collapse them, because both slices are the same kind of file --
+    the two counts are independent by design.
     """
     ids = [c for c in claim_ids if isinstance(c, str)]
     resolved = [index[c] for c in ids if c in index]
