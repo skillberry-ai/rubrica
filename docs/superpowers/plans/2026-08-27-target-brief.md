@@ -1446,7 +1446,17 @@ uses it. Each element carries Task 2's provenance line.
   `Persona(id, name, goals: tuple[str, ...], provenance: Provenance)`;
   `operations(run) -> list[Operation] | Marker`;
   `data_types(run) -> list[DataType] | Marker`;
-  `personas(run) -> list[Persona] | Marker`.
+  `personas(run) -> list[Persona] | Marker`;
+  `_world(run) -> dict | Marker`, the module's single world-model reader.
+
+**`_world` replaces the inline guard in Tasks 4 and 5 as well.** Those two tasks
+each spell `_mapping(_quietly(run.world_model))` followed by `_absent_or_malformed`,
+and this task adds a third copy. Three copies of one guard in one module is a defect
+by this repo's conventions — the "one home" rule that `skills.SKILL_PREFIX` exists
+to satisfy — and the divergence it invites is exactly the kind two reports of the
+same run must not have. So Step 5 below rewrites `disputes` and `open_questions` to
+call `_world` too. Their behaviour does not change: `_world` returns the same marker
+those functions built inline, from the same two lines.
 
 **Outcome provenance comes from the parent capability.** An outcome class's own
 `claims` may not exist: the parsec run fails layer 1 with 213 findings, 195 of them
@@ -1669,8 +1679,9 @@ class Persona:
 def _world(run: RunPaths):
     """The world model, or the marker naming why there is none.
 
-    One reader for the five builders below, so they cannot disagree about whether
-    a run has a world model.
+    The one world-model reader in this module -- the three builders below and the
+    two written in Tasks 4 and 5 -- so no two of them can disagree about whether a
+    run has a world model, or say it differently when it has not.
     """
     payload = _mapping(_quietly(run.world_model))
     if not payload:
@@ -1849,7 +1860,54 @@ def personas(run: RunPaths) -> list[Persona] | Marker:
 Run: `uv run pytest tests/unit/test_target_brief.py -q`
 Expected: PASS.
 
-- [ ] **Step 5: Confirm it survives the run that fails layer 1**
+- [ ] **Step 5: Move Tasks 4 and 5's readers onto `_world`**
+
+Both `disputes` and `open_questions` open with the same four lines this task's
+`_world` now owns. Replace each opening with a call, leaving everything else in both
+functions untouched.
+
+In `disputes`, replace:
+
+```python
+    payload = _mapping(_quietly(run.world_model))
+    if not payload:
+        return _absent_or_malformed(
+            run.world_model, "01-world-model.json", "nothing could be read from it"
+        )
+    index = source_index(run)
+```
+
+with:
+
+```python
+    payload = _world(run)
+    if isinstance(payload, Marker):
+        return payload
+    index = source_index(run)
+```
+
+In `open_questions`, replace the same four lines with the same two — the function
+continues at whatever follows them. Neither rewrite changes behaviour: `_world`
+returns the marker those lines built, from the same two calls.
+
+Then confirm the world-model guard has exactly one home:
+
+```bash
+grep -n "_mapping(_quietly(run.world_model))" src/rubrica/target_brief.py
+grep -c "_absent_or_malformed" src/rubrica/target_brief.py
+```
+
+Expected: **no output at all** from the first — `_world` is the only place that reads
+`run.world_model`. The second returns `4`: the import, plus one call each in
+`source_index` (over `01-claims/`), `inputs_read` (over `manifest.json`) and `_world`.
+Those three read three different files, so they are three guards and not three copies
+of one. Then run
+`uv run pytest tests/unit/test_target_brief.py -q` and expect PASS: Tasks 4 and 5
+each wrote a test that truncates the world model to `{ not json` and then unlinks
+it, asserting `Malformed` and then `Absent`, and those two are what prove the
+rewrite kept both markers rather than collapsing them into one.
+
+- [ ] **Step 6: Confirm it survives the run that fails layer 1**
 
 ```bash
 uv run rubrica validate --run runs/run-20260826-090456 --stage reconcile-seal > /dev/null 2>&1; echo "validate exit: $?  (1 expected -- the parked ruling)"
@@ -1873,7 +1931,7 @@ Expected: `validate exit: 1` (the parked ruling, not a regression), and
 (two actors plus the unattributed-goals bucket, if any goal is unattributed). The
 point of this step is that a world model failing layer 1 still renders completely.
 
-- [ ] **Step 6: `make check` and commit**
+- [ ] **Step 7: `make check` and commit**
 
 ```bash
 make check
@@ -1901,6 +1959,11 @@ semantic kind* -- `oc-qac-empty` is `kind: empty` carrying "No claim addresses w
 is returned when no cost data exists." So `kind` cannot mark absence, nothing else
 can, and the alternative is string-matching model prose. Plain labels plus a legend
 carry it.
+
+`_world` also replaces the inline world-model guard in `disputes` and
+`open_questions`. Three functions spelling one read of one file is where two
+sections of one report start disagreeing about whether the run has a world model;
+`run.world_model` is now read in exactly one place.
 
 Two things kept rather than dropped, both because a description asking "is this
 accurate?" cannot afford to be quietly incomplete: an outcome whose kind is outside
@@ -2023,6 +2086,13 @@ def test_page_renders_the_toy_contradiction_with_both_files_named(tmp_path):
     # of their own documents disagreeing, never `clm-notes-004`.
     assert "notes.md" in page and "trace.json" in page
     assert "clm-notes-004" not in page and "clm-trace-002" not in page
+    # Each side quotes itself: the locator the owner can jump to, and the line
+    # their own document carries. This is what `_side_html` is for -- the naive
+    # `esc(dispute.side_a)` puts a dataclass repr here and fails the line above.
+    assert "#error-behaviour" in page
+    assert "not an empty result" in page
+    # `resolution` is `preferred_a`, so the page names the file it went with.
+    assert "We went with" in page
 
 
 def test_page_distinguishes_two_operations_that_share_a_handle(tmp_path):
@@ -2339,6 +2409,40 @@ def _group_a(run: RunPaths):
     )
 
 
+def _side_html(refs, label: str) -> str:
+    """One side of a disagreement, as the files that state it.
+
+    `Dispute.side_a` is a `tuple[SourceRef, ...]`, not a sentence. Rendering it
+    through `esc()` directly would print the dataclass repr and put
+    `claim_id='clm-notes-004'` on a page whose entire premise is that no rubrica
+    identifier appears on it -- the no-identifier test below would catch it, with
+    nothing to say about the fix. Each ref becomes its path, its locator and the
+    line it quotes, which is what spec section 3.3 asks for: each side shown as a
+    real file quoting itself. `_provenance` is not reused here because that renders
+    a whole element's sources as one subordinate line, and a side of a
+    disagreement is the thing being read, not a footnote under it.
+    """
+    if not refs:
+        # A side whose claims did not resolve to any input. Saying so beats
+        # dropping the side: `taken` below may still name a file, and a page that
+        # answers a question it never asked reads as a page with something missing.
+        return f"<p>{esc(label)}: we could not resolve which file states it.</p>"
+    lines = []
+    for ref in refs:
+        where = f'<span class="file">{esc(ref.path)}</span>'
+        if ref.locator:
+            where += f" ({esc(ref.locator)})"
+        if ref.quote:
+            # Degrades to path plus locator when the evidence record carries no
+            # quote -- 59 of executive-agent's 126 cited claims, per Task 1.
+            lines.append(
+                f'<li>{where}: <span class="quote">“{esc(ref.quote)}”</span></li>'
+            )
+        else:
+            lines.append(f"<li>{where}</li>")
+    return f"<p>{esc(label)} is stated in:</p><ul>{''.join(lines)}</ul>"
+
+
 def _group_bc(run: RunPaths):
     """Where our sources disagree, and what we did about it. Tasks 4's `Dispute`
     carries both the two sides and the side taken, so B and C are one list rather
@@ -2355,10 +2459,16 @@ def _group_bc(run: RunPaths):
         )
     items = []
     for dispute in found:
+        # `taken` is `""` for `unresolved` -- Task 4 leaves it empty rather than
+        # asserting a decision nobody made. The renderer says so out loud instead
+        # of emitting an empty bold paragraph: on this page, silence after two
+        # contradicting sides reads as a decision the reader missed.
+        taken = dispute.taken or "We have not decided between them."
         items.append(
             f"<li><p>{esc(dispute.nature)}</p>"
-            f"<p>{esc(dispute.side_a)}</p><p>{esc(dispute.side_b)}</p>"
-            f"<p><strong>{esc(dispute.taken)}</strong></p></li>"
+            f"{_side_html(dispute.side_a, 'One side')}"
+            f"{_side_html(dispute.side_b, 'The other side')}"
+            f"<p><strong>{esc(taken)}</strong></p></li>"
         )
     return (
         "<p>Two things we read said different things. Each one below is a place "
