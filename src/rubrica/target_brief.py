@@ -450,6 +450,13 @@ def disputes(run: RunPaths) -> list[Dispute] | Marker:
     claim -- would order better and the inputs already exist in `provenance`, but
     it is the one piece of genuinely new analysis in this design and shipping it
     unmeasured is how a report starts asserting a judgment it did not earn.
+
+    One asymmetry, recorded rather than fixed: a hand-edited `"contradictions":
+    "nope"` is dropped by `_dicts` and renders as `[]`, which tells the owner
+    nothing in their system contradicted anything else -- the same false
+    reassurance the `{}` branch below refuses. It stays because `_dicts` is how
+    every reader in this module reads a list, and one spelling of that rule is
+    worth more than a second marker branch for a shape layer 1 rejects outright.
     """
     payload = _mapping(_quietly(run.world_model))
     if not payload:
