@@ -278,10 +278,19 @@ def test_it_states_all_three_exit_codes_and_what_each_means():
 def test_it_states_the_repair_is_bounded_to_one_attempt():
     """Strengthened during Task 13's fix round. The original was
     `("once" in body or "one repair" in body) and "halt" in body`: measured,
-    "once" occurs 13 times in unrelated prose ("get this right once", "two
-    members appending at once"), "halt" 43 times, and "one repair" is in the
-    frontmatter `description:` line -- so deleting the whole bounded-repair
-    rule left all eleven tests green.
+    "once" and "halt" both occur many times over in unrelated prose -- "once"
+    carries the dispatch protocol's own advice and the re-seed budget, and "halt"
+    is what five different rules do -- and "one repair" is in the frontmatter
+    `description:` line, so deleting the whole bounded-repair rule left all
+    eleven tests green.
+
+    The two phrases this paragraph used to quote, and the count beside them, were
+    dropped when the propose fan-out landed. One of them lived in the paragraph
+    arguing that propose could not be a fan-out, which is gone, so the count was
+    no longer true and the quotation sent a reader looking for text that is not
+    there -- and the other is hard-wrapped in the skill, so grepping for it fails
+    even though the sentence is still on the page. Neither was load-bearing: the
+    measurement's point is that the tokens are common, not how common.
 
     What has to be stated is the bound itself: the *same* stage, re-dispatched
     *once*, and no third attempt.

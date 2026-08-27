@@ -204,8 +204,18 @@ def test_output_says_the_matrices_are_computed_rather_than_written():
     phrase. It is a *forbidden* substring rather than a required one, so the
     usual phrase-pin failure mode is inverted: rewording the rule cannot break
     it, and only reintroducing the double write can.
+
+    **Normalised before the `not in`, and this was measured rather than
+    reasoned.** These files hard-wrap at about 78 columns, so the realistic
+    regression is not somebody typing the phrase on one line -- it is somebody
+    re-adding the sentence and letting the formatter wrap it. Against the raw
+    section text, `written twice` split as `written\ntwice` left this predicate
+    GREEN while the same words on one line went RED: the guard could not see the
+    only form the regression actually takes. That is the
+    *fixture-cannot-reach* shape, and it applies to every negative pin in this
+    repo whose phrase is longer than a wrapped line.
     """
-    section = section_body(load(SKILL), OUTPUT)
+    section = re.sub(r"\s+", " ", section_body(load(SKILL), OUTPUT))
     owning = [
         block for block in blocks(OUTPUT) if "capability_matrix" in block and "goal_matrix" in block
     ]
@@ -240,6 +250,15 @@ def test_method_states_the_evaluation_point_a_new_cell_is_judged_from():
     property is that the block owning `new_cells_this_round` states that
     evaluation point, and the alternation is over three ways to say it rather
     than one phrase -- the requirement is the evaluation point, not its wording.
+
+    The negative pin is normalised for the reason the one above is, and this is
+    the predicate where it was measured: reinstating the restatement **exactly as
+    3156b65 wrapped it** -- `no live scenario\n   from an earlier round credits
+    them` -- left the raw-text version GREEN, while the same sentence unwrapped
+    went RED. The wrapped form is the one a reinstatement would actually take, so
+    the guard was blind to its own regression. `method_step` already normalises;
+    this uses the same expression over the whole Method section rather than one
+    step, because a reinstated restatement need not land back in step 8.
     """
     step = method_step(8)
     assert "new_cells_this_round" in step, (
@@ -256,7 +275,7 @@ def test_method_states_the_evaluation_point_a_new_cell_is_judged_from():
         "the step must name the case the two readings diverge in, or the evaluation point "
         "reads as a detail rather than as the rule"
     )
-    method = section_body(load(SKILL), METHOD)
+    method = re.sub(r"\s+", " ", section_body(load(SKILL), METHOD))
     assert "no live scenario from an earlier round credits them" not in method, (
         "the restatement that contradicts this step's own hazard sentence is back"
     )
@@ -280,15 +299,28 @@ def test_output_says_a_re_dispatch_must_restate_the_rulings_it_replaces():
     remedy in the same block: the hazard without the restatement rule is a
     warning a dispatched model cannot act on, which is this project's own test
     for a decorative rule.
+
+    Every alternation here is over the *concept*, not a phrase, because all three
+    were measured red against an untouched paragraph on the first draft: keying
+    the second dispatch on the literal `re-dispatch` failed "a second dispatch of
+    this round", keying the remedy on `restate` failed "carry each forward", and
+    keying what is being carried on `still in force` failed "the rulings that
+    remain in effect". None of those rewords changes the rule.
     """
     owning = [
         block
         for block in blocks(OUTPUT)
-        if re.search(r"re-dispatch", block, re.I) and re.search(r"rewrite|replace", block, re.I)
+        if re.search(r"re-?dispatch|dispatched again|second dispatch|re-?scor", block, re.I)
+        and re.search(r"rewrit|replac|overwrit|in place of", block, re.I)
     ]
     assert owning, "the Output section never says a re-dispatch replaces this round's part"
     assert any(
-        re.search(r"restate", block, re.I) and re.search(r"still in force|already", block, re.I)
+        re.search(r"restate|re-state|reassert|reproduce|repeat|carry .{0,40}forward", block, re.I)
+        and re.search(
+            r"still in force|in effect|already ruled|already carries|remain|standing",
+            block,
+            re.I,
+        )
         for block in owning
     ), (
         "that block must say the replacement part has to restate the rulings still in force, "

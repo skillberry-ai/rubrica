@@ -892,21 +892,31 @@ def progress(run: RunPaths, round_n: int, cap_matrix: dict) -> dict:
     The prior round's coverage document is the baseline, and it is read rather
     than re-derived from the scenarios' round tags.
 
-    WHICH CLAUSE OF METHOD STEP 8 THIS IMPLEMENTS, because the step states two
-    that disagree and a reader has to know which one is in the code. Implemented:
-    the primary clause, "covered now and were *not* covered before this round",
-    as a set difference against the prior round's document. NOT implemented: the
-    step's own round-tag restatement of it, "no live scenario from an earlier
-    round credits them". The two diverge in exactly the states this loop exists
-    to handle -- fold round 1's scenario into a round-2 one claiming the same
-    cell, and the round-tag reading calls that cell new because no *live* earlier
-    scenario credits it, which is the inflation the step's own hazard sentence
-    names ("inflated by counting cells an earlier round already covered is how a
-    loop that has stopped making progress runs to the round cap anyway"). So the
-    restatement contradicts the hazard it is written beside and the primary
-    clause does not. That is a defect in the SKILL, not in this function, and it
-    is recorded as required work for the task that rewrites rb-score -- do not
-    resolve it by changing the code here to match the restatement.
+    WHICH CLAUSE OF METHOD STEP 8 THIS IMPLEMENTS: the primary clause, "covered
+    now and were *not* covered before this round", as a set difference against the
+    prior round's document. The skill agrees with it, and this paragraph records
+    that it once did not, because the divergence is worth remembering and the
+    reasoning is what stops it coming back.
+
+    The step used to restate the primary clause in round-tag terms -- "no live
+    scenario from an earlier round credits them" -- and that restatement, never
+    implemented here, diverged from the clause above in exactly the states this
+    loop exists to handle: fold round 1's scenario into a round-2 one claiming the
+    same cell, and the restatement calls that cell new because no *live* earlier
+    scenario credits it any more, which is the inflation the step's own hazard
+    sentence names ("inflated by counting cells an earlier round already covered is
+    how a loop that has stopped making progress runs to the round cap anyway"). So
+    the restatement contradicted the hazard written beside it and the primary
+    clause did not.
+
+    The skill now states the evaluation point the restatement left unstated:
+    liveness is read as the dispatch *found* it, before its own rulings. With that
+    point named the round-tag reading and this function's baseline agree on the
+    fold case and on the rejection case both -- only rb-score changes a status, so
+    nothing can move between the previous seal and the current dispatch except the
+    current dispatch's own rulings, which is what the evaluation point excludes.
+    rb-score derives the reading for its `halted_no_progress` verdict; it writes
+    neither number, and this function writes both.
 
     Reading round-(N-1).json rather than latest.json is what keeps the step's
     other warning satisfied: latest.json is rewritten by every re-score, so it

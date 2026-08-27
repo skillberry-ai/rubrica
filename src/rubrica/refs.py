@@ -2005,7 +2005,7 @@ def _scenario_part_findings(
         named = sid if sid is not None else f"the scenario at /scenarios/{i}"
         # `provenance.hole_refs` and nothing else, because that is where the member
         # DECLARES which holes it wrote this scenario to close (rb-propose Method
-        # step 8), and scenarios-0.1.json requires it with minItems 1. It is the
+        # step 9), and scenarios-0.1.json requires it with minItems 1. It is the
         # faithful analogue of the triage precedent: a dispositions part names a
         # `candidate_id` and the seal refuses one outside the slice it rules on,
         # because the candidate IS that fan-out's work unit. Here the work unit is

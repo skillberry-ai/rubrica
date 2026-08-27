@@ -336,22 +336,26 @@ belongs in what you report back to the orchestrator, which records it in
    is not covered: no test will ship for it, so it is a hole again (step 7).
 
 5. **Work out `goal_matrix`: one row per goal in the world model**, again
-   every one, none invented. `hop_depths_expected` is copied from that goal's
-   `expected_hop_depths` -- copied, not re-derived and not trimmed to what
-   the scenarios reached. `hop_depths_present` is the set of `hop_depth`
-   values of the scenarios in that row's `scenario_ids`. `covered` is true if
-   and only if the row has a live scenario **and** every expected depth is
-   present.
+   every one, none invented -- and again `score-seal` is what writes it, from the
+   same two inputs, so every rule below is a rule about the derivation you make
+   rather than about a document you produce. `hop_depths_expected` comes from
+   that goal's `expected_hop_depths` unchanged -- not re-derived and not trimmed
+   to what the scenarios reached. `hop_depths_present` is the set of `hop_depth`
+   values of the scenarios in that row's `scenario_ids`. `covered` comes out
+   true if and only if the row has a live scenario **and** every expected depth
+   is present.
 
    A goal exercised at one depth of two is a partial row, and calling it
    covered is how a goal denominator reaches 100% without ever testing the
    hard half of the goal -- the multi-hop half, which is the half the whole
    suite exists to probe. Because `hop_depths_present` is *derived from this
    row's membership*, a goal row's `scenario_ids` carries the scenarios that
-   still count -- `proposed` or `active` -- and not the ones you folded or
-   turned down: leaving a `duplicate` in a goal row credits the goal with a
+   still count -- `proposed` or `active` -- and not the ones your rulings folded
+   or turned down: a `duplicate` left in a goal row credits the goal with a
    depth no shipped test reaches, and `refs.check_coverage` recomputes
-   `hop_depths_present` from whatever ids it finds there.
+   `hop_depths_present` from whatever ids it finds there. That rule is one your
+   *rulings* have to satisfy, since they are the only input to it you control:
+   the seal builds each row's membership from the statuses they leave.
 
 6. **Know what `covered`, `total` and `pct` will come to, from the rows
    themselves.** `total` is the number of rows, `covered` the number marked

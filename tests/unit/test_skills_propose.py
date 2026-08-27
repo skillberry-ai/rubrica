@@ -86,7 +86,7 @@ def test_it_states_that_it_writes_only_the_proposed_status():
     test built on those sets passes against a skill whose prose never mentions
     `duplicate`. That is the likeliest omission of the four, because
     `duplicate` is set by score's dedupe ruling rather than by an obvious
-    judgement verb, and Method step 7 names it explicitly. Deriving from the
+    judgement verb, and Method step 8 names it explicitly. Deriving from the
     enum also gives the property the docstring used to claim falsely: a fifth
     status added to the schema fails here.
     """
@@ -160,6 +160,12 @@ def test_output_requires_the_batch_prefixed_scenario_id():
     prefix" preserves the rule exactly, and pinning the underscore would have
     made an innocuous reword red. The prefix template itself is a format and has
     no paraphrase, so `sc-` is safe to pin.
+
+    The cost half is anchored on `propose-seal`, a code identifier with no
+    paraphrase, plus a wide alternation for what it does about the clash.
+    `collision|collide` alone was measured red against "colliding" and against
+    "clash" -- both of which state the rule perfectly -- which is a phrase pin
+    wearing a semantic requirement's clothes.
     """
     owning = [
         block
@@ -167,8 +173,13 @@ def test_output_requires_the_batch_prefixed_scenario_id():
         if "sc-" in block and re.search(r"batch[_ ]id", block, re.I)
     ]
     assert owning, "no Output block ties the scenario id it must mint to its own batch id"
-    assert any(re.search(r"collision|collide", block, re.I) for block in owning), (
-        "that block must say what the prefix prevents and what ignoring it costs"
+    assert any(
+        "propose-seal" in block
+        and re.search(r"refus|reject|collid|collision|clash|same id|twice", block, re.I)
+        for block in owning
+    ), (
+        "that block must say what the prefix prevents and what ignoring it costs: the seal "
+        "that will not accept two members' identical id, and what it does instead"
     )
 
 
@@ -192,7 +203,12 @@ def test_invariants_hold_every_hole_ref_to_the_members_own_batch():
         if "hole_refs" in block and "check_scenario_parts" in block
     ]
     assert owning, "no Invariants block ties provenance.hole_refs to the checker that resolves it"
-    assert any(re.search(r"\bown batch\b", block) for block in owning), (
+    assert any(
+        re.search(
+            r"own batch|your batch|this batch|sibling|another batch|no other batch", block, re.I
+        )
+        for block in owning
+    ), (
         "that invariant must say the refs have to be the member's OWN batch's, which is the "
         "half no schema and no other layer can see"
     )
