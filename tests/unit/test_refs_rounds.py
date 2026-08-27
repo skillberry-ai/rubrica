@@ -51,11 +51,19 @@ def _run_with_world_for_refs(tmp_path):
             # Bound for the reason test_rounds._world is: the drivable cell set is
             # what reconcile-seal counts into the denominator (reconcile.py:319) and
             # what check_coverage holds the capability matrix to, so an unbound cap-0
-            # would leave this fixture with no drivable cell at all. No test in this
-            # module reaches either -- none of the runs below writes a coverage
-            # document, so check_coverage returns at its first guard -- so the
-            # binding is insurance for a test added later, not a dependency of one
-            # already written here.
+            # would leave this fixture with no drivable cell at all.
+            #
+            # This module reaches a third consumer, unlike the first two:
+            # check_world_model recomputes `denominator.capability_cells` through
+            # drivable_cells, and the three check_all tests below build exactly this
+            # fixture. Measured -- unbinding cap-0 makes check_world_model emit
+            # "declared capability_cells=1 but the world model declares 0 drivable
+            # capability x outcome-class cells", plus the unbound-capability finding
+            # on /capabilities/0. Every assertion below is an `any(...)` over the
+            # findings, so neither extra entry fails one. So the binding is still
+            # insurance for a test added later, not a dependency of one already
+            # written here -- but it is no longer true that nothing here reaches the
+            # narrowed arithmetic.
             "capabilities": [
                 {
                     "id": "cap-0",

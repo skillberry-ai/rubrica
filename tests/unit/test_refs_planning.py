@@ -3,6 +3,7 @@ import json
 import pytest
 
 from rubrica.artifacts import write_json
+from rubrica.errors import UsageError
 from rubrica.paths import RunPaths
 from rubrica.refs import (
     _cells,
@@ -225,6 +226,187 @@ def test_duplicate_capability_ids_are_reported(tmp_path):
     assert [(f.pointer, f.message) for f in findings] == [
         ("/capabilities", "duplicate id 'cap-find-jobs'")
     ]
+
+
+# -- unbound capabilities, reported at gate 1 ---------------------------
+def _binding_run_with(tmp_path, capabilities, *, goals=None):
+    """A run holding the two documents check_world_model's binding clause reads.
+
+    Local rather than a call into `test_rounds.py`'s `_world_run_with`: test
+    modules here do not import each other's builders, and the two build different
+    worlds anyway.
+
+    The `denominator` is recomputed from `capabilities` and `goals`, unlike
+    `_coverage_run_with` above which deliberately leaves it stale.
+    check_world_model *is* the function that recomputes the denominator, so a
+    stale field would add two findings of its own to every assertion below and the
+    binding clause would be asserted about through a filter rather than directly.
+
+    `minimal_claims` is written because `minimal_world_model`'s entities, actors
+    and goals cite `clm-001`: without it every one of those citations becomes a
+    `no such claim` finding, which is the fabricated-finding shape CLAUDE.md warns
+    about rather than anything this section is testing.
+    """
+    run = RunPaths(tmp_path)
+    write_json(run.claims("aap2-api"), minimal_claims())
+    goals = [] if goals is None else goals
+    write_json(
+        run.world_model,
+        minimal_world_model(
+            capabilities=capabilities,
+            goals=goals,
+            denominator={
+                "version": 1,
+                "capability_cells": len(drivable_cells({"capabilities": capabilities})),
+                "goals": len(goals),
+            },
+        ),
+    )
+    return run
+
+
+def _binding_findings(findings):
+    """Only the findings the unbound-capability clause raised.
+
+    Scoped on that clause's own first phrase rather than on the bare word
+    `binding`, which the denominator finding one block above could pick up if its
+    wording ever changes, and no narrower than that, so a reworded justification
+    does not break the filter.
+    """
+    return [f for f in findings if "declares no binding.tool" in f.message]
+
+
+def test_check_world_model_reports_a_capability_with_no_tool_binding(tmp_path):
+    """The earliest signal before this existed was emit.py:105, at stage 06 --
+    after propose, score, instantiate and challenge have all run against the
+    narrowed denominator, and after gates 1, 2 and 3. Its remediation ("add
+    binding.tool and binding.fixed_args in the world model") asks a human to
+    hand-edit a frozen, sealed artifact.
+
+    An unbound capability is a bounded-coverage decision, and this repository's
+    "no silent caps" discipline says it is reported where it is made.
+    """
+    run = _binding_run_with(
+        tmp_path,
+        [_bound("cap-bound", "oc-ok"), _unbound("cap-unbound", "oc-ok", "oc-empty")],
+    )
+
+    unbound = _binding_findings(check_world_model(run))
+
+    assert len(unbound) == 1
+    assert "cap-unbound" in unbound[0].message
+    # The cell count, because that is the number a reader at gate 1 is deciding
+    # about -- two cells excluded, not one capability.
+    assert "2 outcome-class cells" in unbound[0].message
+    # Pointed at the capability, not at the denominator: the denominator is
+    # correct, and /capabilities/1 is the element a human would edit.
+    assert unbound[0].pointer == "/capabilities/1"
+
+
+def test_check_world_model_says_nothing_about_a_fully_bound_world_model(tmp_path):
+    """The negative direction. Every fixture in the tree is fully bound, so a
+    finding here would fire on all of them."""
+    run = _binding_run_with(tmp_path, [_bound("cap-bound", "oc-ok")])
+
+    assert check_world_model(run) == []
+
+
+def test_check_world_model_reports_every_capability_when_none_is_bound(tmp_path):
+    """Zero drivable cells is the case that most needs the finding, not the case
+    that can be left to the mixed one.
+
+    With every capability unbound and `goals: []`, `rounds.closable_holes` yields
+    an empty round-1 worklist, so `propose-batches` exits 0 printing "no closable
+    holes" -- the loop's *normal* terminal state, reached from a world model that
+    is schema-valid and entirely undrivable. Gate 1 precedes propose, so this
+    finding is the only thing standing between that world model and a human who
+    reads a converged run as a covered one.
+
+    Measured both directions against the clause it guards. Gating the loop on
+    `drivable_cells(world)` being non-empty -- the shape a clause derived from the
+    denominator would take -- leaves the mixed test above passing and fails only
+    here, with `assert [] == ['/capabilities/0', '/capabilities/1']`. Deleting the
+    loop fails both.
+    """
+    run = _binding_run_with(
+        tmp_path,
+        [_unbound("cap-a", "oc-ok"), _unbound("cap-b", "oc-ok", "oc-empty")],
+    )
+
+    findings = check_world_model(run)
+    reported = [(f.pointer, f.message) for f in _binding_findings(findings)]
+
+    assert [pointer for pointer, _ in reported] == ["/capabilities/0", "/capabilities/1"]
+    # Counted per capability and not summed, because /capabilities/<index> is what a
+    # human edits and "3 cells excluded" names nothing they can open.
+    assert "its 1 outcome-class cells" in reported[0][1]
+    assert "its 2 outcome-class cells" in reported[1][1]
+    # And nothing else fires: the denominator this fixture declares is 0, which is
+    # the true drivable count, so the run is internally consistent and merely
+    # useless. That is why this is a finding and not a refusal.
+    assert len(findings) == 2
+
+
+def test_an_unreadable_claims_directory_is_a_usage_error_not_an_unbound_report(tmp_path):
+    """CLAUDE.md requires the unreadable-input paths whenever refs.py is touched,
+    and the rule exists because check-refs over an unreadable 01-claims/ once
+    reported four fabricated `no such claim` findings against a correct world
+    model.
+
+    Measured: check_world_model raises UsageError here, and that is the designed
+    answer rather than a defect this clause introduced. `_claim_ids` reads the
+    directory through `paths.list_json`, which raises deliberately (paths.py:131-137)
+    because an unreadable run directory is "the harness pointed at something it
+    cannot read, which is exit 2" -- not a repairable stage defect at exit 1. The
+    same raise happens on a fully bound world model, so the new clause is never
+    reached and cannot be what turns a filesystem problem into a finding.
+
+    Asserted rather than deleted, because the tempting version of this test -- the
+    one asserting the unbound finding still lands beside an unreadable claims
+    directory -- would only pass if `_claim_ids` went back to swallowing EACCES,
+    which is the exact regression paths.py exists to prevent. So the guard runs in
+    the other direction: no partial finding list escapes, and nothing invents a
+    claim defect.
+    """
+    run = _binding_run_with(tmp_path, [_unbound("cap-unbound", "oc-ok", "oc-empty")])
+    run.claims_dir.chmod(0o000)
+    try:
+        with pytest.raises(UsageError, match="cannot read run directory"):
+            check_world_model(run)
+    finally:
+        run.claims_dir.chmod(0o755)  # restored in a finally, or the tmp_path teardown fails
+
+
+def test_a_world_model_read_through_a_mode_0444_file_still_reports_the_unbound_capability(
+    tmp_path,
+):
+    """The other unreadable-input shape CLAUDE.md names: readable but not
+    writable. No checker writes, so this must be indistinguishable from the
+    ordinary case -- and it is the shape a human hand-editing a sealed artifact at
+    gate 1 would leave behind."""
+    run = _binding_run_with(tmp_path, [_unbound("cap-unbound", "oc-ok", "oc-empty")])
+    run.world_model.chmod(0o444)
+    try:
+        findings = check_world_model(run)
+    finally:
+        run.world_model.chmod(0o644)  # restored in a finally, or the tmp_path teardown fails
+
+    assert _binding_findings(findings)
+    assert not any("no such claim" in f.message for f in findings)
+
+
+def test_check_all_over_a_write_protected_run_still_reports_the_unbound_capability(tmp_path):
+    """The exit-code contract's second invariant: a `1` must never have empty
+    stdout. An exception escaping the handler produces exactly that, and the
+    finding is what puts a line on stdout in the first place."""
+    run = _binding_run_with(tmp_path, [_unbound("cap-unbound", "oc-ok", "oc-empty")])
+    run.root.chmod(0o555)
+    try:
+        findings = check_all(run)
+    finally:
+        run.root.chmod(0o755)  # restored in a finally, or the tmp_path teardown fails
+
+    assert _binding_findings(findings), "a readable-but-unwritable run must report, not raise"
 
 
 def _with_a_gap(world):
