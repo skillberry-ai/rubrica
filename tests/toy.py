@@ -488,9 +488,9 @@ def _inputs_seen(part: dict[str, Any], own_kinds: tuple[str, ...]) -> list[dict[
     """One row per artifact in the toy corpus, computed from the part itself.
 
     Total over every artifact, including those holding none of this pass's kinds
-    -- a 0/0/0 row is the honest record for those, and it is what makes the
-    accounting an instrument: a pass cannot state a count for a file it never
-    opened.
+    -- a 0/0/0 row is the honest record for those, and totality is what the
+    checker requires: a missing row leaves a pass that never opened a claims file
+    indistinguishable from one that opened it and cited nothing.
     """
     cited_ids = _claim_refs_in(part)
     rows: list[dict[str, Any]] = []

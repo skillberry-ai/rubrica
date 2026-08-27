@@ -60,11 +60,12 @@ def test_a_row_for_an_artifact_the_manifest_does_not_name_is_reported(tmp_path):
 
 
 def test_an_own_kind_total_that_disagrees_with_the_claims_file_is_reported(tmp_path):
-    """The forcing function.
+    """Recomputed from 01-claims/, not taken on trust.
 
-    own_kind_total is recomputed from 01-claims/, so it is the one number a
-    pass cannot state for a file it never opened. Everything else in this
-    accounting is bookkeeping on top of it.
+    A declared own_kind_total that disagrees with the claims file is a finding.
+    That is a weaker property than it looks: a right count is not evidence of a
+    read, and check_input_dispositions' docstring records the three routes to
+    one without opening the file. What the test pins is the disagreement.
     """
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     path, part = _rows(run)

@@ -99,11 +99,17 @@ def _readable_targets(run: RunPaths) -> list[Path]:
     each of these in turn, which is what keeps the list complete: an artifact
     missing here is one whose truncation still misdirects the repair.
 
-    Three reconcile partials -- entities, goals, gaps -- are listed although no
-    layer-2 check reads them, so this is slightly wider than its first line: they
-    are inputs to reconcile-seal, and a truncated one left unnamed here is a
-    check-refs that came back clean over a run the seal is about to choke on.
-    tests/unit/test_refs_reconcile_parts.py breaks each of the partials in turn.
+    The gaps partial is listed although no layer-2 check reads it, so this is
+    slightly wider than its first line: it is an input to reconcile-seal, and
+    listing it names a truncated one at check-refs time instead of leaving it to
+    the seal's own dispatch. The entities and goals partials are read as well as
+    listed -- check_input_dispositions recomputes each pass's accounting out of
+    them. Being named here is not the only guard, and measurably not: the seal
+    refuses a broken partial itself, exit 1 with the artifact named. And
+    check_readable covers only JSON that will not parse, so a partial that parses
+    to a non-object passes here; layer 1 and the seal each reject that shape by
+    name. tests/unit/test_refs_reconcile_parts.py breaks each of the partials in
+    turn.
     """
     targets = [run.catalogue, run.triage, run.manifest]
     targets += list_json(run.claims_dir)
