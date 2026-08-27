@@ -13,7 +13,7 @@ import os
 import pytest
 
 from rubrica import target_brief
-from rubrica.summary import Malformed
+from rubrica.summary import Absent, Malformed
 from tests.toy import build_toy_run
 
 
@@ -250,3 +250,79 @@ def test_provenance_counts_two_slices_of_one_file_as_two_sources():
     # independent, and this is the case that says so.
     assert result.kinds == ("trace",)
     assert result.single_source is False
+
+
+def test_inputs_read_groups_by_kind_and_directory(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    groups = target_brief.inputs_read(run)
+    # The toy corpus is three files of three kinds, all directly under the shared
+    # prefix, so each is its own group and no directory qualifies any of them.
+    assert [(g.kind, g.directory, g.files, g.slices) for g in groups] == [
+        ("design_doc", "", ("notes.md",), 0),
+        ("mcp_tool_schema", "", ("api.json",), 0),
+        ("trace", "", ("trace.json",), 0),
+    ]
+
+
+def test_inputs_read_collapses_slices_of_one_file(tmp_path):
+    """parsec's 71 trace inputs are 71 slices of one capture. Counting inputs
+    would report 269 files where the run read 199, and would list one file 71
+    times."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    manifest = json.loads(run.manifest.read_text())
+    base = "/corpus/traces/capture.json"
+    manifest["inputs"] = [
+        {"artifact_id": "t-41", "kind": "trace", "source_path": f"{base}#/41"},
+        {"artifact_id": "t-44", "kind": "trace", "source_path": f"{base}#/44"},
+        {"artifact_id": "t-68", "kind": "trace", "source_path": f"{base}#/68"},
+        {"artifact_id": "src", "kind": "source_code", "source_path": "/corpus/src/tool.py"},
+    ]
+    run.manifest.write_text(json.dumps(manifest))
+    groups = {g.kind: g for g in target_brief.inputs_read(run)}
+    # The directory is factored out of the names, so the rendered path is the two
+    # joined: this group is keyed on (kind, directory) and repeating the directory
+    # on every row of a 199-file listing is what the field exists to avoid. Both
+    # halves are asserted, or the file name alone would leave the directory free
+    # to be anything at all.
+    assert (groups["trace"].directory, groups["trace"].files) == ("traces", ("capture.json",))
+    assert groups["trace"].slices == 2  # three inputs, one file
+    assert (groups["source_code"].directory, groups["source_code"].files) == (
+        "src",
+        ("tool.py",),
+    )
+    # Zero is the control for the 2 above: an implementation returning the input
+    # count, or a constant, satisfies neither this line nor that one. The two
+    # together are what say `slices` counts records collapsed away, not records.
+    assert groups["source_code"].slices == 0
+
+
+def test_inputs_read_names_the_artifact_when_the_manifest_records_no_path(tmp_path):
+    """Names something the reader can chase. A blank row names nothing, and a
+    constructed path would be a fabrication about the owner's tree."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    manifest = json.loads(run.manifest.read_text())
+    manifest["inputs"] = [{"artifact_id": "orphan", "kind": "other"}]
+    run.manifest.write_text(json.dumps(manifest))
+    group = target_brief.inputs_read(run)[0]
+    assert group.files == ("orphan",)
+    # And no directory around it. A record with no `source_path` says nothing
+    # about where the file sits, so anything here would be a sentence about the
+    # owner's tree that no artifact supports.
+    assert group.directory == ""
+
+
+def test_inputs_read_marks_an_absent_manifest_absent_and_a_broken_one_malformed(tmp_path):
+    """Two facts, not one. They were a single word until a run said on one page
+    that a stage had produced an artifact and that the artifact was not present."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    # The control, before either fact is manufactured: a readable manifest yields
+    # groups. Without it both assertions below pass for an implementation that
+    # returns a marker for every run, which would put "we could not read what we
+    # read" on a page sent to the owner of a run that is entirely healthy.
+    assert isinstance(target_brief.inputs_read(run), list)
+    run.manifest.write_text("{ not json")
+    broken = target_brief.inputs_read(run)
+    assert isinstance(broken, Malformed)
+    assert broken.what == "manifest.json"
+    run.manifest.unlink()
+    assert isinstance(target_brief.inputs_read(run), Absent)

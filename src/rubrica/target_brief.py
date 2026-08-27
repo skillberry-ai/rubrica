@@ -270,3 +270,84 @@ def provenance(claim_ids, index: dict[str, SourceRef], disputed: frozenset[str])
         kinds=tuple(sorted({r.kind for r in resolved if r.kind})),
         disputed=any(c in disputed for c in ids),
     )
+
+
+@dataclass(frozen=True)
+class InputGroup:
+    """The files of one kind in one directory that the run read.
+
+    `files` holds bare names and `directory` the path they sit under, so a
+    rendering that wants the whole path joins the two: the directory is factored
+    out because it is what the group is keyed on, and repeating it on every row of
+    a group is how a 199-file listing becomes unreadable.
+
+    `slices` is neither a count of inputs nor a count of slices: it is how many
+    inputs this group holds *beyond* one per file, so `len(files) + slices` is the
+    number of manifest records the group collapsed. A `#/NN` fragment marks one
+    slice of a sliced artifact, so parsec's 71 trace inputs over one capture come
+    out as a single-file group with `slices` 70 -- measured, and 1 + 70 == 71.
+    Rendering that as 71 files would misstate what we read, and "1 trace file,
+    read as 71 recorded calls" is both shorter and true.
+    """
+
+    kind: str
+    directory: str
+    files: tuple[str, ...]
+    slices: int
+
+
+def inputs_read(run: RunPaths) -> list[InputGroup] | Marker:
+    """Every file the run admitted, grouped by kind and directory.
+
+    First on the page, because it is the one question the pipeline structurally
+    cannot ask itself. Gate 0 decides what the run can ever know and nothing below
+    `intake` reads the corpus again, so a declined candidate is gone as completely
+    as if the corpus never held it -- and the party that selected the inputs
+    cannot also be the party that ratifies the selection.
+    """
+    # The manifest is read here as well as through `_input_sources`, and that is
+    # not a duplicate read: `_input_sources` returns `{}` for an absent manifest
+    # and for an unreadable one alike, so it cannot tell the two facts apart. This
+    # is `summary.py`'s spelling of that test (`header`, `inputs`), so the two
+    # pages cannot disagree about which fact a run is showing.
+    payload = _mapping(_quietly(run.manifest))
+    if not payload:
+        return _absent_or_malformed(run.manifest, "manifest.json", "nothing could be read from it")
+    records = _dicts(payload.get("inputs"))
+    where = _input_sources(run)
+    prefix = _common_prefix([source for source, _ in where.values()])
+    # (kind, directory) -> [file, ...] with repeats, so `slices` can be the
+    # difference between inputs seen and distinct files.
+    seen: dict[tuple[str, str], list[str]] = {}
+    for record in records:
+        artifact_id = record.get("artifact_id")
+        source = record.get("source_path")
+        kind = record.get("kind")
+        kind = kind if isinstance(kind, str) else ""
+        if isinstance(source, str) and source:
+            # The fragment is cut, which is the whole point of this group: an
+            # input is not a file, and grouping on the raw `source_path` would
+            # list one capture once per recorded call.
+            path = _shorten(source.partition("#")[0], prefix)
+        else:
+            # The artifact id, for the reason SourceRef.path takes it: it names
+            # something chaseable where a blank names nothing. A record with
+            # neither still gets a row rather than being dropped, because
+            # `len(files) + slices` is this group's arithmetic against the
+            # manifest and a dropped record makes the count disagree with the
+            # file silently -- which is the worse of the two failures.
+            path = artifact_id if isinstance(artifact_id, str) else ""
+        directory, _, name = path.rpartition("/")
+        seen.setdefault((kind, directory), []).append(name or path)
+    groups = []
+    for (kind, directory), names in sorted(seen.items()):
+        files = tuple(sorted(set(names)))
+        groups.append(
+            InputGroup(
+                kind=kind,
+                directory=directory,
+                files=files,
+                slices=len(names) - len(files),
+            )
+        )
+    return groups
