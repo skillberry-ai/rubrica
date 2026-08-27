@@ -16,7 +16,7 @@ from rubrica import refs, rounds
 from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.errors import UsageError
 from rubrica.paths import RunPaths
-from rubrica.validate import validate_artifact
+from rubrica.validate import ARTIFACT_SCHEMAS, schema_dir, validate_artifact
 
 
 def _world(caps: int = 2, ocs: int = 2, goals: int = 1) -> dict:
@@ -527,7 +527,7 @@ def test_a_string_scenarios_array_cannot_produce_a_projection_that_does_not_bind
     # wrong number rather than a refusal. Measured before the guard existed: a
     # `scenarios` of "eighteen scenarios" iterated the string's CHARACTERS to a
     # 3-byte estimate, so 86 closable holes became ONE batch projecting 258 bytes
-    # against a real write of ~99,932 -- 387x under, and exactly the cap that does
+    # against a projected write of ~99,932 -- 387x under, and exactly the cap that does
     # not bind, silently, that this module exists to close. Asserted end to end
     # through write_batches rather than on bytes_per_scenario alone, because the
     # projection is where the damage showed.
@@ -1027,6 +1027,50 @@ def test_every_member_declining_its_batch_seals_an_empty_document(tmp_path):
     assert validate_artifact(path, "scenarios") == []
 
 
+def test_a_round_every_member_declined_is_still_derivable_from_its_batch_plan(tmp_path):
+    """The state rb-score's round derivation has to survive, pinned as a state.
+
+    Round 2's members all decline, which the refusal conditions exist to produce
+    and `seal_scenarios` deliberately seals: the sealed document then carries no
+    scenario tagged with round 2. So the highest `round` tag on disk is round 1's,
+    and a stage deriving "the round I am scoring" from those tags derives 1 --
+    writing `03-score/round-1.json` over round 1's own rulings, after which
+    `score-seal --round 2` refuses a part that is not there and blames score for a
+    wrong-round part it was instructed to write.
+
+    The batch plan is the round's own address instead, and it is filed by code
+    before any member runs, so it exists for a round that was declined exactly as
+    for one that was closed. That is what this asserts: the tag derivation and the
+    plan derivation DISAGREE in this state, and only the plan gives 2. It is the
+    state pin under rb-score's prose rule -- `test_skills_score.py` pins the
+    prose, and neither is sufficient alone, because a prose rule about a state
+    nothing reaches is decorative and a reachable state nothing states is silent.
+    """
+    run = _run_with_world(tmp_path, _world())
+    for round_n in (1, 2):
+        write_json(
+            run.batches(round_n),
+            {
+                "schema_version": "0.1",
+                "round": round_n,
+                "cap_bytes": 28000,
+                "bytes_per_scenario": 1000,
+                "batches": [{"id": "b01", "hole_refs": ["goal:goal-0"], "projected_bytes": 1000}],
+            },
+        )
+    _part(run, 1, "b01", [_scenario("sc-b01-001", round_n=1)])
+    _part(run, 2, "b01", [])
+    path, findings = rounds.seal_scenarios(run)
+    assert findings == []
+    sealed = read_json(path)["scenarios"]
+    # The tag derivation's answer, and it is round 1 -- the wrong round.
+    assert max(s["round"] for s in sealed) == 1
+    # The plan derivation's answer, and it is the round that was dispatched.
+    assert run.batches_rounds() == [1, 2]
+    assert max(run.batches_rounds()) == 2
+    assert read_json(run.batches(2))["round"] == 2
+
+
 def test_an_empty_seal_is_not_the_same_signal_as_an_empty_batch_plan(tmp_path):
     # Three terminal signals, not two, and a reader must not collapse them:
     # write_batches returning None says the worklist was empty before any member
@@ -1376,6 +1420,26 @@ def test_a_prior_coverage_document_of_the_wrong_shape_cannot_baseline_a_round(tm
             "non-empty string outcome_class_id",
         ),
         (
+            # The fourth site of the manufactured-normal-outcome class, and the
+            # one that RAISED rather than manufacturing: _covered_cell_keys
+            # indexes `covered` bare, so without this door a prior-round cell
+            # carrying both ids and no `covered` raised KeyError('covered') out
+            # of a code step -- reported as an exit-1 [internal] finding against
+            # the RUN ROOT, when the document is seal_score's own output and the
+            # contract's third rule requires the finding to name it.
+            {
+                "capability_matrix": {
+                    "cells": [{"capability_id": "cap-0", "outcome_class_id": "cap-0-oc-0"}]
+                },
+                "progress": fine,
+            },
+            # The FILENAME is in the expected substring, unlike the rows around
+            # it: the contract's third rule is that a refusal names the right
+            # artifact, and a first draft of this row was measured GREEN against
+            # a door that named the run root instead.
+            "round-1.json capability_matrix.cells[0] is missing required field(s): ['covered']",
+        ),
+        (
             {"capability_matrix": {"cells": []}, "progress": {}},
             "missing required field(s): ['rounds_without_progress']",
         ),
@@ -1610,6 +1674,93 @@ def test_a_hole_with_no_usable_ref_is_a_finding_not_a_traceback(tmp_path):
         assert path is None, holes
         assert [(f.layer, f.pointer) for f in findings] == [("rounds", pointer)], holes
         assert not run.coverage_round(1).exists(), holes
+
+
+def test_the_two_copied_enums_are_the_ones_the_coverage_schema_declares():
+    """`_VERDICTS` and `_HOLE_REASONS` restate coverage-0.1.json, so couple them.
+
+    `_RULING_STATUSES` is deliberately a *subtraction* from the schema it mirrors
+    and cannot be coupled this way; these two are copies, so a sixth verdict or a
+    fifth hole reason added to the schema alone would make score-seal refuse a
+    value its own schema admits. Uncoupled restatements are how the `status`
+    subtraction ended up asserted in two places that could drift apart.
+    """
+    coverage = read_json(schema_dir() / ARTIFACT_SCHEMAS["coverage"])
+    assert set(coverage["properties"]["verdict"]["enum"]) == rounds._VERDICTS
+    assert set(coverage["$defs"]["hole"]["properties"]["reason"]["enum"]) == rounds._HOLE_REASONS
+
+
+def test_a_verdict_outside_the_coverage_enum_is_a_finding_and_writes_nothing(tmp_path):
+    """The sibling of the ruling-status whitelist, in the same position.
+
+    `seal_score` copies `verdict` onto `03-coverage/round-N.json` and its
+    `latest.json` copy untouched, and both are CODE output -- so a string outside
+    the enum makes an artifact no re-dispatch can repair fail its own schema.
+    Measured before this guard: `verdict: "keep_going"` let `score-seal` exit 0 and
+    write both documents, after which `validate --stage score-seal` reported
+    findings against them. Type-checked only is not enough here, which is the
+    whole asymmetry.
+    """
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    _part(run, 1, "b01", [_scenario("sc-b01-001", status="active")])
+    rounds.seal_scenarios(run)
+    for verdict in ("keep_going", "", "CONTINUE", "converged "):
+        _score_part(run, 1, holes=[], verdict=verdict)
+        path, findings = rounds.seal_score(run, round_n=1)
+        assert path is None, verdict
+        assert [(f.layer, f.pointer) for f in findings] == [("rounds", "/verdict")], verdict
+        assert "is not one of" in findings[0].message, verdict
+        assert not run.coverage_round(1).exists(), verdict
+        assert not run.coverage_latest.exists(), verdict
+    # The other direction: every value the schema does admit still composes.
+    for verdict in sorted(rounds._VERDICTS):
+        _score_part(run, 1, holes=[], verdict=verdict)
+        path, findings = rounds.seal_score(run, round_n=1)
+        assert findings == [], verdict
+        assert path == run.coverage_round(1), verdict
+        assert read_json(path)["verdict"] == verdict
+
+
+def test_a_hole_reason_outside_the_coverage_enum_is_a_finding_and_writes_nothing(tmp_path):
+    """The other field copied through untouched, and the same argument.
+
+    Measured before this guard: a hole reason of `because_i_said_so` let
+    `score-seal` exit 0 and write the reason straight onto both coverage
+    documents. Anchored on the hole rather than on `/holes`, because the part is
+    MODEL output and the pointer is what tells a re-dispatched score which hole to
+    fix.
+    """
+    run = _run_with_world(tmp_path, _world(caps=1, ocs=1, goals=0))
+    # `capability_refs: []`, so the one cell stays UNCOVERED and the hole below is
+    # the hole that justifies it. With the helper's default refs the scenario
+    # covers the cell, and the positive half would then fail on the
+    # hole-names-a-covered-row check rather than on the guard under test.
+    _part(run, 1, "b01", [_scenario("sc-b01-001", status="proposed", refs=[])])
+    rounds.seal_scenarios(run)
+    cell = "cell:cap-0/cap-0-oc-0"
+    for reason in ("because_i_said_so", "", "not_yet_attempted ", None, 7):
+        _score_part(
+            run,
+            1,
+            holes=[{"ref": cell, "reason": reason, "justification": "x"}],
+            verdict="continue",
+        )
+        path, findings = rounds.seal_score(run, round_n=1)
+        assert path is None, reason
+        assert [(f.layer, f.pointer) for f in findings] == [("rounds", "/holes/0/reason")], reason
+        assert cell in findings[0].message, reason
+        assert not run.coverage_round(1).exists(), reason
+    # The other direction: every reason the schema admits reaches the document.
+    for reason in sorted(rounds._HOLE_REASONS):
+        hole = {"ref": cell, "reason": reason, "justification": "x"}
+        if reason == "blocked_by_gap":
+            # coverage-0.1.json requires gap_id with this reason, and the guard
+            # under test must not be what lets the case through.
+            hole["gap_id"] = "gap-0"
+        _score_part(run, 1, holes=[hole], verdict="continue")
+        path, findings = rounds.seal_score(run, round_n=1)
+        assert findings == [], reason
+        assert read_json(path)["holes"] == [hole], reason
 
 
 def test_the_score_seal_is_idempotent(tmp_path):

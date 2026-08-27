@@ -303,8 +303,9 @@ finding there would send the orchestrator to repair a propose member that has
 nothing wrong with it and no batch to read. It reports no findings at all, so it
 never exits 1: an unreadable or malformed `01-world-model.json`, `manifest.json`,
 `02-scenarios.json` or `03-coverage/latest.json`, and a budget below one scenario,
-are all exit 2. A hole whose `ref` or `reason` is missing or is not a string is
-refused rather than skipped, because a skipped hole shrinks the worklist in
+are all exit 2. A hole whose `ref` or `reason` is missing, or is not a non-empty
+string, is refused rather than skipped — the empty string is refused too, and it
+*is* a string — because a skipped hole shrinks the worklist in
 silence — and a worklist that empties that way is indistinguishable from the
 `no closable holes` outcome above, which the orchestrator reads as the end of the
 loop.
@@ -345,6 +346,14 @@ ruling, which is supported and applied in ascending round order. It
 `triage-seal` writes nothing: a half-assembled document would clear layer 1 for
 the fields it did manage to fill and read as a complete scenario list to a human
 at gate 2.
+
+A part that exists but cannot be *read* — mode `000`, say — is exit **2**, not a
+finding: `read_json` converts a missing, undecodable or unparseable file into an
+`ArtifactError` this command turns into a finding, and a `PermissionError` is none
+of those, so it surfaces as the misconfigured-run code. The ruling is deliberate
+and it is the register's — an unreadable file is a broken *run* rather than a
+repairable stage defect, and re-dispatching the member that wrote it would not
+change the mode.
 
 One exit-1 case names the round **directory**, `02-scenarios/round-N/`, rather than
 a part: a file in it whose name is not a safe path segment. That is the one
@@ -391,9 +400,14 @@ command writes.
 
 Exits 1, one finding per line naming `03-score/round-N.json`, when that part is
 absent, unparseable or not an object, carries no `holes` array or no `verdict`
-string, has a hole with no string `ref`, names a hole the world model does not
-declare, names a hole the computed matrices show as covered, or leaves an
-uncovered row with no hole to justify it. It **writes nothing at all** in those
+string, carries a `verdict` or a hole `reason` outside the enum
+`coverage-0.1.json` declares for it, has a hole with no string `ref`, names a hole
+the world model does not declare, names a hole the computed matrices show as
+covered, or leaves an uncovered row with no hole to justify it. The two enum
+refusals are there for the reason `propose-seal` whitelists a ruling's `status`:
+both values are copied onto the coverage document untouched, and that document is
+code output, so an arbitrary string would make an artifact no re-dispatch can
+repair fail its own schema. It **writes nothing at all** in those
 cases — including no `latest.json` — for the reason `propose-seal` writes nothing.
 Those last three overlap `check-refs`' own coverage check deliberately: that check
 reports after the fact over any coverage document, including one this command

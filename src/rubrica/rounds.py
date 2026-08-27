@@ -274,9 +274,9 @@ def bytes_per_scenario(run: RunPaths) -> int:
     the sum (the exit-1-against-the-run-root class these guards close), and
     `{"scenarios": "eighteen scenarios"}` iterated the string's characters to a
     3-byte estimate, which on an 86-hole world model emitted ONE batch of all 86
-    holes projecting 258 bytes against a real write of ~99,932 -- 387x under, and
-    exactly the cap that does not bind, silently, that this module exists to
-    close. scenarios-0.1.json lists `scenarios` in `required` and every scenario
+    holes projecting 258 bytes against a projected write of ~99,932 -- 387x
+    under, and exactly the cap that does not bind, silently, that this module
+    exists to close. scenarios-0.1.json lists `scenarios` in `required` and every scenario
     carries a required string `id`, so both checks match layer 1.
 
     Compact `json.dumps`, not artifacts.canonical_bytes, and the divergence from
@@ -412,6 +412,22 @@ def write_batches(run: RunPaths, *, round_n: int) -> Path | None:
 # assembled 02-scenarios.json fail its own schema, and that document is code
 # output, so the finding would be unrepairable by any re-dispatch.
 _RULING_STATUSES = frozenset({"active", "duplicate", "rejected"})
+
+# coverage-0.1.json's own `verdict` enum and its hole `reason` enum, whitelisted
+# here for exactly the reason _RULING_STATUSES is: seal_score copies both onto the
+# coverage document and its latest.json copy untouched, and both are CODE output,
+# so a value outside either enum makes an artifact no re-dispatch can repair fail
+# its own schema. Measured before these two guards existed, each on an otherwise
+# clean round-1 part: `verdict: "keep_going"` and a hole `reason` of
+# `because_i_said_so` each let `rubrica score-seal` exit 0 and WRITE both
+# documents, after which `validate --stage score-seal` reported findings against
+# them. Mitigated rather than unreachable -- `validate --stage score` sees the part
+# first -- which is why the sibling comment above must not be read as covering
+# these two: it argues the who-wrote-it rule, and that rule applies identically
+# here. Restated rather than read out of the schema, matching _RULING_STATUSES;
+# test_rounds.py pins each against the schema enum it mirrors.
+_VERDICTS = frozenset({"continue", "converged", "halted_no_progress", "halted_round_cap"})
+_HOLE_REASONS = frozenset({"not_yet_attempted", "unreachable", "out_of_scope", "blocked_by_gap"})
 
 # (the field a status requires, the status that requires it) -- score-part-0.1.json
 # spells the same pair as two if/then clauses, and scenarios-0.1.json repeats them
@@ -978,6 +994,16 @@ def progress(run: RunPaths, round_n: int, cap_matrix: dict) -> dict:
     # the whole comparison.
     for key in ("capability_id", "outcome_class_id"):
         _rows_with_string_id(previous, "capability_matrix.cells", matrix["cells"], key)
+    # `covered` too, and separately because it is a BOOL: _rows_with_string_id
+    # asks for a non-empty string and cannot ask for this one. _covered_cell_keys
+    # indexes it bare, so a cell without it raises KeyError out of a code step --
+    # the exit-1-`[internal]`-against-the-run-root breach _object_or_refuse's
+    # docstring records, on a document seal_score itself wrote. Measured before
+    # this door: a prior-round cell carrying both ids and no `covered` raised
+    # KeyError('covered') from progress(). Fourth site of the class
+    # closable_holes' `reason` door closed as the third.
+    for i, cell in enumerate(matrix["cells"]):
+        _object_or_refuse(previous, cell, ("covered",), f" capability_matrix.cells[{i}]")
     carried = _object_or_refuse(
         previous, prior["progress"], ("rounds_without_progress",), " progress"
     )["rounds_without_progress"]
@@ -1001,7 +1027,7 @@ def progress(run: RunPaths, round_n: int, cap_matrix: dict) -> dict:
 
 
 def _hole_refs(path: Path, holes: list) -> tuple[set[str], list[Finding]]:
-    """The holes' refs as a set, or a finding per hole that has none.
+    """The holes' refs as a set, or a finding per hole with no ref or a bad reason.
 
     A Finding rather than a UsageError, and that is the exit-code contract rather
     than a preference: 03-score/round-N.json is MODEL output, so a malformed one
@@ -1028,6 +1054,21 @@ def _hole_refs(path: Path, holes: list) -> tuple[set[str], list[Finding]]:
             # nothing -- while every uncovered row it should have named stays
             # unjustified.
             findings.append(Finding(path, "rounds", f"/holes/{i}/ref", "hole has no string ref"))
+            continue
+        reason = hole.get("reason")
+        if reason not in _HOLE_REASONS:
+            # Whitelisted, not merely type-checked: seal_score copies this value
+            # onto the coverage document it writes, so see _HOLE_REASONS for the
+            # who-wrote-it argument and the measurement.
+            findings.append(
+                Finding(
+                    path,
+                    "rounds",
+                    f"/holes/{i}/reason",
+                    f"hole for {ref} carries reason {reason!r}, which is not one of "
+                    f"{sorted(_HOLE_REASONS)}",
+                )
+            )
             continue
         refs.add(ref)
     return refs, findings
@@ -1073,6 +1114,18 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
             findings.append(Finding(path, "rounds", f"/{key}", f"score part has no {key}"))
     if findings:
         return None, findings
+    if part["verdict"] not in _VERDICTS:
+        # Whitelisted for the same reason a ruling's status is, and against the
+        # same document class: see _VERDICTS.
+        return None, [
+            Finding(
+                path,
+                "rounds",
+                "/verdict",
+                f"score part carries verdict {part['verdict']!r}, which is not one of "
+                f"{sorted(_VERDICTS)}",
+            )
+        ]
     holed, findings = _hole_refs(path, part["holes"])
     if findings:
         return None, findings

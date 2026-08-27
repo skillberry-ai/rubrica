@@ -858,9 +858,16 @@ and `score-seal` computes both matrices and composes the coverage document in
 code. What is left is one justification per uncovered row: **35,773 of that
 document's 59,631 serialized bytes** at 170 denominator rows, which is 148
 capability cells plus 22 goals, or roughly 10k output tokens at the 3.5 bytes
-per token this repo estimates with. The dispatch it replaced emitted about
-147 KB — the 24,613-byte scenario re-emit plus a 61,342-byte coverage
-document written twice.
+per token this repo estimates with. That estimate is **unpinned in both
+directions**, and the consequence is structural rather than cosmetic: the budget
+guard constrains a *ratio* between the byte budget and the token ceiling, and only
+the budget side is defended by a test — so a future editor could loosen the guard
+by moving `rounds.BYTES_PER_TOKEN` rather than the budget, and nothing would go
+red. Pinning it needs a real file tokenized against the model's own tokenizer,
+which no test here can do offline, so it stays stated rather than closed.
+
+The dispatch it replaced emitted about 147 KB — the 24,613-byte scenario re-emit
+plus a 61,342-byte coverage document written twice.
 
 That is a fourfold reduction and it fits comfortably. **It is still linear in
 the denominator**, and a target roughly three times this one re-approaches the
@@ -936,8 +943,9 @@ of the *new* shape did what the old one actually did.
 
 So the propose/score loop now sits where the `triage-*` and `reconcile-*`
 families already sit — no behavioural evidence for the prompt that actually
-ships — and with this entry that is the whole of the list, in one place rather
-than three.
+ships. Those two families keep their own entries in this file; this one
+cross-references them rather than absorbing them, so a reader after the whole
+list still has three entries to read and not one.
 
 Re-recording is deferred on cost, and it cannot be done against the toy world:
 the fixture cannot reach this defect class, because re-emitting its scenario
@@ -967,8 +975,14 @@ justifications disagree substantively, with both gates green and the run
 reporting one thing to a human and another to the archive.
 
 Closed by construction rather than by instruction — `score-seal` serializes one
-document object twice, so a second composition does not exist. Recorded here
-because the design record argued only that such an instruction *could* drift,
+document object twice, so a second composition does not exist. **What is closed
+is the authoring, not the invisibility:** `refs.check_coverage` still reads
+`latest.json` alone, so a `round-N.json` edited by hand afterwards diverges from
+it exactly as silently as the two paraphrases did, and this entry's own argument
+is about the invisibility rather than about who wrote the divergence.
+
+Recorded here because the design record argued only that such an instruction
+*could* drift,
 which is now understated: it did drift, on the only real run there was. A dated
 record is not edited to track a later measurement, so this is where that
 correction lives.
@@ -1023,6 +1037,48 @@ duplicate a bound a deterministic gate already holds, which is the question this
 project asks of every proposed `reads` addition. The cost if that is wrong is
 spent dispatches: a round that overshoots is discovered after its members have
 written.
+
+#### An unreadable model-written part is exit 2, and that is the ruling
+
+`artifacts.read_json` converts `FileNotFoundError`, `UnicodeDecodeError` and
+`JSONDecodeError` into the `ArtifactError` every seal turns into a `Finding`
+against the part that carries the defect. A `PermissionError` is none of the
+three, so it reaches `cli.py`'s `OSError` handler and exits **2**. Measured: a
+propose part at mode `000` surfaces as a misconfigured run rather than as a
+repairable defect naming that part.
+
+**Ruled correct rather than parked as a defect.** The exit-code contract splits on
+whether a re-dispatch could repair the artifact, and re-dispatching the member
+that wrote a file nobody can read would not change its mode: that is the
+"unreadable or misconfigured run" the `2` exists for, and the same reading
+`refs.py`'s own unreadable-input rule already takes. The gap was that
+`docs/reference/cli.md`'s `propose-seal` enumeration said neither way, so a reader
+could not tell the ruling from an oversight; it now states it. Recorded here
+because the ruling is the durable part — anyone who re-finds the `PermissionError`
+should find it already decided rather than convert it to a `Finding` and weaken
+the split.
+
+#### `check_batches` has no totality half, where `check_slices` has one
+
+`refs.check_slices` checks the partition **both ways**: every shard is named by
+the plan, and every catalogue candidate lands in exactly one slice ("no slice
+covers `<cid>`"). `refs.check_batches` and `_batch_plan_findings` check only the
+first direction — each `hole_ref` resolves to a declared cell or goal, no ref is
+claimed twice, each projection recomputes, each batch fits the cap. **Nothing
+compares the plan's refs against the closable holes in
+`03-coverage/latest.json`**, so a plan that silently dropped a closable hole
+passes layer 2, and the hole is never dispatched to any member — the same shape
+the slice checker reports by name.
+
+Lower severity than it sounds, and both halves of why are worth keeping: the plan
+is **code output**, written by `rounds.write_batches` from that same coverage
+document, and `rounds.partition` is chunk-adjacent code a sizing test already
+exercises, so a drop would be a code defect rather than a prompt's. But this is
+the one asymmetry against a precedent the design record explicitly cites — the
+batch is to a writing dispatch what a slice is to a reading one — so it is
+registered rather than dismissed. Closing it means `check_batches` reading
+`03-coverage/latest.json`, which is a new input for that checker and a decision
+about whether layer 2 re-derives a code partition's worklist.
 
 #### A seal that refuses leaves the previous round's scenarios in place
 

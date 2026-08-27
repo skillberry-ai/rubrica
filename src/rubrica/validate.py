@@ -70,9 +70,15 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "goals-part": "goals-part-0.1.json",
     "gaps-part": "gaps-part-0.1.json",
     # The propose/score loop's part kinds. Each is one dispatch's slice of a
-    # document that used to be emitted whole by a model, and every one of them
-    # $refs scenarios-0.1.json's or coverage-0.1.json's $defs rather than
-    # restating a scenario, a ruling or a hole.
+    # document that used to be emitted whole by a model, and none of them restates
+    # an element it shares with a sealed document: they resolve into
+    # scenarios-0.1.json and coverage-0.1.json instead. Two of those refs target a
+    # *property* subschema rather than a $defs entry, which is a legal target and
+    # the one available here -- and score-part's `status` is a deliberate
+    # restatement rather than a ref, because it is a proper SUBSET of the sealed
+    # scenario's enum. artifacts.md's "The propose/score loop's parts" section
+    # argues both, and the ref/restatement split is the rule to cite rather than
+    # any one schema's wording.
     "batches": "batches-0.1.json",
     "scenarios-part": "scenarios-part-0.1.json",
     "score-part": "score-part-0.1.json",
