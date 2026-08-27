@@ -1748,9 +1748,11 @@ with `"gaps": "nope"` on a toy run carried through **`score`**, not merely throu
 comprehension, because iterating a string yields characters that then get indexed.
 The precondition is not incidental and the neighbouring entry is why it is spelled
 out — `claim_utilisation` needs only `01-claims/` and a world model, so a sealed
-run reaches it, while `check_coverage` returns `[]` before it reads anything if
-`03-coverage/latest.json` is absent. Measured both ways: at `reconcile-seal` the
-same mutation yields zero findings and no exception.
+run reaches it, while `check_coverage` loads `coverage_latest` *and*
+`world_model` and then returns `[]` if either is `None` — so with
+`03-coverage/latest.json` absent it never reaches the comprehension that raises,
+whatever the world model holds. Measured both ways: at `reconcile-seal` the same
+mutation yields zero findings and no exception.
 
 `_claim_index` does `payload["claims"]` and then `claim["id"]` with no guard on
 either, so each shape in the entry above raises out of layer 2 as well — measured
@@ -1771,9 +1773,30 @@ not. So the reports promise is *breached* by the cases above and merely *served
 badly* by these, and only the breach was in scope. Nor did that change widen
 this path: it touched `utilisation.py`'s world-model walk and added the
 `inputs_seen` checker, and left every reader here as it was. It did notice —
-`check_world_model` carries a parenthesis saying `check_coverage` reads
-`world["gaps"]` — which is how a comment ends up recording an open hole and this
-file ends up recording the ruling on it.
+`check_world_model` carries a parenthesis saying `check_coverage` does read the
+world model's `gaps` — which is how a comment ends up recording an open hole and
+this file ends up recording the ruling on it.
+
+**`check_input_dispositions` reads `manifest.json` the same way, and that one is
+this branch's.** `_load` returns whatever the document holds, so the
+`manifest.get("inputs")` at the top of that checker raises AttributeError on a
+manifest that is a list, a string or a number — measured, `["not", "a", "dict"]`
+and `"nope"` in place of the manifest. A hand-edit is the *more* reachable half of
+this class here rather than the less, since gate 1 is where a human is invited to
+edit a partial and re-read the brief, and this branch's own tests do exactly that.
+
+The partial half of the same read **was** closed, and saying which half and why is
+the point of recording the other: `check_input_dispositions` guards `part` with
+`isinstance(part, dict)` instead of `is None`, because for `01-entities.json` and
+`01-goals.json` it is the only layer-2 reader there is — nothing older raised
+first, so the guard closes the instance rather than moving it. The manifest read
+is the mirror case: `check_manifest` indexes the same document earlier in
+`check_all` and raises `TypeError: list indices must be integers` on it
+— measured, through `check_all` — so a guard at this checker's read alone would change nothing a
+`check-refs` caller can observe, and would be a fix asserted in prose that the
+exit code does not show. The same holds for `01-capabilities.json` and
+`01-outcomes.json`, which `check_outcomes` reads unguarded before this checker is
+reached; that reader predates issue #6 and is the class this entry already parks.
 
 Reachable only by a hand-edit or a tampered artifact: measured, layer 1 exits 1
 on every one of these shapes at the stage that wrote it — `validate --stage
@@ -1783,6 +1806,36 @@ convention. The fix is `_as_list` plus an
 `isinstance` at each site, which is how the rest of the module already spells
 this; its only real cost is deciding which findings a partially-walked world model
 should still produce, and nobody has measured that.
+
+### A new nested `claims` array would be seen by the generic walks and missed by every site list
+
+The world model's citation sites are enumerated by two kinds of reader, and only
+one kind survives a new site. **Site lists**, which name each container in code:
+`utilisation._cited_claim_ids`, `refs.check_world_model`, and three test helpers
+that have to strip or rebuild the same set — `tests.toy.split_world_model`'s
+subject cover, `test_summary._uncite_trace`, `test_utilisation._strip_claim_refs`.
+**Generic walks**, which find any nested `claims` array wherever it sits:
+`refs._claim_refs_in` and its fixture mirror `tests.toy._claim_refs_in`. Which
+kind a reader is, is visible in its shape — a list of container names, or a
+recursion over any nested `claims` key — so read the readers rather than
+trusting any total here; `grep -rn '"claims"' src/rubrica tests/` is far too broad
+to be that list.
+
+So a `claims` array added to a new nested element would be counted toward `cited`
+by `check_input_dispositions`, which reads the generic walk, and **not** counted by
+`claim_utilisation`, and **not** resolved by `check_world_model` — leaving a
+fabricated id at that site uncheckable, while every site-list test helper stayed
+green, because a helper that strips a site it does not know about strips nothing.
+Issue #6 is the demonstration: it added three nested sites, and closing them meant
+editing each of the site lists by hand.
+
+Recorded rather than collapsed, because the two kinds of reader are not
+interchangeable: `check_world_model` reports against a JSON pointer per citation
+and the generic walk yields only ids, so folding one into the other is a design
+change with its own reachability question rather than a de-duplication. The cheap
+guard, if this is ever paid down, is a test asserting that the site lists and the
+generic walk agree on the golden world model — which stays true as sites are
+added, where a count of them does not.
 
 ### `survey`, `intake` and `adopt-projection` sit outside the exception net
 

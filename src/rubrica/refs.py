@@ -1760,7 +1760,7 @@ def check_world_model(run: RunPaths) -> list[Finding]:
     # each claim entry, because these loops reach shapes nothing reached before.
     # `gaps` in particular was iterated by no loop in this function, so every
     # malformed spelling of it was clean here and an unguarded loop makes it raise
-    # instead. (check_coverage does read `world["gaps"]`, for its hole references.)
+    # instead. (check_coverage does read `world.get("gaps", [])`, for its hole refs.)
     # Three measurements, each of a real defect an earlier draft of this block had:
     #
     #   - `"gaps": null` and `"gaps": "x"` raised AttributeError out of a layer-2
@@ -1923,10 +1923,23 @@ def check_input_dispositions(run: RunPaths) -> list[Finding]:
     for attribute, own_kinds in PASS_OWN_KINDS:
         path = getattr(run, attribute)
         part = _load(path)
-        if part is None:
+        if not isinstance(part, dict):
             # An absent or unreadable partial is reconcile.seal's finding and
             # layer 1's; reporting it again here would double-count one defect
             # and name a second artifact for it.
+            #
+            # `isinstance` rather than `is None`, and the difference is reachable:
+            # `_load` returns whatever the document holds, so a partial that is a
+            # list or a string reached `part.get` and raised AttributeError out of
+            # layer 2 -- measured, `["nope"]` in each of the four. For
+            # `01-entities.json` and `01-goals.json` this is the *only* layer-2
+            # reader, so nothing older raised first and the guard closes the whole
+            # instance for them rather than moving it; `01-capabilities.json` and
+            # `01-outcomes.json` still raise out of `check_outcomes`, which runs
+            # earlier in check_all and is not this branch's read. A non-dict
+            # document is the same class as an unreadable one -- layer 1 rejects
+            # it, and every partial's schema is `"type": "object"` -- so it takes
+            # the same branch rather than a finding of its own.
             continue
 
         # `path=path` binds the loop variable deliberately: ruff's B023 fires
