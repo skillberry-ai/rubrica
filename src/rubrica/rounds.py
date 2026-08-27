@@ -1107,8 +1107,8 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
     hole's reason and justification, and the verdict.
 
     The document's holes are score's plus one computed `unreachable` entry per
-    cell the world model declares and the matrix cannot score -- see the comment
-    on `undrivable` below. "Copied through untouched" still holds of every hole
+    declared cell no scenario could be driven through -- see the comment on
+    `undrivable` below. "Copied through untouched" still holds of every hole
     score wrote: the computed ones are deduped against score's refs, and score
     wins the collision.
 
@@ -1191,7 +1191,7 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
     cap = capability_matrix(world, scenarios)
     goals = goal_matrix(world, scenarios)
 
-    # Every cell the world model declares that the scored matrix leaves out.
+    # Every declared cell no scenario could be driven through against this target.
     # rb-score's Method defines `unreachable` as "no scenario could exercise this
     # row against this target at all", and a capability with no binding.tool is
     # exactly that: emit.call_spec reads binding["tool"] unguarded, so no emitted
@@ -1199,8 +1199,8 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
     # because binding absence is a fact on disk and not a judgment -- and
     # score-seal already owns the matrices for the same reason.
     #
-    # The report therefore still accounts for every declared cell: the matrix
-    # carries the drivable ones and these holes carry the rest, which is what
+    # Together with the matrix these holes account for every declared cell: the
+    # drivable ones are scored, the rest are justified here. That pairing is what
     # keeps the narrowed denominator an honest denominator rather than a silent
     # cap. Measured on run-20260827-070444: 37 of 56 cells, all undrivable.
     undrivable = sorted(_cells(world) - drivable_cells(world))
@@ -1237,12 +1237,16 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
     uncovered |= {f"goal:{r['goal_id']}" for r in goals["rows"] if not r["covered"]}
     # The undrivable cells count as declared, because this set backs the "which
     # the world model does not declare" finding below and the world model DOES
-    # declare them -- they are simply not scored rows. Without this, a
-    # score-authored hole on an undrivable cell is refused with a message that is
-    # false, and a correct document never gets written. `uncovered` deliberately
-    # does NOT grow the same way: only a drivable row has to be justified by a
-    # hole of score's, and the undrivable ones are justified by the injection
-    # above.
+    # declare them -- they are simply not scored rows. Without this, the moment the
+    # matrix stops scoring an undrivable cell a score-authored hole on it is
+    # refused with a message that is false, and a correct document never gets
+    # written; measured under exactly that narrowing, and the test that pins it is
+    # test_seal_score_does_not_call_a_score_hole_on_an_undrivable_cell_undeclared,
+    # whose docstring records that it cannot fail until then.
+    #
+    # `uncovered` deliberately does NOT grow the same way: only a drivable row has
+    # to be justified by a hole of score's, and the undrivable ones are justified
+    # by the injection above.
     every_row = scored_rows | undrivable_refs
 
     for ref in sorted(holed - every_row):
@@ -1259,10 +1263,15 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
     # to go and check the table.
     #
     # `scored_rows`, not `every_row`, and the two differ by exactly the undrivable
-    # cells: an undrivable cell is not a matrix row at all, so no matrix can show
-    # it covered. Written with every_row, the very refs the line above now accepts
-    # as declared would come straight back out of this one as "covered".
-    for ref in sorted(holed & (scored_rows - uncovered - undrivable_refs)):
+    # cells: this finding says a MATRIX shows the row covered, so only a row some
+    # matrix actually scores can earn it. Written with `every_row`, every ref the
+    # check above now accepts as declared comes straight back out of this one as
+    # "covered" -- measured, and it is why every_row could not simply be widened
+    # in place. No `- undrivable_refs` term beside it: once the matrix scores
+    # drivable rows only the two sets are disjoint and it would be dead, and while
+    # the matrix is still wide it would suppress a finding that is true, since a
+    # wide matrix really does mark the cell covered when a scenario credits it.
+    for ref in sorted(holed & (scored_rows - uncovered)):
         findings.append(
             Finding(
                 path,

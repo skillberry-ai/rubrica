@@ -1761,6 +1761,20 @@ def test_seal_score_does_not_call_a_score_hole_on_an_undrivable_cell_undeclared(
     undrivable cell is absent from the matrix while the world model DOES declare
     it -- so without the `every_row` extension the message is false and the
     finding blocks a document that is correct.
+
+    **This assertion cannot fail as the pipeline stands**, and that is recorded
+    here rather than left for a reader to discover: `capability_matrix` still
+    enumerates every declared cell, so cap-unbound/oc-ok is in `cap["cells"]` and
+    lands in `every_row` whether or not the extension exists. It passes for a
+    reason unrelated to what it guards, which is this repo's named weakness class,
+    so it is a guard for the state the next task creates and not for this one.
+
+    Measured rather than reasoned: with `capability_matrix` narrowed to
+    `refs.drivable_cells` in place and `every_row = scored_rows | undrivable_refs`
+    cut back to `scored_rows`, this test failed with `hole names
+    cell:cap-unbound/oc-ok, which the world model does not declare` -- the exact
+    false message above. Both mutations were reverted; nothing in the tree carries
+    them.
     """
     run = _score_run_with(
         tmp_path,
