@@ -569,12 +569,11 @@ def test_nothing_check_refs_reads_is_ever_denied(tmp_path):
 # default, so the value a run ran under was not recoverable from this repository
 # afterwards.
 #
-# These tests drive the script rather than grepping it, for the reason this
-# module's docstring gives: a source grep passes on a rule that is present and
-# unreachable. The cap tests put a stub `claude` first on PATH and read the
-# environment the harness actually spawned it with; the transcript tests use the
-# script's own naming, through RUBRICA_PRINT_TRANSCRIPT and through two real
-# invocations of the stub.
+# These tests drive the script rather than grepping it, on the source-grep rule
+# this module's docstring sets out. The cap tests put a stub `claude` first on PATH
+# and read the environment the harness actually spawned it with; the transcript
+# tests use the script's own naming, through RUBRICA_PRINT_TRANSCRIPT and through
+# two real invocations of the stub.
 #
 # Measured in both directions before committing, each mutation made in place in
 # the script and reverted after:
@@ -586,6 +585,14 @@ def test_nothing_check_refs_reads_is_ever_denied(tmp_path):
 #   collision made unconditional   unsuffixed red; both re-dispatch tests green
 #   print block moved above the    the naming test red -- it is the mode
 #     collision block              reporting a path the dispatch would not use
+#   export moved below the         declares red: the line reads exactly as it
+#     `| tee` pipeline             should, and governs nothing. This is the form
+#                                  the real regression takes, and the source-grep
+#                                  assertion this test replaced stays green
+#                                  through it
+#   export moved below `cd "$RUN"`, green, and correctly so -- it still governs the
+#     but still above `claude`     dispatch, so the test is not position-sensitive
+#                                  for its own sake
 #   either comment reworded        all green
 #
 # A mutation that only broke the syntax cannot be mistaken for a test that saw the
@@ -681,8 +688,8 @@ def test_the_output_token_cap_is_overridable_from_the_environment(tmp_path):
 def _transcript_path_for(lab, stage="propose", slice_id=""):
     """The transcript path the script itself would choose, via its print mode.
 
-    Shelling out rather than restating the rule: a test that restates it passes
-    when the rule is present and unreachable.
+    Shelling out rather than restating the naming rule, for the reason this
+    module's docstring gives.
     """
     run = Path(lab).parent / "run"
     run.mkdir(parents=True, exist_ok=True)

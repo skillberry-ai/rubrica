@@ -34,8 +34,9 @@
 #                        orchestrator's retyping of them.
 #   RUBRICA_PRINT_SETTINGS  set to 1 to write the settings files and the prompt,
 #                        print their three paths, and dispatch nothing
-#   RUBRICA_PRINT_TRANSCRIPT  set to 1 to print the transcript path this dispatch
-#                        would write, and dispatch nothing
+#   RUBRICA_PRINT_TRANSCRIPT  set to 1 to write the settings files and the prompt
+#                        as above, print the transcript path this dispatch would
+#                        write, and dispatch nothing
 #   CLAUDE_CODE_MAX_OUTPUT_TOKENS  output-token ceiling for the dispatch. Claude
 #                        Code's own variable, not this project's; pinned below to
 #                        a default so a run's ceiling is on the record, and
@@ -125,6 +126,12 @@ export PATH="$REPO/.venv/bin:$PATH"
 #   var unset, --model aws/claude-opus-5                    max_tokens 64000
 #   var 8000 / 32000 / 64000 / 100000                       sent verbatim
 #   var 999999                                              clamped to 128000
+#   var unset, 643240-byte request body                     max_tokens 64000
+#
+# The last row is the case propose actually is, and it closes the obvious way this
+# pin could be a fiction: the client does NOT shrink max_tokens to fit what is
+# left of the window. A ~150k-token context went on the wire under the same
+# ceiling as a two-line prompt.
 #
 # Two things follow. The 32000 that killed propose round 2 on
 # run-20260825-094033 was this default for the model that dispatch resolved to --
@@ -511,9 +518,9 @@ if [ -e "$TRANSCRIPT" ]; then
 fi
 
 # Stop here with the transcript path chosen and nothing dispatched, for the reason
-# the print-settings block above exists: the alternative ways to check this naming
-# either cost a model dispatch or grep this file's source, and a test that greps
-# the source passes when the rule is present and unreachable. Prints one line.
+# the print-settings block above exists and states: checking this naming any other
+# way either costs a model dispatch or falls to the source-grep weakness that
+# block's comment names. Prints one line.
 if [ "${RUBRICA_PRINT_TRANSCRIPT:-0}" = "1" ]; then
   echo "$TRANSCRIPT"
   exit 0
