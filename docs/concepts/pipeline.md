@@ -129,7 +129,7 @@ can be forgotten in a way a CLI flag cannot; that is a known cost, accepted
 because enforcing the gates in code would mean the orchestrator stops being a
 skill, which is the thing being tested.
 
-## The 02↔03 loop
+## The 02a↔03b loop
 
 Five stages, one logical step, and the whole of it repeats — not just `propose`
 and `score`. `propose-batches` partitions this round's closable holes into

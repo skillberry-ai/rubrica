@@ -753,11 +753,14 @@ def test_the_batches_gate_over_a_run_with_no_plan_names_the_run_root(tmp_path):
     **So this gate must not be run on a terminal round.** `propose-batches` writes
     no document at all when no hole is closable, which is how the loop learns it is
     over -- and this is what that state costs if the gate is run anyway, which is
-    why `rb-orchestrate`'s loop step 1 gates only when a plan was written. Pinned
-    rather than left implicit: the resolver's own comment claims the iterated form
-    avoids failing layer 1 on a correct terminal round, and it does not -- what it
-    avoids is naming a `02-batches/round-N.json` that was never written, since
-    `_artifact_paths` has no round number to build one from.
+    why `rb-orchestrate`'s loop step 1 gates only when a plan was written.
+
+    Pinned rather than left implicit, because Task 8's brief and its Ruling R2 both
+    justified the iterated resolver by claiming it "would" avoid failing layer 1 on
+    a correct terminal round -- and it does not. What it actually avoids is naming a
+    `02-batches/round-N.json` that was never written, since `_artifact_paths` has no
+    round number to build one from. The resolver's own comment now says so; this
+    test is what keeps the two from drifting apart again.
     """
     from rubrica.paths import RunPaths
     from rubrica.validate import validate_stage
