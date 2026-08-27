@@ -1010,12 +1010,19 @@ rather than against the plan. `--round` sits the same way with respect to
 `max_rounds`: validated for shape at the CLI, and compared against the limit
 only later, by the same checker, against a scenario's round tag.
 
+One precision, so the gap is not read as wider than it is: `rb-propose` does
+compare its own batch's `hole_refs` against `max_scenarios` and declines the
+excess when one batch alone names more holes than the run's whole ceiling
+allows. What nobody sums is the batches and rounds together, and `rounds.py`
+reads neither limit.
+
 Left there deliberately in both cases. A fan-out member cannot see a run-wide
-count — the `max_scenarios` refusal that asked it to was rewritten for exactly
-that reason — and a dispatch-time check would duplicate a bound a deterministic
-gate already holds, which is the question this project asks of every proposed
-`reads` addition. The cost if that is wrong is spent dispatches: a round that
-overshoots is discovered after its members have written.
+count — the `max_scenarios` refusal that asked it to was rewritten to that
+batch-local comparison for exactly that reason — and a dispatch-time check would
+duplicate a bound a deterministic gate already holds, which is the question this
+project asks of every proposed `reads` addition. The cost if that is wrong is
+spent dispatches: a round that overshoots is discovered after its members have
+written.
 
 #### A seal that refuses leaves the previous round's scenarios in place
 
