@@ -450,3 +450,61 @@ def test_disputes_is_empty_rather_than_absent_when_the_target_has_none(tmp_path)
     world_model["contradictions"] = []
     run.world_model.write_text(json.dumps(world_model))
     assert target_brief.disputes(run) == []
+
+
+def test_open_questions_carries_unknown_verbatim_and_drops_the_internals(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["gaps"] = [
+        {
+            "id": "gap-002",
+            "subject": "get_ticket",
+            "unknown": "What get_ticket returns for an unknown ticket_id",
+            # Fused owner-facing and internal prose, which is why the field is
+            # dropped rather than selected or rewritten.
+            "why_it_matters": "a scenario built on the empty outcome class has no "
+            "stated ground truth, so score cannot rank it",
+            "blocks": ["propose", "score"],
+        },
+        {
+            "id": "gap-001",
+            "subject": "rate limits",
+            "unknown": "Whether the API rate-limits and with what response",
+            "why_it_matters": "instantiate cannot seed a limit it cannot name",
+            "blocks": ["instantiate"],
+        },
+    ]
+    run.world_model.write_text(json.dumps(world_model))
+    found = target_brief.open_questions(run)
+    assert [q.id for q in found] == ["gap-001", "gap-002"]
+    assert found[1].unknown == "What get_ticket returns for an unknown ticket_id"
+    assert found[1].subject == "get_ticket"
+    # The two internal fields reach no attribute of the record. Asserted over
+    # every field rather than by naming two, so a third internal field added to
+    # the schema later cannot arrive here unnoticed.
+    rendered = " ".join(str(v) for q in found for v in vars(q).values())
+    for leaked in ("propose", "score", "instantiate", "outcome class", "ground truth"):
+        assert leaked not in rendered
+    assert not hasattr(found[0], "why_it_matters")
+    assert not hasattr(found[0], "blocks")
+
+
+def test_open_questions_renders_a_gap_that_cites_no_claim(tmp_path):
+    """The normal case, not the edge case: every gap in all three runs measured
+    carries no `claims` key -- 0 of 18, 0 of 19, 0 of 15."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["gaps"] = [{"id": "gap-001", "subject": "s", "unknown": "u"}]
+    run.world_model.write_text(json.dumps(world_model))
+    assert target_brief.open_questions(run)[0].unknown == "u"
+
+
+def test_open_questions_is_empty_on_the_toy_world_and_marks_an_unreadable_one(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    # The golden toy world has no gaps; an empty group and a missing world model
+    # are different facts and the renderer says different things about them.
+    assert target_brief.open_questions(run) == []
+    run.world_model.write_text("{ not json")
+    assert isinstance(target_brief.open_questions(run), Malformed)
+    run.world_model.unlink()
+    assert isinstance(target_brief.open_questions(run), Absent)

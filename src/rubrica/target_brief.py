@@ -105,6 +105,17 @@ def _shorten(path: str, prefix: str) -> str:
     return base + sep + fragment
 
 
+def _text(value) -> str:
+    """`value` when it is a string, else `""`.
+
+    A hand-edited `"unknown": 7` renders as an empty question rather than as the
+    characters of an integer, and `""` is what the renderer tests to say it could
+    not read the description. Never a stand-in sentence: invented prose in this
+    document would be read as our assertion about the target.
+    """
+    return value if isinstance(value, str) else ""
+
+
 def _input_sources(run: RunPaths) -> dict[str, tuple[str, str]]:
     """artifact_id -> (source_path, kind), from the manifest and nothing else."""
     out: dict[str, tuple[str, str]] = {}
@@ -477,19 +488,19 @@ def disputes(run: RunPaths) -> list[Dispute] | Marker:
     refs = index if isinstance(index, dict) else {}
     out = []
     for record in _dicts(payload.get("contradictions")):
-        identifier = record.get("id")
-        nature = record.get("nature")
-        resolution = record.get("resolution")
-        resolution = resolution if isinstance(resolution, str) else ""
+        resolution = _text(record.get("resolution"))
         side_a = _side(record.get("claim_a"), refs)
         side_b = _side(record.get("claim_b"), refs)
         out.append(
             Dispute(
-                id=identifier if isinstance(identifier, str) else "",
-                # Verbatim, and `""` rather than a stand-in sentence when the
-                # field is missing: the renderer says it could not read the
-                # description, which is true, where invented prose would not be.
-                nature=nature if isinstance(nature, str) else "",
+                id=_text(record.get("id")),
+                # Verbatim, and `_text`'s `""` rather than a stand-in sentence
+                # when the field is missing: the renderer says it could not read
+                # the description, which is true, where invented prose would not
+                # be. That is a ruling about *this* field, not just about the
+                # helper -- `nature` is the one sentence an owner acts on, so an
+                # invented one would be read as our assertion about their system.
+                nature=_text(record.get("nature")),
                 resolution=resolution,
                 taken=_taken(resolution, side_a, side_b),
                 side_a=side_a,
@@ -497,3 +508,45 @@ def disputes(run: RunPaths) -> list[Dispute] | Marker:
             )
         )
     return sorted(out, key=lambda d: d.id)
+
+
+@dataclass(frozen=True)
+class OpenQuestion:
+    """One gap, as the question it is.
+
+    Three fields of the schema's seven. `blocks` is a list of stage names, pure
+    internals. `why_it_matters` is the harder omission and the acknowledged weak
+    point of this design: it is the one field where owner-facing and internal
+    prose are fused inside a single string -- "a scenario built on the empty
+    outcome class has no stated ground truth" is rubrica talking about itself.
+    Selecting it leaks, and splitting it means rewriting prose this document never
+    rewrites. One generic sentence heads the group instead, and the cost is real:
+    an owner is not told why each individual question matters.
+
+    No provenance, deliberately. Every gap in all three runs measured carries no
+    `claims` key -- 0 of 18, 0 of 19, 0 of 15 -- and a gap is by definition a
+    place no claim reached, so the `unknown` prose is the whole record.
+    """
+
+    id: str
+    subject: str
+    unknown: str
+
+
+def open_questions(run: RunPaths) -> list[OpenQuestion] | Marker:
+    """Every gap the world model records, ordered by id."""
+    payload = _mapping(_quietly(run.world_model))
+    if not payload:
+        return _absent_or_malformed(
+            run.world_model, "01-world-model.json", "nothing could be read from it"
+        )
+    out = []
+    for record in _dicts(payload.get("gaps")):
+        out.append(
+            OpenQuestion(
+                id=_text(record.get("id")),
+                subject=_text(record.get("subject")),
+                unknown=_text(record.get("unknown")),
+            )
+        )
+    return sorted(out, key=lambda q: q.id)
