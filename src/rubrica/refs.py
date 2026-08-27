@@ -250,6 +250,45 @@ def _cells(world: dict) -> set[tuple[str, str]]:
     }
 
 
+def drivable_cells(world: dict) -> set[tuple[str, str]]:
+    """The cells a scenario could actually be driven through the target on.
+
+    `_cells` above and this are deliberately two functions, and collapsing them
+    is the mistake this split exists to prevent. `_cells` answers "does this
+    reference resolve" -- it backs hole refs, scenario capability_refs and batch
+    hole_refs -- so it must stay wide, or a scenario on an undrivable cell reads
+    as naming a cell the world model does not declare. This one answers "is this
+    cell in the denominator", which is a narrower question with a different right
+    answer.
+
+    Keyed on `binding.tool` because that is exactly the predicate emit.bindings
+    applies (emit.py:60), so the denominator equals what the pipeline can ship.
+    Measured on run-20260827-070444: 24 capabilities, 5 bound, 37 of 56 cells
+    counted against a suite that could never contain them, with both gate layers
+    exiting 0.
+
+    The proxy is lossy and knowingly so: of the 37 excluded cells on that run, 29
+    were correctly excluded (dependency declarations from pyproject.toml, and real
+    surfaces on another interface) and 8 were real agent-level behaviour that
+    `binding`'s tool shape cannot express at all -- see docs/design/limitations.md
+    on why that is recorded rather than fixed here.
+
+    `(cap.get("binding") or {})` rather than `cap.get("binding", {})`: an explicit
+    `binding: null` is what a hand-edit at gate 1 produces, and the second
+    spelling returns None and raises AttributeError on the chained `.get`.
+
+    A set of distinct pairs, for _cells' reason: the seal writes len() of this and
+    check_world_model recomputes it, so a sum of per-capability counts would
+    diverge the moment an id repeated.
+    """
+    return {
+        (cap["id"], oc["id"])
+        for cap in world.get("capabilities", [])
+        if (cap.get("binding") or {}).get("tool")
+        for oc in cap.get("outcome_classes", [])
+    }
+
+
 def _dupes(values: list[str]) -> list[str]:
     return sorted({v for v in values if values.count(v) > 1})
 

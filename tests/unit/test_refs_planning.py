@@ -5,11 +5,13 @@ import pytest
 from rubrica.artifacts import write_json
 from rubrica.paths import RunPaths
 from rubrica.refs import (
+    _cells,
     cell_ref,
     check_all,
     check_coverage,
     check_scenarios,
     check_world_model,
+    drivable_cells,
     goal_ref,
     parse_hole_ref,
 )
@@ -690,6 +692,73 @@ def test_the_builder_coverage_payload_is_clean(tmp_path):
     """Guards the builders: every later state test depends on this staying true."""
     run = _scored_run(tmp_path, coverage=minimal_coverage())
     assert check_coverage(run) == []
+
+
+# -- drivable cells -----------------------------------------------------
+def test_drivable_cells_keeps_only_cells_whose_capability_names_a_tool():
+    """The scoring set, as distinct from refs._cells' resolver set.
+
+    Measured on run-20260827-070444: 24 capabilities, 5 bound, 37 of 56 cells on
+    capabilities emit.bindings drops. Both spellings are needed at once -- a hole
+    ref on an undrivable cell still has to RESOLVE (refs._cells) while the
+    denominator must not COUNT it (this function), which is why narrowing _cells
+    in place would fabricate findings against correct artifacts.
+    """
+    world = {
+        "capabilities": [
+            {
+                "id": "cap-bound",
+                "binding": {"tool": "query_tickets", "fixed_args": {}},
+                "outcome_classes": [{"id": "oc-ok"}, {"id": "oc-empty"}],
+            },
+            # Key absent -- the shape 19 of 24 capabilities had on the measured run.
+            {"id": "cap-absent", "outcome_classes": [{"id": "oc-ok"}]},
+            # Explicit null. Not schema-legal (binding is an object), but a
+            # hand-edit at gate 1 produces it and `.get("binding", {}).get` raises
+            # AttributeError on it rather than reading as unbound.
+            {"id": "cap-null", "binding": None, "outcome_classes": [{"id": "oc-ok"}]},
+            # Present but no tool: also undrivable, because emit.call_spec reads
+            # binding["tool"] and nothing else identifies the call.
+            {
+                "id": "cap-no-tool",
+                "binding": {"fixed_args": {}},
+                "outcome_classes": [{"id": "oc-ok"}],
+            },
+        ]
+    }
+    assert drivable_cells(world) == {("cap-bound", "oc-ok"), ("cap-bound", "oc-empty")}
+    # The resolver stays wide over the same input: five cells, not two.
+    assert len(_cells(world)) == 5
+
+
+def test_drivable_cells_counts_distinct_pairs_rather_than_summing():
+    """limitations.md:1330 -- a sum of per-capability outcome-class counts agrees
+    with the set only until an id repeats, at which point the sum is the wrong
+    number. A repeated outcome-class id is schema-legal.
+    """
+    world = {
+        "capabilities": [
+            {
+                "id": "cap-a",
+                "binding": {"tool": "t", "fixed_args": {}},
+                "outcome_classes": [{"id": "oc-ok"}, {"id": "oc-ok"}],
+            }
+        ]
+    }
+    assert drivable_cells(world) == {("cap-a", "oc-ok")}
+    assert len(drivable_cells(world)) == 1  # a sum would say 2
+
+
+def test_drivable_cells_tolerates_a_world_model_missing_its_collections():
+    """check_all has no ordering guarantee that layer 1 rejected a malformed
+    document first, which is the argument refs._as_list already carries.
+    """
+    assert drivable_cells({}) == set()
+    assert drivable_cells({"capabilities": []}) == set()
+    assert (
+        drivable_cells({"capabilities": [{"id": "c", "binding": {"tool": "t", "fixed_args": {}}}]})
+        == set()
+    )
 
 
 # -- check_all ----------------------------------------------------------
