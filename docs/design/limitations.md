@@ -372,8 +372,9 @@ argument above rather than the throughput one.
 ### `rb-reconcile-gaps`' read coverage cannot be forced by any output shape
 
 The four reconcile passes that own a claim kind each carry an `inputs_seen`
-accounting whose `own_kind_total` is recomputed from `01-claims/`, so a pass
-cannot state a count for a file it never opened. `rb-reconcile-gaps` has no such
+accounting whose `own_kind_total` is recomputed from `01-claims/`, so a wrong
+count is a finding against the pass that wrote it (the entry below records how
+far short of forcing a read that falls). `rb-reconcile-gaps` has no such
 accounting and cannot be given one: `refs.PASS_OWN_KINDS` gives it no claim kind
 at all — the kinds `claims-0.1.json` defines partition onto the passes that own
 one — and a gap is an assertion about what no input **contains**. A
@@ -408,6 +409,54 @@ gets, and for the same reason.
 What this means for you: **a gap is the one world-model element whose evidence of
 diligence is entirely outside the artifact.** If a run's gaps look thin, read the
 transcript rather than the gaps.
+
+### `own_kind_total` is recomputable, so a skimming pass can state a right one without reading the file
+
+The `inputs_seen` accounting issue #6 added was specified as a **forcing
+function**: `own_kind_total` was to be the one figure a pass could not state for a
+claims file it never opened. It is not, and three shipped routes give a right
+number without a read.
+
+- **Zero is the honest answer for most pairs.** Each pass owns one or two of the
+  six kinds `claims-0.1.json` defines, so on a real corpus most (pass, artifact)
+  pairs hold nothing of the pass's kinds and `0/0/0` is the correct row.
+  `tests/unit/test_toy_split.py::test_the_derived_rows_match_a_hand_written_table`
+  is the table to read: every pair whose artifact holds none of that pass's kinds
+  is all-zero there, and a pass that opened nothing and wrote all-zero rows would
+  match those rows exactly.
+- **The checker hands the pass the numbers, inside its own dispatch.**
+  `refs.check_input_dispositions` reports `declared own_kind_total=0 for notes-md
+  but 01-claims/ holds 5 claim(s) of actor, goal` — measured wording — and every
+  owning skill's §4 tail instructs the pass to run `rubrica check-refs` and repair
+  until it exits clean. So a wrong count converges to a right one through the
+  finding message rather than through a read.
+- **A mechanical count yields it.** Measured on a sealed toy run,
+  `grep -c '"kind": "actor"' 01-claims/*.json` and the same for `goal` return 1
+  and 4 for `notes-md.json`, against the goals pass's declared `own_kind_total` of
+  5. No claim was read.
+
+The four skills' §5 refusal conditions already concede this in the words "a row
+you filled in without opening the file is indistinguishable, in the artifact, from
+one you filled in after reading it", so the design ships the concession and the
+overclaim together; `docs/reference/artifacts.md` and
+`refs.check_input_dispositions`' docstring have been corrected to say
+*recomputable* rather than unforgeable.
+
+**What the instrument does deliver is visibility, not forcing.** `cited` is
+recomputed from the pass's own citations, so it cannot be inflated: a pass that
+cited nothing cannot report having cited something. Layer 1 forces every world-model
+element to carry a non-empty `claims` array, so a pass cannot produce elements
+without citing real claims either. A skimming pass therefore converges, through
+its own repair round, on an artifact stating its true low rate — a drop row per
+input, each carrying the `note` layer 1 requires of a non-zero `dropped` — and
+`gate-brief --gate 1` prints exactly those beside the pass's own-kind rate. That
+is enough for a human at gate 1 to see a skimmed run and not enough for any exit
+code to refuse one, which is the same division `check_claim_utilisation` draws for
+the threshold it declines to enforce.
+
+Parked rather than fixed for the reason the entry above gives for gaps: every
+candidate fix is a self-report. The honest instrument for whether a file was
+opened is the transcript — `scripts/audit-reads.sh` over a real dispatch.
 
 ### Every directory a fan-out writes into is created by a member's `Write`, and until 2026-08-23 nothing told the member so
 

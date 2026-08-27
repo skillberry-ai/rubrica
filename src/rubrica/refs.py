@@ -1893,9 +1893,14 @@ def check_input_dispositions(run: RunPaths) -> list[Finding]:
     diligent pass with a skimming one.
 
     So every number a row declares is recomputed here -- `own_kind_total` from
-    the claims file, `cited` from the part's own citations -- and `own_kind_total`
-    is the forcing function, because it is the one figure a pass cannot state for
-    a file it never opened.
+    the claims file, `cited` from the part's own citations -- which makes a wrong
+    number a finding rather than making a right one evidence of a read.
+    `own_kind_total` is **recomputable, not unforgeable**: it is legitimately zero
+    wherever the input holds no claim of `own_kinds`, the finding message below
+    states the recomputed count back to the pass inside its own dispatch, and a
+    mechanical count over `01-claims/` yields it without reading a claim.
+    `docs/design/limitations.md` records that leak beside the `rb-reconcile-gaps`
+    entry, with what this accounting does deliver instead.
 
     What this deliberately does *not* report: a row whose own_kind_total is
     positive and whose cited is zero. Such a row already carries a required note,

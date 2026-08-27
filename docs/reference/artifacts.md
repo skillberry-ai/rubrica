@@ -287,12 +287,14 @@ is not zero. The row shape lives once, in
 the one schema in the package with no entry in `validate.ARTIFACT_SCHEMAS` and
 nothing `rubrica validate --stage X` ever looks for on its own.
 
-`own_kind_total` is the forcing function: it is how many claims of *that pass's*
-kinds the named input's claims file holds, which is the one figure a pass cannot
-state for a file it never opened. `check-refs` **recomputes** it from
-`01-claims/` and recomputes `cited` from the `claims` arrays in the partial
-itself, so neither is taken on the pass's word, and the accounting is **total
-over `manifest.inputs`** — a registered input with no row is a finding, because a
+`own_kind_total` is how many claims of *that pass's* kinds the named input's
+claims file holds. `check-refs` **recomputes** it from `01-claims/` and
+recomputes `cited` from the `claims` arrays in the partial itself, so neither is
+taken on the pass's word: a wrong number is a finding. That is recomputability,
+not proof of a read — a row is legitimately all-zero wherever the input holds no
+claim of the pass's kinds, and `docs/design/limitations.md` records the other two
+routes to a right number without a read, together with what the accounting does
+deliver instead. The accounting is **total over `manifest.inputs`** — a registered input with no row is a finding, because a
 pass that never opened a claims file is otherwise indistinguishable from one that
 opened it and cited nothing. Issue #6 is what that measures: read coverage of
 `01-claims/` varied from three files of twenty-three to all twenty-three across
