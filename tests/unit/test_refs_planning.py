@@ -265,9 +265,14 @@ def test_a_malformed_gaps_array_is_a_finding_or_nothing_never_a_crash(tmp_path, 
     """`gaps` was iterated by no checker in this module until issue #6.
 
     So these shapes were all clean here, and a loop added without guards makes
-    them raise instead -- a repairable stage defect surfacing as exit 2, the one
-    thing the exit-code contract forbids. Measured before `_as_list` and the
-    `isinstance` guards went in: `{"gaps": null}` and `{"gaps": "x"}` both raised
+    them raise instead. Exit **1**, not 2: `cli.py`'s named handler maps only
+    (OSError, UsageError, ArtifactError, UnknownStage) to 2, and `except Exception`
+    takes an AttributeError to exit 1 with a generic `internal` finding. So it is
+    the *specificity* half of the exit-code rule that these break, never the
+    exit-code half -- a repairable stage defect reported against nothing in
+    particular, which is the wording `refs.check_world_model`'s own guard block
+    carries for the same shapes. Measured before `_as_list` and the `isinstance`
+    guards went in: `{"gaps": null}` and `{"gaps": "x"}` both raised
     AttributeError out of `check_world_model`, `claims: "nope"` reported one
     `no such claim` finding per character, and `claims: [{}]` raised `TypeError:
     unhashable type: 'dict'` from the membership test.
