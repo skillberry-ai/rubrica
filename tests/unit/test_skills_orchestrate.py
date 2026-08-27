@@ -126,6 +126,14 @@ def test_it_declares_every_artifact_its_branches_read():
     `check-refs` never compares the value to anything, and `emit` reports a
     `re-seed` only at stage 6 and a `reject` not at all).
 
+    `batches` joined it for the same shape of reason once `propose` became a
+    fan-out: the roster of that fan-out is the batch ids `propose-batches` mints
+    in code and writes to `02-batches/round-N.json`, a member cannot be
+    dispatched without being told which one is its own, and nothing else
+    surfaces those ids. What the orchestrator may take from that document is
+    still only the ids -- a batch's `hole_refs` are the member's to read out of
+    the same file -- but the read itself is a requirement, not a convenience.
+
     Set equality rather than `<=`: `check_contract` only verifies each entry is
     a public `RunPaths` attribute, so both dropping `verdict` again and quietly
     widening this list to an artifact no requirement needs would otherwise pass
@@ -135,6 +143,7 @@ def test_it_declares_every_artifact_its_branches_read():
     assert set(load(SKILL).contract["reads"]) == {
         "manifest",
         "world_model",
+        "batches",
         "scenarios",
         "coverage_latest",
         "verdict",
@@ -158,6 +167,14 @@ def test_it_invokes_every_subcommand_the_loop_needs():
         "check-refs",
         "record-stage",
         "decide",
+        # The loop's three code steps. Without propose-batches there is no
+        # fan-out roster, without propose-seal no scenario list for score to
+        # read, and without score-seal no coverage document to branch on -- so
+        # an orchestrator that does not know they exist cannot run a round at
+        # all, which is exactly what this set is for.
+        "propose-batches",
+        "propose-seal",
+        "score-seal",
         "dedupe-candidates",
         "emit",
         "smoke",

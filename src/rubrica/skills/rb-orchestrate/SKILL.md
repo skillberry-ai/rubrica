@@ -27,11 +27,14 @@ not. The rules below are the whole of the enforcement.
 ## Contract
 
 ```toml
-reads = ["manifest", "world_model", "scenarios", "coverage_latest", "verdict"]
+reads = [
+  "manifest", "world_model", "batches", "scenarios", "coverage_latest", "verdict",
+]
 writes = ["decisions"]
 invokes = [
   "check-skills", "validate", "check-refs", "record-stage", "decide",
-  "dedupe-candidates", "emit", "smoke", "claim-utilisation",
+  "propose-batches", "propose-seal", "score-seal", "dedupe-candidates",
+  "emit", "smoke", "claim-utilisation",
 ]
 ```
 
@@ -44,7 +47,7 @@ stage's gate is responsible for.
 
 ## 1. Inputs
 
-Five artifacts, and this is the widest `reads` list in the build. That is
+Six artifacts, and this is the widest `reads` list in the build. That is
 correct rather than a lapse: every other skill's narrow boundary buys the
 independence of a judgment about the target, and you make no such judgment.
 What you need is the state of the run, and no slice of it will do.
@@ -61,6 +64,13 @@ What you need is the state of the run, and no slice of it will do.
   exists nowhere else in this system: **no deterministic gate reads
   `blocks`.** `check-refs` never looks at it. If you do not halt on a
   blocking gap, nothing else will.
+- **`02-batches/round-N.json` (`batches`)** -- for the `id` of every batch in
+  the round you are about to run, which is the roster of the `rb-propose`
+  fan-out: one member per batch id. Nothing else surfaces that roster --
+  `propose-batches` mints the ids in code and writes them here, and a member
+  cannot be dispatched without being told which one is its own. You read the
+  ids and nothing else from it: a batch's `hole_refs` are the member's to read
+  out of the same file, never yours to paste into its prompt.
 - **`02-scenarios.json` (`scenarios`)** -- for `status`, which decides who is
   in the `rb-instantiate` fan-out (`active`, and only `active`), and for the
   ids you name when a fan-out member has to be told which slice is its own.
@@ -226,15 +236,22 @@ rubrica reconcile-seal --run <run>            # code: assembles the partials int
 if any gap blocks a stage still to come      → HALT, report the gap, request the missing artifact
                                              → HUMAN GATE 1: the world model
 loop (round = 1..K):                           # K = manifest.limits.max_rounds
-    rb-propose, one dispatch for this round  → validate --stage propose
-    rb-score                                 → validate --stage score → check-refs
+    rubrica propose-batches --round N          # code: 02-batches/round-N.json
+                                             # no closable holes → leave the loop
+    fan out rb-propose, one per batch id     → validate --stage propose
+        at most 3 members concurrently       → check-refs (after all members finish)
+    rubrica propose-seal                       # code: assembles 02-scenarios.json
+    rb-score                                 → validate --stage score
+    rubrica propose-seal, again                # code: folds this round's rulings
+    rubrica score-seal --round N               # code: the matrices and the report
+                                             → validate --stage score-seal → check-refs
     rubrica decide --note "round N: <verdict>, <covered>/<total> cells"
     on latest.json verdict: continue → round++ | converged | halted_* → leave the loop
                                              → HUMAN GATE 2: scenarios and coverage (the cost gate)
 fan out rb-instantiate per active scenario   → validate --stage instantiate → check-refs   ← reachability gate
 fan out rb-challenge per instantiated one    → validate --stage challenge → check-refs (after all members finish)
     re-seed → re-dispatch rb-instantiate ONCE, the adversary's alternatives appended
-    reject  → re-dispatch rb-score: mark rejected in 02, recompute coverage
+    reject  → re-dispatch rb-score: rule it rejected, then both seals again
                                              → HUMAN GATE 3: rejects and re-seeds
 rb-emit                                      → 06-suite/, via the rubrica emit it runs
 rubrica smoke --agents <roster>              → 07-report.json
@@ -243,15 +260,15 @@ rubrica smoke --agents <roster>              → 07-report.json
 Two readings of that block to correct before you start, because both are
 natural and both are wrong.
 
-**`rb-propose` is one dispatch per round, not a fan-out.** An earlier design
-note writes this line as "fan-out rb-propose per hole cluster", and that names the
-*work* a round does -- a round targets the cluster of closable holes -- not a
-set of concurrent subagents. It cannot be a fan-out: `rb-propose` declares
-`scenarios` under both `reads` and `writes` because `02-scenarios.json` is one
-append-only document, and two members appending to it at once would each read
-the same file and write over the other's scenarios, with no gate anywhere able
-to report the loss. One dispatch per round, holding every hole that round
-targets.
+**`rb-propose` is a fan-out, and `rb-score` is not.** The asymmetry is not an
+oversight in the block: a propose member writes only its own
+`02-scenarios/round-N/<batch_id>.json`, so members are independent and
+`rubrica propose-seal` assembles the round's scenario list from the parts in
+code. Score is the barrier that has to see every scenario at once to judge
+which pairs are one test, so it stays a single dispatch. Neither of them writes
+`02-scenarios.json` any more, which is what makes the fan-out safe -- an append
+performed by every member on one shared document would have each of them
+overwrite the others' scenarios, with no gate anywhere able to report the loss.
 
 **`dedupe-candidates` is not something you pipe into a dispatch.** It is in
 your `invokes` because the round loop places it before scoring and because
@@ -282,17 +299,27 @@ the fan-out isolation this design was chosen for.
 
 **A fan-out member gets one further thing, and it is an address, not
 context:** the `artifact_id` (for `rb-extract`), the `subject_id` (for
-`rb-reconcile-contradict`) or the `scenario_id` (for `rb-instantiate` and
-`rb-challenge`) naming which slice is its own. Without it a member cannot find
-its work at all. Give it that id and nothing about any other slice.
+`rb-reconcile-contradict`), the `batch_id` (for `rb-propose`) or the
+`scenario_id` (for `rb-instantiate` and `rb-challenge`) naming which slice is
+its own. Without it a member cannot find its work at all. Give it that id and
+nothing about any other slice.
 
-The `subject_id` is the one that most invites over-helping, because a subject is
-a set of claim ids and you can see them in `01-subjects.json`. Pass the id and
-nothing else: the member reads its own subject's claim list out of that file
-itself, and a pasted list is the deleted check of the paragraph above. It narrows
-what the member must *compare*, never what it may *read* -- every pass still
-reads all of `01-claims/`, which is what keeps a contradiction between two inputs
-visible to the member that records it.
+The `subject_id` and the `batch_id` are the two that most invite over-helping,
+because each names a set you can *see* in the file the member is about to read --
+a subject's claim ids in `01-subjects.json`, a batch's `hole_refs` in
+`02-batches/round-N.json`. Pass the id and nothing else. The member reads its own
+subject's claim list, or its own batch's holes, out of that file itself, and a
+pasted list is the deleted check of the paragraph above -- worse for the batch
+plan than for the subjects, because the plan also holds every *sibling's* holes,
+and pasting one member's list is how a sibling's ends up in the next prompt too.
+
+For `rb-reconcile-contradict` the id narrows what the member must *compare*,
+never what it may *read*: every pass still reads all of `01-claims/`, which is
+what keeps a contradiction between two inputs visible to the member that records
+it. For `rb-propose` the id narrows both, and that is the design rather than a
+tighter version of the same rule: the round's closable holes are partitioned, so
+a hole belongs to exactly one member, and `refs.check_scenario_parts` reports a
+scenario whose `provenance.hole_refs` reach into a sibling's batch.
 
 **Two named exceptions, both repairs rather than fresh work.** Each appends
 machine-quotable text naming a defect in a named artifact -- never a summary of
@@ -594,10 +621,27 @@ human is already deciding whether the input set was right.
    said `converged` if nothing was closable, and at round 1 it means the world
    model declares no cell and no goal at all. In round 1 there is no coverage
    document and that is normal -- every cell and goal is an open hole.
-2. **`rb-propose`, one dispatch per batch id in that plan.** A member is given
-   its own `batch_id` and nothing else -- never a sibling's, and never any
-   batch's *contents*, which it reads out of the plan itself. Gate each with
+2. **`rb-propose`, one dispatch per batch id in that plan, at most three
+   concurrently.** A member is given its own `batch_id` and nothing else --
+   never a sibling's, and never any batch's *contents*, which it reads out of
+   the plan itself. A batch id is an address, not context. Gate each with
    `validate --stage propose`.
+
+   Three is the same bound B3 puts on the contradict fan-out and for the same
+   measured reason: this project's model traffic goes through a shared gateway
+   that degrades on concurrent streaming requests each generating substantial
+   output -- clean at one to three, 60-90s mid-stream stalls at five, envoy
+   `upstream connect error ... connection timeout` at six or more -- and a
+   propose member writes a whole batch of scenarios, which is exactly the
+   sustained generation that contends. Nothing in the artifacts records that
+   the cap was dropped.
+
+   Run `check-refs` **once, after every member has landed**, not per member:
+   `refs.check_scenario_parts` reports every batch of the round with no part on
+   disk from the moment `02-scenarios/round-N/` exists, so mid-fan-out most of
+   them are missing by construction and a finding naming a sibling's batch is
+   nobody's defect. It is the same rule B3 and B9 already carry, for the same
+   shape of checker.
 3. **`rubrica propose-seal --run RUN`, code.** It assembles
    `02-scenarios.json` from every part of every round. Gate with
    `validate --stage propose-seal`.
@@ -694,10 +738,14 @@ Then read each verdict and act:
   reported.
 - **`reject`** -- the scenario must end up `rejected` in `02-scenarios.json`
   with the coverage recomputed against it, and **that is a re-dispatch of
-  `rb-score`, not an edit by you.** `rb-score` is the only stage that may
-  change a scenario's `status` or write a coverage document, and its own
-  invariants already cover re-scoring after a rejection arrives from
-  `rb-challenge`. Because `rb-score` does not read verdicts, the notice A1's
+  `rb-score` followed by both seals, not an edit by you.** `rb-score` is the
+  only stage that may *rule* on a scenario's status, and its own invariants
+  already cover re-scoring after a rejection arrives from `rb-challenge`; the
+  ruling reaches `02-scenarios.json` through `rubrica propose-seal` and the
+  reopened row reaches the coverage document through
+  `rubrica score-seal --round N` for the round you are re-scoring, in that
+  order. Run all three or you have done none of it: the part alone changes no
+  document any later stage reads. Because `rb-score` does not read verdicts, the notice A1's
   second exception permits is how the rejection reaches it: append each
   rejected `scenario_id` and, **quoted from its verdict file**, the
   `uniquely_determined` and `derivable_without_guessing` values and the `notes`.
@@ -715,10 +763,11 @@ ships for, and `check-refs` exits 0 -- nothing anywhere compares a `reject`
 verdict against a scenario's status. Mark it `rejected` but skip the
 re-score and `refs.check_coverage` names the row immediately ("every scenario
 crediting it is rejected or a duplicate ... the score stage must recompute
-coverage and justify the row as a hole"). So the status edit is the half no
+coverage and justify the row as a hole"). So the ruling is the half no
 gate will ever ask you for, and the recompute is the half that will not let you
-forget -- which is why both belong in one `rb-score` re-dispatch rather than in
-two steps you might leave half-done.
+forget -- which is why the ruling and the hole belong in one `rb-score`
+re-dispatch, and why the two seals that publish them belong in the same step
+rather than in a follow-up you might not make.
 
 **A rejection does not loop back to `rb-propose`.** Not once, not for a cell
 that matters. The cell the rejected scenario claimed becomes an honest **hole**
@@ -792,7 +841,7 @@ points at:
 | A stage requests a denominator amendment | Decide, re-dispatch the owning `reconcile-*` pass, re-seal with a bumped `--denominator-version`, re-score | B6 |
 | Verdict `re-seed`, first time | Re-dispatch `rb-instantiate` once, alternatives appended, then re-challenge | B9 |
 | Verdict `re-seed`, second time | Treat as a rejection | B9 |
-| Verdict `reject` | Re-dispatch `rb-score` to mark it and recompute; do not return to `rb-propose` | B9 |
+| Verdict `reject` | Re-dispatch `rb-score` to rule it rejected, then `propose-seal` and `score-seal`; do not return to `rb-propose` | B9 |
 | A human gate reached, no `--no-gate` | Stop and present the artifact | A7, refusal 5 |
 | `smoke` verdict is not `healthy` | Report it as a suite defect; do not repair it here | B11, refusal 6 |
 

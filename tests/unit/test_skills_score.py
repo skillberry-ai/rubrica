@@ -8,6 +8,8 @@ uncovered cell it will mislabel as closable.
 
 from __future__ import annotations
 
+import re
+
 from rubrica.artifacts import read_json
 from rubrica.cli import subcommand_names
 from rubrica.skills import SECTIONS, load, section_body, skills_dir
@@ -15,7 +17,7 @@ from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
 
 SKILL = skills_dir() / "rb-score" / "SKILL.md"
 
-METHOD, INVARIANTS = SECTIONS[2], SECTIONS[3]
+OUTPUT, METHOD, INVARIANTS = SECTIONS[1], SECTIONS[2], SECTIONS[3]
 
 
 def _coverage_schema():
@@ -32,6 +34,27 @@ def blocks(heading: str) -> list[str]:
     belonging to some other rule -- which is exactly how both went vacuous.
     """
     return [chunk for chunk in section_body(load(SKILL), heading).split("\n\n") if chunk.strip()]
+
+
+def method_step(number: int) -> str:
+    """One numbered Method step, whitespace-normalised, paragraphs included.
+
+    `blocks(METHOD)` splits on blank lines, which is the right unit for a rule
+    that lives in one paragraph and the wrong one for a step that spans several:
+    step 8 states the quantity in its first paragraph and the evaluation point it
+    is read at in its second, so a paragraph-scoped check for the pair can never
+    hold no matter how correct the prose is. Same shape as
+    `test_skills_orchestrate.py`'s `step_body`, and normalised for the reason
+    that module and both family modules normalise (399dba5: two phrase pins
+    broke on an innocuous reformat).
+    """
+    section = section_body(load(SKILL), METHOD)
+    start = section.index(f"\n{number}. **")
+    try:
+        end = section.index(f"\n{number + 1}. **", start)
+    except ValueError:
+        end = len(section)
+    return re.sub(r"\s+", " ", section[start:end])
 
 
 def test_the_contract_matches_the_stage_gate():
@@ -163,4 +186,111 @@ def test_it_states_that_a_rejection_reopens_a_row():
     )
     assert any("recompute" in block.lower() and "hole" in block.lower() for block in owning), (
         "that invariant must state the remedy: recompute the row as uncovered and justify a hole"
+    )
+
+
+def test_output_says_the_matrices_are_computed_rather_than_written():
+    """The prose half of `test_it_writes_only_its_own_part_and_neither_coverage_file`.
+    The contract can say `writes = ["score_part"]` while the Output section still
+    instructs a dispatched model to write both matrices and both coverage files,
+    which is exactly the state this task closed -- `check_contract` validates
+    names, so all three gates stayed green through it.
+
+    Scoped to the block that names both matrices, and it must name `score-seal`
+    in the same breath: a section that lists the matrices without saying who
+    computes them reads as an instruction to write them.
+
+    The negative pin is on `written twice`, the superseded instruction's own
+    phrase. It is a *forbidden* substring rather than a required one, so the
+    usual phrase-pin failure mode is inverted: rewording the rule cannot break
+    it, and only reintroducing the double write can.
+    """
+    section = section_body(load(SKILL), OUTPUT)
+    owning = [
+        block for block in blocks(OUTPUT) if "capability_matrix" in block and "goal_matrix" in block
+    ]
+    assert owning, "the Output section never names the two matrices together"
+    assert any("score-seal" in block for block in owning), (
+        "the block naming both matrices must name score-seal as what computes them, or it "
+        "reads as an instruction to write them here"
+    )
+    assert "written twice" not in section.lower(), (
+        "the superseded double-write instruction is back in the Output section"
+    )
+    assert "score-part-0.1.json" in section, (
+        "the Output section must name the shape of the one document this stage writes"
+    )
+
+
+def test_method_states_the_evaluation_point_a_new_cell_is_judged_from():
+    """Method step 8 used to contradict itself, and `rounds.progress`' docstring
+    recorded the contradiction rather than resolving it, because resolving a
+    prompt's specification is not a code task's to do.
+
+    The step stated a primary clause -- "covered now and were *not* covered
+    before this round" -- and then restated it as "no live scenario from an
+    earlier round credits them". The two diverge in the case the loop exists to
+    handle: fold an earlier round's scenario into one of this round's claiming
+    the same cell and no *live* earlier-round scenario credits it, so the
+    restatement calls the cell new, which is the inflation the step's own hazard
+    sentence warns about in the next breath.
+
+    Resolved by naming the evaluation point the restatement left unstated:
+    liveness is read as the dispatch *found* it, before its own rulings. So the
+    property is that the block owning `new_cells_this_round` states that
+    evaluation point, and the alternation is over three ways to say it rather
+    than one phrase -- the requirement is the evaluation point, not its wording.
+    """
+    step = method_step(8)
+    assert "new_cells_this_round" in step, (
+        "Method step 8 is not the step that owns new_cells_this_round any more; this "
+        "predicate is scoped to the wrong step"
+    )
+    assert re.search(
+        r"as you found (them|it)|as you read it|before your own rulings", step, re.I
+    ), (
+        "the step must say which point in this dispatch a credit's liveness is read at; "
+        "without it the round-tag derivation and the seal's baseline disagree on a fold"
+    )
+    assert re.search(r"\bfold\b", step, re.I), (
+        "the step must name the case the two readings diverge in, or the evaluation point "
+        "reads as a detail rather than as the rule"
+    )
+    method = section_body(load(SKILL), METHOD)
+    assert "no live scenario from an earlier round credits them" not in method, (
+        "the restatement that contradicts this step's own hazard sentence is back"
+    )
+
+
+def test_output_says_a_re_dispatch_must_restate_the_rulings_it_replaces():
+    """The one way this stage can silently lose work it already did, and it
+    arrived with the split rather than existing before it.
+
+    `03-score/round-<N>.json` is one document per round and `_apply_rulings`
+    folds the score parts onto scenarios whose parts all say `proposed`, so the
+    sealed statuses come from the score parts and from nothing else. A
+    re-dispatch after an `rb-challenge` rejection scores the same round -- the
+    round it derives is the highest round tag among the scenarios, which no new
+    proposal has moved -- so its part *replaces* the first dispatch's. Carrying
+    only the new rejection reverts every promotion that round made to
+    `proposed`, and a `proposed` scenario is not instantiated, not emitted and
+    not counted: `refs.check_instances` would only ever report it after gate 3.
+
+    Scoped to the block that states the replacement, and required to state the
+    remedy in the same block: the hazard without the restatement rule is a
+    warning a dispatched model cannot act on, which is this project's own test
+    for a decorative rule.
+    """
+    owning = [
+        block
+        for block in blocks(OUTPUT)
+        if re.search(r"re-dispatch", block, re.I) and re.search(r"rewrite|replace", block, re.I)
+    ]
+    assert owning, "the Output section never says a re-dispatch replaces this round's part"
+    assert any(
+        re.search(r"restate", block, re.I) and re.search(r"still in force|already", block, re.I)
+        for block in owning
+    ), (
+        "that block must say the replacement part has to restate the rulings still in force, "
+        "or the hazard is stated with no action a dispatched model can take"
     )

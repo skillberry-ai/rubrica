@@ -12,8 +12,8 @@ module no member reads.
 outright.** The two staged families are developed on sibling branches off `main`,
 neither of which has the other's skills: `staged-triage` carries
 `rb-triage-rule` and the monolithic `rb-reconcile`, `staged-reconcile` carries
-`rb-reconcile-contradict` and the monolithic `rb-triage`. A hard-coded six-row
-table would be a different file on each branch and would conflict on every merge
+`rb-reconcile-contradict` and the monolithic `rb-triage`. A hard-coded table
+would be a different file on each branch and would conflict on every merge
 into an integration branch. Filtering on `paths.STAGES` -- which *is* the
 branch's pipeline -- makes one file correct everywhere, and the filter is not a
 silent cap: a row whose stage this branch runs but whose skill is missing fails
@@ -70,7 +70,14 @@ _CANDIDATES: tuple[tuple[str, str, str, str | None], ...] = (
     ("triage-rule", "rb-triage-rule", "dispositions_dir", "triage-objective"),
     ("reconcile-contradict", "rb-reconcile-contradict", "contradictions_dir", None),
     ("extract", "rb-extract", "claims_dir", "intake"),
-    ("score", "rb-score", "coverage_dir", "propose"),
+    # The loop's two rows moved with the propose/score split. A propose member
+    # writes 02-scenarios/round-N/<batch>.json, so `02-scenarios/` is now
+    # Write-created by whichever member of the round writes first; score writes
+    # 03-score/round-N.json, so `03-score/` is its own. `03-coverage/` left this
+    # table in the same change: rounds.seal_score composes it in code, and
+    # artifacts.write_json mkdirs the parent, so no prompt needs the rule for it.
+    ("propose", "rb-propose", "scenario_parts_dir", "reconcile-seal"),
+    ("score", "rb-score", "score_parts_dir", "propose-seal"),
     ("instantiate", "rb-instantiate", "instances_dir", "score"),
     ("challenge", "rb-challenge", "verdicts_dir", "instantiate"),
 )
