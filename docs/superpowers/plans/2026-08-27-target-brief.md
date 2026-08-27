@@ -253,7 +253,7 @@ from dataclasses import dataclass
 # Private helpers from three siblings, deliberately: `summary.py` imports the
 # same four out of `brief.py` for the reason stated there, which is that a second
 # spelling of one rule is how two reports come to disagree about one run.
-from .brief import _dicts, _mapping, _quietly, _strings
+from .brief import _dicts, _mapping, _quietly
 from .paths import RunPaths
 from .refs import _claims_by_artifact
 from .summary import Marker, _absent_or_malformed
@@ -3147,7 +3147,9 @@ property everywhere it is read (Tasks 2, 7); `source_index` returns
 `dict[str, SourceRef] | Marker` and every consumer narrows with
 `isinstance(index, dict)` before use (Tasks 2, 6); every builder returns
 `list[X] | Marker` and every renderer branches on `isinstance(..., Marker)` first
-(Task 7); `_strings` is named in Task 1's import block because Tasks 2–6 use it.
+(Task 7). `_strings` is *not* in Task 1's import block, because Task 1 does not use
+it and ruff's `F` rules fail `make check` on an unused import: Task 2 Step 3 extends
+the `brief` import when it becomes the first user, and Tasks 4 and 6 inherit it.
 
 ## Execution
 
