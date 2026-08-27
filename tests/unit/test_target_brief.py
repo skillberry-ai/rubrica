@@ -662,3 +662,77 @@ def test_tier_two_builders_mark_an_unreadable_world_model(tmp_path, builder):
     assert isinstance(getattr(target_brief, builder)(run), Malformed)
     run.world_model.unlink()
     assert isinstance(getattr(target_brief, builder)(run), Absent)
+
+
+def test_relations_never_borrow_a_name_from_an_entity_with_no_readable_id(tmp_path):
+    """Both halves of the `names` key are guarded, not just the name.
+
+    Keyed on an unreadable id, the lookup holds `"" -> "Ticket"`, and a relation
+    with no `target_entity_id` then renders as pointing at Ticket -- a relation this
+    run never read, in a document whose owner is asked whether it is true.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["entities"] = [
+        # No `id`, so it must contribute no name to resolve against.
+        {"name": "Ticket", "collection": "tickets", "claims": ["clm-api-001"]},
+        {
+            "id": "ent-comment",
+            "name": "Comment",
+            "collection": "comments",
+            "claims": ["clm-api-001"],
+            "relations": [
+                # No `target_entity_id`: this must not resolve to Ticket.
+                {"name": "orphan", "cardinality": "one"},
+                # The positive control, same shape and same test: a readable id
+                # still resolves to its own entity's name, so the assertion below
+                # cannot pass by relation resolution being broken outright.
+                {"name": "sibling", "target_entity_id": "ent-comment", "cardinality": "many"},
+            ],
+        },
+    ]
+    run.world_model.write_text(json.dumps(world_model))
+    found = target_brief.data_types(run)
+    assert found[1].relations == ("orphan →  (one)", "sibling → Comment (many)")
+
+
+def test_relations_drop_a_record_with_neither_name_nor_target_but_keep_a_nameless_one(tmp_path):
+    """The asymmetry with `_params` is deliberate, and both halves are asserted.
+
+    A relation with no `name` is kept because its payload is the target; a record
+    with neither would render as bare punctuation and is dropped.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["entities"] = [
+        {"id": "ent-ticket", "name": "Ticket", "collection": "tickets", "claims": ["clm-api-001"]},
+        {
+            "id": "ent-comment",
+            "name": "Comment",
+            "collection": "comments",
+            "claims": ["clm-api-001"],
+            "relations": [
+                {"cardinality": "many"},
+                {"target_entity_id": "ent-ticket", "cardinality": "one"},
+            ],
+        },
+    ]
+    run.world_model.write_text(json.dumps(world_model))
+    # Dropped: the first record names nothing at all. Kept: the second still says
+    # these records point at Ticket, which is a statement an owner can correct.
+    assert target_brief.data_types(run)[1].relations == (" → Ticket (one)",)
+
+
+def test_rules_prefer_a_readable_statement_over_a_whitespace_only_prose(tmp_path):
+    """The schema's `minLength: 1` admits `" "`, and an unstripped one-space `prose`
+    is truthy -- it would shadow a `statement` the run could read."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["entities"][0]["invariants"] = [
+        {"id": "inv-001", "statement": "ticket_id is unique", "prose": " "},
+        # The positive control: a real `prose` still wins over its `statement`, so
+        # the assertion cannot pass by `prose` being ignored everywhere.
+        {"id": "inv-002", "statement": "machine phrasing", "prose": "the human phrasing"},
+    ]
+    run.world_model.write_text(json.dumps(world_model))
+    assert target_brief.data_types(run)[0].rules == ("ticket_id is unique", "the human phrasing")

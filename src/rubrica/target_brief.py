@@ -293,7 +293,7 @@ def provenance(claim_ids, index: dict[str, SourceRef], disputed: frozenset[str])
     )
 
 
-def _world(run: RunPaths):
+def _world(run: RunPaths) -> dict | Marker:
     """The world model, or the marker naming why there is none.
 
     The one world-model reader in this module -- `disputes`, `open_questions` and
@@ -313,6 +313,25 @@ def _world(run: RunPaths):
             run.world_model, "01-world-model.json", "nothing could be read from it"
         )
     return payload
+
+
+def _refs(run: RunPaths) -> dict[str, SourceRef]:
+    """The source index, with an unreadable one flattened to no sources at all.
+
+    One home for that decision, because it is a decision and not a shape: dropping
+    the marker turns every provenance line on the page into nothing, and read alone
+    a blank provenance asserts to the owner that no document of theirs states the
+    sentence above it. It is only safe because the renderer calls `source_index`
+    itself and puts that same marker up as a run-level banner over the whole page,
+    saying the citations are missing rather than that the sources are.
+
+    The alternative -- returning the marker from every builder that needs refs --
+    would lose the contradictions, the operations, the entities and the actors,
+    all of which are readable and are the part an owner acts on. So the marker
+    costs the page its citations, never its content.
+    """
+    index = source_index(run)
+    return index if isinstance(index, dict) else {}
 
 
 @dataclass(frozen=True)
@@ -495,14 +514,7 @@ def disputes(run: RunPaths) -> list[Dispute] | Marker:
     payload = _world(run)
     if isinstance(payload, Marker):
         return payload
-    index = source_index(run)
-    # The marker is dropped here on purpose. An unreadable `01-claims/` turns every
-    # side into `()`, which read alone would assert to the owner that nothing in
-    # their system states either half -- so it is only safe because the renderer
-    # calls `source_index` itself and puts that same marker up as a run-level
-    # banner over the whole page. Returning a marker from here instead would lose
-    # the contradictions, which are readable and are the part an owner acts on.
-    refs = index if isinstance(index, dict) else {}
+    refs = _refs(run)
     out = []
     for record in _dicts(payload.get("contradictions")):
         resolution = _text(record.get("resolution"))
@@ -607,6 +619,8 @@ class Operation:
 
 @dataclass(frozen=True)
 class Field:
+    """One field of an entity, as its name and the type the schema gives it."""
+
     name: str
     type: str
 
@@ -653,11 +667,20 @@ def _relations(value, names: dict[str, str]) -> tuple[str, ...]:
     Resolved because `ent-comment` is an id no owner recognises and `Comment` is a
     word from their own vocabulary. Unresolvable ids keep the id: it names
     something, where a blank names nothing.
+
+    A relation with no `name` is kept, where `_params` drops a param with no name,
+    and the asymmetry is the point rather than an oversight: this record's payload
+    is the *target*, so `→ Comment (many)` still tells an owner these records point
+    at those, while a param reduced to a type and a required flag says nothing they
+    could correct. What is dropped is the record with neither name nor target,
+    which would render as bare punctuation.
     """
     out = []
     for record in _dicts(value):
         name = _text(record.get("name"))
         target = _text(record.get("target_entity_id"))
+        if not (name or target):
+            continue
         cardinality = _text(record.get("cardinality"))
         label = names.get(target, target)
         out.append(f"{name} → {label} ({cardinality})" if cardinality else f"{name} → {label}")
@@ -670,12 +693,17 @@ def _rules(value) -> tuple[str, ...]:
     `prose` is the human phrasing where a pass wrote one; the toy world and the
     committed recordings carry `statement` only, so the fallback is the normal
     path rather than the edge case.
+
+    Stripped before the `or`, because the schema's `minLength: 1` admits `" "` and
+    an unstripped `prose` of one space is truthy -- it would shadow a `statement`
+    the run could read and render the rule as a blank line.
     """
-    return tuple(
-        sentence
-        for record in _dicts(value)
-        if (sentence := _text(record.get("prose")) or _text(record.get("statement")))
-    )
+    out = []
+    for record in _dicts(value):
+        sentence = _text(record.get("prose")).strip() or _text(record.get("statement")).strip()
+        if sentence:
+            out.append(sentence)
+    return tuple(out)
 
 
 def operations(run: RunPaths) -> list[Operation] | Marker:
@@ -689,8 +717,7 @@ def operations(run: RunPaths) -> list[Operation] | Marker:
     payload = _world(run)
     if isinstance(payload, Marker):
         return payload
-    index = source_index(run)
-    refs = index if isinstance(index, dict) else {}
+    refs = _refs(run)
     disputed = disputed_claim_ids(payload)
     out = []
     for record in _dicts(payload.get("capabilities")):
@@ -726,11 +753,19 @@ def data_types(run: RunPaths) -> list[DataType] | Marker:
     payload = _world(run)
     if isinstance(payload, Marker):
         return payload
-    index = source_index(run)
-    refs = index if isinstance(index, dict) else {}
+    refs = _refs(run)
     disputed = disputed_claim_ids(payload)
     entities = _dicts(payload.get("entities"))
-    names = {_text(e.get("id")): _text(e.get("name")) for e in entities if _text(e.get("name"))}
+    # Both halves guarded, not just the name. Keyed on an unreadable id, this dict
+    # holds `"" -> "Ticket"`, and a relation with no `target_entity_id` then looks
+    # up `""` and renders as pointing at Ticket -- a relation this run never read,
+    # in a document whose owner is being asked whether it is true. Both shapes fail
+    # layer 1, and this feature exists to render a world model that does.
+    names = {
+        _text(e.get("id")): _text(e.get("name"))
+        for e in entities
+        if _text(e.get("id")) and _text(e.get("name"))
+    }
     out = []
     for record in entities:
         out.append(
@@ -761,8 +796,7 @@ def personas(run: RunPaths) -> list[Persona] | Marker:
     payload = _world(run)
     if isinstance(payload, Marker):
         return payload
-    index = source_index(run)
-    refs = index if isinstance(index, dict) else {}
+    refs = _refs(run)
     disputed = disputed_claim_ids(payload)
     goals = _dicts(payload.get("goals"))
     out = []
