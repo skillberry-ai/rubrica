@@ -18,6 +18,9 @@ build/
 dist/
 *.egg-info/
 
+# IDE stuff
+.vscode/
+
 # uv.lock is tracked, deliberately -- it used to be ignored here. Measured on
 # 2026-08-16: the lock pinned ruff 0.16.1 while a fresh resolution picked 0.16.3,
 # so CI and a contributor's machine were two patch releases apart on a gate
