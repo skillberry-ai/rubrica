@@ -57,7 +57,7 @@ the partials named above, or in this document.
 One `gaps-part-0.1.json`-shaped document, written to `01-gaps.json`
 (`gaps_part`). It carries `schema_version: "0.1"` and a `gaps` array; each gap
 has an `id`, a `subject`, what is `unknown`, `why_it_matters`, a `blocks` list,
-and optionally a `suggested_input` naming what would close it.
+its own `claims`, and optionally a `suggested_input` naming what would close it.
 
 An empty `gaps` array is permitted by the schema and is a strong claim: it says
 every input was complete enough that nothing about the target is unknown. Write

@@ -308,6 +308,14 @@ prints each pass's own-kind rate and every row that dropped something beside its
 note. Making it an exit code would put a coverage judgment behind a repair round
 that cannot repair anything.
 
+One shape of drop a reader at that gate should expect is a **cross-pass** one: a
+claim of one pass's kind that a different pass legitimately modelled, which
+`rb-reconcile-outcomes` produces by design — its method harvests outcome-class
+information from claims of every `kind`, so an `invariant` claim folded into an
+outcome class is `dropped` in `entities-part`'s row while the world model rests
+on it. The note is the only thing that distinguishes that from a claim nobody
+used.
+
 The other three partials carry no accounting, for two different reasons.
 `subjects` and `contradictions-part` need none: `check-refs` already holds the
 subject cover to totality over every claim in the run, so the cover is the

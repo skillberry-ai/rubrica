@@ -118,6 +118,16 @@ kind this pass is accountable for -- `cited` is how many of them appear in a
 `claims` array you wrote, on an outcome class inside an `outcomes` record, and
 `dropped` is the rest.
 
+**Only claims of your own kind count toward `cited`, wherever else you
+legitimately cite.** §3 step 2 has you harvest outcome-class information from
+claims of every `kind`, and an `underspecified` class cites the claims that
+establish its operation rather than the outcome; both of those citations are
+right, and neither belongs in this number. `check-refs` recomputes `cited` by
+intersecting the ids you cited with the named artifact's `outcome_class`-kind
+claims only, so a cross-kind citation counted here is a disagreement you will
+have to repair. It is not lost, either: the pass that owns that claim's kind
+accounts for it, and drops it with a note saying you modelled it.
+
 Total over `manifest.inputs`, which means **a row for every input including
 the ones holding no `outcome_class` claim at all.** Those rows read `0/0/0`
 and need no note, so saying "this file held nothing of mine" costs one line.

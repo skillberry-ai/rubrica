@@ -113,6 +113,15 @@ another artifact" are both good reasons to drop a claim; a human reads them at
 gate 1, and they are the only record that the drop was a decision rather than
 an oversight.
 
+A third reason is easy to mistake for an oversight: **a claim of your kind that
+another pass legitimately modelled.** `rb-reconcile-outcomes` §3 harvests
+outcome-class information from claims of every `kind`, `invariant` included, because
+`rb-extract` files one fact under either label and nothing in the claims schema
+forces the right one. Such a claim is a genuine drop *here* -- it is of your
+kind and it is not in a `claims` array you wrote -- while the world model still
+rests on it, so say so in the note. Without it a human at gate 1 reads a claim
+nobody used.
+
 ## 3. Method
 
 1. **For every capability declared in `01-capabilities.json`, if any claim
