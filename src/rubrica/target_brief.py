@@ -54,8 +54,21 @@ def _common_prefix(files: list[str]) -> str:
     absolute *on the machine rubrica ran on*: all three runs measured share
     `/home/agent/runs/<target>`, which is where the corpus was staged and is not a
     path any owner recognises. What is left is the owner's own tree.
+
+    The `#` fragment is cut off before any of that, because `os.path` is
+    component-aware and a JSON pointer starts with `/`: `intake.py:333` writes a
+    sliced input's `source_path` as `<container>#<json_pointer>`, so `commonpath`
+    over two slices of one capture answers `.../trace.json#` -- measured -- and
+    `_shorten` then matches that against nothing and strips nothing. It never
+    mis-strips, only under-strips, so the failure it caused was the staging path
+    of the machine rubrica ran on shipping to the target's owner, which is the one
+    outcome this function exists to prevent.
     """
-    real = sorted({f for f in files if f})
+    # `if f` is load-bearing, not defensive: `_input_sources` yields "" for a
+    # record whose `source_path` is not a string, and one "" makes `commonpath`
+    # raise, which the handler below reads as "no shared root" -- silently
+    # disabling shortening for every other path in the run.
+    real = sorted({f.partition("#")[0] for f in files if f})
     if not real:
         return ""
     try:
