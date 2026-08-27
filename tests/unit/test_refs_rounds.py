@@ -634,6 +634,50 @@ def test_check_scenario_parts_names_an_unreadable_part(tmp_path):
     assert "malformed JSON" in findings[0].message
 
 
+def test_check_scenario_parts_reports_a_hole_ref_that_is_not_a_string(tmp_path):
+    """The guard whose `continue` keeps an unhashable ref out of `owners.get`.
+
+    Load-bearing rather than defensive: a dict ref reaching `owners.get(ref)`
+    raises `TypeError: unhashable type: 'dict'` out of a checker, which cli.py's
+    catch-all reports as an exit-1 [internal] finding anchored on the run root --
+    the wrong artifact, for a repairable defect in a part that could be named.
+
+    This message is BYTE-IDENTICAL to check_batches' own non-string guard
+    (refs.py, the `/batches/{i}/hole_refs/{j}` clause), so a substring assertion
+    could be satisfied by the wrong guard entirely. The discrimination is therefore
+    on the artifact and the pointer, and the plan written below is well formed so
+    that nothing may legitimately be anchored on it.
+    """
+    run = _run_with_world_for_refs(tmp_path)
+    write_json(
+        run.batches(1),
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "cap_bytes": 28000,
+            "bytes_per_scenario": 1600,
+            "batches": [{"id": "b01", "hole_refs": ["goal:goal-0"], "projected_bytes": 1600}],
+        },
+    )
+    scenario = _scenario("sc-b01-001", holes=("goal:goal-0",))
+    # Unhashable on purpose: an int would be reported either way, but only an
+    # unhashable value proves the `continue` is what stops the raise.
+    scenario["provenance"]["hole_refs"] = [{"cell": "cap-0"}, "goal:goal-0"]
+    write_json(
+        run.scenario_part(1, "b01"),
+        {"schema_version": "0.1", "round": 1, "batch_id": "b01", "scenarios": [scenario]},
+    )
+    findings = refs.check_scenario_parts(run)
+    assert [f.artifact for f in findings] == [run.scenario_part(1, "b01")]
+    assert [f.pointer for f in findings] == ["/scenarios/0/provenance/hole_refs/0"]
+    assert "{'cell': 'cap-0'}" in findings[0].message
+    # Exactly one finding: the second ref is b01's own, so the guard skipped one
+    # entry and the loop carried on rather than abandoning the scenario. And
+    # nothing on the plan, which is what tells this apart from check_batches'
+    # identically worded guard.
+    assert not any(f.artifact == run.batches(1) for f in findings)
+
+
 def test_a_real_write_batches_partition_reports_nothing(tmp_path):
     """The satisfiability pin for the own-batch clause (Ruling R21).
 
@@ -710,9 +754,13 @@ def test_a_real_write_batches_partition_reports_nothing(tmp_path):
                 "scenarios": scenarios,
             },
         )
-    assert written == len(plan["batches"][0]["hole_refs"]) + sum(
-        len(b["hole_refs"]) for b in plan["batches"][1:]
-    )
+    # NOT a sum over the same loop that wrote the scenarios -- that compares the
+    # write loop to itself, so it pins nothing while occupying the space a real
+    # assertion would go. Both figures below are ones this loop did not compute:
+    # the fixture's own dimensions, and the worklist rounds.closable_holes derives
+    # from the world model independently of any part on disk.
+    assert written == caps * ocs + goals
+    assert written == len(rounds.closable_holes(run))
     assert refs.check_scenario_parts(run) == []
 
 
