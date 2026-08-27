@@ -736,3 +736,24 @@ def test_rules_prefer_a_readable_statement_over_a_whitespace_only_prose(tmp_path
     ]
     run.world_model.write_text(json.dumps(world_model))
     assert target_brief.data_types(run)[0].rules == ("ticket_id is unique", "the human phrasing")
+
+
+def test_headline_reads_name_interface_and_notes(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    head = target_brief.headline(run)
+    assert head.name == "ticketq"
+    assert head.interface == "mcp"
+    assert head.notes == ""  # the toy target carries none, and neither does parsec
+
+
+def test_headline_keeps_notes_where_a_pass_wrote_them(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["target"]["notes"] = "A ticket queue behind MCP."
+    run.world_model.write_text(json.dumps(world_model))
+    assert target_brief.headline(run).notes == "A ticket queue behind MCP."
+
+
+def test_headline_marks_a_missing_world_model(tmp_path):
+    run = build_toy_run(tmp_path, upto="extract")
+    assert isinstance(target_brief.headline(run), Absent)

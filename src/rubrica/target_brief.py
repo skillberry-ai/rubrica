@@ -335,6 +335,46 @@ def _refs(run: RunPaths) -> dict[str, SourceRef]:
 
 
 @dataclass(frozen=True)
+class Headline:
+    """The target, as the run names it.
+
+    `notes` is optional in the schema and absent from the toy world and from both
+    of the two most recent recordings, so the page must read without it:
+    `interface` and `name` are the two required fields and the only two guaranteed
+    to be there. Measured on the toy, `target` is exactly `{"interface": "mcp",
+    "name": "ticketq"}`.
+    """
+
+    name: str
+    interface: str
+    notes: str
+
+
+def headline(run: RunPaths) -> Headline | Marker:
+    """The target's own name, how it is reached, and any note a pass wrote.
+
+    Through `_world`, so this cannot disagree with the five builders below about
+    whether the run has a description to show -- and so the renderer gets the
+    world-model marker from the one call it already has to make, rather than
+    reaching for `_world` itself to decide whether to raise its banner.
+
+    No fallback to the manifest's `target.name`, which is also required there and
+    also a string: a `Marker` here is what tells the renderer the description could
+    not be read at all, and a headline assembled from a second artifact would
+    silence that while leaving all five sections empty.
+    """
+    payload = _world(run)
+    if isinstance(payload, Marker):
+        return payload
+    target = _mapping(payload.get("target"))
+    return Headline(
+        name=_text(target.get("name")),
+        interface=_text(target.get("interface")),
+        notes=_text(target.get("notes")),
+    )
+
+
+@dataclass(frozen=True)
 class InputGroup:
     """The files of one kind in one directory that the run read.
 
