@@ -217,7 +217,9 @@ adopt-projection`, but are necessary and never sufficient — `prose` is where
 The run's identity: `run_id`, `target` (name and interface), the registered
 `inputs` (each with its `artifact_id`, `source_path`, `stored_as` name,
 `sha256`, `kind`, and `bytes`), the current `limits` (`max_rounds`,
-`max_scenarios`), and `stages` — one entry per stage that has actually run,
+`max_scenarios`, and the optional `max_scenario_part_bytes` — absent means
+`rounds.DEFAULT_SCENARIO_PART_BYTES`), and `stages` — one entry per stage that
+has actually run,
 recording the `model`, `effort`, and `skill_sha256` `record-stage` computed
 from the skill file used. `stages` gains one entry per prompt stage
 between `extract` and `emit`, plus `triage` — which is recorded **after** gate
@@ -485,13 +487,15 @@ produce grew with the run rather than with the round's work — and on a real
 target it exceeded the harness's output cap, which truncates rather than fails.
 Each part below is bounded by its own batch instead, and code composes the whole.
 
-These three kinds are registered in `validate.ARTIFACT_SCHEMAS` and are **not
-yet in `validate.STAGE_ARTIFACTS`**: the schemas and the byte budget land ahead
-of the code that writes them, so `rubrica validate --stage propose` still gates
-the sealed `scenarios` document alone. The "written by" and "read by" lines
-below name the producer and readers each part is *designed* for, not a stage
-mapping or a checker that exists today — the paths, though, are the ones
-`paths.RunPaths` already resolves.
+Each of the three is now its own stage's layer-1 gate:
+`validate --stage propose-batches` gates `batches`, `--stage propose` gates
+`scenarios-part`, and `--stage score` gates `score-part`. The sealed documents
+moved with them — `scenarios` is `propose-seal`'s gate and `coverage` is
+`score-seal`'s — so no prompt stage is gated on a document that grows with the
+denominator any more. `batches` resolves by *iterating* the rounds that have a
+plan rather than always returning a path: `propose-batches` legitimately writes
+nothing when no hole is closable, and that absence is how the loop learns it is
+over.
 
 Like the reconcile partials above, none of these schemas restates an element it
 shares with a sealed document: `scenarios-part` resolves
@@ -513,9 +517,10 @@ beside the shared `rejected_reason` it sits next to.
 ## `batches`
 
 - **Schema:** `src/rubrica/schema/batches-0.1.json`
-- **Written by:** code, from the round's coverage report — not a prompt, for the
-  same reason `emit` is code: the partition must be reproducible, or a change in
-  a round's output cannot be attributed to the model that wrote it
+- **Written by:** `propose-batches` (code, `rubrica propose-batches`), from the
+  round's coverage report — not a prompt, for the same reason `emit` is code: the
+  partition must be reproducible, or a change in a round's output cannot be
+  attributed to the model that wrote it
 - **Read by:** the `propose` fan-out (each member is dispatched with one batch
   id and reads its own entry), `check-refs`
 - **Path:** `02-batches/round-<N>.json` (`paths.RunPaths.batches`)
@@ -552,7 +557,8 @@ empty array here is a partition defect rather than a quiet round.
 
 - **Schema:** `src/rubrica/schema/scenarios-part-0.1.json`
 - **Written by:** the `propose` fan-out, run as `rb-propose`, one part per batch
-- **Read by:** the code that seals `02-scenarios.json`; `check-refs`
+- **Read by:** `propose-seal` (code), which seals `02-scenarios.json` from every
+  part; `check-refs`
 - **Path:** `02-scenarios/round-<N>/<batch-id>.json`
   (`paths.RunPaths.scenario_part`)
 
@@ -571,7 +577,9 @@ condition exists to produce.
 
 - **Schema:** `src/rubrica/schema/score-part-0.1.json`
 - **Written by:** `score`, run as `rb-score`, one part per round
-- **Read by:** the code that seals `03-coverage/round-<N>.json`; `check-refs`
+- **Read by:** `score-seal` (code), which composes
+  `03-coverage/round-<N>.json` from it, and `propose-seal` (code), which folds its
+  `rulings` into `02-scenarios.json`; `check-refs`
 - **Path:** `03-score/round-<N>.json` (`paths.RunPaths.score_part`)
 
 Everything `rb-score` decides and nothing it can compute. The coverage matrices
@@ -594,13 +602,15 @@ computed); `verdict` (the same four values `coverage` defines, and still only
 ## `scenarios`
 
 - **Schema:** `src/rubrica/schema/scenarios-0.1.json`
-- **Written by:** `propose`, run as `rb-propose` (appends; never renumbers a
-  prior round); also rewritten by `score`, run as `rb-score`, which folds
-  duplicates and applies rejections
-- **Read by:** `rb-propose` itself (it declares `scenarios` in `reads` and has
-  to read the file it appends to, so an earlier round's ids survive
-  unrenumbered), `rb-score`, `rb-instantiate`, `rb-challenge`, `emit` (code),
-  `rb-orchestrate`; `dedupe-candidates`, `compare-gold`
+- **Written by:** `propose-seal` (code, `rubrica propose-seal`), which assembles
+  it from every `scenarios-part` and folds in every `score-part`'s rulings. It
+  runs twice a round — once so `score` has a document to read, again so the
+  statuses are folded before `score-seal` reads it — and it never reads its own
+  output, which is what lets the second run agree with the first by construction
+- **Read by:** `rb-score`, `rb-instantiate`, `rb-challenge`, `emit` (code),
+  `rb-orchestrate`, `score-seal` (code); `dedupe-candidates`, `compare-gold`.
+  **Not** by `rb-propose`: a member's worklist is its batch, and a
+  `not_yet_attempted` hole is by definition one no scenario covers
 - **Path:** `02-scenarios.json`
 
 Every proposed test across every round of the propose/score loop, each with a
@@ -618,9 +628,12 @@ an `outcome_class_id` — the coverage cell this scenario is meant to close);
 ## `coverage`
 
 - **Schema:** `src/rubrica/schema/coverage-0.1.json`
-- **Written by:** `score`, run as `rb-score` (one `round-N.json` per round,
-  plus `latest.json` pointing at the most recent)
-- **Read by:** `rb-propose` (via `latest.json`), `rb-orchestrate`
+- **Written by:** `score-seal` (code, `rubrica score-seal`), one `round-N.json`
+  per round plus a byte-identical `latest.json`. The matrices are computed there
+  rather than copied out of the score part, so a percentage cannot disagree with
+  the matrix beneath it
+- **Read by:** `propose-batches` (code) and `rb-propose` (via `latest.json`),
+  `rb-orchestrate`, `score-seal`'s own progress baseline (via `round-(N-1).json`)
 - **Path:** `03-coverage/round-<N>.json`, `03-coverage/latest.json`
 
 One round's coverage report against the frozen `denominator`: a
@@ -631,8 +644,8 @@ attempted`, `unreachable`, `out_of_scope`, or `blocked_by_gap`, the last
 requiring a `gap_id`), `progress` counters, and the round's `verdict`.
 
 Fields worth knowing: `verdict` (`continue`, `converged`, `halted_no_progress`,
-or `halted_round_cap` — *computed* here; only `rb-orchestrate` acts on it, by
-dispatching another `propose`/`score` round or stopping the loop);
+or `halted_round_cap` — *computed* by `rb-score` and copied through here; only
+`rb-orchestrate` acts on it, by running another round of the loop or stopping);
 `denominator_version` (must match the world model's frozen value, or the
 percentages this round reports are meaningless).
 

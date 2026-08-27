@@ -232,27 +232,52 @@ ROWS: list[dict] = [
     ),
     dict(
         kind="stage",
-        dir="02",
-        name="propose",
-        runs="rb-propose · one dispatch per round",
-        art=["02-scenarios.json"],
+        dir="02a",
+        name="propose-batches",
+        runs="code · partitions this round's holes",
+        art=["02-batches/round-N.json"],
         gates=["validate"],
         loop="top",
-        note="append-only, so it can never be a fan-out",
+        note="no document at all when no hole is closable: the loop is over",
     ),
     dict(
         kind="stage",
-        dir="03",
+        dir="02b",
+        name="propose",
+        runs="rb-propose · one member per batch",
+        art=["02-scenarios/round-N/<batch>.json"],
+        gates=["validate"],
+        fan="fan-out · one member per batch",
+        note="writes its own batch only; a bounded part, never the whole list",
+    ),
+    dict(
+        kind="stage",
+        dir="02c",
+        name="propose-seal",
+        runs="code · assembles the parts",
+        art=["02-scenarios.json"],
+        gates=["validate"],
+        note="runs twice a round: before score, and again to fold its rulings",
+    ),
+    dict(
+        kind="stage",
+        dir="03a",
         name="score",
         runs="rb-score",
-        art=[
-            "03-coverage/round-N.json · latest.json",
-            "02-scenarios.json  (folds, rejects)",
-        ],
-        gates=["validate", "check-refs"],
+        art=["03-score/round-N.json  (rulings, holes, verdict)"],
+        gates=["validate"],
         barrier="barrier · closes the round",
-        loop="bottom",
         note="runs dedupe-candidates itself, as Method step 1",
+    ),
+    dict(
+        kind="stage",
+        dir="03b",
+        name="score-seal",
+        runs="code · computes both matrices",
+        art=["03-coverage/round-N.json · latest.json"],
+        gates=["validate", "check-refs"],
+        loop="bottom",
+        note="a pct can never disagree with the matrix beneath it",
     ),
     dict(
         kind="verdicts",
@@ -503,7 +528,7 @@ def hero() -> str:
             a(text(GATE_X, ay + 15, row["note"], "g-note", "start", 10))
 
     # -- the round loop bracket, in the gutter
-    top, bot = by_name("propose"), by_name("score")
+    top, bot = by_name("propose-batches"), by_name("score-seal")
     ty, byy = top["y"] + 14, bot["y"] + BOX_H - 14
     a(
         f'<path d="M{BOX_X - 6} {byy:.0f} H30 V{ty:.0f} H{BOX_X - 6}" class="edge loop" '
@@ -517,7 +542,7 @@ def hero() -> str:
     # -- challenge's two feedback edges, also in the gutter
     ch = by_name("challenge")
     inst = by_name("instantiate")
-    sc = by_name("score")
+    sc = by_name("score")  # a reject is re-judged by rb-score, not re-partitioned
     for x_lane, src_dy, dst_row, dst_dy, label in (
         (44, 18, inst, BOX_H - 16, "re-seed · once"),
         (14, 34, sc, BOX_H - 30, "reject"),
@@ -1077,9 +1102,10 @@ skill file path. If a stage needs a fact, it reads it from an artifact, or it do
 
 <section>
   <h2>Fan-outs, and why the barrier is not decoration</h2>
-  <p class="lede">Three stages fan out: <code>extract</code> per admitted input,
-  <code>instantiate</code> per active scenario, <code>challenge</code> per instance. Members are
-  concurrent and mutually blind. The gate that follows is not.</p>
+  <p class="lede">Four stages fan out: <code>extract</code> per admitted input,
+  <code>propose</code> per batch, <code>instantiate</code> per active scenario,
+  <code>challenge</code> per instance. Members are concurrent and mutually blind. The gate that
+  follows is not.</p>
   <figure>
     <div class="plate">{fig_barrier()}</div>
     <figcaption><b>Fig. 4</b> — <code>refs.check_verdicts</code> reports every instance without a
@@ -1087,11 +1113,15 @@ skill file path. If a stage needs a fact, it reads it from an artifact, or it do
     members that simply have not finished yet. Run the gate <em>once</em>, after the last member
     returns.</figcaption>
   </figure>
-  <p><code>propose</code> looks like a fan-out and is not. It declares <code>scenarios</code> under
-  both <code>reads</code> and <code>writes</code>, because <code>02-scenarios.json</code> is a
-  single append-only document: two members appending at once would each read the same file and
-  overwrite the other's scenarios, with no gate anywhere able to report the loss. One dispatch per
-  round, holding every hole that round targets.</p>
+  <p><code>propose</code> became a fan-out by taking the shared document off both sides of its
+  contract. It used to declare <code>scenarios</code> under <code>reads</code> and
+  <code>writes</code> both, and that is what made concurrency impossible: two members appending to
+  one <code>02-scenarios.json</code> would each read the same file and overwrite the other's
+  scenarios, with no gate anywhere able to report the loss. Now each member writes
+  <code>02-scenarios/round-N/&lt;batch&gt;.json</code> and only that, and
+  <code>propose-seal</code> assembles the list in code — which is also what bounds one member's
+  output, because a round no longer has to re-emit every earlier round to keep the document
+  whole.</p>
 </section>
 
 <section>

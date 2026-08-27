@@ -27,9 +27,9 @@ reporting coverage of a surface it never touched, with both gates green.
 ```toml
 stage = "score"
 reads = ["manifest", "world_model", "scenarios"]
-writes = ["scenarios", "coverage_round", "coverage_latest"]
-schemas = ["coverage"]
-invokes = ["dedupe-candidates", "validate", "check-refs"]
+writes = ["score_part"]
+schemas = ["score-part"]
+invokes = ["dedupe-candidates", "validate"]
 ```
 
 ## 1. Inputs

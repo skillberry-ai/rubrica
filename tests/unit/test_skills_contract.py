@@ -162,7 +162,7 @@ def test_a_stage_that_disagrees_with_the_directory_name_is_reported(tmp_path):
     can, which is the fixture this test needs to isolate that arm from the one
     above.
     """
-    contract = dict(CONTRACTS["rb-extract"], stage="score", schemas=["coverage"])
+    contract = dict(CONTRACTS["rb-extract"], stage="score", schemas=["score-part"])
     findings = check_contract(load(write_skill(tmp_path, "rb-extract", contract)))
     assert len(findings) == 1
     assert "/stage" in [f.pointer for f in findings]

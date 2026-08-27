@@ -89,3 +89,36 @@ def test_every_artifact_kind_layer_two_reads_is_covered(tmp_path):
         assert [f.artifact for f in check_readable(run)] == [path], f"not covered: {path}"
         path.write_text(original, encoding="utf-8")
     assert check_readable(run) == []
+
+
+def test_every_per_round_loop_artifact_is_covered(tmp_path):
+    """The same enumeration guard for the loop's three per-round documents, and it
+    needs a different fixture to reach them at all.
+
+    `build_state` writes `02-scenarios.json` and the coverage documents directly
+    rather than through the parts, so a `02-batches/round-N.json` left out of
+    `_readable_targets` sails through the test above -- the fixture-cannot-reach
+    weakness, exactly as an empty `05-verdicts/` once hid a real deny in
+    test_dispatch_harness. `build_toy_run` goes through `propose-batches`, the
+    propose part and the score part, so it can reach all three.
+
+    Each one is read by a layer-2 checker of its own -- `check_batches`,
+    `check_scenario_parts`, `check_score_parts` -- and `check_scenario_parts` reads
+    the *plan* beside the parts as well, so a truncated plan left unnamed here is a
+    checker reporting a missing batch for every correct part in the round while
+    naming the wrong artifact.
+    """
+    from tests.toy import TOY_BATCH_ID, build_toy_run
+
+    run = build_toy_run(tmp_path / "runs")
+    assert check_readable(run) == [], "the baseline this state is measured against"
+    for path in (
+        run.batches(1),
+        run.scenario_part(1, TOY_BATCH_ID),
+        run.score_part(1),
+    ):
+        original = path.read_text(encoding="utf-8")
+        path.write_text("{", encoding="utf-8")
+        assert [f.artifact for f in check_readable(run)] == [path], f"not covered: {path}"
+        path.write_text(original, encoding="utf-8")
+    assert check_readable(run) == []

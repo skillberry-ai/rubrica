@@ -40,8 +40,11 @@ contract, not a diagram convention.
 | `01g` | `reconcile-goals` | `rb-reconcile-goals` | `01d`'s reads, plus `01-capabilities.json` and `01-entities.json` | `01-goals.json` | validate · check-refs |
 | `01h` | `reconcile-gaps` | `rb-reconcile-gaps` | the manifest, every claims file, and every partial above | `01-gaps.json` | validate · check-refs |
 | `01i` | `reconcile-seal` | code — `rubrica reconcile-seal` | the manifest, the five singleton partials, and every `01-contradictions/*.json` — **not** `01-subjects.json` | `01-world-model.json` | validate · check-refs · human gate 1 |
-| `02` | `propose` | `rb-propose` | `manifest.json`, `01-world-model.json`, `02-scenarios.json`, `03-coverage/latest.json` | `02-scenarios.json` (appends this round) | validate |
-| `03` | `score` | `rb-score` — barrier | `manifest.json`, `01-world-model.json`, `02-scenarios.json` | `03-coverage/round-N.json`, `03-coverage/latest.json`, `02-scenarios.json` (statuses) | validate · check-refs · human gate 2 |
+| `02a` | `propose-batches` | code — `rubrica propose-batches`, partitions this round's closable holes | `manifest.json`, `01-world-model.json`, `03-coverage/latest.json` | `02-batches/round-N.json`, or **nothing at all** when no hole is closable | validate |
+| `02b` | `propose` | `rb-propose` — fan-out, one per batch | `manifest.json`, `01-world-model.json`, `02-batches/round-N.json`, `03-coverage/latest.json` — never `02-scenarios.json` | `02-scenarios/round-N/<batch-id>.json` | validate |
+| `02c` | `propose-seal` | code — `rubrica propose-seal`, assembles the parts | every `02-scenarios/round-N/<batch-id>.json`, every `03-score/round-N.json` for its rulings, `01-world-model.json` | `02-scenarios.json` | validate |
+| `03a` | `score` | `rb-score` — barrier | `manifest.json`, `01-world-model.json`, `02-scenarios.json` | `03-score/round-N.json` — the rulings, the holes and the verdict | validate |
+| `03b` | `score-seal` | code — `rubrica score-seal`, computes both matrices | `03-score/round-N.json`, `01-world-model.json`, `02-scenarios.json`, `03-coverage/round-(N-1).json` | `03-coverage/round-N.json`, `03-coverage/latest.json` | validate · check-refs · human gate 2 |
 | `04` | `instantiate` | `rb-instantiate` — fan-out, one per active scenario | `01-world-model.json`, `02-scenarios.json` | `04-instances/<sid>/{seed.json,expected.json,rationale.md}` | validate · check-refs |
 | `05` | `challenge` | `rb-challenge` — fan-out, one per instance | the scenario and the seed — then `expected.json` last | `05-verdicts/<sid>.json` | validate · check-refs · human gate 3 |
 | `06` | `emit` | `rb-emit` — wraps code | `02-scenarios.json`, `05-verdicts/`, `04-instances/*/expected.json`, `01-world-model.json` | `06-suite/<sid>/` task packages | validate · check-refs |
@@ -128,11 +131,25 @@ skill, which is the thing being tested.
 
 ## The 02↔03 loop
 
-`propose` and `score` form a loop. `propose` targets the holes the coverage
-report names; `score` recomputes coverage against the frozen denominator and
-returns a verdict — `continue`, `converged`, `halted_no_progress`, or
-`halted_round_cap`. `score` *computes* that verdict; only the orchestrator acts
-on it. The loop is bounded by `max_rounds` in the manifest.
+Five stages, one logical step, and the whole of it repeats — not just `propose`
+and `score`. `propose-batches` partitions this round's closable holes into
+byte-bounded batches; one `rb-propose` member writes a bounded part per batch;
+`propose-seal` assembles those parts into `02-scenarios.json`; `score` rules on
+the scenarios and justifies every hole; `score-seal` computes both coverage
+matrices and composes the round's report. Three of the five are code
+— `propose-batches`, `propose-seal` and `score-seal` — for the reason `emit` is:
+two runs with identical parts must produce byte-identical output, or variance
+stops being attributable to the stage that caused it. `propose-seal` runs twice
+per round, and the repeat is load-bearing rather than defensive: it is a pure
+function of the parts and the rulings, so the second run is what folds this
+round's rulings in before `score-seal` reads the document for what each *live*
+scenario credits.
+
+The verdict is still `score`'s — `continue`, `converged`,
+`halted_no_progress`, or `halted_round_cap`. `score` *computes* it and
+`score-seal` composes the document that carries it; only the orchestrator acts
+on it. The loop is bounded by `max_rounds` in the manifest, and how finely each
+round is partitioned by `max_scenario_part_bytes`.
 
 ## Fan-out means isolation, not just parallelism
 
@@ -141,7 +158,9 @@ conclusion into its claims. A `reconcile-contradict` member is the deliberate
 exception that proves the rule: it is fanned out over *subjects* rather than
 over inputs, and inside its own subject it reads every claim from every input,
 because comparing two inputs is the one thing no input-scoped member could do.
-An instantiate subagent builds one seed world
+A `propose` member sees one batch of holes, so no two members can propose
+against the same hole and hand `score` a duplicate the partition could have
+prevented. An instantiate subagent builds one seed world
 without knowing what the other tests cover. That isolation is the point: it is
 what makes a contradiction between two inputs something the pipeline *records*
 rather than something a single reader silently resolves.
@@ -165,13 +184,14 @@ artifacts.
 | `rb-reconcile-entities` | Models what the declared capabilities return, with `machine:` invariants only where a statement fits one of the four implemented forms and `prose:` everywhere else — a `machine:` invariant promoted from an inference fails every seed that is actually correct. |
 | `rb-reconcile-goals` | Names the actors and enumerates their goals: half the frozen denominator. A later stage may only *request* an amendment, so a goal left out costs an explicit decision and a `denominator_version` bump to put back. |
 | `rb-reconcile-gaps` | Records what no input says and reasoning cannot supply, naming honestly every stage each gap `blocks` — and audits every partial above it for what was modelled without evidence, which no gate can check because support is semantic. |
-| `rb-propose` | Reads the world model and latest coverage report, then appends scenarios targeting real, closable holes — never rewriting or renumbering what an earlier round proposed. |
-| `rb-score` | Folds the scenario pairs that are one test, promotes the rest, computes both coverage matrices against the frozen denominator, justifies every uncovered row with a hole, and computes the verdict. |
+| `rb-propose` | One member per batch. Takes its own batch's `hole_refs` as its whole worklist and writes a scenario for each hole it can close, into a bounded part of its own — never the accumulating scenario list, and never a sibling's holes. |
+| `rb-score` | Folds the scenario pairs that are one test, promotes the rest, justifies every uncovered row with a hole, and rules the verdict. It reasons about both coverage matrices without transcribing them: the arithmetic was never judgment, and `score-seal` computes it. |
 | `rb-instantiate` | Builds one scenario's seed world — **distractors first**, so no agent can pass by reading back the only matching record — then derives the oracle from that seed rather than the other way round, and records which near-misses exist so a reviewer can judge fairness. |
 | `rb-challenge` | The adversary. Verifies one instance is a fair, discriminating test, reading the oracle *last* — an adversary who sees the answer first confirms almost anything. |
 | `rb-emit` | A deliberately thin entry point over `rubrica emit`; writes nothing itself. `emit` is code, not a prompt, because two runs with identical stage-4 and stage-5 artifacts must produce identical suites — otherwise variance can no longer be attributed to a stage. |
 | `rb-orchestrate` | The loop itself: dispatch each stage, validate, allow one bounded repair, hold gates 1 through 3, record each stage's model and skill hash, append every decision to the run's lab notebook. **Not a stage** — it declares no `stage` and no `schemas`. It dispatches `extract` through `emit` only: it never runs `survey`, never dispatches any pass of the triage family, and never holds gate 0. |
 
-`intake`, `smoke`, `survey`, `triage-slices`, `triage-seal`, and
-`reconcile-seal` are code, not skills. They have no `SKILL.md` and no entry in
-`manifest.stages` — their absence there is not a defect.
+`intake`, `smoke`, `survey`, `triage-slices`, `triage-seal`,
+`reconcile-seal`, `propose-batches`, `propose-seal`, and `score-seal` are code,
+not skills. They have no `SKILL.md` and no entry in `manifest.stages` — their
+absence there is not a defect.

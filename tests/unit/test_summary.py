@@ -46,8 +46,11 @@ _INTAKE_THROUGH_CHALLENGE = {
     "reconcile-goals",
     "reconcile-gaps",
     "reconcile-seal",
+    "propose-batches",
     "propose",
+    "propose-seal",
     "score",
+    "score-seal",
     "instantiate",
     "challenge",
 }
@@ -216,6 +219,41 @@ def test_header_reports_this_runs_limits_and_not_the_fixture_default(tmp_path):
     assert head.max_rounds == 3
     assert head.max_scenarios == 11
     assert head.schema_version == "0.1"
+
+
+def test_header_surfaces_the_part_budget_a_run_actually_set(tmp_path):
+    """The third limit, and the only optional one.
+
+    Two runs whose scenario counts differ only because one partitioned its holes
+    more finely were otherwise indistinguishable on this page, so a header that
+    read `max_rounds` and `max_scenarios` alone left the dial that explains the
+    difference invisible. Asserted at a value nothing in the fixture defaults to,
+    for the reason the test above gives about 3 and 11: `build_toy_run` sets no
+    part budget at all, so a constant or a default would satisfy a check against
+    the default.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    doc = read_json(run.manifest)
+    doc["limits"]["max_scenario_part_bytes"] = 9000
+    write_json(run.manifest, doc)
+    assert summary.header(run).max_scenario_part_bytes == 9000
+
+
+def test_header_leaves_an_unset_part_budget_as_none_rather_than_the_default(tmp_path):
+    """Absent means `rounds.DEFAULT_SCENARIO_PART_BYTES`, and this page must not
+    say so by printing that number.
+
+    `manifest-0.1.json` does not require the key, so a run that never set it and a
+    run that set it to the default are different facts about the run -- and only
+    the first is what almost every manifest on disk carries. `_val` renders the
+    None as an explicit absence marker, which is the honest reading; substituting
+    the constant here would make the page claim a limit the manifest never
+    recorded.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    assert summary.header(run).max_scenario_part_bytes is None
 
 
 def test_header_reports_the_manifests_run_id_not_the_directory_name(tmp_path):
@@ -1914,7 +1952,7 @@ def test_coverage_reads_a_row_per_round_document(tmp_path):
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     latest = read_json(run.coverage_latest)
     for n, verdict in ((1, "continue"), (2, "continue"), (10, "halted_round_cap")):
         write_json(run.coverage_round(n), _round_doc(latest, round=n, verdict=verdict))
@@ -1937,7 +1975,7 @@ def test_coverage_row_reads_each_column_from_the_matrix_that_owns_it(tmp_path):
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     latest = read_json(run.coverage_latest)
     holes = [
         {"ref": f"cell:cap-{n}/oc-x", "reason": "not_yet_attempted", "justification": "later"}
@@ -1973,7 +2011,7 @@ def test_coverage_renders_one_row_from_latest_when_no_round_document_exists(tmp_
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     latest = read_json(run.coverage_latest)
     write_json(run.coverage_latest, _round_doc(latest, round=4, verdict="halted_round_cap"))
     run.coverage_round(1).unlink()
@@ -2000,7 +2038,7 @@ def test_coverage_exposes_matrix_cells_with_their_scenarios(tmp_path):
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     latest = read_json(run.coverage_latest)
     latest["capability_matrix"]["cells"][0]["covered"] = False
     write_json(run.coverage_latest, latest)
@@ -2046,7 +2084,7 @@ def test_coverage_exposes_goal_rows_with_their_depths_and_scenarios(tmp_path):
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     latest = read_json(run.coverage_latest)
     open_row = latest["goal_matrix"]["rows"][1]
     open_row["covered"] = False
@@ -2093,7 +2131,7 @@ def test_coverage_keeps_a_hop_depth_present_that_the_goal_does_not_expect(tmp_pa
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     latest = read_json(run.coverage_latest)
     latest["goal_matrix"]["rows"][0]["hop_depths_present"] = [1, 4]
     write_json(run.coverage_latest, latest)
@@ -2111,7 +2149,7 @@ def test_coverage_reads_a_hop_depth_list_that_is_not_a_list_as_empty(tmp_path, b
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     latest = read_json(run.coverage_latest)
     latest["goal_matrix"]["rows"][0]["hop_depths_present"] = bad
     write_json(run.coverage_latest, latest)
@@ -2131,7 +2169,7 @@ def test_coverage_does_not_read_a_boolean_as_a_hop_depth(tmp_path):
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     latest = read_json(run.coverage_latest)
     latest["goal_matrix"]["rows"][0]["hop_depths_expected"] = [True, 2, False]
     write_json(run.coverage_latest, latest)
@@ -2148,7 +2186,7 @@ def test_coverage_reads_holes_with_reason_and_justification(tmp_path):
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     doc = read_json(run.coverage_latest)
     doc["holes"] = [
         {"ref": "cell:cap-a/oc-x", "reason": "unreachable", "justification": "no mapping"},
@@ -2163,7 +2201,7 @@ def test_coverage_reads_holes_with_reason_and_justification(tmp_path):
 
 
 def test_coverage_before_score_is_absent(tmp_path):
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     got = summary.coverage(run)
     assert isinstance(got, summary.Absent)
     assert got.what == "03-coverage/"
@@ -2181,7 +2219,7 @@ def test_coverage_passes_a_pct_that_is_not_a_number_through_uncoerced(tmp_path):
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     doc = read_json(run.coverage_round(1))
     doc["capability_matrix"]["pct"] = "half"
     write_json(run.coverage_round(1), doc)
@@ -2201,7 +2239,7 @@ def test_coverage_passes_a_round_number_that_is_not_a_number_through(tmp_path):
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     latest = read_json(run.coverage_latest)
     write_json(run.coverage_round(2), _round_doc(latest, round="two", verdict="continue"))
     got = summary.coverage(run)
@@ -2219,7 +2257,7 @@ def test_coverage_takes_the_implied_size_from_sizing_rather_than_recomputing(tmp
     """
     from rubrica.sizing import implied_size
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     got = summary.coverage(run)
     assert got.implied == implied_size(run)
     assert got.implied["basis"] == "world_model+coverage"
@@ -2246,7 +2284,7 @@ def test_coverage_implied_is_none_rather_than_raising_on_a_non_numeric_ceiling(t
     from rubrica.artifacts import read_json, write_json
     from rubrica.sizing import implied_size
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     manifest = read_json(run.manifest)
     manifest["limits"]["max_scenarios"] = ceiling
     write_json(run.manifest, manifest)
@@ -2267,7 +2305,7 @@ def test_coverage_skips_a_round_document_it_cannot_read(tmp_path):
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     latest = read_json(run.coverage_latest)
     write_json(run.coverage_round(2), _round_doc(latest, round=2, verdict="converged"))
     run.coverage_round(1).write_text("{not json", encoding="utf-8")
@@ -2285,7 +2323,7 @@ def test_coverage_falls_back_to_latest_when_every_round_document_is_unreadable(t
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     write_json(run.coverage_latest, _round_doc(read_json(run.coverage_latest), round=3))
     run.coverage_round(1).write_text("nope", encoding="utf-8")
     got = summary.coverage(run)
@@ -2301,7 +2339,7 @@ def test_coverage_on_an_unreadable_directory_is_malformed_not_absent(tmp_path):
     """
     if os.geteuid() == 0:
         pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     run.coverage_dir.chmod(0o000)
     try:
         got = summary.coverage(run)
@@ -2320,7 +2358,7 @@ def test_coverage_with_no_readable_round_document_is_malformed_not_absent(tmp_pa
     absence, the one page said both "score produced an artifact" and "03-coverage/
     is not present".
     """
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     for path in run.coverage_dir.iterdir():
         path.unlink()
     run.coverage_latest.write_text("{not json", encoding="utf-8")
@@ -2350,7 +2388,7 @@ def test_coverage_survives_a_field_that_is_the_wrong_type(tmp_path, field, bad):
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     for path in (run.coverage_latest, run.coverage_round(1)):
         doc = read_json(path)
         doc[field] = bad
@@ -2399,7 +2437,7 @@ def test_coverage_survives_a_field_that_is_the_wrong_type(tmp_path, field, bad):
 def test_scenarios_returns_a_row_per_scenario(tmp_path):
     from rubrica.artifacts import read_json
 
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     expected = len(read_json(run.scenarios)["scenarios"])
     rows = summary.scenarios(run)
     assert len(rows) == expected
@@ -2414,7 +2452,7 @@ def test_scenarios_reads_every_id_in_document_order(tmp_path):
     duplicate is last, which is what makes it the row every "absent join" assertion
     below indexes.
     """
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     assert [r.id_ for r in summary.scenarios(run)] == [
         "scn-open",
         "scn-empty",
@@ -2436,7 +2474,7 @@ def test_scenarios_row_carries_the_record_fields(tmp_path):
     is uniform in both, so a value read from this run could not distinguish them
     from a constant.
     """
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     row = summary.scenarios(run)[0]
     assert row.id_ == "scn-open"
     assert row.title == "Find the open billing ticket"
@@ -2469,7 +2507,7 @@ def test_scenarios_reads_the_status_where_the_statuses_differ(tmp_path):
     cannot tell a read status from a constant, and a hardcoded `"active"` would be
     the plausible wrong answer, since four of the five rows carry it.
     """
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     assert {r.id_: r.status for r in summary.scenarios(run)} == {
         "scn-open": "active",
         "scn-empty": "active",
@@ -2489,7 +2527,7 @@ def test_scenarios_reads_the_round_and_actor_from_the_record(tmp_path):
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     doc = read_json(run.scenarios)
     doc["scenarios"][1]["round"] = 2
     doc["scenarios"][1]["actor_id"] = "act-admin"
@@ -2522,7 +2560,7 @@ def test_scenarios_carries_long_prose_in_full_rather_than_truncated(tmp_path):
 def test_scenarios_flattens_capability_refs_into_cell_labels(tmp_path):
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     doc = read_json(run.scenarios)
     doc["scenarios"][0]["capability_refs"] = [
         {"capability_id": "cap-a", "outcome_class_id": "oc-x"},
@@ -2581,7 +2619,7 @@ def test_scenarios_reads_each_verdict_field_from_the_field_that_owns_it(tmp_path
 
 
 def test_scenarios_without_verdicts_leaves_the_verdict_empty(tmp_path):
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     assert all(r.verdict == "" for r in summary.scenarios(run))
 
 
@@ -2773,7 +2811,7 @@ def test_scenarios_before_propose_is_absent(tmp_path):
 def test_scenarios_survives_a_non_dict_member(tmp_path):
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     doc = read_json(run.scenarios)
     before = len(doc["scenarios"])
     doc["scenarios"].append("oops-a-string")
@@ -2917,7 +2955,7 @@ def test_scenarios_survives_a_capability_refs_that_is_not_a_list_of_dicts(tmp_pa
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     doc = read_json(run.scenarios)
     doc["scenarios"][0][field] = bad
     write_json(run.scenarios, doc)
@@ -2938,7 +2976,7 @@ def test_scenarios_on_a_document_that_is_not_a_mapping_is_malformed(tmp_path):
     """
     from rubrica.artifacts import write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     write_json(run.scenarios, ["scn-open"])
     got = summary.scenarios(run)
     assert isinstance(got, summary.Malformed)
@@ -3046,7 +3084,7 @@ def test_challenge_reports_no_package_before_emit(tmp_path):
 
 
 def test_challenge_before_the_stage_is_absent(tmp_path):
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     got = summary.challenge(run)
     assert isinstance(got, summary.Absent)
     assert got.what == "05-verdicts/"
@@ -3125,7 +3163,7 @@ def test_orphaned_temp_files_finds_a_stray_tmp(tmp_path):
     """Found by inspection during design: an orphaned
     02-scenarios.json.tmp.43146.cb890a5abaf7 was sitting in the newest run on
     disk, and decisions.md records an earlier one removed by hand."""
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     (run.root / "02-scenarios.json.tmp.4242.deadbeef").write_text("{}", encoding="utf-8")
     assert summary.orphaned_temp_files(run) == ["02-scenarios.json.tmp.4242.deadbeef"]
 
@@ -3134,7 +3172,7 @@ def test_orphaned_temp_files_sorts_more_than_one(tmp_path):
     """Sorted, for the reason every other collection on this page is: two runs
     over the same directory must render the same list, and `iterdir` order is the
     filesystem's."""
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     for name in ("02-scenarios.json.tmp.9.zz", "01-goals.json.tmp.1.aa"):
         (run.root / name).write_text("{}", encoding="utf-8")
     assert summary.orphaned_temp_files(run) == [
@@ -3144,7 +3182,7 @@ def test_orphaned_temp_files_sorts_more_than_one(tmp_path):
 
 
 def test_orphaned_temp_files_is_empty_on_a_clean_run(tmp_path):
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     assert summary.orphaned_temp_files(run) == []
 
 
@@ -3156,7 +3194,7 @@ def test_orphaned_temp_files_scans_only_the_run_root(tmp_path):
     put a file on the page that nothing else in the run reacts to. The run root is
     where the sealed artifacts live and where an interrupted seal leaves its temp.
     """
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     (run.claims_dir / "api-json.json.tmp.7.bb").write_text("{}", encoding="utf-8")
     assert summary.orphaned_temp_files(run) == []
 
@@ -3170,7 +3208,7 @@ def test_orphaned_temp_files_on_an_unreadable_run_root_is_empty(tmp_path):
     """
     if os.geteuid() == 0:
         pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     run.root.chmod(0o000)
     try:
         assert summary.orphaned_temp_files(run) == []
@@ -3350,7 +3388,7 @@ def test_flags_do_not_fire_unresolved_when_all_are_resolved(tmp_path):
 def test_flags_fire_coverage_halted(tmp_path):
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     doc = read_json(run.coverage_latest)
     doc["verdict"] = "halted_no_progress"
     write_json(run.coverage_latest, doc)
@@ -3362,7 +3400,7 @@ def test_flags_fire_coverage_halted(tmp_path):
 def test_flags_do_not_fire_coverage_halted_on_converged(tmp_path):
     from rubrica.artifacts import read_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     assert read_json(run.coverage_latest)["verdict"] == "converged"
     ids = {f.id_ for f in summary.flags(run)}
     assert "coverage-halted" not in ids
@@ -3376,7 +3414,7 @@ def test_flags_do_not_fire_coverage_halted_before_score(tmp_path):
     none -- neither is a run that stopped making progress, and flagging either
     would put a halt on the page of every run that has not scored yet.
     """
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     assert isinstance(summary.coverage(run), summary.Absent)
     ids = {f.id_ for f in summary.flags(run)}
     assert "coverage-halted" not in ids
@@ -3392,7 +3430,7 @@ def test_flags_do_not_fire_coverage_halted_on_an_unrecorded_verdict(tmp_path):
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     doc = read_json(run.coverage_latest)
     del doc["verdict"]
     write_json(run.coverage_latest, doc)
@@ -3427,7 +3465,7 @@ def test_flags_do_not_fire_difficulty_overstated_on_an_unedited_run(tmp_path):
 
 
 def test_flags_fire_orphaned_temp(tmp_path):
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     (run.root / "02-scenarios.json.tmp.1.x").write_text("{}", encoding="utf-8")
     fired = {f.id_: f for f in summary.flags(run)}
     assert "orphaned-temp" in fired
@@ -3435,7 +3473,7 @@ def test_flags_fire_orphaned_temp(tmp_path):
 
 
 def test_flags_do_not_fire_orphaned_temp_on_a_clean_run(tmp_path):
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     ids = {f.id_ for f in summary.flags(run)}
     assert "orphaned-temp" not in ids
 
@@ -3452,7 +3490,7 @@ def test_flags_fire_stage_record_incomplete_and_exempt_the_code_stages(tmp_path)
     """
     from rubrica.artifacts import read_json
 
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     assert read_json(run.manifest)["stages"] == {}, "the fixture records no stage"
     fired = {f.id_: f for f in summary.flags(run)}
     assert "stage-record-incomplete" in fired
@@ -3481,7 +3519,7 @@ def test_flags_do_not_fire_stage_record_incomplete_when_every_stage_is_recorded(
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     produced = {row.name for row in summary.stage_spine(run) if row.produced}
     manifest = read_json(run.manifest)
     manifest["stages"] = {
@@ -3501,7 +3539,7 @@ def test_flags_do_not_fire_stage_record_incomplete_for_a_stage_that_never_ran(tm
     `emit`, so accusing them of an unrecorded dispatch would put four findings on
     the page of every partial run -- and partial runs are the primary case.
     """
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     fired = {f.id_: f for f in summary.flags(run)}
     named = set(fired["stage-record-incomplete"].detail.split(" -- ")[0].split(", "))
     assert named.isdisjoint({"score", "instantiate", "challenge", "emit"})
@@ -3634,7 +3672,7 @@ def test_flags_keep_their_relative_order_on_a_partial_run(tmp_path):
     when every rule fires is not a fixed order, and 10 of the 11 runs measured at
     design time would have rendered a subset.
     """
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     (run.root / "02-scenarios.json.tmp.1.x").write_text("{}", encoding="utf-8")
     assert [f.id_ for f in summary.flags(run)] == ["orphaned-temp", "stage-record-incomplete"]
 
@@ -3717,7 +3755,7 @@ def test_render_escapes_prose_carrying_markup_and_quotes(tmp_path):
     double quotes in real runs; an unescaped one ends the attribute early."""
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     doc = read_json(run.scenarios)
     doc["scenarios"][0]["discriminating_fact"] = 'he said "<script>alert(1)</script>" & left'
     write_json(run.scenarios, doc)
@@ -3730,7 +3768,7 @@ def test_render_escapes_prose_carrying_markup_and_quotes(tmp_path):
 def test_render_escapes_a_title_bearing_markup(tmp_path):
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="propose")
+    run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     doc = read_json(run.scenarios)
     doc["scenarios"][0]["title"] = "<b>bold</b>"
     write_json(run.scenarios, doc)
@@ -3820,6 +3858,26 @@ def test_render_shows_a_recorded_limit_as_its_value(tmp_path):
     html = summary.run_summary(run)
     assert "<tr><td>max_rounds</td><td>2</td></tr>" in html
     assert "<tr><td>max_scenarios</td><td>8</td></tr>" in html
+
+
+def test_render_shows_the_part_budget_row_whether_or_not_it_is_set(tmp_path):
+    """Both states, because the row is the point: a reader comparing two runs has
+    to be able to see that one set a finer part budget and the other took the
+    default, and a row rendered only when the key is present hides half of that.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    html = summary.run_summary(run)
+    assert (
+        '<tr><td>max_scenario_part_bytes</td><td><span class="absent">not recorded</span></td></tr>'
+    ) in html
+
+    doc = read_json(run.manifest)
+    doc["limits"]["max_scenario_part_bytes"] = 9000
+    write_json(run.manifest, doc)
+    html = summary.run_summary(run)
+    assert "<tr><td>max_scenario_part_bytes</td><td>9000</td></tr>" in html
 
 
 def test_render_marks_a_missing_limit_rather_than_blanking_the_cell(tmp_path):
@@ -4034,7 +4092,10 @@ def test_render_marks_each_matrix_cell_covered_or_not(tmp_path):
     html = summary.run_summary(run)
     assert 'class="cell yes"' in html
     assert 'class="cell no"' in html
-    assert 'title="scn-open, scn-blocked"' in html
+    # Sorted, and carrying the folded claimant: rounds.capability_matrix lists
+    # every scenario claiming the cell and leaves the live/dead distinction to
+    # `covered` alone, per rb-score's Method step 4.
+    assert 'title="scn-blocked, scn-open, scn-open-dup"' in html
 
 
 def _goal_states(run):
@@ -4133,7 +4194,9 @@ def test_render_names_the_scenarios_covering_a_goal(tmp_path):
     say that.
     """
     html = _goal_states(build_toy_run(tmp_path / "runs", upto="challenge"))
-    assert 'title="scn-open, scn-empty, scn-missing"' in html
+    # Sorted by rounds.goal_matrix, which fixes an order the document itself does
+    # not specify so two runs with identical parts produce identical bytes.
+    assert 'title="scn-empty, scn-missing, scn-open"' in html
 
 
 def test_render_says_so_when_latest_carries_no_goal_row(tmp_path):
@@ -4277,7 +4340,7 @@ def test_render_states_the_challenge_absence_as_the_stage_not_having_run(tmp_pat
     page, since "05-verdicts/ could not be listed" about a run that never reached
     the stage would invent a defect.
     """
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     html = summary.run_summary(run)
     assert "Not present: 05-verdicts/" in html
     assert "Present but unreadable: 05-verdicts/" not in html
@@ -4845,7 +4908,7 @@ def test_render_agrees_with_its_own_spine_about_a_present_unreadable_artifact(tm
     """
     from rubrica.artifacts import write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     write_json(run.scenarios, [])
     for path in run.coverage_dir.iterdir():
         path.unlink()
@@ -4902,7 +4965,7 @@ def test_render_heads_the_holes_column_ref_because_a_hole_can_name_a_goal(tmp_pa
     """
     from rubrica.artifacts import read_json, write_json
 
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     doc = read_json(run.coverage_latest)
     doc["holes"] = [
         {"ref": "cell:cap-a/oc-x", "reason": "unreachable", "justification": "no mapping"},
@@ -4923,7 +4986,7 @@ def test_render_labels_which_denominator_the_coverage_prose_means(tmp_path):
     against `capability_cells 148, goals 22` in the world-model table, and neither
     saying which sense it meant.
     """
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     html = summary.run_summary(run)
     # The comma and the trailing space pin the *prose* line rather than the note
     # below it, which necessarily uses the same two words: measured, `assert

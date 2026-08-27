@@ -21,14 +21,27 @@ def test_the_contract_matches_the_stage_gate():
     assert set(skill.contract["schemas"]) == set(STAGE_ARTIFACTS["propose"])
 
 
-def test_it_both_reads_and_writes_the_scenarios_file():
-    """Append-only across rounds: round 2 reads what round 1 proposed. A
-    contract that only wrote it would license a rewrite, and a rewritten
-    02-scenarios.json loses round 1's provenance.
+def test_it_reads_its_batch_plan_and_writes_only_its_own_part():
+    """The scenario list is on neither side of this contract any more, and both
+    absences are the point rather than an omission.
+
+    It does not READ it because the worklist is now the batch plan: a
+    `not_yet_attempted` hole is by definition one no scenario covers, and score
+    folds anything that slips, so nothing a member needs is in the accumulating
+    document. It does not WRITE it because `propose-seal` does -- an append that
+    every member performed on one shared file is exactly the re-emit the round
+    cap was blowing on, and a member that rewrote it would lose a sibling's
+    provenance rather than its own.
+
+    Both directions are asserted: a contract that quietly kept `scenarios` on
+    either side would pass a presence-only check of the two names that replaced
+    it.
     """
     contract = load(SKILL).contract
-    assert "scenarios" in contract["reads"]
-    assert "scenarios" in contract["writes"]
+    assert "batches" in contract["reads"]
+    assert "scenario_part" in contract["writes"]
+    assert "scenarios" not in contract["reads"]
+    assert "scenarios" not in contract["writes"]
 
 
 def test_it_has_the_five_sections():

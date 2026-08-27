@@ -49,8 +49,24 @@ STAGES = (
     "reconcile-goals",
     "reconcile-gaps",
     "reconcile-seal",
+    # The propose/score loop, engineered as substeps for the reason the triage
+    # and reconcile families are. propose-batches and both seals are code, so
+    # they carry no skill and no manifest.stages entry, and their absence there
+    # is not a finding.
+    #
+    # The two seals sort after the passes they seal, and propose-seal sorts
+    # before score because score reads 02-scenarios.json: this tuple is the
+    # documentation of that ordering, and placing either seal earlier would draw
+    # both generated diagrams with a seal running before its own inputs.
+    #
+    # Stages 02a through 03b are a loop bounded by max_rounds, and the whole
+    # loop repeats -- not just propose and score. score-seal computes the
+    # coverage verdict's document; only the orchestrator acts on the verdict.
+    "propose-batches",
     "propose",
+    "propose-seal",
     "score",
+    "score-seal",
     "instantiate",
     "challenge",
     "emit",

@@ -81,9 +81,9 @@ the stage *before* the one you are exercising:
 | `rb-extract`     | `"intake"`      | `01-claims/<artifact-id>.json` for the one input artifact you pointed it at |
 | `rb-reconcile-subjects` | `"extract"` | `01-subjects.json` |
 | any later `rb-reconcile-*` pass | `"extract"`, plus the partials that pass *reads* — see below | that pass's own partial, per [`../reference/artifacts.md`](../reference/artifacts.md). `rb-reconcile-contradict` is a fan-out: give it one `subject_id` |
-| `rb-propose`     | `"reconcile-seal"` | `02-scenarios.json` (a new round) |
-| `rb-score`       | `"propose"`     | `03-coverage/round-N.json` and `latest.json` |
-| `rb-instantiate` | `"score"`       | `04-instances/<sid>/{seed.json,expected.json,rationale.md}` |
+| `rb-propose`     | `"reconcile-seal"`, then `rubrica propose-batches --round 1` | `02-scenarios/round-N/<batch-id>.json` for the one `batch_id` you pointed it at. The checkpoint stops before the batch plan, because `propose-batches` is code: run it yourself so the plan the member reads is the one the code would have written |
+| `rb-score`       | `"propose-seal"` | `03-score/round-N.json` — the rulings, the holes and the verdict, and nothing it can compute |
+| `rb-instantiate` | `"score-seal"`  | `04-instances/<sid>/{seed.json,expected.json,rationale.md}` |
 | `rb-challenge`   | `"instantiate"` | `05-verdicts/<sid>.json` |
 | `rb-emit`        | `"challenge"` (the default — see below) | `06-suite/` (via `rubrica emit`, which the skill invokes; the skill itself writes nothing) |
 
@@ -190,6 +190,8 @@ from §3) for the stage you dispatched:
 ```bash
 RUN=<the run directory from step 3>
 STAGE=<stage>  # e.g. triage-objective, extract, reconcile-subjects, propose, score, instantiate, challenge, emit
+               # the loop's three code steps are not dispatched: run `rubrica
+               # propose-batches`, `propose-seal` and `score-seal` yourself
 
 uv run rubrica validate --run "$RUN" --stage "$STAGE"   # expect 0
 uv run rubrica check-refs --run "$RUN"                  # expect 0

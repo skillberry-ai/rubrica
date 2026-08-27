@@ -38,8 +38,16 @@ AUTHORED_STAGES = (
     "reconcile-goals",
     "reconcile-gaps",
     "reconcile-seal",
+    # All five of the loop's stages, for the reason the reconcile family is
+    # parametrized: the run carries a batch plan, a propose part and a score part
+    # as well as the two sealed documents, and each of the five has its own
+    # layer-1 schema -- so only naming every stage proves each part satisfies its
+    # own gate rather than only the sealed documents satisfying theirs.
+    "propose-batches",
     "propose",
+    "propose-seal",
     "score",
+    "score-seal",
     "instantiate",
     "challenge",
 )

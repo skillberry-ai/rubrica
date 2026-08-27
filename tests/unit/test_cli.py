@@ -727,7 +727,9 @@ _UNREADABLE_LISTINGS = {
     "instances-check-refs": ("instances_dir", ["check-refs"]),
     "claims-validate": ("claims_dir", ["validate", "--stage", "extract"]),
     "claims-check-refs": ("claims_dir", ["check-refs"]),
-    "coverage-validate": ("coverage_dir", ["validate", "--stage", "score"]),
+    # score-seal, not score: the "coverage" kind moved onto the seal's row when
+    # the loop was split, and score's own gate is 03-score/round-N.json.
+    "coverage-validate": ("coverage_dir", ["validate", "--stage", "score-seal"]),
     "verdicts-validate": ("verdicts_dir", ["validate", "--stage", "challenge"]),
     "suite-validate": ("suite_dir", ["validate", "--stage", "emit"]),
     "root-validate": ("root", ["validate", "--stage", "intake"]),

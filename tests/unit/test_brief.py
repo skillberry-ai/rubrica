@@ -179,7 +179,7 @@ def _full_run(tmp_path) -> RunPaths:
     one open triage deficiency -- gate 1's actual state, so the pairing spec
     section 10 rules a human's call has both halves to look at.
     """
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
 
     world = read_json(run.world_model)
     world["gaps"] = [
@@ -428,7 +428,7 @@ def test_gate_two_does_not_raise_on_a_present_but_malformed_world_model(tmp_path
     reach -- pointing this at `run.coverage_latest` would pass trivially and
     prove nothing. The malformed-world-model path is the real second call
     site worth pinning, so the name now says that instead."""
-    run = build_toy_run(tmp_path / "runs", upto="score")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
     world = read_json(run.world_model)
     del world["denominator"]
     write_json(run.world_model, world)

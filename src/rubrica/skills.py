@@ -45,7 +45,23 @@ SKILL_FILENAME = "SKILL.md"
 # the list rather than restating it -- so adding a stage demands a skill
 # without anyone remembering to edit a constant.
 CODE_ONLY_STAGES: frozenset[str] = frozenset(
-    {"intake", "smoke", "survey", "triage-slices", "triage-seal", "reconcile-seal"}
+    {
+        "intake",
+        "smoke",
+        "survey",
+        "triage-slices",
+        "triage-seal",
+        "reconcile-seal",
+        # The propose/score loop's three code steps. propose-batches partitions a
+        # round's closable holes, propose-seal assembles 02-scenarios.json from
+        # every part and every ruling, and score-seal computes the matrices and
+        # composes the round's report -- all three for the reason emit is code:
+        # two runs with identical parts must produce byte-identical output, or
+        # variance stops being attributable to the stage that caused it.
+        "propose-batches",
+        "propose-seal",
+        "score-seal",
+    }
 )
 
 # One home for the skill-directory prefix. It appeared in three places

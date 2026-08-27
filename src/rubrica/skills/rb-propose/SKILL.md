@@ -18,9 +18,9 @@ life exactly the same way: `status: "proposed"`, and nothing else.
 
 ```toml
 stage = "propose"
-reads = ["manifest", "world_model", "scenarios", "coverage_latest"]
-writes = ["scenarios"]
-schemas = ["scenarios"]
+reads = ["manifest", "world_model", "batches", "coverage_latest"]
+writes = ["scenario_part"]
+schemas = ["scenarios-part"]
 invokes = ["validate"]
 ```
 

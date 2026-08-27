@@ -116,7 +116,21 @@ def _readable_targets(run: RunPaths) -> list[Path]:
         run.goals_part,
         run.gaps_part,
     ]
-    targets += [run.world_model, run.scenarios]
+    targets.append(run.world_model)
+    # The loop's per-round documents, in the order one round writes them:
+    # propose-batches' plan, every propose part, the sealed scenario list the
+    # parts assemble into, then score's own part. check_batches,
+    # check_scenario_parts and check_score_parts each read their own, and
+    # check_scenario_parts reads the *plan* beside the parts as well -- so a
+    # truncated plan left unnamed here is a checker reporting a missing batch for
+    # every correct part in the round while naming the wrong artifact.
+    for round_n in run.batches_rounds():
+        targets.append(run.batches(round_n))
+    for round_n in run.scenario_part_rounds():
+        targets += [run.scenario_part(round_n, b) for b in run.scenario_part_batch_ids(round_n)]
+    targets.append(run.scenarios)
+    for round_n in run.score_part_rounds():
+        targets.append(run.score_part(round_n))
     targets += list_json(run.coverage_dir)
     for sid in run.scenario_ids_with_instances():
         targets += [run.seed(sid), run.expected(sid)]

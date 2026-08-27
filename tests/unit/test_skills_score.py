@@ -40,19 +40,23 @@ def test_the_contract_matches_the_stage_gate():
     assert set(skill.contract["schemas"]) == set(STAGE_ARTIFACTS["score"])
 
 
-def test_it_writes_both_the_round_file_and_the_latest_pointer():
-    """validate --stage score requires latest.json by name. A score stage that
-    wrote only the round file passed both gates with every coverage check
-    bypassed, because check_limits and check_coverage both return [] when
-    latest.json is absent.
+def test_it_writes_only_its_own_part_and_neither_coverage_file():
+    """The coverage documents are `score-seal`'s output, not score's.
+
+    Score still OWNS the status transitions and the hole justifications -- they
+    are what its part carries -- but it no longer transcribes the matrices or
+    publishes the pointer, because neither was ever judgment:
+    `refs._check_matrix_arithmetic` already recomputed both from the rows, and a
+    percentage that disagrees with the matrix under it is a failure no gate could
+    catch from the document alone.
+
+    An exact list rather than a membership check, because the interesting defect
+    is an ADDITION: a contract that kept `coverage_round` beside `score_part`
+    would satisfy any presence check of the new name while still claiming an
+    artifact only the seal writes.
     """
     writes = load(SKILL).contract["writes"]
-    assert "coverage_round" in writes
-    assert "coverage_latest" in writes
-
-
-def test_it_writes_the_scenarios_file_because_it_owns_the_status_transitions():
-    assert "scenarios" in load(SKILL).contract["writes"]
+    assert writes == ["score_part"], writes
 
 
 def test_it_invokes_dedupe_candidates():

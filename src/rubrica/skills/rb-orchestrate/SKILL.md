@@ -583,18 +583,43 @@ human is already deciding whether the input set was right.
 
 **B6. The round loop, `round = 1..K` where `K = manifest.limits.max_rounds`.**
 
-1. **`rb-propose`, one dispatch for this round.** Gate with
-   `validate --stage propose`. In round 1 there is no coverage document and
-   that is normal -- `rb-propose` treats every cell and goal as an open hole.
-2. **`rb-score`, a single dispatch** -- the second barrier, for the same
-   reason `rb-reconcile-subjects` is the first. Gate with `validate --stage score`,
-   then `check-refs`.
-3. **Record the round's decision, before you branch on it:**
+1. **`rubrica propose-batches --run RUN --round N`, code.** It partitions this
+   round's closable holes into byte-bounded batches and writes
+   `02-batches/round-N.json`. **If it prints that there are no closable holes it
+   wrote no document at all, and there is no round to run** -- record that with
+   `decide` and leave the loop, and do **not** run
+   `validate --stage propose-batches`, whose "produced no batches artifact"
+   finding would accuse a stage that behaved correctly. Report the disagreement
+   as well: from round 2 on, the previous round's `rb-score` should already have
+   said `converged` if nothing was closable, and at round 1 it means the world
+   model declares no cell and no goal at all. In round 1 there is no coverage
+   document and that is normal -- every cell and goal is an open hole.
+2. **`rb-propose`, one dispatch per batch id in that plan.** A member is given
+   its own `batch_id` and nothing else -- never a sibling's, and never any
+   batch's *contents*, which it reads out of the plan itself. Gate each with
+   `validate --stage propose`.
+3. **`rubrica propose-seal --run RUN`, code.** It assembles
+   `02-scenarios.json` from every part of every round. Gate with
+   `validate --stage propose-seal`.
+4. **`rb-score`, a single dispatch** -- the second barrier, for the same
+   reason `rb-reconcile-subjects` is the first. It writes
+   `03-score/round-N.json`: the rulings, the holes and the verdict, and nothing
+   it can compute. Gate with `validate --stage score`.
+5. **`rubrica propose-seal --run RUN` again, code.** The same command a second
+   time, and the repeat is load-bearing rather than belt-and-braces: the seal is
+   a pure function of the parts and the rulings, so this run is what folds this
+   round's rulings into `02-scenarios.json`, and step 6 reads that document for
+   what each *live* scenario credits. Run it in this order or a folded scenario
+   still credits the cell it was folded out of.
+6. **`rubrica score-seal --run RUN --round N`, code.** It computes both
+   matrices and composes `03-coverage/round-N.json`, publishing it as
+   `latest.json`. Gate with `validate --stage score-seal`, then `check-refs`.
+7. **Record the round's decision, before you branch on it:**
    `decide --note "round N: <verdict>, <covered>/<total> cells"`. Do it in
    this order. A branch taken first and recorded afterwards loses exactly one
    line -- the round that ended the loop -- and that is the round a reader
    most wants.
-4. **Branch on `03-coverage/latest.json`'s `verdict`:**
+8. **Branch on `03-coverage/latest.json`'s `verdict`:**
    - **`continue`** -- increment the round and return to step 1 of this loop,
      if the next round is still within `K`. If `verdict` is `continue` at round `K`, the scoring
      stage should have said `halted_round_cap`; report the disagreement, and
@@ -760,9 +785,10 @@ points at:
 | Any subcommand exits 2 | Halt; no repair attempt spent | A3, refusal 3 |
 | `check-skills` reports findings | Halt before dispatching anything | B0, refusal 1 |
 | A gap blocks a stage still to come | Halt; name the gap and the input that closes it | B4, refusal 4 |
-| Coverage verdict `continue` | `round++`, dispatch `rb-propose` again -- unless the round was `K` | B6.4 |
-| Coverage verdict `converged` | Leave the loop; go to gate 2 | B6.4 |
-| Coverage verdict `halted_no_progress` or `halted_round_cap` | Leave the loop; go to gate 2. The run continues | B6.4 |
+| `propose-batches` prints no closable holes | No round to run: record it, report the disagreement, leave the loop. Do not gate the stage | B6.1 |
+| Coverage verdict `continue` | `round++`, back to `propose-batches` -- unless the round was `K` | B6.8 |
+| Coverage verdict `converged` | Leave the loop; go to gate 2 | B6.8 |
+| Coverage verdict `halted_no_progress` or `halted_round_cap` | Leave the loop; go to gate 2. The run continues | B6.8 |
 | A stage requests a denominator amendment | Decide, re-dispatch the owning `reconcile-*` pass, re-seal with a bumped `--denominator-version`, re-score | B6 |
 | Verdict `re-seed`, first time | Re-dispatch `rb-instantiate` once, alternatives appended, then re-challenge | B9 |
 | Verdict `re-seed`, second time | Treat as a rejection | B9 |

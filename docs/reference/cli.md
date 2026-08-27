@@ -130,8 +130,9 @@ Required: `--run RUN`, `--stage`, one of `survey`, `triage-slices`,
 `triage-objective`, `triage-rule`, `triage-audit`, `triage-seal`, `intake`,
 `extract`, `reconcile-subjects`, `reconcile-contradict`,
 `reconcile-capabilities`, `reconcile-outcomes`, `reconcile-entities`,
-`reconcile-goals`, `reconcile-gaps`, `reconcile-seal`, `propose`, `score`,
-`instantiate`, `challenge`, `emit`, `smoke` — `paths.STAGES`, in order.
+`reconcile-goals`, `reconcile-gaps`, `reconcile-seal`, `propose-batches`,
+`propose`, `propose-seal`, `score`, `score-seal`, `instantiate`, `challenge`,
+`emit`, `smoke` — `paths.STAGES`, in order.
 
 Exits 0 clean, or 1 with one finding per line on stdout.
 

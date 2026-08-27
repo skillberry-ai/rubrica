@@ -81,7 +81,8 @@
           "reconcile-subjects", "reconcile-contradict", "reconcile-capabilities",
           "reconcile-outcomes", "reconcile-entities", "reconcile-goals",
           "reconcile-gaps", "reconcile-seal",
-          "propose", "score", "instantiate", "challenge", "emit", "smoke"
+          "propose-batches", "propose", "propose-seal", "score", "score-seal",
+          "instantiate", "challenge", "emit", "smoke"
         ]
       },
       "additionalProperties": {
