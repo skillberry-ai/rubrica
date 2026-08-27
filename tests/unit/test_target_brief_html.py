@@ -381,14 +381,75 @@ def test_page_banners_an_unreadable_claims_directory_once(tmp_path):
     assert "ticketq" in page and "What it can do" in page
 
 
-def test_page_carries_the_not_addressed_legend_only_when_that_label_appears(tmp_path):
+def test_page_carries_the_legend_only_when_a_phrasing_it_glosses_appears(tmp_path):
+    """Both triggers, and the golden toy as the control for both: its page carries
+    neither our `Not addressed` label nor the idiom a stage writes, so the legend is
+    off, and each mutation below turns it on by itself.
+
+    The idiom is the trigger that matters. Measured on run-20260826-090456: 110
+    occurrences of `No claim`, against a label the same page never uses -- so a
+    legend glossing only the label was a legend for the phrasing the recipient meets
+    least."""
     run = build_toy_run(tmp_path, upto="reconcile-seal")
-    legend = "we looked for it and no document stated it"
-    assert legend not in target_brief_html.render(run)
+    assert 'class="legend"' not in target_brief_html.render(run)
     world_model = json.loads(run.world_model.read_text())
     world_model["capabilities"][0]["outcome_classes"][0]["kind"] = "underspecified"
     run.world_model.write_text(json.dumps(world_model))
-    assert legend in target_brief_html.render(run)
+    assert 'class="legend"' in target_brief_html.render(run)
+    # The label reverted, so the second trigger is measured on its own rather than on
+    # a page the first has already turned the legend on for.
+    world_model["capabilities"][0]["outcome_classes"][0]["kind"] = "success"
+    world_model["gaps"] = [
+        {
+            "id": "gap-reopen",
+            "subject": "reopen-timer",
+            "unknown": "No claim directly addresses whether a reopen resets the timer.",
+            "blocks": [],
+        }
+    ]
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    assert 'class="legend"' in page
+    # And the third spelling, which the same substring has to fire: the stages write
+    # this idiom at least three ways and a legend that fires on one of them is a
+    # legend absent from most pages that need it.
+    world_model["gaps"][0]["unknown"] = (
+        "Whether a reopen resets the timer: no claim explicitly states this."
+    )
+    run.world_model.write_text(json.dumps(world_model))
+    assert 'class="legend"' in target_brief_html.render(run)
+
+
+def test_the_legend_glosses_both_phrasings_and_leads_the_section_carrying_them(tmp_path):
+    """Spec 2 mandates a gloss of the idiom, and the words are pinned literally here
+    rather than through `target_brief_html._LEGEND`: the ban test's exemption is that
+    constant, whatever it says, so a reword that quietly stopped glossing one of the
+    two phrasings would pass every other test in this module. This is the pin that
+    reddens instead."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["gaps"] = [
+        {
+            "id": "gap-reopen",
+            "subject": "reopen-timer",
+            "unknown": "No claim directly addresses whether a reopen resets the timer.",
+            "blocks": [],
+        }
+    ]
+    world_model["capabilities"][0]["outcome_classes"][0]["kind"] = "underspecified"
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    # Both phrasings glossed, and the word the legend exists to explain is in it: a
+    # legend that avoided `claim` would be explaining a word it never names.
+    assert "no claim addresses something" in page
+    assert "directly addresses it, or explicitly states it" in page
+    assert "a “claim” is one statement we recorded while reading them" in page
+    assert "An outcome labelled “Not addressed” says the same thing." in page
+    assert "Neither means the behaviour is missing from your system." in page
+    # Above the lines it glosses, and inside the ask that carries most of them.
+    assert page.index("What we could not tell") < page.index('class="legend"')
+    assert page.index('class="legend"') < page.index("No claim directly addresses")
+    assert page.index('class="legend"') < page.index("What we believe, in full")
 
 
 def test_page_escapes_owner_controlled_prose(tmp_path):
@@ -455,8 +516,31 @@ def test_the_pages_own_prose_never_names_a_stage_a_gate_or_an_artifact(tmp_path)
     ships verbatim -- see the module docstring, and
     `test_selected_prose_carrying_one_of_our_ids_reaches_the_page_unrewritten` for the
     sanctioned exception pinned rather than assumed. What this test can hold, and
-    does, is that the words are not ours."""
-    page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal")).lower()
+    does, is that the words are not ours.
+
+    One exemption, and it is exactly one string wide. `_LEGEND` glosses the idiom
+    *"no claim addresses X"* for a recipient who would otherwise read it as a
+    statement about their system, so it cannot avoid the word `claim` -- a legend that
+    did would be explaining a word it never names. Dropping `claim` from the list
+    below instead would exempt every future piece of chrome along with it, so the
+    legend is subtracted from the page by its own constant: whatever `_LEGEND` says is
+    exempt, and nothing else is. That the legend still says the right thing is
+    `test_the_legend_glosses_both_phrasings_and_leads_the_section_carrying_them`'s job,
+    with the words pinned literally there so a reword reddens rather than silently
+    widening this hole.
+
+    The page is rendered with the legend *on*, by relabelling one outcome rather than
+    by writing prose that carries a banned word: a page the legend is absent from
+    would run this loop without ever meeting the string it exempts, and the exemption
+    would be the decoration this project calls fixture-cannot-reach."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["capabilities"][0]["outcome_classes"][0]["kind"] = "underspecified"
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run).lower()
+    assert target_brief_html._LEGEND.lower() in page
+    page = page.replace(target_brief_html._LEGEND.lower(), "")
+    assert 'class="legend"' not in page
     for word in (
         "reconcile",
         "extract",

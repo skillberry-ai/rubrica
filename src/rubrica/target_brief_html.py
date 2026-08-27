@@ -92,12 +92,32 @@ dd { margin: .15rem 0 .15rem 1.2rem; }
 """
 
 # One rendering of "we looked and no document said", emitted at most once per page
-# and only when a `Not addressed` label actually appears. A legend for a label the
-# page does not use is noise on a document somebody is asked to read closely.
+# and only when something on the page actually uses one of the two phrasings it
+# glosses. A legend for words the page does not use is noise on a document somebody
+# is asked to read closely.
+#
+# Two phrasings, not one. `_NOT_ADDRESSED` is our own label, and the draft legend
+# glossed only that -- but the idiom a stage writes into its prose is the one a
+# recipient meets far more often: 110 occurrences of `No claim` on
+# run-20260826-090456's page, the bulk of them inside the tier-1 "What we could not
+# tell" ask. Glossing the label alone left the phrasing that does the damage
+# unexplained, and put the gloss below it besides.
+#
+# The idiom is matched on `no claim` rather than on a whole sentence because the
+# stages write it at least three ways -- "No claim addresses ...", "No claim
+# directly addresses ...", "no claim explicitly states this" -- and all three must
+# fire it. This is a rendering decision about our own chrome, not absence detection
+# over model prose: nothing about the target is inferred from the match, and the
+# worst a false positive can do is explain a phrasing that is not there.
 _NOT_ADDRESSED = "Not addressed"
+_CLAIM_IDIOM = "no claim"
 _LEGEND = (
-    '<p class="legend">“Not addressed” below means we looked for it and no '
-    "document stated it — not that the behaviour is missing from your system.</p>"
+    '<p class="legend">Two phrasings below are ours, not statements about your '
+    "system. Where a line says that no claim addresses something — directly "
+    "addresses it, or explicitly states it — we mean we found nothing in the "
+    "documents you gave us that settled the point; a “claim” is one statement we "
+    "recorded while reading them. An outcome labelled “Not addressed” says the same "
+    "thing. Neither means the behaviour is missing from your system.</p>"
 )
 
 # `kind` -> the words an owner reads, for all seven values of the schema's shared
@@ -171,9 +191,30 @@ def _body(body, terse: bool) -> str:
     return _marker(body, terse) if isinstance(body, Marker) else body
 
 
-def _section(heading: str, body, terse: bool = False) -> str:
-    """One tier-1 section, its heading always present."""
-    return f"<h2>{esc(heading)}</h2>\n{_body(body, terse)}\n"
+def _section(heading: str, body, terse: bool = False, lead: str = "") -> str:
+    """One tier-1 section, its heading always present.
+
+    `lead` goes between the heading and the body rather than being prepended to the
+    body by the caller, because a body may be a `Marker` and only `_body` may decide
+    how one renders. It is what lets `_LEGEND` be the first thing read under a
+    heading whose lines need it, without the legend becoming part of the group.
+    """
+    opening = f"<h2>{esc(heading)}</h2>\n"
+    return opening + (f"{lead}\n" if lead else "") + f"{_body(body, terse)}\n"
+
+
+def _needs_legend(*bodies) -> bool:
+    """Whether anything rendered on this page uses a phrasing `_LEGEND` glosses.
+
+    Every body the page will show, tier 1 and tier 2 together, rather than the one
+    section the legend sits in: the label lives in "What it can do" and the idiom in
+    both asks and detail, and a reader who meets either anywhere has met the words
+    the legend exists for. A body can be a `Marker`, so this reads `str()` of each
+    rather than assuming HTML -- an unreadable section cannot carry the phrasing, and
+    stringifying it is how that stays true without a type test here.
+    """
+    text = " ".join(str(body) for body in bodies).lower()
+    return _NOT_ADDRESSED.lower() in text or _CLAIM_IDIOM in text
 
 
 def _collapsed(heading: str, body, terse: bool = False) -> str:
@@ -679,6 +720,15 @@ def render(run: RunPaths) -> str:
     # Built once, so the legend below can ask whether the label is on the page
     # rather than recomputing the operations to find out.
     operations = _operations(run)
+    # Every body built before the page is assembled, because the legend's trigger is
+    # a property of all of them and the legend must be readable above the lines it
+    # glosses. Tier 2's three are built here for that reason alone -- they were
+    # interpolated in place before, which is what put the gloss below the tier-1 ask
+    # carrying most of what it explains.
+    could_not_tell = _group_d(run)
+    data_types = _data_types(run)
+    personas = _personas(run)
+    legend = _LEGEND if _needs_legend(could_not_tell, operations, data_types, personas) else ""
     body = [
         "<!doctype html>",
         '<html lang="en"><head><meta charset="utf-8">',
@@ -708,14 +758,13 @@ def render(run: RunPaths) -> str:
         "out.</p>",
         _section("What we read", _group_a(run)),
         _section("Where our sources disagree", _group_bc(run), terse),
-        _section("What we could not tell", _group_d(run), terse),
+        _section("What we could not tell", could_not_tell, terse, lead=legend),
         "<h2>What we believe, in full</h2>",
         "<p>Everything below is the detail behind the asks above. Skim it or skip "
         "it — the sections above are where a correction helps us most.</p>",
-        _LEGEND if _NOT_ADDRESSED in str(operations) else "",
         _collapsed("What it can do", operations, terse),
-        _collapsed("What data it holds", _data_types(run), terse),
-        _collapsed("Who uses it", _personas(run), terse),
+        _collapsed("What data it holds", data_types, terse),
+        _collapsed("Who uses it", personas, terse),
         _reply(),
         "</body></html>",
     ]
