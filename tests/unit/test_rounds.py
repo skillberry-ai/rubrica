@@ -115,8 +115,17 @@ def test_an_empty_sealed_file_falls_back_rather_than_dividing_by_zero(tmp_path):
 def test_the_partition_keeps_every_batch_inside_the_budget():
     refs = [f"cell:cap-{i}/oc" for i in range(86)]
     batches = rounds.partition(refs, cap_bytes=28000, per_scenario=1600)
-    # 28000 // 1600 == 17 holes per batch, so 86 holes become 6 batches -- the
-    # measured case from run-20260825-094033.
+    # 28000 // 1600 == 17 holes per batch, so 86 holes become 6 batches. That is
+    # the ROUND-1 shape: no sealed 02-scenarios.json exists yet, so the projection
+    # runs on DEFAULT_BYTES_PER_SCENARIO rather than on a measured mean.
+    #
+    # The same 86 holes on run-20260825-094033 at ROUND 2 partition differently,
+    # and the difference is bytes_per_scenario doing its job: that run's sealed
+    # round-1 file calibrates the estimate to a 1,162-byte mean, so 28000 // 1162
+    # == 24 holes per batch and the plan is [24, 24, 24, 14] -- 4 batches, largest
+    # projecting 27,888 B. Measured by running propose-batches --round 2 over a
+    # copy of that run. Both figures are right for their own round; this test
+    # holds the uncalibrated one, so do not relabel either as "the" measured case.
     assert len(batches) == 6
     assert [len(b) for b in batches] == [17, 17, 17, 17, 17, 1]
     for batch in batches:
