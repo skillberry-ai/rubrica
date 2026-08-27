@@ -45,9 +45,12 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   that wrote no readable accounting gets a line too, saying so: a pass silently
   missing from a block of four is the anomaly a reader is at this gate to notice.
   The capabilities the coverage denominator *excludes* are listed here too, and
-  this is the only place they are ever reported: issue 17 narrowed
-  `denominator.capability_cells` to the cells a scenario can be driven through,
-  and the finding that was to have accompanied it miscategorised its own
+  this is the only place the excluded *set* is reported -- and the only report of
+  it before a gate that can still act on it. `emit` names a single unbound
+  capability far later and per instance (emit.py:99-107, documented in
+  world-model-0.1.json), by which point the run is past every human gate. Issue 17
+  narrowed `denominator.capability_cells` to the cells a scenario can be driven
+  through, and the finding that was to have accompanied it miscategorised its own
   condition -- `check-refs` exit 1 buys one stage re-dispatch, which cannot add a
   binding `rb-reconcile-capabilities` was told not to guess. Both numbers print
   either way, for the sweep's reason. Nothing here classifies *why* a binding is
@@ -110,11 +113,13 @@ SLICES_HEADER = "Slices the triage family read"
 SPLIT_HEADER = "Groups split across more than one slice"
 
 # Gate 1's excluded-capability section header, named for the three above's reason:
-# it is the anchor a reader and a test both scope to. This section is the *only*
-# place an undrivable capability is ever reported -- the design's paired
-# `check-refs` finding was removed in 11a6c25, because `check-refs` runs before
-# this gate and its exit 1 tells the orchestrator to spend its one repair attempt
-# on a stage, which cannot add a binding a pass was told not to guess.
+# it is the anchor a reader and a test both scope to. This section is the only
+# report of the excluded *set*, and the only report of it at a gate that can still
+# act -- `emit` names one unbound capability at a time, far later (emit.py:99-107).
+# The design's paired `check-refs` finding was removed in 11a6c25, because
+# `check-refs` runs before this gate and its exit 1 tells the orchestrator to spend
+# its one repair attempt on a stage, which cannot add a binding a pass was told not
+# to guess.
 EXCLUDED_HEADER = "Capabilities excluded from the denominator (no tool binding)"
 
 
@@ -335,10 +340,18 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
         # document, and "the denominator is 0 cells" would then be a number this
         # report does not have. "No capability is bound" is computable either way,
         # and it is the premise the rest of the sentence needs.
+        #
+        # Two fenced lines of under 100 characters rather than one of 215: a banner
+        # that wraps stops being a banner. At 80 or 120 columns the long version put
+        # its closing `***` mid-paragraph and read as prose from the second visual
+        # line down, which costs exactly the loudness these two lines exist for.
         lines.append(
             "  *** With nothing bound, round 1 has no closable holes and propose-batches "
-            "exits 0 saying so. That is this world model having no drivable surface at "
-            "all -- it is NOT a converged run, and the suite it leads to is empty. ***"
+            "exits 0 saying so. ***"
+        )
+        lines.append(
+            "  *** No drivable surface at all: NOT a converged run, and the suite it "
+            "leads to is empty. ***"
         )
 
     counts = _cell_counts(world)

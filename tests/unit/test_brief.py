@@ -1471,12 +1471,39 @@ def test_gate_one_makes_a_wholly_undrivable_world_model_impossible_to_miss(tmp_p
     run = _wholly_unbound_run(tmp_path)
     section = _section(brief.gate_brief(run, 1), brief.EXCLUDED_HEADER)
 
-    loud = _row(section, "*** NOTHING IS DRIVABLE")
+    # Located by the fence rather than by each line's opening words: a prefix pin on
+    # prose is the mirror failure CLAUDE.md names, where a meaning-preserving
+    # reword goes red for no reason. The fence is the rendering decision under
+    # test, so it is what the assertion holds.
+    banner = [line for line in section.splitlines() if line.strip().startswith("***")]
+    assert len(banner) == 3, f"expected three fenced lines, got {banner}"
+
+    loud, *follow = banner
+    # The one phrase that IS pinned, deliberately: the requirement is words a reader
+    # cannot mistake for a normal result, and shouted absolutes are the whole
+    # instrument. Both numbers are on this line too.
+    assert "NOTHING IS DRIVABLE" in loud
     assert _has_number(loud, 0) and _has_number(loud, 4)
-    # The mistaking this exists to prevent, named in the rendering itself.
-    convergence = _row(section, "*** With nothing bound")
-    assert "no closable holes" in convergence
-    assert "NOT a converged run" in convergence
+
+    # The mistaking this exists to prevent, named in the rendering itself. Asserted
+    # over the follow-on lines together, so how the sentence is split between them
+    # stays an editorial choice. Both phrases are pinned verbatim on purpose, and
+    # neither is incidental wording: "no closable holes" is the literal string
+    # propose-batches prints (cli.py:606), which is the message the reader will
+    # actually be handed, and "NOT a converged run" is the reading it must not be
+    # given. Rewording either would change what this line does.
+    rest = " ".join(follow)
+    assert "no closable holes" in rest
+    assert "NOT a converged run" in rest
+
+    # A banner that wraps is not a banner. Measured at 215 characters on the first
+    # draft: at 80 and at 120 columns the closing fence landed mid-paragraph and
+    # everything after the first visual line read as prose, which is exactly the
+    # loudness this branch exists for. Each fenced line has to fit a normal terminal
+    # on its own, so both ends of the fence stay visible.
+    for line in banner:
+        assert line.rstrip().endswith("***"), line
+        assert len(line) <= 100, f"{len(line)} characters wraps in a normal terminal: {line}"
 
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
 
@@ -1544,7 +1571,7 @@ def test_gate_one_excluded_listing_costs_one_malformed_claims_file_only_its_own(
 
 
 @pytest.mark.parametrize(
-    "capabilities",
+    ("capabilities", "stated"),
     [
         # Every shape a hand-edit at this gate produces that reaches refs._cells'
         # and refs.drivable_cells' unguarded indexing. Measured before the guard:
@@ -1552,16 +1579,34 @@ def test_gate_one_excluded_listing_costs_one_malformed_claims_file_only_its_own(
         # 'get'` out of both, a capability with no `id` raises `KeyError: 'id'`
         # out of _cells, and a non-list `outcome_classes` raises `TypeError:
         # string indices must be integers` out of _cells.
-        "nope",
-        [{"operation": "no id at all", "outcome_classes": [{"id": "oc-x"}]}],
-        [{"id": "cap-x", "operation": "bad classes", "outcome_classes": "x"}],
-        [{"id": "cap-x", "operation": "null binding", "binding": None, "outcome_classes": []}],
-        ["not a capability object at all"],
-        [{"id": ["not", "a", "string"], "operation": "unhashable id", "outcome_classes": []}],
+        #
+        # `stated` is what the section must say for that shape, and it is the half
+        # that makes this more than a not-raises test: the three outcomes are
+        # "nothing readable to report", "present but uncountable", and "countable
+        # even though malformed", and a rendering that dropped the uncountable line
+        # entirely would pass a bare not-raises assertion on all six.
+        ("nope", "declares no readable capability"),
+        (
+            [{"operation": "no id at all", "outcome_classes": [{"id": "oc-x"}]}],
+            "could not be counted",
+        ),
+        (
+            [{"id": "cap-x", "operation": "bad classes", "outcome_classes": "x"}],
+            "could not be counted",
+        ),
+        (
+            [{"id": "cap-x", "operation": "null binding", "binding": None, "outcome_classes": []}],
+            "0 of 0 capability x outcome-class cells count",
+        ),
+        (["not a capability object at all"], "declares no readable capability"),
+        (
+            [{"id": ["not", "a", "string"], "operation": "unhashable id", "outcome_classes": []}],
+            "0 of 0 capability x outcome-class cells count",
+        ),
     ],
 )
 def test_gate_one_excluded_listing_does_not_raise_on_a_malformed_world_model(
-    tmp_path, capabilities
+    tmp_path, capabilities, stated
 ):
     """A report that reports "this document is malformed" by crashing is the least
     useful reading of a document -- `_dicts`' ruling, and the exit-code contract's
@@ -1574,7 +1619,7 @@ def test_gate_one_excluded_listing_does_not_raise_on_a_malformed_world_model(
 
     text = brief.gate_brief(run, 1)  # must not raise
 
-    assert brief.EXCLUDED_HEADER in text
+    assert stated in _section(text, brief.EXCLUDED_HEADER)
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
 
 

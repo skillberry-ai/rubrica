@@ -619,13 +619,16 @@ partial carrying an accounting at all says so instead.
 
 Gate 1 also lists **the capabilities the coverage denominator excludes** — every
 capability declaring no `binding.tool`, with the cells it would have added, its
-`operation`, and the inputs whose claims it rests on. This is the only place an
-undrivable capability is ever reported: `denominator.capability_cells` counts the
-cells a scenario can actually be driven through, and the `check-refs` finding that
-was to have accompanied that narrowing was removed for miscategorising its own
-condition — a `1` from `check-refs` buys one stage re-dispatch, and no re-dispatch
-adds a binding `rb-reconcile-capabilities` is told to leave off rather than guess.
-Both numbers print either way, on the sweep's argument: "all 2 capabilities are
+`operation`, and the inputs whose claims it rests on. This is the only place the
+excluded **set** is reported, and the only report of it before a gate that can
+still act on it — `emit` names a single unbound capability far later and per
+instance, by which point every human gate is behind the run.
+`denominator.capability_cells` counts the cells a scenario can actually be driven
+through, and the `check-refs` finding that was to have accompanied that narrowing
+was removed for miscategorising its own condition — a `1` from `check-refs` buys
+one stage re-dispatch, and no re-dispatch adds a binding
+`rb-reconcile-capabilities` is told to leave off rather than guess.
+Both numbers print either way, on the sweep's argument: "all N capabilities are
 drivable" is a strong claim, and rendering it as silence hides it. Nothing here
 says *why* a binding is absent — on the one run this was measured against the
 three causes were a dependency declaration that is not target behaviour, a real
