@@ -512,3 +512,153 @@ def test_open_questions_is_empty_on_the_toy_world_and_marks_an_unreadable_one(tm
     assert isinstance(target_brief.open_questions(run), Malformed)
     run.world_model.unlink()
     assert isinstance(target_brief.open_questions(run), Absent)
+
+
+def test_operations_reads_handle_sentence_params_and_labelled_outcomes(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    found = {op.id: op for op in target_brief.operations(run)}
+    op = found["cap-find-tickets"]
+    assert op.handle == "query_tickets"  # binding.tool
+    assert op.sentence == "query_tickets.find_tickets"
+    assert op.params == ("queue (string, optional)", "status (string, optional)")
+    # Labels are owner-facing, and only the kinds actually present appear. The toy
+    # world records success and empty; parsec records all five.
+    assert [(o.label, o.description) for o in op.outcomes] == [
+        ("On success", "one or more tickets match the filters"),
+        ("When there is nothing to return", "no ticket matches the filters"),
+    ]
+    # Provenance is the capability's own claims, all three in api.json.
+    assert op.provenance.files == ("api.json",)
+    assert op.provenance.single_source is True
+    assert found["cap-get-ticket"].params == ("ticket_id (integer, required)",)
+
+
+def test_operations_takes_provenance_from_the_capability_when_an_outcome_cites_nothing(
+    tmp_path,
+):
+    """The parsec run fails layer 1 with 195 findings of `'claims' is a required
+    property` on outcome classes -- the parked "recordings predate the requirement"
+    ruling. Capability-level claims are present on 39 of 39, so provenance reads
+    those."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    for capability in world_model["capabilities"]:
+        for outcome in capability["outcome_classes"]:
+            outcome.pop("claims", None)
+    run.world_model.write_text(json.dumps(world_model))
+    op = target_brief.operations(run)[0]
+    assert op.provenance.files == ("api.json",)
+    # Both label/description pairs rather than a bare `assert op.outcomes`: a
+    # non-empty tuple is truthy whatever it holds, so the bare form can only fail
+    # by the rows disappearing entirely and says nothing about whether the labels
+    # and the prose survived losing `claims`. This form fails on a lost row and on
+    # a blanked description alike.
+    assert [(o.label, o.description) for o in op.outcomes] == [
+        ("On success", "one or more tickets match the filters"),
+        ("When there is nothing to return", "no ticket matches the filters"),
+    ]
+    # Set equality rather than `not hasattr(..., "provenance")`, plus the sibling
+    # assertion beside it: an outcome carries exactly two fields, and the operation
+    # over it does carry `provenance`. The `hasattr` alone would still pass if
+    # `Outcome` grew three unrelated fields, and would also pass if provenance
+    # moved off `Operation` too -- an absence with no positive control asserts
+    # nothing, which is this repo's named recurring failure.
+    assert set(vars(op.outcomes[0])) == {"label", "description"}
+    assert "provenance" in vars(op)
+
+
+def test_operations_falls_back_to_the_operation_string_when_there_is_no_binding(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["capabilities"][0].pop("binding")
+    run.world_model.write_text(json.dumps(world_model))
+    assert target_brief.operations(run)[0].handle == "query_tickets.find_tickets"
+
+
+def test_operations_keeps_an_outcome_whose_kind_is_not_in_the_enum(tmp_path):
+    """A label we do not have is not a reason to drop an outcome: the description
+    is the payload. The kind itself is shown so the row is not mislabelled."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["capabilities"][0]["outcome_classes"][0]["kind"] = "invented"
+    run.world_model.write_text(json.dumps(world_model))
+    assert target_brief.operations(run)[0].outcomes[0].label == "invented"
+
+
+def test_data_types_reads_fields_relations_and_rules(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    found = {d.id: d for d in target_brief.data_types(run)}
+    ticket = found["ent-ticket"]
+    assert ticket.name == "Ticket"
+    assert ticket.collection == "tickets"
+    assert ticket.fields[0] == target_brief.Field("ticket_id", "integer")
+    assert len(ticket.fields) == 5
+    # The relation names the target entity, resolved. `ent-comment` is an id no
+    # owner recognises; "Comment" is a word from their own vocabulary.
+    assert ticket.relations == ("comments → Comment (many)",)
+    # The toy invariants carry `statement` and no `prose`, so the fallback is the
+    # measured-normal path rather than the edge case.
+    assert "comment_count is the number of comments on the ticket" in ticket.rules
+
+
+def test_data_types_prefers_invariant_prose_over_statement_when_present(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["entities"][0]["invariants"][0]["prose"] = "Every comment is counted once."
+    run.world_model.write_text(json.dumps(world_model))
+    rules = target_brief.data_types(run)[0].rules
+    assert "Every comment is counted once." in rules
+    assert not any("comment_count is the number" in r for r in rules)
+
+
+def test_data_types_names_an_unresolvable_relation_target_by_its_id(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["entities"][0]["relations"][0]["target_entity_id"] = "ent-ghost"
+    run.world_model.write_text(json.dumps(world_model))
+    assert target_brief.data_types(run)[0].relations == ("comments → ent-ghost (many)",)
+
+
+def test_personas_pair_each_actor_with_its_goals(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    found = target_brief.personas(run)
+    assert [p.name for p in found] == ["Support engineer"]
+    assert found[0].goals == (
+        "Locate the ticket that needs action, or establish that it does not exist",
+        "Explain why a ticket is stuck",
+    )
+    assert found[0].provenance.files == ("notes.md",)
+
+
+def test_personas_keeps_a_goal_no_actor_claims(tmp_path):
+    """A goal whose actor_id resolves to nothing must not vanish: it is something
+    the run believes about the target, and dropping it silently would make the
+    description quietly incomplete."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["goals"][0]["actor_id"] = "act-ghost"
+    run.world_model.write_text(json.dumps(world_model))
+    found = target_brief.personas(run)
+    # Not a substring over every goal joined into one string: that substring is
+    # present in the un-mutated world too, so the joined form passes whether or not
+    # the bucket was built -- satisfiable by content the mutation never touched,
+    # which is this repo's named recurring failure. The bucket is asserted as its
+    # own persona holding exactly the orphaned goal.
+    assert [p.id for p in found] == ["act-support", ""]
+    assert found[1].name == "Goals we could not attribute to a user"
+    assert found[1].goals == (
+        "Locate the ticket that needs action, or establish that it does not exist",
+    )
+    # The positive control: the actor is still rendered, with the goal it still
+    # claims. So neither assertion above can pass by every goal collapsing into the
+    # bucket, nor by the actor row vanishing along with its goal.
+    assert found[0].goals == ("Explain why a ticket is stuck",)
+
+
+@pytest.mark.parametrize("builder", ["operations", "data_types", "personas"])
+def test_tier_two_builders_mark_an_unreadable_world_model(tmp_path, builder):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.world_model.write_text("{ not json")
+    assert isinstance(getattr(target_brief, builder)(run), Malformed)
+    run.world_model.unlink()
+    assert isinstance(getattr(target_brief, builder)(run), Absent)

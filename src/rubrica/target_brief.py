@@ -293,6 +293,28 @@ def provenance(claim_ids, index: dict[str, SourceRef], disputed: frozenset[str])
     )
 
 
+def _world(run: RunPaths):
+    """The world model, or the marker naming why there is none.
+
+    The one world-model reader in this module -- `disputes`, `open_questions` and
+    the three tier-2 builders all come through here -- so no two of them can
+    disagree about whether a run has a world model, or say it differently when it
+    has not.
+
+    A `Marker` rather than an empty result on a world model that parses to `{}`,
+    and that is the right way round for every caller: `[]` would tell the target's
+    owner we found no disagreements in their system, or that nothing about it was
+    left unanswered, or that it can do nothing and holds no data -- where the truth
+    is that we could not read a world model at all.
+    """
+    payload = _mapping(_quietly(run.world_model))
+    if not payload:
+        return _absent_or_malformed(
+            run.world_model, "01-world-model.json", "nothing could be read from it"
+        )
+    return payload
+
+
 @dataclass(frozen=True)
 class InputGroup:
     """The files of one kind in one directory that the run read.
@@ -465,19 +487,14 @@ def disputes(run: RunPaths) -> list[Dispute] | Marker:
     One asymmetry, recorded rather than fixed: a hand-edited `"contradictions":
     "nope"` is dropped by `_dicts` and renders as `[]`, which tells the owner
     nothing in their system contradicted anything else -- the same false
-    reassurance the `{}` branch below refuses. It stays because `_dicts` is how
-    every reader in this module reads a list, and one spelling of that rule is
-    worth more than a second marker branch for a shape layer 1 rejects outright.
+    reassurance `_world` refuses for a world model that parses to `{}`. It stays
+    because `_dicts` is how every reader in this module reads a list, and one
+    spelling of that rule is worth more than a second marker branch for a shape
+    layer 1 rejects outright.
     """
-    payload = _mapping(_quietly(run.world_model))
-    if not payload:
-        # `Malformed` rather than `[]` on a world model that parses to `{}`, and
-        # that is the right way round: `[]` would tell the target's owner we found
-        # no disagreements in their system, where the truth is that we could not
-        # read a world model at all.
-        return _absent_or_malformed(
-            run.world_model, "01-world-model.json", "nothing could be read from it"
-        )
+    payload = _world(run)
+    if isinstance(payload, Marker):
+        return payload
     index = source_index(run)
     # The marker is dropped here on purpose. An unreadable `01-claims/` turns every
     # side into `()`, which read alone would assert to the owner that nothing in
@@ -535,11 +552,9 @@ class OpenQuestion:
 
 def open_questions(run: RunPaths) -> list[OpenQuestion] | Marker:
     """Every gap the world model records, ordered by id."""
-    payload = _mapping(_quietly(run.world_model))
-    if not payload:
-        return _absent_or_malformed(
-            run.world_model, "01-world-model.json", "nothing could be read from it"
-        )
+    payload = _world(run)
+    if isinstance(payload, Marker):
+        return payload
     out = []
     for record in _dicts(payload.get("gaps")):
         out.append(
@@ -550,3 +565,234 @@ def open_questions(run: RunPaths) -> list[OpenQuestion] | Marker:
             )
         )
     return sorted(out, key=lambda q: q.id)
+
+
+# `outcome_class.kind` -> the words an owner reads. The enum is the schema's five.
+#
+# No mechanical absence detection anywhere near this table, deliberately. parsec
+# records exactly one outcome class of each of the five kinds for each of its 39
+# capabilities, and absence is expressed *in prose under the semantic kind*:
+# `oc-qac-empty` is `kind: empty` carrying "No claim addresses what is returned
+# when no cost data exists." So `kind` does not mark absence, no other field does,
+# and the only alternative is string-matching model prose. The labels plus one
+# legend line carry it instead.
+_OUTCOME_LABELS = {
+    "success": "On success",
+    "empty": "When there is nothing to return",
+    "not_found": "When it is not found",
+    "error": "On error",
+    "underspecified": "Not addressed",
+}
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """One outcome class, relabelled. No provenance of its own -- see `Operation`."""
+
+    label: str
+    description: str
+
+
+@dataclass(frozen=True)
+class Operation:
+    """One capability, as something the target can be asked to do."""
+
+    id: str
+    handle: str
+    sentence: str
+    params: tuple[str, ...]
+    outcomes: tuple[Outcome, ...]
+    provenance: Provenance
+
+
+@dataclass(frozen=True)
+class Field:
+    name: str
+    type: str
+
+
+@dataclass(frozen=True)
+class DataType:
+    """One entity, as a kind of thing the target holds."""
+
+    id: str
+    name: str
+    collection: str
+    fields: tuple[Field, ...]
+    relations: tuple[str, ...]
+    rules: tuple[str, ...]
+    provenance: Provenance
+
+
+@dataclass(frozen=True)
+class Persona:
+    """One actor and what it is trying to do."""
+
+    id: str
+    name: str
+    goals: tuple[str, ...]
+    provenance: Provenance
+
+
+def _params(value) -> tuple[str, ...]:
+    """Each parameter as `name (type, required|optional)`."""
+    out = []
+    for record in _dicts(value):
+        name = _text(record.get("name"))
+        if not name:
+            continue
+        kind = _text(record.get("type")) or "unspecified"
+        needed = "required" if record.get("required") is True else "optional"
+        out.append(f"{name} ({kind}, {needed})")
+    return tuple(out)
+
+
+def _relations(value, names: dict[str, str]) -> tuple[str, ...]:
+    """Each relation as `name → Target (cardinality)`, the target resolved.
+
+    Resolved because `ent-comment` is an id no owner recognises and `Comment` is a
+    word from their own vocabulary. Unresolvable ids keep the id: it names
+    something, where a blank names nothing.
+    """
+    out = []
+    for record in _dicts(value):
+        name = _text(record.get("name"))
+        target = _text(record.get("target_entity_id"))
+        cardinality = _text(record.get("cardinality"))
+        label = names.get(target, target)
+        out.append(f"{name} → {label} ({cardinality})" if cardinality else f"{name} → {label}")
+    return tuple(out)
+
+
+def _rules(value) -> tuple[str, ...]:
+    """Each invariant as one sentence, `prose` preferred over `statement`.
+
+    `prose` is the human phrasing where a pass wrote one; the toy world and the
+    committed recordings carry `statement` only, so the fallback is the normal
+    path rather than the edge case.
+    """
+    return tuple(
+        sentence
+        for record in _dicts(value)
+        if (sentence := _text(record.get("prose")) or _text(record.get("statement")))
+    )
+
+
+def operations(run: RunPaths) -> list[Operation] | Marker:
+    """Every capability, in the sealed world model's own order.
+
+    Source order rather than sorted: two runs with identical partials produce a
+    byte-identical world model, so the order is already reproducible, and it groups
+    related capabilities the way the pass that wrote them chose to. Re-sorting would
+    scramble that grouping for no gain in determinism.
+    """
+    payload = _world(run)
+    if isinstance(payload, Marker):
+        return payload
+    index = source_index(run)
+    refs = index if isinstance(index, dict) else {}
+    disputed = disputed_claim_ids(payload)
+    out = []
+    for record in _dicts(payload.get("capabilities")):
+        sentence = _text(record.get("operation"))
+        handle = _text(_mapping(record.get("binding")).get("tool")) or sentence
+        outcomes = tuple(
+            Outcome(
+                # The raw kind when the enum does not cover it: a label we do not
+                # have is no reason to drop an outcome, and the description is the
+                # payload. Mislabelling it would be worse than showing the kind.
+                label=_OUTCOME_LABELS.get(_text(o.get("kind")), _text(o.get("kind"))),
+                description=_text(o.get("description")),
+            )
+            for o in _dicts(record.get("outcome_classes"))
+        )
+        out.append(
+            Operation(
+                id=_text(record.get("id")),
+                handle=handle,
+                sentence=sentence,
+                params=_params(record.get("params")),
+                outcomes=outcomes,
+                # The capability's claims, never the outcome's: see this task's
+                # note on the parked missing-`claims` ruling.
+                provenance=provenance(_strings(record.get("claims")), refs, disputed),
+            )
+        )
+    return out
+
+
+def data_types(run: RunPaths) -> list[DataType] | Marker:
+    """Every entity, with relation targets resolved to their names."""
+    payload = _world(run)
+    if isinstance(payload, Marker):
+        return payload
+    index = source_index(run)
+    refs = index if isinstance(index, dict) else {}
+    disputed = disputed_claim_ids(payload)
+    entities = _dicts(payload.get("entities"))
+    names = {_text(e.get("id")): _text(e.get("name")) for e in entities if _text(e.get("name"))}
+    out = []
+    for record in entities:
+        out.append(
+            DataType(
+                id=_text(record.get("id")),
+                name=_text(record.get("name")),
+                collection=_text(record.get("collection")),
+                fields=tuple(
+                    Field(_text(f.get("name")), _text(f.get("type")))
+                    for f in _dicts(record.get("fields"))
+                    if _text(f.get("name"))
+                ),
+                relations=_relations(record.get("relations"), names),
+                rules=_rules(record.get("invariants")),
+                provenance=provenance(_strings(record.get("claims")), refs, disputed),
+            )
+        )
+    return out
+
+
+def personas(run: RunPaths) -> list[Persona] | Marker:
+    """Every actor with its goals, plus one bucket for goals no actor claims.
+
+    A goal whose `actor_id` resolves to nothing is still something the run believes
+    about the target. Dropping it would make the description quietly incomplete,
+    which is the one failure a document asking "is this accurate?" cannot afford.
+    """
+    payload = _world(run)
+    if isinstance(payload, Marker):
+        return payload
+    index = source_index(run)
+    refs = index if isinstance(index, dict) else {}
+    disputed = disputed_claim_ids(payload)
+    goals = _dicts(payload.get("goals"))
+    out = []
+    # `set[int]`, not `set[str]`: what goes in is `id(g)`, the identity of the goal
+    # record, so two goals with identical text still count separately.
+    claimed: set[int] = set()
+    for record in _dicts(payload.get("actors")):
+        actor_id = _text(record.get("id"))
+        mine = [g for g in goals if _text(g.get("actor_id")) == actor_id]
+        claimed.update(id(g) for g in mine)
+        out.append(
+            Persona(
+                id=actor_id,
+                name=_text(record.get("name")),
+                goals=tuple(_text(g.get("statement")) for g in mine if _text(g.get("statement"))),
+                provenance=provenance(_strings(record.get("claims")), refs, disputed),
+            )
+        )
+    orphaned = [g for g in goals if id(g) not in claimed]
+    if orphaned:
+        out.append(
+            Persona(
+                id="",
+                name="Goals we could not attribute to a user",
+                goals=tuple(
+                    _text(g.get("statement")) for g in orphaned if _text(g.get("statement"))
+                ),
+                provenance=provenance(
+                    [c for g in orphaned for c in _strings(g.get("claims"))], refs, disputed
+                ),
+            )
+        )
+    return out
