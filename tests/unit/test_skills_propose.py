@@ -16,7 +16,7 @@ from rubrica.validate import ARTIFACT_SCHEMAS, STAGE_ARTIFACTS, schema_dir
 
 SKILL = skills_dir() / "rb-propose" / "SKILL.md"
 
-INPUTS, OUTPUT, INVARIANTS = SECTIONS[0], SECTIONS[1], SECTIONS[3]
+INPUTS, OUTPUT, METHOD, INVARIANTS = SECTIONS[0], SECTIONS[1], SECTIONS[2], SECTIONS[3]
 
 
 def blocks(heading: str) -> list[str]:
@@ -218,4 +218,95 @@ def test_invariants_hold_every_hole_ref_to_the_members_own_batch():
     ), (
         "that invariant must say the refs have to be the member's OWN batch's, which is the "
         "half no schema and no other layer can see"
+    )
+
+
+def test_method_warns_that_its_own_gate_is_run_global():
+    """The warning every other fan-out member carries, and the one this stage
+    lacked.
+
+    `validate --stage propose` builds its target list from every batch of every
+    round with a part on disk, so mid-fan-out it can hand a member a sibling's
+    defect or a sibling's half-written file. Measured: with one honest part and a
+    sibling's truncated file present, the command exits 1 with a finding naming
+    only the sibling. The instruction "report success once it exits clean" is then
+    unsatisfiable through no fault of the member, and a member with no text telling
+    it so has two wrong moves available -- wait for siblings that will not settle,
+    or open the sibling's file, which is the fan-out violation section 1 exists to
+    prevent.
+
+    Scoped to the block that owns the gate command, and required to state the
+    remedy in the same block: the hazard without "a finding naming another batch's
+    part is not yours" is a warning a dispatched model cannot act on, which is this
+    project's own test for a decorative rule. Every alternation is over the
+    concept, matching the sibling skills' intent rather than their words.
+    """
+    owning = [
+        block
+        for block in blocks(METHOD)
+        if "validate --stage propose" in block
+        and re.search(r"run-global|every batch|every part|other batch|sibling", block, re.I)
+    ]
+    assert owning, (
+        "no Method block says the propose gate is run-global; every other fan-out member "
+        "(rb-extract, rb-reconcile-contradict, rb-instantiate, rb-challenge) says so"
+    )
+    assert any(
+        re.search(r"not\s+\*{0,2}yours|not your defect|is not yours", block, re.I)
+        for block in owning
+    ), (
+        "that block must say a finding naming a sibling's part is not this member's to "
+        "repair, or the warning states a hazard with no action a member can take"
+    )
+
+
+def test_the_prefix_and_status_invariants_do_not_lean_on_a_gate_they_lack():
+    """Two invariants here have no enforcement anywhere, and the prose has to say so.
+
+    Measured: a part whose scenario id omits the `sc-<batch_id>-` prefix, and a
+    part whose scenario carries `status: "active"` out of a member, both pass
+    `validate --stage propose`, `refs.check_scenario_parts`, `seal_scenarios`,
+    `refs.check_scenarios` and `refs.check_limits` -- with output identical to a
+    clean part's. The seal refuses an actual *collision*, which is a different
+    property: an unprefixed id that happens not to collide is sealed as written.
+    And `scenarios-0.1.json`'s `status` enum admits all four values, because a
+    sealed scenario legitimately carries any of them, so nothing can tell a
+    member's `active` from score's.
+
+    Invariant 5's round, by contrast, legitimately cites `refs.check_limits`, so
+    the property is not "no invariant may name a gate" -- it is that these two must
+    not read as though a gate held them. Asserted as a co-occurrence inside each
+    owning block, because the whole file names gates constantly.
+    """
+    prefix = [
+        block
+        for block in blocks(INVARIANTS)
+        if "sc-" in block and re.search(r"prefix", block, re.I)
+    ]
+    assert prefix, "no Invariants block owns the scenario-id prefix"
+    assert any(
+        re.search(
+            r"nothing checks|no (layer|gate|check)|no other layer|not checked|unchecked",
+            block,
+            re.I,
+        )
+        for block in prefix
+    ), (
+        "the prefix invariant must say nothing checks the prefix; citing the seal's "
+        "collision refusal alone reads as a gate this invariant does not have"
+    )
+    status = [
+        block for block in blocks(INVARIANTS) if re.search(r'status:?\s*"?proposed', block, re.I)
+    ]
+    assert status, "no Invariants block owns the proposed-status rule"
+    assert any(
+        re.search(
+            r"no layer|nothing (catches|checks)|no (gate|check|schema)|your own care",
+            block,
+            re.I,
+        )
+        for block in status
+    ), (
+        "the status invariant must say no layer catches a member that writes `active`, "
+        "which is the reason it is an invariant rather than a gate's job"
     )

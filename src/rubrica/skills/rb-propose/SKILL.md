@@ -354,8 +354,32 @@ where `<run>` is the run directory you were dispatched with. `--run` is
 required: without it the command exits 2 on a usage error and tells you
 nothing about your artifact. If it reports anything wrong with the file you
 just wrote, that is not a finding to pass along -- it is your own defect to
-fix. Repair the artifact and validate again; report success only once
-`rubrica validate --stage propose --run <run>` exits clean.
+fix. Repair the artifact and validate again.
+
+Read each finding's path before you act on it, because **that command is
+run-global and you are one of several members running right now.**
+`validate --stage propose` schema-checks the part of *every* batch of every round
+that has one on disk, so it can hand you a sibling's defect, or a sibling's
+half-written file caught mid-write, in the same output as your own findings. A
+finding naming another batch's part under `02-scenarios/round-<N>/` is **not
+yours**. It is not a reason to wait for the siblings to settle, not a reason to
+re-run the command hoping it clears, and above all not a reason to open or repair
+that file -- doing that is the fan-out violation section 1 and the last refusal
+condition exist to prevent, and a non-clean exit code is not authorisation to
+cross the boundary.
+
+So the bar for reporting success is: no finding anywhere in that command's output
+names `02-scenarios/round-<N>/<your batch_id>.json`. If findings naming other
+batches' parts remain, you are still done -- say so in what you report, and name
+those paths, because the orchestrator is the one party entitled to look at every
+batch at once and the only one that can act on them.
+
+**Do not run `check-refs`, and note that it is not in your `invokes`.**
+`refs.check_scenario_parts` is the layer-2 gate on your part, and it reports every
+batch of the round with no part on disk from the moment the round directory
+exists -- so while the fan-out is running it names your siblings by construction.
+The orchestrator runs it once after every member has landed, which is where those
+findings are real.
 
 ## 4. Invariants
 
@@ -381,8 +405,12 @@ fix. Repair the artifact and validate again; report success only once
 
 4. Every scenario `id` begins `sc-<batch_id>-` and is unique within your part.
    The prefix is what makes it unique across the round as well, which is the
-   only guarantee available to a member that cannot see a sibling's ids;
-   `propose-seal` refuses a collision and writes nothing when it does.
+   only guarantee available to a member that cannot see a sibling's ids.
+   **Nothing checks the prefix**, and that is why it is yours to keep: the seal
+   refuses an actual *collision* -- two parts carrying one id -- and writes
+   nothing when it does, but an id without the prefix that happens not to collide
+   is sealed as written, by every layer, silently. So the prefix buys a
+   probability, and dropping it spends the whole round's seal on the throw.
 
 5. `round` and `provenance.round` are both the current round, and neither
    exceeds `manifest.limits.max_rounds`. `refs.check_limits` reports both a
@@ -402,6 +430,12 @@ fix. Repair the artifact and validate again; report success only once
 
 7. Every scenario you write carries `status: "proposed"` -- never `active`,
    `duplicate`, or `rejected`. Those three belong to `rb-score` alone.
+   **No layer catches this one either**, and the asymmetry with the invariants
+   above is worth seeing: the sealed scenario's `status` enum admits all four
+   values, because a sealed scenario legitimately carries any of them, so a part
+   claiming `active` is schema-valid and reaches `02-scenarios.json` as a
+   promotion nobody judged. It is counted, instantiated and emitted from there.
+   This is the one invariant here whose whole enforcement is your own care.
 
 ## 5. Refusal conditions
 
