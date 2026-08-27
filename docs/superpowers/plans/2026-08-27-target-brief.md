@@ -171,13 +171,21 @@ def test_source_index_prefers_the_evidence_record_that_carries_a_quote(tmp_path)
 
 def test_source_index_omits_a_claim_id_nothing_defines(tmp_path):
     run = build_toy_run(tmp_path, upto="reconcile-seal")
-    assert "clm-does-not-exist" not in target_brief.source_index(run)
+    index = target_brief.source_index(run)
+    # The positive is the control, and without it this test asserts nothing: a
+    # bare `not in` passes for any implementation that iterates over claims that
+    # exist, an index of `{}` included, so the absence would be
+    # indistinguishable from an index that resolved nothing at all.
+    assert "clm-api-001" in index
+    assert "clm-does-not-exist" not in index
 
 
 def test_source_index_returns_a_marker_when_claims_cannot_be_read(tmp_path):
     """Never a silently empty dict. summary.py:725-770 rules that reporting empty
     on an unreadable 01-claims/ is the one reading a human at gate 1 must never be
     handed, and this page is mailed outside the project."""
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     os.chmod(run.claims_dir, 0o000)
     try:
@@ -185,7 +193,10 @@ def test_source_index_returns_a_marker_when_claims_cannot_be_read(tmp_path):
     finally:
         os.chmod(run.claims_dir, 0o755)
     assert isinstance(result, Malformed)
-    assert "01-claims" in result.what
+    # Equality, not a substring, matching the sibling convention at
+    # test_summary.py:1722 -- it also pins the trailing slash, which is what
+    # says a directory rather than a file could not be read.
+    assert result.what == "01-claims/"
 
 
 @pytest.mark.parametrize(
@@ -202,13 +213,33 @@ def test_source_index_returns_a_marker_when_claims_cannot_be_read(tmp_path):
         # half-trimmed path is worse than a full one.
         (["/abs/one.py", "rel/two.py"], ""),
         ([], ""),
+        # Fragment-bearing paths sharing one container file. `intake.py:333`
+        # builds a sliced input's source_path as `<container>#<json_pointer>`
+        # and a JSON pointer starts with "/", so commonpath -- which is
+        # component-aware -- walks into the fragment and answers
+        # ".../trace.json#", a prefix `_shorten` then matches nothing against.
+        # Measured: the absolute staging path shipped to the owner unstripped,
+        # which is the one outcome this function exists to prevent.
+        (["/a/b/trace.json#/41", "/a/b/trace.json#/42"], "/a/b"),
+        # An empty source_path among real ones. `_input_sources` yields "" for a
+        # record whose `source_path` is not a string, and an unfiltered "" makes
+        # commonpath raise ValueError -- which the handler below turns into "no
+        # prefix", silently disabling shortening for every path in the run.
+        (["", "/a/b/one.py", "/a/b/two.py"], "/a/b"),
+        # A fragment with no container: the base it partitions to is empty, so it
+        # must be filtered *after* the partition. Filtering the raw string instead
+        # lets "" into the set, commonpath raises, and shortening turns off for
+        # every path in the run -- leaking the staging path this helper exists to
+        # strip. This is the parameter the "" one above does not reach: an entry
+        # that is non-empty raw and empty once partitioned.
+        (["#/0", "/a/b/one.py", "/a/b/two.py"], "/a/b"),
     ],
 )
 def test_common_prefix(files, expected):
     assert target_brief._common_prefix(files) == expected
 
 
-def test_shorten_keeps_the_slice_fragment(tmp_path):
+def test_shorten_keeps_the_slice_fragment():
     """A `#/NN` fragment marks one slice of a sliced artifact. parsec's 71 trace
     inputs are 71 slices of one capture, so the fragment is the only thing
     distinguishing them and dropping it would collapse 71 records into one."""
@@ -285,8 +316,30 @@ def _common_prefix(files: list[str]) -> str:
     absolute *on the machine rubrica ran on*: all three runs measured share
     `/home/agent/runs/<target>`, which is where the corpus was staged and is not a
     path any owner recognises. What is left is the owner's own tree.
+
+    The `#` fragment is cut off before any of that, because `os.path` is
+    component-aware and a JSON pointer starts with `/`: `intake.py:333` writes a
+    sliced input's `source_path` as `<container>#<json_pointer>`, so `commonpath`
+    over two slices of one capture answers `.../trace.json#` -- measured -- and
+    `_shorten` then matches that against nothing and strips nothing. It never
+    mis-strips, only under-strips, so the failure it caused was the staging path
+    of the machine rubrica ran on shipping to the target's owner, which is the one
+    outcome this function exists to prevent.
     """
-    real = sorted({f for f in files if f})
+    # The emptiness filter is load-bearing, not defensive: `_input_sources` yields
+    # "" for a record whose `source_path` is not a string, and one "" makes
+    # `commonpath` raise, which the handler below reads as "no shared root" --
+    # silently disabling shortening for every other path in the run.
+    #
+    # It filters *after* the partition because the value that must be non-empty is
+    # the base, not the raw entry, and a fragment-only `source_path` ("#/0") is
+    # what tells the two apart: it is non-empty raw and empty once partitioned, so
+    # testing the raw string lets "" into the set anyway. Measured -- filtering
+    # first, `["#/0", "/a/b/one.py", "/a/b/two.py"]` returned "" and both absolute
+    # paths rendered whole. `intake.py:333` builds its fragment from a `Path`,
+    # which never stringifies empty, so the pipeline cannot produce that shape;
+    # a hand-edited manifest can, and it fails open with no marker and no finding.
+    real = sorted({base for base in (f.partition("#")[0] for f in files) if base})
     if not real:
         return ""
     try:
@@ -390,7 +443,8 @@ def source_index(run: RunPaths) -> dict[str, SourceRef] | Marker:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/unit/test_target_brief.py -q`
-Expected: PASS, all eleven (five named tests, five `_common_prefix` parameters, one `_shorten`).
+Expected: PASS, all fourteen (five named tests, eight `_common_prefix` parameters, one
+`_shorten`).
 
 - [ ] **Step 5: Measure the quote predicate in both directions**
 
