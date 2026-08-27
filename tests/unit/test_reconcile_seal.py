@@ -79,10 +79,12 @@ def test_the_denominator_agrees_with_the_recomputation_that_checks_it(tmp_path):
 
 def test_the_denominator_counts_distinct_cells_not_a_sum_of_counts(tmp_path):
     """The case where set semantics and a sum diverge, which the toy world model
-    cannot reach on its own: refs._cells is a *set* of (capability, outcome class)
-    pairs, so a repeated outcome-class id inside one capability is one cell, not
-    two. A seal that summed per-capability lengths would write 6 here and the
-    check that recomputes the field would immediately contradict it.
+    cannot reach on its own: refs.drivable_cells is a *set* of (capability, outcome
+    class) pairs, so a repeated outcome-class id inside one capability is one cell,
+    not two. A seal that summed per-capability lengths would write 5 here against
+    the 4 distinct cells, and check_world_model -- which recomputes the field
+    through that same function, which is what makes it an identity -- would
+    immediately contradict it.
 
     The repeat is schema-legal -- the world-model schema puts no uniqueItems on
     outcome_classes, and check_world_model's duplicate-id scan covers the four
@@ -106,8 +108,19 @@ def test_the_denominator_counts_distinct_cells_not_a_sum_of_counts(tmp_path):
 
     world = read_json(run.world_model)
     naive_sum = sum(len(o["outcome_classes"]) for o in parts["outcomes"]["outcomes"])
+    # Filtered on the binding so the expected value is narrow like the field it
+    # checks. Measured: every capability in split_world_model() is bound, so the
+    # filter yields the same 4 the unfiltered comprehension did -- this is a
+    # hardening, not a change of what the test means today. Unfiltered, the first
+    # unbound capability added to the toy fixture would turn this into a confusing
+    # failure in a test that is not about binding at all.
     distinct = len(
-        {(c["id"], oc["id"]) for c in world["capabilities"] for oc in c["outcome_classes"]}
+        {
+            (c["id"], oc["id"])
+            for c in world["capabilities"]
+            if (c.get("binding") or {}).get("tool")
+            for oc in c["outcome_classes"]
+        }
     )
     assert naive_sum != distinct, "the fixture must reach the case where the two differ"
     assert world["denominator"]["capability_cells"] == distinct
