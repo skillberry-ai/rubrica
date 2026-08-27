@@ -327,13 +327,17 @@ def closable_holes(run: RunPaths) -> list[str]:
             if hole["reason"] == "not_yet_attempted"
             # An undrivable cell is not closable by proposing in ANY round, and the
             # reason filter beside this does not reach it: score writes the hole
-            # itself as `not_yet_attempted` -- rb-score's Method describes its
-            # capability rows as one per declared pair with no mention of `binding`
-            # -- and seal_score's injection defers to score's hole for the same cell
-            # on purpose, so the mechanical `unreachable` never replaces it. Without
-            # this clause round 2 handed rb-propose back precisely the cells round 1
-            # had kept from it, at the cost the design cites as the whole price of
-            # the defect: a scenario rb-instantiate cannot seed and emit drops.
+            # itself as `not_yet_attempted` -- the prompt that produced that
+            # document described its capability rows as one per declared pair with
+            # no mention of `binding` anywhere in the file, and while rb-score's
+            # Method now names the undrivable case and calls `unreachable` its only
+            # honest reason, no dispatch has measured that it obeys, so this clause
+            # stays whatever the prompt says -- and seal_score's injection defers to
+            # score's hole for the same cell on purpose, so the mechanical
+            # `unreachable` never replaces it. Without this clause round 2 handed
+            # rb-propose back precisely the cells round 1 had kept from it, at the
+            # cost the design cites as the whole price of the defect: a scenario
+            # rb-instantiate cannot seed and emit drops.
             #
             # This does omit the hole from the worklist while the coverage document
             # still shows it `not_yet_attempted`, so the worklist alone does not say

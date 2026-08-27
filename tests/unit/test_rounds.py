@@ -170,11 +170,18 @@ def test_closable_holes_does_not_offer_an_undrivable_cell_on_round_two(tmp_path)
     round-1 filter a one-round reprieve rather than a fix.
 
     score's own hole wins over seal_score's injected `unreachable` by design, and
-    rb-score's Method describes its capability rows as one per declared pair with no
-    mention of `binding` -- so a `not_yet_attempted` hole on an undrivable cell is a
-    document this pipeline really produces. It passes the reason filter, so without
-    the drivability filter round 2 handed rb-propose back exactly the cell round 1
-    had kept from it.
+    the prompt that produced the documents this was measured on described its
+    capability rows as one per declared pair with no mention of `binding` anywhere
+    in the file -- so a `not_yet_attempted` hole on an undrivable cell is a document
+    this pipeline really produces. It passes the reason filter, so without the
+    drivability filter round 2 handed rb-propose back exactly the cell round 1 had
+    kept from it.
+
+    rb-score's Method now names the undrivable case and calls `unreachable` its only
+    honest reason, which is why this test asserts against the *filter* and not
+    against the prompt: a prompt change is validated by a dispatch, none has been
+    run, and a score part written before the change is still a part this code has to
+    read.
 
     `not_yet_attempted` on BOTH cells is the point: the existing coverage of the
     score-authored-hole path uses `out_of_scope`, which the reason filter already

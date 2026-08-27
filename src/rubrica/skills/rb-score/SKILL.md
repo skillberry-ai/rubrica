@@ -344,18 +344,34 @@ belongs in what you report back to the orchestrator, which records it in
    reporting success.
 
 4. **Work out `capability_matrix`: one cell per capability x outcome-class
-   pair in the world model.** You do not write it -- `rubrica score-seal`
-   computes both matrices and every summary number beneath them -- and that is
-   not a demotion: the arithmetic was never judgment, and
+   pair the target can be driven on.** You do not write it -- `rubrica
+   score-seal` computes both matrices and every summary number beneath them --
+   and that is not a demotion: the arithmetic was never judgment, and
    `refs._check_matrix_arithmetic` already recomputed all of it from the rows.
    You still have to derive it, because step 7 asks you to justify every row
    that comes out uncovered and you cannot name those rows without working out
-   which they are. **Every** pair, none omitted and none invented --
+   which they are. **Every** such pair, none omitted and none invented --
    `refs.check_coverage` reports both directions by name, and the omission
    is the dangerous one, because a matrix holding only the cells some
    scenario happens to claim reports 100% of a denominator it shrank to fit.
    Enumerate from the world model's `capabilities` and their
    `outcome_classes`, never from the scenario list.
+
+   "Can be driven on" is a judgment with a mechanical basis you can read off
+   the same file: `emit` turns a capability's `binding.tool` into the tool call
+   a test makes, so a capability declaring no `binding.tool` gives every
+   scenario on it nothing to call. Those cells are real -- the world model
+   declares them, and some are genuine surfaces nobody can reach through this
+   interface -- but they are not rows to score. `score-seal` writes one computed
+   `unreachable` hole for each of them, so the report still accounts for every
+   cell the world model declares. A hole of your own on the same cell wins over
+   the computed one, which is exactly why `unreachable` is the only honest
+   reason to give there: `not_yet_attempted` on such a cell hands the next round
+   a row no scenario can close. `refs.check_coverage` reports a matrix row on
+   one by name -- "matrix scores undrivable cell `cell:x/y`; it belongs in the
+   holes". Read the capability in front of you and decide; do not try to
+   reproduce `denominator.capability_cells`, which is not yours to compute and
+   which `check-refs` already recomputes for the human at gate 1.
 
    For each cell, `scenario_ids` lists the scenarios claiming it -- the ones
    whose `capability_refs` name that capability and that outcome class --
@@ -409,7 +425,14 @@ belongs in what you report back to the orchestrator, which records it in
      later round can close it. This is the only reason that tells the next
      round to try, so it is the only one that keeps the loop running.
    - `unreachable` -- no scenario could exercise this row against this
-     target at all.
+     target at all. One case of it is mechanical rather than a matter of
+     taste: the row's capability declares no `binding.tool`, so `emit` has no
+     call to make and no shipped test could ever reach the cell.
+     `not_yet_attempted` is the one wrong answer on such a row, because it tells
+     the next round to work a cell no scenario can close. `rounds.closable_holes`
+     filters such a hole out of the worklist, so the cost is not a wasted batch
+     -- it is a document that tells the human at gate 2 the round is still
+     working a cell nobody can work.
    - `out_of_scope` -- the row is real but deliberately outside what this
      suite is trying to cover.
    - `blocked_by_gap` -- the world model itself lacks the knowledge a
@@ -498,14 +521,19 @@ belongs in what you report back to the orchestrator, which records it in
 
 ## 4. Invariants
 
-1. The capability rows you reason over are exactly the world model's: one per
-   capability x outcome-class pair it declares -- no pair of the denominator
-   missing, and none naming a capability or outcome class the world model does
-   not declare. Enumerate them from `capabilities` and their `outcome_classes`,
-   never from the scenario list: `score-seal` enumerates the same set from the
-   same file, so a hole set derived from the scenarios instead disagrees with
-   the matrices it has to pair up with, and `refs.check_coverage` reports both
-   directions by name.
+1. The capability rows you reason over are exactly the world model's drivable
+   pairs: one per capability x outcome-class pair it declares whose capability
+   also declares a `binding.tool` -- no pair of the denominator missing, none
+   naming a capability or outcome class the world model does not declare, and
+   none naming a cell no tool call can reach. Enumerate them from
+   `capabilities` and their `outcome_classes`, never from the scenario list:
+   `score-seal` enumerates that same drivable subset from the same file, so a
+   hole set derived from the scenarios instead -- or a row set that scores the
+   pairs no `binding.tool` can reach -- disagrees with the matrices it has to
+   pair up with, and `refs.check_coverage` reports every direction by name. The
+   cells you leave out here are not dropped: `score-seal` writes a computed
+   `unreachable` hole for each one, which is what keeps the narrowed surface an
+   honest denominator rather than a silent cap.
 
 2. The goal rows are exactly the world model's `goals`, on the same terms:
    none omitted, none invented.

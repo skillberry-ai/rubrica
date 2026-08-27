@@ -275,9 +275,20 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
                     run.outcomes_part,
                     "reconcile",
                     "/outcomes",
-                    f"capability {capability['id']} has no outcome classes; every declared "
-                    "capability needs its capability x outcome-class cells, which is what the "
-                    "coverage denominator counts",
+                    # The reason names both halves of the narrowed arithmetic on
+                    # purpose. "which is what the coverage denominator counts" was
+                    # true of every capability before the denominator narrowed to
+                    # the drivable ones; an unbound capability's missing record now
+                    # costs the denominator nothing, so the refusal needed a reason
+                    # that is still true of the capability in front of it. The
+                    # refusal itself is unchanged and stays right either way: a
+                    # declared capability with no outcome classes names no cells,
+                    # so neither the matrices nor the seal's `unreachable` holes
+                    # can account for it.
+                    f"capability {capability['id']} has no outcome classes; a capability's "
+                    "outcome classes are what name its cells at all -- for a bound capability "
+                    "those are what the coverage denominator counts, and for an unbound one "
+                    "they are what the seal's unreachable holes account for",
                 )
             )
         else:

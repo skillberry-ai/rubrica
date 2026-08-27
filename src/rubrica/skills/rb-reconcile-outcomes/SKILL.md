@@ -197,9 +197,10 @@ an oversight.
 
 1. Every capability declared in `01-capabilities.json` has exactly one entry
    here. `refs.check_outcomes` reports each one that does not, and names the
-   reason: the coverage denominator counts capability x outcome-class cells,
-   so a capability left unswept shrinks the surface every later percentage is
-   measured against.
+   reason: a capability with no outcome classes names no cells at all, so a
+   capability the target can be driven against leaves the surface every later
+   percentage is measured against smaller than it should be, and one it cannot
+   leaves nothing for the report's `unreachable` holes to account for.
 
 2. No entry names a capability `01-capabilities.json` does not declare.
    `check_outcomes` reports that direction too, and `reconcile-seal` refuses

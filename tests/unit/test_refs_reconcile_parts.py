@@ -255,7 +255,7 @@ def test_a_capability_with_no_outcome_record_is_reported(tmp_path):
     parts["outcomes"]["outcomes"] = parts["outcomes"]["outcomes"][:1]
     write_json(run.outcomes_part, parts["outcomes"])
     findings = refs.check_outcomes(run)
-    assert findings, "an unswept capability shrinks the denominator silently"
+    assert findings, "an unswept bound capability shrinks the denominator silently"
 
 
 def test_an_outcome_record_for_an_unknown_capability_is_reported(tmp_path):

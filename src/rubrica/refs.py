@@ -1768,9 +1768,17 @@ def check_outcomes(run: RunPaths) -> list[Finding]:
                 run.outcomes_part,
                 "refs",
                 "/outcomes",
-                f"no outcome classes for declared capability {capability_id}; the coverage "
-                "denominator counts capability x outcome-class cells, so a capability left "
-                "unswept shrinks the surface every later percentage is measured against",
+                # Same correction as reconcile.py's twin of this refusal: "a
+                # capability left unswept shrinks the surface every later percentage
+                # is measured against" was true of every capability while the
+                # denominator counted every cell, and is true of a bound one only
+                # now that it counts the drivable ones. The finding does not change
+                # -- an unswept capability names no cells, so nothing accounts for
+                # it in either direction.
+                f"no outcome classes for declared capability {capability_id}; a capability "
+                "with no outcome classes names no cells at all, so a bound one left unswept "
+                "shrinks the surface every later percentage is measured against, and an "
+                "unbound one leaves the seal's unreachable holes nothing to account for",
             )
         )
     for capability_id in sorted(recorded - set(declared)):
