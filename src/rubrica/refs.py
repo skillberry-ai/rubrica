@@ -2792,9 +2792,19 @@ def check_coverage(run: RunPaths) -> list[Finding]:
     matrix = coverage.get("capability_matrix", {})
     matrix_cells = matrix.get("cells", [])
     seen = {(c["capability_id"], c["outcome_class_id"]) for c in matrix_cells}
-    for missing in sorted(cells - seen):
+    # drivable_cells here and `cells` (wide) for the hole refs below, which is the
+    # whole point of the split. The matrix is the SCORED surface, so it enumerates
+    # what a scenario could be driven on; a hole is an ACCOUNT of a cell, so its
+    # ref only has to resolve. Compared against the wide set, a correctly narrowed
+    # matrix reported one 'matrix omits cell' per undrivable cell -- 37 of them on
+    # run-20260827-070444, every one of them fabricated.
+    drivable = drivable_cells(world)
+    for missing in sorted(drivable - seen):
         report("/capability_matrix/cells", f"matrix omits cell {cell_ref(*missing)}")
-    for invented in sorted(seen - cells):
+    # `seen - drivable` rather than `seen - cells`: a matrix row on an undrivable
+    # cell is now also wrong, because that cell belongs in the holes instead. This
+    # tightens the invented-cell direction rather than loosening it.
+    for invented in sorted(seen - drivable):
         report("/capability_matrix/cells", f"matrix invents cell {cell_ref(*invented)}")
     for i, cell in enumerate(matrix_cells):
         for j, sid in enumerate(cell.get("scenario_ids", [])):
