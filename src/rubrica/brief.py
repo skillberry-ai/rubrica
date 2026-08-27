@@ -44,6 +44,16 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   a claim are printed under it, each beside the note the drop required. A pass
   that wrote no readable accounting gets a line too, saying so: a pass silently
   missing from a block of four is the anomaly a reader is at this gate to notice.
+  The capabilities the coverage denominator *excludes* are listed here too, and
+  this is the only place they are ever reported: issue 17 narrowed
+  `denominator.capability_cells` to the cells a scenario can be driven through,
+  and the finding that was to have accompanied it miscategorised its own
+  condition -- `check-refs` exit 1 buys one stage re-dispatch, which cannot add a
+  binding `rb-reconcile-capabilities` was told not to guess. Both numbers print
+  either way, for the sweep's reason. Nothing here classifies *why* a binding is
+  absent, because that is semantic; the operation and the citing inputs are
+  printed so a reader can group them, and the remedy is named because a reader at
+  this gate is the last person who can act on it.
 - **Gates 2 and 3** render what already exists: the coverage verdict, and the
   challenge stage's verdict tallies.
 
@@ -79,7 +89,14 @@ from rubrica.paths import RunPaths, list_json
 # would let the gate's reading surface and the checker that recomputes the
 # numbers come to disagree about what a per-pass rate means -- the drift
 # utilisation.py exists as its own module to refuse.
-from rubrica.refs import PASS_OWN_KINDS, _as_list
+# `_cells` and `drivable_cells` are imported for the same reason and with the same
+# reservation: the denominator's arithmetic has exactly one definition in this
+# build -- `reconcile-seal` writes `len(drivable_cells(world))` and
+# `check_world_model` recomputes it -- and a second spelling here would let the
+# gate's reading surface and the field it is describing come to disagree about what
+# a cell is. Both index unguarded (`cap["id"]`, `oc["id"]`), which is why
+# `_cell_counts` below wraps them rather than calling them straight.
+from rubrica.refs import PASS_OWN_KINDS, _as_list, _cells, drivable_cells
 from rubrica.sizing import implied_size
 from rubrica.utilisation import claim_utilisation
 
@@ -91,6 +108,14 @@ GATES = (0, 1, 2, 3)
 DIVERGENCE_HEADER = "Surface divergence (predicted vs observed)"
 SLICES_HEADER = "Slices the triage family read"
 SPLIT_HEADER = "Groups split across more than one slice"
+
+# Gate 1's excluded-capability section header, named for the three above's reason:
+# it is the anchor a reader and a test both scope to. This section is the *only*
+# place an undrivable capability is ever reported -- the design's paired
+# `check-refs` finding was removed in 11a6c25, because `check-refs` runs before
+# this gate and its exit 1 tells the orchestrator to spend its one repair attempt
+# on a stage, which cannot add a binding a pass was told not to guess.
+EXCLUDED_HEADER = "Capabilities excluded from the denominator (no tool binding)"
 
 
 def gate_brief(run: RunPaths, gate: int) -> str:
@@ -189,6 +214,188 @@ def _count(value) -> int:
     not be interesting, and layer 1 rejects the boolean either way.
     """
     return value if isinstance(value, int) else 0
+
+
+def _cell_counts(world: dict) -> tuple[int, int] | None:
+    """(drivable, declared) distinct capability x outcome-class cells, or None.
+
+    None means "could not be counted", and the caller says so rather than
+    printing a number it does not have. `refs._cells` and `refs.drivable_cells`
+    are the two functions in this module's reach that index unguarded, and every
+    shape a hand-edit at gate 1 produces reaches them. Measured: `"capabilities":
+    "nope"` raises `AttributeError: 'str' object has no attribute 'get'` out of
+    both, a capability with no `id` raises `KeyError: 'id'` out of `_cells`, and
+    `"outcome_classes": "x"` raises `TypeError: string indices must be integers`
+    out of `_cells`. Any one of them would take `gate-brief --gate 1` to exit 1 on
+    a readable run with a fabricated `[internal]` finding, which is exactly the
+    breach `_dicts` and `_mapping` exist to have closed.
+
+    Guarded here rather than in `refs`: those two are a *checker's* readers, and
+    `check_world_model` recomputing the denominator over a malformed document
+    should raise into `validate`'s territory rather than quietly count less. It is
+    this report that is forbidden to fail, so the guard belongs on this side of
+    the call, and `rubrica validate --stage reconcile-seal` is what names the
+    defect a None here stands for.
+    """
+    try:
+        return len(drivable_cells(world)), len(_cells(world))
+    except Exception:  # deliberate, matching _quietly's reasoning
+        return None
+
+
+def _claim_sources(run: RunPaths) -> dict[str, str]:
+    """claim id -> the input id that asserted it, for every readable claims file.
+
+    Its own walk rather than `utilisation.claim_utilisation`, which aggregates to
+    cited/total per artifact and never exposes the per-claim mapping this needs.
+    `_quietly` per file rather than per directory, so one malformed member costs
+    its own claims and not every capability's input list -- the promise this
+    module's docstring makes, that a report states what it could not read instead
+    of crashing.
+    """
+    sources: dict[str, str] = {}
+    for path in list_json(run.claims_dir):
+        payload = _mapping(_quietly(path))
+        artifact_id = payload.get("artifact_id")
+        if not isinstance(artifact_id, str):
+            # The filename is what a reader opens next, and `RunPaths.claims`
+            # derives it from the artifact id -- so it is the same string on every
+            # document this pipeline wrote, and a usable fallback on one it did not.
+            artifact_id = path.stem
+        for claim in _dicts(payload.get("claims")):
+            claim_id = claim.get("id")
+            if isinstance(claim_id, str):
+                sources[claim_id] = artifact_id
+    return sources
+
+
+def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
+    """The `EXCLUDED_HEADER` section: what the denominator does not count.
+
+    Why a human has to read this rather than a checker: absence of `binding.tool`
+    has three causes on the one run it was measured against -- a dependency
+    declaration that is not target behaviour at all, a real surface on another
+    interface, and real agent-level behaviour that `binding`'s tool shape cannot
+    express -- and telling them apart is semantic, which layer 2 is forbidden to
+    mechanise. So this prints each capability's cells, its `operation` and the
+    inputs whose claims it rests on, and lets the reader group them. Counted off
+    this rendering on run-20260827-070444: 10 of the 19 excluded capabilities cite
+    `pyproject-toml`, 4 of them citing nothing else, and those 4 are dependency
+    declarations (`cap-ollama-backend`, `cap-openai-backend`, `cap-keycloak`,
+    `cap-langchain-community`). That grouping is the actual cause of the magnitude,
+    and it is visible here without this report having asserted it.
+    """
+    lines = [EXCLUDED_HEADER]
+    capabilities = _dicts(world.get("capabilities"))
+    # `_mapping(cap.get("binding"))` rather than `cap.get("binding", {})`, for the
+    # reason drivable_cells records: an explicit `binding: null` is what a
+    # hand-edit at this gate produces, and the second spelling returns None and
+    # raises AttributeError on the chained `.get`.
+    unbound = [cap for cap in capabilities if not _mapping(cap.get("binding")).get("tool")]
+    drivable = len(capabilities) - len(unbound)
+
+    if not capabilities:
+        # Never "all 0 capabilities are drivable", which is what the branch below
+        # renders on an empty list: it is a claim about a surface that does not
+        # exist. The two states behind that empty list are separated on `is_file`,
+        # the same line the read-coverage block draws for a pass's partial, because
+        # a reader acts differently on each -- a run that stopped short of the seal
+        # is not the same thing as a sealed world model declaring nothing, and
+        # `capabilities: []` is schema-valid (world-model-0.1.json sets no minItems).
+        state = (
+            "the world model declares no readable capability"
+            if run.world_model.is_file()
+            else "no world model yet"
+        )
+        lines.append(f"  ({state}; nothing to report)")
+        return lines
+
+    if not unbound:
+        # Stated rather than omitted, for the reconcile sweep's reason: rendering
+        # "every capability is drivable" as silence hides a strong claim.
+        lines.append(f"  all {len(capabilities)} capabilities are drivable")
+    elif drivable:
+        lines.append(
+            f"  {drivable} of {len(capabilities)} capabilities are drivable; "
+            f"{len(unbound)} are excluded below"
+        )
+    else:
+        # The loudest thing this brief says, and the volume is the point. With no
+        # drivable cell, round 1's worklist is empty and `propose-batches` exits 0
+        # printing "no closable holes" -- which is also what a genuinely converged
+        # round prints. Gate 1 precedes propose, so a reader here is the only
+        # person who can still tell those two apart, and a number in a table is
+        # not enough to make them look.
+        lines.append(
+            f"  *** NOTHING IS DRIVABLE: 0 of {len(capabilities)} capabilities declare "
+            "binding.tool. ***"
+        )
+        # Phrased off the binding count rather than off the cell count, which the
+        # line below may not have: `_cell_counts` returns None on a malformed
+        # document, and "the denominator is 0 cells" would then be a number this
+        # report does not have. "No capability is bound" is computable either way,
+        # and it is the premise the rest of the sentence needs.
+        lines.append(
+            "  *** With nothing bound, round 1 has no closable holes and propose-batches "
+            "exits 0 saying so. That is this world model having no drivable surface at "
+            "all -- it is NOT a converged run, and the suite it leads to is empty. ***"
+        )
+
+    counts = _cell_counts(world)
+    if counts is None:
+        lines.append(
+            "  (the capability x outcome-class cells could not be counted; run "
+            "`rubrica validate --stage reconcile-seal`)"
+        )
+    else:
+        drivable_count, declared = counts
+        lines.append(
+            f"  {drivable_count} of {declared} capability x outcome-class cells count "
+            "toward the denominator"
+        )
+
+    if not unbound:
+        return lines
+
+    source = _claim_sources(run)
+    for cap in unbound:
+        raw_id = cap.get("id")
+        # Rendered as an absence rather than as `None`: a row reading "None" reads
+        # as an id, and layer 1 is what names a capability with no id.
+        cap_id = raw_id if isinstance(raw_id, str) else "(no id)"
+        # Distinct ids, matching what the denominator counts -- a repeated
+        # outcome-class id is one cell there, so counting the array's length here
+        # would print a number no other surface agrees with.
+        cells = len(
+            {oc["id"] for oc in _dicts(cap.get("outcome_classes")) if isinstance(oc.get("id"), str)}
+        )
+        inputs = sorted(
+            {
+                source[claim_id]
+                for claim_id in _as_list(cap.get("claims"))
+                if isinstance(claim_id, str) and claim_id in source
+            }
+        )
+        operation = cap.get("operation")
+        lines.append(
+            f"  {cap_id}  {cells} {'cell' if cells == 1 else 'cells'}  [{', '.join(inputs) or '?'}]"
+        )
+        lines.append(f"    {operation if isinstance(operation, str) else '(no operation)'}")
+
+    # The action, named where the only person who can still take it is reading.
+    # emit.py's late report is the other place that names it, and it names the same
+    # two fields; this one has to add what does *not* work, because the natural
+    # reading of any finding in this pipeline is "re-dispatch the stage".
+    lines.append(
+        "  Acting on this means editing 01-world-model.json: add binding.tool and "
+        "binding.fixed_args to the capability, or accept the reduced surface and record "
+        "that as a decision (rubrica decide)."
+    )
+    lines.append(
+        "  Re-dispatching a reconcile pass will not add a binding -- "
+        "rb-reconcile-capabilities is told to leave it off rather than guess a tool name."
+    )
+    return lines
 
 
 def _disposition_parts(run: RunPaths) -> tuple[list[dict], list[str]]:
@@ -625,6 +832,19 @@ def _gate_1(run: RunPaths) -> str:
         lines.append("  " + ", ".join(f"{key}: {tally.get(key, 0)}" for key in ordered))
     lines.append("")
 
+    # Read once, here, and used again by the gaps section at the foot of this
+    # brief: two `_quietly(run.world_model)` calls could disagree if the file
+    # changed mid-render, and a brief whose two halves describe different
+    # documents is worse than either half alone.
+    world = _mapping(_quietly(run.world_model))
+
+    # What the denominator does NOT count. Placed above the numbers derived from
+    # it -- utilisation, and the implied size that reads
+    # `denominator.capability_cells` -- because a reader who has not seen the
+    # exclusion cannot read the size line correctly.
+    lines.extend(_excluded_lines(run, world))
+    lines.append("")
+
     lines.append("Claim utilisation, per input")
     utilisation = claim_utilisation(run)
     if utilisation["artifacts"]:
@@ -728,7 +948,6 @@ def _gate_1(run: RunPaths) -> str:
         )
     lines.append("")
 
-    world = _mapping(_quietly(run.world_model))
     gaps = _dicts(world.get("gaps"))
     lines.append(f"World-model gaps ({len(gaps)})")
     if gaps:

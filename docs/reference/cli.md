@@ -572,9 +572,9 @@ finding.
 
 Composes the existing reports into the reading surface at one of the four
 human gates: the objective verdict and grouped declines at gate 0; the reconcile
-sweep, claim utilisation per input, read coverage per reconcile pass and the
-implied suite size at gate 1; the coverage matrix at gate 2; the verdict tally at
-gate 3.
+sweep, the capabilities the coverage denominator excludes, claim utilisation per
+input, read coverage per reconcile pass and the implied suite size at gate 1; the
+coverage matrix at gate 2; the verdict tally at gate 3.
 
 Gate 0 renders more than the others because it is the one gate held before any
 downstream stage has read the corpus: the objective verdict, then the
@@ -616,6 +616,27 @@ each beside the `note` the drop required; a run's accounting is total over
 line a human is at this gate to rule on. A pass whose partial is absent or
 carries no readable rows is named as such rather than omitted, and a run with no
 partial carrying an accounting at all says so instead.
+
+Gate 1 also lists **the capabilities the coverage denominator excludes** — every
+capability declaring no `binding.tool`, with the cells it would have added, its
+`operation`, and the inputs whose claims it rests on. This is the only place an
+undrivable capability is ever reported: `denominator.capability_cells` counts the
+cells a scenario can actually be driven through, and the `check-refs` finding that
+was to have accompanied that narrowing was removed for miscategorising its own
+condition — a `1` from `check-refs` buys one stage re-dispatch, and no re-dispatch
+adds a binding `rb-reconcile-capabilities` is told to leave off rather than guess.
+Both numbers print either way, on the sweep's argument: "all 2 capabilities are
+drivable" is a strong claim, and rendering it as silence hides it. Nothing here
+says *why* a binding is absent — on the one run this was measured against the
+three causes were a dependency declaration that is not target behaviour, a real
+surface on another interface, and real agent-level behaviour `binding`'s tool
+shape cannot express, and telling those apart is semantic — so the operation and
+the citing inputs are printed and the grouping is left to the reader. The remedy
+is named, because a reader at this gate is the last person who can act on it: add
+`binding.tool` and `binding.fixed_args`, or accept the reduced surface and record
+that decision. A world model in which *nothing* is drivable is called out
+separately and loudly, since it reaches `propose-batches` as an empty worklist and
+prints the same "no closable holes" a genuinely converged round does.
 
 Required: `--run RUN`, `--gate {0,1,2,3}`.
 

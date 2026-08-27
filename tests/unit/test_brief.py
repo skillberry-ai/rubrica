@@ -18,6 +18,7 @@ from rubrica import brief, cli, refs, survey
 from rubrica.artifacts import read_json, write_json
 from rubrica.paths import RunPaths, list_json
 from rubrica.utilisation import claim_utilisation
+from rubrica.validate import validate_artifact
 from tests.toy import build_toy_catalogue_and_triage, build_toy_run
 
 CORPUS = Path(__file__).parent.parent / "fixtures" / "corpus-toy"
@@ -1265,3 +1266,376 @@ def test_gate_zero_reports_an_unreadable_dispositions_directory_as_a_broken_run(
         assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "0"]) == 2
     finally:
         run.dispositions_dir.chmod(0o755)
+
+
+# --- Gate 1: the capabilities the denominator excludes ------------------------
+#
+# Issue 17 narrowed `denominator.capability_cells` to the cells a scenario can
+# actually be driven through, and this listing is the *only* place an excluded
+# capability is ever reported: the spec's paired `check-refs` finding was removed
+# in 11a6c25 because `check-refs` runs before gate 1, its exit 1 means "a
+# repairable stage defect, spend the one repair attempt", and an unbound
+# capability is not repairable by re-dispatch -- so the finding halted correct
+# runs before the gate it was meant to be read at. `gate-brief` is a report, not
+# a gate, which is why every test below also pins exit 0.
+
+
+def _unbound_capabilities() -> list[dict]:
+    """Two capabilities with no `binding` at all, for the listing to report.
+
+    No `binding` key rather than an empty one, because that is what
+    `rb-reconcile-capabilities` section 5 tells the pass to write rather than
+    guess a tool name -- so this is the shape the listing exists to report, not a
+    mangling of a well-formed one.
+
+    Two rather than one, and deliberately unlike each other: one cell against
+    two, one citing input against two. A single-capability fixture cannot tell a
+    rendering that reads each capability's own cells and evidence from one that
+    prints a constant, and singular/plural is exactly the detail a rendering gets
+    wrong on the row nobody built a fixture for.
+    """
+    return [
+        {
+            "id": "cap-keycloak",
+            "operation": "Integrate with Keycloak",
+            "params": [],
+            "outcome_classes": [
+                {
+                    "id": "oc-keycloak-ok",
+                    "kind": "success",
+                    "description": "the caller is authenticated against Keycloak",
+                    "claims": ["clm-pyproject-001"],
+                }
+            ],
+            "claims": ["clm-pyproject-001"],
+            "confidence": "low",
+        },
+        {
+            "id": "cap-a2a-cancel",
+            "operation": "agent.task.cancel",
+            "params": [{"name": "task_id", "type": "string", "required": True}],
+            "outcome_classes": [
+                {
+                    "id": "oc-cancelled",
+                    "kind": "success",
+                    "description": "the task reaches a terminal cancelled state",
+                    "claims": ["clm-api-005"],
+                },
+                {
+                    "id": "oc-cancel-unsupported",
+                    "kind": "error",
+                    "description": "the handler raises, and the caller sees a JSON-RPC error",
+                    "claims": ["clm-notes-004"],
+                },
+            ],
+            "claims": ["clm-api-001", "clm-notes-001"],
+            "confidence": "low",
+        },
+    ]
+
+
+def _with_pyproject_claims(run: RunPaths) -> None:
+    """One extra input asserting the claim `cap-keycloak` rests on.
+
+    A new input rather than one of the toy's three, because the citing input is
+    the only mechanical clue this listing can offer about *why* a binding is
+    absent: on run-20260827-070444, 10 of the 19 excluded capabilities cite
+    `pyproject-toml` and 4 of those cite nothing else -- and all 4 are dependency
+    declarations read as target behaviour rather than surfaces the target has,
+    `cap-keycloak` among them, which is why it is this fixture's row. A fixture whose
+    unbound capability cited the same input as the bound ones could not tell a
+    rendering that resolves each claim to its input from one that prints a
+    constant.
+    """
+    write_json(
+        run.claims("pyproject-toml"),
+        {
+            "schema_version": "0.1",
+            "artifact_id": "pyproject-toml",
+            "claims": [
+                {
+                    "id": "clm-pyproject-001",
+                    "kind": "capability",
+                    "statement": "the project depends on python-keycloak",
+                    "evidence": [{"artifact_id": "pyproject-toml", "locator": "dependencies[3]"}],
+                    "confidence": "low",
+                    "derivation": "inferred",
+                }
+            ],
+        },
+    )
+    # The fixture is a document this pipeline could produce, or it teaches the
+    # listing to read a shape that never arrives.
+    assert validate_artifact(run.claims("pyproject-toml"), "claims") == []
+
+
+def _unbound_run(tmp_path) -> RunPaths:
+    """The toy world plus two capabilities that declare no `binding.tool`."""
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    _with_pyproject_claims(run)
+    world = read_json(run.world_model)
+    world["capabilities"].extend(_unbound_capabilities())
+    # Honest rather than stale: `reconcile-seal` writes `len(drivable_cells)`, so
+    # leaving the toy's own figure here would make the fixture carry the
+    # pre-narrowing arithmetic this whole branch exists to remove.
+    world["denominator"]["capability_cells"] = len(refs.drivable_cells(world))
+    write_json(run.world_model, world)
+    assert validate_artifact(run.world_model, "world-model") == []
+    return run
+
+
+def _wholly_unbound_run(tmp_path) -> RunPaths:
+    """A schema-valid world model in which *nothing* is drivable.
+
+    Not a hypothetical: after the narrowing this world model yields an empty
+    round-1 worklist, so `propose-batches` exits 0 printing "no closable holes"
+    -- the loop's normal terminal state. Gate 1 precedes propose, so this listing
+    is the only thing that shows a human what happened.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    _with_pyproject_claims(run)
+    world = read_json(run.world_model)
+    for capability in world["capabilities"]:
+        capability.pop("binding", None)
+    world["capabilities"].extend(_unbound_capabilities())
+    world["denominator"]["capability_cells"] = len(refs.drivable_cells(world))
+    write_json(run.world_model, world)
+    assert validate_artifact(run.world_model, "world-model") == []
+    assert world["denominator"]["capability_cells"] == 0, "the fixture must be wholly undrivable"
+    return run
+
+
+def test_gate_one_lists_the_capabilities_excluded_from_the_denominator(tmp_path):
+    """Code cannot classify WHY a binding is absent -- that is semantic, and layer
+    2 never mechanises semantics. So the brief lists what it can read and lets a
+    human group them: counted off this rendering on run-20260827-070444, 10 of the
+    19 excluded capabilities cite pyproject-toml and 4 of those cite nothing else,
+    which is legible from the listing and is the actual cause of the magnitude.
+    """
+    run = _unbound_run(tmp_path)
+    section = _section(brief.gate_brief(run, 1), brief.EXCLUDED_HEADER)
+
+    one_cell = _row(section, "cap-keycloak")
+    assert _has_number(one_cell, 1)
+    assert "1 cell" in one_cell and "cells" not in one_cell, "singular for one cell"
+    assert "pyproject-toml" in one_cell
+    # The discriminating half: a rendering that printed every input, or a
+    # constant, would satisfy the line above. cap-keycloak rests on one claim from
+    # one input, and the toy's three inputs must not appear beside it.
+    assert "api-json" not in one_cell and "notes-md" not in one_cell
+    assert "Integrate with Keycloak" in section
+
+    two_cells = _row(section, "cap-a2a-cancel")
+    assert "2 cells" in two_cells
+    assert "api-json" in two_cells and "notes-md" in two_cells
+    assert "pyproject-toml" not in two_cells
+    assert "agent.task.cancel" in section
+
+
+def test_gate_one_states_both_numbers_when_capabilities_are_excluded(tmp_path):
+    """Both numbers, always -- the argument the reconcile sweep's line already
+    makes. The counts are read back out of the fixture rather than asserted as
+    literals alone, so a rendering that printed the wrong one of the two fails
+    here: 4 capabilities, 2 of them bound, 4 of the 7 cells drivable."""
+    run = _unbound_run(tmp_path)
+    world = read_json(run.world_model)
+    section = _section(brief.gate_brief(run, 1), brief.EXCLUDED_HEADER)
+
+    capability_line = _row(section, "2 of 4 capabilities")
+    assert _has_number(capability_line, len(world["capabilities"]) - 2), "drivable capabilities"
+    assert _has_number(capability_line, len(world["capabilities"])), "declared capabilities"
+
+    cell_line = _row(section, "4 of 7 capability")
+    assert _has_number(cell_line, len(refs.drivable_cells(world))), "drivable cells"
+    assert _has_number(cell_line, 7), "declared cells"
+
+
+def test_gate_one_says_so_when_every_capability_is_drivable(tmp_path):
+    """A brief that printed the section only when non-empty would render "every
+    capability is drivable" as silence, and that is a strong claim a reader should
+    see stated. `_full_run` is the toy world: 2 capabilities, both bound."""
+    run = _full_run(tmp_path)
+    section = _section(brief.gate_brief(run, 1), brief.EXCLUDED_HEADER)
+
+    assert "all 2 capabilities are drivable" in section
+    # No listing and no remedy when there is nothing to act on -- the section is a
+    # statement here, not an empty table with advice under it.
+    assert "binding.fixed_args" not in section
+
+
+def test_gate_one_makes_a_wholly_undrivable_world_model_impossible_to_miss(tmp_path):
+    """The zero-drivable case reaches `propose-batches` as "no closable holes",
+    which is also what a genuinely converged round prints. A reader at gate 1 is
+    the only person who can still tell those apart, so the rendering must not let
+    the distinction sit inside a table of counts."""
+    run = _wholly_unbound_run(tmp_path)
+    section = _section(brief.gate_brief(run, 1), brief.EXCLUDED_HEADER)
+
+    loud = _row(section, "*** NOTHING IS DRIVABLE")
+    assert _has_number(loud, 0) and _has_number(loud, 4)
+    # The mistaking this exists to prevent, named in the rendering itself.
+    convergence = _row(section, "*** With nothing bound")
+    assert "no closable holes" in convergence
+    assert "NOT a converged run" in convergence
+
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+
+
+def test_gate_one_names_the_remedy_without_promising_a_re_dispatch(tmp_path):
+    """The removed check-refs finding was criticised for stating the exclusion
+    with no action, and emit.py's late report is the one that names it. A reader
+    at gate 1 is the only person who can still act, and the one action that does
+    NOT work has to be named too: rb-reconcile-capabilities section 5 tells the
+    pass to leave `binding` off rather than guess a tool name, so spending a
+    repair attempt on it changes nothing."""
+    section = _section(brief.gate_brief(_unbound_run(tmp_path), 1), brief.EXCLUDED_HEADER)
+
+    remedy = _row(section, "Acting on this")
+    assert "binding.tool" in remedy and "binding.fixed_args" in remedy
+    assert "01-world-model.json" in remedy
+
+    # Co-occurrence on the one line that owns the rule, not presence anywhere in
+    # the section: a section that promised a repair would still carry both
+    # "re-dispatch" and "not" somewhere in it.
+    no_repair = _row(section, "Re-dispatching")
+    assert "will not" in no_repair
+
+
+def test_gate_one_does_not_assert_a_cause_for_a_missing_binding(tmp_path):
+    """Absence of `binding.tool` has three causes on the one run this was measured
+    against -- a dependency declaration that is not target behaviour, a real
+    surface on another interface, and real agent-level behaviour `binding`'s tool
+    shape cannot express -- and telling them apart is semantic. A rendering that
+    named one of them would be asserting a classification code cannot make."""
+    section = _section(brief.gate_brief(_unbound_run(tmp_path), 1), brief.EXCLUDED_HEADER)
+
+    for asserted_cause in ("dependency", "another interface", "agent-level", "not real"):
+        assert asserted_cause not in section.lower()
+
+
+def test_gate_one_excluded_listing_survives_a_malformed_claims_file(tmp_path):
+    """`gate_brief` never raises on a readable run's content -- this module's
+    docstring, and the ruling `_quietly` already carries. The capability is still
+    reported when the file that would name its input cannot be read; only the
+    input is unknown."""
+    run = _unbound_run(tmp_path)
+    run.claims("pyproject-toml").write_text("{not json", encoding="utf-8")
+
+    section = _section(brief.gate_brief(run, 1), brief.EXCLUDED_HEADER)
+
+    one_cell = _row(section, "cap-keycloak")
+    assert "pyproject-toml" not in one_cell, "the file that would have named it is unreadable"
+    assert "?" in one_cell
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+
+
+def test_gate_one_excluded_listing_costs_one_malformed_claims_file_only_its_own(tmp_path):
+    """Per file rather than per directory: one unreadable member must cost its own
+    claims and not the whole listing. A single guard around the walk would turn
+    every capability's input list into `?` instead."""
+    run = _unbound_run(tmp_path)
+    run.claims("api-json").write_text("{not json", encoding="utf-8")
+
+    section = _section(brief.gate_brief(run, 1), brief.EXCLUDED_HEADER)
+
+    assert "pyproject-toml" in _row(section, "cap-keycloak")
+    assert "notes-md" in _row(section, "cap-a2a-cancel")
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+
+
+@pytest.mark.parametrize(
+    "capabilities",
+    [
+        # Every shape a hand-edit at this gate produces that reaches refs._cells'
+        # and refs.drivable_cells' unguarded indexing. Measured before the guard:
+        # a truthy non-list raises `AttributeError: 'str' object has no attribute
+        # 'get'` out of both, a capability with no `id` raises `KeyError: 'id'`
+        # out of _cells, and a non-list `outcome_classes` raises `TypeError:
+        # string indices must be integers` out of _cells.
+        "nope",
+        [{"operation": "no id at all", "outcome_classes": [{"id": "oc-x"}]}],
+        [{"id": "cap-x", "operation": "bad classes", "outcome_classes": "x"}],
+        [{"id": "cap-x", "operation": "null binding", "binding": None, "outcome_classes": []}],
+        ["not a capability object at all"],
+        [{"id": ["not", "a", "string"], "operation": "unhashable id", "outcome_classes": []}],
+    ],
+)
+def test_gate_one_excluded_listing_does_not_raise_on_a_malformed_world_model(
+    tmp_path, capabilities
+):
+    """A report that reports "this document is malformed" by crashing is the least
+    useful reading of a document -- `_dicts`' ruling, and the exit-code contract's
+    for a report. `rubrica validate --stage reconcile-seal` is what names the
+    defect; this must state what it could not count and exit 0."""
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    world = read_json(run.world_model)
+    world["capabilities"] = capabilities
+    write_json(run.world_model, world)
+
+    text = brief.gate_brief(run, 1)  # must not raise
+
+    assert brief.EXCLUDED_HEADER in text
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+
+
+def test_gate_one_excluded_listing_is_quiet_before_the_world_model_exists(tmp_path):
+    """Gate 1 is read on runs that stopped short of the seal, and the section must
+    say it has nothing to report rather than claim every capability is drivable --
+    which is what the "all N" branch renders if it is reached with N of 0."""
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+
+    section = _section(brief.gate_brief(run, 1), brief.EXCLUDED_HEADER)
+
+    assert "nothing to report" in section
+    assert "drivable" not in section
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+
+
+def test_gate_one_excluded_listing_separates_an_empty_world_model_from_an_absent_one(tmp_path):
+    """`capabilities: []` is schema-valid -- world-model-0.1.json sets no minItems
+    on it -- and a reader acts differently on "no world model yet" than on "a
+    sealed world model that declares nothing". Neither may render as "all 0
+    capabilities are drivable", which is the branch an empty list otherwise falls
+    into and is a claim about a surface that does not exist."""
+    absent = build_toy_run(tmp_path / "runs-absent", upto="extract")
+    empty = build_toy_run(tmp_path / "runs-empty", upto="reconcile-seal")
+    world = read_json(empty.world_model)
+    world["capabilities"] = []
+    world["denominator"]["capability_cells"] = 0
+    write_json(empty.world_model, world)
+    assert validate_artifact(empty.world_model, "world-model") == []
+
+    absent_section = _section(brief.gate_brief(absent, 1), brief.EXCLUDED_HEADER)
+    empty_section = _section(brief.gate_brief(empty, 1), brief.EXCLUDED_HEADER)
+
+    assert "nothing to report" in absent_section
+    assert "nothing to report" in empty_section
+    assert "drivable" not in absent_section and "drivable" not in empty_section
+    assert absent_section != empty_section, "a sealed world model is a different state"
+    assert cli.main(["gate-brief", "--run", str(empty.root), "--gate", "1"]) == 0
+
+
+def test_gate_one_excluded_listing_survives_an_unreadable_claims_file(tmp_path):
+    """Unreadable is not the same failure as malformed, and only this one reaches
+    `read_json` as an OSError rather than a JSON error. The module's docstring
+    draws the line at the *directory*: an unreadable `01-claims/` is the harness
+    pointed at something broken and still exits 2
+    (`test_an_unreadable_claims_directory_is_exit_2_from_both_reports`), while one
+    unreadable member is content this report states rather than raises on."""
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = _unbound_run(tmp_path)
+    target = run.claims("pyproject-toml")
+    target.chmod(0o000)
+    try:
+        section = _section(brief.gate_brief(run, 1), brief.EXCLUDED_HEADER)
+
+        one_cell = _row(section, "cap-keycloak")
+        assert "pyproject-toml" not in one_cell
+        assert "?" in one_cell
+        # The other members are still read, so the listing degrades by one row's
+        # input list rather than wholesale.
+        assert "notes-md" in _row(section, "cap-a2a-cancel")
+        assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+    finally:
+        target.chmod(0o644)
