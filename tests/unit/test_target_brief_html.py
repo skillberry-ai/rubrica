@@ -555,14 +555,21 @@ def test_page_says_a_side_is_stated_in_a_file_it_could_not_name(tmp_path):
 
 
 def test_page_states_each_empty_belief_rather_than_rendering_an_empty_list(tmp_path):
-    """Four `not found` branches no golden run reaches, because the toy world has
-    inputs, capabilities, entities and an actor. Each is a sentence rather than an
-    empty `<dl>`: a section with nothing in it reads as a render that broke."""
+    """Five `not found` branches no golden run reaches, because the toy world has
+    inputs, capabilities, entities, an actor and one contradiction. Each is a
+    sentence rather than an empty `<dl>`: a section with nothing in it reads as a
+    render that broke.
+
+    The contradiction branch is the one a real run reaches most often -- most runs
+    record none -- and it is the most delicate paragraph on the page, since "nothing
+    contradicted anything" is what a reader will hear as "your documents agree".
+    Under branch coverage it was the one sentence here no test rendered."""
     empty = (
         "We have no record of what we read.",
         "We did not identify anything it can be asked to do.",
         "We did not identify the kinds of data it holds.",
         "We did not identify who uses it.",
+        "Nothing we read contradicted anything else we read.",
     )
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
@@ -578,6 +585,7 @@ def test_page_states_each_empty_belief_rather_than_rendering_an_empty_list(tmp_p
     world_model["entities"] = []
     world_model["actors"] = []
     world_model["goals"] = []
+    world_model["contradictions"] = []
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
     for sentence in empty:
