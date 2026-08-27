@@ -554,3 +554,200 @@ def test_nothing_check_refs_reads_is_ever_denied(tmp_path):
                 f"{denied} is denied but check-refs reads {target}; a stage that invokes "
                 "check-refs will get fabricated findings about what it cannot see"
             )
+
+
+# --- the output-token cap, and the transcript that must not be overwritten -----
+#
+# Both halves come out of one failure. On 2026-08-25 `propose` round 2 died with
+# "Claude's response exceeded the 32000 output token maximum" after 3.57 USD and
+# 31 minutes, having written nothing; and because transcripts are named by stage
+# rather than by attempt, round 2's transcript landed on round 1's path and the
+# only per-attempt record of that failure went with it.
+#
+# The cap half is not about headroom -- the batch partition is what bounds the
+# write. It is about a declared dependency: the number was Claude Code's own
+# default, so the value a run ran under was not recoverable from this repository
+# afterwards.
+#
+# These tests drive the script rather than grepping it, for the reason this
+# module's docstring gives: a source grep passes on a rule that is present and
+# unreachable. The cap tests put a stub `claude` first on PATH and read the
+# environment the harness actually spawned it with; the transcript tests use the
+# script's own naming, through RUBRICA_PRINT_TRANSCRIPT and through two real
+# invocations of the stub.
+#
+# Measured in both directions before committing, each mutation made in place in
+# the script and reverted after:
+#
+#   export line deleted            declares red (sees UNSET); overridable green,
+#                                  for the reason its own docstring records
+#   export made unconditional      overridable red (sees the constant, not 4242)
+#   collision block deleted        both re-dispatch tests red; unsuffixed green
+#   collision made unconditional   unsuffixed red; both re-dispatch tests green
+#   print block moved above the    the naming test red -- it is the mode
+#     collision block              reporting a path the dispatch would not use
+#   either comment reworded        all green
+#
+# A mutation that only broke the syntax cannot be mistaken for a test that saw the
+# change: every helper here asserts the script exited 0 and reports its stderr, so
+# a bash parse error fails on that assertion instead. The one mutation that moved
+# whole blocks around was additionally checked with `bash -n` before running.
+
+STUB_CLAUDE = """#!/usr/bin/env bash
+# Stand-in for the model dispatch. Records the environment the harness spawned it
+# with, prints one line so `tee` has bytes to write, and exits 0 without a model.
+printf '%s\\n' "${CLAUDE_CODE_MAX_OUTPUT_TOKENS-UNSET}" >> "$STUB_ENV_RECORD"
+echo "{\\"stub_attempt\\": \\"${STUB_ATTEMPT:-1}\\"}"
+"""
+
+
+def _dispatch_with_stub_claude(tmp_path, *args, run=None, **env):
+    """Run the harness for real against a stub `claude`, and return (proc, record).
+
+    The stub sits first on PATH, so it is what `command -v claude` finds and what
+    the dispatch line executes -- the script only prepends its own `.venv/bin`,
+    which carries no `claude`. `record` is the file the stub appended its view of
+    CLAUDE_CODE_MAX_OUTPUT_TOKENS to, one line per invocation.
+    """
+    bin_dir = tmp_path / "stub-bin"
+    bin_dir.mkdir(exist_ok=True)
+    stub = bin_dir / "claude"
+    stub.write_text(STUB_CLAUDE, encoding="utf-8")
+    stub.chmod(0o755)
+    record = tmp_path / "stub-env.txt"
+    if run is None:
+        run = tmp_path / "run"
+        run.mkdir(exist_ok=True)
+    base = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_MAX_OUTPUT_TOKENS"}
+    proc = subprocess.run(
+        [str(SCRIPT), *args],
+        capture_output=True,
+        text=True,
+        env={
+            **base,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "RUBRICA_LAB": str(tmp_path / "lab"),
+            "STUB_ENV_RECORD": str(record),
+            **env,
+        },
+    )
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    return proc, record
+
+
+def test_the_dispatch_declares_the_output_token_cap(tmp_path):
+    """The spawned process must see a concrete cap the caller did not have to set.
+
+    The round loop's viability depended on a default belonging to another tool:
+    unset in the environment and absent from this repository, so the value a run
+    actually ran under was not recoverable afterwards. MEASURED on Claude Code
+    2.1.247 with the variable unset, that default is not even one number: 32000
+    for the id `aws/claude-sonnet-4-6` and 64000 for `claude-sonnet-5`, which is
+    what `--model sonnet` resolved to. 32000 is exactly what killed propose round
+    2, so which ceiling a run got was decided outside this repository.
+
+    The assertion is on the *shape* of the value, not its digits: which number the
+    script pins is a decision recorded in the script's own comment, and pinning it
+    here as well would make a deliberate change a test failure rather than a
+    review.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    _, record = _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run)
+    seen = record.read_text(encoding="utf-8").split()
+    assert seen, "the stub dispatch recorded nothing; it was not executed"
+    assert seen[0] != "UNSET", "the dispatch left the output-token cap to Claude Code's default"
+    assert seen[0].isdigit() and int(seen[0]) > 0
+
+
+def test_the_output_token_cap_is_overridable_from_the_environment(tmp_path):
+    """Same shape as RUBRICA_MODEL and RUBRICA_BUDGET: a default in the script,
+    overridable per dispatch, so a probe does not need the file edited.
+
+    The mutation this one catches is an unconditional `export VAR=<n>`, which
+    would silently discard the value a probe passed in -- and the ceiling is
+    precisely the thing this task had to probe. MEASURED green with the export
+    line deleted altogether, since the caller's own value then reaches the
+    dispatch untouched; that direction is what the test above holds.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    _, record = _dispatch_with_stub_claude(
+        tmp_path, "propose", str(run), run=run, CLAUDE_CODE_MAX_OUTPUT_TOKENS="4242"
+    )
+    assert record.read_text(encoding="utf-8").split() == ["4242"]
+
+
+def _transcript_path_for(lab, stage="propose", slice_id=""):
+    """The transcript path the script itself would choose, via its print mode.
+
+    Shelling out rather than restating the rule: a test that restates it passes
+    when the rule is present and unreachable.
+    """
+    run = Path(lab).parent / "run"
+    run.mkdir(parents=True, exist_ok=True)
+    args = [str(SCRIPT), stage, str(run)] + ([slice_id] if slice_id else [])
+    proc = subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "RUBRICA_LAB": str(lab), "RUBRICA_PRINT_TRANSCRIPT": "1"},
+    )
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    printed = proc.stdout.split()
+    assert len(printed) == 1, f"print-transcript mode printed {printed!r}"
+    return Path(printed[0])
+
+
+def test_a_re_dispatch_does_not_overwrite_the_earlier_transcript(tmp_path):
+    # MEASURED consequence, not a hypothetical: transcripts are named by stage,
+    # so propose round 2 overwrote round 1's and destroyed the only per-attempt
+    # evidence for the failure that motivated this whole change.
+    lab = tmp_path / "lab"
+    (lab / "transcripts").mkdir(parents=True)
+    existing = lab / "transcripts" / "propose.jsonl"
+    existing.write_text("round one\n", encoding="utf-8")
+    # Drive the script's own naming logic rather than reimplementing it here.
+    chosen = _transcript_path_for(lab, stage="propose", slice_id="")
+    assert chosen != existing
+    assert existing.read_text(encoding="utf-8") == "round one\n"
+
+
+def test_a_first_dispatch_still_gets_the_unsuffixed_transcript_name(tmp_path):
+    """The over-correction direction: suffixing unconditionally would rename every
+    first attempt, and the slice id has to stay in the name either way -- the
+    fan-out members' transcripts are told apart by nothing else."""
+    lab = tmp_path / "lab"
+    (lab / "transcripts").mkdir(parents=True)
+    assert _transcript_path_for(lab, stage="propose") == lab / "transcripts" / "propose.jsonl"
+    assert _transcript_path_for(lab, stage="extract", slice_id="api-json") == (
+        lab / "transcripts" / "extract-api-json.jsonl"
+    )
+
+
+def test_a_re_dispatch_leaves_the_earlier_transcripts_bytes_intact(tmp_path):
+    """The end-to-end half: two real invocations, both writing a transcript.
+
+    The naming test above cannot see a `tee` that truncates, because print mode
+    writes nothing. This one runs the dispatch line twice against the stub and
+    reads both files afterwards, which is the form the real regression took.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    first, _ = _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run, STUB_ATTEMPT="1")
+    second, _ = _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run, STUB_ATTEMPT="2")
+    # Which file each attempt wrote comes from the script's own closing summary,
+    # so this test does not restate the naming rule either.
+    paths = [_reported_transcript(proc) for proc in (first, second)]
+    assert paths[0] != paths[1]
+    assert '"stub_attempt": "1"' in paths[0].read_text(encoding="utf-8")
+    assert '"stub_attempt": "2"' in paths[1].read_text(encoding="utf-8")
+    assert len(list((tmp_path / "lab" / "transcripts").iterdir())) == 2
+
+
+def _reported_transcript(proc):
+    """The transcript path out of the script's closing summary ("transcript  <p>")."""
+    for line in proc.stdout.splitlines():
+        if line.startswith("transcript"):
+            return Path(line.split(maxsplit=1)[1].strip())
+    raise AssertionError(f"no transcript line in {proc.stdout!r}")

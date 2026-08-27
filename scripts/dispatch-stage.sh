@@ -34,6 +34,12 @@
 #                        orchestrator's retyping of them.
 #   RUBRICA_PRINT_SETTINGS  set to 1 to write the settings files and the prompt,
 #                        print their three paths, and dispatch nothing
+#   RUBRICA_PRINT_TRANSCRIPT  set to 1 to print the transcript path this dispatch
+#                        would write, and dispatch nothing
+#   CLAUDE_CODE_MAX_OUTPUT_TOKENS  output-token ceiling for the dispatch. Claude
+#                        Code's own variable, not this project's; pinned below to
+#                        a default so a run's ceiling is on the record, and
+#                        overridable here so a probe needs no file edit.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -108,6 +114,41 @@ fi
   echo "         or the stage cannot run its own gate." >&2
 }
 export PATH="$REPO/.venv/bin:$PATH"
+
+# The output-token ceiling, declared here rather than inherited from whatever the
+# spawned tool happens to default to. MEASURED on Claude Code 2.1.247 by pointing
+# ANTHROPIC_BASE_URL at a local recorder that logs the request body and answers
+# 400, so nothing was generated and the sweep cost nothing:
+#
+#   var unset, --model sonnet (logged as claude-sonnet-5)   max_tokens 64000
+#   var unset, --model aws/claude-sonnet-4-6                max_tokens 32000
+#   var unset, --model aws/claude-opus-5                    max_tokens 64000
+#   var 8000 / 32000 / 64000 / 100000                       sent verbatim
+#   var 999999                                              clamped to 128000
+#
+# Two things follow. The 32000 that killed propose round 2 on
+# run-20260825-094033 was this default for the model that dispatch resolved to --
+# not a model limit and not anything this project set; and the default is not one
+# number, it moves with the model id, so which ceiling a run got was decided
+# outside the repository. That is the reason for pinning, rather than headroom:
+# the batch partition is what bounds the write.
+#
+# 64000 is the value this version already chooses for the alias RUBRICA_MODEL
+# defaults to, so pinning it changes no observed behaviour there, while stopping a
+# resolution like the sonnet-4-6 one above from halving the ceiling silently. This
+# line was confirmed to be what reaches the wire, not just the environment: with
+# the default temporarily set to a distinctive value and the variable unset in the
+# caller, that value is what the recorder logged.
+#
+# A live request through the configured gateway carrying max_tokens=64000 was
+# accepted -- HTTP 200, 4 output tokens -- but for `aws/claude-sonnet-4-6`, one of
+# the ids that gateway grants, because `claude-sonnet-5` itself came back 403
+# team-not-allowed on the same account.
+#
+# NOT established, and both need a generation that actually approaches the value:
+# whether a response near 64000 completes, and what the endpoint enforces beyond
+# accepting the field. The 128000 above is the client's clamp, not the API's.
+export CLAUDE_CODE_MAX_OUTPUT_TOKENS="${CLAUDE_CODE_MAX_OUTPUT_TOKENS:-64000}"
 
 # ---------------------------------------------------------------------------
 # Two enforcement layers, deliberately in two different settings scopes.
@@ -453,6 +494,30 @@ if [ "${RUBRICA_PRINT_SETTINGS:-0}" = "1" ]; then
 fi
 
 TRANSCRIPT="$LAB/transcripts/$STAGE${SLICE:+-$SLICE}.jsonl"
+# Never overwrite a prior attempt. MEASURED cost of the previous behaviour:
+# propose round 2's transcript overwrote round 1's on run-20260825-094033,
+# destroying the only per-attempt record of the failure that motivated the
+# bounded-batch change -- and for propose the round is exactly what a reader needs
+# to tell two attempts apart. The script does not know the round and does not need
+# to: "do not destroy the prior attempt" is the whole requirement. The first
+# attempt keeps the unsuffixed name, because that is the path the closing summary
+# prints and audit-reads.sh is pointed at.
+if [ -e "$TRANSCRIPT" ]; then
+  n=2
+  while [ -e "$LAB/transcripts/$STAGE${SLICE:+-$SLICE}-$n.jsonl" ]; do
+    n=$((n + 1))
+  done
+  TRANSCRIPT="$LAB/transcripts/$STAGE${SLICE:+-$SLICE}-$n.jsonl"
+fi
+
+# Stop here with the transcript path chosen and nothing dispatched, for the reason
+# the print-settings block above exists: the alternative ways to check this naming
+# either cost a model dispatch or grep this file's source, and a test that greps
+# the source passes when the rule is present and unreachable. Prints one line.
+if [ "${RUBRICA_PRINT_TRANSCRIPT:-0}" = "1" ]; then
+  echo "$TRANSCRIPT"
+  exit 0
+fi
 
 # cwd is the run directory, not the repository. manifest.inputs[].source_path is
 # a repo-relative path, so a run-dir cwd means it cannot resolve back to the
