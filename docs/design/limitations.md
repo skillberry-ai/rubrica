@@ -494,6 +494,41 @@ the pipeline — and it is that skill's change to make, not the reader's.
 What this means for you: **read a run's gaps before that page is sent.** They are the
 one section whose prose was never written with the recipient in mind.
 
+### "We went with X" identifies nothing when both sides of a disagreement were read from the same file
+
+`target_brief._taken` renders a resolved contradiction as `We went with ` plus the
+files the chosen side's claims were read from. When the two sides were read from the
+*same* file, that sentence names that file for both sides, so it tells the reader
+which document we trusted and not which of the two readings we took — the thing the
+sentence exists to say. Measured on `run-20260826-090456`: 4 of its 41
+contradictions — `cost-tools-001` and `ctr-aap2-agent-006`, whose sides are two
+readings of one file, plus `runtime-traces-001` and `runtime-traces-002`, whose sides
+are two *slices* of one capture (`#/0` against `#/1`, `#/20` against `#/26`).
+
+The last two are this shape's count going **up** by a fix, and the trade is worth
+knowing: `_taken` used to print the slice path, which named a file the owner cannot
+open. It now names the container, which they can — and which is the same container on
+both sides. A sentence that is uninformative is the better of the two defects, but it
+is still one, and 2 of 41 is the number to compare against anything measured before
+`_file_and_piece` existed.
+
+It is **uninformative rather than false.** We did go with the claims in that file,
+the two sides are printed piece by piece immediately above the sentence with their
+quotes intact, and a reader who reads the section rather than the line can still see
+which reading won. What they cannot do is skim to the resolution line and learn it.
+
+**Why it is parked rather than fixed:** every wording reachable from where the
+sentence is composed is worse than the one that ships. `target_brief.py` builds
+`Dispute`, and the two sides are labelled "One side" and "The other side" by the
+renderer — the builder does not know those strings, and teaching it them would put a
+sentence about the renderer's layout inside the module that must stay layout-free, in
+a feature whose split into reader and renderer is the reason either half is testable.
+Naming the claim ids instead prints our vocabulary at a reader the rest of the page
+relabels it for. Dropping the sentence replaces one that names a real file with none
+at all, and `_BOTH_POSSIBLE` ("We are treating both as possible.") is the wrong
+register because we *did* choose. The fix would have to be a wording nobody has
+found, not a change to what the code knows.
+
 ### Every directory a fan-out writes into is created by a member's `Write`, and until 2026-08-23 nothing told the member so
 
 Of a run's directories, `grep -rn mkdir src/rubrica/` creates `run.root`,
