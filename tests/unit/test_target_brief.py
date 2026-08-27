@@ -109,6 +109,12 @@ def test_source_index_returns_a_marker_when_claims_cannot_be_read(tmp_path):
         # commonpath raise ValueError -- which the handler below turns into "no
         # prefix", silently disabling shortening for every path in the run.
         (["", "/a/b/one.py", "/a/b/two.py"], "/a/b"),
+        # A fragment with no container: the base it partitions to is empty, so it
+        # must be filtered *after* the partition. Filtering the raw string instead
+        # lets "" into the set, commonpath raises, and shortening turns off for
+        # every path in the run -- leaking the staging path this helper exists to
+        # strip.
+        (["#/0", "/a/b/one.py", "/a/b/two.py"], "/a/b"),
     ],
 )
 def test_common_prefix(files, expected):

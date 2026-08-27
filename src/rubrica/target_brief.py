@@ -64,11 +64,20 @@ def _common_prefix(files: list[str]) -> str:
     of the machine rubrica ran on shipping to the target's owner, which is the one
     outcome this function exists to prevent.
     """
-    # `if f` is load-bearing, not defensive: `_input_sources` yields "" for a
-    # record whose `source_path` is not a string, and one "" makes `commonpath`
-    # raise, which the handler below reads as "no shared root" -- silently
-    # disabling shortening for every other path in the run.
-    real = sorted({f.partition("#")[0] for f in files if f})
+    # The emptiness filter is load-bearing, not defensive: `_input_sources` yields
+    # "" for a record whose `source_path` is not a string, and one "" makes
+    # `commonpath` raise, which the handler below reads as "no shared root" --
+    # silently disabling shortening for every other path in the run.
+    #
+    # It filters *after* the partition because the value that must be non-empty is
+    # the base, not the raw entry, and a fragment-only `source_path` ("#/0") is
+    # what tells the two apart: it is non-empty raw and empty once partitioned, so
+    # testing the raw string lets "" into the set anyway. Measured -- filtering
+    # first, `["#/0", "/a/b/one.py", "/a/b/two.py"]` returned "" and both absolute
+    # paths rendered whole. `intake.py:333` builds its fragment from a `Path`,
+    # which never stringifies empty, so the pipeline cannot produce that shape;
+    # a hand-edited manifest can, and it fails open with no marker and no finding.
+    real = sorted({base for base in (f.partition("#")[0] for f in files) if base})
     if not real:
         return ""
     try:
