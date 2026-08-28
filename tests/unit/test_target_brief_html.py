@@ -755,6 +755,59 @@ def test_page_renders_an_open_question_as_a_question(tmp_path):
     assert "propose" not in page
 
 
+def test_what_we_could_not_tell_is_a_numbered_table_of_questions(tmp_path):
+    """`open_questions` is `[]` on the golden toy -- measured, and recorded in the
+    docstring of `test_page_renders_an_open_question_as_a_question` -- so the section
+    states its absence and `_table` correctly returns `""` for no rows. The grid is
+    only reachable with a gap written in, which is why this sets one up the same way
+    that test does rather than rendering the golden build and reading the section."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["gaps"] = [
+        {
+            "id": "gap-retention",
+            "subject": "How long a closed ticket is kept",
+            "unknown": "Nothing we read says when a closed ticket is removed.",
+            "blocks": [],
+        }
+    ]
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    section = page.split("What we could not tell")[1].split("What we believe, in full")[0]
+    # Both split keys occur exactly once on the rendered page -- measured -- so the
+    # slice is this section and not a prefix of it.
+    assert "<th>#</th>" in section
+    assert "<th>The question</th>" in section
+    assert "<th>Our reference</th>" in section
+    assert '<span class="num">1</span>' in section
+
+
+def test_a_question_we_have_no_reference_for_gets_a_dash(tmp_path):
+    """The measurement recorded in `_group_d` accounts for a `subject` on all 49
+    questions across the three recordings, so a gap without one is only reachable
+    from an artifact written outside the schema. Both directions are asserted: the
+    dash is present *and* no cell in the section is empty, because an empty `<td>`
+    and a dash look identical to an assertion that only checks for a value."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["gaps"] = [
+        {
+            "id": "gap-owner",
+            "subject": "",
+            "unknown": "Nothing we read says who owns a closed ticket.",
+            "blocks": [],
+        }
+    ]
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    section = page.split("What we could not tell")[1].split("What we believe, in full")[0]
+    # The positive control: the row is rendered, so the two assertions below are
+    # about one absent field rather than about a section that did not render.
+    assert "Nothing we read says who owns a closed ticket." in section
+    assert "<td>—</td>" in section
+    assert "<td></td>" not in section
+
+
 def test_page_counts_the_pieces_a_sliced_input_was_read_as(tmp_path):
     """`slices` is 0 for every toy group -- measured -- so both halves of "we read
     199 files as 269 pieces" are unreachable without a sliced input written in. The

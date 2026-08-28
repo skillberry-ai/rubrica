@@ -750,8 +750,8 @@ def _group_d(run: RunPaths):
             "target that is more likely to mean we did not notice one than that "
             "none exists.</p>"
         )
-    items = []
-    for q in found:
+    rows = []
+    for position, q in enumerate(found, start=1):
         # The question leads and our label for it trails, which is the reverse of
         # the draft. Measured over the 49 questions in the three recordings:
         # `unknown` is a self-contained sentence in all 49, while `subject` is a
@@ -762,16 +762,32 @@ def _group_d(run: RunPaths):
         # rubrica identifier in the recipient's eye ahead of the question itself.
         # The label is kept rather than dropped, and named as ours, because it is
         # what they would quote back at us.
-        ref = f' <span class="ident">(our reference: {esc(q.subject)})</span>' if q.subject else ""
+        #
+        # It is now a column, which is the same ruling expressed in a grid: the
+        # question is the wide first column and our reference is the narrow last
+        # one, so the eye reaches the question before the slug on every row.
+        # The words "our reference:" and the parentheses stay in the cell, not just
+        # in the column heading. `test_page_renders_an_open_question_as_a_question`
+        # and `test_page_states_a_gap_that_records_no_question` both pin the exact
+        # string `(our reference: X)`, and what they are pinning is that the label is
+        # named as *ours* -- a column heading a reader skims past does not carry that.
+        #
+        # An em dash where there is no subject, never an empty cell: a `<td></td>`
+        # in a column of references reads as a value this render dropped, which is
+        # the same failure the absent sentences in this module exist to avoid.
+        ref = f'<span class="ident">(our reference: {esc(q.subject)})</span>' if q.subject else "—"
         # No run has yet produced a gap with no `unknown`, so this is the branch
         # for an artifact that was written outside the schema rather than one
-        # observed: state the absence, never leave a bullet holding only our id.
+        # observed: state the absence, never leave a row holding only our id.
         asked = esc(q.unknown) or "We did not record what it was that we could not tell."
-        items.append(f"<li>{asked}{ref}</li>")
+        # `esc(position)` on an integer this function itself produced, for the reason
+        # `_group_bc` states where it numbers its own index: one number rendered
+        # escaped in one place and raw in another is the shape a later edit reads as
+        # permission to skip it.
+        rows.append(_row(f'<span class="num">{esc(position)}</span>', asked, ref))
     return (
         "<p>These are things we could not work out from what we read. They are "
-        "questions, not criticisms.</p>"
-        f"<ul>{''.join(items)}</ul>"
+        "questions, not criticisms.</p>" + _table(("#", "The question", "Our reference"), rows)
     )
 
 
