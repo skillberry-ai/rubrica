@@ -195,7 +195,11 @@ _CSS = """
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #16171a; --fg: #e7e6e2; --muted: #a3a19b; --rule: #33353a;
-    --surface: #21232733; --zebra: #1c1e21; --quote: #1e2024;
+    /* Amended during implementation: opaque. The 20% alpha byte -- the only alpha
+       value in either palette -- composited over --bg to a 1.02 ratio and fell below
+       --zebra's 1.07, making the heading band the least distinct of the three
+       surfaces and inverting light mode. Opaque it measures 1.14 and 1.06. */
+    --surface: #212327; --zebra: #1c1e21; --quote: #1e2024;
     --attn-bg: #3a2c10; --attn-fg: #f0c675; --attn-line: #8a6a20;
     --settled-bg: #17293a; --settled-fg: #9dc4e6; --settled-line: #3d6a94;
     --both-bg: #262825; --both-fg: #b6b4ae; --both-line: #55544f;
@@ -503,10 +507,12 @@ empty-directory measurement.
         # The leading space is load-bearing: the suite pins
         # `' under <span class="file">docs</span>'` with it, and inside a `<td>` it
         # is invisible.
+        # The dash is the stated absence this module owes every empty value -- the
+        # bullet form could hide it by simply omitting a clause, a table cell cannot
+        # -- and it says the right thing: no directory means the group's files sit at
+        # the root of what we read, not that we failed to work out where they are.
         where = (
-            f' under <span class="file">{esc(group.directory)}</span>'
-            if group.directory
-            else "—"  # The stated absence. The bullet form hid it by having no clause.
+            f' under <span class="file">{esc(group.directory)}</span>' if group.directory else "—"
         )
         # The slice count is why "we read 269 things" and "we read 199 files" are
         # both true: 71 of parsec's inputs are `#/NN` slices of one capture. It sits
@@ -602,11 +608,18 @@ def test_disagreements_lead_with_an_index_table_of_every_dispute(tmp_path):
     section = page.split("Where our sources disagree")[1].split("What we could not tell")[0]
     assert "<th>#</th>" in section
     assert "<th>Status</th>" in section
-    assert "<th>What kind of disagreement</th>" in section
+    # Amended during implementation: no `What kind of disagreement` column. Measured
+    # across the 41 disputes on run-20260826-090456, `nature` is 14 characters at its
+    # shortest, 305 at the median and 780 at its longest, with 38 of 41 over 200, so a
+    # column of it is a wall of paragraphs and the index stops being scannable. Step 4
+    # below carries the same amendment and the rest of the reasoning.
     assert "<th>Files involved</th>" in section
     # The toy world records exactly one contradiction, so the index has one row
     # and its number is 1 -- positional, never the recorded id.
     assert '<span class="num">1</span>' in section
+    # The name claims the index *leads*, and nothing above pins that: with the table
+    # moved below the detail blocks every assertion here stays green.
+    assert section.index("<th>#</th>") < section.index("<h3>")
 
 
 def test_the_index_never_prints_a_recorded_dispute_id(tmp_path):
@@ -812,13 +825,18 @@ def _group_bc(run: RunPaths):
             if files
             else "we could not name them"
         )
-        # `nature` is carried verbatim. Verbatim because this document never rewrites
-        # prose; and it is the cell an owner scans to decide whether this row is one
-        # they know something about.
+        # `nature` is carried verbatim, because this document never rewrites prose.
+        # Amended during implementation: it is *not* an index column. Measured across
+        # the 41 disputes on run-20260826-090456 it runs 14 characters at its shortest,
+        # 305 at the median and 780 at its longest, with 38 of 41 over 200 -- only
+        # `count_mismatch` and `incompatible_precondition` are the short tokens this
+        # plan assumed. A column of those is a wall, which destroys the one thing an
+        # index is for; the files are the better handle at index width, because an owner
+        # scans 41 rows for a name they recognise in their own tree. Truncating it into
+        # the cell was rejected: an excerpt of a 780-character paragraph can invert its
+        # meaning, and this page may not rewrite selected prose.
         nature = esc(dispute.nature) or "we could not read our own note of what about"
-        index_rows.append(
-            _row(f'<span class="num">{position}</span>', chip, nature, involved)
-        )
+        index_rows.append(_row(f'<span class="num">{esc(position)}</span>', chip, involved))
         # `taken` is `""` for `unresolved` -- Task 4 leaves it empty rather than
         # asserting a decision nobody made. The renderer says so out loud instead
         # of emitting an empty bold paragraph: on this page, silence after two
@@ -826,13 +844,19 @@ def _group_bc(run: RunPaths):
         taken = dispute.taken or "We have not decided between them."
         rows = _side_rows(dispute.side_a, "One side") + _side_rows(dispute.side_b, "The other side")
         blocks.append(
+            # Amended with the index above, and for the same measurement: the heading is
+            # the number and the chip, nothing else, because on 38 of this run's 41
+            # disputes heading on `nature` puts a multi-hundred-character paragraph
+            # inside an `<h3>`. The nature moves to a paragraph directly beneath.
+            #
             # "The disagreement: " is pinned by
             # `test_page_labels_the_nature_of_a_disagreement_rather_than_leading_with_it`,
             # which records that a bare `count_mismatch` reads as a sentence we wrote
-            # badly rather than as a category we were handed. The label lives here,
-            # once, and the index cell carries the bare nature because its column
-            # heading is already the label.
-            f"<h3>{esc(position)}. The disagreement: {nature} {chip}</h3>"
+            # badly rather than as a category we were handed. The label stays adjacent
+            # to the nature, which is what keeps those pinned strings whole -- it just
+            # sits in the paragraph now rather than in the heading.
+            f"<h3>{esc(position)}. {chip}</h3>"
+            + f"<p>The disagreement: {nature}</p>"
             + _table(("Side", "Source", "What it says"), rows)
             + f"<p><strong>{esc(taken)}</strong></p>"
         )
@@ -840,7 +864,7 @@ def _group_bc(run: RunPaths):
         "<p>Two things we read said different things. Each one below is a place "
         "where a word from you settles it. The table lists them all; the detail "
         "under it quotes both sides.</p>"
-        + _table(("#", "Status", "What kind of disagreement", "Files involved"), index_rows)
+        + _table(("#", "Status", "Files involved"), index_rows)
         + "".join(blocks)
     )
 ```
