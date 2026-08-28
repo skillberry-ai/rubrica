@@ -459,7 +459,10 @@ MSG
 def test_what_we_read_is_a_table_with_a_kind_column(tmp_path):
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
-    section = page.split("What we read")[1].split("<h2>")[0]
+    # Split on the heading, not the bare phrase: "What we read" first occurs at page
+    # offset 2635 inside `_CSS`'s `.file, .ident` comment, against the heading at 6809,
+    # so a bare-phrase split returns a slice of the stylesheet.
+    section = page.split("<h2>What we read</h2>")[1].split("<h2>")[0]
     assert "<table>" in section or '<table class' in section
     assert "<th>What kind</th>" in section
     assert "<th>Where</th>" in section
@@ -475,7 +478,7 @@ def test_what_we_read_keeps_its_count_sentence_above_the_table(tmp_path):
     owner would have named is the one behind an "and 24 more"."""
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
-    section = page.split("What we read")[1].split("<h2>")[0]
+    section = page.split("<h2>What we read</h2>")[1].split("<h2>")[0]
     assert section.index("We built this description by reading") < section.index("<table")
 ```
 
@@ -501,7 +504,9 @@ empty-directory measurement.
         # `' under <span class="file">docs</span>'` with it, and inside a `<td>` it
         # is invisible.
         where = (
-            f' under <span class="file">{esc(group.directory)}</span>' if group.directory else ""
+            f' under <span class="file">{esc(group.directory)}</span>'
+            if group.directory
+            else "—"  # The stated absence. The bullet form hid it by having no clause.
         )
         # The slice count is why "we read 269 things" and "we read 199 files" are
         # both true: 71 of parsec's inputs are `#/NN` slices of one capture. It sits
