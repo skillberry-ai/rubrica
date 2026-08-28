@@ -588,7 +588,13 @@ def _side_rows(refs, label: str) -> list[str]:
         # A side whose claims did not resolve to any input. Saying so beats
         # dropping the side: `taken` below may still name a file, and a page that
         # answers a question it never asked reads as a page with something missing.
-        return [_row(esc(label), "we could not resolve which file states it", "")]
+        #
+        # The quote cell is a dash, never `""`. There is no wording to put there --
+        # nothing resolved, so nothing was quoted -- but Task 2's ruling on the
+        # absent directory applies unchanged: this module states an absence rather
+        # than leaving a cell blank, because an empty `<td>` reads as a render that
+        # broke and the bullet form could hide the same gap by omitting a clause.
+        return [_row(esc(label), "we could not resolve which file states it", "—")]
     rows = []
     for ref in refs:
         # Task 4's handoff: a sliced input's `path` carries the slicer's fragment,
@@ -647,10 +653,15 @@ def _group_bc(run: RunPaths):
 
     Two tiers, which is new. The index table exists because 41 disputes -- measured
     on run-20260826-090456 -- is more than anyone scans as prose, and the one thing
-    a reader wants first is which of them are still open. The detail stays whole
-    beneath it because the two verbatim quotes are what let an owner settle a
-    dispute, and they cannot be shortened without taking away the thing they are
-    being asked to rule on.
+    a reader wants first is which of them are still open. It carries three columns
+    and deliberately not the nature: on that same run the field's median length is
+    305 characters, so an index column of it is a wall of the paragraphs the detail
+    below already prints. The detail stays whole beneath it because the two verbatim
+    quotes are what let an owner settle a dispute, and they cannot be shortened
+    without taking away the thing they are being asked to rule on.
+
+    No anchor or link between the two tiers. The number is the handle, printed in
+    both places, and a reader who wants dispute 7 scrolls to heading 7.
 
     Numbering is positional, 1-based, and is not `Dispute.id`: the id is the run's
     own string and this page never shows one.
@@ -681,16 +692,20 @@ def _group_bc(run: RunPaths):
             if files
             else "we could not name them"
         )
-        # `nature` is carried verbatim. Verbatim because this document never rewrites
-        # prose; and it is the cell an owner scans to decide whether this row is one
-        # they know something about.
+        # `nature` is carried verbatim, because this document never rewrites prose.
+        # It is not an index column: measured across the 41 disputes on
+        # run-20260826-090456 it runs 14 characters at its shortest, 305 at the
+        # median and 780 at its longest, with 38 of 41 over 200. A column of those
+        # is a wall, which destroys the one thing an index is for. The files are the
+        # better handle at index width anyway -- an owner scans 41 rows for a name
+        # they recognise in their own tree, which a 305-character paragraph is not.
         nature = esc(dispute.nature) or "we could not read our own note of what about"
         # `esc(position)` on an integer this function itself produced, matching the
         # `<h3>` below rather than being spelled two ways in one function: the module
         # docstring's rule covers numbers, `_group_a` already escapes its two counts,
         # and one number rendered escaped in one place and raw in another is the shape
         # a later edit reads as permission to skip it.
-        index_rows.append(_row(f'<span class="num">{esc(position)}</span>', chip, nature, involved))
+        index_rows.append(_row(f'<span class="num">{esc(position)}</span>', chip, involved))
         # `taken` is `""` for `unresolved` -- Task 4 leaves it empty rather than
         # asserting a decision nobody made. The renderer says so out loud instead
         # of emitting an empty bold paragraph: on this page, silence after two
@@ -698,13 +713,18 @@ def _group_bc(run: RunPaths):
         taken = dispute.taken or "We have not decided between them."
         rows = _side_rows(dispute.side_a, "One side") + _side_rows(dispute.side_b, "The other side")
         blocks.append(
+            # The heading is the number and the chip, nothing else. The nature is a
+            # paragraph beneath it for the reason measured above: on 38 of
+            # run-20260826-090456's 41 disputes, heading on that field puts a
+            # multi-hundred-character paragraph inside an `<h3>`.
+            f"<h3>{esc(position)}. {chip}</h3>"
             # "The disagreement: " is pinned by
             # `test_page_labels_the_nature_of_a_disagreement_rather_than_leading_with_it`,
             # which records that a bare `count_mismatch` reads as a sentence we wrote
-            # badly rather than as a category we were handed. The label lives here,
-            # once, and the index cell carries the bare nature because its column
-            # heading is already the label.
-            f"<h3>{esc(position)}. The disagreement: {nature} {chip}</h3>"
+            # badly rather than as a category we were handed. The label stays
+            # immediately in front of the nature, which is what keeps that true after
+            # the heading gave the field up.
+            + f"<p>The disagreement: {nature}</p>"
             + _table(("Side", "Source", "What it says"), rows)
             + f"<p><strong>{esc(taken)}</strong></p>"
         )
@@ -712,7 +732,7 @@ def _group_bc(run: RunPaths):
         "<p>Two things we read said different things. Each one below is a place "
         "where a word from you settles it. The table lists them all; the detail "
         "under it quotes both sides.</p>"
-        + _table(("#", "Status", "What kind of disagreement", "Files involved"), index_rows)
+        + _table(("#", "Status", "Files involved"), index_rows)
         + "".join(blocks)
     )
 

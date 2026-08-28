@@ -613,6 +613,14 @@ def test_page_says_it_could_not_resolve_a_side_rather_than_dropping_it(tmp_path)
         run.claims_dir.chmod(0o755)
     assert page.count("we could not resolve which file states it") == 2
     assert '<td>One side</td><td><span class="file">' not in page
+    # And the quote cell beside each of those two states its absence with a dash --
+    # Task 2's ruling on the absent directory, reached here on the one branch of this
+    # section that has no wording to put in that column. Both halves, for the reason
+    # the `What we read` test records: `"<td></td>" not in` cannot tell an empty cell
+    # from a dash, so on its own it would leave a revert to `""` green.
+    section = page.split("Where our sources disagree")[1].split("What we could not tell")[0]
+    assert section.count("<td>—</td>") == 2
+    assert "<td></td>" not in section
 
 
 def test_page_says_a_side_is_stated_in_a_file_it_could_not_name(tmp_path):
@@ -1209,7 +1217,6 @@ def test_disagreements_lead_with_an_index_table_of_every_dispute(tmp_path):
     section = page.split("Where our sources disagree")[1].split("What we could not tell")[0]
     assert "<th>#</th>" in section
     assert "<th>Status</th>" in section
-    assert "<th>What kind of disagreement</th>" in section
     assert "<th>Files involved</th>" in section
     # The toy world records exactly one contradiction, so the index has one row
     # and its number is 1 -- positional, never the recorded id.
