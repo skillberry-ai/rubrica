@@ -1088,3 +1088,57 @@ def test_page_states_a_field_whose_type_we_did_not_record(tmp_path):
     # The name still ships, and its typed siblings in the same list are untouched --
     # so the brackets go and nothing else does.
     assert "Fields: ticket_id, queue (string)," in page
+
+
+def test_every_colour_token_is_defined_in_both_palettes():
+    """A token defined only in `:root` renders as nothing in dark mode, and the
+    author working in light mode cannot see it. Both directions matter, so this
+    reads the tokens actually *used* and checks each palette defines every one."""
+    css = target_brief_html._CSS
+    used = set(re.findall(r"var\((--[a-z0-9-]+)\)", css))
+    assert used, "no custom properties in use -- this test would be vacuous"
+    light, _, rest = css.partition("prefers-color-scheme: dark")
+    assert rest, "no dark block in the stylesheet"
+    for token in sorted(used):
+        assert f"{token}:" in light, f"{token} is used but not defined for light"
+        assert f"{token}:" in rest, f"{token} is used but not defined for dark"
+
+
+def test_table_helper_emits_a_header_row_and_nothing_for_no_rows():
+    assert target_brief_html._table(("A", "B"), []) == ""
+    html = target_brief_html._table(("A", "B"), [target_brief_html._row("1", "2")])
+    assert "<th>A</th>" in html and "<th>B</th>" in html
+    assert "<td>1</td><td>2</td>" in html
+
+
+def test_table_helper_escapes_its_headers():
+    html = target_brief_html._table(("<x>",), [target_brief_html._row("c")])
+    assert "<th>&lt;x&gt;</th>" in html
+
+
+def test_a_chip_always_carries_its_word():
+    """Colour is never the only carrier: the page is emailed, printed and
+    forwarded into clients that strip CSS."""
+    chip = target_brief_html._chip("undecided", "Undecided")
+    assert ">Undecided<" in chip
+    assert 'class="undecided"' in chip
+
+
+def test_a_chip_escapes_its_word():
+    assert "&lt;b&gt;" in target_brief_html._chip("both", "<b>")
+
+
+def test_every_status_chip_names_a_variant_and_a_word():
+    for resolution, (variant, word) in target_brief_html._STATUS_CHIP.items():
+        assert variant and word, resolution
+        assert word == word.strip()
+
+
+def test_the_page_carries_no_stylesheet_link_and_no_font_import():
+    """No webfont: the page is opened behind a corporate proxy, offline, in a
+    mail client's browser view. A downloaded face is one more thing that fails
+    to arrive."""
+    css = target_brief_html._CSS
+    assert "@import" not in css
+    assert "font-face" not in css
+    assert "http" not in css

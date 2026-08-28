@@ -50,45 +50,123 @@ from rubrica import target_brief
 from rubrica.paths import RunPaths
 from rubrica.summary import Malformed, Marker, esc
 
-# Wider measure and larger type than `summary_html`: this is read as prose by
-# somebody deciding whether it is true, not scanned as a table by an operator.
+# Wider measure than `summary_html` for the reason it always had -- this is read as
+# prose by somebody deciding whether it is true -- and wider again than the 46rem it
+# shipped at, because the same reader now scans it as tables. That is a change to
+# record rather than an argument against the original: the page is read both ways.
+#
+# Every colour is a custom property defined twice, once per palette. Explicit `--bg`
+# and `--fg` rather than leaning on `color-scheme: light dark` alone: once a chip has
+# a background, the UA default is no longer a surface the contrast was checked
+# against.
 _CSS = """
-:root { color-scheme: light dark; }
-body { font: 16px/1.65 system-ui, sans-serif; margin: 0 auto; max-width: 46rem;
-       padding: 2.5rem 1.5rem 6rem; }
-h1 { font-size: 1.6rem; margin-bottom: .2rem; }
-h2 { font-size: 1.15rem; margin-top: 2.75rem; border-bottom: 1px solid currentColor;
-     padding-bottom: .3rem; }
-h3 { font-size: 1rem; margin: 1.75rem 0 .35rem; }
-p { margin: .6rem 0; }
-ul { margin: .5rem 0; padding-left: 1.3rem; }
-li { margin: .3rem 0; }
-.lede { font-size: 1.05rem; }
+:root {
+  color-scheme: light dark;
+  --bg: #fbfaf8; --fg: #1c1c1a; --muted: #5d5c58; --rule: #dedcd6;
+  --surface: #f1efe9; --zebra: #f7f6f2; --quote: #f4f3ee;
+  --attn-bg: #fdf1da; --attn-fg: #7a4a05; --attn-line: #d59a1f;
+  --settled-bg: #e5eef7; --settled-fg: #1f4a70; --settled-line: #6b9dc7;
+  --both-bg: #eceae5; --both-fg: #4e4d49; --both-line: #a8a6a0;
+  --one-bg: #f6f1f8; --one-fg: #64407c; --one-line: #a97fc0;
+  --kind-api: #16645f; --kind-mcp: #6b3f7a; --kind-entity: #74551a;
+  --kind-trace: #7a4718; --kind-doc: #2f5d8a; --kind-code: #2c6549;
+  --kind-other: #55544f;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16171a; --fg: #e7e6e2; --muted: #a3a19b; --rule: #33353a;
+    --surface: #21232733; --zebra: #1c1e21; --quote: #1e2024;
+    --attn-bg: #3a2c10; --attn-fg: #f0c675; --attn-line: #8a6a20;
+    --settled-bg: #17293a; --settled-fg: #9dc4e6; --settled-line: #3d6a94;
+    --both-bg: #262825; --both-fg: #b6b4ae; --both-line: #55544f;
+    --one-bg: #2a2033; --one-fg: #c9a5e0; --one-line: #6b4a80;
+    --kind-api: #5ec4bc; --kind-mcp: #c39ad4; --kind-entity: #d4b869;
+    --kind-trace: #e0a06a; --kind-doc: #8ab4dd; --kind-code: #77c79c;
+    --kind-other: #a3a19b;
+  }
+}
+body { font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+       margin: 0 auto; max-width: 70rem; padding: 2.5rem 1.5rem 6rem;
+       background: var(--bg); color: var(--fg); }
+h1 { font-size: 1.7rem; margin-bottom: .2rem; letter-spacing: -.01em; }
+h2 { font-size: 1.1rem; margin-top: 3rem; padding-bottom: .35rem;
+     border-bottom: 2px solid var(--rule); letter-spacing: .01em; }
+h3 { font-size: .98rem; margin: 2rem 0 .4rem; }
+p { margin: .6rem 0; max-width: 62rem; }
+.lede { font-size: 1.08rem; max-width: 46rem; }
 .meta { opacity: .75; font-size: .9rem; margin-top: 0; }
 /* The one thing on the page that qualifies the whole page. */
-.banner { border-left: 4px solid #c60; padding: .6rem .9rem; margin: 1.5rem 0;
-          font-weight: 600; }
-.absent, .malformed { opacity: .75; font-style: italic; }
-.malformed { border-left: 3px solid #c60; padding-left: .6rem; }
+.banner { border-left: 4px solid var(--attn-line); background: var(--attn-bg);
+          color: var(--attn-fg); padding: .7rem 1rem; margin: 1.5rem 0;
+          font-weight: 600; border-radius: 0 4px 4px 0; }
+.absent, .malformed { color: var(--muted); font-style: italic; }
+.malformed { border-left: 3px solid var(--attn-line); padding-left: .6rem; }
 /* Top level rather than scoped under `.src`, which is where the brief put it:
    `_group_a` and `_data_types` both use `.file` outside a source line, and a
    selector that only matched inside one left every filename in the "What we read"
    listing in the body face. `.ident` is the target's own name for something that
    is not a file -- a collection -- and wants the same treatment for the same
    reason: it is a string to copy exactly, not prose to read. */
-.file, .ident { font-family: ui-monospace, monospace; }
+.file, .ident { font-family: ui-monospace, monospace; font-size: .93em; }
 /* Where we read it. Subordinate to the sentence above it, never competing. */
-.src { display: block; font-size: .85rem; opacity: .7; margin-top: .15rem; }
-.disputed { font-weight: 600; }
-.quote { font-family: ui-monospace, monospace; font-size: .85rem; }
-.legend { font-size: .9rem; opacity: .8; }
-.reply { border: 1px solid #8886; border-radius: 4px; padding: 1rem 1.2rem;
-         margin-top: 3rem; }
-details { margin: .8rem 0; }
+.src { display: block; font-size: .85rem; color: var(--muted); margin-top: .15rem; }
+.quote { font-family: ui-monospace, monospace; font-size: .85rem;
+         background: var(--quote); padding: .05rem .3rem; border-radius: 3px; }
+.legend { font-size: .9rem; color: var(--muted); }
+.reply { border: 1px solid var(--rule); border-radius: 6px; padding: 1rem 1.4rem;
+         margin-top: 3rem; background: var(--surface); }
+details { margin: 1rem 0; border: 1px solid var(--rule); border-radius: 6px;
+          padding: .6rem .9rem; }
 details summary { cursor: pointer; font-weight: 600; }
-dl { margin: .4rem 0; }
-dt { font-weight: 600; margin-top: .7rem; }
-dd { margin: .15rem 0 .15rem 1.2rem; }
+/* Each table scrolls inside its own wrapper, so a narrow screen scrolls one
+   table and never the whole page. */
+.tw { overflow-x: auto; margin: 1rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: .93rem; }
+th { text-align: left; background: var(--surface); color: var(--fg);
+     font-size: .78rem; text-transform: uppercase; letter-spacing: .05em;
+     padding: .5rem .6rem; border-bottom: 2px solid var(--rule);
+     white-space: nowrap; }
+td { padding: .55rem .6rem; border-bottom: 1px solid var(--rule);
+     vertical-align: top; }
+tbody tr:nth-child(even) { background: var(--zebra); }
+.num { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* One class per chip, never a shared `chip` class plus a variant: a bare class
+   string is what the existing suite asserts on, and a shared prefix would break
+   `class="x"` into `class="chip x"` under it. */
+.undecided, .settled, .both, .one-source, .disputed,
+.kind-api, .kind-mcp, .kind-entity, .kind-trace, .kind-doc, .kind-code,
+.kind-other {
+  display: inline-block; font-size: .76rem; font-weight: 600;
+  padding: .08rem .45rem; border-radius: 999px; border: 1px solid;
+  white-space: nowrap; line-height: 1.5;
+}
+.undecided, .disputed { background: var(--attn-bg); color: var(--attn-fg);
+                        border-color: var(--attn-line); }
+.settled { background: var(--settled-bg); color: var(--settled-fg);
+           border-color: var(--settled-line); }
+.both { background: var(--both-bg); color: var(--both-fg);
+        border-color: var(--both-line); }
+.one-source { background: var(--one-bg); color: var(--one-fg);
+              border-color: var(--one-line); }
+.kind-api { color: var(--kind-api); border-color: currentColor; }
+.kind-mcp { color: var(--kind-mcp); border-color: currentColor; }
+.kind-entity { color: var(--kind-entity); border-color: currentColor; }
+.kind-trace { color: var(--kind-trace); border-color: currentColor; }
+.kind-doc { color: var(--kind-doc); border-color: currentColor; }
+.kind-code { color: var(--kind-code); border-color: currentColor; }
+.kind-other { color: var(--kind-other); border-color: currentColor; }
+/* The page is emailed, so it is printed. Backgrounds do not print by default;
+   the border and the chip's own word are what survive. */
+@media print {
+  body { max-width: none; background: #fff; color: #000; }
+  .tw { overflow: visible; }
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; }
+  .undecided, .settled, .both, .one-source, .disputed,
+  .kind-api, .kind-mcp, .kind-entity, .kind-trace, .kind-doc, .kind-code,
+  .kind-other { background: transparent; color: inherit;
+                border-color: currentColor; }
+}
 """
 
 # One rendering of "we looked and no document said", emitted at most once per page
@@ -164,6 +242,104 @@ _SEE_BANNER = "see the note at the top of this page"
 def _kind(kind: str) -> str:
     """One input kind in the owner's vocabulary, or its own token if we have none."""
     return _KIND_LABELS.get(kind, kind)
+
+
+# `kind` -> the CSS class carrying that kind's hue. Seven, matching `_KIND_LABELS`,
+# and an off-schema kind falls to `kind-other` while `_kind` still ships its own
+# token as the word: an unknown kind gets a neutral colour and its real name, never
+# a colour we invented a meaning for.
+#
+# These are unordered categories, so the hues are seven distinct families and not a
+# light-to-dark ramp. A ramp would say one kind outranks another, which is a claim
+# the run does not make.
+#
+# `openapi` is the one slug that is not its own key shortened, and both reasons are
+# measured rather than aesthetic. A slug spelled `kind-openapi` puts that enum token
+# into the `<style>` block of every page regardless of what the run read, which
+# `test_page_relabels_every_input_kind_rather_than_shipping_the_token` fails on --
+# it greps the whole page for a bare `openapi`, and a hyphen is a word boundary. The
+# obvious second try, `kind-http`, fails the no-webfont guard for the same structural
+# reason: that one asserts no `http` anywhere in the stylesheet, and it cannot tell a
+# class name from the start of a URL. So the slug follows `_KIND_LABELS`, which
+# already refuses to name the format the way the enum does, and lands on the words
+# the owner actually reads.
+_KIND_SLUG = {
+    "openapi": "kind-api",
+    "mcp_tool_schema": "kind-mcp",
+    "entity_schema": "kind-entity",
+    "trace": "kind-trace",
+    "design_doc": "kind-doc",
+    "source_code": "kind-code",
+    "other": "kind-other",
+}
+
+# `resolution` -> (CSS class, the word the chip carries).
+#
+# Amber for `unresolved` because it is the only one of the four an owner can act on,
+# and this page exists to be acted on. Blue for the two `preferred_*` and grey for
+# `both_possible`: both are decisions we already took, so they report rather than
+# ask.
+#
+# Read through `.get(resolution, _STATUS_CHIP["unresolved"])`. An off-enum value is
+# undecided, never a decision: `target_brief._taken` already returns `""` for
+# anything outside the three it knows, so the chip and the sentence agree without
+# either consulting the other.
+_STATUS_CHIP = {
+    "unresolved": ("undecided", "Undecided"),
+    "preferred_a": ("settled", "Side chosen"),
+    "preferred_b": ("settled", "Side chosen"),
+    "both_possible": ("both", "Both possible"),
+}
+
+
+def _chip(variant: str, word: str) -> str:
+    """A coloured chip that always carries its word.
+
+    One class, not a shared `chip` class plus a variant, for the reason `_CSS`
+    gives: the suite asserts on bare `class="x"` strings and a shared prefix would
+    break them.
+
+    The word is not optional and there is no branch that omits it. Colour is never
+    the only carrier of meaning here -- this page is emailed, printed, and forwarded
+    into clients that strip CSS, and a chip whose meaning lives in its background is
+    a chip that loses its meaning in transit.
+    """
+    return f'<span class="{variant}">{esc(word)}</span>'
+
+
+def _kind_chip(kind: str) -> str:
+    """One input kind as a chip, in the owner's vocabulary."""
+    return _chip(_KIND_SLUG.get(kind, "kind-other"), _kind(kind))
+
+
+def _row(*cells: str) -> str:
+    """One table row from cell contents that are already escaped or already markup.
+
+    Deliberately not escaping: every caller passes either markup it built (a chip, a
+    `.file` span) or a string it has already put through `esc`. A second escape here
+    would double-encode every filename on the page, and the alternative -- escaping
+    here and not at the call site -- would mean no cell could contain markup.
+    """
+    return "<tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + "</tr>"
+
+
+def _table(headers: tuple[str, ...], rows: list[str], klass: str = "") -> str:
+    """One table, in a wrapper that scrolls it rather than the page.
+
+    Returns `""` for no rows rather than an empty table, so that no caller can ship
+    a header row with nothing under it: a table with headings and no body reads as a
+    render that broke, which is the same failure the five "absent" sentences in this
+    module exist to avoid. Every caller already has a sentence for its empty case
+    and must keep using it.
+    """
+    if not rows:
+        return ""
+    head = "".join(f"<th>{esc(h)}</th>" for h in headers)
+    attr = f' class="{klass}"' if klass else ""
+    return (
+        f'<div class="tw"><table{attr}><thead><tr>{head}</tr></thead>'
+        f"<tbody>{''.join(rows)}</tbody></table></div>"
+    )
 
 
 def _marker(body: Marker, terse: bool) -> str:
