@@ -982,10 +982,13 @@ fenced banner `gate-brief --gate 1` prints when no capability is bound. That is
 deliberate rather than an oversight, and the alternative was built and taken back
 out. **A `check-refs` finding at the seal was designed, implemented in `ae1b74e`,
 and reverted in `11a6c25`.** This is the live account of why it is not there, so
-that its absence is not read as an oversight and re-proposed. It miscategorised
-its own condition: a `1` from `check-refs` tells `rb-orchestrate` "a repairable
-stage defect, spend the one repair attempt", and no re-dispatch can add a binding
-at all — `rb-reconcile-capabilities`' section 5 tells the pass to leave `binding`
+that its absence is not read as an oversight and re-proposed — and it is the
+account to trust over the one in `11a6c25`'s own message, which asserts the halt
+described below indicatively. That message is a record and stays as written; the
+hedge here is the correction to it. **The finding** miscategorised its own
+condition: a `1` from `check-refs` tells `rb-orchestrate` "a repairable stage
+defect, spend the one repair attempt", and no re-dispatch can add a binding at
+all — `rb-reconcile-capabilities`' section 5 tells the pass to leave `binding`
 off rather than guess a tool name, so the pass did the right thing and nothing
 downstream can supply one. `check-refs` also runs *before* gate 1, so the finding
 **would have halted** a correct run ahead of the gate it was written to be read

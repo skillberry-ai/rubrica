@@ -1273,14 +1273,17 @@ def test_gate_zero_reports_an_unreadable_dispositions_directory_as_a_broken_run(
 # Issue 17 narrowed `denominator.capability_cells` to the cells a scenario can
 # actually be driven through, and this listing is the last report of an excluded
 # capability a human can still act on -- not the only one. `seal_score` writes an
-# `unreachable` hole per undrivable cell (rounds.py:1317-1327) and `emit` names one
-# capability per instance (emit.py:99-107), but the first is read at gate 2 and the
-# second at stage 06, by which point the loop has already spent its rounds against
-# the narrowed denominator. The spec's paired `check-refs` finding was removed in
-# 11a6c25 because `check-refs` runs before gate 1, its exit 1 means "a repairable
+# `unreachable` hole per undrivable cell (rounds.py:1332-1350, seal_score's
+# `injected` list) and `emit` names one capability per instance (emit.py:99-107),
+# but the first is read at gate 2 and the second at stage 06, by which point the
+# loop has already spent its rounds against the narrowed denominator. The spec's
+# paired `check-refs` finding was removed in 11a6c25 because `check-refs` runs
+# before gate 1, its exit 1 means "a repairable
 # stage defect, spend the one repair attempt", and an unbound capability is not
-# repairable by re-dispatch -- so the finding halted correct runs before the gate it
-# was meant to be read at. `gate-brief` is a report, not a gate, which is why every
+# repairable by re-dispatch -- so the finding would have halted a correct run before
+# the gate it was meant to be read at: derived from rb-orchestrate's A3 and A4,
+# never observed, since no orchestrated run was dispatched against an unbound world
+# model to watch the halt. `gate-brief` is a report, not a gate, which is why every
 # test below also pins exit 0.
 
 
