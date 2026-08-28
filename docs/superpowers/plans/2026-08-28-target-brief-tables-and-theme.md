@@ -188,7 +188,7 @@ _CSS = """
   --settled-bg: #e5eef7; --settled-fg: #1f4a70; --settled-line: #6b9dc7;
   --both-bg: #eceae5; --both-fg: #4e4d49; --both-line: #a8a6a0;
   --one-bg: #f6f1f8; --one-fg: #64407c; --one-line: #a97fc0;
-  --kind-openapi: #16645f; --kind-mcp: #6b3f7a; --kind-entity: #74551a;
+  --kind-api: #16645f; --kind-mcp: #6b3f7a; --kind-entity: #74551a;
   --kind-trace: #7a4718; --kind-doc: #2f5d8a; --kind-code: #2c6549;
   --kind-other: #55544f;
 }
@@ -200,7 +200,7 @@ _CSS = """
     --settled-bg: #17293a; --settled-fg: #9dc4e6; --settled-line: #3d6a94;
     --both-bg: #262825; --both-fg: #b6b4ae; --both-line: #55544f;
     --one-bg: #2a2033; --one-fg: #c9a5e0; --one-line: #6b4a80;
-    --kind-openapi: #5ec4bc; --kind-mcp: #c39ad4; --kind-entity: #d4b869;
+    --kind-api: #5ec4bc; --kind-mcp: #c39ad4; --kind-entity: #d4b869;
     --kind-trace: #e0a06a; --kind-doc: #8ab4dd; --kind-code: #77c79c;
     --kind-other: #a3a19b;
   }
@@ -254,7 +254,7 @@ tbody tr:nth-child(even) { background: var(--zebra); }
    string is what the existing suite asserts on, and a shared prefix would break
    `class="x"` into `class="chip x"` under it. */
 .undecided, .settled, .both, .one-source, .disputed,
-.kind-openapi, .kind-mcp, .kind-entity, .kind-trace, .kind-doc, .kind-code,
+.kind-api, .kind-mcp, .kind-entity, .kind-trace, .kind-doc, .kind-code,
 .kind-other {
   display: inline-block; font-size: .76rem; font-weight: 600;
   padding: .08rem .45rem; border-radius: 999px; border: 1px solid;
@@ -268,7 +268,7 @@ tbody tr:nth-child(even) { background: var(--zebra); }
         border-color: var(--both-line); }
 .one-source { background: var(--one-bg); color: var(--one-fg);
               border-color: var(--one-line); }
-.kind-openapi { color: var(--kind-openapi); border-color: currentColor; }
+.kind-api { color: var(--kind-api); border-color: currentColor; }
 .kind-mcp { color: var(--kind-mcp); border-color: currentColor; }
 .kind-entity { color: var(--kind-entity); border-color: currentColor; }
 .kind-trace { color: var(--kind-trace); border-color: currentColor; }
@@ -283,7 +283,7 @@ tbody tr:nth-child(even) { background: var(--zebra); }
   thead { display: table-header-group; }
   tr { page-break-inside: avoid; }
   .undecided, .settled, .both, .one-source, .disputed,
-  .kind-openapi, .kind-mcp, .kind-entity, .kind-trace, .kind-doc, .kind-code,
+  .kind-api, .kind-mcp, .kind-entity, .kind-trace, .kind-doc, .kind-code,
   .kind-other { background: transparent; color: inherit;
                 border-color: currentColor; }
 }
@@ -303,8 +303,14 @@ Insert after `_kind` (which currently ends around line 170):
 # These are unordered categories, so the hues are seven distinct families and not a
 # light-to-dark ramp. A ramp would say one kind outranks another, which is a claim
 # the run does not make.
+# Amended during implementation, and the reason is measured rather than aesthetic: a
+# slug spelled `kind-openapi` puts that enum token in the `<style>` block, and
+# `test_page_relabels_every_input_kind_rather_than_shipping_the_token` asserts
+# `\bopenapi\b` is absent from the whole page -- `-` is a word boundary, so the class
+# matches. `kind-http` is not the way out either: it fails this task's own no-webfont
+# check, which cannot tell a class from a URL.
 _KIND_SLUG = {
-    "openapi": "kind-openapi",
+    "openapi": "kind-api",
     "mcp_tool_schema": "kind-mcp",
     "entity_schema": "kind-entity",
     "trace": "kind-trace",
