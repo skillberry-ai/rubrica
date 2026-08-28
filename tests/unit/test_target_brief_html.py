@@ -60,9 +60,14 @@ def test_page_names_the_target_and_asks_the_question(tmp_path):
 
 def test_page_leads_with_the_asks_and_puts_the_description_beneath(tmp_path):
     page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
-    # Tier 1 before tier 2: the ask-list is the point, the full description is
-    # the appendix that supports it.
-    assert page.index("Where our sources disagree") < page.index("What we believe")
+    # Tier 1 before tier 2: the asks are the point, the full description is the
+    # appendix that supports it. The first index is heading-scoped because the ranked
+    # asks table names this section in a cell, and that cell is above both tiers by
+    # construction -- so the bare phrase compared two offsets that stay ordered
+    # however the sections move: 8384 for the cell against 9228 for the heading,
+    # measured. `What we believe` needs no tag; it occurs once, and that once is its
+    # own heading.
+    assert page.index("<h2>Where our sources disagree</h2>") < page.index("What we believe")
     # Tier 2 is collapsed; tier 1 is not.
     body = page[page.index("What we believe") :]
     assert "<details>" in body
@@ -71,16 +76,28 @@ def test_page_leads_with_the_asks_and_puts_the_description_beneath(tmp_path):
 
 def test_page_renders_every_group_and_every_tier_two_section(tmp_path):
     page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
+    # Every heading tagged, and by the helper that renders it. Two reasons, both
+    # measured on a rendered page rather than reasoned about:
+    #
+    #   - the ranked asks table names three of these sections in its "Where it is"
+    #     column, so a bare `in page` for `What we read`, `Where our sources disagree`
+    #     or `What we could not tell` is satisfied by a table cell and proves nothing
+    #     about the section. `What we read` was already reachable that way before the
+    #     table existed -- it occurs first inside a `_CSS` comment, which is the
+    #     collision the `What we read` section test records.
+    #   - `_section` and the two tier headings emit an `<h2>`; `_collapsed` emits a
+    #     `<summary>` and deliberately no `<h2>`, which is what the next test is
+    #     about. One spelling for all seven would fail on whichever it did not
+    #     describe.
     for heading in (
         "What we read",
         "Where our sources disagree",
         "What we could not tell",
-        "What we believe",
-        "What it can do",
-        "What data it holds",
-        "Who uses it",
+        "What we believe, in full",
     ):
-        assert heading in page
+        assert f"<h2>{heading}</h2>" in page
+    for heading in ("What it can do", "What data it holds", "Who uses it"):
+        assert f"<summary>{heading}</summary>" in page
 
 
 def test_page_prints_each_collapsed_heading_exactly_once(tmp_path):
@@ -337,14 +354,15 @@ def test_page_states_the_partial_run_once_and_still_shows_every_section(tmp_path
     # when all we know is that a file would not read.
     assert page.count("Nothing on file here — ") == 5
     assert "not got far enough" not in page
-    for heading in (
-        "Where our sources disagree",
-        "What we could not tell",
-        "What it can do",
-        "What data it holds",
-        "Who uses it",
-    ):
-        assert heading in page
+    # Tagged for `test_page_renders_every_group_and_every_tier_two_section`'s two
+    # reasons: the first two are cells of the ranked asks table as well as headings,
+    # and the last three are `<summary>`s rather than `<h2>`s. Untagged, the two that
+    # matter most here -- the `_section` headings, the ones a marker could have
+    # swallowed -- were the two the asks table satisfied.
+    for heading in ("Where our sources disagree", "What we could not tell"):
+        assert f"<h2>{heading}</h2>" in page
+    for heading in ("What it can do", "What data it holds", "Who uses it"):
+        assert f"<summary>{heading}</summary>" in page
     # The positive control the count above needs: the one section that is not
     # world-model-backed is not a marker at all on this run, so the five is five
     # sections rather than every section on the page.
@@ -457,7 +475,12 @@ def test_the_legend_glosses_both_phrasings_and_leads_the_section_carrying_them(t
     assert "An outcome labelled “Not addressed” says the same thing." in page
     assert "Neither means the behaviour is missing from your system." in page
     # Above the lines it glosses, and inside the ask that carries most of them.
-    assert page.index("What we could not tell") < page.index('class="legend"')
+    # Heading-scoped for the reason `test_page_leads_with_the_asks_and_puts_the
+    # _description_beneath` records: the asks table names this section in a cell at
+    # 8478, against the heading at 10454 and the legend at 10489, so the bare phrase
+    # put the legend after a cell it is always after and said nothing about whether
+    # it is inside the section.
+    assert page.index("<h2>What we could not tell</h2>") < page.index('class="legend"')
     assert page.index('class="legend"') < page.index("No claim directly addresses")
     assert page.index('class="legend"') < page.index("What we believe, in full")
 
@@ -879,8 +902,11 @@ def test_each_tier_heading_is_followed_by_its_own_content(tmp_path):
         after = page[page.index(tag) + len(tag) :].lstrip()
         # Structural rather than a phrase pin: what must hold is that the section is
         # filled, not which words or which element fill it. Enumerated rather than
-        # `not startswith("<h2")`, so that a heading followed by a stray rule or an
-        # empty wrapper is still a failure.
+        # `not startswith("<h2")`, so that a heading followed by a rule, a disclosure
+        # or any other element fails too, not only a heading followed by a heading.
+        # It cannot tell a filled table wrapper from an empty one and does not need
+        # to: `_table` returns "" for no rows, which is why no header row on this page
+        # stands over nothing.
         assert after.startswith(("<p", '<div class="tw">')), heading
 
 
@@ -1528,14 +1554,15 @@ def test_a_marker_section_keeps_its_heading_and_renders_no_table(tmp_path):
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     run.world_model.unlink()
     page = target_brief_html.render(run)
-    for heading in (
-        "Where our sources disagree",
-        "What we could not tell",
-        "What it can do",
-        "What data it holds",
-        "Who uses it",
-    ):
-        assert heading in page
+    # Tagged, for `test_page_renders_every_group_and_every_tier_two_section`'s two
+    # reasons. It matters most here: the first two are the only `_section` headings in
+    # the list, so untagged -- satisfied by the asks table's cells at 8515 rather than
+    # by the headings at 9359 and 9479 -- this guard did not prove that any `_section`
+    # heading survives a description it could not read, which is half of its name.
+    for heading in ("Where our sources disagree", "What we could not tell"):
+        assert f"<h2>{heading}</h2>" in page
+    for heading in ("What it can do", "What data it holds", "Who uses it"):
+        assert f"<summary>{heading}</summary>" in page
     # The five world-model sections are gone, so the only tables left are the asks
     # and what we read -- never an empty grid where a section used to be.
     assert "<th>Status</th>" not in page
