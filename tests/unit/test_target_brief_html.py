@@ -1445,3 +1445,25 @@ def test_every_empty_cell_in_the_detail_tables_states_itself_with_a_dash(tmp_pat
     # is content and the two dashes are exactly the branches taken.
     assert "<td><strong>Ticket</strong></td><td>—</td><td>—</td><td><div" in section
     assert "<td></td>" not in section
+
+
+def test_page_states_an_operation_whose_outcomes_we_did_not_record(tmp_path):
+    """`outcome_classes` is schema-legal empty and unreached by real data: 0 of 39
+    capabilities on run-20260826-090456 have none, which is the same profile as the
+    em-dash branches this plan shipped unguarded twice. In the definition list this
+    replaced an outcome-less operation simply had no `<dd>` for outcomes; in a table
+    the same join is an empty cell, which reads as a render that broke."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    # The positive control on the golden world: both toy operations record outcomes,
+    # so the sentence is one the page states only when an operation has none.
+    assert "We did not record what can come back." not in page
+    world_model = json.loads(run.world_model.read_text())
+    world_model["capabilities"][0]["outcome_classes"] = []
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    assert "We did not record what can come back." in page
+    assert "<td></td>" not in page
+    # And the sibling operation, untouched, still renders its own outcomes -- so this
+    # passes on a section that rendered rather than on one that failed to.
+    assert "the ticket and its comments, ordered by position" in page

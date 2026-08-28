@@ -59,6 +59,30 @@ from rubrica.summary import Malformed, Marker, esc
 # and `--fg` rather than leaning on `color-scheme: light dark` alone: once a chip has
 # a background, the UA default is no longer a surface the contrast was checked
 # against.
+#
+# **Everything below this line is page content, comments included.** `_CSS` is
+# interpolated into the page's own `<style>`, so a class name or a CSS comment inside
+# it is text a page-wide assertion will find -- and most assertions on this page are
+# page-wide greps, because what they guard is what a recipient can read. Three
+# symptoms of that one property, each measured here rather than reasoned about:
+#
+#   - a class named `kind-openapi` failed
+#     `test_page_relabels_every_input_kind_rather_than_shipping_the_token`, which greps
+#     for a bare `openapi` and treats a hyphen as a word boundary; the obvious retry,
+#     `kind-http`, failed the no-webfont guard, which cannot tell a class name from the
+#     start of a URL. `_KIND_SLUG`'s comment records where that landed.
+#   - a comment quoting the disputed chip's wording verbatim, to explain why that chip
+#     is exempted from `nowrap`, put the phrase on every page and failed
+#     `test_page_relabels_the_kinds_and_flags_the_dispute_in_a_multi_source_line`, whose
+#     positive control is that the phrase is *absent* from a page with no disputed
+#     element.
+#   - a comment naming the tag of the definition list the tables replaced shipped that
+#     tag as page text. Green, because no test asserts those tags are gone -- and
+#     therefore a trap set for the test that one day does.
+#
+# So: quote no wording the page carries and no tag the page emits. Describe the shape
+# instead. A comment here explaining a rule costs nothing; a comment here quoting the
+# thing the rule is about is a false positive somebody else has to debug.
 _CSS = """
 :root {
   color-scheme: light dark;
