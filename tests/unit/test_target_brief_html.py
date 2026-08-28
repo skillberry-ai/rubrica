@@ -1142,3 +1142,37 @@ def test_the_page_carries_no_stylesheet_link_and_no_font_import():
     assert "@import" not in css
     assert "font-face" not in css
     assert "http" not in css
+
+
+def test_what_we_read_is_a_table_with_a_kind_column(tmp_path):
+    """Scoped to the section, so that a table anywhere else on the page cannot
+    satisfy it.
+
+    Split on the heading *markup*, not on the words: measured, the bare phrase
+    "What we read" occurs first inside a `_CSS` comment -- the one explaining why
+    `.file` is not scoped to source lines -- so splitting on it lands the section in
+    the stylesheet and `<table` is genuinely absent from what comes back.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    section = page.split("<h2>What we read</h2>")[1].split("<h2>")[0]
+    assert "<table>" in section or "<table class" in section
+    assert "<th>What kind</th>" in section
+    assert "<th>Where</th>" in section
+    assert "<th>The files</th>" in section
+    # The kind chip, coloured and carrying its own word.
+    assert 'class="kind-doc"' in section
+    assert ">Written documentation<" in section
+
+
+def test_what_we_read_keeps_its_count_sentence_above_the_table(tmp_path):
+    """The sentence is what gives a reader the size before they wade in, and
+    `_group_a`'s ruling is that the listing stays uncapped because the file the
+    owner would have named is the one behind an "and 24 more".
+
+    Splits on the heading markup for the reason the test above states.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    section = page.split("<h2>What we read</h2>")[1].split("<h2>")[0]
+    assert section.index("We built this description by reading") < section.index("<table")

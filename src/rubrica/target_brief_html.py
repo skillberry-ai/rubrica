@@ -502,21 +502,25 @@ def _group_a(run: RunPaths):
         return groups
     if not groups:
         return '<p class="absent">We have no record of what we read.</p>'
-    items = []
+    rows = []
     for group in groups:
         # Conditional: every toy group has `directory == ""` -- the three inputs
         # share their whole directory, so nothing survives the prefix strip -- and
         # unconditionally this printed `... under : notes.md` with an empty span.
+        #
+        # The leading space is load-bearing: the suite pins
+        # `' under <span class="file">docs</span>'` with it, and inside a `<td>` it
+        # is invisible.
         where = (
             f' under <span class="file">{esc(group.directory)}</span>' if group.directory else ""
         )
         # The slice count is why "we read 269 things" and "we read 199 files" are
-        # both true: 71 of parsec's inputs are `#/NN` slices of one capture.
+        # both true: 71 of parsec's inputs are `#/NN` slices of one capture. It sits
+        # in the `Where` cell rather than becoming a column of its own, because a
+        # column would print a number for every group and the ruling below is that
+        # two counts appear only when they differ.
         tail = f" (read as {len(group.files) + group.slices} pieces)" if group.slices else ""
-        items.append(
-            f"<li><strong>{esc(_kind(group.kind))}</strong>"
-            f"{where}{tail}: {_files_html(group.files)}</li>"
-        )
+        rows.append(_row(_kind_chip(group.kind), f"{where}{tail}", _files_html(group.files)))
     files = sum(len(group.files) for group in groups)
     pieces = sum(len(group.files) + group.slices for group in groups)
     # Two counts only when they differ, because "199 files, read as 269 pieces" is
@@ -528,7 +532,7 @@ def _group_a(run: RunPaths):
         f"file{'' if files == 1 else 's'} of yours{read_as}. "
         "<strong>If something important is not here, tell us — that is the most "
         "useful correction you can give us.</strong></p>"
-        f"<ul>{''.join(items)}</ul>"
+        + _table(("What kind", "Where", "The files"), rows)
     )
 
 
