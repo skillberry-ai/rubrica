@@ -511,8 +511,13 @@ def _group_a(run: RunPaths):
         # The leading space is load-bearing: the suite pins
         # `' under <span class="file">docs</span>'` with it, and inside a `<td>` it
         # is invisible.
+        #
+        # The dash is the stated absence this module owes every empty value -- the
+        # bullet form could hide it by simply omitting a clause, a table cell cannot
+        # -- and it says the right thing: no directory means the group's files sit at
+        # the root of what we read, not that we failed to work out where they are.
         where = (
-            f' under <span class="file">{esc(group.directory)}</span>' if group.directory else ""
+            f' under <span class="file">{esc(group.directory)}</span>' if group.directory else "—"
         )
         # The slice count is why "we read 269 things" and "we read 199 files" are
         # both true: 71 of parsec's inputs are `#/NN` slices of one capture. It sits
