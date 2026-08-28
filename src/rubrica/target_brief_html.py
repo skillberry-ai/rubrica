@@ -99,7 +99,16 @@ _CSS = """
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #16171a; --fg: #e7e6e2; --muted: #a3a19b; --rule: #33353a;
-    --surface: #21232733; --zebra: #1c1e21; --quote: #1e2024;
+    /* Opaque, necessarily. This shipped with a 20% alpha byte -- the only alpha value
+       in either palette -- and composited over the background it measured 1.02 there
+       while --zebra measured 1.07, which put the heading band *below* the striped rows
+       and made it the least distinct of the three surfaces, inverting light mode. It
+       also cost the reply block its card. Opaque it measures 1.14 against the
+       background and 1.06 against --zebra, matching light's 1.10 and 1.06.
+
+       The rejected value is described rather than written: an eight-digit hex here is
+       a literal a future palette check would find in the stylesheet it is checking. */
+    --surface: #212327; --zebra: #1c1e21; --quote: #1e2024;
     --attn-bg: #3a2c10; --attn-fg: #f0c675; --attn-line: #8a6a20;
     --settled-bg: #17293a; --settled-fg: #9dc4e6; --settled-line: #3d6a94;
     --both-bg: #262825; --both-fg: #b6b4ae; --both-line: #55544f;
@@ -127,10 +136,10 @@ p { margin: .6rem 0; max-width: 62rem; }
 .malformed { border-left: 3px solid var(--attn-line); padding-left: .6rem; }
 /* Top level rather than scoped under `.src`, which is where the brief put it:
    `_group_a` and `_data_types` both use `.file` outside a source line, and a
-   selector that only matched inside one left every filename in the "What we read"
-   listing in the body face. `.ident` is the target's own name for something that
-   is not a file -- a collection -- and wants the same treatment for the same
-   reason: it is a string to copy exactly, not prose to read. */
+   selector that only matched inside one left every filename in the first section's
+   listing of what we read in the body face. `.ident` is the target's own name for
+   something that is not a file -- a collection -- and wants the same treatment for
+   the same reason: it is a string to copy exactly, not prose to read. */
 .file, .ident { font-family: ui-monospace, monospace; font-size: .93em; }
 /* Where we read it. Subordinate to the sentence above it, never competing. */
 .src { display: block; font-size: .85rem; color: var(--muted); margin-top: .15rem; }
@@ -183,7 +192,7 @@ tbody tr:nth-child(even) { background: var(--zebra); }
    own `<style>`, and the suite's negative control for that phrase greps the whole
    page: a comment naming it puts it on every page whether the run has a disputed
    element or not, which is exactly the trap `.file`'s comment above already sprang
-   on "What we read". */
+   by naming the first section's heading. */
 .disputed { white-space: normal; }
 /* One outcome, relation, rule or goal per line inside its cell. A cell holding
    several of them run together reads as one sentence about the row rather than as
@@ -359,6 +368,24 @@ def _kind_chip(kind: str) -> str:
     return _chip(_KIND_SLUG.get(kind, "kind-other"), _kind(kind))
 
 
+# No cell on this page is ever empty, and which of the two forms an empty value takes
+# is decided per column rather than per module. Both forms are in use on purpose, and
+# the difference between analogous-looking columns is this rule rather than drift:
+#
+#   - a **sentence** where the empty set is itself a recorded fact about the target
+#     rather than a hole in our record ("Takes no parameters." -- an operation with no
+#     parameters genuinely takes none, which is a statement an owner can correct), or
+#     where every filled cell in that column is prose, so a lone dash among them reads
+#     as a render that broke. That covers the two in "What it can do" and the one in
+#     "Who uses it".
+#   - a **dash** where the column's filled cells are names, types and short labelled
+#     lines a reader scans rather than reads -- three such slots in "What data it
+#     holds" alone, plus the handle and the directory. A sentence set among identifiers
+#     is read as one of them; a dash cannot be.
+#
+# Unifying either way would mean dashing a column whose neighbours are all sentences,
+# or writing a sentence into a column of identifiers. Neither is an improvement, so
+# the split stands and is recorded here instead.
 def _row(*cells: str) -> str:
     """One table row from cell contents that are already escaped or already markup.
 
@@ -370,7 +397,7 @@ def _row(*cells: str) -> str:
     return "<tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + "</tr>"
 
 
-def _table(headers: tuple[str, ...], rows: list[str], klass: str = "") -> str:
+def _table(headers: tuple[str, ...], rows: list[str]) -> str:
     """One table, in a wrapper that scrolls it rather than the page.
 
     Returns `""` for no rows rather than an empty table, so that no caller can ship
@@ -382,9 +409,8 @@ def _table(headers: tuple[str, ...], rows: list[str], klass: str = "") -> str:
     if not rows:
         return ""
     head = "".join(f"<th>{esc(h)}</th>" for h in headers)
-    attr = f' class="{klass}"' if klass else ""
     return (
-        f'<div class="tw"><table{attr}><thead><tr>{head}</tr></thead>'
+        f'<div class="tw"><table><thead><tr>{head}</tr></thead>'
         f"<tbody>{''.join(rows)}</tbody></table></div>"
     )
 
@@ -468,6 +494,22 @@ def _collapsed(heading: str, body, terse: bool = False) -> str:
     return f"<details><summary>{esc(heading)}</summary>\n{_body(body, terse)}\n</details>"
 
 
+def _file_spans(files) -> str:
+    """A comma-separated run of filenames, each in the monospace face.
+
+    One helper for the three sites that build this -- the source sentence under a
+    statement, one group's file listing, and the disagreement index's cell naming the
+    files two sides came from. All three were the same expression character for
+    character, and holding the `esc` in one place is the point of folding them: a
+    filename is the one string on this page a reader is meant to copy exactly.
+
+    Callers own everything around the run. `_files_html` appends its own "and N more
+    we could not name" tail, which is why the count and the join stay separate: the
+    tail is that group's arithmetic against the run's record and not another name.
+    """
+    return ", ".join(f'<span class="file">{esc(f)}</span>' for f in files)
+
+
 def _provenance(prov) -> str:
     """Where we read it: the files and their kinds, as one sentence.
 
@@ -501,12 +543,12 @@ def _provenance(prov) -> str:
         # No pointer to the page banner either -- on the path that produces this,
         # there is no banner to point at.
         return '<span class="src">We could not work out which of your files this came from.</span>'
-    files = ", ".join(f'<span class="file">{esc(f)}</span>' for f in prov.files)
+    files = _file_spans(prov.files)
     if prov.single_source:
         text = f"From {files}"
     else:
         kinds = ", ".join(esc(_kind(k)) for k in prov.kinds)
-        text = f"From {len(prov.files)} sources ({kinds}): {files}"
+        text = f"From {esc(len(prov.files))} sources ({kinds}): {files}"
     return f'<span class="src">{text}.</span>'
 
 
@@ -556,10 +598,12 @@ def _files_html(files) -> str:
     """
     named = [f for f in files if f.strip()]
     missing = len(files) - len(named)
-    shown = ", ".join(f'<span class="file">{esc(f)}</span>' for f in named)
+    shown = _file_spans(named)
     if not missing:
         return shown
-    tail = f"{missing} more we could not name" if shown else f"{missing} we could not name"
+    tail = (
+        f"{esc(missing)} more we could not name" if shown else f"{esc(missing)} we could not name"
+    )
     return f"{shown} and {tail}" if shown else tail
 
 
@@ -602,7 +646,7 @@ def _group_a(run: RunPaths):
         # in the `Where` cell rather than becoming a column of its own, because a
         # column would print a number for every group and the ruling below is that
         # two counts appear only when they differ.
-        tail = f" (read as {len(group.files) + group.slices} pieces)" if group.slices else ""
+        tail = f" (read as {esc(len(group.files) + group.slices)} pieces)" if group.slices else ""
         rows.append(_row(_kind_chip(group.kind), f"{where}{tail}", _files_html(group.files)))
     files = sum(len(group.files) for group in groups)
     pieces = sum(len(group.files) + group.slices for group in groups)
@@ -765,11 +809,7 @@ def _group_bc(run: RunPaths):
             target_brief._file_and_piece(ref.path)[0] for ref in (*dispute.side_a, *dispute.side_b)
         ]
         files = list(dict.fromkeys(n for n in names if n))
-        involved = (
-            ", ".join(f'<span class="file">{esc(f)}</span>' for f in files)
-            if files
-            else "we could not name them"
-        )
+        involved = _file_spans(files) if files else "we could not name them"
         # `nature` is carried verbatim, because this document never rewrites prose.
         # It is not an index column: measured across the 41 disputes on
         # run-20260826-090456 it runs 14 characters at its shortest, 305 at the

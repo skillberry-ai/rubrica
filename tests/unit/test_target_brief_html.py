@@ -1287,7 +1287,7 @@ def test_what_we_read_is_a_table_with_a_kind_column(tmp_path):
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
     section = page.split("<h2>What we read</h2>")[1].split("<h2>")[0]
-    assert "<table>" in section or "<table class" in section
+    assert "<table>" in section
     assert "<th>What kind</th>" in section
     assert "<th>Where</th>" in section
     assert "<th>The files</th>" in section
@@ -1331,6 +1331,10 @@ def test_disagreements_lead_with_an_index_table_of_every_dispute(tmp_path):
     # The toy world records exactly one contradiction, so the index has one row
     # and its number is 1 -- positional, never the recorded id.
     assert '<span class="num">1</span>' in section
+    # "lead with" is the whole claim of the name, and nothing else here pins it:
+    # moving the index below the per-dispute blocks left every assertion above
+    # green. Same shape as `test_what_we_read_keeps_its_count_sentence_above_the_table`.
+    assert section.index("<th>#</th>") < section.index("<h3>")
 
 
 def test_the_index_never_prints_a_recorded_dispute_id(tmp_path):
@@ -1403,6 +1407,7 @@ def test_the_three_detail_sections_are_tables(tmp_path):
     assert "<th>What it is</th>" in page
     assert "<th>Held as</th>" in page
     assert "<th>Fields</th>" in page
+    assert "<th>Rules and relations</th>" in page
     assert "<th>Who</th>" in page
     assert "<th>What they are trying to do</th>" in page
 
