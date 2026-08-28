@@ -621,7 +621,7 @@ def test_page_says_it_could_not_resolve_a_side_rather_than_dropping_it(tmp_path)
     # section that has no wording to put in that column. Both halves, for the reason
     # the `What we read` test records: `"<td></td>" not in` cannot tell an empty cell
     # from a dash, so on its own it would leave a revert to `""` green.
-    section = page.split("Where our sources disagree")[1].split("What we could not tell")[0]
+    section = page.split("<h2>Where our sources disagree</h2>")[1].split("<h2>")[0]
     assert section.count("<td>—</td>") == 2
     assert "<td></td>" not in section
 
@@ -639,8 +639,8 @@ def test_page_says_a_side_is_stated_in_a_file_it_could_not_name(tmp_path):
     """
 
     def disagreement(page):
-        start = page.index("Where our sources disagree")
-        return page[start : page.index("What we could not tell", start)]
+        start = page.index("<h2>Where our sources disagree</h2>")
+        return page[start : page.index("<h2>", start + 1)]
 
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     section = disagreement(target_brief_html.render(run))
@@ -776,9 +776,10 @@ def test_what_we_could_not_tell_is_a_numbered_table_of_questions(tmp_path):
     ]
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
-    section = page.split("What we could not tell")[1].split("What we believe, in full")[0]
-    # Both split keys occur exactly once on the rendered page -- measured -- so the
-    # slice is this section and not a prefix of it.
+    section = page.split("<h2>What we could not tell</h2>")[1].split("<h2>")[0]
+    # Scoped to the heading tag rather than the bare phrase: the ranked asks table
+    # names this section in its "Where it is" column, so the phrase first occurs there
+    # and a bare split returned a row of that table -- measured on this test.
     assert "<th>#</th>" in section
     assert "<th>The question</th>" in section
     assert "<th>Our reference</th>" in section
@@ -803,7 +804,7 @@ def test_a_question_we_have_no_reference_for_gets_a_dash(tmp_path):
     ]
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
-    section = page.split("What we could not tell")[1].split("What we believe, in full")[0]
+    section = page.split("<h2>What we could not tell</h2>")[1].split("<h2>")[0]
     # The positive control: the row is rendered, so the two assertions below are
     # about one absent field rather than about a section that did not render.
     assert "Nothing we read says who owns a closed ticket." in section
@@ -859,20 +860,28 @@ def test_page_states_a_gap_that_records_no_question(tmp_path):
     assert "(our reference: escalation-path)" in page
 
 
-def test_each_tier_heading_is_followed_by_prose(tmp_path):
+def test_each_tier_heading_is_followed_by_its_own_content(tmp_path):
     """Both tier headings introduce sections rather than carrying content of their
-    own, so each needs its own lead sentence. Rendered on all three recordings, the
-    draft's `What we most need from you` sat directly above the next `<h2>` -- the
-    one place on the page that read as a section that had failed to fill in."""
+    own, so each needs something of its own under it. Rendered on all three
+    recordings, the draft's `What we most need from you` sat directly above the next
+    `<h2>` -- the one place on the page that read as a section that had failed to
+    fill in.
+
+    The two fill differently now: the asks are a ranked table, its counterpart below
+    still its lead sentence. The failure guarded is the same one either way, a
+    heading standing directly above the next heading.
+    """
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
     for heading in ("What we most need from you", "What we believe, in full"):
         tag = f"<h2>{heading}</h2>"
         assert tag in page
         after = page[page.index(tag) + len(tag) :].lstrip()
-        # Structural rather than a phrase pin: what must hold is that prose follows,
-        # not which words it uses.
-        assert after.startswith("<p"), heading
+        # Structural rather than a phrase pin: what must hold is that the section is
+        # filled, not which words or which element fill it. Enumerated rather than
+        # `not startswith("<h2")`, so that a heading followed by a stray rule or an
+        # empty wrapper is still a failure.
+        assert after.startswith(("<p", '<div class="tw">')), heading
 
 
 def test_page_labels_a_slice_of_a_file_rather_than_juxtaposing_the_fragment(tmp_path):
@@ -1289,7 +1298,7 @@ def test_what_we_read_keeps_its_count_sentence_above_the_table(tmp_path):
 def test_disagreements_lead_with_an_index_table_of_every_dispute(tmp_path):
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
-    section = page.split("Where our sources disagree")[1].split("What we could not tell")[0]
+    section = page.split("<h2>Where our sources disagree</h2>")[1].split("<h2>")[0]
     assert "<th>#</th>" in section
     assert "<th>Status</th>" in section
     assert "<th>Files involved</th>" in section
@@ -1312,7 +1321,7 @@ def test_the_index_never_prints_a_recorded_dispute_id(tmp_path):
 def test_each_dispute_shows_its_two_sides_as_a_table_of_source_and_quote(tmp_path):
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
-    section = page.split("Where our sources disagree")[1].split("What we could not tell")[0]
+    section = page.split("<h2>Where our sources disagree</h2>")[1].split("<h2>")[0]
     assert "<th>Side</th>" in section
     assert "<th>Source</th>" in section
     assert "<th>What it says</th>" in section
@@ -1467,3 +1476,75 @@ def test_page_states_an_operation_whose_outcomes_we_did_not_record(tmp_path):
     # And the sibling operation, untouched, still renders its own outcomes -- so this
     # passes on a section that rendered rather than on one that failed to.
     assert "the ticket and its comments, ordered by position" in page
+
+
+def test_the_asks_are_a_ranked_table_of_three(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    section = page.split("What we most need from you")[1].split("<h2>")[0]
+    assert "<th>Rank</th>" in section
+    assert "<th>What we need</th>" in section
+    assert "<th>Where it is</th>" in section
+    # `_reply()` refers back to "the three things we asked for at the top are
+    # ranked", so the table must have exactly three rows for that to stay true.
+    assert section.count("<tr>") == 4  # one header row plus three
+
+
+def test_a_populated_page_carries_no_bullet_list(tmp_path):
+    """The regression guard for the whole change. Measured against a run that
+    reaches every section, because a fixture that reaches only some would let a
+    bullet survive in the sections it never renders.
+
+    Asserted against the rendered page rather than the module source: several
+    comments in the module record what the definition list they replaced did, and a
+    source-level grep would read those as markup that ships.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    # The positive control: the page is populated, so there is something to have
+    # rendered as a bullet in the first place.
+    assert "<table" in page
+    assert "<li>" not in page
+    assert "<ul>" not in page
+    assert "<dl>" not in page
+    assert "<dt>" not in page
+
+
+def test_no_severity_vocabulary_reaches_the_page(tmp_path):
+    """Colour on this page encodes recorded status and kind. It never encodes a
+    severity we assigned, and the words that would announce one are the cheapest
+    thing to check for. `blocks` is the field that would most naturally have become
+    a severity axis, and its values are stage names."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run).lower()
+    for word in ("severity", "critical", "high priority", "p1", "blocker", "urgent"):
+        assert word not in page, word
+
+
+def test_a_marker_section_keeps_its_heading_and_renders_no_table(tmp_path):
+    """A section that cannot be read keeps its heading and says so. `_table` returns
+    "" for no rows, so the failure this guards is a header row standing over nothing
+    -- which reads as a render that broke rather than as a fact we do not have."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.world_model.unlink()
+    page = target_brief_html.render(run)
+    for heading in (
+        "Where our sources disagree",
+        "What we could not tell",
+        "What it can do",
+        "What data it holds",
+        "Who uses it",
+    ):
+        assert heading in page
+    # The five world-model sections are gone, so the only tables left are the asks
+    # and what we read -- never an empty grid where a section used to be.
+    assert "<th>Status</th>" not in page
+    assert "<th>Operation</th>" not in page
+    assert 'class="banner"' in page
+
+
+def test_every_table_on_the_page_has_a_header_row(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    assert page.count("<table") == page.count("<thead>")
+    assert page.count("<table") >= 6

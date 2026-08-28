@@ -1153,9 +1153,20 @@ def render(run: RunPaths) -> str:
         # Its counterpart below ("What we believe, in full") always had its lead
         # sentence, so this is the sentence that was missing rather than a new
         # tier. It also states the ranking that the reply block refers back to.
-        "<p>Three things, in the order they help us most: a source we should have "
-        "read, a place our sources disagree, and something we could not work "
-        "out.</p>",
+        #
+        # Now a table, because the ranking *is* tabular: three asks, in order, each
+        # pointing at the section that answers it. The sentence stated an order the
+        # reader then had to hold; the table shows it. Three rows exactly -- `_reply`
+        # says "the three things we asked for at the top are ranked", and
+        # `CLAUDE.md` and `docs/reference/cli.md` both say three ranked asks lead.
+        _table(
+            ("Rank", "What we need", "Where it is"),
+            [
+                _row("1", "A source we should have read", "What we read"),
+                _row("2", "A place our sources disagree", "Where our sources disagree"),
+                _row("3", "Something we could not work out", "What we could not tell"),
+            ],
+        ),
         _section("What we read", _group_a(run)),
         _section("Where our sources disagree", _group_bc(run), terse),
         _section("What we could not tell", could_not_tell, terse, lead=legend),
