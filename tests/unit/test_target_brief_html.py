@@ -135,7 +135,10 @@ def test_page_names_the_handle_under_both_toy_operations(tmp_path):
     for both capabilities -- the brief's comment claiming it never fires was wrong.
     The handle is kept because it is the name the owner's own tooling uses."""
     page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
-    assert page.count("Called as: query_tickets<") == 2
+    # The label the sentence carried is now the column heading, so the cell holds the
+    # bare handle. The ruling is unchanged and so are both counts: shown when it
+    # differs from the title, once when one operation's title has become the handle.
+    assert page.count("<td>query_tickets</td>") == 2
     run = build_toy_run(tmp_path / "same", upto="reconcile-seal")
     world_model = json.loads(run.world_model.read_text())
     # The positive control for the conditional: an operation whose sentence is
@@ -143,7 +146,7 @@ def test_page_names_the_handle_under_both_toy_operations(tmp_path):
     world_model["capabilities"][0]["operation"] = "query_tickets"
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
-    assert page.count("Called as: query_tickets<") == 1
+    assert page.count("<td>query_tickets</td>") == 1
 
 
 def test_page_names_the_collection_each_data_type_lives_in(tmp_path):
@@ -664,7 +667,7 @@ def test_page_says_a_side_is_stated_in_a_file_it_could_not_name(tmp_path):
 def test_page_states_each_empty_belief_rather_than_rendering_an_empty_list(tmp_path):
     """Five `not found` branches no golden run reaches, because the toy world has
     inputs, capabilities, entities, an actor and one contradiction. Each is a
-    sentence rather than an empty `<dl>`: a section with nothing in it reads as a
+    sentence rather than an empty table: a section with nothing in it reads as a
     render that broke.
 
     The contradiction branch is the one a real run reaches most often -- most runs
@@ -970,7 +973,10 @@ def test_page_states_that_it_could_not_place_a_belief_rather_than_leaving_it_bla
     shutil.rmtree(run.claims_dir)
     page = target_brief_html.render(run)
     assert page.count("We could not work out which of your files this came from.") == 5
-    assert "<dd></dd>" not in page
+    # An empty cell is the new shape of the blank `<dd></dd>` that shipped once: the
+    # sentence goes in the "Where we read it" column, and a row that lost it would
+    # lose it as `<td></td>` rather than as a blank definition.
+    assert "<td></td>" not in page
     # The condition the run is in: no banner fired, which is why the sentence has to
     # stand on its own rather than point up at one.
     assert 'class="banner"' not in page
@@ -1077,17 +1083,21 @@ def test_page_heads_an_operation_on_its_handle_when_the_operation_string_is_blan
     precedent rather than a new rule."""
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
-    # The positive control: with a real `operation`, that string heads the entry.
-    assert "<dt>query_tickets.find_tickets</dt>" in page
+    # The positive control: with a real `operation`, that string heads the row.
+    assert "<strong>query_tickets.find_tickets</strong>" in page
     world_model = json.loads(run.world_model.read_text())
     world_model["capabilities"][0]["operation"] = " "
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
-    assert "<dt> </dt>" not in page
-    assert "<dt>query_tickets</dt>" in page
+    # The blank-heading hole in its new spelling: the heading is a `<strong>` in the
+    # first cell, so a whitespace-only `operation` reaching it would print as a cell
+    # holding one space, and a heading dropped altogether as an empty cell.
+    assert "<strong> </strong>" not in page
+    assert "<td></td>" not in page
+    assert "<strong>query_tickets</strong>" in page
     # And the sibling operation, untouched, still heads itself on its own string --
-    # so the fallback is one entry's and not the whole list collapsing onto handles.
-    assert "<dt>query_tickets.get_ticket</dt>" in page
+    # so the fallback is one row's and not the whole table collapsing onto handles.
+    assert "<strong>query_tickets.get_ticket</strong>" in page
 
 
 def test_page_states_an_operation_it_could_not_name_rather_than_heading_it_blank(tmp_path):
@@ -1105,20 +1115,27 @@ def test_page_states_an_operation_it_could_not_name_rather_than_heading_it_blank
     world_model["capabilities"][0].pop("binding", None)
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
-    assert "<dt></dt>" not in page
-    assert "<dt> </dt>" not in page
-    # `Called as:` with nothing after it is the second blank, and it goes because the
-    # handle it would print is the same unnameable string as the title.
-    assert not re.search(r"Called as:\s*</dd>", page)
-    assert "One operation whose name we did not record" in page
-    # The entry is still an entry: the parameters the run did read are under the
-    # stated absence, so the fact survives the missing name.
-    assert "<dt>One operation whose name we did not record</dt><dd>Takes:" in page
+    # Both blanks in their new spelling: a heading cell holding nothing, and one
+    # holding a space.
+    assert "<td></td>" not in page
+    assert "<strong> </strong>" not in page
+    # The "Called as" cell is the second blank the entry shipped, and it goes for the
+    # same reason -- the handle it would print is the same unnameable string as the
+    # title -- so the cell states its absence with a dash instead.
+    assert "<strong>One operation whose name we did not record</strong>" in page
+    # The row is still a row: the parameters the run did read sit in the same row as
+    # the stated absence, so the fact survives the missing name. Asserted on the cell
+    # that follows the heading cell rather than on the whole row, which would pin the
+    # column order of everything after it.
+    assert (
+        "<td><strong>One operation whose name we did not record</strong></td><td>—</td>"
+        "<td>queue (string, optional)" in page
+    )
     # The positive control, on the golden world: neither the stated absence nor a
     # blank heading is on a page whose operations both have names.
     clean = target_brief_html.render(build_toy_run(tmp_path / "clean", upto="reconcile-seal"))
     assert "One operation whose name we did not record" not in clean
-    assert "<dt>query_tickets.find_tickets</dt>" in clean
+    assert "<strong>query_tickets.find_tickets</strong>" in clean
 
 
 def test_page_drops_a_headline_field_that_holds_only_whitespace(tmp_path):
@@ -1149,11 +1166,16 @@ def test_page_states_a_field_whose_type_we_did_not_record(tmp_path):
     this feature exists to render rather than to reject. Measured pre-fix:
     `Fields: ticket_id (), queue (string), ...` -- a bare pair of brackets, which
     reads as a rendering fault rather than as something we did not record, where the
-    sibling outcome path states its absence in words."""
+    sibling outcome path states its absence in words.
+
+    The `Fields: ` label the measurement quotes is now the column heading, so the list
+    is anchored on the start of its own cell instead. That is the same anchoring the
+    label gave -- it is the first field of the list, not any occurrence of the string
+    on the page -- against the markup the section is now rendered in."""
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
     # The positive control: with a type, the type is parenthesised after the name.
-    assert "Fields: ticket_id (integer)," in page
+    assert "<td>ticket_id (integer)," in page
     world_model = json.loads(run.world_model.read_text())
     world_model["entities"][0]["fields"][0]["type"] = ""
     run.world_model.write_text(json.dumps(world_model))
@@ -1161,7 +1183,7 @@ def test_page_states_a_field_whose_type_we_did_not_record(tmp_path):
     assert "ticket_id ()" not in page
     # The name still ships, and its typed siblings in the same list are untouched --
     # so the brackets go and nothing else does.
-    assert "Fields: ticket_id, queue (string)," in page
+    assert "<td>ticket_id, queue (string)," in page
 
 
 def test_every_colour_token_is_defined_in_both_palettes():
@@ -1333,3 +1355,93 @@ def test_an_off_enum_resolution_reads_as_undecided_and_asserts_no_decision(tmp_p
     assert 'class="undecided"' in page
     assert "We have not decided between them." in page
     assert 'class="settled"' not in page
+
+
+def test_the_three_detail_sections_are_tables(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    assert "<th>Operation</th>" in page
+    assert "<th>Called as</th>" in page
+    assert "<th>Takes</th>" in page
+    assert "<th>What can come back</th>" in page
+    assert "<th>Where we read it</th>" in page
+    assert "<th>What it is</th>" in page
+    assert "<th>Held as</th>" in page
+    assert "<th>Fields</th>" in page
+    assert "<th>Who</th>" in page
+    assert "<th>What they are trying to do</th>" in page
+
+
+def test_an_element_resting_on_one_source_says_so_in_a_chip(tmp_path):
+    """Measured on run-20260826-090456 through the helpers that render it: 28 of 30
+    entities and 4 of 39 operations rest on a single source. It varies, which is
+    why it earns a chip -- a badge that never varies implies a distinction was
+    checked."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    # Every element in the golden toy world rests on one file.
+    assert 'class="one-source"' in page
+    assert ">One source only<" in page
+
+
+def test_a_disputed_element_keeps_its_phrase_and_gains_the_chip(tmp_path):
+    """The phrase is pinned by
+    `test_page_relabels_the_kinds_and_flags_the_dispute_in_a_multi_source_line`,
+    so the chip carries it verbatim rather than replacing it with a shorter word."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["capabilities"][0]["claims"] = ["clm-api-001", "clm-notes-004"]
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    assert 'class="disputed"' in page
+    assert "our sources disagree about this" in page
+
+
+def test_every_chip_variant_has_a_rule_in_the_stylesheet():
+    """Nothing binds the variant string a caller passes `_chip` to a rule that colours
+    it, so a typo ships a colourless chip with every test on this page green -- the
+    word is still there, which is the only thing `test_a_chip_always_carries_its_word`
+    can see. Every variant the module can emit is enumerated here: the seven kinds,
+    the four statuses (three distinct classes) and the two `_where` writes by hand,
+    which are the two nobody would notice, being written as literals rather than read
+    from a table."""
+    css = target_brief_html._CSS
+    variants = set(target_brief_html._KIND_SLUG.values())
+    variants |= {variant for variant, _ in target_brief_html._STATUS_CHIP.values()}
+    variants |= {"one-source", "disputed"}
+    for variant in sorted(variants):
+        assert f".{variant}" in css, variant
+
+
+def test_every_empty_cell_in_the_detail_tables_states_itself_with_a_dash(tmp_path):
+    """An empty cell reads as a render that broke, which is the same fault the five
+    "absent" sentences in this module exist to avoid, one altitude down.
+
+    Both halves are needed and neither is spare: `"tickets</span>" not in page`, the
+    assertion already guarding the absent-collection branch, passes identically for
+    `""` and for `"—"` -- it cannot tell an empty cell from a dash. Measured in both
+    directions, with `held`'s `else` put back to `""`: the dash line fails, and once it
+    is deleted the empty-cell line fails too.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+
+    def held(page):
+        return page.split("<summary>What data it holds</summary>")[1].split("</details>")[0]
+
+    section = held(target_brief_html.render(run))
+    # Reached on the golden world already: `ent-comment` records no relation and no
+    # rule, so its "Rules and relations" cell is the empty one.
+    assert "<td>—</td>" in section
+    assert "<td></td>" not in section
+    world_model = json.loads(run.world_model.read_text())
+    del world_model["entities"][0]["collection"]
+    world_model["entities"][0]["fields"] = []
+    run.world_model.write_text(json.dumps(world_model))
+    section = held(target_brief_html.render(run))
+    # The other two branches, on one row: no collection and no fields at all. Anchored
+    # on the row's own heading cell, because two adjacent dashes anywhere in the
+    # section would also be satisfied by the sibling row this one is being compared
+    # against. `ent-ticket` keeps its relations and its invariants, so the fourth cell
+    # is content and the two dashes are exactly the branches taken.
+    assert "<td><strong>Ticket</strong></td><td>—</td><td>—</td><td><div" in section
+    assert "<td></td>" not in section

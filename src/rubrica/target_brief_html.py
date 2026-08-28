@@ -148,6 +148,29 @@ tbody tr:nth-child(even) { background: var(--zebra); }
         border-color: var(--both-line); }
 .one-source { background: var(--one-bg); color: var(--one-fg);
               border-color: var(--one-line); }
+/* The base rule's `nowrap` is right for a chip carrying one or two words and wrong
+   for the one chip whose word is a whole clause of 30 characters. That chip is also
+   the only one rendered inside a source line rather than inside a `.tw` wrapper that
+   scrolls itself, so an unbreakable run of that length there sets the page's own
+   minimum width. Wrapping is the narrow-viewport cost, and it is borne by the chip
+   rather than by the whole document.
+
+   Its wording is deliberately not quoted here. This block ships inside the page's
+   own `<style>`, and the suite's negative control for that phrase greps the whole
+   page: a comment naming it puts it on every page whether the run has a disputed
+   element or not, which is exactly the trap `.file`'s comment above already sprang
+   on "What we read". */
+.disputed { white-space: normal; }
+/* One outcome, relation, rule or goal per line inside its cell. A cell holding
+   several of them run together reads as one sentence about the row rather than as
+   the several things we recorded separately -- which is the one thing the definition
+   list this replaced got right, where it gave each fact a line of its own. Named for
+   the shape rather than for any of the four, since all four want it.
+
+   No tag name is quoted in this comment. The stylesheet ships inside the page, so a
+   tag written here is markup text a page-wide grep will find, and the tests on this
+   page are page-wide greps. */
+.oc { margin: .1rem 0; }
 .kind-api { color: var(--kind-api); border-color: currentColor; }
 .kind-mcp { color: var(--kind-mcp); border-color: currentColor; }
 .kind-entity { color: var(--kind-entity); border-color: currentColor; }
@@ -422,12 +445,18 @@ def _collapsed(heading: str, body, terse: bool = False) -> str:
 
 
 def _provenance(prov) -> str:
-    """Where we read it: the files, their kinds, and whether they disagreed.
+    """Where we read it: the files and their kinds, as one sentence.
 
-    One line under the sentence it supports rather than a column, because the
-    sentence is what the recipient is being asked about and the source is how they
-    check it. `single_source` is read from the property rather than recomputed here
-    -- Task 2 made it a property precisely so no caller can disagree with `files`.
+    Whether they disagreed used to be a clause appended here, and is now `_where`'s,
+    which wraps this: once the three detail sections became tables the fact reads
+    better stated once, as a chip, at the head of the cell a reader scans for it.
+
+    Still one sentence rather than columns of its own, and the original reason holds
+    in the cell it now sits in: the statement is what the recipient is being asked
+    about and the source is how they check it, so it stays subordinate to the
+    statement rather than ranged against it. `single_source` is read from the property
+    rather than recomputed here -- Task 2 made it a property precisely so no caller
+    can disagree with `files`.
 
     Kinds go through `_kind`: unrelabelled, the toy alone puts `design_doc` and
     `mcp_tool_schema` on the page, which is the machine vocabulary this document
@@ -454,9 +483,34 @@ def _provenance(prov) -> str:
     else:
         kinds = ", ".join(esc(_kind(k)) for k in prov.kinds)
         text = f"From {len(prov.files)} sources ({kinds}): {files}"
-    if prov.disputed:
-        text += ' — <span class="disputed">our sources disagree about this</span>'
     return f'<span class="src">{text}.</span>'
+
+
+def _where(prov) -> str:
+    """The "Where we read it" cell: the chips this element earns, then the sentence.
+
+    Two chips, both recorded and both measured to vary on run-20260826-090456 through
+    these same helpers -- single-source is 28 of 30 entities and 4 of 39 operations,
+    disputed is 4 of 30 and 6 of 39. That is the whole test for whether something may
+    be coloured here: `Provenance`'s docstring records that `derivation` and
+    `confidence` were built as badges and dropped because both come out identical on
+    every row, and that a badge which never varies "implies a distinction was
+    checked".
+
+    The disputed chip carries the full phrase `our sources disagree about this` rather
+    than a shorter word, because the suite pins that phrase and it is the clause
+    `_provenance` used to append. Stating it once, as a chip, is the same fact in the
+    place a reader scans for it.
+    """
+    chips = []
+    # `prov.files and prov.single_source`: with no files at all, `_provenance` already
+    # says it could not work out where the element came from, and a "One source only"
+    # chip above that sentence would contradict it.
+    if prov.files and prov.single_source:
+        chips.append(_chip("one-source", "One source only"))
+    if prov.disputed:
+        chips.append(_chip("disputed", "our sources disagree about this"))
+    return "".join(chips) + _provenance(prov)
 
 
 def _files_html(files) -> str:
@@ -800,21 +854,24 @@ def _operations(run: RunPaths):
         return found
     if not found:
         return '<p class="absent">We did not identify anything it can be asked to do.</p>'
-    blocks = []
+    rows = []
     for op in found:
-        params = (
-            "<dd>Takes: " + esc(", ".join(op.params)) + "</dd>"
-            if op.params
-            else "<dd>Takes no parameters.</dd>"
-        )
-        outcomes = "".join(
-            # A description can be `""` -- Task 5's handoff -- and `label:` with
-            # nothing after it reads as prose that got truncated. The label is
-            # still a fact about the target, so it stays and the absence is stated.
-            f"<dd><em>{esc(o.label)}</em>"
-            + (f": {esc(o.description)}" if o.description else " — we did not record what happens")
-            + "</dd>"
-            for o in op.outcomes
+        params = esc(", ".join(op.params)) if op.params else "Takes no parameters."
+        outcomes = (
+            "".join(
+                # A description can be `""` -- Task 5's handoff -- and `label:` with
+                # nothing after it reads as prose that got truncated. The label is
+                # still a fact about the target, so it stays and the absence is stated.
+                f'<div class="oc"><em>{esc(o.label)}</em>'
+                + (
+                    f": {esc(o.description)}"
+                    if o.description
+                    else " — we did not record what happens"
+                )
+                + "</div>"
+                for o in op.outcomes
+            )
+            or "We did not record what can come back."
         )
         # `sentence` (the `operation` string) heads the entry, not `handle`.
         # Measured on the toy world: both capabilities carry
@@ -846,12 +903,26 @@ def _operations(run: RunPaths):
         # can still recognise the operation by.
         handle = op.handle.strip()
         title = op.sentence.strip() or handle
-        called = f"<dd>Called as: {esc(handle)}</dd>" if handle and handle != title else ""
+        # The bare handle, with the label carried by the column heading rather than
+        # repeated down 39 rows. `test_page_names_the_handle_under_both_toy_operations`
+        # pinned `"Called as: query_tickets<"` twice and now counts
+        # `"<td>query_tickets</td>"` instead, which is the same ruling against the new
+        # markup -- the handle is shown when it differs from the title, and once when
+        # one operation's title has become the handle itself.
+        called = esc(handle) if handle and handle != title else "—"
         heading = esc(title) if title else "One operation whose name we did not record"
-        blocks.append(
-            f"<dt>{heading}</dt>{called}{params}{outcomes}<dd>{_provenance(op.provenance)}</dd>"
+        rows.append(
+            _row(
+                f"<strong>{heading}</strong>",
+                called,
+                params,
+                outcomes,
+                _where(op.provenance),
+            )
         )
-    return f"<dl>{''.join(blocks)}</dl>"
+    return _table(
+        ("Operation", "Called as", "Takes", "What can come back", "Where we read it"), rows
+    )
 
 
 def _data_types(run: RunPaths):
@@ -861,16 +932,14 @@ def _data_types(run: RunPaths):
         return found
     if not found:
         return '<p class="absent">We did not identify the kinds of data it holds.</p>'
-    blocks = []
+    rows = []
     for kind in found:
-        rows = [f"<dt>{esc(kind.name)}</dt>"]
-        if kind.collection:
-            # Measured `tickets` and `comments` on the toy. This is the one
-            # `DataType` field that is the owner's own name rather than ours, so
-            # it is the one a reader can confirm or correct outright -- and it is
-            # the string that tells them which store we mean when their system has
-            # two things called a Ticket.
-            rows.append(f'<dd>Held as: <span class="ident">{esc(kind.collection)}</span></dd>')
+        # Measured `tickets` and `comments` on the toy. This is the one
+        # `DataType` field that is the owner's own name rather than ours, so
+        # it is the one a reader can confirm or correct outright -- and it is
+        # the string that tells them which store we mean when their system has
+        # two things called a Ticket.
+        held = f'<span class="ident">{esc(kind.collection)}</span>' if kind.collection else "—"
         if kind.fields:
             # The type is parenthesised only when there is one. Measured, an empty
             # `type` rendered `ticket_id ()`, where the sibling outcome path states
@@ -880,14 +949,26 @@ def _data_types(run: RunPaths):
                 f"{esc(f.name)} ({esc(f.type)})" if f.type.strip() else esc(f.name)
                 for f in kind.fields
             )
-            rows.append(f"<dd>Fields: {fields}</dd>")
-        for relation in kind.relations:
-            rows.append(f"<dd>Related to: {esc(relation)}</dd>")
-        for rule in kind.rules:
-            rows.append(f"<dd>Rule we believe holds: {esc(rule)}</dd>")
-        rows.append(f"<dd>{_provenance(kind.provenance)}</dd>")
-        blocks.append("".join(rows))
-    return f"<dl>{''.join(blocks)}</dl>"
+        else:
+            fields = "—"
+        # Relations and rules share one column because both are things we believe
+        # hold *between* records rather than fields of one, and each keeps the label
+        # its `<dd>` carried: the column heading names the pair, and inside a cell
+        # holding both a reader still has to be told which is which.
+        extra = [f'<div class="oc">Related to: {esc(r)}</div>' for r in kind.relations]
+        extra += [f'<div class="oc">Rule we believe holds: {esc(r)}</div>' for r in kind.rules]
+        rows.append(
+            _row(
+                f"<strong>{esc(kind.name)}</strong>",
+                held,
+                fields,
+                "".join(extra) or "—",
+                _where(kind.provenance),
+            )
+        )
+    return _table(
+        ("What it is", "Held as", "Fields", "Rules and relations", "Where we read it"), rows
+    )
 
 
 def _personas(run: RunPaths):
@@ -904,15 +985,15 @@ def _personas(run: RunPaths):
         return found
     if not found:
         return '<p class="absent">We did not identify who uses it.</p>'
-    blocks = []
+    rows = []
     for persona in found:
-        goals = "".join(f"<dd>{esc(goal)}</dd>" for goal in persona.goals) or (
-            "<dd>We did not record what they are trying to do.</dd>"
+        goals = "".join(f'<div class="oc">{esc(goal)}</div>' for goal in persona.goals) or (
+            "We did not record what they are trying to do."
         )
-        blocks.append(
-            f"<dt>{esc(persona.name)}</dt>{goals}<dd>{_provenance(persona.provenance)}</dd>"
+        rows.append(
+            _row(f"<strong>{esc(persona.name)}</strong>", goals, _where(persona.provenance))
         )
-    return f"<dl>{''.join(blocks)}</dl>"
+    return _table(("Who", "What they are trying to do", "Where we read it"), rows)
 
 
 def _sources_banner(run: RunPaths) -> str:
