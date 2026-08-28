@@ -1163,6 +1163,18 @@ def test_what_we_read_is_a_table_with_a_kind_column(tmp_path):
     # The kind chip, coloured and carrying its own word.
     assert 'class="kind-doc"' in section
     assert ">Written documentation<" in section
+    # The absent directory states itself. Every toy group has `directory == ""` --
+    # the three inputs share their whole directory, so nothing survives the prefix
+    # strip -- so the plain toy run is exactly the fixture that reaches this branch.
+    #
+    # Both halves are needed and neither is spare. `" under <span" not in page`, the
+    # assertion that already guards the other branch, passes identically for `""` and
+    # for `"—"`: it cannot tell an empty cell from a dash, so on its own it leaves a
+    # revert to `<td></td>` green. Measured in both directions -- with the `else`
+    # branch put back to `""` this fails on the first line and then, once that one is
+    # deleted, on the second.
+    assert "<td>—</td>" in section
+    assert "<td></td>" not in section
 
 
 def test_what_we_read_keeps_its_count_sentence_above_the_table(tmp_path):
