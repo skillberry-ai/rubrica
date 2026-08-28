@@ -241,6 +241,27 @@ are judgments rather than list entries:
   `unresolved` first. Gate 1's read coverage is **per pass, not per input**: each
   owning pass's own-kind claims cited over total, and under it only the input rows
   that dropped a claim, each beside the `note` the drop required.
+  `target-brief` is a report too, and the one written for somebody outside the
+  project: it renders a run's description of the *target* — not of the run — for the
+  people who own that target, asking them to correct it. Three ranked asks lead, and
+  the full description sits collapsed beneath — what it can do, what data it holds,
+  who uses it — each of *its* statements carrying the file it was read from, which is
+  the scope [`docs/reference/cli.md`](docs/reference/cli.md) states. The asks above it
+  are not held to it and were never meant to be: a gap names no file by design, and
+  where we could not work out which file something came from the page says so instead
+  of guessing.
+  Two things about it are load-bearing rather than stylistic: prose written by a stage
+  is **selected and relabelled, never rewritten**, since an owner correcting a
+  sentence we paraphrased would be correcting our paraphrase; and no stage, gate,
+  artifact or mention of rubrica reaches the page *in this project's own wording*,
+  which two tests enforce because a recipient reading about
+  `01-world-model.json` has been handed the wrong question — a claim id inside a
+  sentence we selected ships as written, which is that same rule seen from the other
+  side. It exits **0** on an unreadable `01-claims/` where `claim-utilisation` and
+  `gate-brief` exit 2 — it has no number to be quietly wrong, so it says at the top
+  that it could not cite its sources and describes the target anyway. `run-summary`
+  exits 0 there too, so this is a contrast with the two reports that compute a
+  number, not a property unique to this one.
 - `survey` is `intake`'s counterpart for the corpus path: it walks a corpus,
   digests each candidate, and mints the run, but writes `00-catalogue.json`
   instead of a manifest — there is nothing to extract from yet, because nothing

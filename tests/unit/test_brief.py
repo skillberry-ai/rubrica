@@ -1713,3 +1713,26 @@ def test_gate_one_excluded_listing_survives_an_unreadable_claims_file(tmp_path):
         assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
     finally:
         target.chmod(0o644)
+
+
+def test_gate_1_points_at_the_target_brief(tmp_path):
+    """The report is useless if the human holding gate 1 does not know it exists,
+    and gate 1's brief is the one thing that human certainly reads."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    text = brief.gate_brief(run, 1)
+    assert "rubrica target-brief" in text
+    # Scoped to what follows the command, not `in text`: the brief's own header
+    # line is `GATE 1 -- <run root>`, and every utilisation row above carries a
+    # path, so a bare `"--run" in text` is satisfiable by a pointer that names no
+    # run at all -- which is a line a human cannot copy.
+    pointer = text.split("rubrica target-brief")[1]
+    assert "--run" in pointer
+    assert str(run.root) in pointer
+
+
+@pytest.mark.parametrize("gate", [0, 2, 3])
+def test_only_gate_1_points_at_the_target_brief(tmp_path, gate):
+    """Gate 1 is where the world model is ratified, so it is the only gate at which
+    sending the description out for correction is the next action."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    assert "target-brief" not in brief.gate_brief(run, gate)

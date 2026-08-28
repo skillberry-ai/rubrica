@@ -60,7 +60,19 @@ import sys
 import traceback
 from pathlib import Path
 
-from rubrica import brief, reconcile, refs, rounds, seal, skills, slices, summary, survey, triage
+from rubrica import (
+    brief,
+    reconcile,
+    refs,
+    rounds,
+    seal,
+    skills,
+    slices,
+    summary,
+    survey,
+    target_brief,
+    triage,
+)
 from rubrica.artifacts import ArtifactError, read_json
 from rubrica.dedupe import candidate_pairs
 from rubrica.emit import emit_run
@@ -109,6 +121,7 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("claim-utilisation", "per-artifact share of claims the world model cites"),
     ("gate-brief", "compose the existing reports into the human surface at one gate"),
     ("run-summary", "render one run as a single self-contained HTML page"),
+    ("target-brief", "render one run's description of the target for its owners"),
     ("set-limit", "change a manifest limit, with the reason recorded in decisions.md"),
 )
 
@@ -307,6 +320,20 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="PATH",
         help="where to write the page (default: <run>/run-summary.html)",
+    )
+
+    p_target = parsers["target-brief"]
+    p_target.add_argument("--run", required=True)
+    # Defaulted for run-summary's reason -- the page's home is the run it
+    # describes -- and `-o` matters more here than there: this page is the one
+    # that gets attached to an email, so writing it somewhere an operator can
+    # find is the normal case rather than the read-only-run exception.
+    p_target.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        metavar="PATH",
+        help="where to write the page (default: <run>/target-brief.html)",
     )
 
     p_set_limit = parsers["set-limit"]
@@ -711,6 +738,26 @@ def main(argv: list[str] | None = None) -> int:
             destination.write_text(summary.run_summary(run), encoding="utf-8")
             # The path, not the page: the page is a file an operator opens, and
             # 300KB of markup on a terminal is not a report.
+            print(destination)
+            return CLEAN
+
+        if args.command == "target-brief":
+            # A report, the same ruling as claim-utilisation, gate-brief and
+            # run-summary: it composes what the run already contains and is never
+            # the thing that turns a readable run into exit 1. It goes further than
+            # claim-utilisation and gate-brief, deliberately: an unreadable
+            # 01-claims/ exits 2 out of both, because an empty utilisation table is
+            # the one reading a human at gate 1 must never be handed. run-summary
+            # already exits 0 here, measured, so it is not the foil this contrast
+            # wants -- but this page has no number to be quietly wrong, so it
+            # banners the missing citations and still exits 0.
+            run = _run_dir(args.run)
+            destination = Path(args.output) if args.output else run.root / "target-brief.html"
+            # No local catch, for run-summary's reason: an OSError from write_text
+            # is the filesystem refusing, and the shared handler below already
+            # maps that to USAGE. Catching it here to return FINDINGS would be the
+            # 2-as-1 inversion this module's docstring says it closed.
+            destination.write_text(target_brief.page(run), encoding="utf-8")
             print(destination)
             return CLEAN
 

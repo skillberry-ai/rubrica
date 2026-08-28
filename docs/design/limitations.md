@@ -458,6 +458,77 @@ Parked rather than fixed for the reason the entry above gives for gaps: every
 candidate fix is a self-report. The honest instrument for whether a file was
 opened is the transcript — `scripts/audit-reads.sh` over a real dispatch.
 
+### Some gaps are written for rubrica's own reviewer, and the page the owner reads ships them verbatim
+
+A gap's `unknown` is prose `rb-reconcile-gaps` composes freely, and on a real run
+some of it is addressed to us rather than to the system's owner. Measured while
+rendering three real runs for the owner-facing page: on `run-20260826-090456`, 6 of
+the 18 questions read that way — two of the six are "This gap is already resolved by
+`ctr-aap2-agent-003` … Recorded here only because …" and "For every capability in
+`01-capabilities.json` whose `outcome_classes` includes an 'error' class …". The
+reader-facing page selects `unknown` verbatim, so all six reach it, naming rubrica's
+artifacts and its claim and contradiction ids to a reader who has never seen either.
+
+They are not wrong as gaps. They are correct output aimed at the wrong reader, and
+the page's whole question is "does this accurately describe your system?" — which a
+question about `01-capabilities.json` cannot be answered against. Everything else on
+that page relabels or drops our vocabulary for exactly this reason: input kinds are
+relabelled, a marker never names the artifact behind it, and the one id the renderer
+chooses to print is labelled `(our reference: …)` so the owner can tell whose word it
+is. A gap written for us defeats all three, and no gate objects: the gap resolves,
+its `claims` cite ids that exist, and nothing mechanical can see who a sentence is
+addressed to.
+
+**Why it is parked rather than fixed:** the fix cannot live in the renderer. Filtering
+there is either paraphrasing prose a stage wrote — the one thing that page must never
+do, because a sentence we composed and presented as our description of the owner's
+system is a fabrication in the way an invented quote is — or dropping a question on a
+mechanical proxy such as "mentions one of our filenames", which drops genuine
+questions: an owner-facing gap may legitimately quote a corpus filename, and what
+separates these six from the rest is who they address. That is semantics, and
+inventing a mechanical check for a semantic property is what this project declines to
+do wherever else the same shape appears. So the fix belongs to `rb-reconcile-gaps`'
+prompt — a gap's `unknown` should be a question whose answer can come from outside
+the pipeline — and it is that skill's change to make, not the reader's.
+
+What this means for you: **read a run's gaps before that page is sent.** They are the
+one section whose prose was never written with the recipient in mind.
+
+### "We went with X" identifies nothing when both sides of a disagreement were read from the same file
+
+`target_brief._taken` renders a resolved contradiction as `We went with ` plus the
+files the chosen side's claims were read from. When the two sides were read from the
+*same* file, that sentence names that file for both sides, so it tells the reader
+which document we trusted and not which of the two readings we took — the thing the
+sentence exists to say. Measured on `run-20260826-090456`: 4 of its 41
+contradictions — `cost-tools-001` and `ctr-aap2-agent-006`, whose sides are two
+readings of one file, plus `runtime-traces-001` and `runtime-traces-002`, whose sides
+are two *slices* of one capture (`#/0` against `#/1`, `#/20` against `#/26`).
+
+The last two are this shape's count going **up** by a fix, and the trade is worth
+knowing: `_taken` used to print the slice path, which named a file the owner cannot
+open. It now names the container, which they can — and which is the same container on
+both sides. A sentence that is uninformative is the better of the two defects, but it
+is still one, and 2 of 41 is the number to compare against anything measured before
+`_file_and_piece` existed.
+
+It is **uninformative rather than false.** We did go with the claims in that file,
+the two sides are printed piece by piece immediately above the sentence with their
+quotes intact, and a reader who reads the section rather than the line can still see
+which reading won. What they cannot do is skim to the resolution line and learn it.
+
+**Why it is parked rather than fixed:** every wording reachable from where the
+sentence is composed is worse than the one that ships. `target_brief.py` builds
+`Dispute`, and the two sides are labelled "One side" and "The other side" by the
+renderer — the builder does not know those strings, and teaching it them would put a
+sentence about the renderer's layout inside the module that must stay layout-free, in
+a feature whose split into reader and renderer is the reason either half is testable.
+Naming the claim ids instead prints our vocabulary at a reader the rest of the page
+relabels it for. Dropping the sentence replaces one that names a real file with none
+at all, and `_BOTH_POSSIBLE` ("We are treating both as possible.") is the wrong
+register because we *did* choose. The fix would have to be a wording nobody has
+found, not a change to what the code knows.
+
 ### Every directory a fan-out writes into is created by a member's `Write`, and until 2026-08-23 nothing told the member so
 
 Of a run's directories, `grep -rn mkdir src/rubrica/` creates `run.root`,

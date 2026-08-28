@@ -1,0 +1,1222 @@
+"""The markup half of `target-brief`. `target_brief.py` reads and computes.
+
+The same split as `summary.py` / `summary_html.py`, for the same reason: a section
+that disagrees with the numbers a human reads beside it is then a defect in one
+builder rather than in two spellings of the same read.
+
+Three things this page does differently from `summary_html`, all because it leaves
+the project rather than sitting in a run directory:
+
+**No JavaScript.** Not one line. `<details>` collapses natively, nothing here
+sorts, and this page is emailed -- opened in a mail client's browser view, behind a
+corporate proxy, by a reader with scripts off. A page that needs a script to be
+readable arrives broken for some of its recipients.
+
+**Its own `_CSS`.** Importing `summary_html._CSS` would let a tweak to the operator
+page restyle a document already sent to somebody outside the project.
+
+**Its own marker prose.** `summary_html` says `Not present: 01-world-model.json`,
+which is right for an operator and meaningless to an owner; here the same fact
+reads "We do not have this on file, so this section is empty."
+
+**Nothing this module's own prose puts on the page names a stage, a gate, an
+artifact or rubrica itself,** and
+`test_the_pages_own_prose_never_names_a_stage_a_gate_or_an_artifact` plus
+`test_page_never_shows_a_rubrica_identifier` fail the suite rather than let one back
+in. The claim is deliberately about our own chrome and not about the page as a whole:
+prose this module *selects* from the run ships as written, ids and all, for the reason
+the next paragraph gives. That is not tidiness: a recipient asked "does this describe
+your system?" who is instead reading about `01-world-model.json` has been handed the
+wrong question.
+
+One id shape can still reach the page and is accepted rather than suppressed.
+`SourceRef.path` falls back to the artifact id when the manifest does not register
+the cited artifact, so `_taken` can render "We went with art-notes-md-1." and a
+source row can name the same string. Suppressing it would need this module to
+decide, from a string, whether Task 4's sentence names a real file -- a second
+spelling of a rule Task 1 already ruled on, in the module that owns it, in favour
+of naming *something* chaseable over naming nothing. The no-identifier test is
+therefore a test about the toy corpus, where every cited artifact is registered,
+and not a proof about every run.
+
+Everything user-controlled goes through `summary.esc`, including numbers and dict
+keys, for the reason its docstring gives -- a lone surrogate becomes text there,
+and it was a report exiting 1 after rendering correctly before it did.
+"""
+
+from __future__ import annotations
+
+from rubrica import target_brief
+from rubrica.paths import RunPaths
+from rubrica.summary import Malformed, Marker, esc
+
+# Wider measure than `summary_html` for the reason it always had -- this is read as
+# prose by somebody deciding whether it is true -- and wider again than the 46rem it
+# shipped at, because the same reader now scans it as tables. That is a change to
+# record rather than an argument against the original: the page is read both ways.
+#
+# Every colour is a custom property defined twice, once per palette. Explicit `--bg`
+# and `--fg` rather than leaning on `color-scheme: light dark` alone: once a chip has
+# a background, the UA default is no longer a surface the contrast was checked
+# against.
+#
+# **Everything below this line is page content, comments included.** `_CSS` is
+# interpolated into the page's own `<style>`, so a class name or a CSS comment inside
+# it is text a page-wide assertion will find -- and most assertions on this page are
+# page-wide greps, because what they guard is what a recipient can read. Three
+# symptoms of that one property, each measured here rather than reasoned about:
+#
+#   - a class named `kind-openapi` failed
+#     `test_page_relabels_every_input_kind_rather_than_shipping_the_token`, which greps
+#     for a bare `openapi` and treats a hyphen as a word boundary; the obvious retry,
+#     `kind-http`, failed the no-webfont guard, which cannot tell a class name from the
+#     start of a URL. `_KIND_SLUG`'s comment records where that landed.
+#   - a comment quoting the disputed chip's wording verbatim, to explain why that chip
+#     is exempted from `nowrap`, put the phrase on every page and failed
+#     `test_page_relabels_the_kinds_and_flags_the_dispute_in_a_multi_source_line`, whose
+#     positive control is that the phrase is *absent* from a page with no disputed
+#     element.
+#   - a comment naming the tag of the definition list the tables replaced shipped that
+#     tag as page text. Green, because no test asserts those tags are gone -- and
+#     therefore a trap set for the test that one day does.
+#
+# So: quote no wording the page carries and no tag the page emits. Describe the shape
+# instead. A comment here explaining a rule costs nothing; a comment here quoting the
+# thing the rule is about is a false positive somebody else has to debug.
+_CSS = """
+:root {
+  color-scheme: light dark;
+  --bg: #fbfaf8; --fg: #1c1c1a; --muted: #5d5c58; --rule: #dedcd6;
+  --surface: #f1efe9; --zebra: #f7f6f2; --quote: #f4f3ee;
+  --attn-bg: #fdf1da; --attn-fg: #7a4a05; --attn-line: #d59a1f;
+  --settled-bg: #e5eef7; --settled-fg: #1f4a70; --settled-line: #6b9dc7;
+  --both-bg: #eceae5; --both-fg: #4e4d49; --both-line: #a8a6a0;
+  --one-bg: #f6f1f8; --one-fg: #64407c; --one-line: #a97fc0;
+  --kind-api: #16645f; --kind-mcp: #6b3f7a; --kind-entity: #74551a;
+  --kind-trace: #7a4718; --kind-doc: #2f5d8a; --kind-code: #2c6549;
+  --kind-other: #55544f;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16171a; --fg: #e7e6e2; --muted: #a3a19b; --rule: #33353a;
+    /* Opaque, necessarily. This shipped with a 20% alpha byte -- the only alpha value
+       in either palette -- and composited over the background it measured 1.02 there
+       while --zebra measured 1.07, which put the heading band *below* the striped rows
+       and made it the least distinct of the three surfaces, inverting light mode. It
+       also cost the reply block its card. Opaque it measures 1.14 against the
+       background and 1.06 against --zebra, matching light's 1.10 and 1.06.
+
+       The rejected value is described rather than written: an eight-digit hex here is
+       a literal a future palette check would find in the stylesheet it is checking. */
+    --surface: #212327; --zebra: #1c1e21; --quote: #1e2024;
+    --attn-bg: #3a2c10; --attn-fg: #f0c675; --attn-line: #8a6a20;
+    --settled-bg: #17293a; --settled-fg: #9dc4e6; --settled-line: #3d6a94;
+    --both-bg: #262825; --both-fg: #b6b4ae; --both-line: #55544f;
+    --one-bg: #2a2033; --one-fg: #c9a5e0; --one-line: #6b4a80;
+    --kind-api: #5ec4bc; --kind-mcp: #c39ad4; --kind-entity: #d4b869;
+    --kind-trace: #e0a06a; --kind-doc: #8ab4dd; --kind-code: #77c79c;
+    --kind-other: #a3a19b;
+  }
+}
+body { font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+       margin: 0 auto; max-width: 70rem; padding: 2.5rem 1.5rem 6rem;
+       background: var(--bg); color: var(--fg); }
+h1 { font-size: 1.7rem; margin-bottom: .2rem; letter-spacing: -.01em; }
+h2 { font-size: 1.1rem; margin-top: 3rem; padding-bottom: .35rem;
+     border-bottom: 2px solid var(--rule); letter-spacing: .01em; }
+h3 { font-size: .98rem; margin: 2rem 0 .4rem; }
+p { margin: .6rem 0; max-width: 62rem; }
+.lede { font-size: 1.08rem; max-width: 46rem; }
+.meta { opacity: .75; font-size: .9rem; margin-top: 0; }
+/* The one thing on the page that qualifies the whole page. */
+.banner { border-left: 4px solid var(--attn-line); background: var(--attn-bg);
+          color: var(--attn-fg); padding: .7rem 1rem; margin: 1.5rem 0;
+          font-weight: 600; border-radius: 0 4px 4px 0; }
+.absent, .malformed { color: var(--muted); font-style: italic; }
+.malformed { border-left: 3px solid var(--attn-line); padding-left: .6rem; }
+/* Top level rather than scoped under `.src`, which is where the brief put it:
+   `_group_a` and `_data_types` both use `.file` outside a source line, and a
+   selector that only matched inside one left every filename in the first section's
+   listing of what we read in the body face. `.ident` is the target's own name for
+   something that is not a file -- a collection -- and wants the same treatment for
+   the same reason: it is a string to copy exactly, not prose to read. */
+.file, .ident { font-family: ui-monospace, monospace; font-size: .93em; }
+/* Where we read it. Subordinate to the sentence above it, never competing. */
+.src { display: block; font-size: .85rem; color: var(--muted); margin-top: .15rem; }
+.quote { font-family: ui-monospace, monospace; font-size: .85rem;
+         background: var(--quote); padding: .05rem .3rem; border-radius: 3px; }
+.legend { font-size: .9rem; color: var(--muted); }
+.reply { border: 1px solid var(--rule); border-radius: 6px; padding: 1rem 1.4rem;
+         margin-top: 3rem; background: var(--surface); }
+details { margin: 1rem 0; border: 1px solid var(--rule); border-radius: 6px;
+          padding: .6rem .9rem; }
+details summary { cursor: pointer; font-weight: 600; }
+/* Each table scrolls inside its own wrapper, so a narrow screen scrolls one
+   table and never the whole page. */
+.tw { overflow-x: auto; margin: 1rem 0; }
+table { border-collapse: collapse; width: 100%; font-size: .93rem; }
+th { text-align: left; background: var(--surface); color: var(--fg);
+     font-size: .78rem; text-transform: uppercase; letter-spacing: .05em;
+     padding: .5rem .6rem; border-bottom: 2px solid var(--rule);
+     white-space: nowrap; }
+td { padding: .55rem .6rem; border-bottom: 1px solid var(--rule);
+     vertical-align: top; }
+tbody tr:nth-child(even) { background: var(--zebra); }
+.num { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* One class per chip, never a shared `chip` class plus a variant: a bare class
+   string is what the existing suite asserts on, and a shared prefix would break
+   `class="x"` into `class="chip x"` under it. */
+.undecided, .settled, .both, .one-source, .disputed,
+.kind-api, .kind-mcp, .kind-entity, .kind-trace, .kind-doc, .kind-code,
+.kind-other {
+  display: inline-block; font-size: .76rem; font-weight: 600;
+  padding: .08rem .45rem; border-radius: 999px; border: 1px solid;
+  white-space: nowrap; line-height: 1.5;
+}
+.undecided, .disputed { background: var(--attn-bg); color: var(--attn-fg);
+                        border-color: var(--attn-line); }
+.settled { background: var(--settled-bg); color: var(--settled-fg);
+           border-color: var(--settled-line); }
+.both { background: var(--both-bg); color: var(--both-fg);
+        border-color: var(--both-line); }
+.one-source { background: var(--one-bg); color: var(--one-fg);
+              border-color: var(--one-line); }
+/* The base rule's `nowrap` is right for a chip carrying one or two words and wrong
+   for the one chip whose word is a whole clause of 30 characters. That chip is also
+   the only one rendered inside a source line rather than inside a `.tw` wrapper that
+   scrolls itself, so an unbreakable run of that length there sets the page's own
+   minimum width. Wrapping is the narrow-viewport cost, and it is borne by the chip
+   rather than by the whole document.
+
+   Its wording is deliberately not quoted here. This block ships inside the page's
+   own `<style>`, and the suite's negative control for that phrase greps the whole
+   page: a comment naming it puts it on every page whether the run has a disputed
+   element or not, which is exactly the trap `.file`'s comment above already sprang
+   by naming the first section's heading. */
+.disputed { white-space: normal; }
+/* One outcome, relation, rule or goal per line inside its cell. A cell holding
+   several of them run together reads as one sentence about the row rather than as
+   the several things we recorded separately -- which is the one thing the definition
+   list this replaced got right, where it gave each fact a line of its own. Named for
+   the shape rather than for any of the four, since all four want it.
+
+   No tag name is quoted in this comment. The stylesheet ships inside the page, so a
+   tag written here is markup text a page-wide grep will find, and the tests on this
+   page are page-wide greps. */
+.oc { margin: .1rem 0; }
+.kind-api { color: var(--kind-api); border-color: currentColor; }
+.kind-mcp { color: var(--kind-mcp); border-color: currentColor; }
+.kind-entity { color: var(--kind-entity); border-color: currentColor; }
+.kind-trace { color: var(--kind-trace); border-color: currentColor; }
+.kind-doc { color: var(--kind-doc); border-color: currentColor; }
+.kind-code { color: var(--kind-code); border-color: currentColor; }
+.kind-other { color: var(--kind-other); border-color: currentColor; }
+/* The page is emailed, so it is printed. Backgrounds do not print by default;
+   the border and the chip's own word are what survive. */
+@media print {
+  body { max-width: none; background: #fff; color: #000; }
+  .tw { overflow: visible; }
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; }
+  .undecided, .settled, .both, .one-source, .disputed,
+  .kind-api, .kind-mcp, .kind-entity, .kind-trace, .kind-doc, .kind-code,
+  .kind-other { background: transparent; color: inherit;
+                border-color: currentColor; }
+}
+"""
+
+# One rendering of "we looked and no document said", emitted at most once per page
+# and only when something on the page actually uses one of the two phrasings it
+# glosses. A legend for words the page does not use is noise on a document somebody
+# is asked to read closely.
+#
+# Two phrasings, not one. `_NOT_ADDRESSED` is our own label, and the draft legend
+# glossed only that -- but the idiom a stage writes into its prose is the one a
+# recipient meets far more often. Case-folded on run-20260826-090456's page and binned
+# between the page's own headings: `no claim` 122 times against `not addressed` 41, and
+# both land overwhelmingly in the collapsed "What we believe, in full" section -- 115
+# and 40 respectively, against 7 and 1 in the "What we could not tell" ask. So the
+# label is used, and used heavily: it is what fired the earlier version of this legend
+# on both real runs. Glossing it alone still left the more common phrasing unexplained,
+# and the gloss sat at the head of that collapsed section, below the occurrences
+# already standing in the ask above it.
+#
+# State the fold when quoting those counts. Two reviews of this feature reported 110
+# and 117 for the same page because one counted `No claim` capitalised and the other
+# did not.
+#
+# The idiom is matched on `no claim` rather than on a whole sentence because the
+# stages write it at least three ways -- "No claim addresses ...", "No claim
+# directly addresses ...", "no claim explicitly states this" -- and all three must
+# fire it. This is a rendering decision about our own chrome, not absence detection
+# over model prose: nothing about the target is inferred from the match, and the
+# worst a false positive can do is explain a phrasing that is not there.
+_NOT_ADDRESSED = "Not addressed"
+_CLAIM_IDIOM = "no claim"
+_LEGEND = (
+    '<p class="legend">Two phrasings below are ours, not statements about your '
+    "system. Where a line says that no claim addresses something — directly "
+    "addresses it, or explicitly states it — we mean we found nothing in the "
+    "documents you gave us that settled the point; a “claim” is one statement we "
+    "recorded while reading them. An outcome labelled “Not addressed” says the same "
+    "thing. Neither means the behaviour is missing from your system.</p>"
+)
+
+# `kind` -> the words an owner reads, for all seven values of the schema's shared
+# `$defs/kind` enum (`catalogue-0.1.json`, `triage-0.1.json` and `manifest-0.1.json`
+# each spell the same seven). All seven rather than the ones runs have produced,
+# because the table is what stops a token shipping and a kind nobody has seen yet
+# is exactly the one nobody would notice shipping raw.
+#
+# Read through `.get(kind, kind)`, for `_OUTCOME_LABELS`' reason: an off-schema
+# kind ships as its own token rather than as a label we invented for it.
+#
+# No label names the format the way the enum does -- "HTTP API description" rather
+# than "OpenAPI", "Recorded interactions" rather than "trace" -- because the
+# recipient is being asked whether we read the right things about their system, and
+# the kinds are our filing categories over their files.
+_KIND_LABELS = {
+    "openapi": "HTTP API description",
+    "mcp_tool_schema": "MCP tool definitions",
+    "entity_schema": "Data model definitions",
+    "trace": "Recorded interactions",
+    "design_doc": "Written documentation",
+    "source_code": "Source code",
+    "other": "Other material",
+}
+
+# The sentence that stands in for a section's body when the run-level banner has
+# already stated the fact. Five sections carry the identical marker when one file
+# is unreadable -- `disputes`, `open_questions`, `operations`, `data_types` and
+# `personas` all return whatever `_world` returned, and nothing else -- so
+# rendering the whole sentence five times tells the owner five times that one thing
+# is missing. The heading and a line stay, which is the guarantee that matters: a
+# section that disappears is indistinguishable from one this renderer forgot.
+_SEE_BANNER = "see the note at the top of this page"
+
+
+def _kind(kind: str) -> str:
+    """One input kind in the owner's vocabulary, or its own token if we have none."""
+    return _KIND_LABELS.get(kind, kind)
+
+
+# `kind` -> the CSS class carrying that kind's hue. Seven, matching `_KIND_LABELS`,
+# and an off-schema kind falls to `kind-other` while `_kind` still ships its own
+# token as the word: an unknown kind gets a neutral colour and its real name, never
+# a colour we invented a meaning for.
+#
+# These are unordered categories, so the hues are seven distinct families and not a
+# light-to-dark ramp. A ramp would say one kind outranks another, which is a claim
+# the run does not make.
+#
+# `openapi` is the one slug that is not its own key shortened, and both reasons are
+# measured rather than aesthetic. A slug spelled `kind-openapi` puts that enum token
+# into the `<style>` block of every page regardless of what the run read, which
+# `test_page_relabels_every_input_kind_rather_than_shipping_the_token` fails on --
+# it greps the whole page for a bare `openapi`, and a hyphen is a word boundary. The
+# obvious second try, `kind-http`, fails the no-webfont guard for the same structural
+# reason: that one asserts no `http` anywhere in the stylesheet, and it cannot tell a
+# class name from the start of a URL. So the slug follows `_KIND_LABELS`, which
+# already refuses to name the format the way the enum does, and lands on the words
+# the owner actually reads.
+_KIND_SLUG = {
+    "openapi": "kind-api",
+    "mcp_tool_schema": "kind-mcp",
+    "entity_schema": "kind-entity",
+    "trace": "kind-trace",
+    "design_doc": "kind-doc",
+    "source_code": "kind-code",
+    "other": "kind-other",
+}
+
+# `resolution` -> (CSS class, the word the chip carries).
+#
+# Amber for `unresolved` because it is the only one of the four an owner can act on,
+# and this page exists to be acted on. Blue for the two `preferred_*` and grey for
+# `both_possible`: both are decisions we already took, so they report rather than
+# ask.
+#
+# Read through `.get(resolution, _STATUS_CHIP["unresolved"])`. An off-enum value is
+# undecided, never a decision: `target_brief._taken` already returns `""` for
+# anything outside the three it knows, so the chip and the sentence agree without
+# either consulting the other.
+_STATUS_CHIP = {
+    "unresolved": ("undecided", "Undecided"),
+    "preferred_a": ("settled", "Side chosen"),
+    "preferred_b": ("settled", "Side chosen"),
+    "both_possible": ("both", "Both possible"),
+}
+
+
+def _chip(variant: str, word: str) -> str:
+    """A coloured chip that always carries its word.
+
+    One class, not a shared `chip` class plus a variant, for the reason `_CSS`
+    gives: the suite asserts on bare `class="x"` strings and a shared prefix would
+    break them.
+
+    The word is not optional and there is no branch that omits it. Colour is never
+    the only carrier of meaning here -- this page is emailed, printed, and forwarded
+    into clients that strip CSS, and a chip whose meaning lives in its background is
+    a chip that loses its meaning in transit.
+    """
+    return f'<span class="{variant}">{esc(word)}</span>'
+
+
+def _kind_chip(kind: str) -> str:
+    """One input kind as a chip, in the owner's vocabulary."""
+    return _chip(_KIND_SLUG.get(kind, "kind-other"), _kind(kind))
+
+
+# No cell on this page is ever empty, and which of the two forms an empty value takes
+# is decided per column rather than per module. Both forms are in use on purpose, and
+# the difference between analogous-looking columns is this rule rather than drift:
+#
+#   - a **sentence** where the empty set is itself a recorded fact about the target
+#     rather than a hole in our record ("Takes no parameters." -- an operation with no
+#     parameters genuinely takes none, which is a statement an owner can correct), or
+#     where every filled cell in that column is prose, so a lone dash among them reads
+#     as a render that broke. That covers the two in "What it can do" and the one in
+#     "Who uses it".
+#   - a **dash** where the column's filled cells are names, types and short labelled
+#     lines a reader scans rather than reads -- three such slots in "What data it
+#     holds" alone, plus the handle and the directory. A sentence set among identifiers
+#     is read as one of them; a dash cannot be.
+#
+# Unifying either way would mean dashing a column whose neighbours are all sentences,
+# or writing a sentence into a column of identifiers. Neither is an improvement, so
+# the split stands and is recorded here instead.
+def _row(*cells: str) -> str:
+    """One table row from cell contents that are already escaped or already markup.
+
+    Deliberately not escaping: every caller passes either markup it built (a chip, a
+    `.file` span) or a string it has already put through `esc`. A second escape here
+    would double-encode every filename on the page, and the alternative -- escaping
+    here and not at the call site -- would mean no cell could contain markup.
+    """
+    return "<tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + "</tr>"
+
+
+def _table(headers: tuple[str, ...], rows: list[str]) -> str:
+    """One table, in a wrapper that scrolls it rather than the page.
+
+    Returns `""` for no rows rather than an empty table, so that no caller can ship
+    a header row with nothing under it: a table with headings and no body reads as a
+    render that broke, which is the same failure the five "absent" sentences in this
+    module exist to avoid. Every caller already has a sentence for its empty case
+    and must keep using it.
+    """
+    if not rows:
+        return ""
+    head = "".join(f"<th>{esc(h)}</th>" for h in headers)
+    return (
+        f'<div class="tw"><table><thead><tr>{head}</tr></thead>'
+        f"<tbody>{''.join(rows)}</tbody></table></div>"
+    )
+
+
+def _marker(body: Marker, terse: bool) -> str:
+    """A marker in the recipient's terms.
+
+    The artifact name is dropped deliberately: an owner cannot act on
+    `01-world-model.json`, and the operator page beside this one already names it.
+    The two markers stay two sentences for `summary_html._marker`'s reason -- one
+    is something we do not have, the other something we have and could not read back
+    -- because spelling both the same way is what let one page say a stage had
+    produced an artifact and that the artifact was not there.
+
+    Neither sentence says how far the work has got. The draft's did ("we have not got
+    far enough"), and it was measured on a run root at mode 000, where the run may
+    well be finished and merely unreadable: the page cannot tell the difference, so it
+    states what it has on file, which is the thing it does know. "Yet" was also the
+    entire difference between the two terse markers, so dropping it from one obliged
+    rewording that one rather than leaving the pair a word apart.
+
+    `terse` is only ever True for a section whose marker is the one the page banner
+    above it states, which is the five world-model-backed sections and no others.
+    `What we read` reads a different file, so its marker is a second fact and says
+    the whole thing where it stands -- pointing it at a banner about the
+    description would misattribute one absence to another.
+    """
+    if isinstance(body, Malformed):
+        if terse:
+            return f'<p class="malformed">Nothing to show here — {_SEE_BANNER}.</p>'
+        return (
+            '<p class="malformed">We have this on file but could not read it back, '
+            "so this section is incomplete.</p>"
+        )
+    if terse:
+        return f'<p class="absent">Nothing on file here — {_SEE_BANNER}.</p>'
+    return '<p class="absent">We do not have this on file, so this section is empty.</p>'
+
+
+def _body(body, terse: bool) -> str:
+    """A section's body, with a marker rendered rather than skipped."""
+    return _marker(body, terse) if isinstance(body, Marker) else body
+
+
+def _section(heading: str, body, terse: bool = False, lead: str = "") -> str:
+    """One tier-1 section, its heading always present.
+
+    `lead` goes between the heading and the body rather than being prepended to the
+    body by the caller, because a body may be a `Marker` and only `_body` may decide
+    how one renders. It is what lets `_LEGEND` be the first thing read under a
+    heading whose lines need it, without the legend becoming part of the group.
+    """
+    opening = f"<h2>{esc(heading)}</h2>\n"
+    return opening + (f"{lead}\n" if lead else "") + f"{_body(body, terse)}\n"
+
+
+def _needs_legend(*bodies) -> bool:
+    """Whether anything rendered on this page uses a phrasing `_LEGEND` glosses.
+
+    Every body the page will show, tier 1 and tier 2 together, rather than the one
+    section the legend sits in: the label lives in "What it can do" and the idiom in
+    both asks and detail, and a reader who meets either anywhere has met the words
+    the legend exists for. A body can be a `Marker`, so this reads `str()` of each
+    rather than assuming HTML -- an unreadable section cannot carry the phrasing, and
+    stringifying it is how that stays true without a type test here.
+    """
+    text = " ".join(str(body) for body in bodies).lower()
+    return _NOT_ADDRESSED.lower() in text or _CLAIM_IDIOM in text
+
+
+def _collapsed(heading: str, body, terse: bool = False) -> str:
+    """One tier-2 section, collapsed, with the disclosure control as its heading.
+
+    No `<h2>` inside the `<details>`: the `<summary>` already prints the heading,
+    and a section that carries both prints its own name twice to a reader. The
+    heading is still there for `test_page_renders_every_group_and_every_tier_two_section`
+    to find, and a marker still renders rather than the section disappearing --
+    which is the whole point of routing a body through `_body` rather than
+    interpolating it.
+    """
+    return f"<details><summary>{esc(heading)}</summary>\n{_body(body, terse)}\n</details>"
+
+
+def _file_spans(files) -> str:
+    """A comma-separated run of filenames, each in the monospace face.
+
+    One helper for the three sites that build this -- the source sentence under a
+    statement, one group's file listing, and the disagreement index's cell naming the
+    files two sides came from. All three were the same expression character for
+    character, and holding the `esc` in one place is the point of folding them: a
+    filename is the one string on this page a reader is meant to copy exactly.
+
+    Callers own everything around the run. `_files_html` appends its own "and N more
+    we could not name" tail, which is why the count and the join stay separate: the
+    tail is that group's arithmetic against the run's record and not another name.
+    """
+    return ", ".join(f'<span class="file">{esc(f)}</span>' for f in files)
+
+
+def _provenance(prov) -> str:
+    """Where we read it: the files and their kinds, as one sentence.
+
+    Whether they disagreed used to be a clause appended here, and is now `_where`'s,
+    which wraps this: once the three detail sections became tables the fact reads
+    better stated once, as a chip, at the head of the cell a reader scans for it.
+
+    Still one sentence rather than columns of its own, and the original reason holds
+    in the cell it now sits in: the statement is what the recipient is being asked
+    about and the source is how they check it, so it stays subordinate to the
+    statement rather than ranged against it. `single_source` is read from the property
+    rather than recomputed here -- Task 2 made it a property precisely so no caller
+    can disagree with `files`.
+
+    Kinds go through `_kind`: unrelabelled, the toy alone puts `design_doc` and
+    `mcp_tool_schema` on the page, which is the machine vocabulary this document
+    exists to avoid.
+    """
+    if not prov.files:
+        # Stated, not silent. Measured with `01-claims/` *removed* rather than
+        # unreadable -- `paths.list_dir` returns `[]` for a missing directory, so
+        # `source_index` returns `{}` and no banner fires -- this rendered five
+        # blank `<dd></dd>` rows, and read alone a blank provenance asserts to the
+        # owner that no document of theirs states the sentence above it. That is
+        # what `target_brief._refs`' docstring argues is intolerable.
+        #
+        # The prose is safe in both directions because `world-model-0.1.json`'s
+        # `$defs/claim_refs` is `minItems: 1`: a conforming element always cites at
+        # least one claim, so an empty `files` can only ever mean we failed to
+        # resolve them and never that the element legitimately rests on nothing.
+        # No pointer to the page banner either -- on the path that produces this,
+        # there is no banner to point at.
+        return '<span class="src">We could not work out which of your files this came from.</span>'
+    files = _file_spans(prov.files)
+    if prov.single_source:
+        text = f"From {files}"
+    else:
+        kinds = ", ".join(esc(_kind(k)) for k in prov.kinds)
+        text = f"From {esc(len(prov.files))} sources ({kinds}): {files}"
+    return f'<span class="src">{text}.</span>'
+
+
+def _where(prov) -> str:
+    """The "Where we read it" cell: the chips this element earns, then the sentence.
+
+    Two chips, both recorded and both measured to vary on run-20260826-090456 through
+    these same helpers -- single-source is 28 of 30 entities and 4 of 39 operations,
+    disputed is 4 of 30 and 6 of 39. That is the whole test for whether something may
+    be coloured here: `Provenance`'s docstring records that `derivation` and
+    `confidence` were built as badges and dropped because both come out identical on
+    every row, and that a badge which never varies "implies a distinction was
+    checked".
+
+    The disputed chip carries the full phrase `our sources disagree about this` rather
+    than a shorter word, because the suite pins that phrase and it is the clause
+    `_provenance` used to append. Stating it once, as a chip, is the same fact in the
+    place a reader scans for it.
+    """
+    chips = []
+    # `prov.files and prov.single_source`: with no files at all, `_provenance` already
+    # says it could not work out where the element came from, and a "One source only"
+    # chip above that sentence would contradict it.
+    if prov.files and prov.single_source:
+        chips.append(_chip("one-source", "One source only"))
+    if prov.disputed:
+        chips.append(_chip("disputed", "our sources disagree about this"))
+    return "".join(chips) + _provenance(prov)
+
+
+def _files_html(files) -> str:
+    """One group's filenames, with the ones we could not name counted rather than
+    printed.
+
+    `inputs_read` keeps a record whose `source_path` and `artifact_id` are both
+    unreadable, on purpose: `len(files) + slices` is that group's arithmetic against
+    the run's own record of what it read, and dropping the record makes the count
+    disagree with the listing silently. Task 3 measured exactly one such blank row
+    on a real run. So it is counted here -- an empty monospace span in a comma list
+    renders as stray punctuation, and the count is the honest form of the same fact.
+
+    `.strip()` rather than `target_brief._file_and_piece`, which is the nameability
+    rule the disagreement section asks: measured over every shape that reaches this
+    listing the two agree, because `inputs_read` has already dropped any piece it
+    could name a file for, and routing a bare filename back through a rule about
+    container-plus-pointer paths would judge `x#/1` on `x` while printing `x#/1`.
+    """
+    named = [f for f in files if f.strip()]
+    missing = len(files) - len(named)
+    shown = _file_spans(named)
+    if not missing:
+        return shown
+    tail = (
+        f"{esc(missing)} more we could not name" if shown else f"{esc(missing)} we could not name"
+    )
+    return f"{shown} and {tail}" if shown else tail
+
+
+def _group_a(run: RunPaths):
+    """What we read. The first ask, because it is the one an owner can answer
+    without reading anything else: a file they know we should have had and did not
+    is a correction that invalidates everything below it.
+
+    The full listing, uncapped, and that is a judgment rather than an oversight:
+    Task 3 measured parsec's run as 39 groups over 199 files, which renders as a
+    wall. It stays whole because this section's ask is "what did we miss", and a
+    truncated listing cannot be answered -- the file the owner would have named is
+    the one most likely to be behind the "and 24 more". The count sentence above the
+    list is what gives a reader the size before they wade into it.
+    """
+    groups = target_brief.inputs_read(run)
+    if isinstance(groups, Marker):
+        return groups
+    if not groups:
+        return '<p class="absent">We have no record of what we read.</p>'
+    rows = []
+    for group in groups:
+        # Conditional: every toy group has `directory == ""` -- the three inputs
+        # share their whole directory, so nothing survives the prefix strip -- and
+        # unconditionally this printed `... under : notes.md` with an empty span.
+        #
+        # The leading space is load-bearing: the suite pins
+        # `' under <span class="file">docs</span>'` with it, and inside a `<td>` it
+        # is invisible.
+        #
+        # The dash is the stated absence this module owes every empty value -- the
+        # bullet form could hide it by simply omitting a clause, a table cell cannot
+        # -- and it says the right thing: no directory means the group's files sit at
+        # the root of what we read, not that we failed to work out where they are.
+        where = (
+            f' under <span class="file">{esc(group.directory)}</span>' if group.directory else "—"
+        )
+        # The slice count is why "we read 269 things" and "we read 199 files" are
+        # both true: 71 of parsec's inputs are `#/NN` slices of one capture. It sits
+        # in the `Where` cell rather than becoming a column of its own, because a
+        # column would print a number for every group and the ruling below is that
+        # two counts appear only when they differ.
+        tail = f" (read as {esc(len(group.files) + group.slices)} pieces)" if group.slices else ""
+        rows.append(_row(_kind_chip(group.kind), f"{where}{tail}", _files_html(group.files)))
+    files = sum(len(group.files) for group in groups)
+    pieces = sum(len(group.files) + group.slices for group in groups)
+    # Two counts only when they differ, because "199 files, read as 269 pieces" is
+    # a fact about how the run split a capture and "3 files, read as 3 pieces" is
+    # arithmetic the reader did not ask for.
+    read_as = f", read as {esc(pieces)} separate pieces" if pieces != files else ""
+    return (
+        f"<p>We built this description by reading {esc(files)} "
+        f"file{'' if files == 1 else 's'} of yours{read_as}. "
+        "<strong>If something important is not here, tell us — that is the most "
+        "useful correction you can give us.</strong></p>"
+        + _table(("What kind", "Where", "The files"), rows)
+    )
+
+
+def _status_chip(resolution: str) -> str:
+    """One dispute's status, as a chip.
+
+    Anything outside the three values `_STATUS_CHIP` knows reads as undecided, which
+    is what `target_brief._taken` independently does with the same field: it returns
+    `""` for an unrecognised resolution, so the sentence below the sides also says
+    nothing was decided. The two agree by both defaulting to "we did not decide"
+    rather than by consulting each other -- a colour claiming a decision over a
+    sentence denying one is the page asserting a judgment nobody made.
+    """
+    variant, word = _STATUS_CHIP.get(resolution, _STATUS_CHIP["unresolved"])
+    return _chip(variant, word)
+
+
+def _side_rows(refs, label: str) -> list[str]:
+    """One side of a disagreement, as rows of a source-and-quote table.
+
+    Was `_side_html`, which returned a `<p>` plus a `<ul>`. The rows carry the same
+    three facts and let the reader compare the two sides down a column, which is the
+    comparison the section is asking them to make and the one a pair of nested
+    bullet lists made hardest.
+
+    `Dispute.side_a` is a `tuple[SourceRef, ...]`, not a sentence. Rendering it
+    through `esc()` directly would print the dataclass repr and put
+    `claim_id='clm-notes-004'` on a page whose entire premise is that no rubrica
+    identifier appears on it -- the no-identifier test would catch it, with nothing
+    to say about the fix. Each ref becomes its path, its locator and the line it
+    quotes, which is what spec section 3.3 asks for: each side shown as a real file
+    quoting itself. `_provenance` is not reused here because that renders a whole
+    element's sources as one subordinate line, and a side of a disagreement is the
+    thing being read, not a footnote under it.
+
+    The locator is labelled `at`, not dropped into bare parentheses: it is a
+    fragment or a JSON pointer -- `#error-behaviour` and `#/spans/1/output` on the
+    toy, and Task 3 measured `#/126` shapes on a real run -- and `notes.md
+    (#error-behaviour)` reads as a note about the file where `notes.md (at
+    #error-behaviour)` reads as a place inside it.
+
+    The label repeats down every row of a multi-ref side rather than spanning them.
+    A `rowspan` over a side whose refs are empty is a branch whose edge case is
+    invisible until an owner meets it, and the empty case is real: a side can resolve
+    to no refs at all.
+    """
+    if not refs:
+        # A side whose claims did not resolve to any input. Saying so beats
+        # dropping the side: `taken` below may still name a file, and a page that
+        # answers a question it never asked reads as a page with something missing.
+        #
+        # The quote cell is a dash, never `""`. There is no wording to put there --
+        # nothing resolved, so nothing was quoted -- but Task 2's ruling on the
+        # absent directory applies unchanged: this module states an absence rather
+        # than leaving a cell blank, because an empty `<td>` reads as a render that
+        # broke and the bullet form could hide the same gap by omitting a clause.
+        return [_row(esc(label), "we could not resolve which file states it", "—")]
+    rows = []
+    for ref in refs:
+        # Task 4's handoff: a sliced input's `path` carries the slicer's fragment,
+        # and juxtaposing it against the filename does not explain itself. Measured
+        # on run-20260816-172810, this side line read `trajectories2.json#/10 (at
+        # /data/spans/5/...)`; the file is the owner's and the `#/10` is our index
+        # into it, so the two are separated and only the index is labelled. Nothing
+        # is dropped -- `_shorten` keeps the fragment precisely because it is the
+        # only thing telling 71 slices of one capture apart.
+        #
+        # Which part is the file is `target_brief._file_and_piece`'s ruling, not a
+        # second reading of the same path here: it owns the JSON-pointer clause and
+        # the measurements behind it, and the sentence under these two sides now
+        # names the file through the same helper, so one source cannot be spelled
+        # two ways on one page.
+        base, piece = target_brief._file_and_piece(ref.path)
+        # A path with nothing nameable in it rendered as a blank
+        # `<span class="file">` -- measured on a hand-edited world model, reachable
+        # only there because `SourceRef.path` falls back to the artifact id. The
+        # phrase is `_files_html`'s, which already counts the files it could not
+        # name in the section above, so the absence is stated in words this page
+        # already uses rather than in a new sentence.
+        where = f'<span class="file">{esc(base)}</span>' if base else "a file we could not name"
+        # One parenthesis, not two in a row: the piece and the locator are both
+        # "where inside your material this is", and reading them as one clause is
+        # why they are joined rather than emitted as separate spans.
+        inside = []
+        if piece:
+            inside.append(f"piece {esc(piece)}")
+        if ref.locator:
+            inside.append(f"at {esc(ref.locator)}")
+        if inside:
+            where += f" ({', '.join(inside)})"
+        # Degrades to path plus locator when the evidence record carries no quote --
+        # 59 of executive-agent's 126 cited claims, per Task 1, and the toy's own
+        # side_b, whose `quote` is `""`. The cell states the absence rather than
+        # sitting empty: an empty cell in a quote column reads as a quote we lost.
+        said = (
+            f'<span class="quote">“{esc(ref.quote)}”</span>'
+            if ref.quote
+            else "we did not record the wording"
+        )
+        rows.append(_row(esc(label), where, said))
+    return rows
+
+
+def _group_bc(run: RunPaths):
+    """Where our sources disagree, and what we did about it.
+
+    Task 4's `Dispute` carries both the two sides and the side taken, so B and C
+    are one list rather than two: a reader deciding "which of these two is right"
+    needs to see in the same place which one we acted on. An unresolved
+    contradiction is not split out either -- it is visibly undecided in its own
+    position in the list, and splitting would break the comparison the reader is
+    making across it.
+
+    Two tiers, which is new. The index table exists because 41 disputes -- measured
+    on run-20260826-090456 -- is more than anyone scans as prose, and the one thing
+    a reader wants first is which of them are still open. It carries three columns
+    and deliberately not the nature: on that same run the field's median length is
+    305 characters, so an index column of it is a wall of the paragraphs the detail
+    below already prints. The detail stays whole beneath it because the two verbatim
+    quotes are what let an owner settle a dispute, and they cannot be shortened
+    without taking away the thing they are being asked to rule on.
+
+    No anchor or link between the two tiers. The number is the handle, printed in
+    both places, and a reader who wants dispute 7 scrolls to heading 7.
+
+    Numbering is positional, 1-based, and is not `Dispute.id`: the id is the run's
+    own string and this page never shows one.
+    """
+    found = target_brief.disputes(run)
+    if isinstance(found, Marker):
+        return found
+    if not found:
+        return (
+            '<p class="absent">Nothing we read contradicted anything else we read. '
+            "That is a weaker statement than it sounds: it means we found no "
+            "disagreement, not that your documents agree.</p>"
+        )
+    index_rows = []
+    blocks = []
+    for position, dispute in enumerate(found, start=1):
+        chip = _status_chip(dispute.resolution)
+        # The files on both sides, deduplicated and in first-seen order, so the index
+        # row names what the reader would search their own tree for. `dict.fromkeys`
+        # rather than a set: a set reorders, and the order the sides were read in is
+        # the order the detail below shows them.
+        names = [
+            target_brief._file_and_piece(ref.path)[0] for ref in (*dispute.side_a, *dispute.side_b)
+        ]
+        files = list(dict.fromkeys(n for n in names if n))
+        involved = _file_spans(files) if files else "we could not name them"
+        # `nature` is carried verbatim, because this document never rewrites prose.
+        # It is not an index column: measured across the 41 disputes on
+        # run-20260826-090456 it runs 14 characters at its shortest, 305 at the
+        # median and 780 at its longest, with 38 of 41 over 200. A column of those
+        # is a wall, which destroys the one thing an index is for. The files are the
+        # better handle at index width anyway -- an owner scans 41 rows for a name
+        # they recognise in their own tree, which a 305-character paragraph is not.
+        nature = esc(dispute.nature) or "we could not read our own note of what about"
+        # `esc(position)` on an integer this function itself produced, matching the
+        # `<h3>` below rather than being spelled two ways in one function: the module
+        # docstring's rule covers numbers, `_group_a` already escapes its two counts,
+        # and one number rendered escaped in one place and raw in another is the shape
+        # a later edit reads as permission to skip it.
+        index_rows.append(_row(f'<span class="num">{esc(position)}</span>', chip, involved))
+        # `taken` is `""` for `unresolved` -- Task 4 leaves it empty rather than
+        # asserting a decision nobody made. The renderer says so out loud instead
+        # of emitting an empty bold paragraph: on this page, silence after two
+        # contradicting sides reads as a decision the reader missed.
+        taken = dispute.taken or "We have not decided between them."
+        rows = _side_rows(dispute.side_a, "One side") + _side_rows(dispute.side_b, "The other side")
+        blocks.append(
+            # The heading is the number and the chip, nothing else. The nature is a
+            # paragraph beneath it for the reason measured above: on 38 of
+            # run-20260826-090456's 41 disputes, heading on that field puts a
+            # multi-hundred-character paragraph inside an `<h3>`.
+            f"<h3>{esc(position)}. {chip}</h3>"
+            # "The disagreement: " is pinned by
+            # `test_page_labels_the_nature_of_a_disagreement_rather_than_leading_with_it`,
+            # which records that a bare `count_mismatch` reads as a sentence we wrote
+            # badly rather than as a category we were handed. The label stays
+            # immediately in front of the nature, which is what keeps that true after
+            # the heading gave the field up.
+            + f"<p>The disagreement: {nature}</p>"
+            + _table(("Side", "Source", "What it says"), rows)
+            + f"<p><strong>{esc(taken)}</strong></p>"
+        )
+    return (
+        "<p>Two things we read said different things. Each one below is a place "
+        "where a word from you settles it. The table lists them all; the detail "
+        "under it quotes both sides.</p>"
+        + _table(("#", "Status", "Files involved"), index_rows)
+        + "".join(blocks)
+    )
+
+
+def _group_d(run: RunPaths):
+    """What we could not tell. No provenance line: a gap cites nothing in any of
+    the three recordings measured (0 of 18, 0 of 19, 0 of 15), so a provenance
+    line here would be blank on every real run."""
+    found = target_brief.open_questions(run)
+    if isinstance(found, Marker):
+        return found
+    if not found:
+        return (
+            '<p class="absent">We did not record any open question. On a real '
+            "target that is more likely to mean we did not notice one than that "
+            "none exists.</p>"
+        )
+    rows = []
+    for position, q in enumerate(found, start=1):
+        # The question leads and our label for it trails, which is the reverse of
+        # the draft. Measured over the 49 questions in the three recordings:
+        # `unknown` is a self-contained sentence in all 49, while `subject` is a
+        # bare slug in 19 of 19 on run-20260825-094033 (one of them,
+        # `outbox-approval-invariant`, four times over), an `ent-… / inv-…` id pair
+        # in 10 of 12 on run-20260816-172810, and an id-prefixed phrase in all 18
+        # on run-20260826-090456. Bolding that as the lead of a question put a
+        # rubrica identifier in the recipient's eye ahead of the question itself.
+        # The label is kept rather than dropped, and named as ours, because it is
+        # what they would quote back at us.
+        #
+        # It is now a column, which is the same ruling expressed in a grid: the
+        # question is the wide first column and our reference is the narrow last
+        # one, so the eye reaches the question before the slug on every row.
+        # The words "our reference:" and the parentheses stay in the cell, not just
+        # in the column heading. `test_page_renders_an_open_question_as_a_question`
+        # and `test_page_states_a_gap_that_records_no_question` both pin the exact
+        # string `(our reference: X)`, and what they are pinning is that the label is
+        # named as *ours* -- a column heading a reader skims past does not carry that.
+        #
+        # An em dash where there is no subject, never an empty cell: a `<td></td>`
+        # in a column of references reads as a value this render dropped, which is
+        # the same failure the absent sentences in this module exist to avoid.
+        ref = f'<span class="ident">(our reference: {esc(q.subject)})</span>' if q.subject else "—"
+        # No run has yet produced a gap with no `unknown`, so this is the branch
+        # for an artifact that was written outside the schema rather than one
+        # observed: state the absence, never leave a row holding only our id.
+        asked = esc(q.unknown) or "We did not record what it was that we could not tell."
+        # `esc(position)` on an integer this function itself produced, for the reason
+        # `_group_bc` states where it numbers its own index: one number rendered
+        # escaped in one place and raw in another is the shape a later edit reads as
+        # permission to skip it.
+        rows.append(_row(f'<span class="num">{esc(position)}</span>', asked, ref))
+    return (
+        "<p>These are things we could not work out from what we read. They are "
+        "questions, not criticisms.</p>" + _table(("#", "The question", "Our reference"), rows)
+    )
+
+
+def _operations(run: RunPaths):
+    """What it can do. Source order, never re-sorted -- `operations` returns the
+    sealed description's own order, which is already reproducible and groups related
+    operations the way the pass that wrote them chose to."""
+    found = target_brief.operations(run)
+    if isinstance(found, Marker):
+        return found
+    if not found:
+        return '<p class="absent">We did not identify anything it can be asked to do.</p>'
+    rows = []
+    for op in found:
+        params = esc(", ".join(op.params)) if op.params else "Takes no parameters."
+        outcomes = (
+            "".join(
+                # A description can be `""` -- Task 5's handoff -- and `label:` with
+                # nothing after it reads as prose that got truncated. The label is
+                # still a fact about the target, so it stays and the absence is stated.
+                f'<div class="oc"><em>{esc(o.label)}</em>'
+                + (
+                    f": {esc(o.description)}"
+                    if o.description
+                    else " — we did not record what happens"
+                )
+                + "</div>"
+                for o in op.outcomes
+            )
+            or "We did not record what can come back."
+        )
+        # `sentence` (the `operation` string) heads the entry, not `handle`.
+        # Measured on the toy world: both capabilities carry
+        # `binding.tool == "query_tickets"`, so heading on the handle prints the
+        # same word twice and the reader cannot tell which operation is which.
+        # `operation` is `query_tickets.find_tickets` and distinguishes them.
+        #
+        # The handle is shown under it whenever it says something the title does
+        # not. Measured, that is both toy operations -- `query_tickets` differs from
+        # `query_tickets.find_tickets` -- so the line is the normal case rather than
+        # the edge one, and it is worth keeping: the handle is the name the owner's
+        # own tooling calls, where the title is ours composed from two fields. It
+        # goes only when `operations` has already fallen back to the sentence for
+        # want of a `binding.tool`, which is when the two are the same string.
+        # `.strip()` on both: `capability.operation` is `minLength: 1`, which admits
+        # `" "`, and an unstripped space is truthy -- measured, it shadowed
+        # `query_tickets` and headed the entry with a blank `<dt> </dt>` while every
+        # other empty field in this module is a stated absence.
+        # `target_brief._rules` stripped for this exact hole one module over.
+        #
+        # The handle is stripped once here rather than tested raw below, because
+        # `operations` falls the handle back to the `operation` string when there is
+        # no `binding.tool`: with `operation: " "` and no binding, both are `" "`, so
+        # the raw test was truthy against a stripped title and the entry shipped
+        # `<dt></dt><dd>Called as:  </dd>` -- two blanks in one entry, measured. When
+        # nothing in either field is nameable the absence is stated in the heading,
+        # and the parameters, outcomes and sources below it still say what the
+        # operation does: an unrecorded name is no reason to drop a fact the owner
+        # can still recognise the operation by.
+        handle = op.handle.strip()
+        title = op.sentence.strip() or handle
+        # The bare handle, with the label carried by the column heading rather than
+        # repeated down 39 rows. `test_page_names_the_handle_under_both_toy_operations`
+        # pinned `"Called as: query_tickets<"` twice and now counts
+        # `"<td>query_tickets</td>"` instead, which is the same ruling against the new
+        # markup -- the handle is shown when it differs from the title, and once when
+        # one operation's title has become the handle itself.
+        called = esc(handle) if handle and handle != title else "—"
+        heading = esc(title) if title else "One operation whose name we did not record"
+        rows.append(
+            _row(
+                f"<strong>{heading}</strong>",
+                called,
+                params,
+                outcomes,
+                _where(op.provenance),
+            )
+        )
+    return _table(
+        ("Operation", "Called as", "Takes", "What can come back", "Where we read it"), rows
+    )
+
+
+def _data_types(run: RunPaths):
+    """What data it holds."""
+    found = target_brief.data_types(run)
+    if isinstance(found, Marker):
+        return found
+    if not found:
+        return '<p class="absent">We did not identify the kinds of data it holds.</p>'
+    rows = []
+    for kind in found:
+        # Measured `tickets` and `comments` on the toy. This is the one
+        # `DataType` field that is the owner's own name rather than ours, so
+        # it is the one a reader can confirm or correct outright -- and it is
+        # the string that tells them which store we mean when their system has
+        # two things called a Ticket.
+        held = f'<span class="ident">{esc(kind.collection)}</span>' if kind.collection else "—"
+        if kind.fields:
+            # The type is parenthesised only when there is one. Measured, an empty
+            # `type` rendered `ticket_id ()`, where the sibling outcome path states
+            # its absence -- and a bare pair of brackets reads as a rendering fault
+            # rather than as something we did not record.
+            fields = ", ".join(
+                f"{esc(f.name)} ({esc(f.type)})" if f.type.strip() else esc(f.name)
+                for f in kind.fields
+            )
+        else:
+            fields = "—"
+        # Relations and rules share one column because both are things we believe
+        # hold *between* records rather than fields of one, and each keeps the label
+        # its `<dd>` carried: the column heading names the pair, and inside a cell
+        # holding both a reader still has to be told which is which.
+        extra = [f'<div class="oc">Related to: {esc(r)}</div>' for r in kind.relations]
+        extra += [f'<div class="oc">Rule we believe holds: {esc(r)}</div>' for r in kind.rules]
+        rows.append(
+            _row(
+                f"<strong>{esc(kind.name)}</strong>",
+                held,
+                fields,
+                "".join(extra) or "—",
+                _where(kind.provenance),
+            )
+        )
+    return _table(
+        ("What it is", "Held as", "Fields", "Rules and relations", "Where we read it"), rows
+    )
+
+
+def _personas(run: RunPaths):
+    """Who uses it, and what they are trying to do.
+
+    `personas` can return one bucket whose `id` is `""` and whose name is "Goals we
+    could not attribute to a user". It renders like any other entry, deliberately:
+    Task 6 wrote that name as owner-facing prose precisely so this renderer would
+    need no branch, and a goal we hold about the target is worth showing whether or
+    not we worked out who has it.
+    """
+    found = target_brief.personas(run)
+    if isinstance(found, Marker):
+        return found
+    if not found:
+        return '<p class="absent">We did not identify who uses it.</p>'
+    rows = []
+    for persona in found:
+        goals = "".join(f'<div class="oc">{esc(goal)}</div>' for goal in persona.goals) or (
+            "We did not record what they are trying to do."
+        )
+        rows.append(
+            _row(f"<strong>{esc(persona.name)}</strong>", goals, _where(persona.provenance))
+        )
+    return _table(("Who", "What they are trying to do", "Where we read it"), rows)
+
+
+def _sources_banner(run: RunPaths) -> str:
+    """One line qualifying the whole page when the citations could not be read.
+
+    Task 1 returns a marker rather than an empty index for exactly this: without
+    the banner every "From x.py" line on the page would silently vanish, and the
+    result reads as a confident description with no sources rather than as a
+    broken render. Emitted once, at the top, because it is a property of the page.
+    """
+    if isinstance(target_brief.source_index(run), Marker):
+        return (
+            '<p class="banner">We could not read our own record of where each '
+            "statement below came from, so this copy does not show its sources. "
+            "The statements themselves are unaffected — but ask us for a copy that "
+            "cites them before relying on this one.</p>"
+        )
+    return ""
+
+
+def _description_banner(head) -> str:
+    """One line qualifying the whole page when the description could not be read.
+
+    The five sections below it -- disagreements, open questions, operations, data
+    and users -- all return the identical marker in that case, because all five read
+    the one file. Five panels saying so is one fact told five times, so it is told
+    once here with weight and each section keeps its heading and a short line
+    pointing back up at this.
+
+    `head` rather than a second read: `headline` is a `Marker` exactly when the
+    five builders are, so the caller already has the answer.
+    """
+    if isinstance(head, Malformed):
+        return (
+            '<p class="banner">We have a description of your system on file but '
+            "could not read it back, so the sections below are empty. This is a "
+            "fault at our end and not a statement about your system.</p>"
+        )
+    if isinstance(head, Marker):
+        return (
+            '<p class="banner">We do not have a description of your system on '
+            "file, so the sections below are empty. What we read is the part that "
+            "is worth your time on this copy.</p>"
+        )
+    return ""
+
+
+def _reply() -> str:
+    """How to reply. This is what stands in place of the sign-off block the design
+    dropped: the document asks for corrections in prose and offers no place to
+    record an approval, because whether a ratification is worth collecting is a
+    question these conversations have not answered yet.
+
+    At the foot of the page, where the closing of an emailed document belongs --
+    which is why it says "the description above" and not "below": `render` puts
+    this last, and the brief's draft described a layout it did not build.
+    """
+    return (
+        '<div class="reply"><h2>How to reply</h2>'
+        "<p>Reply in whatever form suits you — prose in an email is ideal. The three "
+        "things we asked for at the top are ranked: a source we should have read is "
+        "worth more to us than a misread field, and a disagreement you settle is "
+        "worth more than a detail you confirm. You do not need to work through the "
+        "full description above to be useful to us.</p>"
+        # Not "we are not asking you to approve anything", which is what the brief
+        # wrote here: the brief's own
+        # `test_page_names_the_target_and_asks_the_question` forbids the word
+        # `approve` anywhere on the page, and the two shipped contradicting each
+        # other. The test wins, because the word is the strongest signal that the
+        # dropped sign-off block has come back -- and the sentence keeps its whole
+        # meaning without it.
+        "<p>Nothing here needs to be agreed to. We are asking whether it is "
+        "true.</p></div>"
+    )
+
+
+def render(run: RunPaths) -> str:
+    """The whole page, as one string."""
+    head = target_brief.headline(run)
+    known = isinstance(head, target_brief.Headline)
+    # `head.name` can be `""` on a description that was read but names nothing, so
+    # the test is the name and not the type. No fallback to `run.root.name`, which
+    # the brief's draft used: measured, that is `run-20260827-115248`, which is
+    # rubrica's identifier for the work rather than anything the recipient has seen
+    # -- and a page whose `<h1>` is that has handed them the wrong subject.
+    name = head.name.strip() if known else ""
+    # `.strip()` on all three: the schema's `minLength: 1` admits `" "`, and
+    # measured, a whitespace-only `interface` rendered `Reached over  .`, a
+    # whitespace-only `notes` an empty `<p> </p>`, and a whitespace-only `name` an
+    # `<h1>` holding one space where the no-name branch says what the page is about.
+    # Stripping what is displayed is not rewriting it.
+    interface = head.interface.strip() if known else ""
+    notes = head.notes.strip() if known else ""
+    # The subject of every sentence about the target, so one branch decides it
+    # rather than each sentence guessing.
+    subject = f"<strong>{esc(name)}</strong>" if name else "your system"
+    # True for exactly the five sections that read the description, which is the
+    # only case `_marker`'s terse form is correct for.
+    terse = isinstance(head, Marker)
+    # Built once, so the legend below can ask whether the label is on the page
+    # rather than recomputing the operations to find out.
+    operations = _operations(run)
+    # Every body built before the page is assembled, because the legend's trigger is
+    # a property of all of them and the legend must be readable above the lines it
+    # glosses. Tier 2's three are built here for that reason alone -- they were
+    # interpolated in place before, which is what put the gloss below the tier-1 ask
+    # carrying most of what it explains.
+    could_not_tell = _group_d(run)
+    data_types = _data_types(run)
+    personas = _personas(run)
+    legend = _LEGEND if _needs_legend(could_not_tell, operations, data_types, personas) else ""
+    body = [
+        "<!doctype html>",
+        '<html lang="en"><head><meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        f"<title>{esc(name)} — does this describe your system?</title>"
+        if name
+        else "<title>Does this describe your system?</title>",
+        f"<style>{_CSS}</style></head><body>",
+        f"<h1>{esc(name)}</h1>" if name else "<h1>The system we are describing</h1>",
+        f'<p class="meta">Reached over {esc(interface)}.</p>' if interface else "",
+        f'<p class="lede">This is what we currently believe about {subject}, '
+        "written from your own documents. "
+        "<strong>Does this accurately describe your system?</strong> Where it does "
+        "not, we would rather hear it now than build on it.</p>",
+        _description_banner(head),
+        _sources_banner(run),
+        f"<p>{esc(notes)}</p>" if notes else "",
+        "<h2>What we most need from you</h2>",
+        # The draft left this heading with nothing under it, and on all three
+        # recordings it rendered as a bare rule above the next heading -- the one
+        # place on the page that read as a section that had failed to fill in.
+        # Its counterpart below ("What we believe, in full") always had its lead
+        # sentence, so this is the sentence that was missing rather than a new
+        # tier. It also states the ranking that the reply block refers back to.
+        #
+        # Now a table, because the ranking *is* tabular: three asks, in order, each
+        # pointing at the section that answers it. The sentence stated an order the
+        # reader then had to hold; the table shows it. Three rows exactly -- `_reply`
+        # says "the three things we asked for at the top are ranked", and
+        # `CLAUDE.md` and `docs/reference/cli.md` both say three ranked asks lead.
+        _table(
+            ("Rank", "What we need", "Where it is"),
+            [
+                _row("1", "A source we should have read", "What we read"),
+                _row("2", "A place our sources disagree", "Where our sources disagree"),
+                _row("3", "Something we could not work out", "What we could not tell"),
+            ],
+        ),
+        _section("What we read", _group_a(run)),
+        _section("Where our sources disagree", _group_bc(run), terse),
+        _section("What we could not tell", could_not_tell, terse, lead=legend),
+        "<h2>What we believe, in full</h2>",
+        "<p>Everything below is the detail behind the asks above. Skim it or skip "
+        "it — the sections above are where a correction helps us most.</p>",
+        _collapsed("What it can do", operations, terse),
+        _collapsed("What data it holds", data_types, terse),
+        _collapsed("Who uses it", personas, terse),
+        _reply(),
+        "</body></html>",
+    ]
+    return "\n".join(part for part in body if part)

@@ -22,6 +22,19 @@ artifact or is arithmetic over artifacts; nothing dispatches a model.
 
 Every task's requirements implicitly include this section.
 
+**Three things below were superseded during execution, and the shipped code is the
+answer, not this document.** (1) The Absent marker no longer says "We have not got far
+enough to describe this yet" — that sentence claimed progress we cannot know when the
+truth is only that a file would not read, so it states what we have on file instead;
+the test body asserting the old phrasing would fail today. (2) The no-identifier claim
+is scoped to the page's *own* prose, not to the page: prose this feature selects from
+the run ships verbatim, claim ids included, because an owner correcting a sentence we
+paraphrased would be correcting our paraphrase. (3) The legend glosses the idiom a
+stage writes ("no claim addresses …") as well as our own "Not addressed" label, and
+leads the first ask rather than sitting inside the collapsed description. Each change
+has its ruling on the record; `docs/reference/cli.md` and the modules' own comments are
+current where this document is not.
+
 - **Commit form, both flags, every time: `git commit -S -s`.** `-s` is the
   `Signed-off-by` DCO trailer, `-S` the cryptographic signature. **If signing
   fails, stop and report it** — never fall back to an unsigned commit, never
@@ -171,13 +184,21 @@ def test_source_index_prefers_the_evidence_record_that_carries_a_quote(tmp_path)
 
 def test_source_index_omits_a_claim_id_nothing_defines(tmp_path):
     run = build_toy_run(tmp_path, upto="reconcile-seal")
-    assert "clm-does-not-exist" not in target_brief.source_index(run)
+    index = target_brief.source_index(run)
+    # The positive is the control, and without it this test asserts nothing: a
+    # bare `not in` passes for any implementation that iterates over claims that
+    # exist, an index of `{}` included, so the absence would be
+    # indistinguishable from an index that resolved nothing at all.
+    assert "clm-api-001" in index
+    assert "clm-does-not-exist" not in index
 
 
 def test_source_index_returns_a_marker_when_claims_cannot_be_read(tmp_path):
     """Never a silently empty dict. summary.py:725-770 rules that reporting empty
     on an unreadable 01-claims/ is the one reading a human at gate 1 must never be
     handed, and this page is mailed outside the project."""
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     os.chmod(run.claims_dir, 0o000)
     try:
@@ -185,7 +206,10 @@ def test_source_index_returns_a_marker_when_claims_cannot_be_read(tmp_path):
     finally:
         os.chmod(run.claims_dir, 0o755)
     assert isinstance(result, Malformed)
-    assert "01-claims" in result.what
+    # Equality, not a substring, matching the sibling convention at
+    # test_summary.py:1722 -- it also pins the trailing slash, which is what
+    # says a directory rather than a file could not be read.
+    assert result.what == "01-claims/"
 
 
 @pytest.mark.parametrize(
@@ -202,13 +226,33 @@ def test_source_index_returns_a_marker_when_claims_cannot_be_read(tmp_path):
         # half-trimmed path is worse than a full one.
         (["/abs/one.py", "rel/two.py"], ""),
         ([], ""),
+        # Fragment-bearing paths sharing one container file. `intake.py:333`
+        # builds a sliced input's source_path as `<container>#<json_pointer>`
+        # and a JSON pointer starts with "/", so commonpath -- which is
+        # component-aware -- walks into the fragment and answers
+        # ".../trace.json#", a prefix `_shorten` then matches nothing against.
+        # Measured: the absolute staging path shipped to the owner unstripped,
+        # which is the one outcome this function exists to prevent.
+        (["/a/b/trace.json#/41", "/a/b/trace.json#/42"], "/a/b"),
+        # An empty source_path among real ones. `_input_sources` yields "" for a
+        # record whose `source_path` is not a string, and an unfiltered "" makes
+        # commonpath raise ValueError -- which the handler below turns into "no
+        # prefix", silently disabling shortening for every path in the run.
+        (["", "/a/b/one.py", "/a/b/two.py"], "/a/b"),
+        # A fragment with no container: the base it partitions to is empty, so it
+        # must be filtered *after* the partition. Filtering the raw string instead
+        # lets "" into the set, commonpath raises, and shortening turns off for
+        # every path in the run -- leaking the staging path this helper exists to
+        # strip. This is the parameter the "" one above does not reach: an entry
+        # that is non-empty raw and empty once partitioned.
+        (["#/0", "/a/b/one.py", "/a/b/two.py"], "/a/b"),
     ],
 )
 def test_common_prefix(files, expected):
     assert target_brief._common_prefix(files) == expected
 
 
-def test_shorten_keeps_the_slice_fragment(tmp_path):
+def test_shorten_keeps_the_slice_fragment():
     """A `#/NN` fragment marks one slice of a sliced artifact. parsec's 71 trace
     inputs are 71 slices of one capture, so the fragment is the only thing
     distinguishing them and dropping it would collapse 71 records into one."""
@@ -253,7 +297,7 @@ from dataclasses import dataclass
 # Private helpers from three siblings, deliberately: `summary.py` imports the
 # same four out of `brief.py` for the reason stated there, which is that a second
 # spelling of one rule is how two reports come to disagree about one run.
-from .brief import _dicts, _mapping, _quietly, _strings
+from .brief import _dicts, _mapping, _quietly
 from .paths import RunPaths
 from .refs import _claims_by_artifact
 from .summary import Marker, _absent_or_malformed
@@ -285,8 +329,30 @@ def _common_prefix(files: list[str]) -> str:
     absolute *on the machine rubrica ran on*: all three runs measured share
     `/home/agent/runs/<target>`, which is where the corpus was staged and is not a
     path any owner recognises. What is left is the owner's own tree.
+
+    The `#` fragment is cut off before any of that, because `os.path` is
+    component-aware and a JSON pointer starts with `/`: `intake.py:333` writes a
+    sliced input's `source_path` as `<container>#<json_pointer>`, so `commonpath`
+    over two slices of one capture answers `.../trace.json#` -- measured -- and
+    `_shorten` then matches that against nothing and strips nothing. It never
+    mis-strips, only under-strips, so the failure it caused was the staging path
+    of the machine rubrica ran on shipping to the target's owner, which is the one
+    outcome this function exists to prevent.
     """
-    real = sorted({f for f in files if f})
+    # The emptiness filter is load-bearing, not defensive: `_input_sources` yields
+    # "" for a record whose `source_path` is not a string, and one "" makes
+    # `commonpath` raise, which the handler below reads as "no shared root" --
+    # silently disabling shortening for every other path in the run.
+    #
+    # It filters *after* the partition because the value that must be non-empty is
+    # the base, not the raw entry, and a fragment-only `source_path` ("#/0") is
+    # what tells the two apart: it is non-empty raw and empty once partitioned, so
+    # testing the raw string lets "" into the set anyway. Measured -- filtering
+    # first, `["#/0", "/a/b/one.py", "/a/b/two.py"]` returned "" and both absolute
+    # paths rendered whole. `intake.py:333` builds its fragment from a `Path`,
+    # which never stringifies empty, so the pipeline cannot produce that shape;
+    # a hand-edited manifest can, and it fails open with no marker and no finding.
+    real = sorted({base for base in (f.partition("#")[0] for f in files) if base})
     if not real:
         return ""
     try:
@@ -390,7 +456,8 @@ def source_index(run: RunPaths) -> dict[str, SourceRef] | Marker:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/unit/test_target_brief.py -q`
-Expected: PASS, all eleven (five named tests, five `_common_prefix` parameters, one `_shorten`).
+Expected: PASS, all fourteen (five named tests, eight `_common_prefix` parameters, one
+`_shorten`).
 
 - [ ] **Step 5: Measure the quote predicate in both directions**
 
@@ -510,8 +577,11 @@ def test_provenance_marks_an_element_a_contradiction_touches(tmp_path):
 
 
 def test_disputed_claim_ids_reads_a_side_written_as_a_string_or_a_list():
-    """The committed recordings write each side as one claim id; nothing forbids a
-    list, and a `str` iterated as a list contributes one character per entry."""
+    """The schema requires each side to be a single id string, so the string branch
+    is the conformant path and the list branch is tolerance for a hand-edit made
+    after layer 1 passed. `_strings` is what reads the list, because it drops a
+    non-string member rather than raising -- which is what the `{"claim_a": 7}`
+    case below pins."""
     as_string = {"contradictions": [{"claim_a": "clm-one", "claim_b": "clm-two"}]}
     assert target_brief.disputed_claim_ids(as_string) == {"clm-one", "clm-two"}
     as_list = {"contradictions": [{"claim_a": ["clm-one", "clm-three"], "claim_b": ["clm-two"]}]}
@@ -531,11 +601,69 @@ def test_provenance_of_an_unresolvable_id_names_no_file_but_still_reports_disput
     )
     assert result.files == ()
     assert result.kinds == ()
+    # Zero files is not one file: `single_source` reads off `files`, and an
+    # element with nothing behind it must not badge as resting on a single source.
+    assert result.single_source is False
     assert result.disputed is True
 
 
-def test_provenance_ignores_non_string_members_of_a_claims_array():
-    assert target_brief.provenance([7, None, {}], {}, frozenset()).files == ()
+def test_provenance_ignores_non_string_members_of_a_claims_array(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    index = target_brief.source_index(run)
+    assert target_brief.provenance([7, None, {}], index, frozenset()).files == ()
+    # The positive control, and without it this test asserts nothing: an
+    # implementation returning no files for any input at all satisfies the
+    # absence above. The string member has to survive the same filter that drops
+    # its three neighbours -- which is also what says the filter is a type test
+    # rather than a length test on the array.
+    mixed = target_brief.provenance([7, "clm-api-001", None, {}], index, frozenset())
+    assert mixed.files == ("api.json",)
+
+
+def test_disputed_claim_ids_tolerates_a_world_model_that_is_not_an_object():
+    """A report never raises on readable content, and a world model is hand-edited
+    at a human gate -- which is exactly when a non-object appears. Bare `.get`
+    raised AttributeError on both shapes below, measured.
+
+    The truthy string is the case `brief._mapping`'s docstring records as measured
+    at gates 0, 1 and 2; `[]` is here as well because bare `.get` raises on a
+    non-object whether it is truthy or falsy, and the `x or {}` idiom `_mapping`
+    replaced would have masked exactly the falsy half.
+    """
+    assert target_brief.disputed_claim_ids([]) == frozenset()
+    assert target_brief.disputed_claim_ids("nope-a-truthy-string") == frozenset()
+    # The positive control: an object still reads, so the guard above cannot be a
+    # blanket "return nothing" that would hide every real contradiction too.
+    readable = {"contradictions": [{"claim_a": "clm-one", "claim_b": "clm-two"}]}
+    assert target_brief.disputed_claim_ids(readable) == {"clm-one", "clm-two"}
+
+
+def test_provenance_counts_two_slices_of_one_file_as_two_sources():
+    """A ruling, not an accident. `intake.py:333` writes a sliced input's
+    source_path as `<container>#<json_pointer>`, so two slices of one capture reach
+    `files` as two entries and the element is not single-source. That is what "how
+    many sources back this" asks: parsec's 71 trace inputs are 71 slices of one
+    capture and 71 independent observations of the target, and collapsing them
+    would tell an owner that 71 recorded interactions are one piece of evidence.
+
+    A synthetic index because the toy run has no sliced input -- `tests/toy.py`'s
+    `#/...` strings are evidence *locators*, not source_path fragments -- so
+    without this the whole fragment behaviour is fixture-cannot-reach.
+    """
+    index = {
+        "clm-one": target_brief.SourceRef(
+            claim_id="clm-one", path="trace.json#/12", locator="#/0", quote="", kind="trace"
+        ),
+        "clm-two": target_brief.SourceRef(
+            claim_id="clm-two", path="trace.json#/41", locator="#/0", quote="", kind="trace"
+        ),
+    }
+    result = target_brief.provenance(["clm-one", "clm-two"], index, frozenset())
+    assert result.files == ("trace.json#/12", "trace.json#/41")
+    # One kind, because both slices are the same kind of file. The two counts are
+    # independent, and this is the case that says so.
+    assert result.kinds == ("trace",)
+    assert result.single_source is False
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -586,14 +714,29 @@ class Provenance:
 def disputed_claim_ids(world_model: dict) -> frozenset[str]:
     """Every claim id either side of a contradiction names.
 
-    Both spellings are read. The committed recordings write each side as a single
-    claim id string, nothing in the schema forbids a list, and a `str` fed through
-    `_strings` would contribute one entry per character -- which is how an element
-    citing `clm-notes-004` would come out undisputed while five single letters
-    came out disputed.
+    The schema *requires* a string: `contradiction` lists `claim_a` and `claim_b`
+    in `required`, both `$ref`-ing `$defs/id`, which is `{"type": "string"}`. So a
+    list fails layer 1, the string branch is the conformant path, and the list
+    branch is tolerance for a hand-edit made after validation passed -- which is
+    the shape a human gate invites.
+
+    `_strings` reads that branch because it *drops* a non-string member instead of
+    raising, which is what the `{"claim_a": 7}` case pins. It does not explode a
+    string into characters: it returns `[]` for anything that is not a list
+    (`brief.py:165-167`), so routing a conformant string through it would drop the
+    id **silently** -- measured, an element citing `clm-notes-004` came out
+    undisputed and the id vanished. That silent drop, not a character explosion,
+    is why the string branch exists. (The character explosion is the failure
+    `_strings` was written to *prevent*, described in its own docstring; an earlier
+    revision of this comment transposed it onto `_strings` itself and was wrong.)
+
+    `_mapping` guards the read for the reason `_input_sources` above guards its
+    own: a world model that parses but is not an object made this raise
+    `AttributeError`, and this module's contract is that a report never raises on
+    readable content.
     """
     out: set[str] = set()
-    for contradiction in _dicts(world_model.get("contradictions")):
+    for contradiction in _dicts(_mapping(world_model).get("contradictions")):
         for side in ("claim_a", "claim_b"):
             value = contradiction.get(side)
             if isinstance(value, str):
@@ -612,6 +755,16 @@ def provenance(
     refs: an element every one of whose claims is unresolvable has no files to
     show, and losing its dispute marker at the same time would hide the more
     important of the two facts.
+
+    Two slices of one file count as two sources, deliberately. `intake.py:333`
+    writes a sliced input's `source_path` as `<container>#<json_pointer>`, so
+    `files` holds `trace.json#/12` and `trace.json#/41` separately and such an
+    element is not `single_source`. That is what "how many sources back this"
+    asks: parsec's 71 trace inputs are 71 slices of one capture and 71
+    independent observations of the target, and collapsing them on the container
+    would tell an owner that 71 recorded interactions are one piece of evidence.
+    `kinds` does collapse them, because both slices are the same kind of file --
+    the two counts are independent by design.
     """
     ids = [c for c in claim_ids if isinstance(c, str)]
     resolved = [index[c] for c in ids if c in index]
@@ -683,12 +836,21 @@ single source across the three runs on disk: 4 of 39, 13 of 37, 0 of 5. Entities
 is -- 13 of executive-agent's 37 operations rest on a design document alone, with
 no schema, no code and no trace behind them.
 
-disputed_claim_ids reads a side written as a string and as a list, because a str
-fed through _strings contributes one entry per character, and an element citing
-clm-notes-004 would then come out undisputed while five single letters came out
-disputed. Dispute is computed from the ids rather than the resolved refs so an
-element whose claims all fail to resolve keeps the more important of the two
-facts.
+disputed_claim_ids reads a side written as a string and as a list. The schema
+requires the string -- claim_a and claim_b are required and $ref a string-typed
+id def -- so the string branch is the conformant path and the list branch is
+tolerance for a hand-edit made after layer 1 passed. _strings reads the list
+because it drops a non-string member instead of raising; routing the conformant
+string through it would return [] and drop the id silently, measured as an
+element citing clm-notes-004 coming out undisputed. The read is guarded by
+_mapping for the reason _input_sources guards its own: a world model that parses
+but is not an object is what a human gate invites, and a report never raises on
+readable content.
+
+Dispute is computed from the ids rather than the resolved refs so an element whose
+claims all fail to resolve keeps the more important of the two facts. Two slices
+of one file count as two sources, because they are two independent observations
+of the target; kinds collapses them, and the two counts are independent by design.
 
 Assisted-By: Claude (Anthropic AI) <noreply@anthropic.com>
 MSG
@@ -1446,7 +1608,17 @@ uses it. Each element carries Task 2's provenance line.
   `Persona(id, name, goals: tuple[str, ...], provenance: Provenance)`;
   `operations(run) -> list[Operation] | Marker`;
   `data_types(run) -> list[DataType] | Marker`;
-  `personas(run) -> list[Persona] | Marker`.
+  `personas(run) -> list[Persona] | Marker`;
+  `_world(run) -> dict | Marker`, the module's single world-model reader.
+
+**`_world` replaces the inline guard in Tasks 4 and 5 as well.** Those two tasks
+each spell `_mapping(_quietly(run.world_model))` followed by `_absent_or_malformed`,
+and this task adds a third copy. Three copies of one guard in one module is a defect
+by this repo's conventions — the "one home" rule that `skills.SKILL_PREFIX` exists
+to satisfy — and the divergence it invites is exactly the kind two reports of the
+same run must not have. So Step 5 below rewrites `disputes` and `open_questions` to
+call `_world` too. Their behaviour does not change: `_world` returns the same marker
+those functions built inline, from the same two lines.
 
 **Outcome provenance comes from the parent capability.** An outcome class's own
 `claims` may not exist: the parsec run fails layer 1 with 213 findings, 195 of them
@@ -1669,8 +1841,9 @@ class Persona:
 def _world(run: RunPaths):
     """The world model, or the marker naming why there is none.
 
-    One reader for the five builders below, so they cannot disagree about whether
-    a run has a world model.
+    The one world-model reader in this module -- the three builders below and the
+    two written in Tasks 4 and 5 -- so no two of them can disagree about whether a
+    run has a world model, or say it differently when it has not.
     """
     payload = _mapping(_quietly(run.world_model))
     if not payload:
@@ -1849,7 +2022,54 @@ def personas(run: RunPaths) -> list[Persona] | Marker:
 Run: `uv run pytest tests/unit/test_target_brief.py -q`
 Expected: PASS.
 
-- [ ] **Step 5: Confirm it survives the run that fails layer 1**
+- [ ] **Step 5: Move Tasks 4 and 5's readers onto `_world`**
+
+Both `disputes` and `open_questions` open with the same four lines this task's
+`_world` now owns. Replace each opening with a call, leaving everything else in both
+functions untouched.
+
+In `disputes`, replace:
+
+```python
+    payload = _mapping(_quietly(run.world_model))
+    if not payload:
+        return _absent_or_malformed(
+            run.world_model, "01-world-model.json", "nothing could be read from it"
+        )
+    index = source_index(run)
+```
+
+with:
+
+```python
+    payload = _world(run)
+    if isinstance(payload, Marker):
+        return payload
+    index = source_index(run)
+```
+
+In `open_questions`, replace the same four lines with the same two — the function
+continues at whatever follows them. Neither rewrite changes behaviour: `_world`
+returns the marker those lines built, from the same two calls.
+
+Then confirm the world-model guard has exactly one home:
+
+```bash
+grep -n "_mapping(_quietly(run.world_model))" src/rubrica/target_brief.py
+grep -c "_absent_or_malformed" src/rubrica/target_brief.py
+```
+
+Expected: **no output at all** from the first — `_world` is the only place that reads
+`run.world_model`. The second returns `4`: the import, plus one call each in
+`source_index` (over `01-claims/`), `inputs_read` (over `manifest.json`) and `_world`.
+Those three read three different files, so they are three guards and not three copies
+of one. Then run
+`uv run pytest tests/unit/test_target_brief.py -q` and expect PASS: Tasks 4 and 5
+each wrote a test that truncates the world model to `{ not json` and then unlinks
+it, asserting `Malformed` and then `Absent`, and those two are what prove the
+rewrite kept both markers rather than collapsing them into one.
+
+- [ ] **Step 6: Confirm it survives the run that fails layer 1**
 
 ```bash
 uv run rubrica validate --run runs/run-20260826-090456 --stage reconcile-seal > /dev/null 2>&1; echo "validate exit: $?  (1 expected -- the parked ruling)"
@@ -1873,7 +2093,7 @@ Expected: `validate exit: 1` (the parked ruling, not a regression), and
 (two actors plus the unattributed-goals bucket, if any goal is unattributed). The
 point of this step is that a world model failing layer 1 still renders completely.
 
-- [ ] **Step 6: `make check` and commit**
+- [ ] **Step 7: `make check` and commit**
 
 ```bash
 make check
@@ -1901,6 +2121,11 @@ semantic kind* -- `oc-qac-empty` is `kind: empty` carrying "No claim addresses w
 is returned when no cost data exists." So `kind` cannot mark absence, nothing else
 can, and the alternative is string-matching model prose. Plain labels plus a legend
 carry it.
+
+`_world` also replaces the inline world-model guard in `disputes` and
+`open_questions`. Three functions spelling one read of one file is where two
+sections of one report start disagreeing about whether the run has a world model;
+`run.world_model` is now read in exactly one place.
 
 Two things kept rather than dropped, both because a description asking "is this
 accurate?" cannot afford to be quietly incomplete: an outcome whose kind is outside
@@ -2023,6 +2248,13 @@ def test_page_renders_the_toy_contradiction_with_both_files_named(tmp_path):
     # of their own documents disagreeing, never `clm-notes-004`.
     assert "notes.md" in page and "trace.json" in page
     assert "clm-notes-004" not in page and "clm-trace-002" not in page
+    # Each side quotes itself: the locator the owner can jump to, and the line
+    # their own document carries. This is what `_side_html` is for -- the naive
+    # `esc(dispute.side_a)` puts a dataclass repr here and fails the line above.
+    assert "#error-behaviour" in page
+    assert "not an empty result" in page
+    # `resolution` is `preferred_a`, so the page names the file it went with.
+    assert "We went with" in page
 
 
 def test_page_distinguishes_two_operations_that_share_a_handle(tmp_path):
@@ -2339,6 +2571,40 @@ def _group_a(run: RunPaths):
     )
 
 
+def _side_html(refs, label: str) -> str:
+    """One side of a disagreement, as the files that state it.
+
+    `Dispute.side_a` is a `tuple[SourceRef, ...]`, not a sentence. Rendering it
+    through `esc()` directly would print the dataclass repr and put
+    `claim_id='clm-notes-004'` on a page whose entire premise is that no rubrica
+    identifier appears on it -- the no-identifier test below would catch it, with
+    nothing to say about the fix. Each ref becomes its path, its locator and the
+    line it quotes, which is what spec section 3.3 asks for: each side shown as a
+    real file quoting itself. `_provenance` is not reused here because that renders
+    a whole element's sources as one subordinate line, and a side of a
+    disagreement is the thing being read, not a footnote under it.
+    """
+    if not refs:
+        # A side whose claims did not resolve to any input. Saying so beats
+        # dropping the side: `taken` below may still name a file, and a page that
+        # answers a question it never asked reads as a page with something missing.
+        return f"<p>{esc(label)}: we could not resolve which file states it.</p>"
+    lines = []
+    for ref in refs:
+        where = f'<span class="file">{esc(ref.path)}</span>'
+        if ref.locator:
+            where += f" ({esc(ref.locator)})"
+        if ref.quote:
+            # Degrades to path plus locator when the evidence record carries no
+            # quote -- 59 of executive-agent's 126 cited claims, per Task 1.
+            lines.append(
+                f'<li>{where}: <span class="quote">“{esc(ref.quote)}”</span></li>'
+            )
+        else:
+            lines.append(f"<li>{where}</li>")
+    return f"<p>{esc(label)} is stated in:</p><ul>{''.join(lines)}</ul>"
+
+
 def _group_bc(run: RunPaths):
     """Where our sources disagree, and what we did about it. Tasks 4's `Dispute`
     carries both the two sides and the side taken, so B and C are one list rather
@@ -2355,10 +2621,16 @@ def _group_bc(run: RunPaths):
         )
     items = []
     for dispute in found:
+        # `taken` is `""` for `unresolved` -- Task 4 leaves it empty rather than
+        # asserting a decision nobody made. The renderer says so out loud instead
+        # of emitting an empty bold paragraph: on this page, silence after two
+        # contradicting sides reads as a decision the reader missed.
+        taken = dispute.taken or "We have not decided between them."
         items.append(
             f"<li><p>{esc(dispute.nature)}</p>"
-            f"<p>{esc(dispute.side_a)}</p><p>{esc(dispute.side_b)}</p>"
-            f"<p><strong>{esc(dispute.taken)}</strong></p></li>"
+            f"{_side_html(dispute.side_a, 'One side')}"
+            f"{_side_html(dispute.side_b, 'The other side')}"
+            f"<p><strong>{esc(taken)}</strong></p></li>"
         )
     return (
         "<p>Two things we read said different things. Each one below is a place "
@@ -3037,7 +3309,9 @@ property everywhere it is read (Tasks 2, 7); `source_index` returns
 `dict[str, SourceRef] | Marker` and every consumer narrows with
 `isinstance(index, dict)` before use (Tasks 2, 6); every builder returns
 `list[X] | Marker` and every renderer branches on `isinstance(..., Marker)` first
-(Task 7); `_strings` is named in Task 1's import block because Tasks 2–6 use it.
+(Task 7). `_strings` is *not* in Task 1's import block, because Task 1 does not use
+it and ruff's `F` rules fail `make check` on an unused import: Task 2 Step 3 extends
+the `brief` import when it becomes the first user, and Tasks 4 and 6 inherit it.
 
 ## Execution
 
