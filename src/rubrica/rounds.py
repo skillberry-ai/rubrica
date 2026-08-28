@@ -362,11 +362,17 @@ def closable_holes(run: RunPaths) -> list[str]:
             # rb-reconcile-capabilities' section 5 tells the pass to leave `binding`
             # off rather than guess a tool name, so the pass did the right thing and
             # nothing downstream can add one. `check-refs` runs after reconcile-seal
-            # and *before* HUMAN GATE 1, so a finding there halted the run ahead of
-            # the gate it was meant to be read at -- 19 of 24 capabilities' worth on
-            # run-20260827-070444. An earlier signal belongs on the layer CLAUDE.md
-            # keeps for exactly this, the reports that always exit clean on a
-            # readable run: gate-brief, not check-refs.
+            # and *before* HUMAN GATE 1, so a finding there WOULD HAVE halted the run
+            # ahead of the gate it was meant to be read at -- rb-orchestrate's A3
+            # reads an exit 1 as a repairable stage defect and A4 spends one
+            # re-dispatch and then halts, which makes that unavoidable rather than
+            # likely. Derived, not observed: what was measured on
+            # run-20260827-070444 is check-refs standalone at exit 1 with 20 stdout
+            # lines, 19 of 24 capabilities named plus the stale capability_cells
+            # line. No orchestrated run was dispatched against such a world model,
+            # so nobody has watched A4 halt on one. An earlier signal belongs on the
+            # layer CLAUDE.md keeps for exactly this, the reports that always exit
+            # clean on a readable run: gate-brief, not check-refs.
             and hole["ref"] not in undrivable_refs
         }
     )

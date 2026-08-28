@@ -127,7 +127,9 @@ SPLIT_HEADER = "Groups split across more than one slice"
 # `check-refs` tells the orchestrator to spend its one repair attempt on a stage,
 # and no re-dispatch adds a binding `rb-reconcile-capabilities` was told to leave
 # off rather than guess -- so the finding miscategorised its own condition. Its
-# running before this gate is what made that fatal rather than merely wrong.
+# running before this gate is what would have made that fatal rather than merely
+# wrong: derived from A3 and A4, never observed, since no orchestrated run was
+# dispatched against an unbound world model to watch the halt.
 EXCLUDED_HEADER = "Capabilities excluded from the denominator (no tool binding)"
 
 

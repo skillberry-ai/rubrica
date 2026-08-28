@@ -982,17 +982,24 @@ fenced banner `gate-brief --gate 1` prints when no capability is bound. That is
 deliberate rather than an oversight, and the alternative was built and taken back
 out. **A `check-refs` finding at the seal was designed, implemented in `ae1b74e`,
 and reverted in `11a6c25`.** This is the live account of why it is not there, so
-that its absence is not read as an oversight and re-proposed. It miscategorised its
-own condition: a `1` from `check-refs` tells
-`rb-orchestrate` "a repairable stage defect, spend the one repair attempt", and no
-re-dispatch can add a binding at all — `rb-reconcile-capabilities`' section 5 tells
-the pass to leave `binding` off rather than guess a tool name, so the pass did the
-right thing and nothing downstream can supply one. `check-refs` also runs *before*
-gate 1, so the finding halted a correct run ahead of the gate it was written to be
-read at — 19 of 24 capabilities' worth on `run-20260827-070444`. **The reason is the
-exit-1 semantics, not a change of mind about visibility**, so do not re-propose it
-on the grounds that the exclusion deserves an earlier signal — the layer for that
-is the one CLAUDE.md keeps for reports that always exit clean on a readable run.
+that its absence is not read as an oversight and re-proposed. It miscategorised
+its own condition: a `1` from `check-refs` tells `rb-orchestrate` "a repairable
+stage defect, spend the one repair attempt", and no re-dispatch can add a binding
+at all — `rb-reconcile-capabilities`' section 5 tells the pass to leave `binding`
+off rather than guess a tool name, so the pass did the right thing and nothing
+downstream can supply one. `check-refs` also runs *before* gate 1, so the finding
+**would have halted** a correct run ahead of the gate it was written to be read
+at, and `rb-orchestrate`'s A3 and A4 make that unavoidable rather than likely: A3
+reads an exit 1 as a repairable stage defect, A4 spends one re-dispatch and then
+halts. **The halt is derived, not observed.** What was measured on
+`run-20260827-070444` is the finding's own magnitude — `check-refs` standalone at
+exit 1 with 20 stdout lines, 19 of 24 capabilities named plus the stale
+`capability_cells` line. No orchestrated run was ever dispatched against such a
+world model, so nobody has watched A4 halt on it. **The reason for the revert is
+the exit-1 semantics, not a change of mind about visibility**, so do not
+re-propose it on the grounds that the exclusion deserves an earlier signal — the
+layer for that is the one CLAUDE.md keeps for reports that always exit clean on a
+readable run.
 
 **Why it is parked: choosing between the two honest fixes needs a measurement
 this branch did not make.** The mechanical guard is cheap and obvious — have the
