@@ -467,8 +467,10 @@ def _cap_bytes(run: RunPaths) -> tuple[int, str]:
     that same constraint for a manifest that reached here without layer 1.
     `isinstance(True, int)` is True in Python, so a `max_scenario_part_bytes:
     true` would otherwise cap every batch at one byte -- the standing bool guard
-    in this repo, present at triage.py:450, manifest.py:149, intake.py:239 and
-    seal.py:307.
+    in this repo, present at triage.py:456 (`digest_body_chars`), manifest.py:176
+    (`set_limit`'s requested limits), intake.py:247 (`root_index`) and seal.py:311
+    (a disposition's `priority`) -- each of those the guard clause itself, not the
+    comment above it.
     """
     if not run.manifest.exists():
         return DEFAULT_SCENARIO_PART_BYTES, DEFAULT_CAP_SOURCE
@@ -917,7 +919,14 @@ def _live_statuses() -> frozenset[str]:
 
 
 def capability_matrix(world: dict, scenarios: list[dict]) -> dict:
-    """One cell per capability x outcome-class pair the world model declares.
+    """One cell per capability x outcome-class pair the target can be driven on.
+
+    Not every pair the world model *declares* -- that was the rule before issue
+    17, and the fourth bullet below is the narrowing that replaced it. This line
+    is worth its own correction because it went on saying "declares" after the
+    body below stopped meaning it, so a reader grepping for the change that IS
+    issue 17 met the superseded rule first and its replacement twelve lines
+    later.
 
     Transcribed from rb-score's Method step 4, which already specifies it as a
     pure function of the world model and the scenario list -- so this takes over
@@ -925,8 +934,10 @@ def capability_matrix(world: dict, scenarios: list[dict]) -> dict:
     this cannot compute: which pairs are one test, which scenarios to turn down,
     and why an uncovered row is uncovered.
 
-    Two rules from that step are easy to get subtly wrong and both are
-    load-bearing:
+    The rules from that step that are easy to get subtly wrong, every one of
+    them load-bearing (unnumbered on purpose: the count was "two" while three
+    bullets stood beneath it, which is the same defect this repo bans in a
+    heading that counts something that grows):
 
     * Enumerate from the world model, never from the scenario list. A matrix
       holding only the cells some scenario happens to claim reports 100% of a

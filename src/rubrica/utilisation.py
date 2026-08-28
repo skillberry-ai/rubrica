@@ -95,7 +95,8 @@ def _cited_claim_ids(run: RunPaths) -> set[str] | None:
             cited.update(_claim_ids(invariant.get("claims")))
     for gap in _elements(world.get("gaps")):
         cited.update(_claim_ids(gap.get("claims")))
-    # `refs.check_world_model` (refs.py:464-467) already resolves contradictions[].claim_a
+    # `refs.check_world_model` (refs.py:1920-1923, its `/contradictions/` loop)
+    # already resolves contradictions[].claim_a
     # and claim_b as claim references -- it reports one as a finding if it does not
     # resolve. A definition of "cited" that excludes them would disagree with that
     # checker in the same module family, and would tell an input whose only surviving

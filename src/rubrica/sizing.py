@@ -86,6 +86,18 @@ def implied_size(run: RunPaths) -> dict | None:
                 if hole.get("reason") == "blocked_by_gap"
             }
             blocked_cells = len(blocked_refs)
+            # Known exposure, measured and deliberately not fixed here: since issue
+            # 17, `capability_cells` counts only DRIVABLE cells, so an undrivable
+            # cell a score part holed `blocked_by_gap` rather than `unreachable` is
+            # subtracted here despite never having been in the count -- cells 10,
+            # blocked 1, denominator 9, one lower than the truth.
+            # test_implied_size_still_double_subtracts_a_blocked_hole_on_an_undrivable_cell
+            # pins that number as an acknowledgement, and carries the ruling for why
+            # this stays arithmetic-as-is: nothing acts on this diagnostic, and the
+            # fix means teaching `sizing` the drivable-cell set for a hole no
+            # observed run has produced. rb-score's Method steps 4 and 7 steer a
+            # dispatch to `unreachable` on such a row, which is a prompt-level
+            # mitigation rather than a guarantee.
             denominator -= blocked_cells
             basis = "world_model+coverage"
 

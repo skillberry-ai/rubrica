@@ -1442,7 +1442,8 @@ which is worth more than the line it costs.
 `refs.drivable_cells` keys the coverage denominator on. It is **one notch tighter
 than `emit.bindings`, not identical to it**, and the difference is worth stating
 because the obvious reading is wrong: `emit.bindings` tests the binding *object*'s
-truthiness (`emit.py:66`) and drops the capability outright, while `emit.call_spec`
+truthiness (`emit.py:67`, the `if cap.get("binding")` clause of its comprehension)
+and drops the capability outright, while `emit.call_spec`
 then reads `binding["tool"]` unguarded (`emit.py:79`). The two therefore disagree
 on exactly one shape — a binding present with no `tool` — and that shape crashes
 `call_spec`, so it belongs outside the denominator rather than inside the suite.
@@ -1517,6 +1518,29 @@ at all, 4 is how many rest on nothing else. The two have been conflated once
 already, in a write-up that gave the second count as five and then listed four
 ids; both figures here are re-measured off the run named above, and this is the
 live record of them.
+
+**And do not read this 10 as the table's 10 either, which is the harder mistake
+because the two numbers are equal and their sets are not.** The editorial table's
+first row is 10 capabilities and 18 cells; the 10 in the paragraph above is 10
+capabilities that cite `pyproject-toml`. They share 7 members. Three row-1
+capabilities cite the file nowhere — `cap-docker-build`, `cap-rossoctl-deploy`,
+`cap-test-startup-expect` — and three citers sit in the other two rows:
+`cap-a2a-http-server` and `cap-mcp-connect` in row 2, and `cap-langgraph-routing`
+in row 3, where it is already flagged as that row's borderline member. So the
+mechanical predicate does not reproduce the editorial line even in size, and
+citing `pyproject-toml` is not what puts a capability in row 1.
+
+The split that *is* mechanical, stated so nobody has to re-derive it: of the 19
+unbound capabilities, 10 cite `pyproject-toml` and 9 do not. Of the 15 left once
+the 4 resting on nothing else are set aside, 6 still cite it and 9 do not — a
+9-to-6 split, not the 10-to-5 the first number invites, because all 4 of the set
+being set aside were among the 10 citers.
+One precision on the 4, since it is the number most likely to be re-measured
+differently: it is the capability's own `claims` array that rests on nothing else.
+`cap-openai-backend`'s *outcome classes* cite `env-openai`, `readme-md` and
+`trajectories-json-0`, so a measurement unioning capability and outcome-class
+claims gives 3 there, not 4. Every figure in these two paragraphs was measured
+against `runs/run-20260827-070444`'s `01-world-model.json` and `01-claims/`.
 
 ### Whether the gateway's contended connection pool is per-API-key or global is unknown
 

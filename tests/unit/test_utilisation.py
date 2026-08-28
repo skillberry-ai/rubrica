@@ -95,7 +95,8 @@ def test_it_does_not_fire_before_a_world_model_exists(tmp_path):
 
 
 def test_an_input_cited_only_through_a_contradiction_is_not_a_finding(tmp_path):
-    """The false-positive direction. `refs.check_world_model` (refs.py:464-467)
+    """The false-positive direction. `refs.check_world_model` (refs.py:1920-1923,
+    its `/contradictions/` loop)
     already resolves contradictions[].claim_a and claim_b as claim references, so a
     definition of "cited" that ignores them disagrees with that checker. Measured
     before this test existed: stripping an artifact's citations from the four walked

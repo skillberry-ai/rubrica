@@ -262,8 +262,9 @@ def drivable_cells(world: dict) -> set[tuple[str, str]]:
     answer.
 
     Keyed on `binding.tool`, one notch tighter than `emit.bindings`' truthiness
-    test on the binding object (emit.py:66) because `emit.call_spec` then reads
-    `binding["tool"]` unguarded (emit.py:79) -- so the denominator equals what the
+    test on the binding object (emit.py:67, the `if cap.get("binding")` clause of
+    its comprehension) because `emit.call_spec` then reads `binding["tool"]`
+    unguarded (emit.py:79) -- so the denominator equals what the
     pipeline can actually ship, not merely what it retains. The two predicates
     disagree on exactly one shape, a binding present with no `tool`, and do not
     "align" them: that shape crashes call_spec, so it belongs outside the

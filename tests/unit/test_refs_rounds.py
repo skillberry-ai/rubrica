@@ -49,7 +49,8 @@ def _run_with_world_for_refs(tmp_path):
             "schema_version": "0.1",
             "denominator": {"capability_cells": 1, "goals": 1, "version": 1},
             # Bound for the reason test_rounds._world is: the drivable cell set is
-            # what reconcile-seal counts into the denominator (reconcile.py:319) and
+            # what reconcile-seal counts into the denominator (reconcile.py:330, the
+            # `"capability_cells": len(drivable_cells(...))` line) and
             # what check_coverage holds the capability matrix to, so an unbound cap-0
             # would leave this fixture with no drivable cell at all.
             #

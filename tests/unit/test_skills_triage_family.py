@@ -585,7 +585,9 @@ def test_the_rule_pass_names_the_disposition_key_itself():
     while never once saying what to call it. Three consecutive dispatches at
     defaults invented `verdict` for it -- not a stale word copied out of the
     prose, an invention two dispatches arrived at independently. Every entry
-    then failed layer 1, and because `brief.py:169,184` key off `disposition`,
+    then failed layer 1, and because `brief.py:502,754` -- the admit filter under
+    `DIVERGENCE_HEADER` and the decline grouping in the gate-0 section -- key off
+    `disposition`,
     `gate-brief --gate 0` rendered zero admits and zero declines at exit 0: a
     human handed an empty selection presented as a clean one. The defect
     survived the split into this family, because the paragraph moved verbatim.

@@ -48,10 +48,11 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   what makes this listing matter is its timing rather than any uniqueness: the
   same exclusion is reported twice more, and both are too late to act on.
   `seal_score` writes one `unreachable` hole per undrivable cell into the round's
-  coverage document (rounds.py:1332-1350, `seal_score`'s `injected` list), which a
-  reader meets at gate 2, and
+  coverage document (rounds.py:1343-1361, `seal_score`'s `undrivable`/`injected`
+  block), which a reader meets at gate 2, and
   `emit` names a single unbound capability per instance at stage 06
-  (emit.py:99-107, documented in world-model-0.1.json). Gate 1 precedes propose,
+  (emit.py:101-108, `to_contract`'s `unbound` closure; documented in
+  world-model-0.1.json). Gate 1 precedes propose,
   so a reader who does not act here has the loop spend every round against the
   narrowed denominator before either of those two says a word. Issue 17 narrowed
   `denominator.capability_cells` to the cells a scenario can be driven through,
@@ -120,9 +121,10 @@ SPLIT_HEADER = "Groups split across more than one slice"
 # Gate 1's excluded-capability section header, named for the three above's reason:
 # it is the anchor a reader and a test both scope to. What this section reports is
 # reported twice more and both times too late -- `seal_score` writes one
-# `unreachable` hole per undrivable cell (rounds.py:1332-1350, `seal_score`'s
-# `injected` list), read at gate 2, and
-# `emit` names one capability per instance at stage 06 (emit.py:99-107) -- so what
+# `unreachable` hole per undrivable cell (rounds.py:1343-1361, `seal_score`'s
+# `undrivable`/`injected` block), read at gate 2, and
+# `emit` names one capability per instance at stage 06 (emit.py:101-108,
+# `to_contract`'s `unbound` closure) -- so what
 # this listing has over both is that gate 1 precedes propose, and a reader here can
 # still act. The design's paired `check-refs` finding was removed in 11a6c25 for a
 # different reason than timing, and the two must not be conflated: a `1` from

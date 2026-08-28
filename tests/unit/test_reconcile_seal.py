@@ -249,10 +249,18 @@ def test_check_world_model_agrees_with_the_narrowed_seal(tmp_path):
     path, findings = reconcile.seal(run)
     assert findings == []
     assert path == run.world_model
-    # Scoped to the denominator rather than asserting no findings at all: a later
-    # task in this branch makes check_world_model report every unbound capability,
-    # and this fixture has one by construction. What this test is about is that the
-    # seal's arithmetic and the check's recomputation agree.
+    # Scoped to the denominator rather than asserting no findings at all, because
+    # `check_world_model` is a checker of many clauses and only one of them is
+    # this test's subject: that the seal's arithmetic and the check's
+    # recomputation of `denominator.capability_cells` agree. A bare `== []` would
+    # couple a binding test to every other clause in that function -- an actor
+    # ref, a collection name, a contradiction's claim_a -- so an unrelated
+    # addition there would fail here with a message about bindings.
+    #
+    # Do not restore the earlier reason given for this scoping, that a later task
+    # on this branch makes check_world_model report every unbound capability:
+    # that task was ae1b74e and 11a6c25 reverted it. The scoping is right; that
+    # justification described behaviour the tree does not have.
     assert [f for f in refs.check_world_model(run) if "/denominator/" in f.pointer] == []
 
 

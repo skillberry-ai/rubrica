@@ -1273,8 +1273,9 @@ def test_gate_zero_reports_an_unreadable_dispositions_directory_as_a_broken_run(
 # Issue 17 narrowed `denominator.capability_cells` to the cells a scenario can
 # actually be driven through, and this listing is the last report of an excluded
 # capability a human can still act on -- not the only one. `seal_score` writes an
-# `unreachable` hole per undrivable cell (rounds.py:1332-1350, seal_score's
-# `injected` list) and `emit` names one capability per instance (emit.py:99-107),
+# `unreachable` hole per undrivable cell (rounds.py:1343-1361, seal_score's
+# `undrivable`/`injected` block) and `emit` names one capability per instance
+# (emit.py:101-108, `to_contract`'s `unbound` closure),
 # but the first is read at gate 2 and the second at stage 06, by which point the
 # loop has already spent its rounds against the narrowed denominator. The spec's
 # paired `check-refs` finding was removed in 11a6c25 because `check-refs` runs

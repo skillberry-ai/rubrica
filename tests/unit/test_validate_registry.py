@@ -71,7 +71,8 @@ def test_a_cross_file_ref_still_rejects_a_bad_element(probe_schema_dir, tmp_path
 
 def test_an_unreadable_schema_file_is_not_a_stage_defect(tmp_path, monkeypatch):
     """`chmod 000` on the *own* schema file that `_validator_for`'s direct
-    `read_json(schema_root / filename)` reads (validate.py:94, which runs before
+    `read_json(schema_root / filename)` reads (validate.py:250, the first read in
+    `_validator_for`, which runs before
     `_schema_registry` is ever called) must still surface as a filesystem
     problem, not a stage defect.
 

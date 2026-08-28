@@ -180,6 +180,19 @@ def test_the_gap_fixture_did_not_acquire_invented_outcome_classes():
         f"the recording declares {len(capabilities)} capability(ies) for a fixture whose "
         f"api.json declares {len(actions)}: {actions}"
     )
+    # Unfiltered on `binding`, and deliberately so -- the mirror assertion in
+    # test_reconcile_seal.py was narrowed onto `binding.tool` in the same branch
+    # and this one must NOT follow it. That one checks a number `reconcile.seal`
+    # computes today, so it has to be narrow like the field. This one checks a
+    # number the superseded single-dispatch `rb-reconcile` wrote into a committed
+    # recording, and *that* prompt's stated invariant was the WIDE count. Narrowing
+    # here would hold a recording to a rule it was not written under. The two
+    # coincide over this fixture only because every capability in it declares a
+    # `binding.tool`; a recording carrying an unbound one would make the narrow
+    # form report a finding against a number that is correct.
+    # docs/design/limitations.md, "The coverage denominator is arithmetic done by
+    # code", is the ruling, including why re-recording to tidy this away would
+    # close the last place the property is measured on a prompt at all.
     cells = 0
     for capability in capabilities:
         kinds = [oc["kind"] for oc in capability["outcome_classes"]]

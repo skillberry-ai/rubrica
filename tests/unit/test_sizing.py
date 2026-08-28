@@ -248,6 +248,82 @@ def test_implied_size_does_not_subtract_unreachable_holes(tmp_path):
     assert size["denominator"] == 11
 
 
+def test_implied_size_still_double_subtracts_a_blocked_hole_on_an_undrivable_cell(tmp_path):
+    """The half of the trap above that is NOT closed, pinned as an acknowledgement
+    rather than as an aspiration -- read the assertions as "this is the number
+    today", not "this is the right number".
+
+    `implied_size` subtracts on `reason == "blocked_by_gap"` and nothing else, so
+    the sibling test above holds only while an undrivable cell is holed
+    `unreachable`. Nothing forces that. `seal_score` copies a score part's reason
+    through untouched and only injects `unreachable` for cells score did not hole
+    at all, and `blocked_by_gap` on an undrivable cell is schema-valid and a
+    reading a prompt can defensibly reach -- the world model genuinely does lack
+    the binding. Such a cell is already outside `denominator.capability_cells`, so
+    subtracting it again under-reports the implied size by one, exactly as if it
+    had been counted twice.
+
+    Measured on this fixture: cells 10, blocked 1, denominator 9 -- one lower than
+    the same fixture with the hole spelled `unreachable`.
+
+    Left alone on purpose, and this is the ruling, not an oversight. `implied_size`
+    is a diagnostic nothing acts on, and correcting it means teaching `sizing` the
+    drivable-cell set -- a behaviour change to the one module in this area that is
+    only ever *read*, made for a hole no observed run has produced. What steers a
+    run away from it is prompt-level rather than mechanical: rb-score's Method step
+    4 and step 7 both name `unreachable` as the reason that fits the mechanical
+    fact of an absent `binding.tool`, and step 7 names `not_yet_attempted` as the
+    one wrong answer there. Neither says `blocked_by_gap` is wrong, which is why
+    this exposure is real and is written down here rather than asserted away.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal", max_scenarios=16)
+    write_json(
+        run.world_model,
+        {
+            "schema_version": "0.1",
+            "target": {"name": "synthetic", "interface": "mcp"},
+            "capabilities": [],
+            "entities": [],
+            "actors": [],
+            "goals": [],
+            "contradictions": [],
+            "gaps": [],
+            # Narrow already, as the seal writes it: cap-unbound's cell is NOT
+            # among these 10, which is what makes the subtraction below a second one.
+            "denominator": {"version": 1, "capability_cells": 10, "goals": 0},
+        },
+    )
+    write_json(
+        run.coverage_latest,
+        {
+            "schema_version": "0.1",
+            "round": 1,
+            "denominator_version": 1,
+            "capability_matrix": {"cells": [], "covered": 0, "total": 10, "pct": 0.0},
+            "goal_matrix": {"rows": [], "covered": 0, "total": 0, "pct": 0.0},
+            "holes": [
+                {
+                    # The same undrivable cell the sibling test holes `unreachable`,
+                    # holed `blocked_by_gap` instead -- score's word, kept by
+                    # seal_score, and schema-valid.
+                    "ref": "cell:cap-unbound/oc-ok",
+                    "reason": "blocked_by_gap",
+                    "justification": "the world model declares no binding for this capability",
+                    "gap_id": "gap-1",
+                },
+            ],
+            "progress": {"new_cells_this_round": 0, "rounds_without_progress": 1},
+            "verdict": "continue",
+        },
+    )
+
+    size = sizing.implied_size(run)
+
+    assert size["blocked_cells"] == 1
+    # 10 - 1 = 9, where 10 is already the narrowed count. The honest number is 10.
+    assert size["denominator"] == 9
+
+
 def test_implied_size_is_none_before_a_world_model_exists(tmp_path):
     """A run stopped at extract legitimately has no world model yet; this is
     the same absence-is-not-a-defect ruling claim_utilisation already makes,
