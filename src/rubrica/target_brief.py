@@ -114,11 +114,11 @@ def _file_and_piece(path: str) -> tuple[str, str]:
     """One recorded source path as the file it names and the piece inside it.
 
     The one home for the sliced-path rule, because this page had three call sites
-    for it and only two spellings: `inputs_read` and `target_brief_html._side_html`
+    for it and only two spellings: `inputs_read` and `target_brief_html._side_rows`
     each carried the clause, `_taken` carried none, and the site with none shipped
     `We went with traces_parsec-agent-metrics_20260713_115226.json#/11.` -- three
     of the 25 resolution lines on `run-20260826-090456`, each naming a path the
-    owner cannot open, while `_side_html` spelled the same source correctly two
+    owner cannot open, while `_side_rows` spelled the same source correctly two
     paragraphs above it on the same page. A document asking somebody whether it is
     true must not spell one of their files two ways.
 
@@ -487,7 +487,7 @@ def inputs_read(run: RunPaths) -> list[InputGroup] | Marker:
             #
             # Which part of the path is the file is `_file_and_piece`'s single
             # ruling for all three sites that ask -- here, `_taken` below, and
-            # `target_brief_html`'s `_side_html`. `_files_html` is deliberately not
+            # `target_brief_html`'s `_side_rows`. `_files_html` is deliberately not
             # one of them and says so in its own docstring: it asks only whether a
             # path can be named at all, which `.strip()` answers.
             #
@@ -602,7 +602,7 @@ def _taken(resolution: str, side_a, side_b) -> str:
     # `_file_and_piece` owns that rule and records what shipped without it. Two
     # slices of one capture collapse to the one filename here, which is right for
     # a sentence about which file we went with and is why the piece is dropped
-    # rather than labelled: `_side_html` above has already shown both sides piece
+    # rather than labelled: `_side_rows` above has already shown both sides piece
     # by piece, and this line is the decision over them.
     names = (_file_and_piece(ref.path)[0] for ref in chosen)
     files = sorted({name for name in names if name})

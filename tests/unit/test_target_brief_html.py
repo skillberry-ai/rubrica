@@ -106,7 +106,7 @@ def test_page_renders_the_toy_contradiction_with_both_files_named(tmp_path):
     assert "notes.md" in page and "trace.json" in page
     assert "clm-notes-004" not in page and "clm-trace-002" not in page
     # Each side quotes itself: the locator the owner can jump to, and the line
-    # their own document carries. This is what `_side_html` is for -- the naive
+    # their own document carries. This is what `_side_rows` is for -- the naive
     # `esc(dispute.side_a)` puts a dataclass repr here and fails the line above.
     assert "#error-behaviour" in page
     assert "not an empty result" in page
@@ -115,7 +115,7 @@ def test_page_renders_the_toy_contradiction_with_both_files_named(tmp_path):
     # A locator is labelled rather than dropped into bare parentheses: side_b's is
     # the raw JSON pointer `#/spans/1/output`, and Task 3 measured `#/126` shapes
     # on a real run. Both sides asserted, because side_b carries no quote and so
-    # takes `_side_html`'s path-plus-locator branch.
+    # takes `_side_rows`'s path-plus-locator branch.
     assert "(at #error-behaviour)" in page
     assert "(at #/spans/1/output)" in page
 
@@ -590,21 +590,29 @@ def test_page_relabels_the_kinds_and_flags_the_dispute_in_a_multi_source_line(tm
 def test_page_says_it_could_not_resolve_a_side_rather_than_dropping_it(tmp_path):
     """Ruling 7: an unreadable record of where we read things must never render as
     a positive statement that no evidence exists. With no sources resolvable both
-    sides of the toy's disagreement say so, and the banner above says why."""
+    sides of the toy's disagreement say so, and the banner above says why.
+
+    The positive control is the resolved *row* rather than the phrase "One side is
+    stated in:", which was the sentence the `<p>`-plus-`<ul>` form led with and which
+    the table form has no place for. The fact it guarded is unchanged and is what is
+    asserted instead: a side that resolved names its file. It has to be the label cell
+    and the file cell together, because the label cell is now emitted on both
+    branches -- `<td>One side</td>` alone passes for the unresolved row too, so on its
+    own it would assert nothing here."""
     if os.geteuid() == 0:
         pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
     # The positive control: with the record readable, both sides name their file.
     assert "we could not resolve which file states it" not in page
-    assert "One side is stated in:" in page
+    assert '<td>One side</td><td><span class="file">notes.md</span>' in page
     run.claims_dir.chmod(0o000)
     try:
         page = target_brief_html.render(run)
     finally:
         run.claims_dir.chmod(0o755)
     assert page.count("we could not resolve which file states it") == 2
-    assert "One side is stated in:" not in page
+    assert '<td>One side</td><td><span class="file">' not in page
 
 
 def test_page_says_a_side_is_stated_in_a_file_it_could_not_name(tmp_path):
@@ -849,7 +857,11 @@ def test_page_keeps_a_hash_in_the_owners_own_filename_whole(tmp_path):
     (piece #2.md, at #/spans/1/output)` and the `What we read` listing said `notes`.
     Two fabrications in the two sections whose whole ask is "did we read the right
     files" -- a file of that name we never read, and a piece of it that does not
-    exist."""
+    exist.
+
+    The count rose from two to three when the disagreement grew an index table: the
+    `Files involved` cell names the same file a third time, above the side row that
+    already did."""
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     manifest = json.loads(run.manifest.read_text())
     trace = next(r for r in manifest["inputs"] if r["kind"] == "trace")
@@ -857,9 +869,10 @@ def test_page_keeps_a_hash_in_the_owners_own_filename_whole(tmp_path):
     trace["source_path"] = original.replace("trace.json", "notes#2.md")
     run.manifest.write_text(json.dumps(manifest))
     page = target_brief_html.render(run)
-    # Both places the name reaches: the listing of what we read, and the side of the
-    # disagreement the trace states. Two, so neither can be the one that passes.
-    assert page.count('<span class="file">notes#2.md</span>') == 2
+    # Every place the name reaches: the listing of what we read, the index row for the
+    # disagreement, and the side of it the trace states. Three, so no one of them can
+    # be the one that passes.
+    assert page.count('<span class="file">notes#2.md</span>') == 3
     assert "piece #2.md" not in page
     assert '<span class="file">notes</span>' not in page
     # The positive control, in the same test: a real slicer fragment on the same path
@@ -1188,3 +1201,75 @@ def test_what_we_read_keeps_its_count_sentence_above_the_table(tmp_path):
     page = target_brief_html.render(run)
     section = page.split("<h2>What we read</h2>")[1].split("<h2>")[0]
     assert section.index("We built this description by reading") < section.index("<table")
+
+
+def test_disagreements_lead_with_an_index_table_of_every_dispute(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    section = page.split("Where our sources disagree")[1].split("What we could not tell")[0]
+    assert "<th>#</th>" in section
+    assert "<th>Status</th>" in section
+    assert "<th>What kind of disagreement</th>" in section
+    assert "<th>Files involved</th>" in section
+    # The toy world records exactly one contradiction, so the index has one row
+    # and its number is 1 -- positional, never the recorded id.
+    assert '<span class="num">1</span>' in section
+
+
+def test_the_index_never_prints_a_recorded_dispute_id(tmp_path):
+    """`Dispute.id` is the run's own string. The existing no-identifier test covers
+    the page as a whole; this one covers the column that would most naturally have
+    been filled with it."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    recorded = world_model["contradictions"][0]["id"]
+    page = target_brief_html.render(run)
+    assert recorded not in page
+
+
+def test_each_dispute_shows_its_two_sides_as_a_table_of_source_and_quote(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    section = page.split("Where our sources disagree")[1].split("What we could not tell")[0]
+    assert "<th>Side</th>" in section
+    assert "<th>Source</th>" in section
+    assert "<th>What it says</th>" in section
+    assert "<td>One side</td>" in section
+    assert "<td>The other side</td>" in section
+
+
+def test_an_undecided_dispute_carries_the_amber_chip_and_says_so(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["contradictions"][0]["resolution"] = "unresolved"
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    assert 'class="undecided"' in page
+    assert ">Undecided<" in page
+    assert "We have not decided between them." in page
+
+
+def test_a_settled_dispute_carries_the_settled_chip_and_names_the_file(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["contradictions"][0]["resolution"] = "preferred_a"
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    assert 'class="settled"' in page
+    assert ">Side chosen<" in page
+    assert "We went with " in page
+
+
+def test_an_off_enum_resolution_reads_as_undecided_and_asserts_no_decision(tmp_path):
+    """`_taken` returns "" for anything outside the three values it knows, so the
+    chip must agree with it without either consulting the other. A colour that said
+    "settled" over a sentence that said "we have not decided" would be the page
+    asserting a decision nobody made."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["contradictions"][0]["resolution"] = "something_new"
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    assert 'class="undecided"' in page
+    assert "We have not decided between them." in page
+    assert 'class="settled"' not in page

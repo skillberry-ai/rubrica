@@ -541,8 +541,27 @@ def _group_a(run: RunPaths):
     )
 
 
-def _side_html(refs, label: str) -> str:
-    """One side of a disagreement, as the files that state it.
+def _status_chip(resolution: str) -> str:
+    """One dispute's status, as a chip.
+
+    Anything outside the three values `_STATUS_CHIP` knows reads as undecided, which
+    is what `target_brief._taken` independently does with the same field: it returns
+    `""` for an unrecognised resolution, so the sentence below the sides also says
+    nothing was decided. The two agree by both defaulting to "we did not decide"
+    rather than by consulting each other -- a colour claiming a decision over a
+    sentence denying one is the page asserting a judgment nobody made.
+    """
+    variant, word = _STATUS_CHIP.get(resolution, _STATUS_CHIP["unresolved"])
+    return _chip(variant, word)
+
+
+def _side_rows(refs, label: str) -> list[str]:
+    """One side of a disagreement, as rows of a source-and-quote table.
+
+    Was `_side_html`, which returned a `<p>` plus a `<ul>`. The rows carry the same
+    three facts and let the reader compare the two sides down a column, which is the
+    comparison the section is asking them to make and the one a pair of nested
+    bullet lists made hardest.
 
     `Dispute.side_a` is a `tuple[SourceRef, ...]`, not a sentence. Rendering it
     through `esc()` directly would print the dataclass repr and put
@@ -559,13 +578,18 @@ def _side_html(refs, label: str) -> str:
     toy, and Task 3 measured `#/126` shapes on a real run -- and `notes.md
     (#error-behaviour)` reads as a note about the file where `notes.md (at
     #error-behaviour)` reads as a place inside it.
+
+    The label repeats down every row of a multi-ref side rather than spanning them.
+    A `rowspan` over a side whose refs are empty is a branch whose edge case is
+    invisible until an owner meets it, and the empty case is real: a side can resolve
+    to no refs at all.
     """
     if not refs:
         # A side whose claims did not resolve to any input. Saying so beats
         # dropping the side: `taken` below may still name a file, and a page that
         # answers a question it never asked reads as a page with something missing.
-        return f"<p>{esc(label)}: we could not resolve which file states it.</p>"
-    lines = []
+        return [_row(esc(label), "we could not resolve which file states it", "")]
+    rows = []
     for ref in refs:
         # Task 4's handoff: a sliced input's `path` carries the slicer's fragment,
         # and juxtaposing it against the filename does not explain itself. Measured
@@ -598,14 +622,17 @@ def _side_html(refs, label: str) -> str:
             inside.append(f"at {esc(ref.locator)}")
         if inside:
             where += f" ({', '.join(inside)})"
-        if ref.quote:
-            # Degrades to path plus locator when the evidence record carries no
-            # quote -- 59 of executive-agent's 126 cited claims, per Task 1, and
-            # the toy's own side_b, whose `quote` is `""`.
-            lines.append(f'<li>{where}: <span class="quote">“{esc(ref.quote)}”</span></li>')
-        else:
-            lines.append(f"<li>{where}</li>")
-    return f"<p>{esc(label)} is stated in:</p><ul>{''.join(lines)}</ul>"
+        # Degrades to path plus locator when the evidence record carries no quote --
+        # 59 of executive-agent's 126 cited claims, per Task 1, and the toy's own
+        # side_b, whose `quote` is `""`. The cell states the absence rather than
+        # sitting empty: an empty cell in a quote column reads as a quote we lost.
+        said = (
+            f'<span class="quote">“{esc(ref.quote)}”</span>'
+            if ref.quote
+            else "we did not record the wording"
+        )
+        rows.append(_row(esc(label), where, said))
+    return rows
 
 
 def _group_bc(run: RunPaths):
@@ -617,6 +644,16 @@ def _group_bc(run: RunPaths):
     contradiction is not split out either -- it is visibly undecided in its own
     position in the list, and splitting would break the comparison the reader is
     making across it.
+
+    Two tiers, which is new. The index table exists because 41 disputes -- measured
+    on run-20260826-090456 -- is more than anyone scans as prose, and the one thing
+    a reader wants first is which of them are still open. The detail stays whole
+    beneath it because the two verbatim quotes are what let an owner settle a
+    dispute, and they cannot be shortened without taking away the thing they are
+    being asked to rule on.
+
+    Numbering is positional, 1-based, and is not `Dispute.id`: the id is the run's
+    own string and this page never shows one.
     """
     found = target_brief.disputes(run)
     if isinstance(found, Marker):
@@ -627,34 +664,56 @@ def _group_bc(run: RunPaths):
             "That is a weaker statement than it sounds: it means we found no "
             "disagreement, not that your documents agree.</p>"
         )
-    items = []
-    for dispute in found:
+    index_rows = []
+    blocks = []
+    for position, dispute in enumerate(found, start=1):
+        chip = _status_chip(dispute.resolution)
+        # The files on both sides, deduplicated and in first-seen order, so the index
+        # row names what the reader would search their own tree for. `dict.fromkeys`
+        # rather than a set: a set reorders, and the order the sides were read in is
+        # the order the detail below shows them.
+        names = [
+            target_brief._file_and_piece(ref.path)[0] for ref in (*dispute.side_a, *dispute.side_b)
+        ]
+        files = list(dict.fromkeys(n for n in names if n))
+        involved = (
+            ", ".join(f'<span class="file">{esc(f)}</span>' for f in files)
+            if files
+            else "we could not name them"
+        )
+        # `nature` is carried verbatim. Verbatim because this document never rewrites
+        # prose; and it is the cell an owner scans to decide whether this row is one
+        # they know something about.
+        nature = esc(dispute.nature) or "we could not read our own note of what about"
+        # `esc(position)` on an integer this function itself produced, matching the
+        # `<h3>` below rather than being spelled two ways in one function: the module
+        # docstring's rule covers numbers, `_group_a` already escapes its two counts,
+        # and one number rendered escaped in one place and raw in another is the shape
+        # a later edit reads as permission to skip it.
+        index_rows.append(_row(f'<span class="num">{esc(position)}</span>', chip, nature, involved))
         # `taken` is `""` for `unresolved` -- Task 4 leaves it empty rather than
         # asserting a decision nobody made. The renderer says so out loud instead
         # of emitting an empty bold paragraph: on this page, silence after two
         # contradicting sides reads as a decision the reader missed.
         taken = dispute.taken or "We have not decided between them."
-        # `nature` is carried verbatim and labelled. Verbatim because this document
-        # never rewrites prose; labelled because Task 4 saw `count_mismatch` and
-        # `incompatible_precondition` in that field on real runs, and a bare token
-        # leading a list item reads as a sentence we wrote badly rather than as a
-        # category we were handed.
-        lead = (
-            f"<p>The disagreement: {esc(dispute.nature)}</p>"
-            if dispute.nature
-            else "<p>Two sources disagree here, and we could not read our own note "
-            "of what about.</p>"
-        )
-        items.append(
-            f"<li>{lead}"
-            f"{_side_html(dispute.side_a, 'One side')}"
-            f"{_side_html(dispute.side_b, 'The other side')}"
-            f"<p><strong>{esc(taken)}</strong></p></li>"
+        rows = _side_rows(dispute.side_a, "One side") + _side_rows(dispute.side_b, "The other side")
+        blocks.append(
+            # "The disagreement: " is pinned by
+            # `test_page_labels_the_nature_of_a_disagreement_rather_than_leading_with_it`,
+            # which records that a bare `count_mismatch` reads as a sentence we wrote
+            # badly rather than as a category we were handed. The label lives here,
+            # once, and the index cell carries the bare nature because its column
+            # heading is already the label.
+            f"<h3>{esc(position)}. The disagreement: {nature} {chip}</h3>"
+            + _table(("Side", "Source", "What it says"), rows)
+            + f"<p><strong>{esc(taken)}</strong></p>"
         )
     return (
         "<p>Two things we read said different things. Each one below is a place "
-        "where a word from you settles it.</p>"
-        f"<ul>{''.join(items)}</ul>"
+        "where a word from you settles it. The table lists them all; the detail "
+        "under it quotes both sides.</p>"
+        + _table(("#", "Status", "What kind of disagreement", "Files involved"), index_rows)
+        + "".join(blocks)
     )
 
 

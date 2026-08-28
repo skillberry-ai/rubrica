@@ -444,7 +444,7 @@ def test_taken_names_the_file_a_slice_came_out_of_rather_than_the_slice(tmp_path
 
     Measured on run-20260826-090456 before the fix: 3 of its 25 resolution lines
     read `We went with traces_parsec-agent-metrics_20260713_115226.json#/11.` and
-    the two nearby, while `_side_html` two paragraphs above rendered the same source
+    the two nearby, while `_side_rows` two paragraphs above rendered the same source
     as `traces_....json (piece #/11)`. One page spelling one file two ways.
 
     Reached by pointing the *manifest* at a sliced `source_path` rather than by
@@ -465,7 +465,7 @@ def test_taken_names_the_file_a_slice_came_out_of_rather_than_the_slice(tmp_path
     dispute = target_brief.disputes(run)[0]
     assert dispute.taken == "We went with notes.md."
     # And the piece is not lost on the way: `SourceRef.path` still carries it, which
-    # is what `_side_html` labels and what tells 71 slices of one capture apart. The
+    # is what `_side_rows` labels and what tells 71 slices of one capture apart. The
     # sentence drops it; the record does not.
     assert [ref.path for ref in dispute.side_a] == ["notes.md#/11"]
 
