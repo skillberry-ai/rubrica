@@ -37,7 +37,16 @@ PARTS_REFERENCING_WORLD_MODEL = [
 @pytest.mark.parametrize("filename,definition", PARTS_REFERENCING_WORLD_MODEL)
 def test_a_partial_refs_the_world_model_definition_rather_than_copying_it(filename, definition):
     text = (validate.schema_dir() / filename).read_text(encoding="utf-8")
-    assert f"world-model-0.1.json#/$defs/{definition}" in text, (
+    # The closing quote is PART OF THE NEEDLE, and it is load-bearing rather than
+    # tidiness. `service` is the one world-model definition name that is a proper
+    # prefix of another -- `service`/`service_tool`, the only such pair across all
+    # sixteen $defs keys -- so without the delimiter this row passes on a partial
+    # that refs the WRONG definition. Measured: with services-part-0.1.json's $ref
+    # rewritten to world-model-0.1.json#/$defs/service_tool in a copied schema
+    # directory, the undelimited needle still passed all seven rows. Every $ref in
+    # these schemas is a JSON string value, so the quote always follows. Do not
+    # tidy it back out.
+    assert f'world-model-0.1.json#/$defs/{definition}"' in text, (
         f"{filename} must reuse world-model-0.1.json#/$defs/{definition}, not restate it"
     )
     assert f'"{definition}":' not in json.dumps(_schema(filename).get("$defs", {})), (
