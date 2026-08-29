@@ -90,7 +90,8 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
     """Write one OpenAPI document per service, or report why none can be written.
 
     All-or-nothing, and deliberately: a partial directory is a state
-    check_interfaces would report as a missing document for a service whose only
+    a layer-2 check over 01-interfaces/ would report as a missing document for a
+    service whose only
     problem is that a *sibling* was malformed, which is a 1 naming the wrong
     artifact. So every service is checked before any file is written.
 
@@ -159,7 +160,15 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
             )
             continue
         tools = service.get("tools")
-        if not isinstance(tools, list) or not tools:
+        # Two defects, two messages. `not isinstance(tools, list) or not tools` in
+        # one branch reported `{"a": 1}` as *empty*, which tells a repair prompt
+        # something untrue about its own output -- the wrong-artifact rule's
+        # sibling, one level down: a 1 has to name the right defect as well as the
+        # right file.
+        if not isinstance(tools, list):
+            findings.append(Finding(run.services_part, LAYER, f"{pointer}/tools", "not an array"))
+            continue
+        if not tools:
             findings.append(Finding(run.services_part, LAYER, f"{pointer}/tools", "empty"))
             continue
 
@@ -202,8 +211,10 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
     run.interfaces_dir.mkdir(parents=True, exist_ok=True)
     written = {path for path, _ in planned}
     # Synthesis owns this directory. A service renamed at gate 1 and re-synthesised
-    # would otherwise leave its old document behind, and check_interfaces would
-    # report an extra file against a run that is now correct.
+    # would otherwise leave its old document behind, and a layer-2 check over this
+    # directory would report an extra file against a run that is now correct. No
+    # such check exists yet -- the removal is what keeps the directory honest for
+    # the one that will, and for a human reading it at gate 1 today.
     for stale in list_json(run.interfaces_dir):
         if stale not in written:
             stale.unlink()

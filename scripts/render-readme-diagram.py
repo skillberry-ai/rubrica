@@ -175,12 +175,14 @@ CAPTIONS: list[list[tuple[str, str]]] = [
         ("gate", "a gate you hold — nothing moves past it until you say so"),
         ("arrow", "every arrow is a file on disk, never a message between stages"),
     ],
-    # "the stages it collapses", not "a family of stages", since synthesise-
-    # interfaces landed: a fold is also how a single stage whose name is too wide
-    # for the box gets drawn, so the star no longer promises more than one stage
-    # behind it. The old wording was true of every fold in the drawing at the time
-    # and false of that one.
-    [("fold", "one line standing for the stages it collapses")],
+    # Names the mark and what it does, because the reader who needs this row is the
+    # one who has just met `synthesise*` and cannot tell what the star signifies.
+    # It replaced "one line standing for a family of stages", which was true of
+    # every fold in the drawing until synthesise-interfaces landed: a fold is also
+    # how a single stage whose name is too wide for the box gets drawn, so a star no
+    # longer promises more than one stage behind it. Kept in the same words as the
+    # README's `alt` text, which describes this drawing to anyone who cannot see it.
+    [("fold", "a starred line collapses the stages behind it into one")],
 ]
 
 N = len(PHASES)

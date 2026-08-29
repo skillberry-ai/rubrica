@@ -904,6 +904,38 @@ def test_the_batches_gate_over_a_run_with_no_plan_names_the_run_root(tmp_path):
     assert "produced no batches artifact" in findings[0].message
 
 
+def test_the_interface_gate_over_a_run_with_no_services_names_the_run_root(tmp_path):
+    """The batches trap, one band earlier, and the mirror of the test above.
+
+    `01-interfaces/` holds one document per service, so the iterated resolver
+    returns `[]` for a run with no service -- and `validate_stage`'s "produced no X
+    artifact" arm then fires against the run root.
+
+    **So this gate must not be run when synthesis printed no path.** A target whose
+    corpus declares no tool at all is a real target: `rb-reconcile-services` is
+    instructed to write `services: []` for one rather than invent a service, and
+    `interfaces.synthesise` then correctly writes nothing and exits 0. Measured on
+    such a run before `rb-orchestrate` was told to gate conditionally:
+    `synthesise-interfaces` exited 0 printing nothing, `validate --stage
+    reconcile-services` exited 0, `check-refs` exited 0, and this gate exited 1
+    naming the run root -- a finding against a run with no defect, which would then
+    have cost the run its one repair attempt on a pass that would honestly write
+    `services: []` again.
+
+    Pinned rather than left to the prose, for the reason the batches test above is:
+    the resolver's comment and the orchestrator's instruction are the only two
+    places this rule lives, and neither is executable.
+    """
+    from rubrica.paths import RunPaths
+    from rubrica.validate import validate_stage
+
+    run = RunPaths(tmp_path)
+    run.root.mkdir(parents=True, exist_ok=True)
+    findings = validate_stage(run, "synthesise-interfaces")
+    assert [f.artifact for f in findings] == [run.root]
+    assert "produced no interface artifact" in findings[0].message
+
+
 def test_a_batch_projecting_zero_bytes_is_refused(tmp_path):
     """`minimum: 1`, because 0 is unreachable by the formula the field states.
 

@@ -546,9 +546,22 @@ judges the parts that are already there.
 Then derive the tool interfaces, which is code and not a dispatch:
 `rubrica synthesise-interfaces --run <run>`. It writes one OpenAPI document per
 service in `01-services.json` under `01-interfaces/`, and prints each path it
-wrote. Gate it with `rubrica validate --stage synthesise-interfaces --run <run>`,
-then `rubrica check-refs --run <run>`. Record nothing for it: it has no skill, so
+wrote. When it printed at least one path, gate it with
+`rubrica validate --stage synthesise-interfaces --run <run>`, then
+`rubrica check-refs --run <run>`. Record nothing for it: it has no skill, so
 there is no digest to hash -- see A5.
+
+**If it exits 0 having printed nothing, `01-services.json` declared no service,
+there was nothing to derive, and you must NOT run
+`validate --stage synthesise-interfaces`** -- its "produced no interface artifact"
+finding would accuse a stage that behaved correctly, which is the same trap
+`validate --stage propose-batches` sets on a terminal round (B6 step 1) and the
+same rule. A target that declares no tool at all is a real target, not a broken
+run: `rb-reconcile-services` is instructed to write `services: []` for one rather
+than invent a service, so an empty derivation is the honest record of an honest
+part. Record that with `decide` and move on to the seal. `check-refs` is still
+safe and still worth running -- it is a whole-run check and reports nothing about
+documents no service asked for.
 
 **Its two exit codes mean different things, and this is the one command where
 mistaking them costs the run's repair attempt on nothing.** A `1` names something

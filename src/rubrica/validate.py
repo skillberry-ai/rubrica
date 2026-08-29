@@ -422,9 +422,19 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         return [run.services_part]
     if kind == "interface":
         # Iterated, not always-return: this function has no service id, so the
-        # always-return form could only invent a path. An empty list still reaches
-        # validate_stage's "produced no interface artifact" arm against the run
-        # root, which is the right finding for a stage that wrote nothing.
+        # always-return form could only invent a path.
+        #
+        # An empty list still reaches validate_stage's "produced no interface
+        # artifact" arm against the run root, and that is NOT always the right
+        # finding -- the same caveat batches carries just below, for the same
+        # reason. A target whose corpus declares no tool is a real target:
+        # rb-reconcile-services is instructed to write `services: []` for one, and
+        # synthesis then correctly writes nothing and exits 0 having printed no
+        # path. Asking this gate anyway accuses a run with no defect, so
+        # rb-orchestrate gates the stage only when it printed at least one path
+        # (pinned by test_the_interface_gate_over_a_run_with_no_services_names_the
+        # _run_root, which mirrors the batches one). `validate --stage X` is right
+        # to answer what it was asked; the decision is whether to ask.
         return list_json(run.interfaces_dir)
     if kind == "batches":
         # Iterated, and so empty when no round has a plan -- NOT the

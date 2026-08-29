@@ -394,8 +394,12 @@ def test_every_readme_phase_line_accounts_for_exactly_one_stage_and_no_line_for_
             f"the {spec['verb']!r} phase draws its lines {[label for label, _ in lines]} in "
             f"an order other than the pipeline's against its stages {stages}"
         )
-        for label, stages in lines:
-            assert stages, (
+        # `stages_of`, like the two loops above: `stages` is the phase's own list and
+        # every message here interpolates it. Binding a line's stages to that name was
+        # harmless only because this is the last statement in the body, and an
+        # assertion appended after it would have read one line's stages as the phase's.
+        for label, stages_of in lines:
+            assert stages_of, (
                 f"the {spec['verb']!r} phase draws a {label!r} line that accounts for no "
                 "stage at all: a fold prefix matching nothing hides whatever it was "
                 "meant to stand for"
@@ -441,7 +445,7 @@ def test_the_readme_diagram_fold_legend_appears_only_when_something_folds():
     changed in the merge; the property it held did not.
     """
     renderer = _readme_renderer()
-    words = "one line standing for the stages it collapses"
+    words = "a starred line collapses the stages behind it into one"
     folds = bool(renderer.fold_marks())
     for theme in renderer.OUTPUTS:
         assert (words in renderer.svg(theme)) is folds, (

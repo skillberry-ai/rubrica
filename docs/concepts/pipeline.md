@@ -203,8 +203,7 @@ artifacts.
 | `rb-emit` | A deliberately thin entry point over `rubrica emit`; writes nothing itself. `emit` is code, not a prompt, because two runs with identical stage-4 and stage-5 artifacts must produce identical suites — otherwise variance can no longer be attributed to a stage. |
 | `rb-orchestrate` | The loop itself: dispatch each stage, validate, allow one bounded repair, hold gates 1 through 3, record each stage's model and skill hash, append every decision to the run's lab notebook. **Not a stage** — it declares no `stage` and no `schemas`. It dispatches `extract` through `emit` only: it never runs `survey`, never dispatches any pass of the triage family, and never holds gate 0. |
 
-`intake`, `smoke`, `survey`, `triage-slices`, `triage-seal`,
-`reconcile-seal`, `synthesise-interfaces`, `propose-batches`, `propose-seal`,
-and `score-seal` are code,
-not skills. They have no `SKILL.md` and no entry in `manifest.stages` — their
-absence there is not a defect.
+`intake`, `smoke`, `survey`, `triage-slices`, `triage-seal`, `reconcile-seal`,
+`synthesise-interfaces`, `propose-batches`, `propose-seal` and `score-seal` are
+code, not skills. They have no `SKILL.md` and no entry in `manifest.stages` —
+their absence there is not a defect.

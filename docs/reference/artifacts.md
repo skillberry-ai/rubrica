@@ -560,7 +560,9 @@ and a code rule for picking a winner would bury the judgment, with
 - **Written by:** `synthesise-interfaces` (code), via `rubrica
   synthesise-interfaces`, from `01-services.json` and the claim payload each
   tool's `schema_claim` names
-- **Read by:** `gate-brief` at gate 1; `check-refs`
+- **Read by:** `check-refs`, for parseability. Nothing else reads one yet — the
+  gate-1 surface that will render it, and the cross-artifact checks over
+  `01-interfaces/` described below, are both still to be built
 - **Path:** `01-interfaces/<service_id>.json`, one per service — derivable from
   the service id, so there is no path field anywhere to drift out of agreement
   with the directory
@@ -583,8 +585,10 @@ results, which is a later step, and a request-only document is what a tool-style
 spec that declares no `components.schemas` looks like on purpose.
 
 Fields worth knowing: `paths` (one entry per tool, keyed `/<tool name>`, whose
-`operationId` set must equal the service's tool names byte for byte — contract
-preservation made mechanical); `x-rubrica.service_id` and `x-rubrica.tools` (the
+`operationId` set is the service's tool names byte for byte — contract preservation
+made mechanical, and the property a layer-2 check over `01-interfaces/` is meant to
+hold the document to; **no such check exists yet**, so today it is a property of
+the code that writes the document rather than one anything verifies); `x-rubrica.service_id` and `x-rubrica.tools` (the
 provenance, carried inside the document because the document is what a human reads
 at gate 1 and what a later step hands the harness, under an `x-` key so it stays a
 legal OpenAPI extension).

@@ -11,6 +11,7 @@ import pytest
 
 from rubrica.cli import main
 from rubrica.interfaces import LAYER, TOOL_NAME, TOOL_NAME_PATTERN, synthesise
+from rubrica.paths import list_json
 from rubrica.validate import validate_artifact
 from tests.toy import build_toy_run, toy_claims
 
@@ -165,6 +166,37 @@ def test_the_request_body_is_the_named_schema_claim_not_the_first_one(tmp_path):
     assert schema != losing["payload"], "the first-listed claim's payload must not win"
 
 
+def test_a_run_whose_target_declares_no_tools_writes_nothing_and_exits_clean(tmp_path, capsys):
+    """`services: []` is an honest part, so an empty derivation is exit 0.
+
+    `rb-reconcile-services`' refusal conditions instruct the pass to write an empty
+    list rather than invent a service for a target whose corpus declares no tool,
+    and this is the other half of that ruling: nothing to derive is not a failure to
+    derive. Exit code *and* stdout, because the printed-path count is the signal
+    `rb-orchestrate` branches on -- it must not run
+    `validate --stage synthesise-interfaces` here, whose "produced no interface
+    artifact" finding would accuse a correct run
+    (test_the_interface_gate_over_a_run_with_no_services_names_the_run_root pins what
+    that costs).
+
+    The part is validated in the test rather than assumed legal: if
+    `services-part-0.1.json` ever grew a `minItems`, the pass could no longer obey
+    its own refusal condition and this whole case would be unreachable.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    part = json.loads(run.services_part.read_text(encoding="utf-8"))
+    part["services"] = []
+    for row in part["inputs_seen"]:
+        row.update(own_kind_total=0, cited=0, dropped=0)
+    run.services_part.write_text(json.dumps(part), encoding="utf-8")
+    assert validate_artifact(run.services_part, "services-part") == []
+
+    code = main(["synthesise-interfaces", "--run", str(run.root)])
+    captured = capsys.readouterr()
+    assert (code, captured.out, captured.err) == (0, "", "")
+    assert list_json(run.interfaces_dir) == []
+
+
 def test_a_missing_services_part_is_a_repairable_finding(tmp_path):
     """Exit 1, not 2: re-dispatching reconcile-services repairs it, which is
     exactly what a 1 promises the orchestrator.
@@ -203,6 +235,96 @@ def test_a_services_key_that_is_not_an_array_names_that_key(tmp_path):
     written, findings = synthesise(run)
     assert written == []
     assert [(f.artifact, f.pointer) for f in findings] == [(run.services_part, "/services")]
+    assert {f.layer for f in findings} == {LAYER}
+
+
+def _rewrite_services(run, mutate):
+    """Apply `mutate` to the parsed services part and write it back.
+
+    A helper rather than four more copies of parse/mutate/dump: the four cases
+    below differ only in the one value they break, and the repeated boilerplate is
+    what made three of these branches easy to leave untested in the first place.
+    """
+    part = json.loads(run.services_part.read_text(encoding="utf-8"))
+    mutate(part)
+    run.services_part.write_text(json.dumps(part), encoding="utf-8")
+    return part
+
+
+def test_a_claims_file_that_is_not_an_object_names_that_file(tmp_path):
+    """`["nope"]` in a claims file, not in the services part.
+
+    The same shape as the services-part case, in the other loop, and it was
+    untested: a document that parses to a list reached `.get("claims", [])` and
+    raised AttributeError in four measured places in this repo. A claims file is
+    `extract`'s output, so the finding names the file and re-dispatching that one
+    input's extractor is the repair.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    run.claims("api-json").write_text('["nope"]', encoding="utf-8")
+    written, findings = synthesise(run)
+    assert written == []
+    assert (findings[0].artifact, findings[0].message) == (
+        run.claims("api-json"),
+        "claims file is not a JSON object",
+    )
+    assert {f.layer for f in findings} == {LAYER}
+
+
+def test_a_service_that_is_not_an_object_names_its_index(tmp_path):
+    """A string where a service belongs, so the pointer is the only thing that can
+    say which element is wrong -- there is no id to quote.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    _rewrite_services(run, lambda part: part["services"].insert(0, "nope"))
+    written, findings = synthesise(run)
+    assert written == []
+    assert [(f.artifact, f.pointer, f.message) for f in findings] == [
+        (run.services_part, "/services/0", "not an object")
+    ]
+    assert {f.layer for f in findings} == {LAYER}
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ({"query_tickets": {}}, "not an array"),
+        ([], "empty"),
+    ],
+    ids=["mapping", "empty-list"],
+)
+def test_a_tools_value_that_is_wrong_and_one_that_is_empty_get_different_messages(
+    tmp_path, value, message
+):
+    """Two defects, two messages, and they used to be one.
+
+    `not isinstance(tools, list) or not tools` reported `{"query_tickets": {}}` as
+    *empty*, so a repair prompt handed that finding would have been told something
+    untrue about its own output. Parametrized rather than split, because what is
+    being asserted is precisely that the two inputs do not produce the same line.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    _rewrite_services(run, lambda part: part["services"][0].__setitem__("tools", value))
+    written, findings = synthesise(run)
+    assert written == []
+    assert [(f.artifact, f.pointer, f.message) for f in findings] == [
+        (run.services_part, "/services/0/tools", message)
+    ]
+    assert {f.layer for f in findings} == {LAYER}
+
+
+def test_a_tool_that_is_not_an_object_names_its_index_within_the_service(tmp_path):
+    """The tool-level twin of the service-level case: the pointer carries both
+    indices, because a service with several tools gives a repair nothing else to go
+    on -- `name` is exactly what is missing.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    _rewrite_services(run, lambda part: part["services"][0]["tools"].insert(0, "nope"))
+    written, findings = synthesise(run)
+    assert written == []
+    assert (run.services_part, "/services/0/tools/0", "not an object") in [
+        (f.artifact, f.pointer, f.message) for f in findings
+    ]
     assert {f.layer for f in findings} == {LAYER}
 
 
@@ -329,8 +451,10 @@ def test_an_unwritable_interfaces_directory_is_exit_2_with_no_finding(
 
 def test_a_stale_document_from_a_previous_run_is_removed(tmp_path):
     """Synthesis owns the directory. A service renamed at gate 1 and re-synthesised
-    would otherwise leave the old document behind, and check_interfaces would
-    report an extra file for a run that is now correct -- a 1 against a fixed run.
+    would otherwise leave the old document behind, and a layer-2 check over
+    01-interfaces/ would report an extra file for a run that is now correct -- a 1
+    against a fixed run. That check does not exist yet, so what this pins today is
+    that the directory never carries a document no service asked for.
     """
     run = build_toy_run(tmp_path, upto="reconcile-services")
     stale = run.interface("svc-gone")

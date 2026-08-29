@@ -229,6 +229,48 @@ def test_the_orchestrator_disclaims_survey_triage_and_gate_zero():
     )
 
 
+def test_it_forbids_the_interface_gate_when_synthesis_printed_no_path():
+    """The gate that accuses a correct run, and the one instruction that closes it.
+
+    `01-interfaces/` holds one document per service, so a target whose corpus
+    declares no tool produces none -- `rb-reconcile-services` is instructed to write
+    `services: []` for one, and synthesis then exits 0 having printed nothing.
+    `validate --stage synthesise-interfaces` over that run exits 1 against the run
+    root ("produced no interface artifact"), which would send this skill to spend
+    its single repair attempt on a pass that would honestly write `services: []`
+    again. Measured before this prose existed, on a run with every `tool` claim
+    removed: synthesis 0 with empty stdout, `validate --stage reconcile-services` 0,
+    `check-refs` 0, this gate 1.
+
+    Scoped to one sentence of the Method section, and required to carry the
+    prohibition together with the command it prohibits: `synthesise-interfaces`
+    appears in that section several times by necessity (the dispatch table, the
+    exit-code paragraph), so an unscoped check would be satisfied by prose that
+    never states the condition. Tolerant of how the empty case is spelled --
+    "printed nothing", "no path", `services: []` -- because that is editorial,
+    while the `not`/`validate` pairing is not.
+
+    The rule is B6 step 1's, one band earlier, and that step's own version is pinned
+    by test_the_batches_gate_over_a_run_with_no_plan_names_the_run_root in
+    tests/unit/test_validate.py rather than here.
+    """
+    sentences = _sentences(_norm(method_body()))
+    assert any(
+        "validate --stage synthesise-interfaces" in s
+        and ("must not" in s or "do not" in s or "never" in s)
+        and ("print" in s or "no path" in s or "services: []" in s)
+        for s in sentences
+    ), (
+        "no single sentence of the Method section forbids "
+        "`validate --stage synthesise-interfaces` AND says which run it applies to. "
+        "Both halves in one sentence, because the dispatch table above sets few "
+        "periods and so reads as one enormous sentence: measured, that table alone "
+        "satisfies the command-plus-prohibition half on its own (`-- not yours` "
+        "twice), which is exactly the substring-of-message vacuity scoping exists "
+        "to prevent."
+    )
+
+
 def test_the_orchestrator_knows_gate_zero_decides_what_the_run_can_know():
     """The reason this gate is different in kind from 1-3: a model that both
     selects the inputs and ratifies the selection makes triage unfalsifiable.

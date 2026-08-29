@@ -96,14 +96,13 @@ finding's clothes.
 | `07` | smoke | code | validate · check-refs |
 
 Rows `01b` through `01i`, and `01k`, are **one logical step engineered as
-substeps.** Every
-pass reads all of `01-claims/` — the split is on *output*, not on claims, so the
-barrier property is untouched and a contradiction between two inputs is still
-visible to the pass that records it. They are separate stages rather than one
-skill branching on a slice id because `check-skills` binds one skill file to one
-stage name and `manifest.stages` records model, effort and skill digest per
-stage, which is what lets a think-heavy pass carry a different budget from a
-mechanical one.
+substeps.** Every pass reads all of `01-claims/` — the split is on *output*, not
+on claims, so the barrier property is untouched and a contradiction between two
+inputs is still visible to the pass that records it. They are separate stages
+rather than one skill branching on a slice id because `check-skills` binds one
+skill file to one stage name and `manifest.stages` records model, effort and
+skill digest per stage, which is what lets a think-heavy pass carry a different
+budget from a mechanical one.
 
 **`01j` is not one of them**, and it is named here rather than folded into the
 range: `synthesise-interfaces` merges no claims into a partial. It *derives* one
