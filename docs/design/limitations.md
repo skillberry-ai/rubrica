@@ -418,7 +418,7 @@ claims file it never opened. It is not, and three shipped routes give a right
 number without a read.
 
 - **Zero is the honest answer for most pairs.** Each pass owns one or two of the
-  six kinds `claims-0.1.json` defines, so on a real corpus most (pass, artifact)
+  seven kinds `claims-0.1.json` defines, so on a real corpus most (pass, artifact)
   pairs hold nothing of the pass's kinds and `0/0/0` is the correct row.
   `tests/unit/test_toy_split.py::test_the_derived_rows_match_a_hand_written_table`
   is the table to read: every pair whose artifact holds none of that pass's kinds

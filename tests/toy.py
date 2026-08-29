@@ -58,11 +58,13 @@ ARTIFACT_IDS: tuple[str, ...] = ("api-json", "notes-md", "trace-json")
 SIDS: tuple[str, ...] = ("scn-open", "scn-empty", "scn-blocked", "scn-missing")
 
 
-def _claim(cid, kind, statement, artifact_id, locator, confidence, derivation, quote=None):
+def _claim(
+    cid, kind, statement, artifact_id, locator, confidence, derivation, quote=None, payload=None
+):
     evidence: dict[str, Any] = {"artifact_id": artifact_id, "locator": locator}
     if quote is not None:
         evidence["quote"] = quote
-    return {
+    claim: dict[str, Any] = {
         "id": cid,
         "kind": kind,
         "statement": statement,
@@ -70,6 +72,12 @@ def _claim(cid, kind, statement, artifact_id, locator, confidence, derivation, q
         "confidence": confidence,
         "derivation": derivation,
     }
+    # Omitted rather than written as null when absent: claims-0.1.json does not
+    # require `payload`, and a null one is a different document from an absent
+    # one to every reader that uses `.get`.
+    if payload is not None:
+        claim["payload"] = payload
+    return claim
 
 
 _CLAIMS: dict[str, list[dict[str, Any]]] = {
@@ -156,6 +164,25 @@ _CLAIMS: dict[str, list[dict[str, Any]]] = {
             "#/tools/0/input_schema/properties/ticket_id",
             "medium",
             "inferred",
+        ),
+        _claim(
+            "clm-api-010",
+            "tool",
+            "The target declares one tool, query_tickets, taking an action and optional filters",
+            "api-json",
+            "#/tools/0/input_schema",
+            "high",
+            "stated",
+            payload={
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                    "action": {"type": "string", "enum": ["find_tickets", "get_ticket"]},
+                    "queue": {"type": "string", "enum": ["billing", "shipping"]},
+                    "status": {"type": "string", "enum": ["open", "blocked", "closed"]},
+                    "ticket_id": {"type": "integer"},
+                },
+            },
         ),
     ],
     "notes-md": [
@@ -445,14 +472,15 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
     return payload
 
 
-# Which claim kinds each pass is accountable for. The six kinds in
-# claims-0.1.json partition onto the four passes that own one, which is what
-# makes an own-kind count a per-pass number rather than an aggregate: measured on
-# run-20260823-112746, per-kind citation was capability 110/135 while goal was
-# 2/38, and the run's single aggregate figure of 33.6% is the average that hid
-# it. reconcile-gaps owns no kind, and reconcile-subjects and
-# reconcile-contradict need no accounting -- refs.check_subjects already makes
-# the cover total.
+# Which claim kinds each pass is accountable for. Six of the seven kinds in
+# claims-0.1.json partition onto the four passes that own one; `tool` is owned by
+# reconcile-services, which is added to this table in the same commit that adds
+# the pass. That partition is what makes an own-kind count a per-pass number
+# rather than an aggregate: measured on run-20260823-112746, per-kind citation
+# was capability 110/135 while goal was 2/38, and the run's single aggregate
+# figure of 33.6% is the average that hid it. reconcile-gaps owns no kind, and
+# reconcile-subjects and reconcile-contradict need no accounting --
+# refs.check_subjects already makes the cover total.
 OWN_KINDS: dict[str, tuple[str, ...]] = {
     "capabilities": ("capability",),
     "entities": ("entity", "invariant"),

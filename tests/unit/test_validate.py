@@ -172,6 +172,45 @@ def test_claim_without_evidence_is_rejected(tmp_path):
     assert findings[0].pointer == "/claims/0/evidence"
 
 
+def test_a_tool_claim_carrying_its_input_schema_validates(tmp_path):
+    """The seventh kind, and the payload the whole design rests on reaching synthesis.
+
+    `payload` is `{"type": "object"}` in claims-0.1.json -- free-form on purpose,
+    because a tool's input schema is whatever the target declared. So this asserts
+    the *kind* is admitted and that a nested schema survives the round trip; the
+    shape of the schema itself is not layer 1's business.
+    """
+    path = tmp_path / "01-claims" / "api-json.json"
+    path.parent.mkdir()
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "artifact_id": "api-json",
+                "claims": [
+                    {
+                        "id": "clm-api-010",
+                        "kind": "tool",
+                        "statement": "query_tickets is the only tool the target declares",
+                        "payload": {
+                            "type": "object",
+                            "required": ["action"],
+                            "properties": {"action": {"type": "string"}},
+                        },
+                        "evidence": [
+                            {"artifact_id": "api-json", "locator": "#/tools/0/input_schema"}
+                        ],
+                        "confidence": "high",
+                        "derivation": "stated",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert validate_artifact(path, "claims") == []
+
+
 def test_traversal_shaped_id_is_rejected_by_the_schema(tmp_path):
     payload = minimal_claims()
     payload["claims"][0]["id"] = "../../etc/passwd"

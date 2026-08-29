@@ -39,9 +39,9 @@ way, with a reason for why not.
 
 One atomic, evidence-backed statement about the target system, extracted by
 `rb-extract` from exactly one input artifact. Its schema requires a `kind`
-(`capability`, `entity`, `invariant`, `actor`, `goal`, or `outcome_class`), a
-`statement`, at least one `evidence` entry carrying an `artifact_id` and a
-`locator`, a `confidence`, and a `derivation`
+(`capability`, `entity`, `invariant`, `actor`, `goal`, `outcome_class`, or
+`tool`), a `statement`, at least one `evidence` entry carrying an `artifact_id`
+and a `locator`, a `confidence`, and a `derivation`
 (`src/rubrica/schema/claims-0.1.json`). Every claim traces back to the one
 input it came from; nothing later fabricates a claim without a locator.
 

@@ -1944,14 +1944,17 @@ def check_world_model(run: RunPaths) -> list[Finding]:
     return out
 
 
-# Which claim kinds each reconcile pass is accountable for. The six kinds in
-# claims-0.1.json partition onto the four passes that own one, and that is what
-# makes a per-pass number possible at all: measured on run-20260823-112746,
-# per-kind citation ran capability 110/135 (the pass that read 23/23 files) and
-# goal 2/38 (the pass that read 3/23), while the run's one aggregate utilisation
-# figure was 33.6% -- the average that hid both. reconcile-gaps owns no kind, and
-# reconcile-subjects and reconcile-contradict need no accounting because
-# check_subjects already makes the cover total.
+# Which claim kinds each reconcile pass is accountable for. Six of the seven
+# kinds in claims-0.1.json partition onto the four passes below; `tool` is owned
+# by reconcile-services, which is added to this table in the same commit that
+# adds the pass. Two kinds unowned would make an own-kind count an aggregate
+# again, which is the exact failure this table exists to prevent. That partition
+# is what makes a per-pass number possible at all: measured on
+# run-20260823-112746, per-kind citation ran capability 110/135 (the pass that
+# read 23/23 files) and goal 2/38 (the pass that read 3/23), while the run's one
+# aggregate utilisation figure was 33.6% -- the average that hid both.
+# reconcile-gaps owns no kind, and reconcile-subjects and reconcile-contradict
+# need no accounting because check_subjects already makes the cover total.
 PASS_OWN_KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("capabilities_part", ("capability",)),
     ("entities_part", ("entity", "invariant")),

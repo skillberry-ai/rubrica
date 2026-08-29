@@ -1385,9 +1385,12 @@ def test_utilisation_sums_the_report_rather_than_recomputing(tmp_path):
     asserted identical objects-in-order, so re-sorting or rebuilding them here
     goes red; the columns are asserted as its sums.
 
-    The measured totals are pinned alongside: 9/9, 8/8 and 2/2 on the toy
-    fixture, 19 of 19 overall. Derived sums alone would agree with a `utilisation`
-    that summed the wrong column, since cited == total on this fixture.
+    The measured totals are pinned alongside: 9/10, 8/8 and 2/2 on the toy
+    fixture, 19 of 20 overall. They were pinned when the two columns were equal at
+    19/19, where derived sums alone could not tell a `utilisation` that summed the
+    wrong column from one that summed the right one. api-json's denominator has
+    since gained `clm-api-010`, the run's one `tool` claim, which nothing cites
+    yet, so cited != total and the pair now discriminates that on its own.
     """
     from rubrica.utilisation import claim_utilisation
 
@@ -1397,18 +1400,21 @@ def test_utilisation_sums_the_report_rather_than_recomputing(tmp_path):
     assert got.per_artifact == report["artifacts"]
     assert got.cited == sum(a["cited"] for a in report["artifacts"])
     assert got.total == sum(a["total"] for a in report["artifacts"])
-    assert (got.cited, got.total) == (19, 19), "the toy world model cites all 19 claims"
-    assert got.pct == pytest.approx(100.0)
+    assert (got.cited, got.total) == (19, 20), (
+        "the toy world model cites 19 of 20 claims -- every one but the tool claim"
+    )
+    assert got.pct == pytest.approx(95.0)
 
 
 def test_utilisation_names_an_artifact_the_world_model_cites_nothing_of(tmp_path):
     """`uncited`, which the toy fixture cannot reach unaltered.
 
-    Measured: the sealed toy world model cites every claim of all three inputs
-    (9/9, 8/8, 2/2), so the loop in
-    test_utilisation_totals_and_names_uncited_artifacts has an empty body and the
-    list ships unexercised -- and it is the entire input to the
-    `uncited-artifacts` flag.
+    Measured: the sealed toy world model cites every claim of notes-md and
+    trace-json and all but one of api-json's (9/10, 8/8, 2/2), so no input is at
+    zero, the loop in test_utilisation_totals_and_names_uncited_artifacts has an
+    empty body and the list ships unexercised -- and it is the entire input to the
+    `uncited-artifacts` flag. `uncited` is per *input*, not per claim, which is
+    why api-json's own uncited `tool` claim does not put it on the list.
 
     trace-json is emptied of citations here. Its claims are cited in two places
     and both must go: a capability's `claims` array, and the sealed
@@ -1434,8 +1440,8 @@ def test_utilisation_names_an_artifact_the_world_model_cites_nothing_of(tmp_path
     got = summary.utilisation(run)
     assert got.uncited == ["trace-json"]
     assert {a["artifact_id"]: a["cited"] for a in got.per_artifact}["trace-json"] == 0
-    assert (got.cited, got.total) == (17, 19), "trace-json's two claims stopped being cited"
-    assert got.pct == pytest.approx(17 / 19 * 100)
+    assert (got.cited, got.total) == (17, 20), "trace-json's two claims stopped being cited"
+    assert got.pct == pytest.approx(17 / 20 * 100)
 
 
 def test_utilisation_reports_no_percentage_when_no_claim_was_extracted(tmp_path):
@@ -3344,21 +3350,23 @@ def test_code_stages_is_exactly_the_stages_that_run_as_code():
 
 
 def test_flags_fire_low_utilisation_below_the_threshold(tmp_path, monkeypatch):
-    """The threshold is patched *above* 100 because the toy fixture cites everything.
+    """The threshold is patched *above* the fixture's own pct, which is nearly 100.
 
-    Measured: the toy run's claim utilisation is 100.0% (api-json 9/9, notes-md
-    8/8, trace-json 2/2). The predicate is a strict `<`, so patching the threshold
-    to 100.0 -- as this test was first written -- leaves `100.0 < 100.0` False and
-    the flag silently not firing while the test claims to have observed it. 100.1
-    is the smallest round value that makes the predicate observable on a fixture
-    with nothing uncited.
+    Measured: the toy run's claim utilisation is 95.0% (api-json 9/10, notes-md
+    8/8, trace-json 2/2) -- the one uncited claim is `clm-api-010`, the run's
+    `tool` claim, which nothing consumes yet. The predicate is a strict `<`, so
+    patching the threshold to the fixture's own pct -- as this test was first
+    written, when that pct was 100.0 -- leaves `95.0 < 95.0` False and the flag
+    silently not firing while the test claims to have observed it. 95.1 is the
+    smallest round value that makes the predicate observable, and the pct is
+    asserted first so a fixture change moves this test rather than hiding in it.
     """
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
-    assert summary.utilisation(run).pct == 100.0, "the fixture this threshold is chosen against"
-    monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 100.1)
+    assert summary.utilisation(run).pct == 95.0, "the fixture this threshold is chosen against"
+    monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 95.1)
     fired = {f.id_: f for f in summary.flags(run)}
     assert "low-utilisation" in fired
-    assert "100.0%" in fired["low-utilisation"].headline
+    assert "95.0%" in fired["low-utilisation"].headline
 
 
 def test_flags_do_not_fire_low_utilisation_above_the_threshold(tmp_path, monkeypatch):
@@ -3374,9 +3382,13 @@ def test_flags_do_not_fire_low_utilisation_exactly_at_the_threshold(tmp_path, mo
     Without this the pair above is satisfied by `<=` just as well as by `<`, and
     the threshold string on the page says "below". A flag whose stated rule and
     whose predicate disagree at the boundary is worse than no flag.
+
+    95.0 is the fixture's own measured pct -- see the firing test above for where
+    that number comes from -- so this sits exactly on the boundary rather than
+    merely near it.
     """
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
-    monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 100.0)
+    monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 95.0)
     ids = {f.id_ for f in summary.flags(run)}
     assert "low-utilisation" not in ids
 

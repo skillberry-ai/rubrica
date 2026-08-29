@@ -255,7 +255,7 @@ never sees a sibling's file, so every claims document names only the
 tracing back to one.
 
 Fields worth knowing: `claims[].kind` (`capability`, `entity`, `invariant`,
-`actor`, `goal`, or `outcome_class`); `claims[].derivation` (`stated`,
+`actor`, `goal`, `outcome_class`, or `tool`); `claims[].derivation` (`stated`,
 `inferred`, or `reverse_engineered` — a claim's honesty grade, carried forward
 into the world model); `claims[].evidence[].locator` (required on every claim,
 so a claim with no way to find where it came from cannot exist).
@@ -323,7 +323,7 @@ used.
 The other three partials carry no accounting, for two different reasons.
 `subjects` and `contradictions-part` need none: `check-refs` already holds the
 subject cover to totality over every claim in the run, so the cover is the
-accounting. `gaps-part` cannot be given one — its pass owns none of the six
+accounting. `gaps-part` cannot be given one — its pass owns none of the seven
 claim kinds, and a gap asserts what no input *contains*, so no output shape can
 force its read coverage. See
 [`docs/design/limitations.md`](../design/limitations.md).
