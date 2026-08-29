@@ -49,6 +49,36 @@ def _sentences(text: str) -> list[str]:
     return [s for s in re.split(r"\.(?:\*\*)?\s", text) if s.strip()]
 
 
+# Ways English forbids something, for the interface-gate predicate below. A set
+# rather than three literals inline, because the predicate's brittleness was
+# measured: "and running `validate --stage synthesise-interfaces` is forbidden to
+# you" is meaning-preserving and reded the earlier {must not, do not, never}
+# spelling, which is the same reword-brittleness CLAUDE.md warns about.
+#
+# Widened, but not to bare "not", and the ceiling is measured rather than guessed.
+# With B4's paragraph blanked exactly one prose sentence still carries the command
+# -- "when it printed at least one path, gate it with `rubrica validate --stage
+# synthesise-interfaces --run <run>`, then `rubrica check-refs --run <run>`" -- and
+# it already satisfies the empty-case half through "printed". So the prohibition
+# half is the only thing discriminating there, and every token below is absent from
+# that sentence deliberately: none of "gate", "then", "when", "path" or "run" may
+# ever join this set, however natural it reads.
+PROHIBITIONS: frozenset[str] = frozenset(
+    {
+        "must not",
+        "do not",
+        "never",
+        "not run",
+        "forbidden",
+        "forbids",
+        "prohibited",
+        "refuse",
+        "skip",
+        "avoid",
+    }
+)
+
+
 def prose_sentences(text: str) -> list[str]:
     """`text`'s sentences with every fenced code block removed first.
 
@@ -64,10 +94,20 @@ def prose_sentences(text: str) -> list[str]:
     command, `never yours`, and `printed` inside that one pseudo-sentence. Reading
     prose only is what makes the predicate about the prose.
 
-    Not folded into `method_body`, deliberately: several predicates in this file --
-    the stage roster most of all -- are satisfied *by* the block, since that is
-    where most stage names appear. Stripping it there would make those vacuous in
-    the other direction.
+    Not folded into `method_body`, deliberately, and the example is measured rather
+    than assumed: folding it in reds
+    `test_it_records_each_stage_and_each_decision`, whose `record-stage --run` needle
+    exists exactly once in the whole section, at `SKILL.md:402`, inside a fence --
+    *the Method must invoke record-stage*. That predicate is satisfied **by** the
+    block, so stripping the block there would make it vacuous in the other
+    direction.
+
+    Not the stage roster, which is what an earlier draft of this docstring claimed:
+    zero of its needles are block-only. Every `rb-*` name and every
+    `CODE_ONLY_STAGES` name also appears in the prose bands, so
+    `test_it_names_every_stage_it_dispatches` is unaffected by stripping. Measured
+    by folding the strip into `method_body` and running the module: two tests red,
+    that one not among them.
     """
     return _sentences(re.sub(r"```.*?```", " ", text, flags=re.DOTALL))
 
@@ -319,8 +359,13 @@ def test_it_forbids_the_interface_gate_when_synthesis_printed_no_path():
     appears in that section several times by necessity (the dispatch table, the
     exit-code paragraph), so an unscoped check would be satisfied by prose that
     never states the condition. Tolerant of how the empty case is spelled --
-    "printed nothing", "no path", `services: []` -- because that is editorial,
-    while the `not`/`validate` pairing is not.
+    "printed nothing", "no path", `services: []` -- and, since the fix round that
+    measured it, equally tolerant of how the prohibition is spelled: PROHIBITIONS
+    above holds the vocabulary, and its comment records both why it was widened
+    ("is forbidden to you" reded the earlier three-token spelling) and the ceiling
+    on widening it further (with B4 blanked, one prose sentence still carries the
+    command *and* satisfies the empty-case half, so the prohibition half is the
+    whole discriminator there).
 
     The rule is B6 step 1's, one band earlier, and that step's own version is pinned
     by test_the_batches_gate_over_a_run_with_no_plan_names_the_run_root in
@@ -329,7 +374,7 @@ def test_it_forbids_the_interface_gate_when_synthesis_printed_no_path():
     sentences = prose_sentences(_norm(method_body()))
     assert any(
         "validate --stage synthesise-interfaces" in s
-        and ("must not" in s or "do not" in s or "never" in s)
+        and any(prohibition in s for prohibition in PROHIBITIONS)
         and ("print" in s or "no path" in s or "services: []" in s)
         for s in sentences
     ), (
