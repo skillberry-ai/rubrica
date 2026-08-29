@@ -288,15 +288,20 @@ record will change the run.
 
 ## What must not break
 
-- **The exit-code contract.** `synthesise-interfaces` is new code with an
-  unreadable-input surface: a missing or non-dict `01-services.json`, an
-  unwritable `01-interfaces/`, a `service_id` that is not a safe path segment.
-  Each is a stage defect and must arrive as exit 1 with a finding per line, never
-  as 2 and never as a 1 with empty stdout. The `service_id` case follows
-  `check_inputs`' handling of `stored_as`: validate the segment rather than
-  joining it blindly, because `paths` raises `UnsafeSegment`, which `cli.py`
-  maps to 2 — and a bad value in a stage's own output is repairable, so it owes
-  a finding instead.
+- **The exit-code contract**, and the two codes are not interchangeable here.
+  A missing or non-dict `01-services.json`, a `service_id` that is not a safe
+  path segment, a `schema_claim` that resolves to nothing, and a tool name that
+  would not survive sanitisation are all **exit 1** with a finding per line:
+  each is repairable by re-dispatching `reconcile-services`, which is what a `1`
+  promises the orchestrator. An **unwritable** `01-interfaces/` is **exit 2** —
+  no re-dispatch of any prompt fixes a directory permission, and a `1` there
+  spends the run's one repair attempt on a stage whose output was never the
+  problem.
+  The `service_id` case follows `check_inputs`' handling of `stored_as`:
+  ask `is_safe_segment` and emit a finding, rather than joining through
+  `safe_segment` and raising `UnsafeSegment`, which `cli.py` maps to 2. A bad
+  value in a stage's own output is repairable; the segment check is what keeps
+  it reported as such.
 - **Both live recordings stay valid**, which the optional `services` key
   guarantees. Neither fixture's recording is re-recorded in this step.
 - **`rb-extract`'s refusal prose.** "Record it under the closest of the six" and
