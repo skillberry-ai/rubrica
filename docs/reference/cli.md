@@ -218,6 +218,21 @@ all `1`s — each is repaired by re-dispatching `reconcile-services`, which is w
 re-dispatch of any prompt fixes a directory permission, and a `1` there would spend
 the run's one repair attempt on a stage whose output was never the problem.
 
+**Exiting 0 having printed nothing is a real outcome, not a silent failure.** A
+target whose corpus declares no tool at all is a real target, and
+`rb-reconcile-services` is instructed to write `services: []` for one rather than
+invent a service — so there is nothing to derive, and this command writes nothing and
+says nothing.
+
+**Do not run `rubrica validate --stage synthesise-interfaces` on that run.** Its
+"produced no interface artifact" finding is a `1` against the run root of a run with
+no defect: `01-interfaces/` holds one document per service, so no service means no
+document, and the gate cannot tell that from a stage that failed. This is the same
+trap `validate --stage propose-batches` sets on a terminal round, and the same rule —
+gate the stage only when it printed at least one path. `rubrica check-refs` is safe
+either way; it is a whole-run check and has no opinion about documents no service
+asked for.
+
 ```bash
 rubrica synthesise-interfaces --run runs/run-20260806-123005
 ```

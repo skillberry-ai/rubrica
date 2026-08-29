@@ -431,10 +431,12 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         # rb-reconcile-services is instructed to write `services: []` for one, and
         # synthesis then correctly writes nothing and exits 0 having printed no
         # path. Asking this gate anyway accuses a run with no defect, so
-        # rb-orchestrate gates the stage only when it printed at least one path
-        # (pinned by test_the_interface_gate_over_a_run_with_no_services_names_the
-        # _run_root, which mirrors the batches one). `validate --stage X` is right
-        # to answer what it was asked; the decision is whether to ask.
+        # rb-orchestrate gates the stage only when it printed at least one path.
+        # That is pinned, and the name is on one line so it can be grepped:
+        # test_the_interface_gate_over_a_run_with_no_services_names_the_run_root
+        # (tests/unit/test_validate.py, mirroring the batches one below).
+        # `validate --stage X` is right to answer what it was asked; the decision
+        # is whether to ask.
         return list_json(run.interfaces_dir)
     if kind == "batches":
         # Iterated, and so empty when no round has a plan -- NOT the

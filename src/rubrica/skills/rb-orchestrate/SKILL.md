@@ -234,7 +234,8 @@ rb-reconcile-goals                           → validate --stage reconcile-goal
 rb-reconcile-gaps                            → validate --stage reconcile-gaps → check-refs
 rb-reconcile-services                        → validate --stage reconcile-services → check-refs
 rubrica synthesise-interfaces --run <run>     # code: one OpenAPI document per service
-                                             → validate --stage synthesise-interfaces → check-refs
+if it printed at least one path              → validate --stage synthesise-interfaces → check-refs
+if it printed nothing                        # no service declared: skip that gate (B4)
 rubrica reconcile-seal --run <run>            # code: assembles the partials into the world model
                                              → validate --stage reconcile-seal → check-refs
 if any gap blocks a stage still to come      → HALT, report the gap, request the missing artifact

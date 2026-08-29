@@ -49,6 +49,43 @@ def _sentences(text: str) -> list[str]:
     return [s for s in re.split(r"\.(?:\*\*)?\s", text) if s.strip()]
 
 
+def prose_sentences(text: str) -> list[str]:
+    """`text`'s sentences with every fenced code block removed first.
+
+    The Method section opens with the whole-run block, which is fenced, ~2,900
+    characters long, and contains almost no `. ` -- so `_sentences` returns the
+    entire block as **one** pseudo-sentence. Any co-occurrence predicate over
+    sentences is therefore satisfiable by that block alone, which is not a check of
+    the prose at all.
+
+    Measured, and it is not hypothetical: the interface-gate predicate below was
+    green with its own paragraph deleted the moment the block's synthesis row was
+    annotated with `if it printed nothing`, because the block then carried the
+    command, `never yours`, and `printed` inside that one pseudo-sentence. Reading
+    prose only is what makes the predicate about the prose.
+
+    Not folded into `method_body`, deliberately: several predicates in this file --
+    the stage roster most of all -- are satisfied *by* the block, since that is
+    where most stage names appear. Stripping it there would make those vacuous in
+    the other direction.
+    """
+    return _sentences(re.sub(r"```.*?```", " ", text, flags=re.DOTALL))
+
+
+def whole_run_block() -> str:
+    """The fenced whole-run block that opens the Method section.
+
+    Its own reader, because the block and the prose are two audiences of one
+    instruction and each can drift from the other: the block is framed as "every
+    `rubrica` command shown is one you actually run", so a command shown there
+    unconditionally *is* an instruction to run it, whatever a later band says.
+    prose_sentences above exists to read everything except this; this reads only it.
+    """
+    match = re.search(r"```\n(.*?)```", method_body(), re.DOTALL)
+    assert match, "the Method section no longer opens with a fenced whole-run block"
+    return match.group(1)
+
+
 def method_body() -> str:
     """The `## 3. Method` section only.
 
@@ -203,6 +240,41 @@ def test_it_names_every_stage_it_dispatches():
             assert f"rb-{stage}" in method, f"the loop never dispatches rb-{stage}"
 
 
+def test_the_whole_run_block_shows_the_interface_gate_as_conditional():
+    """The block must not instruct the command its own prose forbids.
+
+    `validate --stage synthesise-interfaces` accuses a run whose target declares no
+    tool (see the predicate above and
+    test_the_interface_gate_over_a_run_with_no_services_names_the_run_root), so B4
+    forbids it there. The block is framed as "every `rubrica` command shown is one
+    you actually run" and nothing in it says the bands override it -- so a row
+    showing that gate unconditionally contradicts the prose, and an orchestrator
+    that reads the block and skims the band still spends its one repair attempt on
+    a correct run. This is the shape `propose-batches` avoids by carrying no
+    `validate` row at all, only `# no closable holes -> leave the loop`.
+
+    Asserted over the block alone rather than the section: the prose predicate above
+    deliberately strips fenced blocks, so without this nothing checks the block at
+    all -- and the block is where this contradiction was introduced.
+    """
+    lines = [
+        line for line in whole_run_block().splitlines() if "validate --stage synthesise" in line
+    ]
+    assert len(lines) == 1, f"expected one gate row for synthesis, found {lines}"
+    assert lines[0].lstrip().lower().startswith("if "), (
+        "the block shows `validate --stage synthesise-interfaces` unconditionally: "
+        f"{lines[0]!r}. Every command in this block is one the orchestrator runs, so "
+        "the condition has to be visible here and not only in B4"
+    )
+    skips = [
+        line
+        for line in whole_run_block().splitlines()
+        if ("printed nothing" in line or "no path" in line or "no service" in line)
+        and ("skip" in line or "not" in line)
+    ]
+    assert skips, "the block never shows what to do when synthesis printed no path"
+
+
 def test_the_orchestrator_disclaims_survey_triage_and_gate_zero():
     """`survey` and the triage family both precede intake, and gate 0 precedes
     the orchestrator's own dispatch entirely -- it never runs `rubrica survey`,
@@ -254,21 +326,23 @@ def test_it_forbids_the_interface_gate_when_synthesis_printed_no_path():
     by test_the_batches_gate_over_a_run_with_no_plan_names_the_run_root in
     tests/unit/test_validate.py rather than here.
     """
-    sentences = _sentences(_norm(method_body()))
+    sentences = prose_sentences(_norm(method_body()))
     assert any(
         "validate --stage synthesise-interfaces" in s
         and ("must not" in s or "do not" in s or "never" in s)
         and ("print" in s or "no path" in s or "services: []" in s)
         for s in sentences
     ), (
-        "no single sentence of the Method section forbids "
-        "`validate --stage synthesise-interfaces` AND says which run it applies to. "
-        "Both halves in one sentence, because the dispatch table above sets few "
-        "periods and so reads as one enormous sentence: measured, that table alone "
-        "satisfies the command-plus-prohibition half on its own (`-- not yours` "
-        "twice), which is exactly the substring-of-message vacuity scoping exists "
-        "to prevent."
+        "no single sentence of the Method section's prose forbids "
+        "`validate --stage synthesise-interfaces` AND says which run it applies to"
     )
+    # Both halves in one sentence, and over prose rather than the whole section:
+    # two vacuities were measured here, one after the other. Splitting this into
+    # two assertions let the fenced block satisfy the command-plus-prohibition half
+    # alone (`-- not yours`, `never yours`); and once the block's synthesis row was
+    # annotated `if it printed nothing`, the block satisfied all three tokens at
+    # once and the predicate passed with its own paragraph deleted. prose_sentences
+    # is the fix for the second, one co-occurrence for the first.
 
 
 def test_the_orchestrator_knows_gate_zero_decides_what_the_run_can_know():

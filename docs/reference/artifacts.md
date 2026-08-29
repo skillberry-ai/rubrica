@@ -588,10 +588,10 @@ Fields worth knowing: `paths` (one entry per tool, keyed `/<tool name>`, whose
 `operationId` set is the service's tool names byte for byte — contract preservation
 made mechanical, and the property a layer-2 check over `01-interfaces/` is meant to
 hold the document to; **no such check exists yet**, so today it is a property of
-the code that writes the document rather than one anything verifies); `x-rubrica.service_id` and `x-rubrica.tools` (the
-provenance, carried inside the document because the document is what a human reads
-at gate 1 and what a later step hands the harness, under an `x-` key so it stays a
-legal OpenAPI extension).
+the code that writes the document rather than one anything verifies);
+`x-rubrica.service_id` and `x-rubrica.tools` (the provenance, carried inside the
+document because the document is what a human reads at gate 1 and what a later step
+hands the harness, under an `x-` key so it stays a legal OpenAPI extension).
 
 ## `world-model`
 
