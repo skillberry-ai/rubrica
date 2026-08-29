@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "services-part-0.1.json",
   "title": "The tools the target declares, grouped into the services a simulator would stand in for",
-  "description": "Its own pass because grouping is a judgment with evidence rather than a string match, and it decides how many simulators exist -- which makes it reviewable at gate 1 rather than derived. `inputs_seen` is the same per-input accounting the four other owning passes carry: this pass owns the `tool` kind, so a skimmed read of 01-claims/ shows up as a recomputable number rather than as a well-formed partial nobody can distinguish from a diligent one.",
+  "description": "Its own pass because grouping is a judgment with evidence rather than a string match, and it decides how many simulators exist -- which makes it reviewable at gate 1 rather than derived. `inputs_seen` is the same per-input accounting every other pass that owns a claim kind carries: this pass owns the `tool` kind, so a skimmed read of 01-claims/ shows up as a recomputable number rather than as a well-formed partial nobody can distinguish from a diligent one.",
   "type": "object",
   "required": ["schema_version", "services", "inputs_seen"],
   "additionalProperties": false,

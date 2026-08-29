@@ -2023,15 +2023,19 @@ def check_input_dispositions(run: RunPaths) -> list[Finding]:
             # `isinstance` rather than `is None`, and the difference is reachable:
             # `_load` returns whatever the document holds, so a partial that is a
             # list or a string reached `part.get` and raised AttributeError out of
-            # layer 2 -- measured, `["nope"]` in each of the four. For
-            # `01-entities.json` and `01-goals.json` this is the *only* layer-2
-            # reader, so nothing older raised first and the guard closes the whole
-            # instance for them rather than moving it; `01-capabilities.json` and
-            # `01-outcomes.json` still raise out of `check_outcomes`, which runs
-            # earlier in check_all and is not this branch's read. A non-dict
-            # document is the same class as an unreadable one -- layer 1 rejects
-            # it, and every partial's schema is `"type": "object"` -- so it takes
-            # the same branch rather than a finding of its own.
+            # layer 2 -- measured, `["nope"]` in each of the four partials that
+            # then existed. For `01-entities.json`, `01-goals.json` and
+            # `01-services.json` this is the *only* layer-2 reader, so nothing
+            # older raised first and the guard closes the whole instance for them
+            # rather than moving it -- and `01-services.json` is the deepest of the
+            # three, since reconcile-seal does not read it either, so no later
+            # dispatch would refuse it the way the seal refuses the other two.
+            # `01-capabilities.json` and `01-outcomes.json` still raise out of
+            # `check_outcomes`, which runs earlier in check_all and is not this
+            # branch's read. A non-dict document is the same class as an
+            # unreadable one -- layer 1 rejects it, and every partial's schema is
+            # `"type": "object"` -- so it takes the same branch rather than a
+            # finding of its own.
             continue
 
         # `path=path` binds the loop variable deliberately: ruff's B023 fires

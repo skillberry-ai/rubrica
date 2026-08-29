@@ -43,6 +43,40 @@ def _flat(stage: str, heading: str) -> str:
     return " ".join(section_body(_skill(stage), heading).lower().split())
 
 
+def _bullets(stage: str, heading: str) -> list[str]:
+    """One entry per top-level `- ` bullet in a section, each flattened like _flat.
+
+    A continuation line joins the bullet above it, so a wrapped bullet is one
+    entry rather than several. Anything before the first bullet -- a section's
+    intro paragraph -- is deliberately dropped: this exists to scope an assertion
+    to the condition that owns a rule, and an intro is owned by none of them.
+    """
+    out: list[str] = []
+    for line in section_body(_skill(stage), heading).splitlines():
+        if line.startswith("- "):
+            out.append(line)
+        elif out:
+            out[-1] += " " + line
+    return [" ".join(bullet.lower().split()) for bullet in out]
+
+
+def _bullet_carrying(stage: str, heading: str, *keys: str) -> str:
+    """The one bullet in a section carrying any of `keys`, flattened.
+
+    Asserting inside one bullet rather than over a whole section is what makes a
+    §5 assertion mean something: `assert "guess" in refusals` is satisfied by any
+    of five sibling conditions, so a rule deleted from the one that owns it stays
+    green. The exactly-one check is part of the instrument -- a key that matches
+    two bullets is not a locator, and one that matches none means the rule is gone
+    rather than that the test should quietly pass.
+    """
+    found = [bullet for bullet in _bullets(stage, heading) if any(k in bullet for k in keys)]
+    assert len(found) == 1, (
+        f"{keys} locates {len(found)} bullet(s) in {stage}'s {heading}, not one: {found}"
+    )
+    return found[0]
+
+
 def _world_schema():
     return read_json(schema_dir() / ARTIFACT_SCHEMAS["world-model"])
 
@@ -437,13 +471,30 @@ def test_gaps_audits_the_earlier_partials_and_may_not_edit_them():
 
 def test_gaps_carries_the_confabulation_refusal_as_the_last_close_reader():
     """It was "you are the last stage that does" when one stage read every claim
-    and wrote everything. Six passes later it is still true of this one, and only
-    of this one: after it, nothing in the pipeline compares the world model
-    against the evidence it came from.
+    and wrote everything. Passes later it is still true of this one, and only of
+    this one: after it, nothing in the pipeline compares the world model against
+    the evidence it came from. `rb-reconcile-services` is dispatched after it and
+    reads the claims too, but it reads them to group tools rather than to check a
+    model against them, which is why the claim survives as stated below.
+
+    Scoped to the owning bullet and asserted as concepts, not as a sentence. This
+    pinned the exact phrase "you are the last pass that reads the claims closely"
+    until `reconcile-services` made that sentence false; the sentence was
+    corrected, and an exact pin would then have gone red on the correction rather
+    than on the defect -- the phrase-pin failure this repository has already had
+    once. Locating the bullet by "confabulation" is what keeps the assertions off
+    the four sibling conditions in the same section.
     """
-    refusals = _flat("reconcile-gaps", "5. Refusal conditions")
-    assert "confabulation under under-specification" in refusals
-    assert "you are the last pass that reads the claims closely" in refusals
+    bullet = _bullet_carrying("reconcile-gaps", "5. Refusal conditions", "confabulation")
+    assert "under-specification" in bullet
+    # The last-ness, and what it is last *with respect to*. An OR over the three
+    # natural formulations rather than one of them, because which noun carries it
+    # is exactly the part a meaning-preserving reword changes.
+    assert any(k in bullet for k in ("last pass", "last stage", "last to read")), bullet
+    assert "claims" in bullet
+    # And why the last-ness matters: nothing after this pass can tell an invention
+    # from a fact. The verb is the rewordable part, so this is an OR too.
+    assert any(k in bullet for k in ("catch", "detect", "notice")), bullet
 
 
 def test_gaps_says_a_gap_cites_the_claims_that_make_the_absence_matter():

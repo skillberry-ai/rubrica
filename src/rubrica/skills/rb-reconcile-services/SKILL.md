@@ -77,6 +77,13 @@ self-contained. Each signal names one of five kinds and carries a `locator`:
   purpose. Its `locator` names the artifacts you read, not a place you saw
   something. Writing it is a statement about your inputs, never about the tool.
 
+Every signal also takes an optional `artifact_id`. Name it whenever the signal
+came from one particular input: the `locator` says *where in what you read* the
+evidence is, and `artifact_id` says *which input the manifest registers* it was.
+On `no_outward_evidence_found` there is usually no single input to name, because
+the statement is about everything you read — which is why the field is optional
+rather than required.
+
 Three of those five need a source file to see, and this run may contain none, or
 may contain source in a language whose digest is prose rather than structure. A
 short signal list is therefore not reassurance, and you must not present it as
@@ -132,7 +139,11 @@ record that the drop was a decision rather than an oversight.
    tell whether two tools share a backend, **split them**: two services that
    should be one produce two simulators a human can merge at gate 1, whereas one
    service that should be two produces a database the tools silently disagree
-   about.
+   about. And where the evidence you would group on is one side of a
+   contradiction `01-contradictions/` records `unresolved`, do not group as though
+   that side were settled: an unresolved contradiction about which backend a tool
+   addresses is a reason to split, not a tie for you to break here, because a
+   service carries no field in which to say you broke it.
 
 5. **Record signals per service, each with a locator.** A service with no signal
    at all asserts nothing about its reach, which is worse than asserting absence
@@ -184,14 +195,25 @@ both again; report success only once both exit clean.
 
 ## 5. Refusal conditions
 
-- **A tool's name would not survive the harness's sanitisation.** A name is
-  preserved only if every character is in `[a-zA-Z0-9_-]`, it is at most 64
-  characters, and neither its first nor its last character is `_` or `-`. Record
-  the tool under its **real** name anyway and say in the service's `statement`
-  that the name cannot be preserved. Do **not** rename it to something that
-  would survive: the substitution downstream is invisible to the agent only if
-  the name is unchanged, so a rename here converts a detectable refusal into a
-  suite that passes against a tool the agent cannot call.
+- **A tool's name is longer than 64 characters.** Refuse, say which tool, and
+  stop. There is no legal record for this case and you must not invent one: the
+  harness caps a name at 64, `service_tool.name` carries the same `maxLength`, so
+  the real name fails layer 1 by name — and Invariant 4 forbids the shortening
+  that would pass it. Do not truncate it to fit, and do not substitute a name
+  that fits. Either one produces a service that validates cleanly against a tool
+  the agent cannot call, which is the single failure this whole condition exists
+  to keep visible. A refusal is recoverable by a human who can rule on the name;
+  a truncation nobody sees is not.
+
+- **A tool's name would not survive the harness's sanitisation for any other
+  reason.** A name comes back unchanged only if every character is in
+  `[a-zA-Z0-9_-]` and neither its first nor its last character is `_` or `-`. A
+  name that breaks one of those while still fitting inside 64 characters *can* be
+  recorded, so record the tool under its **real** name and say in the service's
+  `statement` that the name cannot be preserved. Do **not** rename it to
+  something that would survive: the substitution downstream is invisible to the
+  agent only if the name is unchanged, so a rename here converts a detectable
+  refusal into a suite that passes against a tool the agent cannot call.
 
 - **You cannot tell whether two tools share a backend.** Split them into two
   services and say so in each `statement`. Do not merge on a hunch: a merge that

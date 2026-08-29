@@ -506,8 +506,7 @@ Dispatch `rb-reconcile-subjects`, then fan out `rb-reconcile-contradict` with
 one `subject_id` per subject in `01-subjects.json`, then
 `rb-reconcile-capabilities`, `rb-reconcile-outcomes`,
 `rb-reconcile-entities`, `rb-reconcile-goals`, `rb-reconcile-gaps` and
-`rb-reconcile-services`, each a
-single dispatch in that order. Gate each with
+`rb-reconcile-services`, each a single dispatch in that order. Gate each with
 `rubrica validate --stage <the pass's stage name> --run <run>` and then
 `rubrica check-refs --run <run>`, and `record-stage` each one -- the entry is
 per stage, which is what lets a think-heavy pass carry a different model or

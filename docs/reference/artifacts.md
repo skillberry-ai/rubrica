@@ -274,8 +274,7 @@ first — the world model has no subjects field, so the cover is an input to the
 contradiction fan-out, to `reconcile-gaps`, and to `check-refs`, not to the seal.
 `01-services.json` is the second, and for a different reason: a service becomes
 an interface document of its own under `01-interfaces/`, not a field of the
-sealed model, so the seal has nothing to fold in. Each pass
-is a stage in
+sealed model, so the seal has nothing to fold in. Each pass is a stage in
 `paths.STAGES`, so `rubrica validate --stage reconcile-<pass>` gates exactly one
 of these kinds.
 
@@ -287,12 +286,12 @@ partial accept an element the sealed world model then rejects.
 
 The passes that own a claim kind — `capabilities-part`, `outcomes-part`,
 `entities-part`, `goals-part`, `services-part` — each carry an **`inputs_seen`
-accounting** on top
-of their elements: one row per input `manifest.json` registers, each
+accounting** on top of their elements: one row per input `manifest.json`
+registers, each
 `{artifact_id, own_kind_total, cited, dropped}` plus a `note` whenever `dropped`
 is not zero. The row shape lives once, in
-`src/rubrica/schema/inputs-seen-0.1.json`, which each of them `$ref`s and which is
-**not an artifact kind** — no stage writes a document of that shape, so it is
+`src/rubrica/schema/inputs-seen-0.1.json`, which each of them `$ref`s and which
+is **not an artifact kind** — no stage writes a document of that shape, so it is
 the one schema in the package with no entry in `validate.ARTIFACT_SCHEMAS` and
 nothing `rubrica validate --stage X` ever looks for on its own.
 
@@ -362,7 +361,7 @@ where a reader would not expect it).
   (fan-out, one file per subject)
 - **Read by:** `rb-reconcile-capabilities`, `rb-reconcile-outcomes`,
   `rb-reconcile-entities`, `rb-reconcile-goals`, `rb-reconcile-gaps`,
-  `reconcile-seal` (code); `check-refs`
+  `rb-reconcile-services`, `reconcile-seal` (code); `check-refs`
 - **Path:** `01-contradictions/<subject_id>.json`
 
 What one fan-out member found within its own subject, reading every claim in

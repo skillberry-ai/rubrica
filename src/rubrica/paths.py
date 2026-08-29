@@ -50,9 +50,15 @@ STAGES = (
     "reconcile-gaps",
     # Owns the `tool` kind, and the only pass in this family whose output the
     # human at gate 1 reads as a description of something outside the run: the
-    # services a simulator would stand in for. Sorted here rather than earlier
-    # because grouping evidence is spread across every other kind, so it wants
-    # every partial's claims already filed.
+    # services a simulator would stand in for.
+    #
+    # Its slot is genuinely free, and saying so is the point: it reads no partial,
+    # every claims file exists the moment `extract` finishes, and reconcile-seal
+    # does not read its output -- so it could sort anywhere after `extract`. It
+    # sits here because this tuple is the pipeline's documentation and both
+    # generated drawings render it in order: with the other prompt passes and
+    # ahead of the seal, the family reads as one block. Do not read the position as
+    # a dependency and do not add one to justify it.
     "reconcile-services",
     "reconcile-seal",
     # The propose/score loop, engineered as substeps for the reason the triage
