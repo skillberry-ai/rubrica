@@ -230,8 +230,11 @@ no defect: `01-interfaces/` holds one document per service, so no service means 
 document, and the gate cannot tell that from a stage that failed. This is the same
 trap `validate --stage propose-batches` sets on a terminal round, and the same rule —
 gate the stage only when it printed at least one path. `rubrica check-refs` is safe
-either way; it is a whole-run check and has no opinion about documents no service
-asked for.
+either way: it derives what it expects from the same `01-services.json`, so a run
+that declared no service expects no document and the empty directory this command
+leaves behind is clean. It is *not* indifferent to the directory's contents — a
+document no service asked for is one of its findings, which is why this command
+removes what a superseded grouping left behind.
 
 ```bash
 rubrica synthesise-interfaces --run runs/run-20260806-123005

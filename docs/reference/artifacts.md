@@ -263,7 +263,13 @@ into the world model); `claims[].evidence[].locator` (required on every claim,
 so a claim with no way to find where it came from cannot exist); and
 `claims[].payload` (optional, and free-form by design — on a `tool` claim it
 carries that tool's input schema verbatim, with `evidence[0].locator` the JSON
-pointer it was copied from).
+pointer it was copied from. "Verbatim" is checked rather than trusted: for every
+payload a service names as its `schema_claim`, `check-refs` re-reads the registered
+input at that pointer and compares the decoded values, which is the one thing that
+makes a prompt's transcription of a schema falsifiable. Decoded, not bytes — a
+reformatted schema is not a fidelity defect. A locator that is a heading anchor
+rather than a pointer, or an input that is not JSON, is not comparable and is not
+reported).
 
 ## The reconcile partials
 
@@ -560,9 +566,10 @@ and a code rule for picking a winner would bury the judgment, with
 - **Written by:** `synthesise-interfaces` (code), via `rubrica
   synthesise-interfaces`, from `01-services.json` and the claim payload each
   tool's `schema_claim` names
-- **Read by:** `check-refs`, for parseability. Nothing else reads one yet — the
-  gate-1 surface that will render it, and the cross-artifact checks over
-  `01-interfaces/` described below, are both still to be built
+- **Read by:** `check-refs`, which holds each document to the service it was
+  derived from: one document per service and nothing else in the directory, and
+  each document's `operationId` set equal to its service's tool names. The gate-1
+  surface that will render it is still to be built
 - **Path:** `01-interfaces/<service_id>.json`, one per service — derivable from
   the service id, so there is no path field anywhere to drift out of agreement
   with the directory
@@ -586,9 +593,10 @@ spec that declares no `components.schemas` looks like on purpose.
 
 Fields worth knowing: `paths` (one entry per tool, keyed `/<tool name>`, whose
 `operationId` set is the service's tool names byte for byte — contract preservation
-made mechanical, and the property a layer-2 check over `01-interfaces/` is meant to
-hold the document to; **no such check exists yet**, so today it is a property of
-the code that writes the document rather than one anything verifies);
+made mechanical, and `check-refs` holds the document to it, naming the difference in
+both directions so a rename is not read as one defect when it is two. Checked
+rather than merely written, because a document hand-corrected at gate 1 reaches
+`check-refs` without passing through synthesis again);
 `x-rubrica.service_id` and `x-rubrica.tools` (the provenance, carried inside the
 document because the document is what a human reads at gate 1 and what a later step
 hands the harness, under an `x-` key so it stays a legal OpenAPI extension).

@@ -451,10 +451,11 @@ def test_an_unwritable_interfaces_directory_is_exit_2_with_no_finding(
 
 def test_a_stale_document_from_a_previous_run_is_removed(tmp_path):
     """Synthesis owns the directory. A service renamed at gate 1 and re-synthesised
-    would otherwise leave the old document behind, and a layer-2 check over
-    01-interfaces/ would report an extra file for a run that is now correct -- a 1
-    against a fixed run. That check does not exist yet, so what this pins today is
-    that the directory never carries a document no service asked for.
+    would otherwise leave the old document behind, and refs.check_interfaces
+    reports a document no service asked for -- a 1 against a run that is now
+    correct. What this pins is the half of that pair the writer owns: the directory
+    never carries a document no service asked for. The checker's half is measured
+    in tests/unit/test_refs_services.py, over a rename through this same code.
     """
     run = build_toy_run(tmp_path, upto="reconcile-services")
     stale = run.interface("svc-gone")

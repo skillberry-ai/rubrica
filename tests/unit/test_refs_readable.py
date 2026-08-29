@@ -91,6 +91,36 @@ def test_every_artifact_kind_layer_two_reads_is_covered(tmp_path):
     assert check_readable(run) == []
 
 
+def test_the_services_part_and_every_synthesised_document_are_covered(tmp_path):
+    """The same enumeration guard for the two artifacts of the 01 band's tail, and
+    it needs a different fixture to reach either.
+
+    `build_state` deliberately writes no `01-services.json` -- the seal does not
+    read it, and a state that always wrote it could not show that -- so
+    `01-interfaces/` is absent there too, one step further on. Both are the
+    fixture-cannot-reach weakness in the test above, and `build_toy_run` goes
+    through `reconcile-services` and the real `synthesise-interfaces`, so it can
+    reach both.
+
+    Each has a layer-2 reader of its own now: `check_services` resolves the
+    grouping's claim ids against `01-claims/`, and `check_interfaces` holds each
+    document's `operationId` set to its service's tool names. Both treat an
+    unreadable document as absent, so one left out of `_readable_targets` is a
+    check-refs that came back clean over a run nothing can stand a simulator up
+    from.
+    """
+    from tests.toy import build_toy_run
+
+    run = build_toy_run(tmp_path / "runs", upto="synthesise-interfaces")
+    assert check_readable(run) == [], "the baseline this state is measured against"
+    for path in (run.services_part, run.interface("svc-tickets")):
+        original = path.read_text(encoding="utf-8")
+        path.write_text("{", encoding="utf-8")
+        assert [f.artifact for f in check_readable(run)] == [path], f"not covered: {path}"
+        path.write_text(original, encoding="utf-8")
+    assert check_readable(run) == []
+
+
 def test_every_per_round_loop_artifact_is_covered(tmp_path):
     """The same enumeration guard for the loop's three per-round documents, and it
     needs a different fixture to reach them at all.

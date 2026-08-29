@@ -28,6 +28,7 @@ from typing import Any
 
 from rubrica.artifacts import ArtifactError, read_json, sha256_of
 from rubrica.findings import Finding
+from rubrica.interfaces import TOOL_NAME
 from rubrica.invariants import InvariantForm
 from rubrica.invariants import evaluate as evaluate_invariant
 from rubrica.paths import RunPaths, is_safe_segment, list_json
@@ -102,12 +103,13 @@ def _readable_targets(run: RunPaths) -> list[Path]:
     The gaps partial is listed although no layer-2 check reads it, so this is
     slightly wider than its first line: it is an input to reconcile-seal, and
     listing it names a truncated one at check-refs time instead of leaving it to
-    the seal's own dispatch. The services partial is listed for a *different*
-    reason of the same shape: the seal does not read it at all, so nothing below
-    it would name a truncated one, and check_input_dispositions is the only
-    layer-2 reader it has. The entities, goals and services partials are read as
-    well as listed -- check_input_dispositions recomputes each pass's accounting
-    out of them. Being named here is not the only guard, and measurably not: the
+    the seal's own dispatch. The services partial needs no such argument -- it has
+    two layer-2 readers, check_input_dispositions for its accounting and
+    check_services for the grouping itself -- but it is listed for a reason the
+    seal cannot supply either way: the seal does not read it at all, so nothing
+    below it would name a truncated one. The entities, goals and services partials
+    are read as well as listed -- check_input_dispositions recomputes each pass's
+    accounting out of them. Being named here is not the only guard, and measurably not: the
     seal refuses a broken partial itself, exit 1 with the artifact named. And
     check_readable covers only JSON that will not parse, so a partial that parses
     to a non-object passes here; layer 1 and the seal each reject that shape by
@@ -128,8 +130,10 @@ def _readable_targets(run: RunPaths) -> list[Path]:
     ]
     # The synthesised documents, after the part they are derived from: a truncated
     # one is named here rather than left to whichever later reader hands it to the
-    # harness. Iterated, because there is one per service and none at all in a run
-    # whose target declares no tools.
+    # harness, and check_interfaces is the reader that would otherwise treat it as
+    # absent and report a missing document against the part instead. Iterated,
+    # because there is one per service and none at all in a run whose target
+    # declares no tools.
     targets += list_json(run.interfaces_dir)
     targets.append(run.world_model)
     # The loop's per-round documents, in the order one round writes them:
@@ -2029,15 +2033,16 @@ def check_input_dispositions(run: RunPaths) -> list[Finding]:
             # `_load` returns whatever the document holds, so a partial that is a
             # list or a string reached `part.get` and raised AttributeError out of
             # layer 2 -- measured, `["nope"]` in each of the four partials that
-            # then existed. For `01-entities.json`, `01-goals.json` and
-            # `01-services.json` this is the *only* layer-2 reader, so nothing
-            # older raised first and the guard closes the whole instance for them
-            # rather than moving it -- and `01-services.json` was the deepest of
-            # the three when the guard was written, since reconcile-seal does not
-            # read it either. `synthesise-interfaces` now does, and refuses a
-            # non-dict one by name (interfaces.synthesise), so a broken services
-            # part is caught below this as well as here; the guard stays because
-            # this checker still runs first and must not raise past it.
+            # then existed. For `01-entities.json` and `01-goals.json` this is the
+            # *only* layer-2 reader, so nothing older raised first and the guard
+            # closes the whole instance for them rather than moving it.
+            # `01-services.json` was the third such case and the deepest of them
+            # when the guard was written, since reconcile-seal does not read it
+            # either; it now has readers on both sides -- `synthesise-interfaces`
+            # refuses a non-dict one by name (interfaces.synthesise), and
+            # `check_services` below guards the same read the same way -- so the
+            # guard here no longer closes that instance alone. It stays because
+            # this checker still runs first and must not raise past either of them.
             # `01-capabilities.json` and `01-outcomes.json` still raise out of
             # `check_outcomes`, which runs earlier in check_all and is not this
             # branch's read. A non-dict document is the same class as an
@@ -2147,6 +2152,462 @@ def check_input_dispositions(run: RunPaths) -> list[Finding]:
                 "indistinguishable from one that opened it and cited nothing",
             )
     return out
+
+
+def _stored_input_paths(run: RunPaths) -> dict[str, Path]:
+    """artifact_id -> the registered copy of that input under 00-inputs/.
+
+    The same resolution check_inputs performs -- manifest entry, `stored_as`,
+    paths.input_file -- and it has to stay the same one: a payload compared
+    against some other reading of the input would answer a question nobody asked.
+
+    `stored_as` is asked is_safe_segment first for the reason check_inputs asks
+    it: paths.input_file raises UnsafeSegment, which cli.py maps to exit 2, and a
+    bad value in a stage's output is a repairable defect that must arrive as a
+    finding instead. Here it owes silence rather than a second finding -- it is
+    reported already, against the manifest it lives in.
+    """
+    manifest = _load(run.manifest)
+    if not isinstance(manifest, dict):
+        return {}
+    out: dict[str, Path] = {}
+    for entry in _as_list(manifest.get("inputs")):
+        if not isinstance(entry, dict):
+            continue
+        artifact_id = _str_or_none(entry.get("artifact_id"))
+        stored_as = _str_or_none(entry.get("stored_as"))
+        if artifact_id is None or stored_as is None or not is_safe_segment(stored_as):
+            continue
+        out[artifact_id] = run.input_file(stored_as)
+    return out
+
+
+def _payload_findings(
+    claim_id: str,
+    claim: dict,
+    claims_file: Path | None,
+    claim_index: int,
+    stored: dict[str, Path],
+) -> list[Finding]:
+    """One `schema_claim`'s payload against the input region its evidence names.
+
+    This is what makes a prompt's byte-for-byte transcription of an input schema
+    falsifiable. Synthesis does not read 00-inputs/ -- the stage that reads inputs
+    is extract -- so the payload reaches the OpenAPI document through a claim or
+    not at all, and nothing else in the pipeline can tell a transcribed schema
+    from an invented one.
+
+    Structural identity, not support. Whether a claim *supports* an element is
+    semantic and layer 2 is forbidden to invent a mechanical check for it; whether
+    a payload equals the document region its own locator names is decidable, and
+    is exactly the class layer 2 exists for. Decoded values, never bytes: the
+    payload and the input are each parsed first, so a reformatted schema whose
+    parsed value is unchanged is not a fidelity defect and must not read as one.
+
+    Everything that is merely *not comparable* returns nothing, because a
+    structural non-comparison is not evidence of a defect:
+
+    - no payload -- interfaces.synthesise refuses a `schema_claim` carrying none,
+      by name and against the services part, so a second report here would name a
+      second artifact for one defect;
+    - an input this checker cannot resolve to a path, or whose registered copy is
+      absent, not UTF-8 or not JSON: check_manifest, check_inputs and
+      check_readable each own one of those, and a markdown input reaches the last
+      of them every time a prose claim is named as a schema claim;
+    - a locator that is not a JSON pointer. Locators come in two shapes across
+      this project's corpora -- `#/tools/0/input_schema` for a JSON input and
+      `#operator-notes` for prose -- and resolve_pointer *raises* on the second
+      rather than returning UNSET. An exception escaping here is exit 1 with one
+      `[internal]` finding naming the run root, which is the class cli.py's
+      catch-all and findings.py exist to prevent. tests/builders.py carries a
+      third shape, `api.json#/tools/0`, which this treats as the prose case for
+      the same reason: what follows the strip is not a pointer.
+
+    A pointer that resolves to *nothing* is a finding, and deliberately so: a
+    fabricated payload behind a fabricated locator is precisely what silence there
+    would let through, and that is the property this check exists to observe.
+    """
+    payload = claim.get("payload")
+    if not isinstance(payload, dict) or claims_file is None:
+        return []
+    evidence = _as_list(claim.get("evidence"))
+    first = evidence[0] if evidence and isinstance(evidence[0], dict) else None
+    if first is None:
+        # minItems 1 of evidence objects is layer 1's requirement; a claim with
+        # neither names no region for this to read.
+        return []
+    artifact_id = _str_or_none(first.get("artifact_id"))
+    locator = _str_or_none(first.get("locator"))
+    if artifact_id is None or locator is None:
+        return []
+    document_path = stored.get(artifact_id)
+    if document_path is None:
+        return []
+    document = _load(document_path)
+    if document is None:
+        return []
+    pointer = locator[1:] if locator.startswith("#") else locator
+    if not pointer.startswith("/"):
+        return []
+    value = resolve_pointer(document, pointer)
+    if value is UNSET:
+        return [
+            Finding(
+                claims_file,
+                "refs",
+                f"/claims/{claim_index}/evidence/0/locator",
+                f"{claim_id} records locator {locator} in {artifact_id}, which resolves to "
+                f"nothing in {document_path.name}, so the payload every simulator of this "
+                "tool is built from cannot be checked against the input it claims to copy",
+            )
+        ]
+    if value != payload:
+        return [
+            Finding(
+                claims_file,
+                "refs",
+                f"/claims/{claim_index}/payload",
+                f"{claim_id}'s payload is not what {document_path.name} holds at {locator}; "
+                "the tool's input schema has to be transcribed verbatim, and a payload that "
+                "has drifted from it makes the synthesised interface describe a tool the "
+                "target does not have",
+            )
+        ]
+    return []
+
+
+def check_services(run: RunPaths) -> list[Finding]:
+    """The tool grouping in 01-services.json, against the claims it cites.
+
+    Five clauses, reported in the order below so a repair reads resolution before
+    accounting: every id in a tool's `claims` resolves to a `tool` claim, every
+    `schema_claim` is one of its own tool's ids, every `tool` claim in 01-claims/
+    is referenced by exactly one service, every tool name survives the harness's
+    sanitisation unchanged, and every `schema_claim`'s payload equals the input
+    region its evidence names.
+
+    The partition is checked from both sides because the two failures are
+    different defects. An orphaned tool claim is a hole in the description -- a
+    tool nothing can simulate, which the pass's own accounting should have
+    recorded as a drop. A tool claim in two services is two simulators serving one
+    tool name, which is one database the agent under test sees two conflicting
+    views of.
+
+    Silent on an absent or non-dict part, and silent on the whole run when any
+    claims file is unreadable: see the guards inline. Nothing here reports a
+    defect in an *input* to itself -- check_readable, check_manifest and
+    check_inputs each own one of those, and check-refs over an unreadable
+    01-claims/ once produced four fabricated `no such claim` findings against a
+    correct world model.
+    """
+    part = _load(run.services_part)
+    if not isinstance(part, dict):
+        # Absent is the ordinary state before reconcile-services. isinstance
+        # rather than `is None` for the reason check_input_dispositions guards the
+        # same read that way: `null` and a list are legitimate JSON that reach
+        # `.get` and raise AttributeError out of layer 2.
+        return []
+
+    # Every claims file has to be whole before one id is resolved. A file that is
+    # unreadable, not an object, or an object with no `claims` array leaves the
+    # index short of the claims it should have held, so each "no such claim" below
+    # would be a guess against a part that may be perfectly correct -- the
+    # fabricated-finding class this module has paid for once. This says nothing at
+    # all instead: check_readable names the first shape and layer 1 the other two,
+    # `claims` being required in claims-0.1.json. The third is worth its own
+    # clause because it is neither of the first two and measurably reachable --
+    # `{"schema_version": "0.1"}` in place of a claims file made this checker
+    # report `no claim in 01-claims/ has id clm-api-010` against a correct
+    # services part, and takes _claim_index down a KeyError.
+    #
+    # An empty or absent 01-claims/ takes the same branch: a services part with
+    # nothing to resolve against means extract has not run, which is
+    # validate_stage's finding.
+    #
+    # Two reads of each claims file, deliberately. _claims_by_artifact already
+    # carries the member guards this checker needs and skips a broken file
+    # silently, so the alternative is a third walker of 01-claims/ restating those
+    # guards -- and check_inputs re-hashing every registered input on every call
+    # is the cost precedent for a re-read here.
+    claim_files = list_json(run.claims_dir)
+    if not claim_files or any(
+        not isinstance(document, dict) or not isinstance(document.get("claims"), list)
+        for document in (_load(path) for path in claim_files)
+    ):
+        return []
+
+    # Claim id -> the record, the file it came from, and its index in that file.
+    # From _claims_by_artifact rather than _claim_index: that index carries only
+    # defining *paths*, which is neither the `kind` clause 1 needs nor the
+    # `payload` clause 5 does, and it reaches `payload["claims"]` and `claim["id"]`
+    # unguarded besides -- so a claims file that is a dict with no `claims` key
+    # raises KeyError out of it, a third shape check_readable cannot see.
+    claims: dict[str, dict] = {}
+    defined_in: dict[str, tuple[Path | None, int]] = {}
+    for artifact_id, records in _claims_by_artifact(run).items():
+        # A declared artifact_id that is not a safe segment cannot be turned into
+        # a path to name in a finding, and the disagreement between the declared
+        # id and the filename is check_manifest's. The claims stay in the index
+        # either way: dropping them would make every service citing one look as
+        # though it cited nothing, which is the fabricated-finding class again.
+        # Two files declaring one artifact_id is check_manifest's finding too, and
+        # is the one case where the index below is that of the merged list rather
+        # than of the file.
+        path = run.claims(artifact_id) if is_safe_segment(artifact_id) else None
+        for index, claim in enumerate(records):
+            claim_id = _str_or_none(claim.get("id"))
+            if claim_id is None or claim_id in claims:
+                # A duplicate id is check_manifest's finding, and it reports every
+                # definition; keeping the first is enough to resolve against here
+                # and adds no second report of the same defect.
+                continue
+            claims[claim_id] = claim
+            defined_in[claim_id] = (path, index)
+
+    out: list[Finding] = []
+
+    def report(pointer: str, message: str) -> None:
+        out.append(Finding(run.services_part, "refs", pointer, message))
+
+    # Collected during the one walk and emitted after it, so the clauses come out
+    # in the documented order rather than interleaved per tool: a repair reading
+    # "no such claim" first is reading the defect the others are consequences of.
+    references: dict[str, list[str]] = {}
+    names: list[tuple[str, Any]] = []
+    schema_claims: list[str] = []
+
+    for i, service in enumerate(_as_list(part.get("services"))):
+        if not isinstance(service, dict):
+            # Layer 1 rejects it and interfaces.synthesise refuses it by name;
+            # a third report would name a third pointer for one defect.
+            continue
+        service_id = _str_or_none(service.get("id"))
+        # The label a partition finding names. A service with no usable id is
+        # synthesise's finding, so this falls back to the pointer rather than
+        # reporting the id again.
+        label = service_id if service_id is not None else f"/services/{i}"
+        cited_here: set[str] = set()
+        for j, tool in enumerate(_as_list(service.get("tools"))):
+            if not isinstance(tool, dict):
+                continue
+            pointer = f"/services/{i}/tools/{j}"
+            declared = _as_list(tool.get("claims"))
+            own_ids = {c for c in declared if isinstance(c, str)}
+            for k, claim_id in enumerate(declared):
+                if not isinstance(claim_id, str):
+                    # Layer 1 owns a non-string id, and a set built from unguarded
+                    # members raises TypeError: unhashable type instead.
+                    continue
+                cited_here.add(claim_id)
+                claim = claims.get(claim_id)
+                if claim is None:
+                    report(
+                        f"{pointer}/claims/{k}",
+                        f"no claim in 01-claims/ has id {claim_id}, so this tool cites nothing "
+                        "a simulator could be built from",
+                    )
+                elif claim.get("kind") != "tool":
+                    report(
+                        f"{pointer}/claims/{k}",
+                        f"{claim_id} is a {claim.get('kind')!r} claim, not a tool claim: it "
+                        "records no tool contract for this service to preserve",
+                    )
+            schema_claim = tool.get("schema_claim")
+            if isinstance(schema_claim, str):
+                if schema_claim not in own_ids:
+                    report(
+                        f"{pointer}/schema_claim",
+                        f"{schema_claim} is not among this tool's own claims, so the request "
+                        "body it names has no recorded evidence of belonging to this tool",
+                    )
+                schema_claims.append(schema_claim)
+            names.append((f"{pointer}/name", tool.get("name")))
+        for claim_id in sorted(cited_here):
+            # Once per service, not once per citation: two tools of one service
+            # sharing a schema claim are one simulator with one database, which is
+            # not the hazard the duplicate clause reports.
+            references.setdefault(claim_id, []).append(label)
+
+    for claim_id, claim in sorted(claims.items()):
+        if claim.get("kind") != "tool":
+            continue
+        where = references.get(claim_id, [])
+        if not where:
+            report(
+                "/services",
+                f"{claim_id} is a tool claim no service references, so the tool it describes "
+                "has no simulator and no recorded reason for being left out",
+            )
+        elif len(set(where)) > 1:
+            report(
+                "/services",
+                f"{claim_id} is referenced by more than one service ({', '.join(where)}): two "
+                "simulators serving one tool name give the agent two conflicting views of one "
+                "database",
+            )
+
+    for pointer, name in names:
+        if not isinstance(name, str) or not TOOL_NAME.match(name):
+            # Checked here as well as in interfaces.synthesise, and not
+            # redundantly: a document hand-corrected at gate 1 reaches check-refs
+            # without passing through synthesis again, so the property has to hold
+            # at check time and not only at write time. TOOL_NAME is imported from
+            # the module that owns it rather than restated -- a second copy of the
+            # pattern is exactly the drift its one home exists to prevent, and it
+            # is already one restatement away from the harness's own rule.
+            report(
+                pointer,
+                f"tool name {name!r} would not survive the harness's sanitisation unchanged, "
+                "so the agent would call a name the simulator does not serve",
+            )
+
+    stored = _stored_input_paths(run)
+    for claim_id in schema_claims:
+        claim = claims.get(claim_id)
+        if claim is None:
+            # Already reported above, through the tool's own `claims` array.
+            continue
+        path, index = defined_in[claim_id]
+        out.extend(_payload_findings(claim_id, claim, path, index, stored))
+    return out
+
+
+def _operation_ids(document: dict) -> set[str]:
+    """Every `operationId` a document declares, across every path and method.
+
+    A walk rather than the fixed `/paths/<tool>/post` this project's synthesis
+    writes. The check below exists for a document a human corrected at gate 1, and
+    reading only `post` would report an operation moved to another method as
+    missing -- a finding naming a defect that is not the one there. A non-string
+    operationId is skipped and then surfaces as a tool name with no operation,
+    which names the same file either way.
+    """
+    found: set[str] = set()
+    paths = document.get("paths")
+    if not isinstance(paths, dict):
+        return found
+    for item in paths.values():
+        if not isinstance(item, dict):
+            continue
+        for operation in item.values():
+            if isinstance(operation, dict):
+                name = _str_or_none(operation.get("operationId"))
+                if name is not None:
+                    found.add(name)
+    return found
+
+
+def check_interfaces(run: RunPaths) -> list[Finding]:
+    """One synthesised document per service, each preserving its tool names.
+
+    Three clauses: a service with no document, a document no service asked for,
+    and a document whose set of `operationId`s differs from its service's set of
+    tool names -- the difference named in both directions, because a rename is two
+    defects and a human shown one half would rename the wrong side back.
+
+    The third is the check the rest of the lab design rests on. `operationId` is
+    what the harness turns back into an MCP tool name, so the substitution the
+    whole measurement depends on is invisible to the agent's reasoning only if the
+    name it calls is the name the simulator serves.
+
+    Returns nothing until 01-interfaces/ exists, for the reason check_verdicts
+    returns nothing until 05-verdicts/ does: before synthesis has run there is no
+    document to be missing, and reporting one per service would make
+    reconcile-services' own check-refs gate exit 1 on a correct run, spending the
+    orchestrator's single repair attempt re-dispatching a pass whose output was
+    never the problem. interfaces.synthesise mkdirs the directory even for a run
+    whose target declares no tool, so its existence is what distinguishes
+    "synthesis has not run" from "synthesis ran and wrote nothing". Once it
+    exists every missing document is reported: synthesis is all-or-nothing, so
+    there is no partially-written window to tolerate -- the guard is `is_dir()`,
+    not a count.
+    """
+    if not run.interfaces_dir.is_dir():
+        return []
+    part = _load(run.services_part)
+    if not isinstance(part, dict):
+        # With no readable grouping there is no expectation to hold the directory
+        # to; an absent part is validate_stage's finding and an unreadable one is
+        # check_readable's.
+        return []
+
+    missing: list[Finding] = []
+    mismatched: list[Finding] = []
+    expected: set[Path] = set()
+    for i, service in enumerate(_as_list(part.get("services"))):
+        if not isinstance(service, dict):
+            continue
+        service_id = _str_or_none(service.get("id"))
+        if service_id is None or not is_safe_segment(service_id):
+            # An id that cannot be a filename is interfaces.synthesise's finding
+            # against the part, and there is no path to expect for it.
+            continue
+        path = run.interface(service_id)
+        expected.add(path)
+        if not path.is_file():
+            missing.append(
+                Finding(
+                    run.services_part,
+                    "refs",
+                    f"/services/{i}/id",
+                    f"service {service_id} has no synthesised document at {path}: nothing "
+                    "downstream can stand a simulator up for it",
+                )
+            )
+            continue
+        document = _load(path)
+        if not isinstance(document, dict):
+            # Present but unreadable, or parsing to something other than an
+            # object. check_readable names the first and layer 1 the second;
+            # reporting a *missing* document for it would send the repair at the
+            # grouping instead of at the file that will not parse.
+            continue
+        declared = {
+            name
+            for name in (
+                _str_or_none(tool.get("name"))
+                for tool in _as_list(service.get("tools"))
+                if isinstance(tool, dict)
+            )
+            if name is not None
+        }
+        served = _operation_ids(document)
+        for name in sorted(declared - served):
+            mismatched.append(
+                Finding(
+                    path,
+                    "refs",
+                    "/paths",
+                    f"service {service_id} declares tool {name!r} and this document serves no "
+                    "operation with that operationId, so the agent would call a name the "
+                    "simulator does not answer",
+                )
+            )
+        for name in sorted(served - declared):
+            mismatched.append(
+                Finding(
+                    path,
+                    "refs",
+                    "/paths",
+                    f"this document serves operationId {name!r}, which is not a tool of "
+                    f"service {service_id}: the simulator would answer a name the agent under "
+                    "test was never given",
+                )
+            )
+
+    extra = [
+        Finding(
+            path,
+            "refs",
+            "",
+            f"no service in 01-services.json is named {path.stem}, so this document describes "
+            "a simulator nothing asked for; synthesis owns this directory and removes what a "
+            "superseded grouping left behind",
+        )
+        for path in list_json(run.interfaces_dir)
+        if path not in expected
+    ]
+    return missing + extra + mismatched
 
 
 def check_claim_utilisation(run: RunPaths) -> list[Finding]:
@@ -3607,6 +4068,12 @@ def check_all(run: RunPaths) -> list[Finding]:
     # assembled from them: the accounting is a property of what each pass wrote,
     # so it is answerable while the parts are still separate documents.
     findings.extend(check_input_dispositions(run))
+    # After each pass's accounting, before anything reasons about the assembled
+    # model: these are properties of what reconcile-services and
+    # synthesise-interfaces wrote, answerable while the parts are still separate
+    # documents.
+    findings.extend(check_services(run))
+    findings.extend(check_interfaces(run))
     findings.extend(check_world_model(run))
     findings.extend(check_claim_utilisation(run))
     findings.extend(check_batches(run))

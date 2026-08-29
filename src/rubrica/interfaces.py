@@ -90,8 +90,7 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
     """Write one OpenAPI document per service, or report why none can be written.
 
     All-or-nothing, and deliberately: a partial directory is a state
-    a layer-2 check over 01-interfaces/ would report as a missing document for a
-    service whose only
+    refs.check_interfaces reports as a missing document for a service whose only
     problem is that a *sibling* was malformed, which is a 1 naming the wrong
     artifact. So every service is checked before any file is written.
 
@@ -211,10 +210,9 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
     run.interfaces_dir.mkdir(parents=True, exist_ok=True)
     written = {path for path, _ in planned}
     # Synthesis owns this directory. A service renamed at gate 1 and re-synthesised
-    # would otherwise leave its old document behind, and a layer-2 check over this
-    # directory would report an extra file against a run that is now correct. No
-    # such check exists yet -- the removal is what keeps the directory honest for
-    # the one that will, and for a human reading it at gate 1 today.
+    # would otherwise leave its old document behind, and refs.check_interfaces
+    # reports a document no service asked for -- so without this the rename would
+    # leave a 1 standing against a run that is now correct.
     for stale in list_json(run.interfaces_dir):
         if stale not in written:
             stale.unlink()
