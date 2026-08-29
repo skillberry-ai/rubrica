@@ -129,10 +129,9 @@ yet, `"reconcile-services"` adds `01-services.json` to that, and
 `"reconcile-seal"` is the assembled world model — the states the seal and the
 later stages are tested against. None of them is the checkpoint a *middle* pass
 needs, because each includes that pass's own output. So to exercise one middle
-pass, build to `"extract"` and
-write only the partials it declares under `reads`, taking them from
-`tests/toy.py`'s `split_world_model()`, which cuts the golden world model into
-exactly those files:
+pass, build to `"extract"` and write only the partials it declares under `reads`,
+taking them from `tests/toy.py`'s `split_world_model()`, which cuts the golden
+world model into exactly those files:
 
 ```python
 from rubrica.artifacts import write_json

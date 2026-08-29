@@ -287,9 +287,8 @@ partial accept an element the sealed world model then rejects.
 The passes that own a claim kind — `capabilities-part`, `outcomes-part`,
 `entities-part`, `goals-part`, `services-part` — each carry an **`inputs_seen`
 accounting** on top of their elements: one row per input `manifest.json`
-registers, each
-`{artifact_id, own_kind_total, cited, dropped}` plus a `note` whenever `dropped`
-is not zero. The row shape lives once, in
+registers, each `{artifact_id, own_kind_total, cited, dropped}` plus a `note`
+whenever `dropped` is not zero. The row shape lives once, in
 `src/rubrica/schema/inputs-seen-0.1.json`, which each of them `$ref`s and which
 is **not an artifact kind** — no stage writes a document of that shape, so it is
 the one schema in the package with no entry in `validate.ARTIFACT_SCHEMAS` and

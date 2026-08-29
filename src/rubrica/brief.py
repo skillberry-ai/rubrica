@@ -925,9 +925,9 @@ def _gate_1(run: RunPaths) -> str:
             # fires when *every* owning pass is absent -- so all but one pass
             # rendering and one omitted read as a complete brief, with the
             # omission being the anomaly a reader is here to notice. `is_file`
-            # separates the two cases a reader would act on differently: a partial
-            # that has not been written yet is a run that stopped, and one that is
-            # there carrying no readable rows is a defect
+            # separates the two cases a reader would act on differently: a
+            # partial that has not been written yet is a run that stopped, and
+            # one that is there carrying no readable rows is a defect that
             # `rubrica validate --stage X` will name.
             state = (
                 "present, but unreadable or carrying no inputs_seen rows"

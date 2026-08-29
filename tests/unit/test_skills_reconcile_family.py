@@ -82,11 +82,20 @@ def _world_schema():
 
 
 def test_the_family_is_exactly_the_stages_between_extract_and_propose_batches():
-    """Guards the derivation above, and the ordering the passes depend on:
-    outcomes quantifies over capabilities' output, gaps audits all of them,
-    services wants every partial's claims already filed, and the seal runs last.
-    A reordering here is a real change to what each pass can read, not a cosmetic
-    one.
+    """Guards the derivation above, and the ordering the passes that have a real
+    dependency depend on: outcomes quantifies over capabilities' output, entities
+    and goals read the partials above them, gaps audits all of them, and the seal
+    runs last. A reordering among those is a real change to what each pass can
+    read, not a cosmetic one.
+
+    `reconcile-services` is pinned here on a different footing, and this docstring
+    must not be read as giving it a dependency it does not have: it reads no
+    partial, every claims file exists the moment `extract` finishes, and the seal
+    does not read its output, so its slot is genuinely free. The comment beside it
+    in `paths.STAGES` says exactly that, and the two must not disagree. What the
+    position pins for that pass is the *documentation*: STAGES is the on-disk
+    numbering and both generated drawings render it in order, so moving it silently
+    would redraw the family.
     """
     assert STAGES[STAGES.index("extract") + 1 : STAGES.index("propose-batches")] == (
         "reconcile-subjects",

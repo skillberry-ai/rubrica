@@ -81,7 +81,7 @@ Every signal also takes an optional `artifact_id`. Name it whenever the signal
 came from one particular input: the `locator` says *where in what you read* the
 evidence is, and `artifact_id` says *which input the manifest registers* it was.
 On `no_outward_evidence_found` there is usually no single input to name, because
-the statement is about everything you read — which is why the field is optional
+the statement is about everything you read -- which is why the field is optional
 rather than required.
 
 Three of those five need a source file to see, and this run may contain none, or
@@ -198,7 +198,7 @@ both again; report success only once both exit clean.
 - **A tool's name is longer than 64 characters.** Refuse, say which tool, and
   stop. There is no legal record for this case and you must not invent one: the
   harness caps a name at 64, `service_tool.name` carries the same `maxLength`, so
-  the real name fails layer 1 by name — and Invariant 4 forbids the shortening
+  the real name fails layer 1 by name -- and Invariant 4 forbids the shortening
   that would pass it. Do not truncate it to fit, and do not substitute a name
   that fits. Either one produces a service that validates cleanly against a tool
   the agent cannot call, which is the single failure this whole condition exists

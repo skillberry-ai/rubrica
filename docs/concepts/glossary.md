@@ -348,10 +348,9 @@ and every `01-contradictions/*.json` — and **not** `01-subjects.json`: the wor
 model has no subjects field, so the cover is an input to the contradiction
 fan-out, to `reconcile-gaps`, and to `check-refs`, not to the seal; and not
 `01-services.json`, which becomes an interface document of its own rather than a
-field here — folds each capability's
-outcome classes into that capability, counts the `denominator` once, and writes
-`01-world-model.json` (`src/rubrica/reconcile.py`, run as
-`rubrica reconcile-seal`).
+field here — folds each capability's outcome classes into that capability,
+counts the `denominator` once, and writes `01-world-model.json`
+(`src/rubrica/reconcile.py`, run as `rubrica reconcile-seal`).
 
 **A seal assembles; it does not check.** Cross-artifact checking is layer 2 and
 lives in `refs.py`, which runs over the sealed record afterwards on any run,
