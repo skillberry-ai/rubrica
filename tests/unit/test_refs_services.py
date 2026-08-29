@@ -17,7 +17,13 @@ from __future__ import annotations
 import json
 
 from rubrica.interfaces import synthesise
-from rubrica.refs import check_all, check_interfaces, check_services
+from rubrica.refs import (
+    check_all,
+    check_input_dispositions,
+    check_interfaces,
+    check_services,
+)
+from rubrica.validate import validate_stage
 from tests.toy import build_toy_run
 
 
@@ -162,15 +168,55 @@ def test_a_schema_claim_from_outside_its_own_tool_is_reported(tmp_path):
     assert all(f.artifact == run.services_part for f in findings)
 
 
-def test_a_tool_claim_in_no_service_is_reported(tmp_path):
-    """The partition, from the orphan side. A tool nobody can simulate is a hole in
-    the description, and the pass's own accounting is what should have recorded it.
+def test_an_unaccounted_orphan_tool_claim_is_the_accountings_finding(tmp_path):
+    """The orphan side of the partition, and check_services says nothing about it.
+
+    Not a hole: check_input_dispositions enforces it by identity. It recomputes
+    `own_kind_total` from 01-claims/ and `cited` from the part's own citations
+    rather than trusting either, and PASS_OWN_KINDS binds `services_part` to the
+    `tool` kind -- so a tool claim in no service either shows up as a declared
+    `cited` that disagrees with the recomputation, as here, or as a `dropped` count
+    the schema requires a `note` on. Reporting it a second time from here would
+    name a second pointer for one defect, and would make the documented case below
+    permanently dirty.
+
+    This asserts the identity rather than assuming it: silence here, and the
+    finding present there.
     """
     run = build_toy_run(tmp_path, upto="synthesise-interfaces")
     part = _services(run)
     part["services"] = []
     _rewrite(run, part)
-    assert any("clm-api-010" in f.message for f in check_services(run))
+    assert check_services(run) == []
+    findings = check_input_dispositions(run)
+    assert [(f.artifact, f.pointer) for f in findings] == [
+        (run.services_part, "/inputs_seen/0/cited")
+    ], findings
+
+
+def test_a_documented_drop_is_clean_rather_than_permanently_dirty(tmp_path):
+    """The other direction, and the reason the clause was deleted.
+
+    A tool the pass means to exclude is recorded as a `dropped` count with the
+    `note` inputs-seen-0.1.json requires beside it, read by a human at gate 1. With
+    an orphan clause here that state exited 1 forever: the pass would correctly
+    reproduce the same drop, so no re-dispatch could clear it. Synthesis is re-run
+    because it owns 01-interfaces/ -- with no service left there is no document to
+    keep.
+    """
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+    part = _services(run)
+    part["services"] = []
+    row = next(r for r in part["inputs_seen"] if r["artifact_id"] == "api-json")
+    row["cited"] = 0
+    row["dropped"] = 1
+    row["note"] = "declared in a claim whose payload is not a schema I could read"
+    _rewrite(run, part)
+    written, findings = synthesise(run)
+    assert (written, findings) == ([], [])
+    assert check_services(run) == []
+    assert check_interfaces(run) == []
+    assert check_input_dispositions(run) == []
 
 
 def test_a_tool_claim_in_two_services_is_reported(tmp_path):
@@ -183,6 +229,30 @@ def test_a_tool_claim_in_two_services_is_reported(tmp_path):
     part["services"][1]["id"] = "svc-tickets-again"
     _rewrite(run, part)
     assert any("clm-api-010" in f.message for f in check_services(run))
+
+
+def test_two_services_with_one_id_are_reported(tmp_path):
+    """The same hazard by a different route, and the only place it can be named.
+
+    `run.interface()` derives one path from the id, so two services sharing one
+    collapse onto one document -- synthesis accepts the part, writes that document
+    with the last grouping and reports nothing. Measured before this clause:
+    check_services came back clean and check_interfaces reported both directions of
+    the difference against `01-interfaces/svc-tickets.json`, a derived file that is
+    byte-for-byte what synthesis wrote, for a defect living in the part.
+    """
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+    part = _services(run)
+    second = json.loads(json.dumps(part["services"][0]))
+    second["tools"] = [
+        {"name": "close_ticket", "claims": ["clm-api-010"], "schema_claim": "clm-api-010"}
+    ]
+    part["services"].append(second)
+    _rewrite(run, part)
+    findings = check_services(run)
+    assert any(f.artifact == run.services_part and "svc-tickets" in f.message for f in findings), (
+        findings
+    )
 
 
 def test_one_tool_cited_twice_inside_one_service_is_not_a_duplicate(tmp_path):
@@ -223,12 +293,18 @@ def test_a_payload_reformatted_without_changing_its_value_stays_clean(tmp_path):
     """
     run = build_toy_run(tmp_path, upto="synthesise-interfaces")
     path, document = _claims(run)
+    before = path.read_text(encoding="utf-8")
     payload = _claim(document, "clm-api-010")["payload"]
     _claim(document, "clm-api-010")["payload"] = {
         key: payload[key] for key in reversed(list(payload))
     }
     _rewrite_claims(run, path, document, indent=4, sort_keys=False, separators=(" ,", " : "))
-    assert path.read_text(encoding="utf-8") != run.claims("notes-md").read_text(encoding="utf-8")
+    after = path.read_text(encoding="utf-8")
+    # Both halves of the premise, asserted rather than assumed: the earlier version
+    # of this compared the claims file against a *different* file and was true
+    # whatever the rewrite did.
+    assert after != before, "the rewrite changed no bytes, so it measures nothing"
+    assert json.loads(after) == json.loads(before), "it must not change the parsed value either"
     assert check_services(run) == []
 
 
@@ -257,20 +333,45 @@ def test_a_locator_that_resolves_to_nothing_is_reported(tmp_path):
     ), findings
 
 
-def test_a_heading_anchor_locator_is_not_compared(tmp_path):
-    """Locators come in two shapes in this project, and only one is comparable.
+def test_a_heading_anchor_locator_on_a_prose_input_is_not_compared(tmp_path):
+    """A prose claim named as a schema claim: the shape that actually occurs.
 
-    `#/tools/0/input_schema` is a JSON pointer; `#operator-notes` is a markdown
-    heading anchor. resolve_pointer *raises* on the second, so an unguarded
-    comparison would leave an exception escaping as one `[internal]` finding
-    naming the run root. A structural non-comparison is not evidence of a defect,
-    so this says nothing -- demonstrated by mutating the payload as well, which
-    the pointer locator above reports and this one does not.
+    Silence, and the payload is mutated as well to show it is silence about a
+    difference the pointer case above reports. Note *which* guard this reaches: the
+    input is `notes-md`, whose registered bytes are markdown, so it returns at the
+    unparseable-input branch -- the same one its sibling below covers. It does
+    **not** exercise the non-pointer-locator branch, which is why the test after it
+    exists; an earlier version of this file claimed it did, measured wrong.
     """
     run = build_toy_run(tmp_path, upto="synthesise-interfaces")
     path, document = _claims(run)
     claim = _claim(document, "clm-api-010")
     claim["evidence"][0] = {"artifact_id": "notes-md", "locator": "#operator-notes"}
+    del claim["payload"]["properties"]["ticket_id"]
+    _rewrite_claims(run, path, document)
+    assert check_services(run) == []
+
+
+def test_a_non_pointer_locator_on_a_json_input_is_not_compared(tmp_path):
+    """The guard that keeps resolve_pointer's `raise` off this path.
+
+    Three locator shapes occur in this project, not two: a bare JSON pointer
+    (`#/tools/0/input_schema`), a markdown heading anchor (`#operator-notes`), and
+    the URI-with-path form `tests/builders.py` carries, `api.json#/tools/0`.
+    `claims-0.1.json` constrains `locator` to a non-empty string and nothing more,
+    so layer 1 admits all three and any other.
+
+    The third shape against a JSON input is what reaches this branch: stripping one
+    leading `#` leaves `api.json#/...`, which is not a pointer, and
+    `resolve_pointer` raises `ValueError: not a JSON pointer` rather than returning
+    UNSET. Measured without the guard, on this state: exit 1 with one `[internal]`
+    finding naming the run root. The payload is mutated as well, so this is silence
+    about a difference and not silence about nothing.
+    """
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+    path, document = _claims(run)
+    claim = _claim(document, "clm-api-010")
+    claim["evidence"][0]["locator"] = "api.json#/tools/0/input_schema"
     del claim["payload"]["properties"]["ticket_id"]
     _rewrite_claims(run, path, document)
     assert check_services(run) == []
@@ -289,6 +390,62 @@ def test_a_non_json_input_is_not_compared(tmp_path):
     del claim["payload"]["properties"]["ticket_id"]
     _rewrite_claims(run, path, document)
     assert check_services(run) == []
+
+
+def test_two_tools_sharing_a_drifted_schema_claim_are_reported_once(tmp_path):
+    """One defect, one line. `schema_claims` is appended per tool, so before the
+    dedup two tools naming one drifted claim produced two byte-identical findings --
+    same artifact, same pointer, same message -- and a repair reading stdout could
+    not tell one defect from two.
+    """
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+    part = _services(run)
+    tool = part["services"][0]["tools"][0]
+    part["services"][0]["tools"].append({**tool, "name": "query_tickets_readonly"})
+    _rewrite(run, part)
+    claims_path, document = _claims(run)
+    del _claim(document, "clm-api-010")["payload"]["properties"]["ticket_id"]
+    _rewrite_claims(run, claims_path, document)
+    findings = [f for f in check_services(run) if f.artifact == claims_path]
+    assert len(findings) == 1, findings
+
+
+def test_a_non_string_claim_id_is_skipped_rather_than_raised_through(tmp_path):
+    """Guard the members, not just the container.
+
+    `_as_list` guards the array; a truthy element can still be a list where an id
+    belongs, and `set.add` on an unhashable one raises `TypeError: unhashable type`
+    -- measured out of three places in brief.py, and out of this loop without the
+    isinstance. cli.py takes that to exit 1 with one `[internal]` finding naming the
+    run root, losing every real finding in the run. Layer 1 owns the defect itself:
+    `service_tool.claims` items are the id pattern, so `validate --stage
+    reconcile-services` rejects it by name.
+    """
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+    part = _services(run)
+    part["services"][0]["tools"][0]["claims"] = [["clm-api-010"], "clm-api-010"]
+    _rewrite(run, part)
+    assert check_services(run) == []
+    assert validate_stage(run, "reconcile-services"), "layer 1 has to be the one that reports it"
+
+
+def test_an_unsafe_service_id_is_skipped_rather_than_raised_through(tmp_path):
+    """Never join an id into a path unchecked.
+
+    A service id comes out of a prompt, and `run.interface()` goes through
+    `safe_segment`, which raises `UnsafeSegment` -- cli.py maps that to exit 2, and
+    a stage defect must never surface as a 2. So check_interfaces asks
+    `is_safe_segment` first and leaves the id to `interfaces.synthesise`, which
+    reports it against the part. What it still says here is true of the directory:
+    the document on disk now matches no service.
+    """
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+    part = _services(run)
+    part["services"][0]["id"] = "../evil"
+    _rewrite(run, part)
+    findings = check_interfaces(run)
+    assert [f.artifact for f in findings] == [run.interface("svc-tickets")], findings
+    assert any(f.artifact == run.services_part for f in synthesise(run)[1])
 
 
 def test_a_missing_document_and_an_extra_one_are_both_reported(tmp_path):

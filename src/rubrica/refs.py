@@ -2280,18 +2280,25 @@ def check_services(run: RunPaths) -> list[Finding]:
     """The tool grouping in 01-services.json, against the claims it cites.
 
     Five clauses, reported in the order below so a repair reads resolution before
-    accounting: every id in a tool's `claims` resolves to a `tool` claim, every
-    `schema_claim` is one of its own tool's ids, every `tool` claim in 01-claims/
-    is referenced by exactly one service, every tool name survives the harness's
-    sanitisation unchanged, and every `schema_claim`'s payload equals the input
-    region its evidence names.
+    the grouping the resolution feeds: every id in a tool's `claims` resolves to a
+    `tool` claim, every `schema_claim` is one of its own tool's ids, no two
+    services share a tool claim and no two share an id, every tool name survives
+    the harness's sanitisation unchanged, and every `schema_claim`'s payload equals
+    the input region its evidence names.
 
-    The partition is checked from both sides because the two failures are
-    different defects. An orphaned tool claim is a hole in the description -- a
-    tool nothing can simulate, which the pass's own accounting should have
-    recorded as a drop. A tool claim in two services is two simulators serving one
-    tool name, which is one database the agent under test sees two conflicting
-    views of.
+    A tool claim in two services is two simulators serving one tool name, which is
+    one database the agent under test sees two conflicting views of. Two services
+    with one id is the same hazard arriving by a different route, and it is worth
+    its own clause because of where the alternative surfaces: `interfaces.synthesise`
+    accepts the part and writes one document, last grouping wins, and
+    check_interfaces then reports both directions of the difference against
+    `01-interfaces/<id>.json` -- a 1 naming a derived file that is byte-for-byte
+    what synthesis wrote, for a defect living in the part, unclearable by
+    re-dispatching either stage. Nothing else reports it: services-part-0.1.json
+    carries no uniqueness constraint and synthesis has no opinion.
+
+    The orphan side of the partition is deliberately absent; see the comment on
+    the clause itself.
 
     Silent on an absent or non-dict part, and silent on the whole run when any
     claims file is unreadable: see the guards inline. Nothing here reports a
@@ -2369,10 +2376,15 @@ def check_services(run: RunPaths) -> list[Finding]:
     def report(pointer: str, message: str) -> None:
         out.append(Finding(run.services_part, "refs", pointer, message))
 
-    # Collected during the one walk and emitted after it, so the clauses come out
-    # in the documented order rather than interleaved per tool: a repair reading
-    # "no such claim" first is reading the defect the others are consequences of.
+    # Clauses 3, 4 and 5 are collected during the one walk and emitted after it,
+    # so each arrives as a group rather than interleaved per tool. Clauses 1 and 2
+    # emit inline, because a tool's own resolution findings belong beside each
+    # other -- so the order is *by clause from 3 onwards*, and across tools a tool
+    # B clause-1 finding can still follow a tool A clause-2 one. What the grouping
+    # buys is that a repair reads every unresolvable id before the grouping and
+    # payload consequences of those ids.
     references: dict[str, list[str]] = {}
+    service_ids: list[str] = []
     names: list[tuple[str, Any]] = []
     schema_claims: list[str] = []
 
@@ -2386,6 +2398,8 @@ def check_services(run: RunPaths) -> list[Finding]:
         # synthesise's finding, so this falls back to the pointer rather than
         # reporting the id again.
         label = service_id if service_id is not None else f"/services/{i}"
+        if service_id is not None:
+            service_ids.append(service_id)
         cited_here: set[str] = set()
         for j, tool in enumerate(_as_list(service.get("tools"))):
             if not isinstance(tool, dict):
@@ -2428,17 +2442,51 @@ def check_services(run: RunPaths) -> list[Finding]:
             # not the hazard the duplicate clause reports.
             references.setdefault(claim_id, []).append(label)
 
+    for service_id in sorted({sid for sid in service_ids if service_ids.count(sid) > 1}):
+        # Named here rather than left to the document, because run.interface()
+        # derives one path from the id: two services with one id collapse onto one
+        # file, so the only artifact the difference *can* be reported against
+        # afterwards is a derived document that faithfully carries the last
+        # grouping. That is a 1 naming a file with no defect in it, and no
+        # re-dispatch of either stage clears it.
+        report(
+            "/services",
+            f"more than one service is named {service_id}: they share the one document "
+            f"01-interfaces/{service_id}.json, so the groupings after the first are lost and "
+            "the tools in them have no simulator",
+        )
+
+    # The duplicate side of the claim-level partition only. The orphan side -- a `tool` claim
+    # no service references -- is deliberately NOT reported here, because
+    # check_input_dispositions already enforces it by identity: PASS_OWN_KINDS
+    # binds services_part to ("tool",), that checker recomputes `own_kind_total`
+    # from 01-claims/ and `cited` from the part's own citations rather than
+    # trusting either, and reports both disagreements plus
+    # `cited + dropped != own_kind_total`. So on a run where it is clean, the
+    # number of unreferenced tool claims per input already equals the declared
+    # `dropped` -- and inputs-seen-0.1.json requires a `note` on any row with
+    # `dropped >= 1`, which makes the reason a layer-1 property. A property a
+    # deterministic gate already enforces belongs to that gate, not to a second
+    # reading of it here against a different pointer; reporting it twice would
+    # also make a documented drop permanently dirty, a 1 no re-dispatch can clear.
+    #
+    # The asymmetry is why the duplicate side stays. It has no counterpart in that
+    # accounting at all: `cited` counts a claim referenced *at all*, so a claim in
+    # two services counts once and the arithmetic still balances. And the two
+    # counters coincide only because every citation in the services part sits
+    # inside a service's tool -- a field carrying claim ids somewhere else in the
+    # part would silently pull them apart, and that is the change that would owe
+    # this clause's orphan half back.
+    #
+    # The residual case neither side covers: a tool claim in a claims file whose
+    # `artifact_id` the manifest does not register has no accounting row to be
+    # counted in. That is check_manifest's finding, plus the `no row for input`
+    # clause beside the arithmetic.
     for claim_id, claim in sorted(claims.items()):
         if claim.get("kind") != "tool":
             continue
         where = references.get(claim_id, [])
-        if not where:
-            report(
-                "/services",
-                f"{claim_id} is a tool claim no service references, so the tool it describes "
-                "has no simulator and no recorded reason for being left out",
-            )
-        elif len(set(where)) > 1:
+        if len(set(where)) > 1:
             report(
                 "/services",
                 f"{claim_id} is referenced by more than one service ({', '.join(where)}): two "
@@ -2462,7 +2510,12 @@ def check_services(run: RunPaths) -> list[Finding]:
             )
 
     stored = _stored_input_paths(run)
-    for claim_id in schema_claims:
+    # set, because `schema_claims` is appended per tool: two tools of one service
+    # naming one drifted schema claim produced two byte-identical findings -- same
+    # artifact, same pointer, same message -- which is two stdout lines for one
+    # defect and one of them a repair cannot act on separately. sorted, so the
+    # emission order is the claim id's rather than the walk's.
+    for claim_id in sorted(set(schema_claims)):
         claim = claims.get(claim_id)
         if claim is None:
             # Already reported above, through the tool's own `claims` array.

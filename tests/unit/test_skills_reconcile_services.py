@@ -1,4 +1,4 @@
-"""rb-reconcile-services' contract and the four rules its prose must carry.
+"""rb-reconcile-services' contract, and the rules its prose must carry.
 
 Every assertion here is scoped with skills.section_body. `skills.load()` sets
 `body` to the entire file text and the five section headings are mandatory, so an
@@ -58,6 +58,48 @@ def _step_carrying(skill, heading: str, *keys: str) -> str:
     flat = [" ".join(step.lower().split()) for step in steps]
     found = [step for step in flat if any(k in step for k in keys)]
     assert len(found) == 1, f"{keys} locates {len(found)} step(s) in {heading}, not one: {found}"
+    return found[0]
+
+
+def _paragraph_carrying(skill, heading: str, *keys: str) -> str:
+    """The one blank-line-delimited paragraph in a section carrying any of `keys`.
+
+    §3 ends with a prose paragraph rather than a numbered step, so _step_carrying
+    cannot reach it -- it matched zero steps, measured. Paragraph scoping is the
+    same instrument one shape over: flattened, so a rewrap cannot flip it, and
+    exactly-one so a key that matches two paragraphs is not a locator.
+    """
+    paragraphs = skills.section_body(skill, heading).split("\n\n")
+    flat = [" ".join(paragraph.lower().split()) for paragraph in paragraphs]
+    found = [paragraph for paragraph in flat if any(k in paragraph for k in keys)]
+    assert len(found) == 1, f"{keys} locates {len(found)} paragraph(s) in {heading}: {found}"
+    return found[0]
+
+
+def _bullets(skill, heading: str) -> list[str]:
+    """One entry per top-level `- ` bullet in a section, each flattened like _flat.
+
+    A continuation line joins the bullet above it, so a wrapped bullet is one entry.
+    Mirrors test_skills_reconcile_family._bullets for the same measured reason: a
+    §5 assertion over a whole section is satisfied by any of seven sibling
+    conditions, so a rule deleted from the one that owns it stays green.
+    """
+    out: list[str] = []
+    for line in skills.section_body(skill, heading).splitlines():
+        if line.startswith("- "):
+            out.append(line)
+        elif out:
+            out[-1] += " " + line
+    return [" ".join(bullet.lower().split()) for bullet in out]
+
+
+def _bullet_carrying(skill, heading: str, *keys: str) -> str:
+    """The one bullet carrying any of `keys`. The exactly-one check is part of the
+    instrument: a key matching two bullets is not a locator, and one matching none
+    means the rule is gone rather than that the test should quietly pass.
+    """
+    found = [bullet for bullet in _bullets(skill, heading) if any(k in bullet for k in keys)]
+    assert len(found) == 1, f"{keys} locates {len(found)} bullet(s), not one: {found}"
     return found[0]
 
 
@@ -128,3 +170,39 @@ def test_a_refusal_condition_covers_a_tool_name_that_cannot_be_preserved(skill):
     refusal = _flat(skill, "5. Refusal conditions")
     assert "renam" in refusal
     assert "record" in refusal or "report" in refusal
+
+
+def test_a_refusal_condition_covers_a_finding_against_another_stages_artifact(skill):
+    """The third move, for the one state that otherwise has no legal one.
+
+    `check-refs` now compares every `schema_claim`'s payload against the input
+    region its locator names and reports a mismatch against the claims file --
+    `rb-extract`'s artifact. §4's verification paragraph says a finding naming
+    another artifact is not this pass's to fix, and one sentence later says to
+    report success only once `check-refs` exits clean: from a schema-valid run,
+    obeying both is possible only by editing another stage's output or by claiming a
+    success the exit code contradicts. Same class as the >64-character name, which
+    had no legal record until a refusal gave it one.
+
+    Scoped to the bullet that owns it, and asserted through several formulations
+    where the wording is the part a meaning-preserving reword changes.
+    """
+    bullet = _bullet_carrying(skill, "5. Refusal conditions", "check-refs")
+    assert "payload" in bullet
+    assert "01-claims/" in bullet
+    # Both halves of the prohibition, plus the move that replaces them.
+    assert "do not edit" in bullet
+    assert any(k in bullet for k in ("do not report success", "not clean")), bullet
+    assert "stop" in bullet
+
+
+def test_the_verification_paragraph_points_at_that_condition(skill):
+    """The other side of the pair: the paragraph that used to demand one of two
+    forbidden moves has to name the third one, or a reader who stops at the
+    verification instruction still has no legal move.
+    """
+    # §4, not §3: the verification paragraph closes the Invariants section, which
+    # is where the arithmetic it re-runs is stated. Measured -- over §3 the locator
+    # matched nothing.
+    paragraph = _paragraph_carrying(skill, "4. Invariants", "report success")
+    assert "refusal condition" in paragraph, paragraph

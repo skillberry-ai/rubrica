@@ -558,7 +558,12 @@ operation's request body, named by the pass because synthesis is deterministic
 and a code rule for picking a winner would bury the judgment, with
 `schema_disagreement` recording what the losing claim said);
 `inputs_seen[].own_kind_total` (how many `tool`-kind claims the named input holds
-— the one kind this pass is accountable for).
+— the one kind this pass is accountable for); and `services[].id`, which must be
+unique across the array although the schema cannot say so — the document path is
+derived from it, so two services sharing an id collapse onto one file and the
+groupings after the first are lost. `check-refs` reports that against this file,
+because by the time it shows up in `01-interfaces/` the only artifact left to name
+is a derived document that faithfully carries the last grouping.
 
 ## `interface`
 

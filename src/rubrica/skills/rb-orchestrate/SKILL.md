@@ -561,8 +561,12 @@ same rule. A target that declares no tool at all is a real target, not a broken
 run: `rb-reconcile-services` is instructed to write `services: []` for one rather
 than invent a service, so an empty derivation is the honest record of an honest
 part. Record that with `decide` and move on to the seal. `check-refs` is still
-safe and still worth running -- it is a whole-run check and reports nothing about
-documents no service asked for.
+safe and still worth running: it derives what it expects from the same
+`01-services.json`, so a run that declared no service expects no document and the
+empty directory the command leaves behind is clean. It is not indifferent to that
+directory's contents, though -- a document no service asked for *is* one of its
+findings -- so if one is ever reported there, the repair belongs to whatever left
+the file behind and not to a re-derivation.
 
 **Its two exit codes mean different things, and this is the one command where
 mistaking them costs the run's repair attempt on nothing.** A `1` names something
