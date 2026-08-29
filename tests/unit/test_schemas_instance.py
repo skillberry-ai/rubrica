@@ -222,7 +222,7 @@ def test_a_child_element_with_an_empty_claims_array_is_rejected(tmp_path, pointe
 
 
 def test_every_registered_artifact_kind_now_has_a_schema_file():
-    """All eight kinds registered in validate.ARTIFACT_SCHEMAS exist on disk.
+    """Every kind registered in validate.ARTIFACT_SCHEMAS exists on disk.
 
     Task 3 could only assert this for the two schemas it created. With Tasks 4
     and 5 landed, the registry and the schema directory must agree completely.

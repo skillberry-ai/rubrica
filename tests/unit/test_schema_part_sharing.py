@@ -30,6 +30,7 @@ PARTS_REFERENCING_WORLD_MODEL = [
     ("goals-part-0.1.json", "goal"),
     ("goals-part-0.1.json", "actor"),
     ("outcomes-part-0.1.json", "outcome_class"),
+    ("services-part-0.1.json", "service"),
 ]
 
 

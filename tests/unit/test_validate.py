@@ -173,6 +173,16 @@ def test_the_interface_document_closes_the_blocks_this_project_owns(tmp_path):
     defect -- the carrier convention is one `post` per tool -- and an
     unrecognised key inside `x-rubrica` is a stage inventing provenance.
     """
+    # The exemption is a singleton, pinned here rather than left implicit: this
+    # test is hand-written for `interface` and not parameterised, so a second
+    # kind added to OPEN_ROOT_KINDS would silently lose the closed-root property
+    # with nothing going red. Extending the exemption now forces whoever does it
+    # to extend the replacement too.
+    # `sorted(...)` rather than `== frozenset({"interface"})`: ruff SIM300 reads an
+    # ALL_CAPS name as the constant and calls that form a Yoda condition. Same
+    # predicate -- a set equals a one-element set exactly when its sorted list does.
+    assert sorted(OPEN_ROOT_KINDS) == ["interface"]
+
     path = tmp_path / "interface.json"
 
     # Open at the root: an OpenAPI key we do not model is carried, not rejected.
@@ -184,7 +194,15 @@ def test_the_interface_document_closes_the_blocks_this_project_owns(tmp_path):
     write_json(path, payload)
     findings = validate_artifact(path, "interface")
     assert findings, "a second HTTP method on a path item must be rejected"
-    assert any("get" in f.message for f in findings), [f.message for f in findings]
+    # The QUOTED form, and the pointer beside it. A bare `"get" in f.message` is
+    # the substring-of-message shape CLAUDE.md names: the word "target" contains
+    # "get", so any future finding mentioning a target would satisfy it for the
+    # wrong reason. The pointer also pins _pointer's RFC 6901 escaping -- an
+    # interface document's path keys all begin with `/`, so `/paths//query_aap2`
+    # would be indistinguishable from a property named "" followed by one named
+    # "query_aap2".
+    assert any("'get'" in f.message for f in findings), [f.message for f in findings]
+    assert [f.pointer for f in findings] == ["/paths/~1query_aap2"], [f.pointer for f in findings]
 
     payload = minimal_interface()
     payload["x-rubrica"]["surprise_key"] = 1

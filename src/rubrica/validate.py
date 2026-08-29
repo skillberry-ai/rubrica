@@ -280,7 +280,24 @@ def _validator_for(kind: str, schema_root: Path) -> Draft202012Validator:
 
 
 def _pointer(parts) -> str:
-    return "".join(f"/{part}" for part in parts)
+    """RFC 6901 pointer naming where in the artifact the error is.
+
+    Tokens are escaped, `~` before `/`, or the second replacement would
+    re-escape what the first produced. Same rule and same order as
+    survey.py's `_escape_pointer_token`, which carries the measurement that
+    established it -- one convention with two call sites rather than two
+    coincidences, and if it ever needs changing both must change together.
+
+    Unescaped, this was already wrong and became commonly wrong with the
+    `interface` kind: every path key in an interface document is
+    `/<tool_name>`, so a finding there rendered `/paths//query_tickets`, which
+    is also exactly how a property named `""` followed by `"query_tickets"`
+    renders. `/paths/~1query_tickets` says which one it is.
+
+    `str(part)` because `error.absolute_path` carries array indices as ints
+    alongside property names, and only the names need escaping.
+    """
+    return "".join(f"/{str(part).replace('~', '~0').replace('/', '~1')}" for part in parts)
 
 
 def validate_artifact(path: Path, kind: str) -> list[Finding]:
