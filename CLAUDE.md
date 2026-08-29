@@ -82,7 +82,8 @@ finding's clothes.
 | `01f` | reconcile-entities | `rb-reconcile-entities` | validate · check-refs |
 | `01g` | reconcile-goals | `rb-reconcile-goals` | validate · check-refs |
 | `01h` | reconcile-gaps | `rb-reconcile-gaps` | validate · check-refs |
-| `01i` | reconcile-seal | code — `rubrica reconcile-seal` assembles the partials | validate · check-refs · **human gate 1** |
+| `01i` | reconcile-services | `rb-reconcile-services` — barrier | validate · check-refs |
+| `01j` | reconcile-seal | code — `rubrica reconcile-seal` assembles the partials | validate · check-refs · **human gate 1** |
 | `02a` | propose-batches | code — partitions the round's closable holes | validate |
 | `02b` | propose | `rb-propose` — fan-out, one per batch | validate |
 | `02c` | propose-seal | code — assembles the parts into `02-scenarios.json` | validate |
@@ -93,7 +94,7 @@ finding's clothes.
 | `06` | emit | `rb-emit` — thin wrapper over `rubrica emit` | validate · check-refs |
 | `07` | smoke | code | validate · check-refs |
 
-Rows `01b` through `01i` are **one logical step engineered as substeps.** Every
+Rows `01b` through `01j` are **one logical step engineered as substeps.** Every
 pass reads all of `01-claims/` — the split is on *output*, not on claims, so the
 barrier property is untouched and a contradiction between two inputs is still
 visible to the pass that records it. They are separate stages rather than one

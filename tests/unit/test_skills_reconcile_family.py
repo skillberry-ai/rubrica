@@ -47,11 +47,12 @@ def _world_schema():
     return read_json(schema_dir() / ARTIFACT_SCHEMAS["world-model"])
 
 
-def test_the_family_is_the_eight_stages_between_extract_and_propose_batches():
+def test_the_family_is_exactly_the_stages_between_extract_and_propose_batches():
     """Guards the derivation above, and the ordering the passes depend on:
-    outcomes quantifies over capabilities' output, gaps audits all of them, and
-    the seal runs last. A reordering here is a real change to what each pass can
-    read, not a cosmetic one.
+    outcomes quantifies over capabilities' output, gaps audits all of them,
+    services wants every partial's claims already filed, and the seal runs last.
+    A reordering here is a real change to what each pass can read, not a cosmetic
+    one.
     """
     assert STAGES[STAGES.index("extract") + 1 : STAGES.index("propose-batches")] == (
         "reconcile-subjects",
@@ -61,6 +62,7 @@ def test_the_family_is_the_eight_stages_between_extract_and_propose_batches():
         "reconcile-entities",
         "reconcile-goals",
         "reconcile-gaps",
+        "reconcile-services",
         "reconcile-seal",
     )
 
@@ -128,7 +130,7 @@ def test_the_resolvers_forbid_convention_standing_in_for_evidence(stage):
     assert "even if `notes.md` had never been extracted at all" in inputs
 
 
-# The four passes that own a claim kind and therefore carry an inputs_seen
+# The passes that own a claim kind and therefore carry an inputs_seen
 # accounting. Derived from the schema rather than restated: a part schema that
 # gains the field joins this parametrization without anyone editing a literal.
 OWNING = tuple(
@@ -139,19 +141,22 @@ OWNING = tuple(
 )
 
 
-def test_the_owning_passes_are_the_four_with_a_claim_kind():
+def test_the_owning_passes_are_exactly_the_ones_with_a_claim_kind():
     """A guard on the derivation above, not a restatement of it.
 
-    If a fifth partial gains inputs_seen, this fails and someone has to decide
+    If another partial gains inputs_seen, this fails and someone has to decide
     whether that pass really owns a claim kind -- rb-reconcile-gaps owns none,
     and giving it an accounting would assert a read coverage no output shape can
-    force.
+    force. The list is the same roster refs.PASS_OWN_KINDS carries, reached from
+    the other side: this one reads the schemas, that one names the kinds, and a
+    pass added to either without the other is what this catches.
     """
     assert OWNING == (
         "reconcile-capabilities",
         "reconcile-outcomes",
         "reconcile-entities",
         "reconcile-goals",
+        "reconcile-services",
     ), OWNING
 
 

@@ -69,22 +69,24 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "entities-part": "entities-part-0.1.json",
     "goals-part": "goals-part-0.1.json",
     "gaps-part": "gaps-part-0.1.json",
-    # The tool-interface kinds. Registered here and deliberately absent from
-    # STAGE_ARTIFACTS: no stage in paths.STAGES produces either one yet, so a
-    # stage entry would name a stage validate_stage's UnknownStage exists to
-    # reject and would put an undocumented kind in front of
-    # test_docs_accuracy's per-kind check, which reads STAGE_ARTIFACTS. Both
-    # shapes are reviewable before any stage depends on them, which is the
-    # point of landing them without a producer.
+    # The tool-interface kinds. `services-part` now has a producer --
+    # reconcile-services, the barrier pass that groups the declared tools -- and
+    # so has a STAGE_ARTIFACTS row and an entry in artifacts.md. `interface` is
+    # still deliberately absent from STAGE_ARTIFACTS: no stage in paths.STAGES
+    # writes one yet, so a stage entry would name a stage validate_stage's
+    # UnknownStage exists to reject, and would put an undocumented kind in front
+    # of test_docs_accuracy's per-kind check, which reads STAGE_ARTIFACTS. Its
+    # shape is reviewable before any stage depends on it, which is the point of
+    # landing it without a producer.
     "services-part": "services-part-0.1.json",
     "interface": "interface-0.1.json",
     # inputs-seen-0.1.json is deliberately absent from this map, and is the only
     # schema in the package that is not an artifact kind. It holds one $defs/row
-    # that the four reconcile partials $ref, and no stage produces a document of
-    # that shape on its own -- so a kind here would name an artifact
-    # `validate --stage X` must never look for. _schema_registry globs the
-    # directory and registers by filename, so the cross-file $ref resolves
-    # without an entry.
+    # that every reconcile partial whose pass owns a claim kind $refs, and no
+    # stage produces a document of that shape on its own -- so a kind here would
+    # name an artifact `validate --stage X` must never look for.
+    # _schema_registry globs the directory and registers by filename, so the
+    # cross-file $ref resolves without an entry.
     #
     # The propose/score loop's part kinds. Each is one dispatch's slice of a
     # document that used to be emitted whole by a model, and none of them restates
@@ -140,6 +142,7 @@ STAGE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "reconcile-entities": ("entities-part",),
     "reconcile-goals": ("goals-part",),
     "reconcile-gaps": ("gaps-part",),
+    "reconcile-services": ("services-part",),
     "reconcile-seal": ("world-model",),
     "propose-batches": ("batches",),
     # propose now writes only its own batch's part. The stage that produces the
@@ -413,6 +416,11 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         return [run.goals_part]
     if kind == "gaps-part":
         return [run.gaps_part]
+    if kind == "services-part":
+        # The always-return form the other partials use, not the iterated one: a
+        # pass that wrote nothing must fail its own gate by name rather than
+        # passing trivially on an empty list.
+        return [run.services_part]
     if kind == "batches":
         # Iterated, and so empty when no round has a plan -- NOT the
         # always-return form catalogue/slices/subjects use. propose-batches

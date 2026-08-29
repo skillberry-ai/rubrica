@@ -371,7 +371,7 @@ argument above rather than the throughput one.
 
 ### `rb-reconcile-gaps`' read coverage cannot be forced by any output shape
 
-The four reconcile passes that own a claim kind each carry an `inputs_seen`
+The reconcile passes that own a claim kind each carry an `inputs_seen`
 accounting whose `own_kind_total` is recomputed from `01-claims/`, so a wrong
 count is a finding against the pass that wrote it (the entry below records how
 far short of forcing a read that falls). `rb-reconcile-gaps` has no such
@@ -768,7 +768,7 @@ citing passes read were cited 80 of 212 — about 38% — while claims in files 
 never opened were cited **0 of 167**. Not lower. Zero.
 
 Parked, and the reason is narrower than its parent's now that half the instrument
-exists. What shipped is visibility, not variance: the four passes that own a
+exists. What shipped is visibility, not variance: the passes that own a
 claim kind carry an `inputs_seen` accounting, `refs.check_input_dispositions`
 recomputes every number in it against `01-claims/` and `manifest.inputs`, and
 `rubrica gate-brief --gate 1` renders read coverage per pass. That makes one

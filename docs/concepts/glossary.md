@@ -276,15 +276,18 @@ fabricating agent.
 
 ## partial
 
-One `reconcile-*` pass's slice of the world model, written into the `01-` band
+One `reconcile-*` pass's own output, written into the `01-` band
 as its own file: `01-subjects.json`, `01-contradictions/<subject_id>.json`,
 `01-capabilities.json`, `01-outcomes.json`, `01-entities.json`,
-`01-goals.json`, `01-gaps.json`. Each has its own schema and its own layer-1
+`01-goals.json`, `01-gaps.json`, `01-services.json`. Each has its own schema and
+its own layer-1
 gate, and a later pass reads an earlier pass's partial as a *file* rather than
 as a memory of having written it — which is what lets `rb-reconcile-outcomes`
 quantify over the capability list instead of recalling it. No partial reads
 `01-world-model.json`; the **seal** is what joins them into one — all of them
-except `01-subjects.json`, which the world model has no field for.
+except two. `01-subjects.json` is one, because the world model has no field for
+it; `01-services.json` is the other, because a service becomes its own interface
+document under `01-interfaces/` rather than a field of the sealed model.
 
 ## projection
 
@@ -340,10 +343,13 @@ killed mid-record by an idle reset however large the assembled record gets.
 This pipeline has two. `triage-seal` reads `00-objective.json`,
 `00-slices.json`, every `00-dispositions/<slice_id>.json`, `00-audit.json` and
 `00-adoptions.json`, and writes `00-triage.json` (`src/rubrica/seal.py`).
-`reconcile-seal` reads the manifest, the five singleton partials and every
+`reconcile-seal` reads the manifest, the five singleton partials it assembles and
+every
 `01-contradictions/*.json` — and **not** `01-subjects.json`: the world model has
 no subjects field, so the cover is an input to the contradiction fan-out, to
-`reconcile-gaps`, and to `check-refs`, not to the seal — folds each capability's
+`reconcile-gaps`, and to `check-refs`, not to the seal; and not
+`01-services.json`, which becomes an interface document of its own rather than a
+field here — folds each capability's
 outcome classes into that capability, counts the `denominator` once, and writes
 `01-world-model.json` (`src/rubrica/reconcile.py`, run as
 `rubrica reconcile-seal`).

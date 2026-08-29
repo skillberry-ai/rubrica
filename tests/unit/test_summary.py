@@ -45,6 +45,7 @@ _INTAKE_THROUGH_CHALLENGE = {
     "reconcile-entities",
     "reconcile-goals",
     "reconcile-gaps",
+    "reconcile-services",
     "reconcile-seal",
     "propose-batches",
     "propose",
@@ -128,11 +129,11 @@ def test_stage_spine_marks_every_triage_family_stage_produced(tmp_path):
 
 
 def test_stage_spine_marks_every_stage_from_intake_through_challenge_produced(tmp_path):
-    """The other fourteen, same exact-set reasoning.
+    """The rest of the spine, same exact-set reasoning.
 
-    Covers all six `reconcile-*` partial paths, which are six near-identical
-    lines in `_stage_evidence` and so the likeliest place for a copy-paste slip
-    that no earlier test could see.
+    Covers every `reconcile-*` partial path, which are near-identical lines in
+    `_stage_evidence` and so the likeliest place for a copy-paste slip that no
+    earlier test could see.
     """
     run = build_toy_run(tmp_path / "runs")
     assert _produced(run) == _INTAKE_THROUGH_CHALLENGE
@@ -4505,6 +4506,7 @@ def test_render_says_no_flags_fired_rather_than_leaving_the_section_empty(tmp_pa
             "reconcile-entities",
             "reconcile-goals",
             "reconcile-gaps",
+            "reconcile-services",
             "propose",
             "score",
             "instantiate",

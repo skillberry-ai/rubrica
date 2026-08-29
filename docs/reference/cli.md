@@ -130,7 +130,8 @@ Required: `--run RUN`, `--stage`, one of `survey`, `triage-slices`,
 `triage-objective`, `triage-rule`, `triage-audit`, `triage-seal`, `intake`,
 `extract`, `reconcile-subjects`, `reconcile-contradict`,
 `reconcile-capabilities`, `reconcile-outcomes`, `reconcile-entities`,
-`reconcile-goals`, `reconcile-gaps`, `reconcile-seal`, `propose-batches`,
+`reconcile-goals`, `reconcile-gaps`, `reconcile-services`, `reconcile-seal`,
+`propose-batches`,
 `propose`, `propose-seal`, `score`, `score-seal`, `instantiate`, `challenge`,
 `emit`, `smoke` — `paths.STAGES`, in order.
 
@@ -187,8 +188,10 @@ Reads `manifest.json`, the five singleton partials — `01-capabilities.json`,
 `01-outcomes.json`, `01-entities.json`, `01-goals.json`, `01-gaps.json` — and
 every `01-contradictions/*.json`. It does **not** read `01-subjects.json`: the
 world model has no subjects field, so the cover is an input to the contradiction
-passes and to `check-refs`, not to the seal. Writes `01-world-model.json` and
-prints its path.
+passes and to `check-refs`, not to the seal. Nor `01-services.json`, which becomes
+an interface document of its own rather than a field of the sealed model — so the
+world model is byte-identical whether `reconcile-services` ran or not. Writes
+`01-world-model.json` and prints its path.
 
 Code rather than a prompt, for the reason `emit` is code: two runs with identical
 partials must produce a byte-identical world model, or variance can no longer be
@@ -629,7 +632,7 @@ points at the page that asks the target's owners whether the description is true
 Two coverage figures follow the sweep, and they measure different things.
 **Claim utilisation is per input** — how much of one artifact's claims the world
 model cites, a fact about the artifact rather than about any pass's diligence.
-**Read coverage is per pass**: each of the four reconcile passes that owns a
+**Read coverage is per pass**: each reconcile pass that owns a
 claim kind states, in its partial's `inputs_seen`, how many claims of its own
 kinds each input holds and how many of them it cited, and this block prints that
 pass's own-kind rate on one line. Reading only the first of the two is what hid

@@ -265,13 +265,16 @@ pointer it was copied from).
 
 ## The reconcile partials
 
-The seven entries below are one logical step — building the world model —
+The entries below are one logical step — building the world model —
 engineered as bounded passes, each writing its own slice into the `01-` band
 and none of them reading `01-world-model.json`. `reconcile-seal` assembles them
 into that file, which is unchanged: nothing downstream of the seal knows the
-partials exist. It reads every one of them but `01-subjects.json` — the world
-model has no subjects field, so the cover is an input to the contradiction
-fan-out, to `reconcile-gaps`, and to `check-refs`, not to the seal. Each pass
+partials exist. It reads every one of them but two. `01-subjects.json` is the
+first — the world model has no subjects field, so the cover is an input to the
+contradiction fan-out, to `reconcile-gaps`, and to `check-refs`, not to the seal.
+`01-services.json` is the second, and for a different reason: a service becomes
+an interface document of its own under `01-interfaces/`, not a field of the
+sealed model, so the seal has nothing to fold in. Each pass
 is a stage in
 `paths.STAGES`, so `rubrica validate --stage reconcile-<pass>` gates exactly one
 of these kinds.
@@ -282,12 +285,13 @@ than restating them — a duplicated `$defs/entity` that fell behind would make 
 partial accept an element the sealed world model then rejects.
 `capabilities-part` is the single exception and says so in its own entry.
 
-The four passes that own a claim kind — `capabilities-part`, `outcomes-part`,
-`entities-part`, `goals-part` — each carry an **`inputs_seen` accounting** on top
+The passes that own a claim kind — `capabilities-part`, `outcomes-part`,
+`entities-part`, `goals-part`, `services-part` — each carry an **`inputs_seen`
+accounting** on top
 of their elements: one row per input `manifest.json` registers, each
 `{artifact_id, own_kind_total, cited, dropped}` plus a `note` whenever `dropped`
 is not zero. The row shape lives once, in
-`src/rubrica/schema/inputs-seen-0.1.json`, which the four `$ref` and which is
+`src/rubrica/schema/inputs-seen-0.1.json`, which each of them `$ref`s and which is
 **not an artifact kind** — no stage writes a document of that shape, so it is
 the one schema in the package with no entry in `validate.ARTIFACT_SCHEMAS` and
 nothing `rubrica validate --stage X` ever looks for on its own.
@@ -507,12 +511,51 @@ named honestly rather than narrowly, and never left empty to avoid a halt);
 which by definition nothing states — the claims that make the absence *matter*,
 so a gap's provenance is resolvable rather than sitting in prose).
 
+## `services-part`
+
+- **Schema:** `src/rubrica/schema/services-part-0.1.json`
+- **Written by:** `reconcile-services`, run as `rb-reconcile-services`
+- **Read by:** `check-refs`; the interface synthesis below it
+- **Path:** `01-services.json`
+
+The tools the target declares, grouped into the services one simulator each
+would stand in for. Its own pass because the grouping is a judgment with
+evidence rather than a string match, and because it decides how many simulators
+exist: tools split across two services get disjoint databases, so an entity
+created through one is invisible to the other. Splitting when unsure is the
+instructed direction — two services that should be one are two simulators a
+human can merge at gate 1, while one service that should be two is a database
+the tools silently disagree about, and nothing downstream detects it.
+
+Not read by `reconcile-seal`, which is what distinguishes it from every partial
+above: a service becomes its own `interface` document rather than a field of the
+world model, so the sealed file is byte-identical whether this pass ran or not.
+
+Fields worth knowing: `services[].grouping_evidence` (what makes two tools one
+backend — a shared base URL, client construction, credential or MCP server entry
+— with `sole_service_in_run` the honest value for a group of one, so a run with a
+single tool has no reason to invent shared evidence); `services[].signals` (one
+per piece of evidence about whether the service reaches outside the process, each
+with a `locator`, and **never a containment verdict** — there is no `contained`
+field anywhere, because a tool that looks self-contained but holds a hidden call
+produces a suite that passes in the lab and fails in production, so uncertainty
+must not read as contained; `no_outward_evidence_found` is absence of evidence
+and its locator names what was read, not where something was seen);
+`services[].tools[].schema_claim` (the one claim whose `payload` becomes the
+operation's request body, named by the pass because synthesis is deterministic
+and a code rule for picking a winner would bury the judgment, with
+`schema_disagreement` recording what the losing claim said);
+`inputs_seen[].own_kind_total` (how many `tool`-kind claims the named input holds
+— the one kind this pass is accountable for).
+
 ## `world-model`
 
 - **Schema:** `src/rubrica/schema/world-model-0.1.json`
 - **Written by:** `reconcile-seal` (code), via `rubrica reconcile-seal`, from
   the partials above — every one of them but `01-subjects.json`, which has no
-  counterpart field here
+  counterpart field here, and `01-services.json`, whose counterpart `services`
+  field is optional and which the seal does not read, so the sealed file is
+  byte-identical whether `reconcile-services` ran or not
 - **Read by:** `rb-propose`, `rb-score`, `rb-instantiate`, `emit` (code),
   `rb-orchestrate`; `check-refs`
 - **Path:** `01-world-model.json`

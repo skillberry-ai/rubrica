@@ -123,11 +123,12 @@ landed, then `rubrica triage-seal`.
 should make a pass of it refuse; copying either one over a freshly-minted run's
 `00-catalogue.json` exercises those refusals without a corpus at all.
 
-**The reconcile family has two checkpoints, not eight.** `"reconcile-gaps"` is
-every partial written with no world model yet, and `"reconcile-seal"` is the
-assembled world model — the states the seal and the later stages are tested
-against. Neither is the checkpoint a *middle* pass needs, because both include
-that pass's own output. So to exercise one middle pass, build to `"extract"` and
+**The reconcile family has a few checkpoints, not one per pass.**
+`"reconcile-gaps"` is every partial the seal reads written with no world model
+yet, `"reconcile-services"` adds `01-services.json` to that, and
+`"reconcile-seal"` is the assembled world model — the states the seal and the
+later stages are tested against. None of them is the checkpoint a *middle* pass
+needs, because each includes that pass's own output. So to exercise one middle pass, build to `"extract"` and
 write only the partials it declares under `reads`, taking them from
 `tests/toy.py`'s `split_world_model()`, which cuts the golden world model into
 exactly those files:

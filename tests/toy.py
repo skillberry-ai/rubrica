@@ -472,13 +472,14 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
     return payload
 
 
-# Which claim kinds each pass is accountable for. Six of the seven kinds in
-# claims-0.1.json partition onto the four passes that own one; `tool` is owned by
-# reconcile-services, which is added to this table in the same commit that adds
-# the pass. That partition is what makes an own-kind count a per-pass number
-# rather than an aggregate: measured on run-20260823-112746, per-kind citation
-# was capability 110/135 while goal was 2/38, and the run's single aggregate
-# figure of 33.6% is the average that hid it. reconcile-gaps owns no kind, and
+# Which claim kinds each pass is accountable for. Every kind in claims-0.1.json's
+# enum has an owner here now: `tool` was the one that did not, and
+# reconcile-services took it in the commit that added the pass. What makes an
+# own-kind count a per-pass number rather than an aggregate is the partition --
+# no kind with two owners -- and not one kind per pass, since "entities" and
+# "goals" each own two: measured on run-20260823-112746, per-kind citation was
+# capability 110/135 while goal was 2/38, and the run's single aggregate figure of
+# 33.6% is the average that hid it. reconcile-gaps owns no kind, and
 # reconcile-subjects and reconcile-contradict need no accounting --
 # refs.check_subjects already makes the cover total.
 OWN_KINDS: dict[str, tuple[str, ...]] = {
@@ -486,13 +487,14 @@ OWN_KINDS: dict[str, tuple[str, ...]] = {
     "entities": ("entity", "invariant"),
     "outcomes": ("outcome_class",),
     "goals": ("actor", "goal"),
+    "services": ("tool",),
 }
 
 
 def _claim_refs_in(node: Any) -> set[str]:
     """Every id in every `claims` array anywhere in a partial.
 
-    A walk rather than a per-part list of paths: the four partials nest their
+    A walk rather than a per-part list of paths: the partials each nest their
     citations differently -- an entity carries them on itself and on each
     invariant, the outcomes part two levels down inside an `outcomes` record --
     and a path list would need revising by whoever nests a new element. Mirrors
@@ -712,6 +714,41 @@ def split_world_model(
             "schema_version": "0.1",
             "actors": world["actors"],
             "goals": world["goals"],
+        },
+        # One service, because the toy declares one tool. `sole_service_in_run` is
+        # the honest grouping reason: there is no shared base URL or credential to
+        # cite for a group of one, and a fixture citing one would teach the skill to
+        # invent evidence. The signal is the absence one for the same reason -- the
+        # toy corpus is a tool-schema document, notes and a trace, none of which can
+        # show an HTTP client being constructed.
+        #
+        # Not derived from `world` the way every partial above is: the sealed world
+        # model's `services` field is optional and the golden one does not carry it,
+        # so there is nothing there to cut. Which is why this is the one partial the
+        # seal's round trip does not cover, and why the hand-read row in
+        # tests/unit/test_toy_split.py is the whole of its accounting check.
+        "services": {
+            "schema_version": "0.1",
+            "services": [
+                {
+                    "id": "svc-tickets",
+                    "statement": "The support ticket backend that query_tickets addresses",
+                    "grouping_evidence": ["sole_service_in_run"],
+                    "tools": [
+                        {
+                            "name": "query_tickets",
+                            "claims": ["clm-api-010"],
+                            "schema_claim": "clm-api-010",
+                        }
+                    ],
+                    "signals": [
+                        {
+                            "kind": "no_outward_evidence_found",
+                            "locator": "api-json, notes-md, trace-json",
+                        }
+                    ],
+                }
+            ],
         },
     }
     for key, own_kinds in OWN_KINDS.items():
@@ -1442,13 +1479,21 @@ _UPTO_STAGES: tuple[str, ...] = (
     *_TRIAGE_UPTO_STAGES,
     "intake",
     "extract",
-    # Two checkpoints for the reconcile family rather than eight: "reconcile-gaps"
-    # is every partial written with no world model yet -- the state the seal and
-    # the layer-2 part checkers are tested against -- and "reconcile-seal" is the
-    # assembled world model every later stage reads. The intermediate states
-    # between passes have no consumer, and a checkpoint nobody stops at is a
-    # helper this module already has too many requests for.
+    # Three checkpoints for the reconcile family rather than one per pass.
+    # "reconcile-gaps" is every partial the seal reads written with no world model
+    # yet -- the state the seal and the layer-2 part checkers are tested against.
+    # "reconcile-services" adds the services partial, so it is every partial
+    # written with no interfaces synthesised, which is what the checks over
+    # 01-services.json alone are tested against; it is a checkpoint of its own
+    # rather than folded into the one above because the seal must stay testable
+    # against a run in which 01-services.json does not exist -- the seal does not
+    # read it, and a fixture that always wrote it could not show that. And
+    # "reconcile-seal" is the assembled world model every later stage reads. The
+    # intermediate states between the other passes have no consumer, and a
+    # checkpoint nobody stops at is a helper this module already has too many
+    # requests for.
     "reconcile-gaps",
+    "reconcile-services",
     "reconcile-seal",
     # Four checkpoints across the loop rather than five: "propose" is every part
     # written with nothing sealed -- the state check_scenario_parts and the
@@ -1555,6 +1600,10 @@ def build_toy_run(
     write_json(run.entities_part, parts["entities"])
     write_json(run.goals_part, parts["goals"])
     write_json(run.gaps_part, parts["gaps"])
+    if stop < _UPTO_INDEX["reconcile-services"]:
+        return run
+
+    write_json(run.services_part, parts["services"])
     if stop < _UPTO_INDEX["reconcile-seal"]:
         return run
 

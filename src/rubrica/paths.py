@@ -48,6 +48,12 @@ STAGES = (
     "reconcile-entities",
     "reconcile-goals",
     "reconcile-gaps",
+    # Owns the `tool` kind, and the only pass in this family whose output the
+    # human at gate 1 reads as a description of something outside the run: the
+    # services a simulator would stand in for. Sorted here rather than earlier
+    # because grouping evidence is spread across every other kind, so it wants
+    # every partial's claims already filed.
+    "reconcile-services",
     "reconcile-seal",
     # The propose/score loop, engineered as substeps for the reason the triage
     # and reconcile families are. propose-batches and both seals are code, so

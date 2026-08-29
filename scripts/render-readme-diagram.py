@@ -93,6 +93,7 @@ PHASES: list[dict] = [
             "reconcile-entities",
             "reconcile-goals",
             "reconcile-gaps",
+            "reconcile-services",
             "reconcile-seal",
         ],
         # Folded for the same two reasons the triage family is. paths.STAGES holds
@@ -100,8 +101,8 @@ PHASES: list[dict] = [
         # one skill to one stage and manifest.stages records model, effort and
         # digest per stage -- but they are one logical step engineered as substeps,
         # and this drawing is the newcomer's altitude. Listing them all would also
-        # not fit: phase() draws one line per entry from a fixed BOX_H, so ten
-        # lines would overflow the box rather than crowd it.
+        # not fit: phase() draws one line per entry from a fixed BOX_H, so a line
+        # per pass would overflow the box rather than crowd it.
         folds=["reconcile-"],
         gate=1,
     ),

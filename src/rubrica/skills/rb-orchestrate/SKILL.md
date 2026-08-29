@@ -231,6 +231,7 @@ rb-reconcile-outcomes                        → validate --stage reconcile-outc
 rb-reconcile-entities                        → validate --stage reconcile-entities → check-refs
 rb-reconcile-goals                           → validate --stage reconcile-goals → check-refs
 rb-reconcile-gaps                            → validate --stage reconcile-gaps → check-refs
+rb-reconcile-services                        → validate --stage reconcile-services → check-refs
 rubrica reconcile-seal --run <run>            # code: assembles the partials into the world model
                                              → validate --stage reconcile-seal → check-refs
 if any gap blocks a stage still to come      → HALT, report the gap, request the missing artifact
@@ -504,7 +505,8 @@ contradiction detection still sees every input at once.
 Dispatch `rb-reconcile-subjects`, then fan out `rb-reconcile-contradict` with
 one `subject_id` per subject in `01-subjects.json`, then
 `rb-reconcile-capabilities`, `rb-reconcile-outcomes`,
-`rb-reconcile-entities`, `rb-reconcile-goals` and `rb-reconcile-gaps`, each a
+`rb-reconcile-entities`, `rb-reconcile-goals`, `rb-reconcile-gaps` and
+`rb-reconcile-services`, each a
 single dispatch in that order. Gate each with
 `rubrica validate --stage <the pass's stage name> --run <run>` and then
 `rubrica check-refs --run <run>`, and `record-stage` each one -- the entry is

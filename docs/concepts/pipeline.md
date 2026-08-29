@@ -39,7 +39,8 @@ contract, not a diagram convention.
 | `01f` | `reconcile-entities` | `rb-reconcile-entities` | `01d`'s reads, plus `01-capabilities.json` — **not** `01-outcomes.json` | `01-entities.json` | validate · check-refs |
 | `01g` | `reconcile-goals` | `rb-reconcile-goals` | `01d`'s reads, plus `01-capabilities.json` and `01-entities.json` | `01-goals.json` | validate · check-refs |
 | `01h` | `reconcile-gaps` | `rb-reconcile-gaps` | the manifest, every claims file, and every partial above | `01-gaps.json` | validate · check-refs |
-| `01i` | `reconcile-seal` | code — `rubrica reconcile-seal` | the manifest, the five singleton partials, and every `01-contradictions/*.json` — **not** `01-subjects.json` | `01-world-model.json` | validate · check-refs · human gate 1 |
+| `01i` | `reconcile-services` | `rb-reconcile-services` — barrier | the manifest, every claims file, `01-contradictions/` | `01-services.json` | validate · check-refs |
+| `01j` | `reconcile-seal` | code — `rubrica reconcile-seal` | the manifest, the five singleton partials, and every `01-contradictions/*.json` — **not** `01-subjects.json` | `01-world-model.json` | validate · check-refs · human gate 1 |
 | `02a` | `propose-batches` | code — `rubrica propose-batches`, partitions this round's closable holes | `manifest.json`, `01-world-model.json`, `03-coverage/latest.json` | `02-batches/round-N.json`, or **nothing at all** when no hole is closable | validate |
 | `02b` | `propose` | `rb-propose` — fan-out, one per batch | `manifest.json`, `01-world-model.json`, `02-batches/round-N.json`, `03-coverage/latest.json` — never `02-scenarios.json` | `02-scenarios/round-N/<batch-id>.json` | validate |
 | `02c` | `propose-seal` | code — `rubrica propose-seal`, assembles the parts | every `02-scenarios/round-N/<batch-id>.json`, every `03-score/round-N.json` for its rulings, `01-world-model.json` | `02-scenarios.json` | validate |
@@ -64,7 +65,7 @@ corpus, no catalogue, no triage record, no slices, and no gate 0.
 
 ### Reconcile is one logical step, engineered as substeps
 
-Rows `01b` through `01i` are one job: merge every extractor's claims into one
+Rows `01b` through `01j` are one job: merge every extractor's claims into one
 world model. It was one stage and one dispatch, and it was split because that
 dispatch had to hold every claim in view, plan an eight-collection merge, and
 only then write its first byte — the shape most exposed to a gateway that
@@ -184,6 +185,7 @@ artifacts.
 | `rb-reconcile-entities` | Models what the declared capabilities return, with `machine:` invariants only where a statement fits one of the four implemented forms and `prose:` everywhere else — a `machine:` invariant promoted from an inference fails every seed that is actually correct. |
 | `rb-reconcile-goals` | Names the actors and enumerates their goals: half the frozen denominator. A later stage may only *request* an amendment, so a goal left out costs an explicit decision and a `denominator_version` bump to put back. |
 | `rb-reconcile-gaps` | Records what no input says and reasoning cannot supply, naming honestly every stage each gap `blocks` — and audits every partial above it for what was modelled without evidence, which no gate can check because support is semantic. |
+| `rb-reconcile-services` | Groups the tools the target declares into the services one simulator each would stand in for, citing what makes two tools one backend — and records *signals* about whether a tool reaches outside the process, never a containment verdict, because a tool that looks self-contained but holds a hidden call passes in the lab and fails in production. Splits when unsure: a wrong split is two simulators a human can merge at gate 1, a wrong merge is one database two tools silently disagree about. |
 | `rb-propose` | One member per batch. Takes its own batch's `hole_refs` as its whole worklist and writes a scenario for each hole it can close, into a bounded part of its own — never the accumulating scenario list, and never a sibling's holes. |
 | `rb-score` | Folds the scenario pairs that are one test, promotes the rest, justifies every uncovered row with a hole, and rules the verdict. It reasons about both coverage matrices without transcribing them: the arithmetic was never judgment, and `score-seal` computes it. |
 | `rb-instantiate` | Builds one scenario's seed world — **distractors first**, so no agent can pass by reading back the only matching record — then derives the oracle from that seed rather than the other way round, and records which near-misses exist so a reviewer can judge fairness. |

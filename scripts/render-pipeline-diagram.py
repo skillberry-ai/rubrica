@@ -213,6 +213,15 @@ ROWS: list[dict] = [
     dict(
         kind="stage",
         dir="01i",
+        name="reconcile-services",
+        runs="rb-reconcile-services",
+        art=["01-services.json"],
+        gates=["validate", "check-refs"],
+        note="the tools, grouped into the services a simulator would stand in for",
+    ),
+    dict(
+        kind="stage",
+        dir="01j",
         name="reconcile-seal",
         runs="code · assembles the partials",
         art=["01-world-model.json"],

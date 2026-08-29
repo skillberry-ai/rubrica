@@ -231,7 +231,7 @@ def _stage_evidence(run: RunPaths) -> dict[str, tuple[Path, ...]]:
     test_stage_spine_covers_every_declared_stage_in_order asserts against STAGES
     rather than against this mapping.
 
-    Every path here comes from a `RunPaths` property, the six reconcile partials
+    Every path here comes from a `RunPaths` property, every reconcile partial
     included, rather than being joined from a filename in this table: `paths.py`
     is the one home for every artifact path in this repo, so a rename there
     cannot leave a stale spelling behind here.
@@ -252,6 +252,7 @@ def _stage_evidence(run: RunPaths) -> dict[str, tuple[Path, ...]]:
         "reconcile-entities": (run.entities_part,),
         "reconcile-goals": (run.goals_part,),
         "reconcile-gaps": (run.gaps_part,),
+        "reconcile-services": (run.services_part,),
         "reconcile-seal": (run.world_model,),
         "propose-batches": (run.batches_dir,),
         "propose": (run.scenario_parts_dir,),

@@ -38,6 +38,7 @@ def test_stages_are_in_pipeline_order():
         "reconcile-entities",
         "reconcile-goals",
         "reconcile-gaps",
+        "reconcile-services",
         "reconcile-seal",
         "propose-batches",
         "propose",

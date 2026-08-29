@@ -102,10 +102,13 @@ def _readable_targets(run: RunPaths) -> list[Path]:
     The gaps partial is listed although no layer-2 check reads it, so this is
     slightly wider than its first line: it is an input to reconcile-seal, and
     listing it names a truncated one at check-refs time instead of leaving it to
-    the seal's own dispatch. The entities and goals partials are read as well as
-    listed -- check_input_dispositions recomputes each pass's accounting out of
-    them. Being named here is not the only guard, and measurably not: the seal
-    refuses a broken partial itself, exit 1 with the artifact named. And
+    the seal's own dispatch. The services partial is listed for a *different*
+    reason of the same shape: the seal does not read it at all, so nothing below
+    it would name a truncated one, and check_input_dispositions is the only
+    layer-2 reader it has. The entities, goals and services partials are read as
+    well as listed -- check_input_dispositions recomputes each pass's accounting
+    out of them. Being named here is not the only guard, and measurably not: the
+    seal refuses a broken partial itself, exit 1 with the artifact named. And
     check_readable covers only JSON that will not parse, so a partial that parses
     to a non-object passes here; layer 1 and the seal each reject that shape by
     name. tests/unit/test_refs_reconcile_parts.py breaks each of the partials in
@@ -121,6 +124,7 @@ def _readable_targets(run: RunPaths) -> list[Path]:
         run.entities_part,
         run.goals_part,
         run.gaps_part,
+        run.services_part,
     ]
     targets.append(run.world_model)
     # The loop's per-round documents, in the order one round writes them:
@@ -221,7 +225,7 @@ def _claims_by_artifact(run: RunPaths) -> dict[str, list[dict]]:
 def _claim_refs_in(node: Any) -> list[str]:
     """Every id in every `claims` array anywhere in a document.
 
-    A walk rather than a per-part list of paths: the four reconcile partials nest
+    A walk rather than a per-part list of paths: the reconcile partials each nest
     their citations differently -- an entity carries them on itself and on each
     invariant, the outcomes part two levels down inside an `outcomes` record --
     and a path list would need revising by whoever nests a new element, which is
@@ -1944,25 +1948,30 @@ def check_world_model(run: RunPaths) -> list[Finding]:
     return out
 
 
-# Which claim kinds each reconcile pass is accountable for. Six of the seven
-# kinds in claims-0.1.json partition onto the four passes below; `tool` is owned
-# by reconcile-services, which is added to this table in the same commit that
-# adds the pass. Nothing compares this table to the schema's enum, deliberately:
-# a pass's own-kind number is well defined whether or not every kind has an
-# owner, and a checker that demanded total coverage would have to invent an owner
-# for `tool` before the pass that reads it exists. `tool` is named here so the
-# gap is a recorded pending entry rather than an omission a later reader has to
-# work out. Owning one kind each is what makes a per-pass number possible at all:
-# measured on run-20260823-112746, per-kind citation ran capability 110/135 (the
-# pass that read 23/23 files) and goal 2/38 (the pass that read 3/23), while the
-# run's one aggregate utilisation figure was 33.6% -- the average that hid both.
-# reconcile-gaps owns no kind, and reconcile-subjects and reconcile-contradict
-# need no accounting because check_subjects already makes the cover total.
+# Which claim kinds each reconcile pass is accountable for. Every kind in
+# claims-0.1.json's enum now has an owner among the passes below -- `tool` was
+# the one that did not, and reconcile-services took it in the commit that added
+# the pass -- so the partition is whole rather than pending. Nothing compares
+# this table to the schema's enum, deliberately: a pass's own-kind number is well
+# defined whether or not every kind has an owner, so a checker demanding total
+# coverage would have had to invent an owner for a kind whose pass did not exist
+# yet, and would demand one again of the next kind added ahead of its pass.
+#
+# What makes a per-pass number possible is the *partition* -- no kind having two
+# owners -- and not one kind per pass: entities_part owns two and goals_part owns
+# two, and both numbers are still per-pass because no other pass is accountable
+# for those kinds. Measured on run-20260823-112746, per-kind citation ran
+# capability 110/135 (the pass that read 23/23 files) and goal 2/38 (the pass
+# that read 3/23), while the run's one aggregate utilisation figure was 33.6% --
+# the average that hid both. reconcile-gaps owns no kind, and reconcile-subjects
+# and reconcile-contradict need no accounting because check_subjects already
+# makes the cover total.
 PASS_OWN_KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("capabilities_part", ("capability",)),
     ("entities_part", ("entity", "invariant")),
     ("outcomes_part", ("outcome_class",)),
     ("goals_part", ("actor", "goal")),
+    ("services_part", ("tool",)),
 )
 
 

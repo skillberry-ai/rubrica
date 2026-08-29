@@ -922,8 +922,9 @@ def _gate_1(run: RunPaths) -> str:
         if not rows:
             # Named rather than skipped. A bare `continue` dropped the pass out
             # of the block entirely, and the "nothing to report" line below only
-            # fires when *all four* are absent -- so three passes rendering and
-            # one omitted read as a complete brief, with the omission being the
+            # fires when *every* owning pass is absent -- so all but one pass
+            # rendering and one omitted read as a complete brief, with the
+            # omission being the
             # anomaly a reader is here to notice. `is_file` separates the two
             # cases a reader would act on differently: a partial that has not
             # been written yet is a run that stopped, and one that is there

@@ -332,13 +332,19 @@ def test_an_unreadable_sibling_schema_reached_only_via_the_registry_glob(tmp_pat
         locked.chmod(0o644)
 
 
-# The four reconcile partials whose pass owns a claim kind, and so must account
-# for every input the manifest names. A literal tuple for the same reason
-# PART_KINDS above is one: a set computed from ARTIFACT_SCHEMAS could not notice
-# one of these ceasing to exist. gaps-part is deliberately absent --
+# The reconcile partials whose pass owns a claim kind, and so must account for
+# every input the manifest names. A literal tuple for the same reason PART_KINDS
+# above is one: a set computed from ARTIFACT_SCHEMAS could not notice one of
+# these ceasing to exist. gaps-part is deliberately absent --
 # rb-reconcile-gaps owns no claim kind, and a gap asserts what no input
 # contains, so no output shape can force its read coverage.
-_INPUTS_SEEN_PARTS = ("capabilities-part", "entities-part", "outcomes-part", "goals-part")
+_INPUTS_SEEN_PARTS = (
+    "capabilities-part",
+    "entities-part",
+    "outcomes-part",
+    "goals-part",
+    "services-part",
+)
 
 # Part kind -> the key split_world_model files that partial under.
 _PART_FIXTURE_KEYS = {
@@ -346,6 +352,7 @@ _PART_FIXTURE_KEYS = {
     "entities-part": "entities",
     "outcomes-part": "outcomes",
     "goals-part": "goals",
+    "services-part": "services",
 }
 
 
@@ -361,7 +368,7 @@ def _minimal_part(kind):
 
 @pytest.mark.parametrize("kind", _INPUTS_SEEN_PARTS)
 def test_a_partial_without_inputs_seen_is_rejected(tmp_path, kind):
-    """The four passes that own a claim kind must account for every input.
+    """Every pass that owns a claim kind must account for every input.
 
     Issue #6: read coverage of 01-claims/ varied 3/23 to 23/23 across
     byte-identical dispatches, and nothing in either check layer could see the
