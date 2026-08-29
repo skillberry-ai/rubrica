@@ -289,6 +289,31 @@ class RunPaths:
         return self.root / "01-gaps.json"
 
     @property
+    def services_part(self) -> Path:
+        """The tools the target declares, grouped into services.
+
+        In the 01 band for the reason every other partial is: the numbering stays
+        intake's, and everything between 01-claims/ and 01-world-model.json is one
+        logical step engineered as substeps.
+        """
+        return self.root / "01-services.json"
+
+    @property
+    def interfaces_dir(self) -> Path:
+        return self.root / "01-interfaces"
+
+    def interface(self, service_id: str) -> Path:
+        """One service's synthesised OpenAPI document.
+
+        Derivable from the service id rather than recorded as a path field on the
+        service, so there is nothing to drift out of agreement with the directory.
+        Through safe_segment because a service id comes out of a prompt: callers
+        that must report a bad one as a finding rather than abort ask
+        is_safe_segment first -- see interfaces.synthesise.
+        """
+        return self.interfaces_dir / f"{safe_segment(service_id)}.json"
+
+    @property
     def world_model(self) -> Path:
         return self.root / "01-world-model.json"
 

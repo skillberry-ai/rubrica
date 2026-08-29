@@ -69,6 +69,15 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "entities-part": "entities-part-0.1.json",
     "goals-part": "goals-part-0.1.json",
     "gaps-part": "gaps-part-0.1.json",
+    # The tool-interface kinds. Registered here and deliberately absent from
+    # STAGE_ARTIFACTS: no stage in paths.STAGES produces either one yet, so a
+    # stage entry would name a stage validate_stage's UnknownStage exists to
+    # reject and would put an undocumented kind in front of
+    # test_docs_accuracy's per-kind check, which reads STAGE_ARTIFACTS. Both
+    # shapes are reviewable before any stage depends on them, which is the
+    # point of landing them without a producer.
+    "services-part": "services-part-0.1.json",
+    "interface": "interface-0.1.json",
     # inputs-seen-0.1.json is deliberately absent from this map, and is the only
     # schema in the package that is not an artifact kind. It holds one $defs/row
     # that the four reconcile partials $ref, and no stage produces a document of

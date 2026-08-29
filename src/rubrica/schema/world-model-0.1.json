@@ -26,6 +26,7 @@
     "goals": { "type": "array", "items": { "$ref": "#/$defs/goal" } },
     "contradictions": { "type": "array", "items": { "$ref": "#/$defs/contradiction" } },
     "gaps": { "type": "array", "items": { "$ref": "#/$defs/gap" } },
+    "services": { "type": "array", "items": { "$ref": "#/$defs/service" } },
     "denominator": {
       "type": "object",
       "required": ["version", "capability_cells", "goals"],
@@ -286,6 +287,73 @@
         },
         "suggested_input": { "type": "string" },
         "claims": { "$ref": "#/$defs/claim_refs" }
+      }
+    },
+    "signal": {
+      "type": "object",
+      "required": ["kind", "locator"],
+      "additionalProperties": false,
+      "description": "One piece of evidence about whether a service's tools reach outside the process. Never a verdict: no `contained` boolean is computed anywhere, because a tool that looks self-contained but holds a hidden call produces a suite that passes in the lab and fails in production -- so uncertainty must not read as contained. `no_outward_evidence_found` is absence of evidence, and its locator names what was read rather than where something was seen.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "remote_mcp_server_configured",
+            "http_client_constructed",
+            "credential_or_base_url_read",
+            "network_dependency_imported",
+            "no_outward_evidence_found"
+          ]
+        },
+        "locator": { "type": "string", "minLength": 1 },
+        "artifact_id": { "$ref": "#/$defs/id" }
+      }
+    },
+    "service_tool": {
+      "type": "object",
+      "required": ["name", "claims", "schema_claim"],
+      "additionalProperties": false,
+      "description": "One tool the agent registers. `claims` may hold more than one id -- a tool declared in a tool-schema document and observed again in a trace is two pieces of evidence for one operation, not two operations. `schema_claim` names the one whose payload becomes the operation's request body, because synthesis is deterministic and a rule for picking a winner would bury a judgment in code.",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "claims": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "schema_claim": { "$ref": "#/$defs/id" },
+        "schema_disagreement": { "type": "string", "minLength": 1 }
+      }
+    },
+    "service": {
+      "type": "object",
+      "required": ["id", "statement", "tools", "signals"],
+      "additionalProperties": false,
+      "description": "The backend one simulator would stand in for. The unit is the service and not the tool because the harness generates one simulation per specification: tools split across two services get disjoint databases, so an entity created through one is invisible to the other.",
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "statement": { "type": "string", "minLength": 1 },
+        "grouping_evidence": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "shared_base_url",
+              "shared_client_construction",
+              "shared_credential",
+              "shared_mcp_server_entry",
+              "sole_service_in_run"
+            ]
+          }
+        },
+        "tools": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/service_tool" }
+        },
+        "signals": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/signal" }
+        }
       }
     }
   }
