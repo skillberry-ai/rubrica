@@ -258,7 +258,10 @@ Fields worth knowing: `claims[].kind` (`capability`, `entity`, `invariant`,
 `actor`, `goal`, `outcome_class`, or `tool`); `claims[].derivation` (`stated`,
 `inferred`, or `reverse_engineered` — a claim's honesty grade, carried forward
 into the world model); `claims[].evidence[].locator` (required on every claim,
-so a claim with no way to find where it came from cannot exist).
+so a claim with no way to find where it came from cannot exist); and
+`claims[].payload` (optional, and free-form by design — on a `tool` claim it
+carries that tool's input schema verbatim, with `evidence[0].locator` the JSON
+pointer it was copied from).
 
 ## The reconcile partials
 

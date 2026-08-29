@@ -113,6 +113,13 @@ Each entry in `claims` is an object with `id`, `kind`, `statement`,
 schema; do not drop one for a particular claim because it seems unimportant
 there -- an incomplete claim is a validation failure, not a smaller claim.
 
+One further field, `payload`, the schema leaves optional. Omit it rather than
+writing `null` wherever you have nothing structured to record. The exception
+is a `tool` claim, which is where the tool's input schema goes: such a claim
+validates without a `payload` and is still incomplete, so the schema is not
+what holds you to it. Step 3 of the method states exactly what belongs there
+and in what form.
+
 ## 3. Method
 
 1. **Find your entry, then read your file.** In `manifest.json`, find the
@@ -122,11 +129,11 @@ there -- an incomplete claim is a validation failure, not a smaller claim.
 
 2. **Enumerate, one claim per statement.** Go through the artifact and list
    every statement it makes about the target -- every capability it
-   exposes, every entity it describes, every invariant, actor, goal, or
-   outcome class it names or implies. A claim is the atom of this stage:
-   there is no such thing as a bare assertion floating outside a claim, and
-   no claim bundling two statements together just because they shared a
-   sentence.
+   exposes, every entity it describes, every tool it declares, every
+   invariant, actor, goal, or outcome class it names or implies. A claim is
+   the atom of this stage: there is no such thing as a bare assertion
+   floating outside a claim, and no claim bundling two statements together
+   just because they shared a sentence.
 
 3. **Classify and locate.** For each claim, choose its `kind` from the
    schema's closed enum -- `capability`, `entity`, `invariant`, `actor`,

@@ -59,7 +59,7 @@ SIDS: tuple[str, ...] = ("scn-open", "scn-empty", "scn-blocked", "scn-missing")
 
 
 def _claim(
-    cid, kind, statement, artifact_id, locator, confidence, derivation, quote=None, payload=None
+    cid, kind, statement, artifact_id, locator, confidence, derivation, *, quote=None, payload=None
 ):
     evidence: dict[str, Any] = {"artifact_id": artifact_id, "locator": locator}
     if quote is not None:

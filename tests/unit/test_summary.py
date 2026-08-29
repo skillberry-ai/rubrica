@@ -3698,7 +3698,9 @@ def _run_with_every_flag(tmp_path, monkeypatch) -> RunPaths:
 
     run = build_toy_run(tmp_path / "runs", upto="challenge")
     # low-utilisation and uncited-artifacts: one claims artifact nothing cites
-    # drops the pct off 100.0 and gives the uncited list a member.
+    # drops the pct off the fixture's own 95.0 and gives the uncited list a
+    # member. The threshold is patched to 100.0 below, which is above the pct
+    # either way -- what this arranges is the uncited list, not the crossing.
     write_json(run.claims_dir / "stray-md.json", _stray_claims_doc())
     monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 100.0)
     write_json(
@@ -4121,10 +4123,13 @@ def test_render_reports_the_utilisation_percentage_and_both_columns(tmp_path):
     assert f"{got.cited} of {got.total} claims cited" in html
     assert f"{got.pct:.1f}%" in html
     for row in got.per_artifact:
-        # Three cells as one string, not the `cited` cell alone: `cited == total` on
-        # this fixture (9/9, 8/8, 2/2), so the adjacent `total` column satisfied a
-        # lone `cited` assertion -- measured green with the cited cell mutated to
-        # `_val(-1)`. The same adjacent-identical-column trap
+        # Three cells as one string, not the `cited` cell alone: `cited == total`
+        # for two of this fixture's three rows (notes-md 8/8, trace-json 2/2), so
+        # the adjacent `total` column satisfied a lone `cited` assertion --
+        # measured green with the cited cell mutated to `_val(-1)`. api-json is
+        # 9/10 since the `tool` claim nothing cites yet, so it alone would now
+        # catch that; the other two still would not, which is why the three-cell
+        # form stays. The same adjacent-identical-column trap
         # test_render_names_every_round_with_its_verdict_and_cells already records.
         assert (
             f'<td class="mono">{row["artifact_id"]}</td>'
