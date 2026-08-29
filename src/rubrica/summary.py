@@ -253,6 +253,7 @@ def _stage_evidence(run: RunPaths) -> dict[str, tuple[Path, ...]]:
         "reconcile-goals": (run.goals_part,),
         "reconcile-gaps": (run.gaps_part,),
         "reconcile-services": (run.services_part,),
+        "synthesise-interfaces": (run.interfaces_dir,),
         "reconcile-seal": (run.world_model,),
         "propose-batches": (run.batches_dir,),
         "propose": (run.scenario_parts_dir,),
@@ -1311,7 +1312,7 @@ def scenarios(run: RunPaths) -> list[ScenarioRow] | Marker:
 #
 # Measured, not assumed: `set(STAGES) - {every skill's declared stage}` is
 # exactly {intake, propose-batches, propose-seal, reconcile-seal, score-seal,
-# smoke, survey, triage-seal, triage-slices}.
+# smoke, survey, synthesise-interfaces, triage-seal, triage-slices}.
 # Note `emit` is NOT in it -- rb-emit is a thin wrapper over `rubrica emit`, so
 # emit does get a manifest.stages entry and must stay accusable. Hardcoding the
 # set here got that wrong once;
@@ -1332,6 +1333,7 @@ _CODE_STAGES = frozenset(
         "score-seal",
         "smoke",
         "survey",
+        "synthesise-interfaces",
         "triage-seal",
         "triage-slices",
     }

@@ -222,6 +222,15 @@ ROWS: list[dict] = [
     dict(
         kind="stage",
         dir="01j",
+        name="synthesise-interfaces",
+        runs="code · derives one document per service",
+        art=["01-interfaces/<service>.json"],
+        gates=["validate", "check-refs"],
+        note="operationId is the agent's own tool name; the request body is its input schema",
+    ),
+    dict(
+        kind="stage",
+        dir="01k",
         name="reconcile-seal",
         runs="code · assembles the partials",
         art=["01-world-model.json"],

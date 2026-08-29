@@ -46,6 +46,7 @@ _INTAKE_THROUGH_CHALLENGE = {
     "reconcile-goals",
     "reconcile-gaps",
     "reconcile-services",
+    "synthesise-interfaces",
     "reconcile-seal",
     "propose-batches",
     "propose",

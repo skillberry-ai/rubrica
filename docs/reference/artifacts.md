@@ -227,7 +227,9 @@ between `extract` and `emit`, plus `triage` — which is recorded **after** gate
 merge into until `intake --run` writes one
 ([`docs/guides/running-a-stage-by-hand.md`](../guides/running-a-stage-by-hand.md)
 §4 has the command). `intake`, `smoke`, `survey`, `triage-slices`,
-`triage-seal`, and `reconcile-seal` are code: they have no skill file for
+`triage-seal`, `synthesise-interfaces`, `reconcile-seal`, `propose-batches`,
+`propose-seal` and `score-seal` — `skills.CODE_ONLY_STAGES`, in full — are code:
+they have no skill file for
 `record-stage` to hash, so they never appear there, and their absence is not a
 finding. The schema's `propertyNames` enum permits exactly `paths.STAGES` —
 `tests/unit/test_manifest_stages.py` holds the two equal, in order — so it
@@ -277,6 +279,12 @@ an interface document of its own under `01-interfaces/`, not a field of the
 sealed model, so the seal has nothing to fold in. Each pass is a stage in
 `paths.STAGES`, so `rubrica validate --stage reconcile-<pass>` gates exactly one
 of these kinds.
+
+One entry below is **not** a partial and not a pass: `interface`. It is derived
+from `01-services.json` by `synthesise-interfaces`, which merges no claims into
+anything, and it is gated as `rubrica validate --stage synthesise-interfaces`. It
+is documented here because it is written in the same band and read at the same
+gate, not because it shares the shape of the entries around it.
 
 Every one of these schemas resolves its element definitions against
 `world-model-0.1.json#/$defs/...` through `validate._schema_registry`, rather
@@ -545,6 +553,41 @@ and a code rule for picking a winner would bury the judgment, with
 `schema_disagreement` recording what the losing claim said);
 `inputs_seen[].own_kind_total` (how many `tool`-kind claims the named input holds
 — the one kind this pass is accountable for).
+
+## `interface`
+
+- **Schema:** `src/rubrica/schema/interface-0.1.json`
+- **Written by:** `synthesise-interfaces` (code), via `rubrica
+  synthesise-interfaces`, from `01-services.json` and the claim payload each
+  tool's `schema_claim` names
+- **Read by:** `gate-brief` at gate 1; `check-refs`
+- **Path:** `01-interfaces/<service_id>.json`, one per service — derivable from
+  the service id, so there is no path field anywhere to drift out of agreement
+  with the directory
+
+One service's OpenAPI document, synthesised backwards from the tool contract the
+agent under test already has: `operationId` is the tool's own name and the request
+body is that tool's input schema, copied from the claim payload rather than derived
+from it. Method `post` and path `/<tool name>` are fixed carriers, because only
+`operationId` is contractually significant — it is what a simulator turns back into
+a tool name — so the other two are chosen to be stable rather than pretty.
+
+Not folded into the world model, and that is a ruling rather than a convenience: an
+inlined document would bloat an artifact whose byte-identity is load-bearing, and
+the harness this feeds consumes a file.
+
+The schema pins the carrier convention and the provenance, and is **not** an
+OpenAPI validator — whether a document is acceptable is the harness's test, not
+ours. `responses` is deliberately not required: inferring one needs observed tool
+results, which is a later step, and a request-only document is what a tool-style
+spec that declares no `components.schemas` looks like on purpose.
+
+Fields worth knowing: `paths` (one entry per tool, keyed `/<tool name>`, whose
+`operationId` set must equal the service's tool names byte for byte — contract
+preservation made mechanical); `x-rubrica.service_id` and `x-rubrica.tools` (the
+provenance, carried inside the document because the document is what a human reads
+at gate 1 and what a later step hands the harness, under an `x-` key so it stays a
+legal OpenAPI extension).
 
 ## `world-model`
 

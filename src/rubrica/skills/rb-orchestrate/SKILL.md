@@ -33,6 +33,7 @@ reads = [
 writes = ["decisions"]
 invokes = [
   "check-skills", "validate", "check-refs", "record-stage", "decide",
+  "synthesise-interfaces", "reconcile-seal",
   "propose-batches", "propose-seal", "score-seal", "dedupe-candidates",
   "emit", "smoke", "claim-utilisation",
 ]
@@ -232,6 +233,8 @@ rb-reconcile-entities                        → validate --stage reconcile-enti
 rb-reconcile-goals                           → validate --stage reconcile-goals → check-refs
 rb-reconcile-gaps                            → validate --stage reconcile-gaps → check-refs
 rb-reconcile-services                        → validate --stage reconcile-services → check-refs
+rubrica synthesise-interfaces --run <run>     # code: one OpenAPI document per service
+                                             → validate --stage synthesise-interfaces → check-refs
 rubrica reconcile-seal --run <run>            # code: assembles the partials into the world model
                                              → validate --stage reconcile-seal → check-refs
 if any gap blocks a stage still to come      → HALT, report the gap, request the missing artifact
@@ -429,9 +432,10 @@ survived, and its skill is what should be on file.
 The stages implemented in code have no skill to hash, and
 `skills.CODE_ONLY_STAGES` is the one list of them: `intake`, which mints the run
 id and the timestamps no skill may invent; `survey`, which walks a corpus before
-you are ever dispatched; `reconcile-seal`, which you run yourself as `rubrica
-reconcile-seal` at B3; and `smoke`, which executes the suite. There is no
-`rb-intake`, `rb-survey`, `rb-reconcile-seal` or `rb-smoke`, so nothing is
+you are ever dispatched; `synthesise-interfaces` and `reconcile-seal`, which you
+run yourself as `rubrica synthesise-interfaces` and `rubrica reconcile-seal` at
+B3; and `smoke`, which executes the suite. There is no `rb-intake`, `rb-survey`,
+`rb-synthesise-interfaces`, `rb-reconcile-seal` or `rb-smoke`, so nothing is
 recorded for any of them, and that absence is the design rather than a stage you
 forgot. Do not reach for `record-stage` after the seal: it would need a skill
 file that does not exist, and `--skill` pointed at anything else records a digest
@@ -539,7 +543,24 @@ every one of those findings is about a member still in flight.
 `validate --stage reconcile-contradict` is safe at any point, because it only
 judges the parts that are already there.
 
-Then run the seal, which is code, not a dispatch:
+Then derive the tool interfaces, which is code and not a dispatch:
+`rubrica synthesise-interfaces --run <run>`. It writes one OpenAPI document per
+service in `01-services.json` under `01-interfaces/`, and prints each path it
+wrote. Gate it with `rubrica validate --stage synthesise-interfaces --run <run>`,
+then `rubrica check-refs --run <run>`. Record nothing for it: it has no skill, so
+there is no digest to hash -- see A5.
+
+**Its two exit codes mean different things, and this is the one command where
+mistaking them costs the run's repair attempt on nothing.** A `1` names something
+`rb-reconcile-services` wrote -- a service id that is not usable as a filename, a
+tool name the simulator would rewrite, a `schema_claim` no claim carries a payload
+for -- so spend the repair on *that pass*, with the findings appended verbatim,
+never on the synthesis. A `2` is the filesystem: `01-interfaces/` cannot be
+written, or the run directory cannot be read. No re-dispatch of any prompt fixes
+that, so it consumes no repair attempt and it is not a stage defect -- report it
+and halt, exactly as B0's rule says.
+
+Then run the seal, which is also code, not a dispatch:
 `rubrica reconcile-seal --run <run>`. It assembles the partials into
 `01-world-model.json`, folds each capability's outcome classes in, and counts
 the denominator once. It reads the manifest, the five singleton partials and
@@ -871,8 +892,8 @@ points at:
 4. **Every stage you dispatched has a `manifest.stages` entry** with its
    model, its effort, and the `skill_sha256` of the file it ran. The stages in
    `skills.CODE_ONLY_STAGES` are not among them and are not recorded: you
-   dispatch no subagent for `intake`, `survey`, `reconcile-seal` or `smoke`,
-   because none of the four has a skill.
+   dispatch no subagent for `intake`, `survey`, `synthesise-interfaces`,
+   `reconcile-seal` or `smoke`, because none of them has a skill.
 
 5. **Every branch is in `decisions.md`**, appended through `rubrica decide`,
    one line each, with the timestamp minted by `decide`.

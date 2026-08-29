@@ -126,6 +126,11 @@ def _readable_targets(run: RunPaths) -> list[Path]:
         run.gaps_part,
         run.services_part,
     ]
+    # The synthesised documents, after the part they are derived from: a truncated
+    # one is named here rather than left to whichever later reader hands it to the
+    # harness. Iterated, because there is one per service and none at all in a run
+    # whose target declares no tools.
+    targets += list_json(run.interfaces_dir)
     targets.append(run.world_model)
     # The loop's per-round documents, in the order one round writes them:
     # propose-batches' plan, every propose part, the sealed scenario list the
@@ -2027,9 +2032,12 @@ def check_input_dispositions(run: RunPaths) -> list[Finding]:
             # then existed. For `01-entities.json`, `01-goals.json` and
             # `01-services.json` this is the *only* layer-2 reader, so nothing
             # older raised first and the guard closes the whole instance for them
-            # rather than moving it -- and `01-services.json` is the deepest of the
-            # three, since reconcile-seal does not read it either, so no later
-            # dispatch would refuse it the way the seal refuses the other two.
+            # rather than moving it -- and `01-services.json` was the deepest of
+            # the three when the guard was written, since reconcile-seal does not
+            # read it either. `synthesise-interfaces` now does, and refuses a
+            # non-dict one by name (interfaces.synthesise), so a broken services
+            # part is caught below this as well as here; the guard stays because
+            # this checker still runs first and must not raise past it.
             # `01-capabilities.json` and `01-outcomes.json` still raise out of
             # `check_outcomes`, which runs earlier in check_all and is not this
             # branch's read. A non-dict document is the same class as an

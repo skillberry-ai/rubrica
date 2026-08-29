@@ -23,7 +23,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from rubrica import rounds
+from rubrica import interfaces, rounds
 from rubrica.artifacts import read_json, sha256_of, write_json
 from rubrica.intake import classify, intake
 from rubrica.paths import RunPaths
@@ -1479,7 +1479,7 @@ _UPTO_STAGES: tuple[str, ...] = (
     *_TRIAGE_UPTO_STAGES,
     "intake",
     "extract",
-    # Three checkpoints for the reconcile family rather than one per pass.
+    # Four checkpoints for the 01 band rather than one per pass.
     # "reconcile-gaps" is every partial the seal reads written with no world model
     # yet -- the state the seal and the layer-2 part checkers are tested against.
     # "reconcile-services" adds the services partial, so it is every partial
@@ -1487,13 +1487,17 @@ _UPTO_STAGES: tuple[str, ...] = (
     # 01-services.json alone are tested against; it is a checkpoint of its own
     # rather than folded into the one above because the seal must stay testable
     # against a run in which 01-services.json does not exist -- the seal does not
-    # read it, and a fixture that always wrote it could not show that. And
-    # "reconcile-seal" is the assembled world model every later stage reads. The
-    # intermediate states between the other passes have no consumer, and a
+    # read it, and a fixture that always wrote it could not show that.
+    # "synthesise-interfaces" adds the derived documents, which is the state every
+    # check over 01-interfaces/ is tested against -- and it is what makes the
+    # checkpoint above the run in which the part exists and the documents do not.
+    # And "reconcile-seal" is the assembled world model every later stage reads.
+    # The intermediate states between the other passes have no consumer, and a
     # checkpoint nobody stops at is a helper this module already has too many
     # requests for.
     "reconcile-gaps",
     "reconcile-services",
+    "synthesise-interfaces",
     "reconcile-seal",
     # Four checkpoints across the loop rather than five: "propose" is every part
     # written with nothing sealed -- the state check_scenario_parts and the
@@ -1604,6 +1608,15 @@ def build_toy_run(
         return run
 
     write_json(run.services_part, parts["services"])
+    if stop < _UPTO_INDEX["synthesise-interfaces"]:
+        return run
+
+    # Synthesised by the real code, not by writing a document here. Same reason
+    # intake and the seal are real in this builder: the artifact every later stage
+    # reads is produced by the code that produces it in a real run, so a defect in
+    # that code fails a test instead of being papered over by the fixture.
+    _, synthesis_findings = interfaces.synthesise(run)
+    assert not synthesis_findings, synthesis_findings
     if stop < _UPTO_INDEX["reconcile-seal"]:
         return run
 

@@ -40,7 +40,8 @@ contract, not a diagram convention.
 | `01g` | `reconcile-goals` | `rb-reconcile-goals` | `01d`'s reads, plus `01-capabilities.json` and `01-entities.json` | `01-goals.json` | validate · check-refs |
 | `01h` | `reconcile-gaps` | `rb-reconcile-gaps` | the manifest, every claims file, and every partial above | `01-gaps.json` | validate · check-refs |
 | `01i` | `reconcile-services` | `rb-reconcile-services` — barrier | the manifest, every claims file, `01-contradictions/` | `01-services.json` | validate · check-refs |
-| `01j` | `reconcile-seal` | code — `rubrica reconcile-seal` | the manifest, the five singleton partials, and every `01-contradictions/*.json` — **not** `01-subjects.json` | `01-world-model.json` | validate · check-refs · human gate 1 |
+| `01j` | `synthesise-interfaces` | code — `rubrica synthesise-interfaces` | `01-services.json`, and every claims file, for the payload each `schema_claim` names | `01-interfaces/<service_id>.json` | validate · check-refs |
+| `01k` | `reconcile-seal` | code — `rubrica reconcile-seal` | the manifest, the five singleton partials, and every `01-contradictions/*.json` — **not** `01-subjects.json` | `01-world-model.json` | validate · check-refs · human gate 1 |
 | `02a` | `propose-batches` | code — `rubrica propose-batches`, partitions this round's closable holes | `manifest.json`, `01-world-model.json`, `03-coverage/latest.json` | `02-batches/round-N.json`, or **nothing at all** when no hole is closable | validate |
 | `02b` | `propose` | `rb-propose` — fan-out, one per batch | `manifest.json`, `01-world-model.json`, `02-batches/round-N.json`, `03-coverage/latest.json` — never `02-scenarios.json` | `02-scenarios/round-N/<batch-id>.json` | validate |
 | `02c` | `propose-seal` | code — `rubrica propose-seal`, assembles the parts | every `02-scenarios/round-N/<batch-id>.json`, every `03-score/round-N.json` for its rulings, `01-world-model.json` | `02-scenarios.json` | validate |
@@ -65,12 +66,21 @@ corpus, no catalogue, no triage record, no slices, and no gate 0.
 
 ### Reconcile is one logical step, engineered as substeps
 
-Rows `01b` through `01j` are one job: merge every extractor's claims into one
-world model. It was one stage and one dispatch, and it was split because that
-dispatch had to hold every claim in view, plan an eight-collection merge, and
+Rows `01b` through `01i`, and `01k`, are one job: merge every extractor's claims
+into one world model. It was one stage and one dispatch, and it was split because
+that dispatch had to hold every claim in view, plan an eight-collection merge, and
 only then write its first byte — the shape most exposed to a gateway that
 closes a stream which has produced nothing for long enough, regardless of how
 long a *producing* stream is allowed to run.
+
+`01j` is the exception, and it is named rather than folded in: `synthesise-interfaces`
+merges nothing. It **derives** one OpenAPI document per service from
+`01-services.json`, reading `01-claims/` solely to resolve the input schema each
+operation carries — so the barrier property below is not its property at all, since
+its inputs were already sealed by the pass above it. It sits inside the band
+because it belongs to world-model construction and its output is read at gate 1,
+not because it shares the band's shape. A derivation left hiding inside a family
+of merge rows is the kind of quiet inaccuracy that costs two commits later.
 
 Every pass still reads all of `01-claims/`, so the barrier property is
 untouched: **the split is on output, not on claims.** A contradiction between
@@ -194,6 +204,7 @@ artifacts.
 | `rb-orchestrate` | The loop itself: dispatch each stage, validate, allow one bounded repair, hold gates 1 through 3, record each stage's model and skill hash, append every decision to the run's lab notebook. **Not a stage** — it declares no `stage` and no `schemas`. It dispatches `extract` through `emit` only: it never runs `survey`, never dispatches any pass of the triage family, and never holds gate 0. |
 
 `intake`, `smoke`, `survey`, `triage-slices`, `triage-seal`,
-`reconcile-seal`, `propose-batches`, `propose-seal`, and `score-seal` are code,
+`reconcile-seal`, `synthesise-interfaces`, `propose-batches`, `propose-seal`,
+and `score-seal` are code,
 not skills. They have no `SKILL.md` and no entry in `manifest.stages` — their
 absence there is not a defect.

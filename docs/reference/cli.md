@@ -130,7 +130,8 @@ Required: `--run RUN`, `--stage`, one of `survey`, `triage-slices`,
 `triage-objective`, `triage-rule`, `triage-audit`, `triage-seal`, `intake`,
 `extract`, `reconcile-subjects`, `reconcile-contradict`,
 `reconcile-capabilities`, `reconcile-outcomes`, `reconcile-entities`,
-`reconcile-goals`, `reconcile-gaps`, `reconcile-services`, `reconcile-seal`,
+`reconcile-goals`, `reconcile-gaps`, `reconcile-services`,
+`synthesise-interfaces`, `reconcile-seal`,
 `propose-batches`, `propose`, `propose-seal`, `score`, `score-seal`,
 `instantiate`, `challenge`, `emit`, `smoke` — `paths.STAGES`, in order.
 
@@ -165,6 +166,60 @@ Exits 0 clean, or 1 with findings.
 
 ```bash
 rubrica check-skills
+```
+
+## Deriving the tool interfaces
+
+### `rubrica synthesise-interfaces`
+
+Derives one OpenAPI document per service from `01-services.json`, writing
+`01-interfaces/<service_id>.json` and printing each path it wrote, one per line.
+
+Required: `--run RUN`, and nothing else. There is no `--service`: the documents are
+a pure function of the services part and the claims it cites, and synthesis owns
+`01-interfaces/` whole — a flag that re-derived one document would let a sibling go
+stale against the grouping it was derived from.
+
+Reads `01-services.json` and every claims file, the latter solely to resolve the
+payload each tool's `schema_claim` names. It does not read `00-inputs/`: the stage
+that reads inputs is `extract`, so a tool's input schema reaches synthesis through
+a claim or it does not reach it at all.
+
+Each document is written backwards from the contract the agent under test already
+has. `operationId` is the tool's own name, and the request body is that tool's
+input schema, copied from the claim payload rather than derived from it. Method
+`post` and path `/<tool name>` are fixed carriers: only `operationId` is
+contractually significant, so the other two are chosen to be stable rather than
+pretty. There is no `responses` — inferring one needs observed tool results, which
+is a later step, and a request-only document is what the harness's
+`inline_schema_evidence` path is for. Provenance travels inside the document under
+`x-rubrica`, because the document is what a human reads at gate 1 and what a later
+step hands the harness.
+
+Code rather than a prompt, for the reason `emit` is code: two runs with identical
+groupings must produce byte-identical documents, or a difference in an emitted lab
+stops being attributable to a stage. Every judgment it could have made was already
+made by `rb-reconcile-services` — including which claim wins when two inputs
+declare one tool with different input schemas, which is what `schema_claim` names.
+
+**It is all-or-nothing, and it owns its directory.** Every service is checked
+before any file is written, and documents left over from a superseded grouping are
+removed: a partial directory, or a stale document, makes a later check report a
+missing or extra document against a service whose only problem is a malformed
+sibling.
+
+Exits 0 clean, 1 with one finding per line on stdout, or 2 if the run directory
+cannot be read or `01-interfaces/` cannot be written. The split is deliberate. A
+missing or non-object `01-services.json`, a `services` key that is not an array, a
+service id that is not usable as a filename, a tool name the harness's
+sanitisation would rewrite, and a `schema_claim` no claim carries a payload for are
+all `1`s — each is repaired by re-dispatching `reconcile-services`, which is what a
+`1` promises the orchestrator. An unwritable `01-interfaces/` is a `2`: no
+re-dispatch of any prompt fixes a directory permission, and a `1` there would spend
+the run's one repair attempt on a stage whose output was never the problem.
+
+```bash
+rubrica synthesise-interfaces --run runs/run-20260806-123005
 ```
 
 ## Assembling the world model

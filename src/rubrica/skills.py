@@ -52,6 +52,14 @@ CODE_ONLY_STAGES: frozenset[str] = frozenset(
         "triage-slices",
         "triage-seal",
         "reconcile-seal",
+        # synthesise-interfaces is here on the seals' reasoning rather than
+        # intake's, with one difference worth stating: it assembles nothing. It
+        # *derives* one OpenAPI document per service from 01-services.json, and the
+        # derivation is a pure function of the grouping the pass above it judged --
+        # so two runs with identical groupings must produce byte-identical
+        # documents, or a difference in an emitted lab stops being attributable to
+        # a stage. Every judgment it could have made was made by rb-reconcile-services.
+        "synthesise-interfaces",
         # The propose/score loop's three code steps. propose-batches partitions a
         # round's closable holes, propose-seal assembles 02-scenarios.json from
         # every part and every ruling, and score-seal computes the matrices and

@@ -96,6 +96,12 @@ def test_the_family_is_exactly_the_stages_between_extract_and_propose_batches():
     position pins for that pass is the *documentation*: STAGES is the on-disk
     numbering and both generated drawings render it in order, so moving it silently
     would redraw the family.
+
+    `synthesise-interfaces` is in the slice and is **not** in `FAMILY`: it is code,
+    it has no skill, and it merges nothing -- it derives one OpenAPI document per
+    service from `01-services.json`. It is pinned here for the reason
+    `reconcile-services` is, one step further: its position *is* a dependency, since
+    it reads the part the pass before it writes.
     """
     assert STAGES[STAGES.index("extract") + 1 : STAGES.index("propose-batches")] == (
         "reconcile-subjects",
@@ -106,6 +112,7 @@ def test_the_family_is_exactly_the_stages_between_extract_and_propose_batches():
         "reconcile-goals",
         "reconcile-gaps",
         "reconcile-services",
+        "synthesise-interfaces",
         "reconcile-seal",
     )
 

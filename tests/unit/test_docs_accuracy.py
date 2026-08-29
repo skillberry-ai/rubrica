@@ -341,14 +341,58 @@ def test_every_readme_phase_line_accounts_for_exactly_one_stage_and_no_line_for_
     Green on the committed table, and green with `folds` deleted from every phase
     (measured: the legend entry and its whole row fall away with it, and the canvas
     returns to its one-row height).
+
+    The first half was `accounted == list(spec["stages"])` until
+    `synthesise-interfaces` landed, and that spelling asserted one thing more than
+    the property above: that every folded family occupies an *unbroken* run of its
+    phase's stages. The pipeline falsified it. `synthesise-interfaces` sits between
+    `reconcile-services` and `reconcile-seal` -- it reads the part the first writes,
+    so the slot is a dependency, not a preference -- and it is not a `reconcile-`
+    pass, so the `understand` phase's fold now spans a stage that draws its own
+    line. List equality then failed on a table that is correct, which is a
+    predicate wrong about the pipeline rather than a pipeline wrong about the
+    predicate.
+
+    So the two halves are spelled as what they always meant -- a multiset equality
+    and a no-empty-line check -- plus the ordering claim the drawing does make,
+    which list equality had been carrying implicitly: each line's own stages are in
+    pipeline order, and the lines are ordered by where each begins. Four mutations
+    measured red against this spelling, the two above and two that exist because
+    ordering is now asserted directly rather than as a side effect:
+
+    - `fold_lines`' append moved inside its `if label not in at` branch → *the
+      'select' phase draws lines accounting for ['survey', 'triage-slices'], not
+      for its stages [...]*;
+    - `folds=["deploy-"]` on the `compile` phase → *draws a 'deploy*' line that
+      accounts for no stage at all*;
+    - `return list(reversed(lines))` → *the 'select' phase draws its lines
+      ['triage*', 'survey'] in an order other than the pipeline's*;
+    - the fold's `append` changed to `insert(0, stage)` → *the 'select' phase's
+      'triage*' line draws ['triage-seal', ..., 'triage-slices'] out of pipeline
+      order*.
     """
     renderer = _readme_renderer()
     for spec in renderer.PHASES:
+        stages = list(spec["stages"])
         lines = renderer.fold_lines(spec)
-        accounted = [stage for _, stages in lines for stage in stages]
-        assert accounted == list(spec["stages"]), (
+        accounted = [stage for _, stages_of in lines for stage in stages_of]
+        assert sorted(accounted) == sorted(stages), (
             f"the {spec['verb']!r} phase draws lines accounting for {accounted}, "
-            f"not for its stages {list(spec['stages'])}"
+            f"not for its stages {stages}"
+        )
+        # Order, in the two senses the drawing claims: within a line, and between
+        # lines. `stages.index` is safe because the multiset check above has already
+        # established that every drawn stage is one of this phase's.
+        for label, stages_of in lines:
+            positions = [stages.index(stage) for stage in stages_of]
+            assert positions == sorted(positions), (
+                f"the {spec['verb']!r} phase's {label!r} line draws {stages_of} out of "
+                f"pipeline order against its stages {stages}"
+            )
+        starts = [stages.index(stages_of[0]) for _, stages_of in lines if stages_of]
+        assert starts == sorted(starts), (
+            f"the {spec['verb']!r} phase draws its lines {[label for label, _ in lines]} in "
+            f"an order other than the pipeline's against its stages {stages}"
         )
         for label, stages in lines:
             assert stages, (
@@ -397,7 +441,7 @@ def test_the_readme_diagram_fold_legend_appears_only_when_something_folds():
     changed in the merge; the property it held did not.
     """
     renderer = _readme_renderer()
-    words = "one line standing for a family of stages"
+    words = "one line standing for the stages it collapses"
     folds = bool(renderer.fold_marks())
     for theme in renderer.OUTPUTS:
         assert (words in renderer.svg(theme)) is folds, (

@@ -60,6 +60,15 @@ STAGES = (
     # ahead of the seal, the family reads as one block. Do not read the position as
     # a dependency and do not add one to justify it.
     "reconcile-services",
+    # Code, for emit's reason: one OpenAPI document per service is a pure function
+    # of the tool contract, so two runs with identical groupings must produce
+    # byte-identical documents or a difference in an emitted lab stops being
+    # attributable to a stage. The only row in this band that does not merge
+    # claims into a partial -- it derives documents from one part, reading
+    # 01-claims/ solely to resolve each operation's request body. Its position IS
+    # a dependency, unlike its neighbour's above: it reads 01-services.json, so it
+    # cannot sort before the pass that writes it.
+    "synthesise-interfaces",
     "reconcile-seal",
     # The propose/score loop, engineered as substeps for the reason the triage
     # and reconcile families are. propose-batches and both seals are code, so

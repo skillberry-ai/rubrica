@@ -69,15 +69,13 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "entities-part": "entities-part-0.1.json",
     "goals-part": "goals-part-0.1.json",
     "gaps-part": "gaps-part-0.1.json",
-    # The tool-interface kinds. `services-part` now has a producer --
-    # reconcile-services, the barrier pass that groups the declared tools -- and
-    # so has a STAGE_ARTIFACTS row and an entry in artifacts.md. `interface` is
-    # still deliberately absent from STAGE_ARTIFACTS: no stage in paths.STAGES
-    # writes one yet, so a stage entry would name a stage validate_stage's
-    # UnknownStage exists to reject, and would put an undocumented kind in front
-    # of test_docs_accuracy's per-kind check, which reads STAGE_ARTIFACTS. Its
-    # shape is reviewable before any stage depends on it, which is the point of
-    # landing it without a producer.
+    # The tool-interface kinds, each with a producer now: `services-part` is
+    # reconcile-services', the barrier pass that groups the declared tools, and
+    # `interface` is synthesise-interfaces', the code stage that derives one
+    # OpenAPI document per service from it. Both therefore carry a STAGE_ARTIFACTS
+    # row and an entry in artifacts.md -- the second landed one commit after its
+    # schema did, which is why the schema was reviewable before anything depended
+    # on it.
     "services-part": "services-part-0.1.json",
     "interface": "interface-0.1.json",
     # inputs-seen-0.1.json is deliberately absent from this map, and is the only
@@ -143,6 +141,7 @@ STAGE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "reconcile-goals": ("goals-part",),
     "reconcile-gaps": ("gaps-part",),
     "reconcile-services": ("services-part",),
+    "synthesise-interfaces": ("interface",),
     "reconcile-seal": ("world-model",),
     "propose-batches": ("batches",),
     # propose now writes only its own batch's part. The stage that produces the
@@ -421,6 +420,12 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         # pass that wrote nothing must fail its own gate by name rather than
         # passing trivially on an empty list.
         return [run.services_part]
+    if kind == "interface":
+        # Iterated, not always-return: this function has no service id, so the
+        # always-return form could only invent a path. An empty list still reaches
+        # validate_stage's "produced no interface artifact" arm against the run
+        # root, which is the right finding for a stage that wrote nothing.
+        return list_json(run.interfaces_dir)
     if kind == "batches":
         # Iterated, and so empty when no round has a plan -- NOT the
         # always-return form catalogue/slices/subjects use. propose-batches
