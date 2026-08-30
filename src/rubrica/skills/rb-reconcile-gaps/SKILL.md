@@ -5,16 +5,15 @@ description: Record what no input says and reasoning cannot supply, naming hones
 
 # rb-reconcile-gaps
 
-You are dispatched once, after every pass whose output the world model is built
-from and before `reconcile-seal` assembles their partials into it. Two
-jobs, and the second one is new to this pass: record the gaps, and audit what
-the passes above you wrote. You read all of the claims and every partial those
-passes wrote, which makes you the last pass to read the claims *against the
-model built from them* -- after
-you, nothing in the pipeline compares the world model against the evidence it
-was supposed to come from. `rb-reconcile-services` is dispatched after you and
-reads the claims too, but it reads them to group the target's tools, not to check
-any of this against them.
+You are dispatched once, after every pass whose partial you audit and before
+`rb-reconcile-services` and the seal that assembles every partial into
+`01-world-model.json`. Two jobs, and the second one is new to this pass: record
+the gaps, and audit what the passes above you wrote. You read all of the claims
+and every partial those passes wrote, which makes you the last pass to read the
+claims *against the model built from them* -- after you, nothing in the pipeline
+compares the world model against the evidence it was supposed to come from.
+`rb-reconcile-services` is dispatched after you and reads the claims too, but it
+reads them to group the target's tools, not to check any of this against them.
 
 ## Contract
 
