@@ -277,14 +277,14 @@ The entries below are one logical step — building the world model —
 engineered as bounded passes, each writing its own slice into the `01-` band
 and none of them reading `01-world-model.json`. `reconcile-seal` assembles them
 into that file, which is unchanged: nothing downstream of the seal knows the
-partials exist. It reads every one of them but two. `01-subjects.json` is the
-first — the world model has no subjects field, so the cover is an input to the
+partials exist. It reads every one of them but one. `01-subjects.json` is the
+exception — the world model has no subjects field, so the cover is an input to the
 contradiction fan-out, to `reconcile-gaps`, and to `check-refs`, not to the seal.
-`01-services.json` is the second, and for a different reason: a service becomes
-an interface document of its own under `01-interfaces/`, not a field of the
-sealed model, so the seal has nothing to fold in. Each pass is a stage in
-`paths.STAGES`, so `rubrica validate --stage reconcile-<pass>` gates exactly one
-of these kinds.
+`01-services.json` it reads on a different footing from the rest: the seal folds
+it into the world model's `services` field **when the file exists**, and omits
+that key entirely when it does not, so it is the one input whose absence is not a
+finding. Each pass is a stage in `paths.STAGES`, so
+`rubrica validate --stage reconcile-<pass>` gates exactly one of these kinds.
 
 One entry below is **not** a partial and not a pass: `interface`. It is derived
 from `01-services.json` by `synthesise-interfaces`, which merges no claims into
@@ -527,7 +527,8 @@ so a gap's provenance is resolvable rather than sitting in prose).
 
 - **Schema:** `src/rubrica/schema/services-part-0.1.json`
 - **Written by:** `reconcile-services`, run as `rb-reconcile-services`
-- **Read by:** `check-refs`; the interface synthesis below it
+- **Read by:** `check-refs`; the interface synthesis below it; `reconcile-seal`,
+  which folds it into the world model's optional `services` field
 - **Path:** `01-services.json`
 
 The tools the target declares, grouped into the services one simulator each
@@ -539,9 +540,15 @@ instructed direction — two services that should be one are two simulators a
 human can merge at gate 1, while one service that should be two is a database
 the tools silently disagree about, and nothing downstream detects it.
 
-Not read by `reconcile-seal`, which is what distinguishes it from every partial
-above: a service becomes its own `interface` document rather than a field of the
-world model, so the sealed file is byte-identical whether this pass ran or not.
+**The one optional input to `reconcile-seal`,** which is what distinguishes it
+from every partial above. The seal folds its `services` array into the world model
+verbatim when this file exists — the grouping is a judgment a human ratifies at
+gate 1, and a seal that rebuilt the records would be ratifying the seal's — and
+omits the `services` key entirely when it does not, rather than writing `[]`: an
+empty array asserts that a pass looked and found no tools, which is a different
+claim about the target from "no pass ran". Its absence is therefore not a finding,
+unlike every other partial's. Being optional does not make it unchecked: a `null`
+or list-shaped document here is a finding naming this file.
 
 Fields worth knowing: `services[].grouping_evidence` (what makes two tools one
 backend — a shared base URL, client construction, credential or MCP server entry
@@ -615,9 +622,9 @@ hands the harness, under an `x-` key so it stays a legal OpenAPI extension).
 - **Schema:** `src/rubrica/schema/world-model-0.1.json`
 - **Written by:** `reconcile-seal` (code), via `rubrica reconcile-seal`, from
   the partials above — every one of them but `01-subjects.json`, which has no
-  counterpart field here, and `01-services.json`, whose counterpart `services`
-  field is optional and which the seal does not read, so the sealed file is
-  byte-identical whether `reconcile-services` ran or not
+  counterpart field here. `01-services.json` is the one optional input: its
+  `services` array is folded in verbatim when that file exists, and the `services`
+  key is omitted entirely when it does not
 - **Read by:** `rb-propose`, `rb-score`, `rb-instantiate`, `emit` (code),
   `rb-orchestrate`; `check-refs`
 - **Path:** `01-world-model.json`
@@ -627,8 +634,10 @@ partials the `reconcile-*` passes wrote out of every claim `rb-extract`
 produced: `capabilities`, `entities`, `actors`, `goals`, recorded
 `contradictions` (disagreements carried forward rather than silently
 resolved), recorded `gaps` (things no input says anything about, each naming
-which later stages it `blocks`), and a `denominator` frozen at a `version` for
-the rest of the run. Every element carries a `claims` array of the claim ids
+which later stages it `blocks`), an optional `services` (the tool groupings a
+simulator would stand in for, present only when `01-services.json` was written),
+and a `denominator` frozen at a `version` for the rest of the run. Every element
+carries a `claims` array of the claim ids
 that support it — **including the nested ones**: an outcome class, an invariant
 and a gap each require their own non-empty array, and until issue #6 none of the
 three could carry one at all, so an invariant's provenance went onto its parent

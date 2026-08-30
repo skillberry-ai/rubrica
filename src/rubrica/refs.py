@@ -103,14 +103,16 @@ def _readable_targets(run: RunPaths) -> list[Path]:
     The gaps partial is listed although no layer-2 check reads it, so this is
     slightly wider than its first line: it is an input to reconcile-seal, and
     listing it names a truncated one at check-refs time instead of leaving it to
-    the seal's own dispatch. The services partial needs no such argument -- it has
-    two layer-2 readers, check_input_dispositions for its accounting and
-    check_services for the grouping itself -- but it is listed for a reason the
-    seal cannot supply either way: the seal does not read it at all, so nothing
-    below it would name a truncated one. The entities, goals and services partials
-    are read as well as listed -- check_input_dispositions recomputes each pass's
-    accounting out of them. Being named here is not the only guard, and measurably not: the
-    seal refuses a broken partial itself, exit 1 with the artifact named. And
+    the seal's own dispatch. The services partial needs no such argument at all --
+    it has two layer-2 readers of its own, check_input_dispositions for its
+    accounting and check_services for the grouping itself, and the seal reads it
+    too when it exists, folding it into the world model's optional `services`
+    field. So unlike the gaps partial it is named here for the ordinary reason,
+    and this listing is the earliest of three guards rather than the only one.
+    The entities, goals and services partials are read as well as listed --
+    check_input_dispositions recomputes each pass's accounting out of them. Being
+    named here is not the only guard, and measurably not: the seal refuses a
+    broken partial itself, exit 1 with the artifact named. And
     check_readable covers only JSON that will not parse, so a partial that parses
     to a non-object passes here; layer 1 and the seal each reject that shape by
     name. tests/unit/test_refs_reconcile_parts.py breaks each of the partials in
@@ -2037,12 +2039,13 @@ def check_input_dispositions(run: RunPaths) -> list[Finding]:
             # *only* layer-2 reader, so nothing older raised first and the guard
             # closes the whole instance for them rather than moving it.
             # `01-services.json` was the third such case and the deepest of them
-            # when the guard was written, since reconcile-seal does not read it
-            # either; it now has readers on both sides -- `synthesise-interfaces`
-            # refuses a non-dict one by name (interfaces.synthesise), and
-            # `check_services` below guards the same read the same way -- so the
-            # guard here no longer closes that instance alone. It stays because
-            # this checker still runs first and must not raise past either of them.
+            # when the guard was written, since reconcile-seal did not read it then
+            # either; it now has readers on every side -- `synthesise-interfaces`
+            # refuses a non-dict one by name (interfaces.synthesise), the seal
+            # refuses one through its own read door, and `check_services` below
+            # guards the same read the same way -- so the guard here no longer
+            # closes that instance alone. It stays because this checker still runs
+            # first and must not raise past any of them.
             # `01-capabilities.json` and `01-outcomes.json` still raise out of
             # `check_outcomes`, which runs earlier in check_all and is not this
             # branch's read. A non-dict document is the same class as an

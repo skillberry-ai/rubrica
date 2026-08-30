@@ -52,22 +52,24 @@ STAGES = (
     # human at gate 1 reads as a description of something outside the run: the
     # services a simulator would stand in for.
     #
-    # Its slot is genuinely free, and saying so is the point: it reads no partial,
-    # every claims file exists the moment `extract` finishes, and reconcile-seal
-    # does not read its output -- so it could sort anywhere after `extract`. It
-    # sits here because this tuple is the pipeline's documentation and both
-    # generated drawings render it in order: with the other prompt passes and
-    # ahead of the seal, the family reads as one block. Do not read the position as
-    # a dependency and do not add one to justify it.
+    # Nothing *above* it constrains the slot, and saying so is still the point: it
+    # reads no partial, and every claims file exists the moment `extract` finishes,
+    # so it could sort anywhere after `extract`. What bounds it is what reads its
+    # output -- synthesise-interfaces derives from 01-services.json, and
+    # reconcile-seal folds that part into the world model's optional `services`
+    # field -- so it cannot sort after either of them. It sits at this end of that
+    # window because this tuple is the pipeline's documentation and both generated
+    # drawings render it in order: with the other prompt passes and ahead of the
+    # seal, the family reads as one block.
     "reconcile-services",
     # Code, for emit's reason: one OpenAPI document per service is a pure function
     # of the tool contract, so two runs with identical groupings must produce
     # byte-identical documents or a difference in an emitted lab stops being
     # attributable to a stage. The only row in this band that does not merge
     # claims into a partial -- it derives documents from one part, reading
-    # 01-claims/ solely to resolve each operation's request body. Its position IS
-    # a dependency, unlike its neighbour's above: it reads 01-services.json, so it
-    # cannot sort before the pass that writes it.
+    # 01-claims/ solely to resolve each operation's request body. Its position is a
+    # dependency: it reads 01-services.json, so it cannot sort before the pass that
+    # writes it.
     "synthesise-interfaces",
     "reconcile-seal",
     # The propose/score loop, engineered as substeps for the reason the triage
@@ -316,6 +318,11 @@ class RunPaths:
         In the 01 band for the reason every other partial is: the numbering stays
         intake's, and everything between 01-claims/ and 01-world-model.json is one
         logical step engineered as substeps.
+
+        The one input to reconcile-seal that may be absent. The seal folds it into
+        the world model's optional `services` field when the file exists and omits
+        the key entirely when it does not, so a run whose services pass never ran
+        seals without one rather than asserting an empty grouping.
         """
         return self.root / "01-services.json"
 

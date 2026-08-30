@@ -45,6 +45,68 @@ def test_the_sealed_world_model_passes_layer_one(tmp_path):
     assert validate.validate_artifact(run.world_model, "world-model") == []
 
 
+def test_the_seal_folds_the_services_part_into_the_world_model(tmp_path):
+    """The one optional partial, and the one the seal folds whole.
+
+    Read outside `_SINGLETON_PARTS` because every entry there is required and an
+    absent one is a finding -- right for the five partials the world model cannot
+    be assembled without, wrong for this one, which the test below is about.
+    """
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+
+    path, findings = reconcile.seal(run)
+
+    assert findings == []
+    assert path == run.world_model
+    model = read_json(run.world_model)
+    assert [service["id"] for service in model["services"]] == ["svc-tickets"]
+    # Folded verbatim, not re-derived: the grouping is the pass's judgment and it is
+    # what a human ratifies at gate 1, so a seal that rebuilt the records would be
+    # handing them the seal's judgment instead.
+    assert model["services"] == read_json(run.services_part)["services"]
+
+
+def test_a_run_with_no_services_part_omits_the_key_rather_than_writing_an_empty_list(tmp_path):
+    """Omitted, not `[]`, and the difference is what keeps the two committed live
+    recordings valid: they predate the key, and a required or always-written one
+    would invalidate the only behavioural evidence the refusal conditions have --
+    obliging a paid re-record for a change that does not touch what they record.
+
+    It is also the honest shape. `[]` asserts a pass looked and found no tools,
+    which is a different claim about the target from "no pass ran".
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-gaps")
+    assert not run.services_part.exists()
+
+    path, findings = reconcile.seal(run)
+
+    assert findings == []
+    assert path == run.world_model
+    assert "services" not in read_json(run.world_model)
+
+
+@pytest.mark.parametrize("broken", ["null", '["nope"]', '{"schema_version": "0.1"}'])
+def test_a_malformed_services_part_is_a_finding_naming_that_artifact(tmp_path, broken):
+    """Optional does not mean unchecked: a part that exists comes through the same
+    door as the rest.
+
+    `null` is the shape that motivated that door -- it is legitimate JSON, so
+    `read_json` returns None for it and `document is not None` meant two things at
+    once. Measured on `01-gaps.json`: the payload-key check was skipped and the
+    assembly raised `KeyError`, which cli.py's catch-all reported against the run
+    root. A list is the other half, and reaches `document["services"]` instead.
+    Both must name `01-services.json`, which is where a repair starts.
+    """
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+    run.services_part.write_text(broken, encoding="utf-8")
+
+    path, findings = reconcile.seal(run)
+
+    assert path is None
+    assert [f.artifact for f in findings] == [run.services_part], findings
+    assert not run.world_model.is_file(), "the seal must not write a partial world model"
+
+
 def test_the_denominator_is_computed_not_copied(tmp_path):
     """The arithmetic is the seal's job. A partial cannot assert it, and nothing
     in the partials carries a number for the seal to trust."""

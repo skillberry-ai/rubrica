@@ -284,10 +284,11 @@ its own layer-1 gate, and a later pass reads an earlier pass's partial as a
 *file* rather than as a memory of having written it — which is what lets
 `rb-reconcile-outcomes` quantify over the capability list instead of recalling
 it. No partial reads `01-world-model.json`; the **seal** is what joins them into
-one — all of them except two. `01-subjects.json` is one, because the world model
-has no field for it; `01-services.json` is the other, because a service becomes
-its own interface document under `01-interfaces/` rather than a field of the
-sealed model.
+one — all of them except `01-subjects.json`, because the world model has no field
+for it. `01-services.json` joins on a different footing: it is the seal's one
+*optional* input, folded into the world model's `services` field when that file
+exists and leaving the key absent when it does not, so it is the one partial whose
+absence the seal does not report.
 
 ## projection
 
@@ -343,14 +344,15 @@ killed mid-record by an idle reset however large the assembled record gets.
 This pipeline has two. `triage-seal` reads `00-objective.json`,
 `00-slices.json`, every `00-dispositions/<slice_id>.json`, `00-audit.json` and
 `00-adoptions.json`, and writes `00-triage.json` (`src/rubrica/seal.py`).
-`reconcile-seal` reads the manifest, the five singleton partials it assembles
-and every `01-contradictions/*.json` — and **not** `01-subjects.json`: the world
-model has no subjects field, so the cover is an input to the contradiction
-fan-out, to `reconcile-gaps`, and to `check-refs`, not to the seal; and not
-`01-services.json`, which becomes an interface document of its own rather than a
-field here — folds each capability's outcome classes into that capability,
-counts the `denominator` once, and writes `01-world-model.json`
-(`src/rubrica/reconcile.py`, run as `rubrica reconcile-seal`).
+`reconcile-seal` reads the manifest, the five singleton partials it assembles,
+every `01-contradictions/*.json`, and `01-services.json` when that file exists —
+and **not** `01-subjects.json`: the world model has no subjects field, so the cover
+is an input to the contradiction fan-out, to `reconcile-gaps`, and to `check-refs`,
+not to the seal. `01-services.json` is its one optional input, folded in verbatim
+when present and leaving the `services` key absent when not, so an absent one is
+the only missing input the seal does not report — folds each capability's outcome
+classes into that capability, counts the `denominator` once, and writes
+`01-world-model.json` (`src/rubrica/reconcile.py`, run as `rubrica reconcile-seal`).
 
 **A seal assembles; it does not check.** Cross-artifact checking is layer 2 and
 lives in `refs.py`, which runs over the sealed record afterwards on any run,

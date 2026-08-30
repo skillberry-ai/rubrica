@@ -1262,7 +1262,15 @@ def _uncite_trace(sealed: dict) -> None:
 def test_world_model_counts_every_kind(tmp_path):
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     got = summary.world_model(run)
-    for kind in ("capabilities", "entities", "actors", "goals", "gaps", "contradictions"):
+    for kind in (
+        "capabilities",
+        "entities",
+        "actors",
+        "goals",
+        "services",
+        "gaps",
+        "contradictions",
+    ):
         assert kind in got.counts, f"{kind} is a world-model collection"
     assert got.counts["capabilities"] > 0
 
@@ -1270,8 +1278,8 @@ def test_world_model_counts_every_kind(tmp_path):
 def test_world_model_counts_are_the_lengths_of_the_sealed_collections(tmp_path):
     """Every count against the fixture's own arrays, not one spot check.
 
-    The presence test above passes on a `world_model` that returns 0 for five of
-    the six collections -- measured: replacing the length with the literal 0
+    The presence test above passes on a `world_model` that returns 0 for every
+    collection but one -- measured: replacing the length with the literal 0
     leaves it green, because only `capabilities` is asserted non-empty there.
 
     The key set is derived from the sealed document rather than re-typed, so a
@@ -1295,21 +1303,23 @@ def test_world_model_counts_are_the_lengths_of_the_sealed_collections(tmp_path):
         "contradictions",
         "entities",
         "goals",
-    ], "five of the six collections are non-empty in the toy world model"
+        "services",
+    ], "every collection but gaps is non-empty in the toy world model"
     assert got.target == sealed["target"]
     assert got.denominator == sealed["denominator"]
 
 
 @pytest.mark.parametrize(
-    "collection", ["capabilities", "entities", "actors", "goals", "gaps", "contradictions"]
+    "collection",
+    ["capabilities", "entities", "actors", "goals", "services", "gaps", "contradictions"],
 )
 def test_world_model_counts_a_collection_that_is_not_a_list_as_zero(tmp_path, collection):
-    """`_dicts` at each of the six keys, one parametrisation per key.
+    """`_dicts` at every key, one parametrisation per key.
 
     `"actors": "nope"` is a four-character string, and `len()` on it counts four
-    actors. Parametrised rather than asserted once because the six keys are a
+    actors. Parametrised rather than asserted once because the keys are a
     comprehension over a tuple -- the copy-paste slip this shape invites is a key
-    spelled wrong, and only a case per key can see it. The other five counts are
+    spelled wrong, and only a case per key can see it. Every other count is
     asserted unchanged, so a guard that swallowed the whole document would go red.
     """
     from rubrica.artifacts import write_json

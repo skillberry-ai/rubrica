@@ -95,8 +95,8 @@ def test_the_services_part_and_every_synthesised_document_are_covered(tmp_path):
     """The same enumeration guard for the two artifacts of the 01 band's tail, and
     it needs a different fixture to reach either.
 
-    `build_state` deliberately writes no `01-services.json` -- the seal does not
-    read it, and a state that always wrote it could not show that -- so
+    `build_state` deliberately writes no `01-services.json` -- the seal folds it
+    only when it exists, and a state that always wrote it could not show that -- so
     `01-interfaces/` is absent there too, one step further on. Both are the
     fixture-cannot-reach weakness in the test above, and `build_toy_run` goes
     through `reconcile-services` and the real `synthesise-interfaces`, so it can

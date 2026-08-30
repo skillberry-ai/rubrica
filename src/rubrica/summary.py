@@ -646,18 +646,27 @@ def deficiencies(run: RunPaths) -> list[Deficiency]:
 
 
 # Every collection the sealed world model can carry, in the order a reader wants
-# them: what the target can do, what it does it to, who asks, why, then the two
-# collections that are about the *evidence* rather than about the target. Keyed
-# from this tuple rather than from the document's own keys so a count of 0 still
-# renders -- "0 gaps" is a fact about the run, while a missing row is
-# indistinguishable from a renderer that forgot the kind. Measured on the toy
-# world model, which carries `"gaps": []`: keying off the payload would have
-# dropped the gaps row from the one fixture the page is developed against.
+# them: what the target can do, what it does it to, who asks, why, what a
+# simulator would stand in for, then the two collections that are about the
+# *evidence* rather than about the target. Keyed from this tuple rather than from
+# the document's own keys so a count of 0 still renders -- "0 gaps" is a fact about
+# the run, while a missing row is indistinguishable from a renderer that forgot the
+# kind. Measured on the toy world model, which carries `"gaps": []`: keying off the
+# payload would have dropped the gaps row from the one fixture the page is
+# developed against.
+#
+# `services` is the one key the sealed model may omit entirely -- the seal writes it
+# only when 01-services.json exists -- so it is the one row where 0 does not
+# distinguish "the pass found no tools" from "the pass never ran". It is counted
+# anyway, for the reason the whole tuple is keyed this way: a row silently dropped
+# from a summary is worse than a row a reader has to place, and this page's job is
+# to say what the run's artifacts hold.
 _WORLD_MODEL_COLLECTIONS = (
     "capabilities",
     "entities",
     "actors",
     "goals",
+    "services",
     "gaps",
     "contradictions",
 )

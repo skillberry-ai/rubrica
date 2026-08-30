@@ -581,10 +581,14 @@ and halt, exactly as B0's rule says.
 Then run the seal, which is also code, not a dispatch:
 `rubrica reconcile-seal --run <run>`. It assembles the partials into
 `01-world-model.json`, folds each capability's outcome classes in, and counts
-the denominator once. It reads the manifest, the five singleton partials and
-every `01-contradictions/*.json` -- and **not** `01-subjects.json`, which has no
-counterpart field in the world model, so the world model itself carries no
-record of whether the cover was total. `check-refs` is what holds the cover; a
+the denominator once. It reads the manifest, the five singleton partials, every
+`01-contradictions/*.json`, and `01-services.json` when that file exists -- and
+**not** `01-subjects.json`, which has no counterpart field in the world model, so
+the world model itself carries no record of whether the cover was total.
+`01-services.json` is its one optional input: an absent one is not a finding and
+the sealed model simply carries no `services` key, so do not read a clean seal on
+such a run as evidence that the services pass produced nothing -- it is evidence
+that nothing was there to fold. `check-refs` is what holds the cover; a
 seal that clears both its gates has had that checked mechanically, but do not
 read a clean seal as having ratified the cover -- mechanical totality is not a
 human's judgment that the subjects themselves are the right ones. Gate it with

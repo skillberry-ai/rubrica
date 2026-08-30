@@ -124,8 +124,9 @@ should make a pass of it refuse; copying either one over a freshly-minted run's
 `00-catalogue.json` exercises those refusals without a corpus at all.
 
 **The reconcile family has a few checkpoints, not one per pass.**
-`"reconcile-gaps"` is every partial the seal reads written with no world model
-yet, `"reconcile-services"` adds `01-services.json` to that,
+`"reconcile-gaps"` is every partial the seal *requires* written with no world
+model yet — so it is also the state that shows the seal omitting its optional
+`services` key — `"reconcile-services"` adds `01-services.json` to that,
 `"synthesise-interfaces"` adds the `01-interfaces/` documents the real code derives
 from it, and
 `"reconcile-seal"` is the assembled world model — the states the seal and the

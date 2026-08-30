@@ -89,19 +89,20 @@ def test_the_family_is_exactly_the_stages_between_extract_and_propose_batches():
     read, not a cosmetic one.
 
     `reconcile-services` is pinned here on a different footing, and this docstring
-    must not be read as giving it a dependency it does not have: it reads no
-    partial, every claims file exists the moment `extract` finishes, and the seal
-    does not read its output, so its slot is genuinely free. The comment beside it
-    in `paths.STAGES` says exactly that, and the two must not disagree. What the
-    position pins for that pass is the *documentation*: STAGES is the on-disk
-    numbering and both generated drawings render it in order, so moving it silently
-    would redraw the family.
+    must not be read as giving it a dependency it does not have *upward*: it reads
+    no partial, and every claims file exists the moment `extract` finishes, so
+    nothing above it constrains the slot. Its readers below do -- both
+    `synthesise-interfaces` and the seal read the part it writes, the seal folding
+    it into the world model's optional `services` field -- so it cannot sort after
+    either. The comment beside it in `paths.STAGES` says exactly that, and the two
+    must not disagree. What the position pins beyond that window is the
+    *documentation*: STAGES is the on-disk numbering and both generated drawings
+    render it in order, so moving it silently would redraw the family.
 
     `synthesise-interfaces` is in the slice and is **not** in `FAMILY`: it is code,
     it has no skill, and it merges nothing -- it derives one OpenAPI document per
-    service from `01-services.json`. It is pinned here for the reason
-    `reconcile-services` is, one step further: its position *is* a dependency, since
-    it reads the part the pass before it writes.
+    service from `01-services.json`. Its position is a dependency for the same
+    reason, one step further: it reads the part the pass before it writes.
     """
     assert STAGES[STAGES.index("extract") + 1 : STAGES.index("propose-batches")] == (
         "reconcile-subjects",

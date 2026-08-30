@@ -257,13 +257,23 @@ orchestrator decision recorded in `decisions.md` instead of a number the command
 quietly incremented.
 
 Reads `manifest.json`, the five singleton partials — `01-capabilities.json`,
-`01-outcomes.json`, `01-entities.json`, `01-goals.json`, `01-gaps.json` — and
-every `01-contradictions/*.json`. It does **not** read `01-subjects.json`: the
-world model has no subjects field, so the cover is an input to the contradiction
-passes and to `check-refs`, not to the seal. Nor `01-services.json`, which becomes
-an interface document of its own rather than a field of the sealed model — so the
-world model is byte-identical whether `reconcile-services` ran or not. Writes
-`01-world-model.json` and prints its path.
+`01-outcomes.json`, `01-entities.json`, `01-goals.json`, `01-gaps.json` — every
+`01-contradictions/*.json`, and `01-services.json` **when that file exists**. It
+does **not** read `01-subjects.json`: the world model has no subjects field, so the
+cover is an input to the contradiction passes and to `check-refs`, not to the seal.
+Writes `01-world-model.json` and prints its path.
+
+`01-services.json` is the one optional input, and it is read outside the required
+five: every one of those is a partial the model cannot be assembled without, so an
+absent one is a finding, and this one is not. When it exists the seal folds its
+`services` array into the world model verbatim — the grouping is
+`rb-reconcile-services`' judgment and it is what a human ratifies at gate 1, so a
+seal that rebuilt the records would be handing them the seal's judgment instead.
+When it does not exist the seal **omits the key entirely** rather than writing
+`[]`: an empty array asserts that a pass looked and found no tools, which is a
+different claim about the target from "no pass ran". Consumers read the field as
+`.get("services", [])`. Optional does not mean unchecked — a `null` or list-shaped
+`01-services.json` is a finding naming that file, the same as any other partial.
 
 Code rather than a prompt, for the reason `emit` is code: two runs with identical
 partials must produce a byte-identical world model, or variance can no longer be

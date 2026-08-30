@@ -1480,14 +1480,15 @@ _UPTO_STAGES: tuple[str, ...] = (
     "intake",
     "extract",
     # Four checkpoints for the 01 band rather than one per pass.
-    # "reconcile-gaps" is every partial the seal reads written with no world model
-    # yet -- the state the seal and the layer-2 part checkers are tested against.
+    # "reconcile-gaps" is every partial the seal *requires* written with no world
+    # model yet -- the state the seal and the layer-2 part checkers are tested
+    # against, and the one that shows the seal omitting its optional `services` key.
     # "reconcile-services" adds the services partial, so it is every partial
     # written with no interfaces synthesised, which is what the checks over
     # 01-services.json alone are tested against; it is a checkpoint of its own
     # rather than folded into the one above because the seal must stay testable
-    # against a run in which 01-services.json does not exist -- the seal does not
-    # read it, and a fixture that always wrote it could not show that.
+    # against a run in which 01-services.json does not exist -- the seal folds it
+    # only when it exists, and a fixture that always wrote it could not show that.
     # "synthesise-interfaces" adds the derived documents, which is the state every
     # check over 01-interfaces/ is tested against -- and it is what makes the
     # checkpoint above the run in which the part exists and the documents do not.

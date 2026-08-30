@@ -219,11 +219,12 @@ def test_a_non_dict_partial_is_skipped_rather_than_raised_through(tmp_path):
     layer-2 checker reads either, so before the guard this function was the sole
     raiser and there was nothing older to blame. `01-services.json` was the third
     such case and the deepest of them when this was written, because
-    `reconcile-seal` does not read it either -- for the other two the seal would
+    `reconcile-seal` did not read it then either -- for the other two the seal would
     refuse a broken partial afterwards, and for this one nothing below did. It has
-    readers on both sides now: `synthesise-interfaces` refuses a non-dict one by
-    name, and `refs.check_services` guards the same read the same way, so this
-    function is no longer its sole raiser. It stays asserted here regardless,
+    readers on every side now: `synthesise-interfaces` refuses a non-dict one by
+    name, the seal refuses one through its own read door, and `refs.check_services`
+    guards the same read the same way, so this function is no longer its sole
+    raiser. It stays asserted here regardless,
     since this checker still runs first and a raise here would still name the run
     root. `check_outcomes`
     runs earlier in `check_all` and still raises on
