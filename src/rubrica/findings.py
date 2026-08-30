@@ -50,7 +50,10 @@ class Finding:
     01-services.json and the claims files it cites, and the failure is that no
     OpenAPI document can be derived at all -- a services part absent or
     unparseable, a service id that is not a usable filename, a tool name the
-    harness would rewrite, a `schema_claim` no claim carries a payload for.
+    harness would rewrite, a `schema_claim` no claim in 01-claims/ has an id for.
+    A `schema_claim` naming a claim that exists and carries no usable payload is
+    the one finding in this layer that names a *claims* file instead, because that
+    payload is rb-extract's output and the part citing it may be correct.
     Distinct from "refs" for the reason "reconcile" and "rounds" are: refs checks
     a run someone may still be building, while this names the reason one command
     produced no output. Distinct from those two because synthesis is a

@@ -100,9 +100,11 @@ def test_two_runs_produce_byte_identical_documents(tmp_path):
     artifacts.canonical_bytes sorts keys, so the order `_document` builds them in
     is normalised away on write. What it pins is everything canonicalisation does
     not decide for us -- the separators and indentation write_json chooses, and the
-    order of every *list* in the document, which sort_keys does not touch: `paths`
-    iterates the service's tools and `x-rubrica.tools` copies that same array, so a
-    synthesis that visited tools in a set's order would fail here.
+    order of every *list* in the document, which sort_keys does not touch. There is
+    exactly one such list, `x-rubrica.tools`, and it copies `service["tools"]` in
+    order -- so a synthesis that visited tools in a set's order would fail here.
+    `paths` would not catch it: it is a dict, and sort_keys normalises the very
+    order it was built in.
     """
     a = build_toy_run(tmp_path / "a", upto="reconcile-services")
     b = build_toy_run(tmp_path / "b", upto="reconcile-services")
@@ -356,13 +358,93 @@ def test_a_tool_name_that_would_not_survive_sanitisation_is_a_finding(tmp_path):
 
 
 def test_a_schema_claim_resolving_to_nothing_is_a_finding(tmp_path):
+    """An id no claim carries *is* the part's defect, so this one names the part.
+
+    The other half of the split the case below pins: no claims file is named here,
+    because every claims file was read and none of them holds this id -- there is
+    no file to send a repair at except the one that invented the id.
+    """
     run = build_toy_run(tmp_path, upto="reconcile-services")
     part = json.loads(run.services_part.read_text(encoding="utf-8"))
     part["services"][0]["tools"][0]["schema_claim"] = "clm-does-not-exist"
     run.services_part.write_text(json.dumps(part), encoding="utf-8")
     written, findings = synthesise(run)
     assert written == []
-    assert any("clm-does-not-exist" in f.message for f in findings)
+    assert [(f.artifact, f.pointer, f.message) for f in findings] == [
+        (
+            run.services_part,
+            "/services/0/tools/0/schema_claim",
+            "no claim in 01-claims/ has id 'clm-does-not-exist'",
+        )
+    ]
+    assert {f.layer for f in findings} == {LAYER}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [None, "an object with properties", []],
+    ids=["absent", "a-string", "a-list"],
+)
+def test_a_schema_claim_whose_claim_has_no_usable_payload_names_the_claims_file(tmp_path, payload):
+    """The measured wrong-artifact case, and the reason the lookup is a claim index.
+
+    `rb-reconcile-services` refusal condition 4 *instructs* the pass to name the
+    claim as its `schema_claim` anyway when the payload is unusable and to say so in
+    the service's `statement`. So a run reaching this state has a byte-for-byte
+    correct `01-services.json` citing the only claim there is, and a defect in
+    `rb-extract`'s output. Reported against the part, the 1 named the wrong artifact
+    and the orchestrator spent its one repair attempt re-dispatching a pass that
+    followed its instructions and wrote the same thing again.
+
+    The pointer is into the claims file, at the payload that is missing, so the
+    repair lands on the element rather than on the file.
+
+    Three shapes of unusable, because "no payload" is not the only one: a payload
+    that parses to a string or a list is not a schema either, and each of the three
+    used to be indistinguishable from an id nothing carries.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    target = run.claims("api-json")
+    document = json.loads(target.read_text(encoding="utf-8"))
+    index = next(i for i, claim in enumerate(document["claims"]) if claim["id"] == "clm-api-010")
+    if payload is None:
+        del document["claims"][index]["payload"]
+    else:
+        document["claims"][index]["payload"] = payload
+    target.write_text(json.dumps(document), encoding="utf-8")
+    written, findings = synthesise(run)
+    assert written == []
+    assert [(f.artifact, f.pointer) for f in findings] == [(target, f"/claims/{index}/payload")]
+    assert "01-services.json names this claim at /services/0/tools/0/schema_claim" in (
+        findings[0].message
+    )
+    # The point of the whole split: the part is named by nothing.
+    assert run.services_part not in [f.artifact for f in findings]
+    assert {f.layer for f in findings} == {LAYER}
+
+
+def test_a_payload_less_claim_in_an_unreadable_claims_file_is_not_blamed_twice(tmp_path):
+    """The guard discipline: a file the index could not read is absent, not blamed.
+
+    A malformed claims file already owes its own finding, and its claims are not in
+    the index -- so the `schema_claim` into it comes back as an id nothing carries,
+    named against the part. That is the right pair: the part's citation cannot be
+    resolved and the file that would resolve it will not parse. What must not happen
+    is a `/claims/N/payload` pointer into a document nobody could index.
+
+    A shape pin rather than a discriminator, and measured as one: the payload index
+    this replaced produced exactly this pair too, so the test is green against
+    either. It is here because the claim index is the thing that *could* blame a
+    file it never read, and nothing else would notice if it began to.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    target = run.claims("api-json")
+    target.write_text("{ not json", encoding="utf-8")
+    written, findings = synthesise(run)
+    assert written == []
+    assert sorted((str(f.artifact), f.pointer) for f in findings) == sorted(
+        [(str(target), ""), (str(run.services_part), "/services/0/tools/0/schema_claim")]
+    )
     assert {f.layer for f in findings} == {LAYER}
 
 

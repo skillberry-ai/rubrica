@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import NamedTuple
 
 from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.findings import Finding
@@ -40,7 +41,30 @@ TOOL_NAME = re.compile(TOOL_NAME_PATTERN)
 LAYER = "interfaces"
 
 
-def _document(service: dict, payloads: dict[str, dict]) -> dict:
+class _Claim(NamedTuple):
+    """Where one claim was read from, and its payload when that payload is usable.
+
+    A claim index rather than the payload index this used to be, because the two
+    ways a `schema_claim` can fail are repairs for two different stages. An id no
+    claim in `01-claims/` carries is `01-services.json`'s own defect and the
+    finding names that file. A claim that *exists* and carries no payload usable
+    as a schema is `rb-extract`'s defect, in the claims file this tuple names --
+    the services part may be citing the only claim there is, byte-for-byte
+    correctly. A payload index cannot tell those apart, and reported both against
+    the services part: a 1 naming the wrong artifact, which sent the run's one
+    repair attempt at a pass that would write the same thing again.
+
+    `pointer` is into the claims file, not into the services part, and it is
+    recorded here rather than recomputed because the index is the only place that
+    knows which element of which file the id resolved to.
+    """
+
+    artifact: Path
+    pointer: str
+    payload: dict | None
+
+
+def _document(service: dict, claims: dict[str, _Claim]) -> dict:
     """One service's OpenAPI document.
 
     The carrier convention is fixed rather than derived: method `post`, path
@@ -56,9 +80,10 @@ def _document(service: dict, payloads: dict[str, dict]) -> dict:
     responses needs observed tool results, which is the step above this one.
 
     Key order here is *not* load-bearing: artifacts.canonical_bytes writes with
-    sort_keys, so the order these dicts are built in is normalised away. List
-    order is what byte-identity actually rests on, and both lists below are
-    `service["tools"]` in the order the pass wrote it.
+    sort_keys, so the order these dicts are built in -- `paths` among them, which
+    is a dict and not a sequence -- is normalised away. List order is what
+    byte-identity actually rests on, and this function builds exactly one list:
+    `x-rubrica.tools`, in the order the pass wrote `service["tools"]`.
     """
     paths: dict[str, dict] = {}
     for tool in service["tools"]:
@@ -68,7 +93,9 @@ def _document(service: dict, payloads: dict[str, dict]) -> dict:
                 "operationId": name,
                 "requestBody": {
                     "required": True,
-                    "content": {"application/json": {"schema": payloads[tool["schema_claim"]]}},
+                    "content": {
+                        "application/json": {"schema": claims[tool["schema_claim"]].payload}
+                    },
                 },
             }
         }
@@ -98,6 +125,11 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
     cli.py maps to exit 2 -- correct, because no re-dispatch of any prompt fixes a
     directory permission, and a 1 there would spend the run's single repair
     attempt rewriting a prompt whose output was never the problem.
+
+    The findings name two different artifacts, and which one is not cosmetic: the
+    services part for a defect in the grouping, and a claims file for a
+    `schema_claim` resolving to a claim `rb-extract` left with no usable payload.
+    See `_Claim` for why the second is not the part's defect.
     """
     findings: list[Finding] = []
 
@@ -119,10 +151,15 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
     if not isinstance(services, list):
         return [], [Finding(run.services_part, LAYER, "/services", "not an array")]
 
-    # Claim id -> payload, over every claims file. Built once: a run with forty
-    # inputs and four services would otherwise re-read every claims file per
-    # service.
-    payloads: dict[str, dict] = {}
+    # Claim id -> where it was read and what payload it carries, over every claims
+    # file. Built once: a run with forty inputs and four services would otherwise
+    # re-read every claims file per service.
+    #
+    # An unreadable or non-dict claims file contributes nothing to the index, so a
+    # `schema_claim` into it comes back as an id no claim carries -- the finding
+    # against that file is already in `findings` and it is the one a repair acts
+    # on. The index never blames a file it could not read.
+    claims: dict[str, _Claim] = {}
     for path in list_json(run.claims_dir):
         try:
             document = read_json(path)
@@ -132,11 +169,14 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
         if not isinstance(document, dict):
             findings.append(Finding(path, LAYER, "", "claims file is not a JSON object"))
             continue
-        for claim in document.get("claims", []):
+        for index, claim in enumerate(document.get("claims", [])):
             if isinstance(claim, dict) and isinstance(claim.get("id"), str):
                 payload = claim.get("payload")
-                if isinstance(payload, dict):
-                    payloads[claim["id"]] = payload
+                claims[claim["id"]] = _Claim(
+                    path,
+                    f"/claims/{index}/payload",
+                    payload if isinstance(payload, dict) else None,
+                )
 
     planned: list[tuple[Path, dict]] = []
     for index, service in enumerate(services):
@@ -191,18 +231,37 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
                 ok = False
                 continue
             schema_claim = tool.get("schema_claim")
-            if not isinstance(schema_claim, str) or schema_claim not in payloads:
+            claim = claims.get(schema_claim) if isinstance(schema_claim, str) else None
+            # Two defects, two artifacts. Which file a 1 names is the whole point
+            # of the split: an id nothing carries is this part's defect, while a
+            # claim with no usable payload is the claims file's, and naming the
+            # part for the second sent the repair at a pass whose output was
+            # correct -- rb-reconcile-services is instructed to name the claim
+            # anyway in exactly that case, so it would write the same thing again.
+            if claim is None:
                 findings.append(
                     Finding(
                         run.services_part,
                         LAYER,
                         f"{tool_pointer}/schema_claim",
-                        f"no claim in 01-claims/ carries a payload for {schema_claim!r}",
+                        f"no claim in 01-claims/ has id {schema_claim!r}",
+                    )
+                )
+                ok = False
+            elif claim.payload is None:
+                findings.append(
+                    Finding(
+                        claim.artifact,
+                        LAYER,
+                        claim.pointer,
+                        "no payload usable as a request-body schema, and "
+                        f"{run.services_part.name} names this claim at "
+                        f"{tool_pointer}/schema_claim",
                     )
                 )
                 ok = False
         if ok:
-            planned.append((run.interface(service_id), _document(service, payloads)))
+            planned.append((run.interface(service_id), _document(service, claims)))
 
     if findings:
         return [], findings

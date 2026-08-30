@@ -218,3 +218,58 @@ def test_the_verification_paragraph_points_at_that_condition(skill):
     # matched nothing.
     paragraph = _paragraph_carrying(skill, "4. Invariants", "report success")
     assert "refusal condition" in paragraph, paragraph
+
+
+def test_the_unusable_payload_condition_routes_the_finding_it_produces(skill):
+    """The bullet that *instructs* the state, carrying the move for the finding.
+
+    Following this condition is not a defect, and after the fix round that measured
+    it the finding synthesis raises names `01-claims/<artifact_id>.json` rather than
+    this pass's part -- so the pass can be handed a finding about an artifact it did
+    not write, for having done exactly what it was told. That is the same class as
+    the `check-refs` bullet below it, and the same third move closes it. Without the
+    move stated here, a reader of this bullet alone has two forbidden options: edit
+    another stage's claims file, or report a success the exit code contradicts.
+
+    Scoped to the one bullet that owns the case, and asserted through stems and
+    alternations for the reason its sibling records: `01-claims/` reds on a
+    meaning-preserving "the claims file", and "do not edit" on "never edit".
+    """
+    bullet = _bullet_carrying(skill, "5. Refusal conditions", "schema_claim")
+    # The file the finding names -- the whole point of the routing, since the
+    # tempting reading is that a finding about your own citation is yours to fix.
+    assert any(k in bullet for k in ("01-claims/", "claims file")), bullet
+    assert any(k in bullet for k in ("not yours", "rb-extract")), bullet
+    # The third move, in the three parts that make it recoverable: report it, keep
+    # your hands off the other stage's file, and stop rather than claim success.
+    assert "stop" in bullet, bullet
+    # A regex rather than the literal set its sibling uses, and both bounds are
+    # measured. Tighter fails: the meaning-preserving "that claims file is never
+    # yours to edit" reds every literal in that set and every adjacency window.
+    # Looser fails too -- the bare stem `edit` is the mirror hazard, since a bullet
+    # *permitting* the edit carries it just as well. So: a prohibition and the verb
+    # inside one sentence, which a permission is not. The bullet also writes "must
+    # not" with no emphasis inside it deliberately: `must **not** edit` reds this.
+    assert re.search(r"(?:do not|must not|never)\b[^.]{0,40}?\bedit", bullet), bullet
+    assert any(k in bullet for k in ("report the finding", "report it")), bullet
+
+
+def test_the_unpreservable_name_condition_names_the_one_legal_way_out(skill):
+    """A dead end with an escape the bullet used to leave unnamed.
+
+    Recording the tool under its real name is what this condition requires, and
+    `synthesise-interfaces` then refuses the service -- correctly, and against this
+    pass's own part. Re-dispatched with that finding, a pass told only "record it
+    and do not rename it" has no move at all, and the one it is likeliest to invent
+    is the rename this bullet forbids. Invariant 1's accounting is the escape:
+    `dropped` with a `note`. So the bullet has to name it, while still forbidding
+    the rename -- both halves, in the bullet that owns them.
+    """
+    bullet = _bullet_carrying(skill, "5. Refusal conditions", "sanitis")
+    assert "renam" in bullet, bullet
+    assert "dropped" in bullet, bullet
+    assert "note" in bullet, bullet
+    # Named as the invariant rather than described loosely, because `dropped` and
+    # `note` alone are also how section 2 describes a drop: what makes this the
+    # *legal* way out is that Invariant 1 admits it.
+    assert "invariant 1" in bullet, bullet

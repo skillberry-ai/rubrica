@@ -212,9 +212,20 @@ Exits 0 clean, 1 with one finding per line on stdout, or 2 if the run directory
 cannot be read or `01-interfaces/` cannot be written. The split is deliberate. A
 missing or non-object `01-services.json`, a `services` key that is not an array, a
 service id that is not usable as a filename, a tool name the harness's
-sanitisation would rewrite, and a `schema_claim` no claim carries a payload for are
-all `1`s — each is repaired by re-dispatching `reconcile-services`, which is what a
-`1` promises the orchestrator. An unwritable `01-interfaces/` is a `2`: no
+sanitisation would rewrite, and a `schema_claim` no claim in `01-claims/` has an id
+for are all `1`s against that part — each is repaired by re-dispatching
+`reconcile-services`, which is what a `1` promises the orchestrator.
+
+**A `schema_claim` whose claim exists and carries no usable `payload` is the one
+finding here that names a claims file instead**, at that claim's `payload`. The
+payload is `rb-extract`'s output, and `rb-reconcile-services` is instructed to cite
+such a claim as the `schema_claim` anyway and say so in the service's `statement` —
+so the part is correct, re-dispatching that pass returns the same bytes, and a `1`
+against the part would be a `1` naming the wrong artifact. Nothing downstream needs
+the document to reach the seal, so the run carries this one into gate 1, where a
+human rules on a service that is not simulatable as it stands.
+
+An unwritable `01-interfaces/` is a `2`: no
 re-dispatch of any prompt fixes a directory permission, and a `1` there would spend
 the run's one repair attempt on a stage whose output was never the problem.
 

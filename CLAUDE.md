@@ -242,8 +242,12 @@ are judgments rather than list entries:
   produce byte-identical documents. **Its failure surface splits across both exit
   codes, and the split is load-bearing.** A missing or non-object
   `01-services.json`, a service id that is not a usable filename, a tool name the
-  harness would rewrite, and a `schema_claim` no claim carries a payload for are
-  `1`s: re-dispatching `reconcile-services` repairs each. An unwritable
+  harness would rewrite, and a `schema_claim` no claim in `01-claims/` has an id
+  for are `1`s: re-dispatching `reconcile-services` repairs each. A `schema_claim`
+  naming a claim that exists and carries no usable `payload` is a `1` too, but
+  against `01-claims/<artifact_id>.json` and **not** repairable by that pass —
+  which is instructed to cite such a claim anyway — so it is a finding a human
+  rules on at gate 1. An unwritable
   `01-interfaces/` is a `2`, because no prompt re-dispatch fixes a directory
   permission and a `1` there would spend the run's one repair attempt on a stage
   whose output was never the problem. It is also all-or-nothing and owns its

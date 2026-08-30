@@ -192,8 +192,9 @@ checker the run has inputs for, so it may also name an artifact an earlier pass
 wrote; the findings that are yours name `01-services.json`, and those are your
 own defect to fix rather than findings to pass along. Repair the artifact and run
 both again; report success only once both exit clean -- and when a finding names
-an artifact that is not yours, so neither repairing it nor succeeding is open to
-you, take the third move the last refusal condition prescribes rather than
+an artifact that is not yours, whether one of these two commands printed it or a
+repair dispatch handed it to you, so that neither repairing it nor succeeding is
+open to you, take the third move the last refusal condition prescribes rather than
 choosing between two moves you are forbidden.
 
 ## 5. Refusal conditions
@@ -216,7 +217,12 @@ choosing between two moves you are forbidden.
   `statement` that the name cannot be preserved. Do **not** rename it to
   something that would survive: the substitution downstream is invisible to the
   agent only if the name is unchanged, so a rename here converts a detectable
-  refusal into a suite that passes against a tool the agent cannot call.
+  refusal into a suite that passes against a tool the agent cannot call. That
+  service has no derivable document either, and if you are handed the finding and
+  judge that the tool must not be recorded at all, Invariant 1's is the one legal
+  way to leave it out: its input's row carries a `dropped` count and a `note`
+  saying the name cannot be preserved. A tool left out under that accounting is a
+  dead end a human reads at gate 1; a renamed one is a dead end nobody sees.
 
 - **You cannot tell whether two tools share a backend.** Split them into two
   services and say so in each `statement`. Do not merge on a hunch: a merge that
@@ -228,7 +234,16 @@ choosing between two moves you are forbidden.
   anyway, and say in the `statement` that the input schema is unusable. Do not
   reconstruct the schema from the tool's prose description: a request body you
   invented is a contract the agent never declared, and the check below you
-  compares a payload against its input, not against your reasoning.
+  compares a payload against its input, not against your reasoning. That service
+  then has no derivable document: `rubrica synthesise-interfaces` refuses it, and
+  its finding names `01-claims/<artifact_id>.json` at that claim's `payload` --
+  `rb-extract`'s output, not yours. If it is ever handed to you as a repair, take
+  the third move the last condition below prescribes: report the finding, name the
+  file it names, say your own artifact validates and carries no finding of its
+  own, and stop. Doing what this condition told you to do is not a defect you can
+  repair, and you must not edit that claims file to make the finding go away:
+  a payload you supplied is another stage's output wearing your reasoning, and the
+  missing schema is exactly what a human at gate 1 needs to see.
 
 - **The run declares no tools at all.** Write `services: []` with a complete
   `inputs_seen`. That is a legitimate run -- not every target is tool-driven --
