@@ -2231,6 +2231,12 @@ def _payload_findings(
     A pointer that resolves to *nothing* is a finding, and deliberately so: a
     fabricated payload behind a fabricated locator is precisely what silence there
     would let through, and that is the property this check exists to observe.
+
+    A pointer that resolves to a JSON *string* is the one further abstention, and
+    unlike the three above it is about the resolved value rather than the locator's
+    shape. `payload` is `{"type": "object"}` in claims-0.1.json, so a string target
+    makes the comparison below unequal by construction and the finding a certain
+    false positive. See the guard for the measurement that found it.
     """
     payload = claim.get("payload")
     if not isinstance(payload, dict) or claims_file is None:
@@ -2266,6 +2272,28 @@ def _payload_findings(
                 "tool is built from cannot be checked against the input it claims to copy",
             )
         ]
+    if isinstance(value, str):
+        # A pointer that lands on a JSON *string* is not comparable, and reporting
+        # drift for it is a guaranteed false positive: claims-0.1.json declares
+        # `payload` as `{"type": "object"}`, so layer 1 has already rejected any
+        # payload that could equal a string, and the `!=` below can therefore only
+        # ever fire. Measured on run-20260830-101018, an MLflow trace corpus: every
+        # one of twelve rb-extract dispatches found the target's tool declarations
+        # stored inside JSON-*encoded string* attributes, so no pointer over the
+        # document reaches a schema object at all. One of the twelve pointed its
+        # locator at the enclosing attribute -- an honest pointer, a verbatim
+        # payload -- and this comparison called it drift that "makes the synthesised
+        # interface describe a tool the target does not have". That accuses the
+        # claims file of a defect it does not have, which is the "a 1 must name the
+        # right artifact" rule read from the other side.
+        #
+        # Abstaining loses no real check for the reason above, and it is deliberately
+        # narrower than the fix it stands in for: teaching resolve_pointer to decode a
+        # string target and keep descending would make these payloads genuinely
+        # checkable. That is a capability rather than a workaround -- MLflow traces
+        # are a real input kind -- and docs/design/limitations.md carries the ruling
+        # that parked it.
+        return []
     if value != payload:
         return [
             Finding(

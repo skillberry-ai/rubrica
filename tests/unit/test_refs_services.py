@@ -401,6 +401,38 @@ def test_a_non_pointer_locator_on_a_json_input_is_not_compared(tmp_path):
     assert check_services(run) == []
 
 
+def test_a_pointer_landing_on_a_json_string_is_not_compared(tmp_path):
+    """The one abstention about the resolved *value* rather than the locator's shape.
+
+    `payload` is `{"type": "object"}` in claims-0.1.json, so layer 1 has already
+    rejected any payload that could equal a string: a pointer landing on a JSON
+    string makes the `!=` comparison unequal by construction, and the drift finding
+    a certain false positive.
+
+    Measured on run-20260830-101018, an MLflow trace corpus, which is why this
+    branch exists rather than being hypothetical. All twelve rb-extract dispatches
+    found the target's tool declarations stored inside JSON-*encoded string* span
+    attributes, so no pointer over the document reaches a schema object at all. One
+    of the twelve addressed the enclosing attribute -- an honest pointer over a
+    verbatim payload -- and without this guard that was reported as a payload that
+    "has drifted", accusing a correct claims file of the defect this check exists to
+    find. Here `/tools` resolves to a string standing in for that shape.
+
+    The payload is mutated as well, so this asserts silence about a *difference* and
+    not silence about nothing -- the same construction the two locator-shape
+    abstentions above use.
+    """
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+    api = run.input_file("api-json.json")
+    api.write_text(json.dumps({"tools": '[{"name": "query_tickets"}]'}), encoding="utf-8")
+    path, document = _claims(run)
+    claim = _claim(document, "clm-api-010")
+    claim["evidence"][0]["locator"] = "#/tools"
+    del claim["payload"]["properties"]["ticket_id"]
+    _rewrite_claims(run, path, document)
+    assert [f for f in check_services(run) if f.artifact == path] == []
+
+
 def test_a_non_json_input_is_not_compared(tmp_path):
     """The same silence for the other half of the pair: a pointer is only
     resolvable against a document that parses. notes.md is registered input bytes

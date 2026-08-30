@@ -2580,6 +2580,53 @@ edit. Unifying all four keys behind one helper would remove the class and
 refactor a function three reviews validated, for a cosmetic gain in a message a
 human reads once.
 
+### A tool schema inside a JSON-encoded string is not payload-checkable, and every extraction of one abstains
+
+`refs._payload_findings` re-reads a `tool` claim's `payload` against the input at
+its `evidence[0].locator` and compares parsed values, which is what makes a
+prompt's byte-for-byte transcription falsifiable. It cannot do that when the
+declaration lives inside a JSON-*encoded string*: `resolve_pointer` walks to the
+string and cannot descend into it, so no pointer over the document addresses a
+schema object at all.
+
+Measured on `run-20260830-101018`, a real MLflow trace corpus of five declared
+tools. **All twelve `rb-extract` dispatches over trace inputs hit this**, every
+one transcribed its payloads verbatim and said in each claim's statement what it
+had done — and between them they wrote six locator spellings driving this check
+down three paths. Three chose forms that are not bare pointers so it abstains,
+two of them stating that they chose it *for* that reason. Seven wrote pointers
+descending into the string, which resolve to nothing and report that the payload
+"cannot be checked". One addressed the enclosing attribute — an honest pointer
+over a verbatim payload — which resolved to a string and was reported as a
+payload that "has drifted", accusing a correct claims file of the defect this
+check exists to find.
+
+Only that last case is fixed here: a pointer resolving to a JSON string now
+abstains, because `payload` is `{"type": "object"}` in `claims-0.1.json`, so the
+comparison was unequal by construction and the finding a certain false positive.
+`tests/unit/test_refs_services.py::test_a_pointer_landing_on_a_json_string_is_not_compared`
+pins it, and removing the guard reproduces the fabricated finding.
+
+**What stays open, and the ruling.** Payload fidelity does not apply to
+trace-sourced `tool` claims at all — it abstains rather than fabricating, which
+is the honest failure, but it abstains. The fix is to teach the resolver to decode
+a string-valued target and keep descending; MLflow traces are a real input kind
+and every dispatch independently found the same structure, so that is a capability
+rather than a workaround. It is not done here because it widens a resolver five
+checkers share, and because the exposure is bounded: `rb-reconcile-services`'
+Method step 3 instructs picking the *declared* contract, and a corpus carrying a
+tool-schema document supplies pointer-checkable payloads for every tool — in this
+run `tools-list-json` did, at `#/tools/N/inputSchema`, with all five resolving
+clean. A corpus of traces *alone* would have no checked payloads and nothing
+would say so, which is the shape to watch for.
+
+Two smaller things the same run surfaced, neither fixed: `rb-extract`'s Method
+section gives no convention for addressing a value inside an encoded string, which
+is why twelve dispatches invented six spellings; and its example pointer
+`#/tools/0/input_schema` is the toy fixture's snake_case, where real MCP declares
+`inputSchema` — the dispatch that read the real document used the document's key
+rather than copying the example, but the example is a latent trap.
+
 ---
 
 ## Before you rely on a test or a fixture
