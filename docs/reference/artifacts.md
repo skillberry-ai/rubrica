@@ -528,7 +528,10 @@ so a gap's provenance is resolvable rather than sitting in prose).
 - **Schema:** `src/rubrica/schema/services-part-0.1.json`
 - **Written by:** `reconcile-services`, run as `rb-reconcile-services`
 - **Read by:** `check-refs`; the interface synthesis below it; `reconcile-seal`,
-  which folds it into the world model's optional `services` field
+  which folds it into the world model's optional `services` field; and
+  `gate-brief`, which renders one block per service at gate 1 — from this file
+  rather than from the assembled model, because a reader whose next action is to
+  correct a grouping edits the part
 - **Path:** `01-services.json`
 
 The tools the target declares, grouped into the services one simulator each
@@ -584,8 +587,11 @@ repair belongs in.
   derived from: one document per service and nothing else in the directory, and
   each document's `operationId` set equal to its service's tool names — with one
   exception, a document two services with the same id collapsed onto, which is held
-  to neither grouping because the finding belongs to `01-services.json`. The gate-1
-  surface that will render it is still to be built
+  to neither grouping because the finding belongs to `01-services.json`. Also
+  `gate-brief`, whose gate-1 services block names each document's path, or states
+  that none was written: it asks `is_file` per service rather than trusting the
+  directory, since synthesis creates `01-interfaces/` even for an empty service
+  list
 - **Path:** `01-interfaces/<service_id>.json`, one per service — derivable from
   the service id, so there is no path field anywhere to drift out of agreement
   with the directory

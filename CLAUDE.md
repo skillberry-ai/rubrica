@@ -262,15 +262,19 @@ are judgments rather than list entries:
   human gate: at gate 0 the objective verdict, the predicted-vs-observed surface
   divergence, grouped declines, the slice table and every group the slicer split
   across more than one slice; the reconcile sweep plus per-input utilisation,
-  per-pass read coverage, the capabilities the coverage denominator excludes and
-  implied size at gate 1; the coverage matrix at gate 2; the verdict tally at gate
-  3.
+  per-pass read coverage, the capabilities the coverage denominator excludes,
+  implied size and one block per service at gate 1; the coverage matrix at gate 2;
+  the verdict tally at gate 3.
   Gate 1's sweep is an **aggregate, not a per-subject tally** — how many subjects
   cover how many claims, how many subjects were swept, how many contradictions
   were recorded, and, only when any were, the tally by `resolution` with
   `unresolved` first. Gate 1's read coverage is **per pass, not per input**: each
   owning pass's own-kind claims cited over total, and under it only the input rows
-  that dropped a claim, each beside the `note` the drop required.
+  that dropped a claim, each beside the `note` the drop required. Gate 1's services
+  block is read from `01-services.json`, not from the assembled world model, so a
+  reader correcting a grouping edits the file `synthesise-interfaces` re-derives
+  from; **nothing in the run reads a decision about those services**, and the block
+  says so rather than letting a recorded selection read as a narrowing.
   `target-brief` is a report too, and the one written for somebody outside the
   project: it renders a run's description of the *target* — not of the run — for the
   people who own that target, asking them to correct it. Three ranked asks lead, and

@@ -682,8 +682,8 @@ a defect finding.
 Composes the existing reports into the reading surface at one of the four
 human gates: the objective verdict and grouped declines at gate 0; the reconcile
 sweep, the capabilities the coverage denominator excludes, claim utilisation per
-input, read coverage per reconcile pass and the implied suite size at gate 1; the
-coverage matrix at gate 2; the verdict tally at gate 3.
+input, read coverage per reconcile pass, the implied suite size and one block per
+service at gate 1; the coverage matrix at gate 2; the verdict tally at gate 3.
 
 Gate 0 renders more than the others because it is the one gate held before any
 downstream stage has read the corpus: the objective verdict, then the
@@ -706,7 +706,8 @@ as one rather than rendered as silence. The sweep reports counts, not the
 contradictions themselves, so a non-zero `unresolved` is the cue to open
 `01-contradictions/`. The world model's gaps and triage's open deficiencies
 follow, each listed by its id and its prose statement, since pairing them is a
-human's call and no mechanical check exists for it. The brief then closes by
+human's call and no mechanical check exists for it. One block per **service**
+closes the content, described in its own paragraph below. The brief then closes by
 naming `target-brief` below, with this run already substituted into the command:
 gate 1 is where the world model is ratified, so it is the only gate whose brief
 points at the page that asks the target's owners whether the description is true.
@@ -771,6 +772,34 @@ converged round prints and exits 0, and gate 1 is the last place a human can tel
 those two apart. The banner states that condition rather than asserting the halt,
 because a goal hole is closable with no binding anywhere — an all-unbound world
 model with goals keeps proposing, against no capability surface at all.
+
+Gate 1 closes with one block per **service a simulator would stand in for**: the
+grouping and the `grouping_evidence` cited for it, the service's tools, any
+`schema_disagreement` the pass had to resolve, every signal beside its locator, and
+the path to the synthesised OpenAPI document — or a stated absence where none was
+written, because `synthesise-interfaces` creates `01-interfaces/` even for an empty
+service list, so the directory existing is not evidence that a document does. Read
+from `01-services.json` rather than from the assembled world model: the seal folds
+the array in verbatim, so the two agree until a human edits one, and after that
+edit the part is the file that matters — `synthesise-interfaces` re-derives the
+documents from it and not from the seal. Nothing in the section is recomputed,
+because there is no number in it to recompute; it renders a judgment, and the one
+thing it derives from disk is whether each document exists.
+
+Two sentences in that block are load-bearing rather than decorative. **A short
+signal list is not reassurance:** three of the five signal kinds need a source file
+to see and only Python source is parsed into structure, so absence of evidence may
+mean nobody could look — and `no_outward_evidence_found`'s locator names what was
+*read*, which is why it renders as `read:` where every other kind renders as `at:`.
+That caveat sits *above* the signal lines it qualifies rather than under the last
+service, because a reader who finds the one service they came for stops there, and
+the misreading it guards against is the dangerous direction: uncertainty about
+containment must never read as containment. **And nothing in the run reads a
+decision about these services** — no stage reads a selection and coverage does not
+narrow from one, so a human who recorded a selection expecting the run to narrow
+would have been misled by a report that showed them services and stayed silent.
+`rubrica decide` is named as the action that does work: it puts the correction on
+the record for whichever run acts on it.
 
 Required: `--run RUN`, `--gate {0,1,2,3}`.
 
