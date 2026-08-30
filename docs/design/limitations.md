@@ -435,9 +435,11 @@ number without a read.
   and 4 for `notes-md.json`, against the goals pass's declared `own_kind_total` of
   5. No claim was read.
 
-The four skills' §5 refusal conditions already concede this in the words "a row
+Every owning pass's §5 refusal conditions already concede this in the words "a row
 you filled in without opening the file is indistinguishable, in the artifact, from
-one you filled in after reading it", so the design ships the concession and the
+one you filled in after reading it" — stated without a count on purpose, because it
+said "the four skills" until `rb-reconcile-services` made it five and the next pass
+to own a claim kind would make it six. So the design ships the concession and the
 overclaim together; `docs/reference/artifacts.md` and
 `refs.check_input_dispositions`' docstring have been corrected to say
 *recomputable* rather than unforgeable.
@@ -2150,6 +2152,33 @@ today — `defs`, `classes`, `assignments` and `imports` have no entry cap — s
 parser over a file like parsec's 101KB `static/app.js`, which carries on the
 order of 144 top-level names, needs a cap and a visible truncation flag in the
 `keys_truncated` / `skeleton_nodes_truncated` / `role_keys_truncated` family.
+
+### Nothing reads a human's decision about which services to simulate
+
+`rb-reconcile-services` groups the tools the target declares into the services one
+simulator each would stand in for, and gate 1 is where a human rules on that
+grouping — the pass is instructed to split when unsure precisely because two
+services that should be one are two simulators a human can merge there. **No stage
+reads the merge.** `rubrica decide` appends it to `decisions.md`, and no coverage
+denominator, batch partition or instantiation narrows from it: a person who rules
+at gate 1 that two of these services are one has changed the record and nothing
+else. The one correction at this gate that does propagate is editing
+`01-services.json` and re-running `rubrica synthesise-interfaces`, which re-derives
+that service's document — and that is a correction to the grouping, not a reading
+of a decision about it.
+
+Parked with the ruling the design states: consuming a selection, and the
+`denominator` narrowing that would accompany it, belong with the step that reads a
+selection. `denominator` is `{version, capability_cells, goals}` under
+`additionalProperties: false`, so a new exclusion reason is a deliberate change to
+arithmetic four consumers narrow together — not a field one command can start
+writing. Building the read ahead of that step would put something in the artifact
+contract that nothing consumes, which is the shape a `service.derivation` field was
+cut for in the same design. What keeps this from costing a fix round is that the
+boundary is stated where the decision is made: `gate-brief --gate 1`'s services
+section ends by saying that no stage reads a selection and that coverage does not
+narrow from one, so a reader is told the limit before they act on the assumption
+that it does.
 
 ---
 
