@@ -655,12 +655,11 @@ def deficiencies(run: RunPaths) -> list[Deficiency]:
 # payload would have dropped the gaps row from the one fixture the page is
 # developed against.
 #
-# `services` is the one key the sealed model may omit entirely -- the seal writes it
-# only when 01-services.json exists -- so it is the one row where 0 does not
-# distinguish "the pass found no tools" from "the pass never ran". It is counted
-# anyway, for the reason the whole tuple is keyed this way: a row silently dropped
-# from a summary is worse than a row a reader has to place, and this page's job is
-# to say what the run's artifacts hold.
+# `services` is the one key a *conforming* sealed model may omit entirely -- the seal
+# writes it only when 01-services.json exists -- so it is the one row where the
+# document's silence is the ordinary case rather than a hand edit. The row is still
+# keyed from here and still rendered, but its value is None rather than 0 in that
+# state; see `world_model` below for why 0 would have been a false report.
 _WORLD_MODEL_COLLECTIONS = (
     "capabilities",
     "entities",
@@ -674,7 +673,9 @@ _WORLD_MODEL_COLLECTIONS = (
 
 @dataclass(frozen=True)
 class WorldModel:
-    counts: dict[str, int]
+    # `int | None`, and the None is load-bearing: a collection key the document does
+    # not carry at all counts as None, never as 0. See `world_model` below.
+    counts: dict[str, int | None]
     # Rendered as whatever they hold rather than unpacked into fields, for
     # `Header.max_rounds`' reason: both are small closed objects (`target` is
     # name/interface/notes, `denominator` is version/capability_cells/goals) that
@@ -698,6 +699,23 @@ def world_model(run: RunPaths) -> WorldModel | Marker:
     are rendered: the parts are what `reconcile-contradict` recorded, the sealed
     array is what survived the seal, and a divergence between them is a real
     finding about the run rather than a rendering to reconcile.
+
+    **A count of None means the document carries no such key, and it is not the same
+    fact as 0.** `services` is where this bites, because it is the one key a
+    conforming sealed model omits: `reconcile-seal` writes it only when
+    01-services.json exists, and it deliberately omits it rather than writing `[]`,
+    because an empty array asserts that a pass looked and found no tools while
+    absence says no pass ran. Collapsing both to 0 here would erase on the page the
+    exact distinction the artifact shape exists to preserve -- so this is `Absent`
+    versus `Malformed` one level down, and the same ruling as the `manifest.stages`
+    record that renders blank fields rather than dropping its row.
+
+    The rule is applied to every collection rather than special-cased for
+    `services`, because it is the honest reading for all of them: for the other six
+    a missing key means a hand-edited or truncated model, which is again a different
+    fact about the run from an empty array. A key that is present but not a list
+    still counts 0 -- `_dicts` owns that shape, and "carries something unreadable as
+    a collection" is the malformed case layer 1 rejects, not an absent key.
     """
     payload = _mapping(_quietly(run.world_model))
     if not payload:
@@ -707,7 +725,14 @@ def world_model(run: RunPaths) -> WorldModel | Marker:
     # `_dicts` rather than `len(...)` on the raw value: a hand-edited
     # `"actors": "nope"` is not a list at all, and iterating it would count four
     # characters as four actors.
-    counts = {name: len(_dicts(payload.get(name))) for name in _WORLD_MODEL_COLLECTIONS}
+    #
+    # `name in payload` before the length, so an absent key is None and an empty
+    # array is 0: the docstring above is the whole argument, and a `.get(name, [])`
+    # here is exactly the collapse it forbids.
+    counts: dict[str, int | None] = {
+        name: (len(_dicts(payload[name])) if name in payload else None)
+        for name in _WORLD_MODEL_COLLECTIONS
+    }
     return WorldModel(
         counts=counts,
         target=_mapping(payload.get("target")),

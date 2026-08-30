@@ -1335,6 +1335,78 @@ def test_world_model_counts_a_collection_that_is_not_a_list_as_zero(tmp_path, co
     }
 
 
+def test_world_model_reports_an_absent_collection_key_as_none_never_zero(tmp_path):
+    """The distinction the optional `services` key exists to carry, held on the page.
+
+    `reconcile-seal` writes `services` only when `01-services.json` exists, and omits
+    it rather than writing `[]` when it does not, because an empty array asserts that
+    a pass looked and found no tools while absence says no pass ran. Those are
+    different facts about the target, and a report rendering both as 0 would erase on
+    the one surface a human reads exactly the distinction the artifact shape was
+    given in order to preserve.
+
+    All three states are asserted against one document, mutated between them, so this
+    cannot pass by two readings agreeing on the same number.
+    """
+    from rubrica.artifacts import write_json
+    from rubrica.reconcile import seal
+
+    # Sealed from the checkpoint that writes no services part, and by the real seal
+    # rather than by hand: the absent key has to be what the code produces, or this
+    # asserts against a state the pipeline never reaches.
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-gaps")
+    path, findings = seal(run)
+    assert findings == [], findings
+    assert path == run.world_model
+    sealed = _sealed(run)
+    assert "services" not in sealed, "the fixture must reach the absent-key state"
+
+    assert summary.world_model(run).counts["services"] is None
+
+    sealed["services"] = []
+    write_json(run.world_model, sealed)
+    assert summary.world_model(run).counts["services"] == 0
+
+    # A non-empty one still counts, so None is about the key and not about emptiness.
+    sealed["services"] = [{"id": "svc-one"}]
+    write_json(run.world_model, sealed)
+    assert summary.world_model(run).counts["services"] == 1
+
+
+def test_render_shows_an_absent_collection_as_not_recorded_not_a_blank_cell(tmp_path):
+    """`esc(None)` is the empty string, so a None count renders as an empty `<td>`
+    unless the renderer marks it -- and a blank cell in a column of numbers reads as
+    zero, which is the one reading this must not produce. The same measurement that
+    put `_NOT_RECORDED` in this module in the first place.
+
+    Asserted as the whole `<tr>` rather than by looking for "services" and the
+    marker somewhere on the page: the page is long and both tokens appear elsewhere
+    in it. The empty-array row is asserted in the same shape off the same document,
+    which is what makes the two cells comparable rather than two independent claims.
+
+    The marker itself comes from the module's own `_NOT_RECORDED` rather than being
+    typed out here. What this test is about is that the cell carries the absence
+    marker instead of a blank or a number, not what that marker's wording is -- and a
+    pinned phrase in this repo has already broken on a reformat that changed nothing.
+    """
+    from rubrica.artifacts import write_json
+    from rubrica.reconcile import seal
+    from rubrica.summary_html import _NOT_RECORDED
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-gaps")
+    seal(run)
+
+    absent = f'<tr><td>services</td><td class="num">{_NOT_RECORDED}</td></tr>'
+    assert absent in summary.run_summary(run)
+
+    sealed = _sealed(run)
+    sealed["services"] = []
+    write_json(run.world_model, sealed)
+    html = summary.run_summary(run)
+    assert '<tr><td>services</td><td class="num">0</td></tr>' in html
+    assert absent not in html
+
+
 def test_world_model_survives_a_target_and_denominator_that_are_not_mappings(tmp_path):
     """Both are rendered key by key, so a truthy non-dict is the shape that raises.
 

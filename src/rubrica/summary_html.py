@@ -551,8 +551,15 @@ def _world_model(run: RunPaths):
     got = summary.world_model(run)
     if isinstance(got, Marker):
         return got
+    # `_NOT_RECORDED` rather than the number for a None count, which is the state
+    # the document carries no such key at all. `esc(None)` is the empty string, so
+    # this cell would otherwise render blank -- and a blank next to a row of numbers
+    # reads as zero, which is the one reading that must not happen here: the sealed
+    # model omits `services` when no pass wrote a grouping and carries `[]` when a
+    # pass looked and found no tools, and those are different facts about the target.
     counts = "".join(
-        f'<tr><td>{esc(kind)}</td><td class="num">{esc(count)}</td></tr>'
+        f"<tr><td>{esc(kind)}</td>"
+        f'<td class="num">{_NOT_RECORDED if count is None else esc(count)}</td></tr>'
         for kind, count in got.counts.items()
     )
     return "\n".join(

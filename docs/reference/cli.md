@@ -830,7 +830,12 @@ and one that is there and unreadable — bad JSON, a document of the wrong shape
 a permission, bytes that are not UTF-8 — renders as `Present but unreadable`, with
 the reason. That second case is a defect `validate --stage X` will name; it is
 still exit 0 here, and a stage bolded in the spine above such a section is the two
-tests disagreeing about one artifact on purpose. The output is derived rather than
+tests disagreeing about one artifact on purpose. The world-model counts draw the same
+distinction one level down: a collection the sealed document carries as an empty
+array counts `0`, while one whose key the document does not carry at all renders as
+`not recorded`. `services` is where that matters, since it is the one key a
+conforming sealed model omits — an empty array there says a pass looked and found no
+tools, and an absent key says no pass ran. The output is derived rather than
 an artifact: no schema, outside the numbered contract, and read by no stage.
 
 The page is self-contained — inline CSS and JS, no external asset, no network
