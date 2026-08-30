@@ -564,13 +564,16 @@ def split_world_model(
 ) -> dict[str, Any]:
     """The golden world model, cut into the partials the reconcile passes write.
 
-    Derived rather than hand-authored beside toy_world_model: tests/fixtures/toy/
-    is the model answer a skill imitates, and a second copy of that answer in
-    partial form would be a second thing to keep correct -- the drift this module
-    already avoids by building every checkpoint from one source. Deriving is also
-    what makes the seal's round trip a *property* (seal(split(w)) == w) rather
-    than a worked example: a hand-authored pair could satisfy it while both
-    drifted together.
+    Derived from `world` rather than hand-authored beside toy_world_model --
+    every partial but `services`, which has nothing in the golden world model to
+    cut and is written out below, with its own comment saying why.
+    tests/fixtures/toy/ is the model answer a skill imitates, and a second copy of
+    that answer in partial form would be a second thing to keep correct -- the
+    drift this module already avoids by building every checkpoint from one source.
+    Deriving is also what makes the seal's round trip a *property*
+    (seal(split(w)) == w) rather than a worked example: a hand-authored pair could
+    satisfy it while both drifted together, and it is exactly the one partial that
+    is not derived that the round trip therefore does not cover.
 
     `claim_ids` defaults to every claim the toy run actually contains, because the
     cover has to be total -- refs.check_subjects reports any claim it omits, and a

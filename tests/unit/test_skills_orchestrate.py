@@ -56,13 +56,16 @@ def _sentences(text: str) -> list[str]:
 # spelling, which is the same reword-brittleness CLAUDE.md warns about.
 #
 # Widened, but not to bare "not", and the ceiling is measured rather than guessed.
-# With B4's paragraph blanked exactly one prose sentence still carries the command
-# -- "when it printed at least one path, gate it with `rubrica validate --stage
-# synthesise-interfaces --run <run>`, then `rubrica check-refs --run <run>`" -- and
-# it already satisfies the empty-case half through "printed". So the prohibition
-# half is the only thing discriminating there, and every token below is absent from
-# that sentence deliberately: none of "gate", "then", "when", "path" or "run" may
-# ever join this set, however natural it reads.
+# The prose this guards is B3's, not B4's -- B4 halts on a blocking gap and has
+# nothing to do with synthesis, and a maintainer who blanks it, sees green and
+# concludes the guard is vacuous has measured the wrong band. With B3's prohibition
+# paragraph blanked (1132 characters) exactly one prose sentence still carries the
+# command -- "when it printed at least one path, gate it with `rubrica validate
+# --stage synthesise-interfaces --run <run>`, then `rubrica check-refs --run
+# <run>`" -- and it already satisfies the empty-case half through "printed". So the
+# prohibition half is the only thing discriminating there, and every token below is
+# absent from that sentence deliberately: none of "gate", "then", "when", "path" or
+# "run" may ever join this set, however natural it reads.
 PROHIBITIONS: frozenset[str] = frozenset(
     {
         "must not",
@@ -285,7 +288,7 @@ def test_the_whole_run_block_shows_the_interface_gate_as_conditional():
 
     `validate --stage synthesise-interfaces` accuses a run whose target declares no
     tool (see the predicate above and
-    test_the_interface_gate_over_a_run_with_no_services_names_the_run_root), so B4
+    test_the_interface_gate_over_a_run_with_no_services_names_the_run_root), so B3
     forbids it there. The block is framed as "every `rubrica` command shown is one
     you actually run" and nothing in it says the bands override it -- so a row
     showing that gate unconditionally contradicts the prose, and an orchestrator
@@ -304,7 +307,7 @@ def test_the_whole_run_block_shows_the_interface_gate_as_conditional():
     assert lines[0].lstrip().lower().startswith("if "), (
         "the block shows `validate --stage synthesise-interfaces` unconditionally: "
         f"{lines[0]!r}. Every command in this block is one the orchestrator runs, so "
-        "the condition has to be visible here and not only in B4"
+        "the condition has to be visible here and not only in B3"
     )
     skips = [
         line
@@ -363,9 +366,14 @@ def test_it_forbids_the_interface_gate_when_synthesis_printed_no_path():
     measured it, equally tolerant of how the prohibition is spelled: PROHIBITIONS
     above holds the vocabulary, and its comment records both why it was widened
     ("is forbidden to you" reded the earlier three-token spelling) and the ceiling
-    on widening it further (with B4 blanked, one prose sentence still carries the
-    command *and* satisfies the empty-case half, so the prohibition half is the
-    whole discriminator there).
+    on widening it further (with B3's prohibition paragraph blanked, one prose
+    sentence still carries the command *and* satisfies the empty-case half, so the
+    prohibition half is the whole discriminator there).
+
+    The band is **B3**, where synthesis is run, and every citation here says so.
+    Measured, because the four that used to say B4 were citing a measurement:
+    blanking all 2,130 characters of B4 leaves this test and the block test green,
+    while removing B3's synthesis prose fails this one.
 
     The rule is B6 step 1's, one band earlier, and that step's own version is pinned
     by test_the_batches_gate_over_a_run_with_no_plan_names_the_run_root in
