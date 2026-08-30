@@ -2214,14 +2214,16 @@ def _payload_findings(
       absent, not UTF-8 or not JSON: check_manifest, check_inputs and
       check_readable each own one of those, and a markdown input reaches the last
       of them every time a prose claim is named as a schema claim;
-    - a locator that is not a JSON pointer. Locators come in two shapes across
-      this project's corpora -- `#/tools/0/input_schema` for a JSON input and
-      `#operator-notes` for prose -- and resolve_pointer *raises* on the second
-      rather than returning UNSET. An exception escaping here is exit 1 with one
-      `[internal]` finding naming the run root, which is the class cli.py's
-      catch-all and findings.py exist to prevent. tests/builders.py carries a
-      third shape, `api.json#/tools/0`, which this treats as the prose case for
-      the same reason: what follows the strip is not a pointer.
+    - a locator that is not a JSON pointer. Locators come in three shapes across
+      this project's corpora, and only the first is comparable:
+      `#/tools/0/input_schema`, a bare pointer into a JSON input;
+      `#operator-notes`, a markdown heading anchor for prose; and
+      `api.json#/tools/0`, the URI-with-path form tests/builders.py carries.
+      claims-0.1.json constrains `locator` to a non-empty string and nothing
+      further, so layer 1 admits all three and any fourth. resolve_pointer
+      *raises* on the last two rather than returning UNSET, and an exception
+      escaping here is exit 1 with one `[internal]` finding naming the run root --
+      the class cli.py's catch-all and findings.py exist to prevent.
 
     A pointer that resolves to *nothing* is a finding, and deliberately so: a
     fabricated payload behind a fabricated locator is precisely what silence there
@@ -2274,6 +2276,24 @@ def _payload_findings(
             )
         ]
     return []
+
+
+def _duplicate_service_ids(part: dict) -> set[str]:
+    """Every `services[].id` the part declares more than once.
+
+    One home, two readers: check_services reports it, and check_interfaces stays
+    silent about the documents such a pair collapses onto. Two computations of the
+    same set would be two answers free to drift, and the second reader's silence is
+    only correct while it is silent about exactly the ids the first reports.
+
+    Non-string ids are dropped rather than counted: an unhashable one would raise
+    out of the set, and layer 1 owns the shape.
+    """
+    ids = [
+        service.get("id") for service in _as_list(part.get("services")) if isinstance(service, dict)
+    ]
+    declared = [service_id for service_id in ids if isinstance(service_id, str)]
+    return {service_id for service_id in declared if declared.count(service_id) > 1}
 
 
 def check_services(run: RunPaths) -> list[Finding]:
@@ -2384,7 +2404,6 @@ def check_services(run: RunPaths) -> list[Finding]:
     # buys is that a repair reads every unresolvable id before the grouping and
     # payload consequences of those ids.
     references: dict[str, list[str]] = {}
-    service_ids: list[str] = []
     names: list[tuple[str, Any]] = []
     schema_claims: list[str] = []
 
@@ -2398,8 +2417,6 @@ def check_services(run: RunPaths) -> list[Finding]:
         # synthesise's finding, so this falls back to the pointer rather than
         # reporting the id again.
         label = service_id if service_id is not None else f"/services/{i}"
-        if service_id is not None:
-            service_ids.append(service_id)
         cited_here: set[str] = set()
         for j, tool in enumerate(_as_list(service.get("tools"))):
             if not isinstance(tool, dict):
@@ -2442,13 +2459,13 @@ def check_services(run: RunPaths) -> list[Finding]:
             # not the hazard the duplicate clause reports.
             references.setdefault(claim_id, []).append(label)
 
-    for service_id in sorted({sid for sid in service_ids if service_ids.count(sid) > 1}):
-        # Named here rather than left to the document, because run.interface()
-        # derives one path from the id: two services with one id collapse onto one
-        # file, so the only artifact the difference *can* be reported against
-        # afterwards is a derived document that faithfully carries the last
-        # grouping. That is a 1 naming a file with no defect in it, and no
-        # re-dispatch of either stage clears it.
+    for service_id in sorted(_duplicate_service_ids(part)):
+        # Named here and *only* here: run.interface() derives one path from the id,
+        # so two services with one id collapse onto one file, and the difference
+        # would otherwise be reported against a derived document that faithfully
+        # carries the last grouping -- a 1 naming a file with no defect in it.
+        # check_interfaces skips these services for that reason, so this is the one
+        # line a repair can act on.
         report(
             "/services",
             f"more than one service is named {service_id}: they share the one document "
@@ -2558,6 +2575,13 @@ def check_interfaces(run: RunPaths) -> list[Finding]:
     tool names -- the difference named in both directions, because a rename is two
     defects and a human shown one half would rename the wrong side back.
 
+    Silent about a service whose id another service also declares. Those collapse
+    onto one document, so every clause here would report the collapse against a
+    file that is byte-for-byte what synthesis wrote, for a defect living in the
+    part -- and check_services names that defect once, where a repair can act on
+    it. The path is still counted as expected, or the document they share would come
+    back as one no service asked for.
+
     The third is the check the rest of the lab design rests on. `operationId` is
     what the harness turns back into an MCP tool name, so the substitution the
     whole measurement depends on is invisible to the agent's reasoning only if the
@@ -2587,6 +2611,7 @@ def check_interfaces(run: RunPaths) -> list[Finding]:
     missing: list[Finding] = []
     mismatched: list[Finding] = []
     expected: set[Path] = set()
+    duplicated = _duplicate_service_ids(part)
     for i, service in enumerate(_as_list(part.get("services"))):
         if not isinstance(service, dict):
             continue
@@ -2597,6 +2622,8 @@ def check_interfaces(run: RunPaths) -> list[Finding]:
             continue
         path = run.interface(service_id)
         expected.add(path)
+        if service_id in duplicated:
+            continue
         if not path.is_file():
             missing.append(
                 Finding(

@@ -231,7 +231,7 @@ def test_a_tool_claim_in_two_services_is_reported(tmp_path):
     assert any("clm-api-010" in f.message for f in check_services(run))
 
 
-def test_two_services_with_one_id_are_reported(tmp_path):
+def test_two_services_with_one_id_are_reported_once_and_only_here(tmp_path):
     """The same hazard by a different route, and the only place it can be named.
 
     `run.interface()` derives one path from the id, so two services sharing one
@@ -240,6 +240,12 @@ def test_two_services_with_one_id_are_reported(tmp_path):
     check_services came back clean and check_interfaces reported both directions of
     the difference against `01-interfaces/svc-tickets.json`, a derived file that is
     byte-for-byte what synthesis wrote, for a defect living in the part.
+
+    So the count is asserted rather than the presence. Through the real CLI this
+    state printed three lines, two of them against that document; check_interfaces
+    now skips a service whose id another declares, and the defect arrives once, in
+    the file a repair can edit. The document is not reported as one no service asked
+    for either -- the collapsed path stays expected.
     """
     run = build_toy_run(tmp_path, upto="synthesise-interfaces")
     part = _services(run)
@@ -250,9 +256,27 @@ def test_two_services_with_one_id_are_reported(tmp_path):
     part["services"].append(second)
     _rewrite(run, part)
     findings = check_services(run)
-    assert any(f.artifact == run.services_part and "svc-tickets" in f.message for f in findings), (
-        findings
-    )
+    assert [(f.artifact, f.pointer) for f in findings] == [(run.services_part, "/services")]
+    assert "svc-tickets" in findings[0].message
+    assert check_interfaces(run) == [], "the collapse must not be reported against the document"
+
+
+def test_correcting_a_duplicate_id_and_re_deriving_clears_it(tmp_path):
+    """The property that makes the clause worth having: the finding is clearable.
+
+    Before it nothing was. The two findings named a derived document, and
+    re-deriving reproduced that document byte for byte.
+    """
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+    part = _services(run)
+    part["services"].append(json.loads(json.dumps(part["services"][0])))
+    _rewrite(run, part)
+    assert check_services(run), "the baseline this repair is measured against"
+
+    del part["services"][1]
+    _rewrite(run, part)
+    assert synthesise(run)[1] == []
+    assert check_all(run) == []
 
 
 def test_one_tool_cited_twice_inside_one_service_is_not_a_duplicate(tmp_path):

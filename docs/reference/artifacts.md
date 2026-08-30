@@ -561,9 +561,11 @@ and a code rule for picking a winner would bury the judgment, with
 — the one kind this pass is accountable for); and `services[].id`, which must be
 unique across the array although the schema cannot say so — the document path is
 derived from it, so two services sharing an id collapse onto one file and the
-groupings after the first are lost. `check-refs` reports that against this file,
-because by the time it shows up in `01-interfaces/` the only artifact left to name
-is a derived document that faithfully carries the last grouping.
+groupings after the first are lost. `check-refs` reports that here and nowhere
+else: it holds the shared document to neither grouping, because that document is
+byte-for-byte what synthesis wrote from the last of them and a finding against it
+would send a repair at a file with no defect in it. One line, in the file the
+repair belongs in.
 
 ## `interface`
 
@@ -573,7 +575,9 @@ is a derived document that faithfully carries the last grouping.
   tool's `schema_claim` names
 - **Read by:** `check-refs`, which holds each document to the service it was
   derived from: one document per service and nothing else in the directory, and
-  each document's `operationId` set equal to its service's tool names. The gate-1
+  each document's `operationId` set equal to its service's tool names — with one
+  exception, a document two services with the same id collapsed onto, which is held
+  to neither grouping because the finding belongs to `01-services.json`. The gate-1
   surface that will render it is still to be built
 - **Path:** `01-interfaces/<service_id>.json`, one per service — derivable from
   the service id, so there is no path field anywhere to drift out of agreement

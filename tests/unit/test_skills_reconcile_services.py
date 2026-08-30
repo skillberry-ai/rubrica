@@ -189,10 +189,22 @@ def test_a_refusal_condition_covers_a_finding_against_another_stages_artifact(sk
     """
     bullet = _bullet_carrying(skill, "5. Refusal conditions", "check-refs")
     assert "payload" in bullet
-    assert "01-claims/" in bullet
+    # Stems and an OR over the natural formulations rather than phrase pins, which
+    # is what the sibling at the top of this section does (`renam`, `record` or
+    # `report`). Measured: `"do not edit"` reds on a meaning-preserving "Never edit
+    # that file", and `"01-claims/"` on a bullet that says "the claims file" -- the
+    # same class as this project's `rename` -> `renam` fix, and narrow fragility
+    # rather than a broken guard, since a wholesale rewrite stays green either way.
+    assert any(k in bullet for k in ("01-claims/", "claims file")), bullet
     # Both halves of the prohibition, plus the move that replaces them.
-    assert "do not edit" in bullet
-    assert any(k in bullet for k in ("do not report success", "not clean")), bullet
+    # An OR over the three ways a prohibition on editing is actually written --
+    # `do/must not edit`, `never edit`, and the passive `must not be edited` -- and
+    # not the bare stem `edit`, which the mirror hazard satisfies: a bullet
+    # *permitting* the edit would contain it too. Measured: the passive reworded
+    # variant reds against ("not edit", "never edit") alone, which is how this set
+    # got its third entry.
+    assert any(k in bullet for k in ("not edit", "never edit", "not be edited")), bullet
+    assert any(k in bullet for k in ("not report success", "not clean")), bullet
     assert "stop" in bullet
 
 
