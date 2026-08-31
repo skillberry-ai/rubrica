@@ -2620,9 +2620,23 @@ run `tools-list-json` did, at `#/tools/N/inputSchema`, with all five resolving
 clean. A corpus of traces *alone* would have no checked payloads and nothing
 would say so, which is the shape to watch for.
 
+**The spread is wider than locator spellings, and that is the part to fix in the
+prompt.** Thirteen dispatches over trace inputs produced four *qualitatively*
+different outcomes, and the count of `tool` claims per input ranged from 0 to 8:
+claims whose locator abstains, claims whose locator resolves to nothing, claims
+with the enclosing-attribute locator above (chosen independently by two of the
+thirteen), and one dispatch that filed **no `tool` claims at all** — reasoning that
+a payload which cannot be checked against its pointer should not be a `tool` claim,
+and recording the declarations as `capability` claims with the parameter names and
+types in their statements instead. That reading is defensible on the skill's own
+terms: it is the same move `rb-extract` makes for a prose input that names tools
+without declaring schemas. So whether this claim kind exists at all for a
+trace-sourced tool currently varies between dispatches. Across the whole run, 19
+inputs produced 712 claims of which 94 were `tool` claims, for five real tools.
+
 Two smaller things the same run surfaced, neither fixed: `rb-extract`'s Method
 section gives no convention for addressing a value inside an encoded string, which
-is why twelve dispatches invented six spellings; and its example pointer
+is where that spread comes from; and its example pointer
 `#/tools/0/input_schema` is the toy fixture's snake_case, where real MCP declares
 `inputSchema` — the dispatch that read the real document used the document's key
 rather than copying the example, but the example is a latent trap.
