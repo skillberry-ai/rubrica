@@ -113,6 +113,13 @@ Each entry in `claims` is an object with `id`, `kind`, `statement`,
 schema; do not drop one for a particular claim because it seems unimportant
 there -- an incomplete claim is a validation failure, not a smaller claim.
 
+One further field, `payload`, the schema leaves optional. Omit it rather than
+writing `null` wherever you have nothing structured to record. The exception
+is a `tool` claim, which is where the tool's input schema goes: such a claim
+validates without a `payload` and is still incomplete, so the schema is not
+what holds you to it. Step 3 of the method states exactly what belongs there
+and in what form.
+
 ## 3. Method
 
 1. **Find your entry, then read your file.** In `manifest.json`, find the
@@ -122,15 +129,15 @@ there -- an incomplete claim is a validation failure, not a smaller claim.
 
 2. **Enumerate, one claim per statement.** Go through the artifact and list
    every statement it makes about the target -- every capability it
-   exposes, every entity it describes, every invariant, actor, goal, or
-   outcome class it names or implies. A claim is the atom of this stage:
-   there is no such thing as a bare assertion floating outside a claim, and
-   no claim bundling two statements together just because they shared a
-   sentence.
+   exposes, every entity it describes, every tool it declares, every
+   invariant, actor, goal, or outcome class it names or implies. A claim is
+   the atom of this stage: there is no such thing as a bare assertion
+   floating outside a claim, and no claim bundling two statements together
+   just because they shared a sentence.
 
 3. **Classify and locate.** For each claim, choose its `kind` from the
    schema's closed enum -- `capability`, `entity`, `invariant`, `actor`,
-   `goal`, or `outcome_class` -- and record at least one `evidence` entry
+   `goal`, `outcome_class`, or `tool` -- and record at least one `evidence` entry
    whose `locator` is precise enough that a reader, given only the artifact
    and the locator, can find the exact statement again: a JSON Pointer
    (`#/tools/0/input_schema/properties/action`) for a JSON input, a heading
@@ -155,6 +162,19 @@ there -- an incomplete claim is a validation failure, not a smaller claim.
    what `get_ticket` does for the class of input "unknown id." If you catch
    yourself about to write `invariant` for a sentence describing what an
    operation *does*, that is the sign you have the pair backwards.
+
+   A `tool` claim is the one kind whose `payload` is load-bearing rather than
+   optional. File one per tool the target declares -- not one per action a tool
+   dispatches on, because the unit is what the agent registers. Copy the tool's
+   input schema into `payload` **verbatim**: do not summarise it, reformat it,
+   fill in a type you think was implied, or drop a field you judge unused. A
+   later stage builds the request body of a synthesised interface out of exactly
+   these bytes, and an agent's tool contract survives that substitution only if
+   they are unchanged. Set `evidence[0].locator` to the JSON pointer the schema
+   was copied from -- `#/tools/0/input_schema` for the first tool of a tool-schema
+   document -- because a deterministic check re-reads the input at that pointer
+   and compares it to what you wrote. A `payload` that disagrees with its pointer
+   is a finding against this stage, so the pointer is not decoration.
 
    **A state observation needs its instant.** A trace records what the target
    did at one moment, and for a target that stores anything, the same call can
@@ -268,9 +288,9 @@ loudly is the one that is actually correct.
   be looking at in the first place.
 
 - **The artifact describes something you cannot classify into any `kind`.**
-  Record it under the closest of the six anyway, with `confidence: low`,
+  Record it under the closest of the seven anyway, with `confidence: low`,
   and say in the `statement` itself that the fit is approximate. Do not
-  invent a seventh kind: the enum is closed, and a claim with an unlisted
+  invent an eighth kind: the enum is closed, and a claim with an unlisted
   kind fails validation rather than being read by anyone.
 
 - **The artifact contradicts itself.** Record both sides as separate

@@ -227,7 +227,9 @@ between `extract` and `emit`, plus `triage` — which is recorded **after** gate
 merge into until `intake --run` writes one
 ([`docs/guides/running-a-stage-by-hand.md`](../guides/running-a-stage-by-hand.md)
 §4 has the command). `intake`, `smoke`, `survey`, `triage-slices`,
-`triage-seal`, and `reconcile-seal` are code: they have no skill file for
+`triage-seal`, `synthesise-interfaces`, `reconcile-seal`, `propose-batches`,
+`propose-seal` and `score-seal` — `skills.CODE_ONLY_STAGES`, in full — are code:
+they have no skill file for
 `record-stage` to hash, so they never appear there, and their absence is not a
 finding. The schema's `propertyNames` enum permits exactly `paths.STAGES` —
 `tests/unit/test_manifest_stages.py` holds the two equal, in order — so it
@@ -255,23 +257,40 @@ never sees a sibling's file, so every claims document names only the
 tracing back to one.
 
 Fields worth knowing: `claims[].kind` (`capability`, `entity`, `invariant`,
-`actor`, `goal`, or `outcome_class`); `claims[].derivation` (`stated`,
+`actor`, `goal`, `outcome_class`, or `tool`); `claims[].derivation` (`stated`,
 `inferred`, or `reverse_engineered` — a claim's honesty grade, carried forward
 into the world model); `claims[].evidence[].locator` (required on every claim,
-so a claim with no way to find where it came from cannot exist).
+so a claim with no way to find where it came from cannot exist); and
+`claims[].payload` (optional, and free-form by design — on a `tool` claim it
+carries that tool's input schema verbatim, with `evidence[0].locator` the JSON
+pointer it was copied from. "Verbatim" is checked rather than trusted: for every
+payload a service names as its `schema_claim`, `check-refs` re-reads the registered
+input at that pointer and compares the decoded values, which is the one thing that
+makes a prompt's transcription of a schema falsifiable. Decoded, not bytes — a
+reformatted schema is not a fidelity defect. A locator that is a heading anchor
+rather than a pointer, or an input that is not JSON, is not comparable and is not
+reported).
 
 ## The reconcile partials
 
-The seven entries below are one logical step — building the world model —
+The entries below are one logical step — building the world model —
 engineered as bounded passes, each writing its own slice into the `01-` band
 and none of them reading `01-world-model.json`. `reconcile-seal` assembles them
 into that file, which is unchanged: nothing downstream of the seal knows the
-partials exist. It reads every one of them but `01-subjects.json` — the world
-model has no subjects field, so the cover is an input to the contradiction
-fan-out, to `reconcile-gaps`, and to `check-refs`, not to the seal. Each pass
-is a stage in
-`paths.STAGES`, so `rubrica validate --stage reconcile-<pass>` gates exactly one
-of these kinds.
+partials exist. It reads every one of them but one. `01-subjects.json` is the
+exception — the world model has no subjects field, so the cover is an input to the
+contradiction fan-out, to `reconcile-gaps`, and to `check-refs`, not to the seal.
+`01-services.json` it reads on a different footing from the rest: the seal folds
+it into the world model's `services` field **when the file exists**, and omits
+that key entirely when it does not, so it is the one input whose absence is not a
+finding. Each pass is a stage in `paths.STAGES`, so
+`rubrica validate --stage reconcile-<pass>` gates exactly one of these kinds.
+
+One entry below is **not** a partial and not a pass: `interface`. It is derived
+from `01-services.json` by `synthesise-interfaces`, which merges no claims into
+anything, and it is gated as `rubrica validate --stage synthesise-interfaces`. It
+is documented here because it is written in the same band and read at the same
+gate, not because it shares the shape of the entries around it.
 
 Every one of these schemas resolves its element definitions against
 `world-model-0.1.json#/$defs/...` through `validate._schema_registry`, rather
@@ -279,13 +298,13 @@ than restating them — a duplicated `$defs/entity` that fell behind would make 
 partial accept an element the sealed world model then rejects.
 `capabilities-part` is the single exception and says so in its own entry.
 
-The four passes that own a claim kind — `capabilities-part`, `outcomes-part`,
-`entities-part`, `goals-part` — each carry an **`inputs_seen` accounting** on top
-of their elements: one row per input `manifest.json` registers, each
-`{artifact_id, own_kind_total, cited, dropped}` plus a `note` whenever `dropped`
-is not zero. The row shape lives once, in
-`src/rubrica/schema/inputs-seen-0.1.json`, which the four `$ref` and which is
-**not an artifact kind** — no stage writes a document of that shape, so it is
+The passes that own a claim kind — `capabilities-part`, `outcomes-part`,
+`entities-part`, `goals-part`, `services-part` — each carry an **`inputs_seen`
+accounting** on top of their elements: one row per input `manifest.json`
+registers, each `{artifact_id, own_kind_total, cited, dropped}` plus a `note`
+whenever `dropped` is not zero. The row shape lives once, in
+`src/rubrica/schema/inputs-seen-0.1.json`, which each of them `$ref`s and which
+is **not an artifact kind** — no stage writes a document of that shape, so it is
 the one schema in the package with no entry in `validate.ARTIFACT_SCHEMAS` and
 nothing `rubrica validate --stage X` ever looks for on its own.
 
@@ -323,7 +342,7 @@ used.
 The other three partials carry no accounting, for two different reasons.
 `subjects` and `contradictions-part` need none: `check-refs` already holds the
 subject cover to totality over every claim in the run, so the cover is the
-accounting. `gaps-part` cannot be given one — its pass owns none of the six
+accounting. `gaps-part` cannot be given one — its pass owns none of the seven
 claim kinds, and a gap asserts what no input *contains*, so no output shape can
 force its read coverage. See
 [`docs/design/limitations.md`](../design/limitations.md).
@@ -355,7 +374,7 @@ where a reader would not expect it).
   (fan-out, one file per subject)
 - **Read by:** `rb-reconcile-capabilities`, `rb-reconcile-outcomes`,
   `rb-reconcile-entities`, `rb-reconcile-goals`, `rb-reconcile-gaps`,
-  `reconcile-seal` (code); `check-refs`
+  `rb-reconcile-services`, `reconcile-seal` (code); `check-refs`
 - **Path:** `01-contradictions/<subject_id>.json`
 
 What one fan-out member found within its own subject, reading every claim in
@@ -504,12 +523,114 @@ named honestly rather than narrowly, and never left empty to avoid a halt);
 which by definition nothing states — the claims that make the absence *matter*,
 so a gap's provenance is resolvable rather than sitting in prose).
 
+## `services-part`
+
+- **Schema:** `src/rubrica/schema/services-part-0.1.json`
+- **Written by:** `reconcile-services`, run as `rb-reconcile-services`
+- **Read by:** `check-refs`; the interface synthesis below it; `reconcile-seal`,
+  which folds it into the world model's optional `services` field; and
+  `gate-brief`, which renders one block per service at gate 1 — from this file
+  rather than from the assembled model, because a reader whose next action is to
+  correct a grouping edits the part
+- **Path:** `01-services.json`
+
+The tools the target declares, grouped into the services one simulator each
+would stand in for. Its own pass because the grouping is a judgment with
+evidence rather than a string match, and because it decides how many simulators
+exist: tools split across two services get disjoint databases, so an entity
+created through one is invisible to the other. Splitting when unsure is the
+instructed direction — two services that should be one are two simulators a
+human can merge at gate 1, while one service that should be two is a database
+the tools silently disagree about, and nothing downstream detects it.
+
+**The one optional input to `reconcile-seal`,** which is what distinguishes it
+from every partial above. The seal folds its `services` array into the world model
+verbatim when this file exists — the grouping is a judgment a human ratifies at
+gate 1, and a seal that rebuilt the records would be ratifying the seal's — and
+omits the `services` key entirely when it does not, rather than writing `[]`: an
+empty array asserts that a pass looked and found no tools, which is a different
+claim about the target from "no pass ran". Its absence is therefore not a finding,
+unlike every other partial's. Being optional does not make it unchecked: a `null`
+or list-shaped document here is a finding naming this file.
+
+Fields worth knowing: `services[].grouping_evidence` (what makes two tools one
+backend — a shared base URL, client construction, credential or MCP server entry
+— with `sole_service_in_run` the honest value for a group of one, so a run with a
+single tool has no reason to invent shared evidence); `services[].signals` (one
+per piece of evidence about whether the service reaches outside the process, each
+with a `locator`, and **never a containment verdict** — there is no `contained`
+field anywhere, because a tool that looks self-contained but holds a hidden call
+produces a suite that passes in the lab and fails in production, so uncertainty
+must not read as contained; `no_outward_evidence_found` is absence of evidence
+and its locator names what was read, not where something was seen);
+`services[].tools[].schema_claim` (the one claim whose `payload` becomes the
+operation's request body, named by the pass because synthesis is deterministic
+and a code rule for picking a winner would bury the judgment, with
+`schema_disagreement` recording what the losing claim said);
+`inputs_seen[].own_kind_total` (how many `tool`-kind claims the named input holds
+— the one kind this pass is accountable for); and `services[].id`, which must be
+unique across the array although the schema cannot say so — the document path is
+derived from it, so two services sharing an id collapse onto one file and the
+groupings after the first are lost. `check-refs` reports that here and nowhere
+else: it holds the shared document to neither grouping, because that document is
+byte-for-byte what synthesis wrote from the last of them and a finding against it
+would send a repair at a file with no defect in it. One line, in the file the
+repair belongs in.
+
+## `interface`
+
+- **Schema:** `src/rubrica/schema/interface-0.1.json`
+- **Written by:** `synthesise-interfaces` (code), via `rubrica
+  synthesise-interfaces`, from `01-services.json` and the claim payload each
+  tool's `schema_claim` names
+- **Read by:** `check-refs`, which holds each document to the service it was
+  derived from: one document per service and nothing else in the directory, and
+  each document's `operationId` set equal to its service's tool names — with one
+  exception, a document two services with the same id collapsed onto, which is held
+  to neither grouping because the finding belongs to `01-services.json`. Also
+  `gate-brief`, whose gate-1 services block names each document's path, or states
+  that none was written: it asks `is_file` per service rather than trusting the
+  directory, since synthesis creates `01-interfaces/` even for an empty service
+  list
+- **Path:** `01-interfaces/<service_id>.json`, one per service — derivable from
+  the service id, so there is no path field anywhere to drift out of agreement
+  with the directory
+
+One service's OpenAPI document, synthesised backwards from the tool contract the
+agent under test already has: `operationId` is the tool's own name and the request
+body is that tool's input schema, copied from the claim payload rather than derived
+from it. Method `post` and path `/<tool name>` are fixed carriers, because only
+`operationId` is contractually significant — it is what a simulator turns back into
+a tool name — so the other two are chosen to be stable rather than pretty.
+
+Not folded into the world model, and that is a ruling rather than a convenience: an
+inlined document would bloat an artifact whose byte-identity is load-bearing, and
+the harness this feeds consumes a file.
+
+The schema pins the carrier convention and the provenance, and is **not** an
+OpenAPI validator — whether a document is acceptable is the harness's test, not
+ours. `responses` is deliberately not required: inferring one needs observed tool
+results, which is a later step, and a request-only document is what a tool-style
+spec that declares no `components.schemas` looks like on purpose.
+
+Fields worth knowing: `paths` (one entry per tool, keyed `/<tool name>`, whose
+`operationId` set is the service's tool names byte for byte — contract preservation
+made mechanical, and `check-refs` holds the document to it, naming the difference in
+both directions so a rename is not read as one defect when it is two. Checked
+rather than merely written, because a document hand-corrected at gate 1 reaches
+`check-refs` without passing through synthesis again);
+`x-rubrica.service_id` and `x-rubrica.tools` (the provenance, carried inside the
+document because the document is what a human reads at gate 1 and what a later step
+hands the harness, under an `x-` key so it stays a legal OpenAPI extension).
+
 ## `world-model`
 
 - **Schema:** `src/rubrica/schema/world-model-0.1.json`
 - **Written by:** `reconcile-seal` (code), via `rubrica reconcile-seal`, from
   the partials above — every one of them but `01-subjects.json`, which has no
-  counterpart field here
+  counterpart field here. `01-services.json` is the one optional input: its
+  `services` array is folded in verbatim when that file exists, and the `services`
+  key is omitted entirely when it does not
 - **Read by:** `rb-propose`, `rb-score`, `rb-instantiate`, `emit` (code),
   `rb-orchestrate`; `check-refs`
 - **Path:** `01-world-model.json`
@@ -519,8 +640,10 @@ partials the `reconcile-*` passes wrote out of every claim `rb-extract`
 produced: `capabilities`, `entities`, `actors`, `goals`, recorded
 `contradictions` (disagreements carried forward rather than silently
 resolved), recorded `gaps` (things no input says anything about, each naming
-which later stages it `blocks`), and a `denominator` frozen at a `version` for
-the rest of the run. Every element carries a `claims` array of the claim ids
+which later stages it `blocks`), an optional `services` (the tool groupings a
+simulator would stand in for, present only when `01-services.json` was written),
+and a `denominator` frozen at a `version` for the rest of the run. Every element
+carries a `claims` array of the claim ids
 that support it — **including the nested ones**: an outcome class, an invariant
 and a gap each require their own non-empty array, and until issue #6 none of the
 three could carry one at all, so an invariant's provenance went onto its parent

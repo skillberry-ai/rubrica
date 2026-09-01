@@ -63,6 +63,19 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   absent, because that is semantic; the operation and the citing inputs are
   printed so a reader can group them, and the remedy is named because a reader at
   this gate is the last person who can act on it.
+  Last of gate 1's content sections comes one block per **service** a simulator
+  would stand in for: its grouping and the evidence cited for it, its tools, any
+  schema disagreement the pass had to resolve, every signal beside its locator, and
+  the synthesised OpenAPI document -- read from `01-services.json` rather than from
+  the assembled model, because a reader whose next action is to correct a grouping
+  edits the part. Two sentences in it are load-bearing rather than decorative. A
+  short signal list is *not* reassurance: three of the five kinds need a source file
+  to see and only Python source is parsed into structure, so absence of evidence may
+  mean nobody could look -- which is why that caveat sits above the signal lines it
+  qualifies rather than under the last service. And nothing in the run reads a
+  decision about these services, stated because a human who records a selection
+  expecting coverage to narrow would have been misled by a report that showed them
+  services and stayed silent.
 - **Gates 2 and 3** render what already exists: the coverage verdict, and the
   challenge stage's verdict tallies.
 
@@ -82,10 +95,12 @@ to exit 2 like every other subcommand's.
 
 from __future__ import annotations
 
+import textwrap
+
 from rubrica.artifacts import read_json
 from rubrica.errors import UsageError
 from rubrica.intake import admit_sort_key
-from rubrica.paths import RunPaths, list_json
+from rubrica.paths import RunPaths, is_safe_segment, list_json
 
 # Imported rather than re-spelled, private name and all: `_as_list` is the one
 # definition of "a list or nothing" in this build, and its docstring carries the
@@ -135,6 +150,15 @@ SPLIT_HEADER = "Groups split across more than one slice"
 # wrong: derived from A3 and A4, never observed, since no orchestrated run was
 # dispatched against an unbound world model to watch the halt.
 EXCLUDED_HEADER = "Capabilities excluded from the denominator (no tool binding)"
+
+# Gate 1's services section header, named for the four above's reason: it is the
+# anchor a reader and a test both scope to, and an unscoped assertion here is
+# measurably free -- `api-json` is a locator in this section *and* the first row of
+# the claim-utilisation block above it, and `01-services.json` is a read-coverage
+# row, so `"api-json" in text` passes against a brief with no services section at
+# all. Deliberately not the bare word "Services": that is the word the section is
+# found by, and a one-word anchor is satisfiable by any sentence containing it.
+SERVICES_HEADER = "Services a simulator would stand in for"
 
 
 def gate_brief(run: RunPaths, gate: int) -> str:
@@ -442,6 +466,247 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
     lines.append(
         "  Re-dispatching a reconcile pass will not add a binding -- "
         "rb-reconcile-capabilities is told to leave it off rather than guess a tool name."
+    )
+    return lines
+
+
+# 78 rather than 80: the two spare columns are what keep a line off the right edge
+# of a terminal exactly 80 wide, where a character in the last column makes some
+# terminals wrap and others truncate. Named once because two renderers below fold
+# against it, and a section whose prose and whose lists disagreed about the width
+# would read as two sections.
+_FOLD_WIDTH = 78
+
+
+def _fold(text: str, indent: str, hang: str) -> list[str]:
+    """`text` folded to `_FOLD_WIDTH`, first line under `indent` and the rest `hang`.
+
+    Folded mechanically rather than hand-broken into one `append` per line, and that
+    is a measurement rather than a preference: the first draft of the services
+    caveat below was hand-broken, and it split the phrase "absence of evidence"
+    across a line end -- which left the section carrying the caveat while a reader
+    (and the assertion standing in for one) scanning for the phrase found nothing.
+    Hand-breaking also renders raggedly, and a paragraph whose lines end at 80 and
+    61 alternately reads as a list of fragments.
+
+    `break_long_words=False` with `break_on_hyphens=False` so a single long token
+    overflows intact: a tool name split across two lines is not the tool's name, and
+    a reader copying it would copy something the target does not have.
+    """
+    return textwrap.wrap(
+        text,
+        width=_FOLD_WIDTH,
+        initial_indent=indent,
+        subsequent_indent=hang,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+
+
+def _wrapped(label: str, values: list[str]) -> list[str]:
+    """`    label: a, b, c`, folded onto hanging continuation lines."""
+    if not values:
+        return [f"    {label}: (none)"]
+    return _fold(f"{label}: {', '.join(values)}", "    ", "      ")
+
+
+def _service_lines(run: RunPaths) -> list[str]:
+    """The services a simulator would stand in for, and what is known about each.
+
+    Reads `01-services.json` rather than the assembled world model, for the reason
+    the reconcile sweep reads `01-subjects.json`: this report points at the parts,
+    and a reader whose next action is to correct a grouping edits the part. The seal
+    folds the array in verbatim, so the two agree by construction until a human edits
+    one -- and after that edit the part is the file that matters, because
+    `synthesise-interfaces` re-derives the documents from it and not from the seal.
+
+    Every member is guarded, not just the containers. `{"services": ["nope"]}` is
+    readable JSON and precisely what a hand-edit at this gate produces, and three
+    measured instances in this module turned that shape into a `TypeError` escaping
+    as a fabricated `[internal]` finding against a run that was fine -- so the
+    containers go through `_mapping`, `_dicts` and `_strings`, and every scalar is
+    `isinstance`-checked at the point it is rendered.
+
+    No number in this section is recomputed, because there is none to recompute: it
+    renders a judgment. The one thing it derives is whether a document exists, and it
+    asks `is_file` rather than reading a path out of a field -- there is no path field
+    anywhere to drift out of agreement with the directory.
+    """
+    part = _mapping(_quietly(run.services_part))
+    # The id guard is applied here rather than inside the loop, and the placement is
+    # what makes it load-bearing: a member without an id is not a service this report
+    # can render at all -- the document path is derived from the id, so there is no
+    # interface row to print and no file for a reader to open next -- and dropping it
+    # *before* the emptiness test below is what lets that test say "no service this
+    # report could read" instead of rendering `None:` as though it were an id.
+    # Measured: with the guard inside the loop, `{"services": [{"tools": "nope"}]}`
+    # rendered the section's prose around no service rows at all, and moving the guard
+    # here was the difference between a stated absence and a caveat about nothing.
+    # Layer 1 names the defect itself -- `world-model-0.1.json`'s `service` requires
+    # `id` -- and `rubrica validate --stage reconcile-services` is the command for it.
+    services = [
+        service for service in _dicts(part.get("services")) if isinstance(service.get("id"), str)
+    ]
+    lines = [SERVICES_HEADER]
+
+    if not services:
+        # The two states separated on `is_file`, the line the excluded block and the
+        # read-coverage block both draw, and for their reason: a reader acts
+        # differently on each. No pass having run is the ordinary shape of a target
+        # that declares no tools and is explicitly not a finding -- the seal omits the
+        # key rather than writing `[]`, because an empty array asserts that a pass
+        # looked. A part that is present and yields nothing is a defect, and `rubrica
+        # validate --stage reconcile-services` is what names it.
+        if run.services_part.is_file():
+            lines.append(
+                "  (none rendered; 01-services.json is present but unreadable, or "
+                "declares no service this report could read)"
+            )
+        else:
+            lines.append(
+                "  (none recorded; no services pass has run -- the ordinary shape of a "
+                "target that declares no tools, and not a finding)"
+            )
+        return lines
+
+    # Above the signal lines it qualifies, not below them. A caveat about how to read
+    # a line has to be readable *before* the line: a reader who finds the one service
+    # they came for stops there, so a footnote under the last service is a footnote
+    # that reader never sees -- and the misreading it guards against is the dangerous
+    # direction, since uncertainty about containment must never read as containment.
+    lines.extend(
+        _fold(
+            "A signal is evidence, never a verdict: no containment field exists "
+            "anywhere, because a tool that looks self-contained but holds a hidden "
+            "call passes in the lab and fails in production. So "
+            "`no_outward_evidence_found` states absence of evidence, and its locator "
+            "names what was read -- which is why it renders below as `read:` where "
+            "every other kind renders as `at:`. Three of the five signal kinds need a "
+            "source file to see, and only Python source is parsed into structure here, "
+            "so a short list is not reassurance that a tool stays inside the process.",
+            "  ",
+            "  ",
+        )
+    )
+    lines.append("")
+
+    for service in services:
+        # Narrowed by the comprehension above, so this is a `str` -- asserted by
+        # construction rather than re-checked, since a second guard here would read as
+        # though the first one might not have held.
+        service_id = service["id"]
+        statement = service.get("statement")
+        shown_statement = (
+            statement if isinstance(statement, str) and statement else "(no statement)"
+        )
+        # Folded, like the tools row below and for its reason: measured, a statement of
+        # 67 characters -- unremarkable for one written by the pass -- put this row at
+        # 82 columns. Folding re-flows whitespace and changes no word, which is the
+        # distinction that matters for prose a stage wrote: this section selects and
+        # relabels, it never rewrites. The continuation hangs at four so it sits under
+        # the statement rather than under the next service id, and it cannot be
+        # mistaken for one of the field rows at that indent because every one of those
+        # opens with a label and a colon.
+        lines.extend(_fold(f"{service_id}: {shown_statement}", "  ", "    "))
+
+        # The grouping evidence, because the grouping is the judgment in this section
+        # a human at this gate is better placed to rule on than the pass was, and this
+        # is what they would rule on. Stated as an absence when there is none: the
+        # field is optional, and an omitted line would read as a grouping made on
+        # evidence the reader simply cannot see rather than on none.
+        evidence = _strings(service.get("grouping_evidence"))
+        lines.append(f"    grouped by: {', '.join(evidence) if evidence else '(nothing cited)'}")
+
+        tools = _dicts(service.get("tools"))
+        names = [tool.get("name") for tool in tools if isinstance(tool.get("name"), str)]
+        # Wrapped, because this is the one field in the section whose length grows
+        # with the target rather than with a stage's prose: a service registering
+        # twenty tools renders one line no terminal shows the end of, and the end is
+        # where the tool a reader came looking for would be.
+        lines.extend(_wrapped("tools", names))
+
+        for tool in tools:
+            disagreement = tool.get("schema_disagreement")
+            if isinstance(disagreement, str) and disagreement:
+                # Surfaced rather than summarised: the pass picked one of two input
+                # schemas for this tool, the pick is what the request body of the
+                # synthesised operation carries, and it is the judgment a human at
+                # this gate is best placed to overturn.
+                name = tool.get("name")
+                # Folded for the service row's reason: this carries a sentence the pass
+                # wrote about the losing claim, and measured at 91 columns on a
+                # perfectly ordinary one.
+                lines.extend(
+                    _fold(
+                        f"{name if isinstance(name, str) else '(unnamed tool)'}: "
+                        f"schemas disagreed -- {disagreement}",
+                        "    ",
+                        "      ",
+                    )
+                )
+
+        signals = _dicts(service.get("signals"))
+        if not signals:
+            # Stated, on the reconcile sweep's argument: a service with no signals at
+            # all is the strongest claim this section can carry and the one under most
+            # pressure to be read as reassurance, so rendering it as silence is the one
+            # thing that must not happen here. Schema-invalid (`minItems: 1`) and so
+            # reachable only by hand-edit -- which is exactly who reads this page.
+            lines.append("    signals: (none recorded -- nothing here says anyone looked)")
+        for signal in signals:
+            kind = signal.get("kind")
+            if not isinstance(kind, str):
+                continue
+            locator = signal.get("locator")
+            # `read:` for the absence signal and `at:` for every other kind, which is
+            # the distinction `world-model-0.1.json`'s `signal` draws in prose: the
+            # absence signal's locator names what was read, the others name where
+            # something was seen. Rendered rather than explained, because the two
+            # readings lead a human to opposite conclusions about one string and the
+            # caveat above is a sentence a reader may skip.
+            label = "read" if kind == "no_outward_evidence_found" else "at"
+            shown_locator = locator if isinstance(locator, str) and locator else "?"
+            # Folded, not split into two rows, and the difference is the point: a
+            # locator can be a path with a line number and measured past the bound on an
+            # ordinary one, but a signal whose kind sits on one structural row and whose
+            # locator sits on another is an assertion separated from its evidence --
+            # which is the shape this section exists to avoid. A continuation at six is
+            # visibly part of the row above; a sibling at four is not.
+            lines.extend(_fold(f"signal: {kind} ({label}: {shown_locator})", "    ", "      "))
+
+        # `is_safe_segment` first, then `run.interface`, following `check_inputs`'
+        # handling of `stored_as`: `run.interface` joins through `safe_segment`, which
+        # raises `UnsafeSegment`, which `cli.py` maps to exit 2 -- a report is
+        # forbidden that, and a service id like "../etc" is a plausible thing for a
+        # confused stage or a hand-edit to leave in this file.
+        if not is_safe_segment(service_id):
+            shown_document = "-- the service id is not a usable filename, so none was written"
+        elif run.interface(service_id).is_file():
+            shown_document = f"01-interfaces/{service_id}.json"
+        else:
+            # A stated absence rather than a blank, matching how this module already
+            # renders an absent partial: an empty cell reads as "not checked" where a
+            # reader needs "checked, and there is none". `synthesise` creates this
+            # directory even for an empty service list, so the directory existing is
+            # not evidence that any document does -- the question has to be asked of
+            # the file.
+            shown_document = "-- not synthesised"
+        lines.append(f"    interface: {shown_document}")
+        lines.append("")
+
+    # The boundary of this step, stated to the person at the gate rather than left to
+    # be discovered. A human who records a selection and expects the run to narrow has
+    # been misled by a report that showed them services and stayed silent about what
+    # happens next -- and `rubrica decide` is named because putting the ruling on the
+    # record is the one action that does work here.
+    lines.extend(
+        _fold(
+            "Nothing in this run reads a decision about these services: no stage reads "
+            "a selection, and coverage does not narrow from one. `rubrica decide` puts "
+            "a correction on the record for whichever run acts on it.",
+            "  ",
+            "  ",
+        )
     )
     return lines
 
@@ -922,12 +1187,12 @@ def _gate_1(run: RunPaths) -> str:
         if not rows:
             # Named rather than skipped. A bare `continue` dropped the pass out
             # of the block entirely, and the "nothing to report" line below only
-            # fires when *all four* are absent -- so three passes rendering and
-            # one omitted read as a complete brief, with the omission being the
-            # anomaly a reader is here to notice. `is_file` separates the two
-            # cases a reader would act on differently: a partial that has not
-            # been written yet is a run that stopped, and one that is there
-            # carrying no readable rows is a defect
+            # fires when *every* owning pass is absent -- so all but one pass
+            # rendering and one omitted read as a complete brief, with the
+            # omission being the anomaly a reader is here to notice. `is_file`
+            # separates the two cases a reader would act on differently: a
+            # partial that has not been written yet is a run that stopped, and
+            # one that is there carrying no readable rows is a defect that
             # `rubrica validate --stage X` will name.
             state = (
                 "present, but unreadable or carrying no inputs_seen rows"
@@ -1024,6 +1289,18 @@ def _gate_1(run: RunPaths) -> str:
                 )
         else:
             lines.append("  (none open)")
+
+    # Placed here rather than beside the excluded-capability block it is thematically
+    # nearest to, and the reason is that block's own comment: the exclusion has to sit
+    # immediately above the numbers derived from it -- utilisation, and the implied
+    # size that reads `denominator.capability_cells` -- because a reader who has not
+    # seen the exclusion cannot read the size line correctly. A section this long
+    # wedged between them would break that adjacency to buy nothing. Last of the
+    # content sections instead, which also keeps the reconcile sweep at the top where
+    # a non-zero `unresolved` is what should send a reader into `01-contradictions/`
+    # before anything built on top of it.
+    lines.append("")
+    lines.extend(_service_lines(run))
 
     # The one place a human at gate 1 certainly looks. Gate 1 ratifies the world
     # model, so it is the only gate at which "send this description to the people

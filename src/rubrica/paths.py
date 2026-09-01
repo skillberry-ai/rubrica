@@ -48,6 +48,29 @@ STAGES = (
     "reconcile-entities",
     "reconcile-goals",
     "reconcile-gaps",
+    # Owns the `tool` kind, and the only pass in this family whose output the
+    # human at gate 1 reads as a description of something outside the run: the
+    # services a simulator would stand in for.
+    #
+    # Nothing *above* it constrains the slot, and saying so is still the point: it
+    # reads no partial, and every claims file exists the moment `extract` finishes,
+    # so it could sort anywhere after `extract`. What bounds it is what reads its
+    # output -- synthesise-interfaces derives from 01-services.json, and
+    # reconcile-seal folds that part into the world model's optional `services`
+    # field -- so it cannot sort after either of them. It sits at this end of that
+    # window because this tuple is the pipeline's documentation and both generated
+    # drawings render it in order: with the other prompt passes and ahead of the
+    # seal, the family reads as one block.
+    "reconcile-services",
+    # Code, for emit's reason: one OpenAPI document per service is a pure function
+    # of the tool contract, so two runs with identical groupings must produce
+    # byte-identical documents or a difference in an emitted lab stops being
+    # attributable to a stage. The only row in this band that does not merge
+    # claims into a partial -- it derives documents from one part, reading
+    # 01-claims/ solely to resolve each operation's request body. Its position is a
+    # dependency: it reads 01-services.json, so it cannot sort before the pass that
+    # writes it.
+    "synthesise-interfaces",
     "reconcile-seal",
     # The propose/score loop, engineered as substeps for the reason the triage
     # and reconcile families are. propose-batches and both seals are code, so
@@ -287,6 +310,36 @@ class RunPaths:
     @property
     def gaps_part(self) -> Path:
         return self.root / "01-gaps.json"
+
+    @property
+    def services_part(self) -> Path:
+        """The tools the target declares, grouped into services.
+
+        In the 01 band for the reason every other partial is: the numbering stays
+        intake's, and everything between 01-claims/ and 01-world-model.json is one
+        logical step engineered as substeps.
+
+        The one input to reconcile-seal that may be absent. The seal folds it into
+        the world model's optional `services` field when the file exists and omits
+        the key entirely when it does not, so a run whose services pass never ran
+        seals without one rather than asserting an empty grouping.
+        """
+        return self.root / "01-services.json"
+
+    @property
+    def interfaces_dir(self) -> Path:
+        return self.root / "01-interfaces"
+
+    def interface(self, service_id: str) -> Path:
+        """One service's synthesised OpenAPI document.
+
+        Derivable from the service id rather than recorded as a path field on the
+        service, so there is nothing to drift out of agreement with the directory.
+        Through safe_segment because a service id comes out of a prompt: callers
+        that must report a bad one as a finding rather than abort ask
+        is_safe_segment first -- see interfaces.synthesise.
+        """
+        return self.interfaces_dir / f"{safe_segment(service_id)}.json"
 
     @property
     def world_model(self) -> Path:

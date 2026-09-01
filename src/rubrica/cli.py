@@ -62,6 +62,7 @@ from pathlib import Path
 
 from rubrica import (
     brief,
+    interfaces,
     reconcile,
     refs,
     rounds,
@@ -106,6 +107,10 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("validate", "schema-validate one stage's output"),
     ("check-refs", "cross-artifact and reachability checks"),
     ("reconcile-seal", "assemble the reconcile partials into one world model"),
+    (
+        "synthesise-interfaces",
+        "derive one OpenAPI document per service from the services part",
+    ),
     ("propose-batches", "partition a round's closable holes into byte-bounded batches"),
     ("propose-seal", "assemble the propose parts and score rulings into the scenario list"),
     ("score-seal", "compute the coverage matrices and compose the round's report"),
@@ -247,6 +252,13 @@ def _build_parser() -> argparse.ArgumentParser:
     # explicit orchestrator decision, and a seal that incremented a version it
     # found on disk would let the denominator move without one on the record.
     p_reconcile_seal.add_argument("--denominator-version", type=int, default=1)
+
+    # No argument but --run: the documents are a pure function of 01-services.json
+    # and the claims it cites, so there is nothing for a caller to choose. Nothing
+    # to select either -- synthesis owns 01-interfaces/ whole, and a --service flag
+    # would let a human at gate 1 re-derive one document and leave a sibling stale.
+    p_synthesise = parsers["synthesise-interfaces"]
+    p_synthesise.add_argument("--run", required=True)
 
     p_batches = parsers["propose-batches"]
     p_batches.add_argument("--run", required=True)
@@ -609,6 +621,19 @@ def main(argv: list[str] | None = None) -> int:
             world, findings = reconcile.seal(run, denominator_version=args.denominator_version)
             if world is not None:
                 print(world)
+            return _report(findings)
+
+        # No catch of its own, and that is the whole exit-code split: every finding
+        # synthesise returns is repairable by re-dispatching reconcile-services or
+        # the one extractor whose claims file it names, so those are 1s. An
+        # unwritable 01-interfaces/ raises OSError past this branch to the shared
+        # except below and becomes a 2, because no prompt re-dispatch fixes a
+        # directory permission.
+        if args.command == "synthesise-interfaces":
+            run = _run_dir(args.run)
+            written, findings = interfaces.synthesise(run)
+            for path in written:
+                print(path)
             return _report(findings)
 
         # The loop's three code steps. No catch of their own, on purpose: every

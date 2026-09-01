@@ -14,7 +14,8 @@ class Finding:
     root. `layer` names the checking layer that produced it, so a reader can
     tell a shape error from a reference error without parsing the message.
     The layers: "schema" | "refs" | "invariant" | "emit" | "reconcile" |
-    "internal" | "recall" | "review" | "skill" | "seal" | "rounds".
+    "internal" | "recall" | "review" | "skill" | "seal" | "rounds" |
+    "interfaces".
 
     "internal" is the layer cli.py uses when a checking layer raised instead of
     returning: the artifact is malformed in a way layer 1 must reject first, and
@@ -44,6 +45,21 @@ class Finding:
     reason one command produced no output. Distinct from "seal" and "reconcile"
     because a reader triaging a failed round needs to know which assembler
     refused without reading the message.
+
+    "interfaces" is interfaces.synthesise's layer: the artifacts are
+    01-services.json and the claims files it cites, and the failure is that no
+    OpenAPI document can be derived at all -- a services part absent or
+    unparseable, a service id that is not a usable filename, a tool name the
+    harness would rewrite, a `schema_claim` no claim in 01-claims/ has an id for.
+    A `schema_claim` naming a claim that exists and carries no usable payload is
+    the one finding in this layer that names a *claims* file instead, because that
+    payload is rb-extract's output and the part citing it may be correct.
+    Distinct from "refs" for the reason "reconcile" and "rounds" are: refs checks
+    a run someone may still be building, while this names the reason one command
+    produced no output. Distinct from those two because synthesis is a
+    *derivation* rather than an assembly of staged parts, so a reader triaging a
+    failed 01 band needs to know it was the derivation that refused and not one of
+    the seals.
     """
 
     artifact: Path

@@ -29,6 +29,7 @@ from tests.builders import (
     minimal_gaps_part,
     minimal_goals_part,
     minimal_gold,
+    minimal_interface,
     minimal_manifest,
     minimal_objective,
     minimal_outcomes_part,
@@ -37,6 +38,7 @@ from tests.builders import (
     minimal_scenarios_part,
     minimal_score_part,
     minimal_seed,
+    minimal_services_part,
     minimal_slices,
     minimal_subjects,
     minimal_suite_expected,
@@ -99,6 +101,8 @@ MINIMAL_BUILDERS = {
     "entities-part": minimal_entities_part,
     "goals-part": minimal_goals_part,
     "gaps-part": minimal_gaps_part,
+    "services-part": minimal_services_part,
+    "interface": minimal_interface,
     "batches": minimal_batches,
     "scenarios-part": minimal_scenarios_part,
     "score-part": minimal_score_part,
@@ -135,7 +139,19 @@ def test_the_minimal_payload_for_every_kind_is_valid(tmp_path, kind):
     assert validate_artifact(path, kind) == []
 
 
-@pytest.mark.parametrize("kind", sorted(ARTIFACT_SCHEMAS))
+# The one artifact whose root is deliberately open, and the reason the check
+# below excludes it rather than being weakened for everybody. `interface` is an
+# OpenAPI document: its top-level vocabulary is OpenAPI's, not ours, so
+# `components` or `servers` appearing there is a later step adding a key the
+# format already defines rather than a stage inventing contract. What this
+# project *does* own inside that document -- its `x-rubrica` provenance block,
+# and each path item, where a second HTTP method would be a synthesis defect --
+# is closed, and test_the_interface_document_closes_the_blocks_this_project_owns
+# below is what holds that half, so the property is moved rather than dropped.
+OPEN_ROOT_KINDS = frozenset({"interface"})
+
+
+@pytest.mark.parametrize("kind", sorted(set(ARTIFACT_SCHEMAS) - OPEN_ROOT_KINDS))
 def test_an_unknown_top_level_key_is_rejected_for_every_kind(tmp_path, kind):
     """additionalProperties: false at every artifact root, not just one.
 
@@ -146,6 +162,53 @@ def test_an_unknown_top_level_key_is_rejected_for_every_kind(tmp_path, kind):
     write_json(path, MINIMAL_BUILDERS[kind](surprise_key=1))
     findings = validate_artifact(path, kind)
     assert findings, f"{kind} accepted an unknown top-level key"
+    assert any("surprise_key" in f.message for f in findings), [f.message for f in findings]
+
+
+def test_the_interface_document_closes_the_blocks_this_project_owns(tmp_path):
+    """The open root above, bounded: open at the top, closed where we own it.
+
+    Both halves are asserted, because the open root is only defensible if the
+    parts that are ours are shut. A second HTTP method on a path is a synthesis
+    defect -- the carrier convention is one `post` per tool -- and an
+    unrecognised key inside `x-rubrica` is a stage inventing provenance.
+    """
+    # The exemption is a singleton, pinned here rather than left implicit: this
+    # test is hand-written for `interface` and not parameterised, so a second
+    # kind added to OPEN_ROOT_KINDS would silently lose the closed-root property
+    # with nothing going red. Extending the exemption now forces whoever does it
+    # to extend the replacement too.
+    # `sorted(...)` rather than `== frozenset({"interface"})`: ruff SIM300 reads an
+    # ALL_CAPS name as the constant and calls that form a Yoda condition. Same
+    # predicate -- a set equals a one-element set exactly when its sorted list does.
+    assert sorted(OPEN_ROOT_KINDS) == ["interface"]
+
+    path = tmp_path / "interface.json"
+
+    # Open at the root: an OpenAPI key we do not model is carried, not rejected.
+    write_json(path, minimal_interface(servers=[{"url": "https://example.invalid"}]))
+    assert validate_artifact(path, "interface") == []
+
+    payload = minimal_interface()
+    payload["paths"]["/query_aap2"]["get"] = {"operationId": "query_aap2"}
+    write_json(path, payload)
+    findings = validate_artifact(path, "interface")
+    assert findings, "a second HTTP method on a path item must be rejected"
+    # The QUOTED form, and the pointer beside it. A bare `"get" in f.message` is
+    # the substring-of-message shape CLAUDE.md names: the word "target" contains
+    # "get", so any future finding mentioning a target would satisfy it for the
+    # wrong reason. The pointer also pins _pointer's RFC 6901 escaping -- an
+    # interface document's path keys all begin with `/`, so `/paths//query_aap2`
+    # would be indistinguishable from a property named "" followed by one named
+    # "query_aap2".
+    assert any("'get'" in f.message for f in findings), [f.message for f in findings]
+    assert [f.pointer for f in findings] == ["/paths/~1query_aap2"], [f.pointer for f in findings]
+
+    payload = minimal_interface()
+    payload["x-rubrica"]["surprise_key"] = 1
+    write_json(path, payload)
+    findings = validate_artifact(path, "interface")
+    assert findings, "x-rubrica accepted an unknown key"
     assert any("surprise_key" in f.message for f in findings), [f.message for f in findings]
 
 
@@ -161,6 +224,31 @@ def test_minimal_world_model_is_valid(tmp_path):
     assert validate_artifact(path, "world-model") == []
 
 
+def test_the_world_model_carries_services_optionally_and_still_checks_them(tmp_path):
+    """`services` is optional, and the optional key is the one that needs a test.
+
+    Optional because a target declaring no tools has nothing to say, and because
+    both committed live recordings predate the key -- requiring it would
+    invalidate the only behavioural evidence the refusal conditions have and
+    oblige a paid re-record. The consequence is that minimal_world_model omits
+    it, so nothing else follows `#/$defs/service`: jsonschema resolves a $ref
+    only when the instance reaches it, so an unresolvable one would sit here
+    unnoticed for as long as every tested world model left the key out. Both
+    directions, because "accepted" alone would also be true of a key nothing
+    constrains.
+    """
+    path = tmp_path / "wm.json"
+    services = minimal_services_part()["services"]
+    write_json(path, minimal_world_model(services=services))
+    assert validate_artifact(path, "world-model") == []
+
+    del services[0]["signals"]
+    write_json(path, minimal_world_model(services=services))
+    findings = validate_artifact(path, "world-model")
+    assert findings, "a service with no signals must be rejected"
+    assert any("signals" in f.message for f in findings), [f.message for f in findings]
+
+
 def test_claim_without_evidence_is_rejected(tmp_path):
     payload = minimal_claims()
     payload["claims"][0]["evidence"] = []
@@ -170,6 +258,45 @@ def test_claim_without_evidence_is_rejected(tmp_path):
     assert findings
     assert findings[0].layer == "schema"
     assert findings[0].pointer == "/claims/0/evidence"
+
+
+def test_a_tool_claim_carrying_its_input_schema_validates(tmp_path):
+    """The seventh kind, and the payload the whole design rests on reaching synthesis.
+
+    `payload` is `{"type": "object"}` in claims-0.1.json -- free-form on purpose,
+    because a tool's input schema is whatever the target declared. So this asserts
+    the *kind* is admitted and that a nested schema survives the round trip; the
+    shape of the schema itself is not layer 1's business.
+    """
+    path = tmp_path / "01-claims" / "api-json.json"
+    path.parent.mkdir()
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "artifact_id": "api-json",
+                "claims": [
+                    {
+                        "id": "clm-api-010",
+                        "kind": "tool",
+                        "statement": "query_tickets is the only tool the target declares",
+                        "payload": {
+                            "type": "object",
+                            "required": ["action"],
+                            "properties": {"action": {"type": "string"}},
+                        },
+                        "evidence": [
+                            {"artifact_id": "api-json", "locator": "#/tools/0/input_schema"}
+                        ],
+                        "confidence": "high",
+                        "derivation": "stated",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert validate_artifact(path, "claims") == []
 
 
 def test_traversal_shaped_id_is_rejected_by_the_schema(tmp_path):
@@ -777,6 +904,38 @@ def test_the_batches_gate_over_a_run_with_no_plan_names_the_run_root(tmp_path):
     assert "produced no batches artifact" in findings[0].message
 
 
+def test_the_interface_gate_over_a_run_with_no_services_names_the_run_root(tmp_path):
+    """The batches trap, one band earlier, and the mirror of the test above.
+
+    `01-interfaces/` holds one document per service, so the iterated resolver
+    returns `[]` for a run with no service -- and `validate_stage`'s "produced no X
+    artifact" arm then fires against the run root.
+
+    **So this gate must not be run when synthesis printed no path.** A target whose
+    corpus declares no tool at all is a real target: `rb-reconcile-services` is
+    instructed to write `services: []` for one rather than invent a service, and
+    `interfaces.synthesise` then correctly writes nothing and exits 0. Measured on
+    such a run before `rb-orchestrate` was told to gate conditionally:
+    `synthesise-interfaces` exited 0 printing nothing, `validate --stage
+    reconcile-services` exited 0, `check-refs` exited 0, and this gate exited 1
+    naming the run root -- a finding against a run with no defect, which would then
+    have cost the run its one repair attempt on a pass that would honestly write
+    `services: []` again.
+
+    Pinned rather than left to the prose, for the reason the batches test above is:
+    the resolver's comment and the orchestrator's instruction are the only two
+    places this rule lives, and neither is executable.
+    """
+    from rubrica.paths import RunPaths
+    from rubrica.validate import validate_stage
+
+    run = RunPaths(tmp_path)
+    run.root.mkdir(parents=True, exist_ok=True)
+    findings = validate_stage(run, "synthesise-interfaces")
+    assert [f.artifact for f in findings] == [run.root]
+    assert "produced no interface artifact" in findings[0].message
+
+
 def test_a_batch_projecting_zero_bytes_is_refused(tmp_path):
     """`minimum: 1`, because 0 is unreachable by the formula the field states.
 
@@ -931,3 +1090,102 @@ def test_a_rejection_ruling_must_name_a_reason(tmp_path):
         },
     )
     assert validate_artifact(path, "score-part") != []
+
+
+def test_a_services_part_validates_and_a_tool_with_no_schema_claim_does_not(tmp_path):
+    """`schema_claim` is required, and the requirement is the whole reason the
+    field exists: two claims can describe one tool, they can disagree about its
+    input schema, and deterministic synthesis cannot pick a winner. Making it
+    optional would put that choice back into code.
+    """
+    good = {
+        "schema_version": "0.1",
+        "services": [
+            {
+                "id": "svc-tickets",
+                "statement": "The support ticket backend the one declared tool addresses",
+                "grouping_evidence": ["shared_mcp_server_entry"],
+                "tools": [
+                    {
+                        "name": "query_tickets",
+                        "claims": ["clm-api-010"],
+                        "schema_claim": "clm-api-010",
+                    }
+                ],
+                "signals": [
+                    {
+                        "kind": "no_outward_evidence_found",
+                        "locator": "api-json, notes-md, trace-json",
+                    }
+                ],
+            }
+        ],
+        "inputs_seen": [
+            {"artifact_id": "api-json", "own_kind_total": 1, "cited": 1, "dropped": 0},
+            {"artifact_id": "notes-md", "own_kind_total": 0, "cited": 0, "dropped": 0},
+            {"artifact_id": "trace-json", "own_kind_total": 0, "cited": 0, "dropped": 0},
+        ],
+    }
+    path = tmp_path / "01-services.json"
+    path.write_text(json.dumps(good), encoding="utf-8")
+    assert validate_artifact(path, "services-part") == []
+
+    bad = json.loads(json.dumps(good))
+    del bad["services"][0]["tools"][0]["schema_claim"]
+    path.write_text(json.dumps(bad), encoding="utf-8")
+    findings = validate_artifact(path, "services-part")
+    assert findings, "a tool with no schema_claim must be rejected by layer 1"
+    assert any("schema_claim" in f.message for f in findings)
+
+
+def test_an_interface_document_validates_and_a_missing_request_body_does_not(tmp_path):
+    """The carrier convention is pinned here rather than left to the code that
+    writes it: one path per tool, `post`, an operationId matching the survival
+    predicate, and a requestBody. `responses` is deliberately absent -- the
+    harness's inline_schema_evidence feeds request bodies as entity evidence, so
+    a request-only document is its intended input, not a degraded one.
+    """
+    good = {
+        "openapi": "3.1.0",
+        "info": {"title": "svc-tickets", "version": "0.1.0"},
+        "paths": {
+            "/query_tickets": {
+                "post": {
+                    "operationId": "query_tickets",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {"type": "object", "required": ["action"]}
+                            }
+                        },
+                    },
+                }
+            }
+        },
+        "x-rubrica": {
+            "service_id": "svc-tickets",
+            "tools": [
+                {
+                    "name": "query_tickets",
+                    "claims": ["clm-api-010"],
+                    "schema_claim": "clm-api-010",
+                }
+            ],
+        },
+    }
+    path = tmp_path / "svc-tickets.json"
+    path.write_text(json.dumps(good), encoding="utf-8")
+    assert validate_artifact(path, "interface") == []
+
+    bad = json.loads(json.dumps(good))
+    del bad["paths"]["/query_tickets"]["post"]["requestBody"]
+    path.write_text(json.dumps(bad), encoding="utf-8")
+    assert validate_artifact(path, "interface"), "an operation with no requestBody must be rejected"
+
+    worse = json.loads(json.dumps(good))
+    worse["paths"]["/query_tickets"]["post"]["operationId"] = "_query_tickets"
+    path.write_text(json.dumps(worse), encoding="utf-8")
+    assert validate_artifact(path, "interface"), (
+        "an operationId the harness would rewrite must be rejected by layer 1 too"
+    )

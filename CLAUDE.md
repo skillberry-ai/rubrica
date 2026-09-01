@@ -82,7 +82,9 @@ finding's clothes.
 | `01f` | reconcile-entities | `rb-reconcile-entities` | validate · check-refs |
 | `01g` | reconcile-goals | `rb-reconcile-goals` | validate · check-refs |
 | `01h` | reconcile-gaps | `rb-reconcile-gaps` | validate · check-refs |
-| `01i` | reconcile-seal | code — `rubrica reconcile-seal` assembles the partials | validate · check-refs · **human gate 1** |
+| `01i` | reconcile-services | `rb-reconcile-services` — barrier | validate · check-refs |
+| `01j` | synthesise-interfaces | code — derives one OpenAPI document per service | validate · check-refs |
+| `01k` | reconcile-seal | code — `rubrica reconcile-seal` assembles the partials | validate · check-refs · **human gate 1** |
 | `02a` | propose-batches | code — partitions the round's closable holes | validate |
 | `02b` | propose | `rb-propose` — fan-out, one per batch | validate |
 | `02c` | propose-seal | code — assembles the parts into `02-scenarios.json` | validate |
@@ -93,14 +95,27 @@ finding's clothes.
 | `06` | emit | `rb-emit` — thin wrapper over `rubrica emit` | validate · check-refs |
 | `07` | smoke | code | validate · check-refs |
 
-Rows `01b` through `01i` are **one logical step engineered as substeps.** Every
-pass reads all of `01-claims/` — the split is on *output*, not on claims, so the
-barrier property is untouched and a contradiction between two inputs is still
-visible to the pass that records it. They are separate stages rather than one
-skill branching on a slice id because `check-skills` binds one skill file to one
-stage name and `manifest.stages` records model, effort and skill digest per
-stage, which is what lets a think-heavy pass carry a different budget from a
-mechanical one. `reconcile-seal` is code for the reason `emit` is: two runs with
+Rows `01b` through `01i`, and `01k`, are **one logical step engineered as
+substeps.** Every pass reads all of `01-claims/` — the split is on *output*, not
+on claims, so the barrier property is untouched and a contradiction between two
+inputs is still visible to the pass that records it. They are separate stages
+rather than one skill branching on a slice id because `check-skills` binds one
+skill file to one stage name and `manifest.stages` records model, effort and
+skill digest per stage, which is what lets a think-heavy pass carry a different
+budget from a mechanical one.
+
+**`01j` is not one of them**, and it is named here rather than folded into the
+range: `synthesise-interfaces` merges no claims into a partial. It *derives* one
+OpenAPI document per service from `01-services.json`, reading `01-claims/` solely
+to resolve the input schema each operation carries, so the barrier property above
+is not its property at all — its inputs were sealed by the pass before it. It is
+in the band because it belongs to world-model construction and a human reads its
+output at gate 1, not because it shares the band's shape. It is code for `emit`'s
+reason, and it is its own stage rather than part of the seal so that a human who
+corrects a grouping at gate 1 can re-derive one service's document without
+re-running the seal over every partial.
+
+`reconcile-seal` is code for the reason `emit` is: two runs with
 identical partials must produce a byte-identical world model.
 `01-world-model.json` keeps its path, schema and byte shape, so nothing below
 the seal can tell it was assembled pass by pass rather than written in one
@@ -145,8 +160,9 @@ dispatches any pass of the triage family, and never holds gate 0 — all three a
 finished before it is ever dispatched.
 
 `intake`, `smoke`, `survey`, `triage-slices`, `triage-seal`, `reconcile-seal`,
-`propose-batches`, `propose-seal`, and `score-seal` are code, so they have no
-skill and no `manifest.stages` entry. Their absence there is not a finding.
+`synthesise-interfaces`, `propose-batches`, `propose-seal`, and `score-seal` are
+code, so they have no skill and no `manifest.stages` entry. Their absence there is
+not a finding.
 
 ## The exit-code contract — load-bearing, do not weaken
 
@@ -220,6 +236,24 @@ are judgments rather than list entries:
 - `emit` is code, not a prompt, because two runs with identical stage-4 and
   stage-5 artifacts must produce byte-identical suites — otherwise variance can
   no longer be attributed to a stage.
+- `synthesise-interfaces` is code on that same argument, one band earlier: a
+  service's OpenAPI document is a pure function of the grouping
+  `rb-reconcile-services` judged, so two runs with identical groupings must
+  produce byte-identical documents. **Its failure surface splits across both exit
+  codes, and the split is load-bearing.** A missing or non-object
+  `01-services.json`, a service id that is not a usable filename, a tool name the
+  harness would rewrite, and a `schema_claim` no claim in `01-claims/` has an id
+  for are `1`s: re-dispatching `reconcile-services` repairs each. A `schema_claim`
+  naming a claim that exists and carries no usable `payload` is a `1` too, but
+  against `01-claims/<artifact_id>.json` and **not** repairable by that pass —
+  which is instructed to cite such a claim anyway — so it is a finding a human
+  rules on at gate 1. An unwritable
+  `01-interfaces/` is a `2`, because no prompt re-dispatch fixes a directory
+  permission and a `1` there would spend the run's one repair attempt on a stage
+  whose output was never the problem. It is also all-or-nothing and owns its
+  directory: a partial write, or a document left over from a superseded grouping,
+  makes a later check report against a service whose only problem is a malformed
+  sibling.
 - `dedupe-candidates` proposes pairs and never decides.
 - `record-stage` hashes the skill file the run actually used, so a digest that no
   longer matches the file on disk means the file changed after the run — that is
@@ -232,15 +266,19 @@ are judgments rather than list entries:
   human gate: at gate 0 the objective verdict, the predicted-vs-observed surface
   divergence, grouped declines, the slice table and every group the slicer split
   across more than one slice; the reconcile sweep plus per-input utilisation,
-  per-pass read coverage, the capabilities the coverage denominator excludes and
-  implied size at gate 1; the coverage matrix at gate 2; the verdict tally at gate
-  3.
+  per-pass read coverage, the capabilities the coverage denominator excludes,
+  implied size and one block per service at gate 1; the coverage matrix at gate 2;
+  the verdict tally at gate 3.
   Gate 1's sweep is an **aggregate, not a per-subject tally** — how many subjects
   cover how many claims, how many subjects were swept, how many contradictions
   were recorded, and, only when any were, the tally by `resolution` with
   `unresolved` first. Gate 1's read coverage is **per pass, not per input**: each
   owning pass's own-kind claims cited over total, and under it only the input rows
-  that dropped a claim, each beside the `note` the drop required.
+  that dropped a claim, each beside the `note` the drop required. Gate 1's services
+  block is read from `01-services.json`, not from the assembled world model, so a
+  reader correcting a grouping edits the file `synthesise-interfaces` re-derives
+  from; **nothing in the run reads a decision about those services**, and the block
+  says so rather than letting a recorded selection read as a narrowing.
   `target-brief` is a report too, and the one written for somebody outside the
   project: it renders a run's description of the *target* — not of the run — for the
   people who own that target, asking them to correct it. Three ranked asks lead, and

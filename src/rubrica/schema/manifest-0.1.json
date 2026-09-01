@@ -80,7 +80,7 @@
           "extract",
           "reconcile-subjects", "reconcile-contradict", "reconcile-capabilities",
           "reconcile-outcomes", "reconcile-entities", "reconcile-goals",
-          "reconcile-gaps", "reconcile-seal",
+          "reconcile-gaps", "reconcile-services", "synthesise-interfaces", "reconcile-seal",
           "propose-batches", "propose", "propose-seal", "score", "score-seal",
           "instantiate", "challenge", "emit", "smoke"
         ]

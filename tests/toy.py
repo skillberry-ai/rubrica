@@ -23,7 +23,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from rubrica import rounds
+from rubrica import interfaces, rounds
 from rubrica.artifacts import read_json, sha256_of, write_json
 from rubrica.intake import classify, intake
 from rubrica.paths import RunPaths
@@ -58,11 +58,13 @@ ARTIFACT_IDS: tuple[str, ...] = ("api-json", "notes-md", "trace-json")
 SIDS: tuple[str, ...] = ("scn-open", "scn-empty", "scn-blocked", "scn-missing")
 
 
-def _claim(cid, kind, statement, artifact_id, locator, confidence, derivation, quote=None):
+def _claim(
+    cid, kind, statement, artifact_id, locator, confidence, derivation, *, quote=None, payload=None
+):
     evidence: dict[str, Any] = {"artifact_id": artifact_id, "locator": locator}
     if quote is not None:
         evidence["quote"] = quote
-    return {
+    claim: dict[str, Any] = {
         "id": cid,
         "kind": kind,
         "statement": statement,
@@ -70,6 +72,12 @@ def _claim(cid, kind, statement, artifact_id, locator, confidence, derivation, q
         "confidence": confidence,
         "derivation": derivation,
     }
+    # Omitted rather than written as null when absent: claims-0.1.json does not
+    # require `payload`, and a null one is a different document from an absent
+    # one to every reader that uses `.get`.
+    if payload is not None:
+        claim["payload"] = payload
+    return claim
 
 
 _CLAIMS: dict[str, list[dict[str, Any]]] = {
@@ -156,6 +164,25 @@ _CLAIMS: dict[str, list[dict[str, Any]]] = {
             "#/tools/0/input_schema/properties/ticket_id",
             "medium",
             "inferred",
+        ),
+        _claim(
+            "clm-api-010",
+            "tool",
+            "The target declares one tool, query_tickets, taking an action and optional filters",
+            "api-json",
+            "#/tools/0/input_schema",
+            "high",
+            "stated",
+            payload={
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                    "action": {"type": "string", "enum": ["find_tickets", "get_ticket"]},
+                    "queue": {"type": "string", "enum": ["billing", "shipping"]},
+                    "status": {"type": "string", "enum": ["open", "blocked", "closed"]},
+                    "ticket_id": {"type": "integer"},
+                },
+            },
         ),
     ],
     "notes-md": [
@@ -445,26 +472,29 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
     return payload
 
 
-# Which claim kinds each pass is accountable for. The six kinds in
-# claims-0.1.json partition onto the four passes that own one, which is what
-# makes an own-kind count a per-pass number rather than an aggregate: measured on
-# run-20260823-112746, per-kind citation was capability 110/135 while goal was
-# 2/38, and the run's single aggregate figure of 33.6% is the average that hid
-# it. reconcile-gaps owns no kind, and reconcile-subjects and
-# reconcile-contradict need no accounting -- refs.check_subjects already makes
-# the cover total.
+# Which claim kinds each pass is accountable for. Every kind in claims-0.1.json's
+# enum has an owner here now: `tool` was the one that did not, and
+# reconcile-services took it in the commit that added the pass. What makes an
+# own-kind count a per-pass number rather than an aggregate is the partition --
+# no kind with two owners -- and not one kind per pass, since "entities" and
+# "goals" each own two: measured on run-20260823-112746, per-kind citation was
+# capability 110/135 while goal was 2/38, and the run's single aggregate figure of
+# 33.6% is the average that hid it. reconcile-gaps owns no kind, and
+# reconcile-subjects and reconcile-contradict need no accounting --
+# refs.check_subjects already makes the cover total.
 OWN_KINDS: dict[str, tuple[str, ...]] = {
     "capabilities": ("capability",),
     "entities": ("entity", "invariant"),
     "outcomes": ("outcome_class",),
     "goals": ("actor", "goal"),
+    "services": ("tool",),
 }
 
 
 def _claim_refs_in(node: Any) -> set[str]:
     """Every id in every `claims` array anywhere in a partial.
 
-    A walk rather than a per-part list of paths: the four partials nest their
+    A walk rather than a per-part list of paths: the partials each nest their
     citations differently -- an entity carries them on itself and on each
     invariant, the outcomes part two levels down inside an `outcomes` record --
     and a path list would need revising by whoever nests a new element. Mirrors
@@ -534,13 +564,16 @@ def split_world_model(
 ) -> dict[str, Any]:
     """The golden world model, cut into the partials the reconcile passes write.
 
-    Derived rather than hand-authored beside toy_world_model: tests/fixtures/toy/
-    is the model answer a skill imitates, and a second copy of that answer in
-    partial form would be a second thing to keep correct -- the drift this module
-    already avoids by building every checkpoint from one source. Deriving is also
-    what makes the seal's round trip a *property* (seal(split(w)) == w) rather
-    than a worked example: a hand-authored pair could satisfy it while both
-    drifted together.
+    Derived from `world` rather than hand-authored beside toy_world_model --
+    every partial but `services`, which has nothing in the golden world model to
+    cut and is written out below, with its own comment saying why.
+    tests/fixtures/toy/ is the model answer a skill imitates, and a second copy of
+    that answer in partial form would be a second thing to keep correct -- the
+    drift this module already avoids by building every checkpoint from one source.
+    Deriving is also what makes the seal's round trip a *property*
+    (seal(split(w)) == w) rather than a worked example: a hand-authored pair could
+    satisfy it while both drifted together, and it is exactly the one partial that
+    is not derived that the round trip therefore does not cover.
 
     `claim_ids` defaults to every claim the toy run actually contains, because the
     cover has to be total -- refs.check_subjects reports any claim it omits, and a
@@ -684,6 +717,41 @@ def split_world_model(
             "schema_version": "0.1",
             "actors": world["actors"],
             "goals": world["goals"],
+        },
+        # One service, because the toy declares one tool. `sole_service_in_run` is
+        # the honest grouping reason: there is no shared base URL or credential to
+        # cite for a group of one, and a fixture citing one would teach the skill to
+        # invent evidence. The signal is the absence one for the same reason -- the
+        # toy corpus is a tool-schema document, notes and a trace, none of which can
+        # show an HTTP client being constructed.
+        #
+        # Not derived from `world` the way every partial above is: the sealed world
+        # model's `services` field is optional and the golden one does not carry it,
+        # so there is nothing there to cut. Which is why this is the one partial the
+        # seal's round trip does not cover, and why the hand-read row in
+        # tests/unit/test_toy_split.py is the whole of its accounting check.
+        "services": {
+            "schema_version": "0.1",
+            "services": [
+                {
+                    "id": "svc-tickets",
+                    "statement": "The support ticket backend that query_tickets addresses",
+                    "grouping_evidence": ["sole_service_in_run"],
+                    "tools": [
+                        {
+                            "name": "query_tickets",
+                            "claims": ["clm-api-010"],
+                            "schema_claim": "clm-api-010",
+                        }
+                    ],
+                    "signals": [
+                        {
+                            "kind": "no_outward_evidence_found",
+                            "locator": "api-json, notes-md, trace-json",
+                        }
+                    ],
+                }
+            ],
         },
     }
     for key, own_kinds in OWN_KINDS.items():
@@ -1414,13 +1482,26 @@ _UPTO_STAGES: tuple[str, ...] = (
     *_TRIAGE_UPTO_STAGES,
     "intake",
     "extract",
-    # Two checkpoints for the reconcile family rather than eight: "reconcile-gaps"
-    # is every partial written with no world model yet -- the state the seal and
-    # the layer-2 part checkers are tested against -- and "reconcile-seal" is the
-    # assembled world model every later stage reads. The intermediate states
-    # between passes have no consumer, and a checkpoint nobody stops at is a
-    # helper this module already has too many requests for.
+    # Four checkpoints for the 01 band rather than one per pass.
+    # "reconcile-gaps" is every partial the seal *requires* written with no world
+    # model yet -- the state the seal and the layer-2 part checkers are tested
+    # against, and the one that shows the seal omitting its optional `services` key.
+    # "reconcile-services" adds the services partial, so it is every partial
+    # written with no interfaces synthesised, which is what the checks over
+    # 01-services.json alone are tested against; it is a checkpoint of its own
+    # rather than folded into the one above because the seal must stay testable
+    # against a run in which 01-services.json does not exist -- the seal folds it
+    # only when it exists, and a fixture that always wrote it could not show that.
+    # "synthesise-interfaces" adds the derived documents, which is the state every
+    # check over 01-interfaces/ is tested against -- and it is what makes the
+    # checkpoint above the run in which the part exists and the documents do not.
+    # And "reconcile-seal" is the assembled world model every later stage reads.
+    # The intermediate states between the other passes have no consumer, and a
+    # checkpoint nobody stops at is a helper this module already has too many
+    # requests for.
     "reconcile-gaps",
+    "reconcile-services",
+    "synthesise-interfaces",
     "reconcile-seal",
     # Four checkpoints across the loop rather than five: "propose" is every part
     # written with nothing sealed -- the state check_scenario_parts and the
@@ -1527,6 +1608,19 @@ def build_toy_run(
     write_json(run.entities_part, parts["entities"])
     write_json(run.goals_part, parts["goals"])
     write_json(run.gaps_part, parts["gaps"])
+    if stop < _UPTO_INDEX["reconcile-services"]:
+        return run
+
+    write_json(run.services_part, parts["services"])
+    if stop < _UPTO_INDEX["synthesise-interfaces"]:
+        return run
+
+    # Synthesised by the real code, not by writing a document here. Same reason
+    # intake and the seal are real in this builder: the artifact every later stage
+    # reads is produced by the code that produces it in a real run, so a defect in
+    # that code fails a test instead of being papered over by the fixture.
+    _, synthesis_findings = interfaces.synthesise(run)
+    assert not synthesis_findings, synthesis_findings
     if stop < _UPTO_INDEX["reconcile-seal"]:
         return run
 

@@ -23,7 +23,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "kind": {
-          "enum": ["capability", "entity", "invariant", "actor", "goal", "outcome_class"]
+          "enum": ["capability", "entity", "invariant", "actor", "goal", "outcome_class", "tool"]
         },
         "statement": { "type": "string", "minLength": 1 },
         "payload": { "type": "object" },

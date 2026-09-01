@@ -112,9 +112,17 @@ structurally forced to write down.
 ## Why `emit` is code and not a prompt
 
 Every judgment-bearing stage in Rubrica is a skill — a prompt. `emit` is the
-one stage that is not: it is deterministic Python
+one stage that *looks* like judgment and is not: it is deterministic Python
 (`src/rubrica/emit.py`), invoked through a thin skill (`rb-emit`) that exists
 only as the human-facing entry point.
+
+The stages in `skills.CODE_ONLY_STAGES` are code as well, and the argument below
+is the one several of them rest on — but none of them was ever a candidate for
+judgment. They mint run ids and timestamps, partition a catalogue by byte budget,
+assemble a family's staged parts, or derive one document from another that a pass
+has already judged. `emit` is the case where this argument had to overrule a
+stage a reader would expect to be a prompt, which is why it is the one the
+heading names.
 
 The reason is the reproducibility criterion the whole pipeline is held to. If
 `emit` compiled the accepted scenarios into a runnable suite by prompting a

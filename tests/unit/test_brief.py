@@ -1736,3 +1736,341 @@ def test_only_gate_1_points_at_the_target_brief(tmp_path, gate):
     sending the description out for correction is the next action."""
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     assert "target-brief" not in brief.gate_brief(run, gate)
+
+
+def test_gate_1_shows_each_service_its_signals_and_its_document(tmp_path):
+    """Spec section "Gate 1's surface": per service, its tools, its signals each with
+    a locator, and the path to its synthesised document.
+
+    Every assertion is scoped to the section rather than to the whole brief, and the
+    scoping is not decoration here: `api-json` is a locator in the toy's one signal
+    *and* the first row of the claim-utilisation block twelve lines above, and
+    `01-services.json` is a read-coverage row -- so an unscoped `in text` for either
+    passes against a brief that renders no services section at all. Measured: both
+    hold on the pre-change rendering.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    text = brief.gate_brief(run, 1)
+    section = _section(text, brief.SERVICES_HEADER)
+    assert "svc-tickets" in section
+    row = _row(section, "svc-tickets")
+    # The statement, not just the id: an id alone is not a description anyone
+    # outside this run can rule on.
+    assert "The support ticket backend" in row
+    # The tool name, bounded on both sides and scoped to the row that is supposed to
+    # carry it. `"query_ticket" in "query_tickets"` is true, and that shape shipped
+    # once in this plan's own test text -- but the section-wide version of this
+    # assertion was measurably worse than that: the toy's *statement* is "the support
+    # ticket backend that query_tickets addresses", so a rendering that truncated
+    # every tool name by one character still satisfied a section-scoped word-bounded
+    # regex, off the statement fifteen lines above the tools row.
+    assert re.search(r"(?<!\w)query_tickets(?!\w)", _row(section, "tools:")), section
+    # The signal *and* its locator: a signal with no locator is an assertion with no
+    # evidence, which is the shape this whole section exists to avoid. Asserted on
+    # one line rather than as two section-wide substrings, because a section-wide
+    # co-occurrence is satisfied by a kind on one line and an unrelated locator
+    # fifteen lines below it.
+    signal = _row(section, "signal:")
+    assert "no_outward_evidence_found" in signal
+    assert "api-json" in signal
+    assert "01-interfaces/svc-tickets.json" in _row(section, "interface:")
+
+
+def test_gate_1_renders_an_absence_signals_locator_as_what_was_read(tmp_path):
+    """`no_outward_evidence_found`'s locator names what was *read*, not where
+    something was seen -- world-model-0.1.json's `signal` says so, and the two
+    readings lead a human to opposite conclusions about the same string.
+
+    Rendered rather than explained: the label is on the line carrying the locator,
+    so a reader who skips every sentence in the section still cannot read the
+    locator as a sighting.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    signal = _row(_section(brief.gate_brief(run, 1), brief.SERVICES_HEADER), "signal:")
+    assert "read:" in signal, signal
+
+
+def test_gate_1_says_that_nothing_consumes_the_selection(tmp_path):
+    """The boundary of this step, stated to the person at the gate. A human who
+    records a selection and expects the run to narrow has been misled by a report
+    that showed them services and stayed silent about what happens next.
+    """
+    text = brief.gate_brief(build_toy_run(tmp_path, upto="reconcile-seal"), 1)
+    section = _section(text, brief.SERVICES_HEADER)
+    # Scoped, for the reason above: gate 1 already names `rubrica decide` in the
+    # excluded-capabilities remedy, so an unscoped search for the boundary sentence
+    # could be answered by a paragraph about capability bindings.
+    assert "no stage reads" in section or "nothing in this run reads" in section
+
+
+def test_gate_1_does_not_present_a_short_signal_list_as_reassurance(tmp_path):
+    """Three of the five signal kinds need a source file to see, and this repo has a
+    source parser for Python only -- so a service showing one absence signal may
+    mean nobody could look. The caveat has to be readable *before* the signal lines
+    it qualifies, not in a trailing block a reader who found their service skips.
+    """
+    text = brief.gate_brief(build_toy_run(tmp_path, upto="reconcile-seal"), 1)
+    section = _section(text, brief.SERVICES_HEADER)
+    assert "absence of evidence" in section
+    # Position, not just presence, and compared line by line rather than by string
+    # offset: the caveat's own prose names the signal kinds, so a `section.index`
+    # comparison would be measuring where two sentences sit inside one paragraph.
+    # A rendering that moved the caveat below the signals would satisfy a bare
+    # substring check while being the exact failure this asserts against.
+    rows = section.splitlines()
+    caveat = next(i for i, row in enumerate(rows) if "absence of evidence" in row)
+    first_signal = next(i for i, row in enumerate(rows) if row.strip().startswith("signal:"))
+    assert caveat < first_signal, "the caveat must precede the signals it qualifies"
+
+
+def test_gate_1_on_a_run_with_no_services_part_says_so_and_exits_clean(tmp_path):
+    """gate-brief is a report, not a gate: it always exits clean on a readable run.
+    A missing services part is the ordinary shape of a target that declares no
+    tools, and must render as a stated absence rather than an empty heading.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-gaps")
+    assert not run.services_part.exists(), "the fixture state this test is chosen for"
+    text = brief.gate_brief(run, 1)
+    section = _section(text, brief.SERVICES_HEADER)
+    assert "(none" in section
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        '{"services": ["nope"]}',
+        '{"services": [{"tools": "nope"}]}',
+        # The member above short-circuits at the `id` guard, so on its own it never
+        # reaches the `tools` guard it was written for. This one has a usable id and
+        # a malformed `tools`, `signals` and `grouping_evidence`, so every
+        # per-member guard in the helper is actually exercised.
+        '{"services": [{"id": "svc-x", "statement": "s", "tools": "nope",'
+        ' "signals": "nope", "grouping_evidence": "nope"}]}',
+        # A tool that is not a dict, and a signal that is not a dict, inside
+        # containers that are the right shape.
+        '{"services": [{"id": "svc-x", "tools": ["nope"], "signals": ["nope"]}]}',
+        '{"services": "nope"}',
+        '{"services": null}',
+        "[]",
+        "null",
+    ],
+)
+def test_gate_1_survives_a_services_part_whose_members_are_the_wrong_shape(tmp_path, broken):
+    """Every one of these is readable JSON, and every one is what a hand-edit at this
+    gate produces. Three measured instances in this module turned exactly that shape
+    into a TypeError escaping as a fabricated `[internal]` finding at exit 1, against
+    a run that was fine -- so the guard is asserted per member, not per container.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.services_part.write_text(broken, encoding="utf-8")
+    text = brief.gate_brief(run, 1)  # must not raise
+    assert brief.SERVICES_HEADER in text
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+
+
+def test_gate_1_names_a_service_whose_document_was_never_synthesised(tmp_path):
+    """`synthesise` mkdirs `01-interfaces/` even for an empty service list, so the
+    directory existing does not mean a document does. A blank cell there reads as
+    "not checked" where a reader needs "checked, and there is none" -- the same line
+    the excluded block draws on `is_file`.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    assert not run.interface("svc-tickets").is_file(), "the fixture state this test needs"
+    section = _section(brief.gate_brief(run, 1), brief.SERVICES_HEADER)
+    row = _row(section, "interface:")
+    assert "not synthesised" in row
+    assert "01-interfaces/svc-tickets.json" not in row
+
+
+def test_gate_1_states_a_services_grouping_evidence(tmp_path):
+    """The grouping is the one judgment in this section a human at gate 1 is best
+    placed to overturn, and `grouping_evidence` is what they would overturn it on --
+    so the section states it rather than leaving the reader to open the part.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    section = _section(brief.gate_brief(run, 1), brief.SERVICES_HEADER)
+    assert "sole_service_in_run" in _row(section, "grouped by:")
+
+
+def test_the_services_section_does_not_bury_the_reconcile_sweep(tmp_path):
+    """Ordering, asserted rather than eyeballed once. The sweep is what sends a
+    reader into 01-contradictions/ before they read anything built on top of it, so
+    a new section that landed above it would cost the sweep its position.
+    """
+    text = brief.gate_brief(build_toy_run(tmp_path, upto="reconcile-seal"), 1)
+    assert text.index("Reconcile sweep") < text.index(brief.SERVICES_HEADER)
+    # And the target-brief invitation stays last: it is the one place a human at
+    # gate 1 certainly looks.
+    assert text.index(brief.SERVICES_HEADER) < text.index("rubrica target-brief")
+
+
+def _rewrite_sole_service(run: RunPaths, **fields) -> None:
+    """The toy's one service with `fields` merged in, written back to the part.
+
+    A hand-edit of `01-services.json`, which is what this section's reader does and
+    the only way to reach three of its branches: the toy declares one tool, so it
+    carries no `schema_disagreement`, one signal rather than none, and an id that is
+    a usable filename. A fixture that cannot reach a branch is the second of the two
+    weakness shapes CLAUDE.md names, and it applies here rather than in the golden
+    world -- editing `tests/fixtures/toy/` to reach them would teach every skill that
+    imitates it a shape no real target has.
+    """
+    document = read_json(run.services_part)
+    document["services"][0].update(fields)
+    write_json(run.services_part, document)
+
+
+def test_gate_1_surfaces_a_tools_schema_disagreement(tmp_path):
+    """The pass picked one of two input schemas, that pick is what the synthesised
+    operation's request body carries, and it is the judgment a human at this gate is
+    best placed to overturn -- so it is surfaced rather than summarised away.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    _rewrite_sole_service(
+        run,
+        tools=[
+            {
+                "name": "query_tickets",
+                "claims": ["clm-api-010"],
+                "schema_claim": "clm-api-010",
+                "schema_disagreement": "clm-notes-003 typed status as an enum",
+            }
+        ],
+    )
+    section = _section(brief.gate_brief(run, 1), brief.SERVICES_HEADER)
+    row = _row(section, "query_tickets:")
+    # The tool it belongs to and what the losing claim said, on one line: a section
+    # that named the disagreement without naming the tool would leave a reader with
+    # twenty tools nothing to act on.
+    assert "schemas disagreed" in row
+    assert "clm-notes-003" in row
+
+
+def test_gate_1_states_a_service_that_records_no_signal_at_all(tmp_path):
+    """The strongest claim this section can carry, and the one under most pressure to
+    be read as reassurance -- so rendering it as silence is the one thing that must
+    not happen. Schema-invalid (`minItems: 1`), reachable only by hand-edit, which is
+    exactly who reads this page.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    _rewrite_sole_service(run, signals=[])
+    section = _section(brief.gate_brief(run, 1), brief.SERVICES_HEADER)
+    assert "signals:" in section, section
+    row = _row(section, "signals:")
+    assert "none recorded" in row
+    # And the section must not have gone quiet instead: the service is still rendered.
+    assert "svc-tickets" in section
+
+
+def test_gate_1_does_not_join_an_unsafe_service_id_into_a_path(tmp_path):
+    """`run.interface` joins through `safe_segment`, which raises `UnsafeSegment`,
+    which `cli.py` maps to **exit 2** -- and a report is forbidden that on a readable
+    run. So the id is asked of `is_safe_segment` first, following `check_inputs`'
+    handling of `stored_as`, and a bad one renders as a stated absence.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    _rewrite_sole_service(run, id="../etc/passwd")
+    text = brief.gate_brief(run, 1)  # must not raise UnsafeSegment
+    row = _row(_section(text, brief.SERVICES_HEADER), "interface:")
+    assert "not a usable filename" in row
+    # Exit 0, not 2. This is the assertion the branch exists for; the row above only
+    # says the rendering is honest about why there is no path.
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+
+
+def test_gate_1_drops_a_service_with_no_id_rather_than_rendering_one(tmp_path):
+    """`{"services": [{"tools": "nope"}]}` is readable JSON and what a hand-edit
+    produces. A member with no id is not a service this report can render -- the
+    document path is derived from the id -- and rendering it as `None:` would put a
+    Python repr where a reader expects something to open.
+
+    Asserted on the output rather than on the absence of an exception: measured, this
+    shape raises nothing either way, so a test that only called `gate_brief` was
+    green with the guard deleted.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.services_part.write_text('{"services": [{"tools": "nope"}]}', encoding="utf-8")
+    section = _section(brief.gate_brief(run, 1), brief.SERVICES_HEADER)
+    assert "None" not in section, section
+    # And the section states the absence rather than rendering its prose around no
+    # rows at all: "no service this report could read" is the honest reading of a
+    # part that is present and yields nothing.
+    assert "(none" in section
+
+
+def test_gate_1_does_not_render_a_string_grouping_evidence_one_letter_at_a_time(tmp_path):
+    """`"grouping_evidence": "shared_base_url"` -- a string where the schema wants an
+    array, which is what a hand-edit produces. Iterating it yields characters, and
+    `", ".join` over them renders fifteen bogus evidence values on the one row a
+    reader would rule on.
+
+    Asserted on the output for the reason above: this shape raises nothing, so the
+    no-raise family of tests was green with `_strings` deleted.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    _rewrite_sole_service(run, grouping_evidence="shared_base_url")
+    row = _row(_section(brief.gate_brief(run, 1), brief.SERVICES_HEADER), "grouped by:")
+    assert "s, h, a" not in row, row
+    # `_strings` returns [] for a non-list, so the row states that nothing was cited
+    # -- which is true of the document, and better than a value invented from its
+    # characters.
+    assert "(nothing cited)" in row
+
+
+def test_no_line_in_the_services_section_runs_past_a_terminal_width(tmp_path):
+    """Every field in this section whose length is set by the target rather than by
+    this module is folded, and this is the assertion that says so once instead of per
+    field. Measured before folding was added: a 67-character statement put its row at
+    82 columns and an ordinary schema-disagreement sentence put its row at 91.
+
+    The three prose sentences are excluded from nothing here -- they are folded by the
+    same helper, so the bound holds over the whole section.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    _rewrite_sole_service(
+        run,
+        statement=(
+            "The support ticket backend the agent reaches for whenever a question "
+            "turns out to be about a ticket rather than about a person"
+        ),
+        grouping_evidence=["shared_base_url", "shared_credential", "shared_mcp_server_entry"],
+        tools=[
+            {
+                "name": f"ticket_operation_number_{n}",
+                "claims": ["clm-api-010"],
+                "schema_claim": "clm-api-010",
+                **(
+                    {
+                        "schema_disagreement": (
+                            "clm-notes-003 typed status as an enum of three values where "
+                            "clm-api-010 typed it as a free string"
+                        )
+                    }
+                    if n == 2
+                    else {}
+                ),
+            }
+            for n in range(1, 9)
+        ],
+        signals=[
+            {
+                "kind": "credential_or_base_url_read",
+                "locator": "support/ticket_client_configuration.py:118",
+            }
+        ],
+    )
+    section = _section(brief.gate_brief(run, 1), brief.SERVICES_HEADER)
+    # The fixture must actually reach past the bound before folding, or this asserts
+    # nothing: every field above is longer than the width it is folded to.
+    assert len(section.splitlines()) > 12, "the fixture this bound is measured against"
+    over = [row for row in section.splitlines() if len(row) > 78]
+    assert not over, f"lines past 78 columns: {over}"
+    # And a folded row stays one row: the long locator continues at six, under the
+    # `signal:` it belongs to, rather than becoming a sibling row at four. A kind on one
+    # structural row and its locator on another is an assertion separated from its
+    # evidence, which is the shape this whole section exists to avoid.
+    rows = section.splitlines()
+    kind_at = next(i for i, row in enumerate(rows) if row.startswith("    signal: "))
+    assert "ticket_client_configuration.py:118" in rows[kind_at + 1], rows[kind_at : kind_at + 2]
+    assert rows[kind_at + 1].startswith("      "), rows[kind_at + 1]

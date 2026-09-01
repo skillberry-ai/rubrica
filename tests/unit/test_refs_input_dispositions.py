@@ -214,21 +214,37 @@ def test_a_non_dict_partial_is_skipped_rather_than_raised_through(tmp_path):
     takes that to exit 1 with one `[internal]` finding naming the run root instead
     of an artifact, which is the specificity half of the exit-code rule.
 
-    `01-entities.json` and `01-goals.json` are the two that matter, and they are
-    asserted separately from the other pair: no other layer-2 checker reads either,
-    so before the guard this function was the sole raiser and there was nothing
-    older to blame. `check_outcomes` runs earlier in `check_all` and still raises on
+    `01-entities.json` and `01-goals.json` are the ones that matter, and they are
+    asserted alongside the other pair rather than instead of them: no other
+    layer-2 checker reads either, so before the guard this function was the sole
+    raiser and there was nothing older to blame. `01-services.json` was the third
+    such case and the deepest of them when this was written, because
+    `reconcile-seal` did not read it then either -- for the other two the seal would
+    refuse a broken partial afterwards, and for this one nothing below did. It has
+    readers on every side now: `synthesise-interfaces` refuses a non-dict one by
+    name, the seal refuses one through its own read door, and `refs.check_services`
+    guards the same read the same way, so this function is no longer its sole
+    raiser. It stays asserted here regardless,
+    since this checker still runs first and a raise here would still name the run
+    root. `check_outcomes`
+    runs earlier in `check_all` and still raises on
     a non-dict `01-capabilities.json` or `01-outcomes.json`, which is why the
     assertion here is against this checker rather than against `check_all` -- the
     register carries the ruling on the reads this branch did not add.
     """
-    for attribute in ("entities_part", "goals_part", "capabilities_part", "outcomes_part"):
+    for attribute in (
+        "entities_part",
+        "goals_part",
+        "services_part",
+        "capabilities_part",
+        "outcomes_part",
+    ):
         run = build_toy_run(tmp_path / attribute, upto="reconcile-seal")
         getattr(run, attribute).write_text('["nope"]', encoding="utf-8")
         findings = refs.check_input_dispositions(run)
-        # The other three passes still get recomputed: skipping the unreadable
-        # partial must not skip the loop. A guard that returned [] outright would
-        # satisfy a bare "does not raise" assertion while deleting the instrument.
+        # Every other pass still gets recomputed: skipping the unreadable partial
+        # must not skip the loop. A guard that returned [] outright would satisfy
+        # a bare "does not raise" assertion while deleting the instrument.
         assert all(f.artifact != getattr(run, attribute) for f in findings), findings
         assert findings == [], [str(f) for f in findings]
 

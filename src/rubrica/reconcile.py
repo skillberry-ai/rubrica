@@ -201,6 +201,27 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
         if parts_document is not None:
             parts[attribute] = parts_document
 
+    # Read outside _SINGLETON_PARTS because it is the one optional partial. Every
+    # entry in that tuple is required and an absent one is a finding, which is right
+    # for the five the world model cannot be assembled without and wrong here: a run
+    # whose services pass never ran has no services part at all, and the world model
+    # it seals is complete without one. The write site below carries the rest of that
+    # argument.
+    #
+    # Through the same door as the rest when it *does* exist: a `null` or
+    # list-shaped document must be a finding naming this artifact, not an
+    # AttributeError against the run root.
+    #
+    # No element type on the annotation, matching every other payload value here:
+    # _payload_keys checks the shape of the *document* and never the type of what a
+    # payload key holds, so `{"services": 5}` reaches this line and is layer 1's to
+    # reject, exactly as `{"capabilities": 5}` is.
+    services: list | None = None
+    if run.services_part.is_file():
+        services_document = _read_checked(run.services_part, ("services",), findings)
+        if services_document is not None:
+            services = services_document["services"]
+
     contradictions: list[dict] = []
     for path in list_json(run.contradictions_dir):
         # Through the same door, for the same reason: a `null` contradiction part
@@ -331,5 +352,21 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
             "goals": len(parts["goals_part"]["goals"]),
         },
     }
+    # Folded verbatim rather than re-derived: the grouping is rb-reconcile-services'
+    # judgment and it is what a human ratifies at gate 1, so a seal that rebuilt the
+    # records would be handing them the seal's judgment instead.
+    #
+    # Omitted rather than written as [] when the part is absent: `[]` asserts a pass
+    # looked and found no tools, which is a different claim about the target from "no
+    # pass ran". Consumers read it as `.get("services", [])`, so absence is the honest
+    # shape and not a special case anyone downstream must handle -- and it is what
+    # leaves both committed live recordings valid without a paid re-record, since each
+    # is a world model sealed before this key existed and neither records anything
+    # this change touches.
+    #
+    # Assigned after the literal rather than folded into it because write_json sorts
+    # keys, so insertion order cannot move a byte of the result.
+    if services is not None:
+        world["services"] = services
     write_json(run.world_model, world)
     return run.world_model, []

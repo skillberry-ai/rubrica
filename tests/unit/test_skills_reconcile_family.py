@@ -43,15 +43,66 @@ def _flat(stage: str, heading: str) -> str:
     return " ".join(section_body(_skill(stage), heading).lower().split())
 
 
+def _bullets(stage: str, heading: str) -> list[str]:
+    """One entry per top-level `- ` bullet in a section, each flattened like _flat.
+
+    A continuation line joins the bullet above it, so a wrapped bullet is one
+    entry rather than several. Anything before the first bullet -- a section's
+    intro paragraph -- is deliberately dropped: this exists to scope an assertion
+    to the condition that owns a rule, and an intro is owned by none of them.
+    """
+    out: list[str] = []
+    for line in section_body(_skill(stage), heading).splitlines():
+        if line.startswith("- "):
+            out.append(line)
+        elif out:
+            out[-1] += " " + line
+    return [" ".join(bullet.lower().split()) for bullet in out]
+
+
+def _bullet_carrying(stage: str, heading: str, *keys: str) -> str:
+    """The one bullet in a section carrying any of `keys`, flattened.
+
+    Asserting inside one bullet rather than over a whole section is what makes a
+    §5 assertion mean something: `assert "guess" in refusals` is satisfied by any
+    of five sibling conditions, so a rule deleted from the one that owns it stays
+    green. The exactly-one check is part of the instrument -- a key that matches
+    two bullets is not a locator, and one that matches none means the rule is gone
+    rather than that the test should quietly pass.
+    """
+    found = [bullet for bullet in _bullets(stage, heading) if any(k in bullet for k in keys)]
+    assert len(found) == 1, (
+        f"{keys} locates {len(found)} bullet(s) in {stage}'s {heading}, not one: {found}"
+    )
+    return found[0]
+
+
 def _world_schema():
     return read_json(schema_dir() / ARTIFACT_SCHEMAS["world-model"])
 
 
-def test_the_family_is_the_eight_stages_between_extract_and_propose_batches():
-    """Guards the derivation above, and the ordering the passes depend on:
-    outcomes quantifies over capabilities' output, gaps audits all of them, and
-    the seal runs last. A reordering here is a real change to what each pass can
+def test_the_family_is_exactly_the_stages_between_extract_and_propose_batches():
+    """Guards the derivation above, and the ordering the passes that have a real
+    dependency depend on: outcomes quantifies over capabilities' output, entities
+    and goals read the partials above them, gaps audits all of them, and the seal
+    runs last. A reordering among those is a real change to what each pass can
     read, not a cosmetic one.
+
+    `reconcile-services` is pinned here on a different footing, and this docstring
+    must not be read as giving it a dependency it does not have *upward*: it reads
+    no partial, and every claims file exists the moment `extract` finishes, so
+    nothing above it constrains the slot. Its readers below do -- both
+    `synthesise-interfaces` and the seal read the part it writes, the seal folding
+    it into the world model's optional `services` field -- so it cannot sort after
+    either. The comment beside it in `paths.STAGES` says exactly that, and the two
+    must not disagree. What the position pins beyond that window is the
+    *documentation*: STAGES is the on-disk numbering and both generated drawings
+    render it in order, so moving it silently would redraw the family.
+
+    `synthesise-interfaces` is in the slice and is **not** in `FAMILY`: it is code,
+    it has no skill, and it merges nothing -- it derives one OpenAPI document per
+    service from `01-services.json`. Its position is a dependency for the same
+    reason, one step further: it reads the part the pass before it writes.
     """
     assert STAGES[STAGES.index("extract") + 1 : STAGES.index("propose-batches")] == (
         "reconcile-subjects",
@@ -61,6 +112,8 @@ def test_the_family_is_the_eight_stages_between_extract_and_propose_batches():
         "reconcile-entities",
         "reconcile-goals",
         "reconcile-gaps",
+        "reconcile-services",
+        "synthesise-interfaces",
         "reconcile-seal",
     )
 
@@ -128,7 +181,7 @@ def test_the_resolvers_forbid_convention_standing_in_for_evidence(stage):
     assert "even if `notes.md` had never been extracted at all" in inputs
 
 
-# The four passes that own a claim kind and therefore carry an inputs_seen
+# The passes that own a claim kind and therefore carry an inputs_seen
 # accounting. Derived from the schema rather than restated: a part schema that
 # gains the field joins this parametrization without anyone editing a literal.
 OWNING = tuple(
@@ -139,19 +192,22 @@ OWNING = tuple(
 )
 
 
-def test_the_owning_passes_are_the_four_with_a_claim_kind():
+def test_the_owning_passes_are_exactly_the_ones_with_a_claim_kind():
     """A guard on the derivation above, not a restatement of it.
 
-    If a fifth partial gains inputs_seen, this fails and someone has to decide
+    If another partial gains inputs_seen, this fails and someone has to decide
     whether that pass really owns a claim kind -- rb-reconcile-gaps owns none,
     and giving it an accounting would assert a read coverage no output shape can
-    force.
+    force. The list is the same roster refs.PASS_OWN_KINDS carries, reached from
+    the other side: this one reads the schemas, that one names the kinds, and a
+    pass added to either without the other is what this catches.
     """
     assert OWNING == (
         "reconcile-capabilities",
         "reconcile-outcomes",
         "reconcile-entities",
         "reconcile-goals",
+        "reconcile-services",
     ), OWNING
 
 
@@ -432,13 +488,30 @@ def test_gaps_audits_the_earlier_partials_and_may_not_edit_them():
 
 def test_gaps_carries_the_confabulation_refusal_as_the_last_close_reader():
     """It was "you are the last stage that does" when one stage read every claim
-    and wrote everything. Six passes later it is still true of this one, and only
-    of this one: after it, nothing in the pipeline compares the world model
-    against the evidence it came from.
+    and wrote everything. Passes later it is still true of this one, and only of
+    this one: after it, nothing in the pipeline compares the world model against
+    the evidence it came from. `rb-reconcile-services` is dispatched after it and
+    reads the claims too, but it reads them to group tools rather than to check a
+    model against them, which is why the claim survives as stated below.
+
+    Scoped to the owning bullet and asserted as concepts, not as a sentence. This
+    pinned the exact phrase "you are the last pass that reads the claims closely"
+    until `reconcile-services` made that sentence false; the sentence was
+    corrected, and an exact pin would then have gone red on the correction rather
+    than on the defect -- the phrase-pin failure this repository has already had
+    once. Locating the bullet by "confabulation" is what keeps the assertions off
+    the four sibling conditions in the same section.
     """
-    refusals = _flat("reconcile-gaps", "5. Refusal conditions")
-    assert "confabulation under under-specification" in refusals
-    assert "you are the last pass that reads the claims closely" in refusals
+    bullet = _bullet_carrying("reconcile-gaps", "5. Refusal conditions", "confabulation")
+    assert "under-specification" in bullet
+    # The last-ness, and what it is last *with respect to*. An OR over the three
+    # natural formulations rather than one of them, because which noun carries it
+    # is exactly the part a meaning-preserving reword changes.
+    assert any(k in bullet for k in ("last pass", "last stage", "last to read")), bullet
+    assert "claims" in bullet
+    # And why the last-ness matters: nothing after this pass can tell an invention
+    # from a fact. The verb is the rewordable part, so this is an OR too.
+    assert any(k in bullet for k in ("catch", "detect", "notice")), bullet
 
 
 def test_gaps_says_a_gap_cites_the_claims_that_make_the_absence_matter():

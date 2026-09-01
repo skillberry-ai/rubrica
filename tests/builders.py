@@ -521,12 +521,12 @@ def minimal_contradictions_part(**over: Any) -> dict[str, Any]:
 def _minimal_inputs_seen(own_kinds: tuple[str, ...]) -> list[dict[str, Any]]:
     """The accounting row for minimal_claims' single artifact, nothing dropped.
 
-    Required on the four partials whose pass owns a claim kind since issue #6,
+    Required on every partial whose pass owns a claim kind since issue #6,
     where read coverage of 01-claims/ varied 3/23 to 23/23 across byte-identical
     dispatches. The count is *counted* against minimal_claims rather than passed
     in as a literal, so it stays honest if that payload's one claim ever changes
     kind or gains a sibling: today its only claim is of kind `capability`, so
-    capabilities-part reads 1/1/0 and the other three 0/0/0. `note` is absent
+    capabilities-part reads 1/1/0 and every other owning partial 0/0/0. `note` is absent
     because nothing is dropped, which is the half of the schema's if/then that
     keeps a 0/0/0 row cheap enough for the totality rule to be worth having.
 
@@ -601,6 +601,75 @@ def minimal_gaps_part(**over: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": "0.1",
         "gaps": minimal_world_model()["gaps"],
+    }
+    payload.update(over)
+    return payload
+
+
+# The tool-interface kinds. Stated here rather than sliced out of
+# minimal_world_model the way the other partials are, because the world model's
+# `services` key is optional and no seal assembles this part into it yet -- a
+# slice would assert an assembly that does not exist. The direction of reuse
+# instead runs the other way, from the part to the document: minimal_interface
+# derives its title, path, operationId and provenance block from this service,
+# so the carrier convention is *shown* being derived rather than restated in a
+# second literal that could disagree with the first.
+def minimal_services_part(**over: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "services": [
+            {
+                "id": "svc-aap2",
+                "statement": "the aap2 backend the one declared tool addresses",
+                # `sole_service_in_run` and not a shared-anything reason: one
+                # tool has nothing to share, which is why the enum carries it.
+                "grouping_evidence": ["sole_service_in_run"],
+                "tools": [
+                    {
+                        "name": "query_aap2",
+                        # The only claim minimal_claims declares. It is of kind
+                        # `capability`, not `tool`, which is why the accounting
+                        # row below reads 0/0/0 -- layer 1 asks that the ids
+                        # resolve to the id pattern, never that the claim they
+                        # name is of any particular kind.
+                        "claims": ["clm-001"],
+                        "schema_claim": "clm-001",
+                    }
+                ],
+                # Absence of evidence, never a `contained` verdict: nothing in
+                # minimal_claims says this tool reaches outside the process, and
+                # nothing says it does not.
+                "signals": [{"kind": "no_outward_evidence_found", "locator": "aap2-api"}],
+            }
+        ],
+        "inputs_seen": _minimal_inputs_seen(("tool",)),
+    }
+    payload.update(over)
+    return payload
+
+
+def minimal_interface(**over: Any) -> dict[str, Any]:
+    service = minimal_services_part()["services"][0]
+    tool = service["tools"][0]
+    payload: dict[str, Any] = {
+        "openapi": "3.1.0",
+        "info": {"title": service["id"], "version": "0.1.0"},
+        "paths": {
+            f"/{tool['name']}": {
+                "post": {
+                    "operationId": tool["name"],
+                    # No `responses`. The harness's inline_schema_evidence exists
+                    # for tool-style specs that declare no components.schemas and
+                    # feeds request bodies as entity evidence, so a request-only
+                    # document is its intended input rather than a degraded one.
+                    "requestBody": {
+                        "required": True,
+                        "content": {"application/json": {"schema": {"type": "object"}}},
+                    },
+                }
+            }
+        },
+        "x-rubrica": {"service_id": service["id"], "tools": [tool]},
     }
     payload.update(over)
     return payload

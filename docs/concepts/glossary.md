@@ -39,9 +39,9 @@ way, with a reason for why not.
 
 One atomic, evidence-backed statement about the target system, extracted by
 `rb-extract` from exactly one input artifact. Its schema requires a `kind`
-(`capability`, `entity`, `invariant`, `actor`, `goal`, or `outcome_class`), a
-`statement`, at least one `evidence` entry carrying an `artifact_id` and a
-`locator`, a `confidence`, and a `derivation`
+(`capability`, `entity`, `invariant`, `actor`, `goal`, `outcome_class`, or
+`tool`), a `statement`, at least one `evidence` entry carrying an `artifact_id`
+and a `locator`, a `confidence`, and a `derivation`
 (`src/rubrica/schema/claims-0.1.json`). Every claim traces back to the one
 input it came from; nothing later fabricates a claim without a locator.
 
@@ -276,15 +276,19 @@ fabricating agent.
 
 ## partial
 
-One `reconcile-*` pass's slice of the world model, written into the `01-` band
+One `reconcile-*` pass's own output, written into the `01-` band
 as its own file: `01-subjects.json`, `01-contradictions/<subject_id>.json`,
 `01-capabilities.json`, `01-outcomes.json`, `01-entities.json`,
-`01-goals.json`, `01-gaps.json`. Each has its own schema and its own layer-1
-gate, and a later pass reads an earlier pass's partial as a *file* rather than
-as a memory of having written it — which is what lets `rb-reconcile-outcomes`
-quantify over the capability list instead of recalling it. No partial reads
-`01-world-model.json`; the **seal** is what joins them into one — all of them
-except `01-subjects.json`, which the world model has no field for.
+`01-goals.json`, `01-gaps.json`, `01-services.json`. Each has its own schema and
+its own layer-1 gate, and a later pass reads an earlier pass's partial as a
+*file* rather than as a memory of having written it — which is what lets
+`rb-reconcile-outcomes` quantify over the capability list instead of recalling
+it. No partial reads `01-world-model.json`; the **seal** is what joins them into
+one — all of them except `01-subjects.json`, because the world model has no field
+for it. `01-services.json` joins on a different footing: it is the seal's one
+*optional* input, folded into the world model's `services` field when that file
+exists and leaving the key absent when it does not, so it is the one partial whose
+absence the seal does not report.
 
 ## projection
 
@@ -340,13 +344,15 @@ killed mid-record by an idle reset however large the assembled record gets.
 This pipeline has two. `triage-seal` reads `00-objective.json`,
 `00-slices.json`, every `00-dispositions/<slice_id>.json`, `00-audit.json` and
 `00-adoptions.json`, and writes `00-triage.json` (`src/rubrica/seal.py`).
-`reconcile-seal` reads the manifest, the five singleton partials and every
-`01-contradictions/*.json` — and **not** `01-subjects.json`: the world model has
-no subjects field, so the cover is an input to the contradiction fan-out, to
-`reconcile-gaps`, and to `check-refs`, not to the seal — folds each capability's
-outcome classes into that capability, counts the `denominator` once, and writes
-`01-world-model.json` (`src/rubrica/reconcile.py`, run as
-`rubrica reconcile-seal`).
+`reconcile-seal` reads the manifest, the five singleton partials it assembles,
+every `01-contradictions/*.json`, and `01-services.json` when that file exists —
+and **not** `01-subjects.json`: the world model has no subjects field, so the cover
+is an input to the contradiction fan-out, to `reconcile-gaps`, and to `check-refs`,
+not to the seal. `01-services.json` is its one optional input, folded in verbatim
+when present and leaving the `services` key absent when not, so an absent one is
+the only missing input the seal does not report — folds each capability's outcome
+classes into that capability, counts the `denominator` once, and writes
+`01-world-model.json` (`src/rubrica/reconcile.py`, run as `rubrica reconcile-seal`).
 
 **A seal assembles; it does not check.** Cross-artifact checking is layer 2 and
 lives in `refs.py`, which runs over the sealed record afterwards on any run,

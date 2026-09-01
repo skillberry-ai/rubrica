@@ -231,7 +231,7 @@ def _stage_evidence(run: RunPaths) -> dict[str, tuple[Path, ...]]:
     test_stage_spine_covers_every_declared_stage_in_order asserts against STAGES
     rather than against this mapping.
 
-    Every path here comes from a `RunPaths` property, the six reconcile partials
+    Every path here comes from a `RunPaths` property, every reconcile partial
     included, rather than being joined from a filename in this table: `paths.py`
     is the one home for every artifact path in this repo, so a rename there
     cannot leave a stale spelling behind here.
@@ -252,6 +252,8 @@ def _stage_evidence(run: RunPaths) -> dict[str, tuple[Path, ...]]:
         "reconcile-entities": (run.entities_part,),
         "reconcile-goals": (run.goals_part,),
         "reconcile-gaps": (run.gaps_part,),
+        "reconcile-services": (run.services_part,),
+        "synthesise-interfaces": (run.interfaces_dir,),
         "reconcile-seal": (run.world_model,),
         "propose-batches": (run.batches_dir,),
         "propose": (run.scenario_parts_dir,),
@@ -644,18 +646,26 @@ def deficiencies(run: RunPaths) -> list[Deficiency]:
 
 
 # Every collection the sealed world model can carry, in the order a reader wants
-# them: what the target can do, what it does it to, who asks, why, then the two
-# collections that are about the *evidence* rather than about the target. Keyed
-# from this tuple rather than from the document's own keys so a count of 0 still
-# renders -- "0 gaps" is a fact about the run, while a missing row is
-# indistinguishable from a renderer that forgot the kind. Measured on the toy
-# world model, which carries `"gaps": []`: keying off the payload would have
-# dropped the gaps row from the one fixture the page is developed against.
+# them: what the target can do, what it does it to, who asks, why, what a
+# simulator would stand in for, then the two collections that are about the
+# *evidence* rather than about the target. Keyed from this tuple rather than from
+# the document's own keys so a count of 0 still renders -- "0 gaps" is a fact about
+# the run, while a missing row is indistinguishable from a renderer that forgot the
+# kind. Measured on the toy world model, which carries `"gaps": []`: keying off the
+# payload would have dropped the gaps row from the one fixture the page is
+# developed against.
+#
+# `services` is the one key a *conforming* sealed model may omit entirely -- the seal
+# writes it only when 01-services.json exists -- so it is the one row where the
+# document's silence is the ordinary case rather than a hand edit. The row is still
+# keyed from here and still rendered, but its value is None rather than 0 in that
+# state; see `world_model` below for why 0 would have been a false report.
 _WORLD_MODEL_COLLECTIONS = (
     "capabilities",
     "entities",
     "actors",
     "goals",
+    "services",
     "gaps",
     "contradictions",
 )
@@ -663,7 +673,9 @@ _WORLD_MODEL_COLLECTIONS = (
 
 @dataclass(frozen=True)
 class WorldModel:
-    counts: dict[str, int]
+    # `int | None`, and the None is load-bearing: a collection key the document does
+    # not carry at all counts as None, never as 0. See `world_model` below.
+    counts: dict[str, int | None]
     # Rendered as whatever they hold rather than unpacked into fields, for
     # `Header.max_rounds`' reason: both are small closed objects (`target` is
     # name/interface/notes, `denominator` is version/capability_cells/goals) that
@@ -687,6 +699,23 @@ def world_model(run: RunPaths) -> WorldModel | Marker:
     are rendered: the parts are what `reconcile-contradict` recorded, the sealed
     array is what survived the seal, and a divergence between them is a real
     finding about the run rather than a rendering to reconcile.
+
+    **A count of None means the document carries no such key, and it is not the same
+    fact as 0.** `services` is where this bites, because it is the one key a
+    conforming sealed model omits: `reconcile-seal` writes it only when
+    01-services.json exists, and it deliberately omits it rather than writing `[]`,
+    because an empty array asserts that a pass looked and found no tools while
+    absence says no pass ran. Collapsing both to 0 here would erase on the page the
+    exact distinction the artifact shape exists to preserve -- so this is `Absent`
+    versus `Malformed` one level down, and the same ruling as the `manifest.stages`
+    record that renders blank fields rather than dropping its row.
+
+    The rule is applied to every collection rather than special-cased for
+    `services`, because it is the honest reading for all of them: for the other six
+    a missing key means a hand-edited or truncated model, which is again a different
+    fact about the run from an empty array. A key that is present but not a list
+    still counts 0 -- `_dicts` owns that shape, and "carries something unreadable as
+    a collection" is the malformed case layer 1 rejects, not an absent key.
     """
     payload = _mapping(_quietly(run.world_model))
     if not payload:
@@ -696,7 +725,14 @@ def world_model(run: RunPaths) -> WorldModel | Marker:
     # `_dicts` rather than `len(...)` on the raw value: a hand-edited
     # `"actors": "nope"` is not a list at all, and iterating it would count four
     # characters as four actors.
-    counts = {name: len(_dicts(payload.get(name))) for name in _WORLD_MODEL_COLLECTIONS}
+    #
+    # `name in payload` before the length, so an absent key is None and an empty
+    # array is 0: the docstring above is the whole argument, and a `.get(name, [])`
+    # here is exactly the collapse it forbids.
+    counts: dict[str, int | None] = {
+        name: (len(_dicts(payload[name])) if name in payload else None)
+        for name in _WORLD_MODEL_COLLECTIONS
+    }
     return WorldModel(
         counts=counts,
         target=_mapping(payload.get("target")),
@@ -1310,7 +1346,7 @@ def scenarios(run: RunPaths) -> list[ScenarioRow] | Marker:
 #
 # Measured, not assumed: `set(STAGES) - {every skill's declared stage}` is
 # exactly {intake, propose-batches, propose-seal, reconcile-seal, score-seal,
-# smoke, survey, triage-seal, triage-slices}.
+# smoke, survey, synthesise-interfaces, triage-seal, triage-slices}.
 # Note `emit` is NOT in it -- rb-emit is a thin wrapper over `rubrica emit`, so
 # emit does get a manifest.stages entry and must stay accusable. Hardcoding the
 # set here got that wrong once;
@@ -1331,6 +1367,7 @@ _CODE_STAGES = frozenset(
         "score-seal",
         "smoke",
         "survey",
+        "synthesise-interfaces",
         "triage-seal",
         "triage-slices",
     }

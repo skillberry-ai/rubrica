@@ -38,6 +38,8 @@ def test_stages_are_in_pipeline_order():
         "reconcile-entities",
         "reconcile-goals",
         "reconcile-gaps",
+        "reconcile-services",
+        "synthesise-interfaces",
         "reconcile-seal",
         "propose-batches",
         "propose",
@@ -281,6 +283,27 @@ def test_the_new_triage_paths_sit_in_the_double_zero_band(tmp_path):
     assert run.dispositions_dir.name == "00-dispositions"
     assert run.audit.name == "00-audit.json"
     assert run.adoptions.name == "00-adoptions.json"
+
+
+def test_the_two_new_artifacts_sit_in_the_01_band(tmp_path):
+    """In the 01 band with the rest of world-model construction, because the
+    numbering stays intake's: everything between 01-claims/ and
+    01-world-model.json is one logical step engineered as substeps.
+    """
+    run = RunPaths(tmp_path / "run-1")
+    assert run.services_part == run.root / "01-services.json"
+    assert run.interfaces_dir == run.root / "01-interfaces"
+    assert run.interface("svc-tickets") == run.root / "01-interfaces" / "svc-tickets.json"
+
+
+def test_an_unsafe_service_id_never_becomes_a_path(tmp_path):
+    """Ids in artifacts are produced by language models and must never be joined
+    into a path unchecked. `interface()` raises; the *stage* asks
+    `is_safe_segment` first so it can report a finding instead of exiting 2.
+    """
+    run = RunPaths(tmp_path / "run-1")
+    with pytest.raises(UnsafeSegment):
+        run.interface("../../etc/passwd")
 
 
 def test_a_slice_id_that_would_escape_the_run_is_refused(tmp_path):

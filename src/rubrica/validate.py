@@ -69,13 +69,22 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     "entities-part": "entities-part-0.1.json",
     "goals-part": "goals-part-0.1.json",
     "gaps-part": "gaps-part-0.1.json",
+    # The tool-interface kinds, each with a producer now: `services-part` is
+    # reconcile-services', the barrier pass that groups the declared tools, and
+    # `interface` is synthesise-interfaces', the code stage that derives one
+    # OpenAPI document per service from it. Both therefore carry a STAGE_ARTIFACTS
+    # row and an entry in artifacts.md -- the second landed one commit after its
+    # schema did, which is why the schema was reviewable before anything depended
+    # on it.
+    "services-part": "services-part-0.1.json",
+    "interface": "interface-0.1.json",
     # inputs-seen-0.1.json is deliberately absent from this map, and is the only
     # schema in the package that is not an artifact kind. It holds one $defs/row
-    # that the four reconcile partials $ref, and no stage produces a document of
-    # that shape on its own -- so a kind here would name an artifact
-    # `validate --stage X` must never look for. _schema_registry globs the
-    # directory and registers by filename, so the cross-file $ref resolves
-    # without an entry.
+    # that every reconcile partial whose pass owns a claim kind $refs, and no
+    # stage produces a document of that shape on its own -- so a kind here would
+    # name an artifact `validate --stage X` must never look for.
+    # _schema_registry globs the directory and registers by filename, so the
+    # cross-file $ref resolves without an entry.
     #
     # The propose/score loop's part kinds. Each is one dispatch's slice of a
     # document that used to be emitted whole by a model, and none of them restates
@@ -131,6 +140,8 @@ STAGE_ARTIFACTS: dict[str, tuple[str, ...]] = {
     "reconcile-entities": ("entities-part",),
     "reconcile-goals": ("goals-part",),
     "reconcile-gaps": ("gaps-part",),
+    "reconcile-services": ("services-part",),
+    "synthesise-interfaces": ("interface",),
     "reconcile-seal": ("world-model",),
     "propose-batches": ("batches",),
     # propose now writes only its own batch's part. The stage that produces the
@@ -271,7 +282,24 @@ def _validator_for(kind: str, schema_root: Path) -> Draft202012Validator:
 
 
 def _pointer(parts) -> str:
-    return "".join(f"/{part}" for part in parts)
+    """RFC 6901 pointer naming where in the artifact the error is.
+
+    Tokens are escaped, `~` before `/`, or the second replacement would
+    re-escape what the first produced. Same rule and same order as
+    survey.py's `_escape_pointer_token`, which carries the measurement that
+    established it -- one convention with two call sites rather than two
+    coincidences, and if it ever needs changing both must change together.
+
+    Unescaped, this was already wrong and became commonly wrong with the
+    `interface` kind: every path key in an interface document is
+    `/<tool_name>`, so a finding there rendered `/paths//query_tickets`, which
+    is also exactly how a property named `""` followed by `"query_tickets"`
+    renders. `/paths/~1query_tickets` says which one it is.
+
+    `str(part)` because `error.absolute_path` carries array indices as ints
+    alongside property names, and only the names need escaping.
+    """
+    return "".join(f"/{str(part).replace('~', '~0').replace('/', '~1')}" for part in parts)
 
 
 def validate_artifact(path: Path, kind: str) -> list[Finding]:
@@ -387,6 +415,29 @@ def _artifact_paths(run: RunPaths, kind: str) -> list[Path]:
         return [run.goals_part]
     if kind == "gaps-part":
         return [run.gaps_part]
+    if kind == "services-part":
+        # The always-return form the other partials use, not the iterated one: a
+        # pass that wrote nothing must fail its own gate by name rather than
+        # passing trivially on an empty list.
+        return [run.services_part]
+    if kind == "interface":
+        # Iterated, not always-return: this function has no service id, so the
+        # always-return form could only invent a path.
+        #
+        # An empty list still reaches validate_stage's "produced no interface
+        # artifact" arm against the run root, and that is NOT always the right
+        # finding -- the same caveat batches carries just below, for the same
+        # reason. A target whose corpus declares no tool is a real target:
+        # rb-reconcile-services is instructed to write `services: []` for one, and
+        # synthesis then correctly writes nothing and exits 0 having printed no
+        # path. Asking this gate anyway accuses a run with no defect, so
+        # rb-orchestrate gates the stage only when it printed at least one path.
+        # That is pinned, and the name is on one line so it can be grepped:
+        # test_the_interface_gate_over_a_run_with_no_services_names_the_run_root
+        # (tests/unit/test_validate.py, mirroring the batches one below).
+        # `validate --stage X` is right to answer what it was asked; the decision
+        # is whether to ask.
+        return list_json(run.interfaces_dir)
     if kind == "batches":
         # Iterated, and so empty when no round has a plan -- NOT the
         # always-return form catalogue/slices/subjects use. propose-batches

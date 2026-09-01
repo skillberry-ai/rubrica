@@ -371,7 +371,7 @@ argument above rather than the throughput one.
 
 ### `rb-reconcile-gaps`' read coverage cannot be forced by any output shape
 
-The four reconcile passes that own a claim kind each carry an `inputs_seen`
+The reconcile passes that own a claim kind each carry an `inputs_seen`
 accounting whose `own_kind_total` is recomputed from `01-claims/`, so a wrong
 count is a finding against the pass that wrote it (the entry below records how
 far short of forcing a read that falls). `rb-reconcile-gaps` has no such
@@ -418,7 +418,7 @@ claims file it never opened. It is not, and three shipped routes give a right
 number without a read.
 
 - **Zero is the honest answer for most pairs.** Each pass owns one or two of the
-  six kinds `claims-0.1.json` defines, so on a real corpus most (pass, artifact)
+  seven kinds `claims-0.1.json` defines, so on a real corpus most (pass, artifact)
   pairs hold nothing of the pass's kinds and `0/0/0` is the correct row.
   `tests/unit/test_toy_split.py::test_the_derived_rows_match_a_hand_written_table`
   is the table to read: every pair whose artifact holds none of that pass's kinds
@@ -435,9 +435,11 @@ number without a read.
   and 4 for `notes-md.json`, against the goals pass's declared `own_kind_total` of
   5. No claim was read.
 
-The four skills' §5 refusal conditions already concede this in the words "a row
+Every owning pass's §5 refusal conditions already concede this in the words "a row
 you filled in without opening the file is indistinguishable, in the artifact, from
-one you filled in after reading it", so the design ships the concession and the
+one you filled in after reading it" — stated without a count on purpose, because it
+said "the four skills" until `rb-reconcile-services` made it five and the next pass
+to own a claim kind would make it six. So the design ships the concession and the
 overclaim together; `docs/reference/artifacts.md` and
 `refs.check_input_dispositions`' docstring have been corrected to say
 *recomputable* rather than unforgeable.
@@ -768,7 +770,7 @@ citing passes read were cited 80 of 212 — about 38% — while claims in files 
 never opened were cited **0 of 167**. Not lower. Zero.
 
 Parked, and the reason is narrower than its parent's now that half the instrument
-exists. What shipped is visibility, not variance: the four passes that own a
+exists. What shipped is visibility, not variance: the passes that own a
 claim kind carry an `inputs_seen` accounting, `refs.check_input_dispositions`
 recomputes every number in it against `01-claims/` and `manifest.inputs`, and
 `rubrica gate-brief --gate 1` renders read coverage per pass. That makes one
@@ -2151,6 +2153,33 @@ parser over a file like parsec's 101KB `static/app.js`, which carries on the
 order of 144 top-level names, needs a cap and a visible truncation flag in the
 `keys_truncated` / `skeleton_nodes_truncated` / `role_keys_truncated` family.
 
+### Nothing reads a human's decision about which services to simulate
+
+`rb-reconcile-services` groups the tools the target declares into the services one
+simulator each would stand in for, and gate 1 is where a human rules on that
+grouping — the pass is instructed to split when unsure precisely because two
+services that should be one are two simulators a human can merge there. **No stage
+reads the merge.** `rubrica decide` appends it to `decisions.md`, and no coverage
+denominator, batch partition or instantiation narrows from it: a person who rules
+at gate 1 that two of these services are one has changed the record and nothing
+else. The one correction at this gate that does propagate is editing
+`01-services.json` and re-running `rubrica synthesise-interfaces`, which re-derives
+that service's document — and that is a correction to the grouping, not a reading
+of a decision about it.
+
+Parked with the ruling the design states: consuming a selection, and the
+`denominator` narrowing that would accompany it, belong with the step that reads a
+selection. `denominator` is `{version, capability_cells, goals}` under
+`additionalProperties: false`, so a new exclusion reason is a deliberate change to
+arithmetic four consumers narrow together — not a field one command can start
+writing. Building the read ahead of that step would put something in the artifact
+contract that nothing consumes, which is the shape a `service.derivation` field was
+cut for in the same design. What keeps this from costing a fix round is that the
+boundary is stated where the decision is made: `gate-brief --gate 1`'s services
+section ends by saying that no stage reads a selection and that coverage does not
+narrow from one, so a reader is told the limit before they act on the assumption
+that it does.
+
 ---
 
 ## Before you file a bug against the check layers or the CLI
@@ -2550,6 +2579,67 @@ exit-1 finding that renders the offending element, so a reader can see what to
 edit. Unifying all four keys behind one helper would remove the class and
 refactor a function three reviews validated, for a cosmetic gain in a message a
 human reads once.
+
+### A tool schema inside a JSON-encoded string is not payload-checkable, and every extraction of one abstains
+
+`refs._payload_findings` re-reads a `tool` claim's `payload` against the input at
+its `evidence[0].locator` and compares parsed values, which is what makes a
+prompt's byte-for-byte transcription falsifiable. It cannot do that when the
+declaration lives inside a JSON-*encoded string*: `resolve_pointer` walks to the
+string and cannot descend into it, so no pointer over the document addresses a
+schema object at all.
+
+Measured on `run-20260830-101018`, a real MLflow trace corpus of five declared
+tools. **All twelve `rb-extract` dispatches over trace inputs hit this**, every
+one transcribed its payloads verbatim and said in each claim's statement what it
+had done — and between them they wrote six locator spellings driving this check
+down three paths. Three chose forms that are not bare pointers so it abstains,
+two of them stating that they chose it *for* that reason. Seven wrote pointers
+descending into the string, which resolve to nothing and report that the payload
+"cannot be checked". One addressed the enclosing attribute — an honest pointer
+over a verbatim payload — which resolved to a string and was reported as a
+payload that "has drifted", accusing a correct claims file of the defect this
+check exists to find.
+
+Only that last case is fixed here: a pointer resolving to a JSON string now
+abstains, because `payload` is `{"type": "object"}` in `claims-0.1.json`, so the
+comparison was unequal by construction and the finding a certain false positive.
+`tests/unit/test_refs_services.py::test_a_pointer_landing_on_a_json_string_is_not_compared`
+pins it, and removing the guard reproduces the fabricated finding.
+
+**What stays open, and the ruling.** Payload fidelity does not apply to
+trace-sourced `tool` claims at all — it abstains rather than fabricating, which
+is the honest failure, but it abstains. The fix is to teach the resolver to decode
+a string-valued target and keep descending; MLflow traces are a real input kind
+and every dispatch independently found the same structure, so that is a capability
+rather than a workaround. It is not done here because it widens a resolver five
+checkers share, and because the exposure is bounded: `rb-reconcile-services`'
+Method step 3 instructs picking the *declared* contract, and a corpus carrying a
+tool-schema document supplies pointer-checkable payloads for every tool — in this
+run `tools-list-json` did, at `#/tools/N/inputSchema`, with all five resolving
+clean. A corpus of traces *alone* would have no checked payloads and nothing
+would say so, which is the shape to watch for.
+
+**The spread is wider than locator spellings, and that is the part to fix in the
+prompt.** Thirteen dispatches over trace inputs produced four *qualitatively*
+different outcomes, and the count of `tool` claims per input ranged from 0 to 8:
+claims whose locator abstains, claims whose locator resolves to nothing, claims
+with the enclosing-attribute locator above (chosen independently by two of the
+thirteen), and one dispatch that filed **no `tool` claims at all** — reasoning that
+a payload which cannot be checked against its pointer should not be a `tool` claim,
+and recording the declarations as `capability` claims with the parameter names and
+types in their statements instead. That reading is defensible on the skill's own
+terms: it is the same move `rb-extract` makes for a prose input that names tools
+without declaring schemas. So whether this claim kind exists at all for a
+trace-sourced tool currently varies between dispatches. Across the whole run, 19
+inputs produced 712 claims of which 94 were `tool` claims, for five real tools.
+
+Two smaller things the same run surfaced, neither fixed: `rb-extract`'s Method
+section gives no convention for addressing a value inside an encoded string, which
+is where that spread comes from; and its example pointer
+`#/tools/0/input_schema` is the toy fixture's snake_case, where real MCP declares
+`inputSchema` — the dispatch that read the real document used the document's key
+rather than copying the example, but the example is a latent trap.
 
 ---
 

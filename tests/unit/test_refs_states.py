@@ -80,7 +80,13 @@ def _extract(run: RunPaths) -> None:
 
 
 def _reconcile_parts(run: RunPaths) -> None:
-    """Every partial the seven prompt passes write, and no world model yet.
+    """Every partial the seal requires, and no world model yet.
+
+    Seven files, which is not one per prompt pass in the family: `01-services.json`
+    is deliberately absent, because the seal folds it only when it exists -- it is
+    the one optional input -- and a state that always wrote it could not show that.
+    `01-interfaces/` is absent for the same reason one step on -- it is derived from
+    the part this state omits.
 
     A state the pipeline really passes through, and the reason it is its own
     entry: between the last pass and the seal, check_all sees seven partials with

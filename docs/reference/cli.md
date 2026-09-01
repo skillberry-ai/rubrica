@@ -130,9 +130,10 @@ Required: `--run RUN`, `--stage`, one of `survey`, `triage-slices`,
 `triage-objective`, `triage-rule`, `triage-audit`, `triage-seal`, `intake`,
 `extract`, `reconcile-subjects`, `reconcile-contradict`,
 `reconcile-capabilities`, `reconcile-outcomes`, `reconcile-entities`,
-`reconcile-goals`, `reconcile-gaps`, `reconcile-seal`, `propose-batches`,
-`propose`, `propose-seal`, `score`, `score-seal`, `instantiate`, `challenge`,
-`emit`, `smoke` — `paths.STAGES`, in order.
+`reconcile-goals`, `reconcile-gaps`, `reconcile-services`,
+`synthesise-interfaces`, `reconcile-seal`,
+`propose-batches`, `propose`, `propose-seal`, `score`, `score-seal`,
+`instantiate`, `challenge`, `emit`, `smoke` — `paths.STAGES`, in order.
 
 Exits 0 clean, or 1 with one finding per line on stdout.
 
@@ -167,6 +168,89 @@ Exits 0 clean, or 1 with findings.
 rubrica check-skills
 ```
 
+## Deriving the tool interfaces
+
+### `rubrica synthesise-interfaces`
+
+Derives one OpenAPI document per service from `01-services.json`, writing
+`01-interfaces/<service_id>.json` and printing each path it wrote, one per line.
+
+Required: `--run RUN`, and nothing else. There is no `--service`: the documents are
+a pure function of the services part and the claims it cites, and synthesis owns
+`01-interfaces/` whole — a flag that re-derived one document would let a sibling go
+stale against the grouping it was derived from.
+
+Reads `01-services.json` and every claims file, the latter solely to resolve the
+payload each tool's `schema_claim` names. It does not read `00-inputs/`: the stage
+that reads inputs is `extract`, so a tool's input schema reaches synthesis through
+a claim or it does not reach it at all.
+
+Each document is written backwards from the contract the agent under test already
+has. `operationId` is the tool's own name, and the request body is that tool's
+input schema, copied from the claim payload rather than derived from it. Method
+`post` and path `/<tool name>` are fixed carriers: only `operationId` is
+contractually significant, so the other two are chosen to be stable rather than
+pretty. There is no `responses` — inferring one needs observed tool results, which
+is a later step, and a request-only document is what the harness's
+`inline_schema_evidence` path is for. Provenance travels inside the document under
+`x-rubrica`, because the document is what a human reads at gate 1 and what a later
+step hands the harness.
+
+Code rather than a prompt, for the reason `emit` is code: two runs with identical
+groupings must produce byte-identical documents, or a difference in an emitted lab
+stops being attributable to a stage. Every judgment it could have made was already
+made by `rb-reconcile-services` — including which claim wins when two inputs
+declare one tool with different input schemas, which is what `schema_claim` names.
+
+**It is all-or-nothing, and it owns its directory.** Every service is checked
+before any file is written, and documents left over from a superseded grouping are
+removed: a partial directory, or a stale document, makes a later check report a
+missing or extra document against a service whose only problem is a malformed
+sibling.
+
+Exits 0 clean, 1 with one finding per line on stdout, or 2 if the run directory
+cannot be read or `01-interfaces/` cannot be written. The split is deliberate. A
+missing or non-object `01-services.json`, a `services` key that is not an array, a
+service id that is not usable as a filename, a tool name the harness's
+sanitisation would rewrite, and a `schema_claim` no claim in `01-claims/` has an id
+for are all `1`s against that part — each is repaired by re-dispatching
+`reconcile-services`, which is what a `1` promises the orchestrator.
+
+**A `schema_claim` whose claim exists and carries no usable `payload` is the one
+finding here that names a claims file instead**, at that claim's `payload`. The
+payload is `rb-extract`'s output, and `rb-reconcile-services` is instructed to cite
+such a claim as the `schema_claim` anyway and say so in the service's `statement` —
+so the part is correct, re-dispatching that pass returns the same bytes, and a `1`
+against the part would be a `1` naming the wrong artifact. Nothing downstream needs
+the document to reach the seal, so the run carries this one into gate 1, where a
+human rules on a service that is not simulatable as it stands.
+
+An unwritable `01-interfaces/` is a `2`: no
+re-dispatch of any prompt fixes a directory permission, and a `1` there would spend
+the run's one repair attempt on a stage whose output was never the problem.
+
+**Exiting 0 having printed nothing is a real outcome, not a silent failure.** A
+target whose corpus declares no tool at all is a real target, and
+`rb-reconcile-services` is instructed to write `services: []` for one rather than
+invent a service — so there is nothing to derive, and this command writes nothing and
+says nothing.
+
+**Do not run `rubrica validate --stage synthesise-interfaces` on that run.** Its
+"produced no interface artifact" finding is a `1` against the run root of a run with
+no defect: `01-interfaces/` holds one document per service, so no service means no
+document, and the gate cannot tell that from a stage that failed. This is the same
+trap `validate --stage propose-batches` sets on a terminal round, and the same rule —
+gate the stage only when it printed at least one path. `rubrica check-refs` is safe
+either way: it derives what it expects from the same `01-services.json`, so a run
+that declared no service expects no document and the empty directory this command
+leaves behind is clean. It is *not* indifferent to the directory's contents — a
+document no service asked for is one of its findings, which is why this command
+removes what a superseded grouping left behind.
+
+```bash
+rubrica synthesise-interfaces --run runs/run-20260806-123005
+```
+
 ## Assembling the world model
 
 ### `rubrica reconcile-seal`
@@ -184,11 +268,23 @@ orchestrator decision recorded in `decisions.md` instead of a number the command
 quietly incremented.
 
 Reads `manifest.json`, the five singleton partials — `01-capabilities.json`,
-`01-outcomes.json`, `01-entities.json`, `01-goals.json`, `01-gaps.json` — and
-every `01-contradictions/*.json`. It does **not** read `01-subjects.json`: the
-world model has no subjects field, so the cover is an input to the contradiction
-passes and to `check-refs`, not to the seal. Writes `01-world-model.json` and
-prints its path.
+`01-outcomes.json`, `01-entities.json`, `01-goals.json`, `01-gaps.json` — every
+`01-contradictions/*.json`, and `01-services.json` **when that file exists**. It
+does **not** read `01-subjects.json`: the world model has no subjects field, so the
+cover is an input to the contradiction passes and to `check-refs`, not to the seal.
+Writes `01-world-model.json` and prints its path.
+
+`01-services.json` is the one optional input, and it is read outside the required
+five: every one of those is a partial the model cannot be assembled without, so an
+absent one is a finding, and this one is not. When it exists the seal folds its
+`services` array into the world model verbatim — the grouping is
+`rb-reconcile-services`' judgment and it is what a human ratifies at gate 1, so a
+seal that rebuilt the records would be handing them the seal's judgment instead.
+When it does not exist the seal **omits the key entirely** rather than writing
+`[]`: an empty array asserts that a pass looked and found no tools, which is a
+different claim about the target from "no pass ran". Consumers read the field as
+`.get("services", [])`. Optional does not mean unchecked — a `null` or list-shaped
+`01-services.json` is a finding naming that file, the same as any other partial.
 
 Code rather than a prompt, for the reason `emit` is code: two runs with identical
 partials must produce a byte-identical world model, or variance can no longer be
@@ -597,8 +693,8 @@ a defect finding.
 Composes the existing reports into the reading surface at one of the four
 human gates: the objective verdict and grouped declines at gate 0; the reconcile
 sweep, the capabilities the coverage denominator excludes, claim utilisation per
-input, read coverage per reconcile pass and the implied suite size at gate 1; the
-coverage matrix at gate 2; the verdict tally at gate 3.
+input, read coverage per reconcile pass, the implied suite size and one block per
+service at gate 1; the coverage matrix at gate 2; the verdict tally at gate 3.
 
 Gate 0 renders more than the others because it is the one gate held before any
 downstream stage has read the corpus: the objective verdict, then the
@@ -621,7 +717,8 @@ as one rather than rendered as silence. The sweep reports counts, not the
 contradictions themselves, so a non-zero `unresolved` is the cue to open
 `01-contradictions/`. The world model's gaps and triage's open deficiencies
 follow, each listed by its id and its prose statement, since pairing them is a
-human's call and no mechanical check exists for it. The brief then closes by
+human's call and no mechanical check exists for it. One block per **service**
+closes the content, described in its own paragraph below. The brief then closes by
 naming `target-brief` below, with this run already substituted into the command:
 gate 1 is where the world model is ratified, so it is the only gate whose brief
 points at the page that asks the target's owners whether the description is true.
@@ -629,7 +726,7 @@ points at the page that asks the target's owners whether the description is true
 Two coverage figures follow the sweep, and they measure different things.
 **Claim utilisation is per input** — how much of one artifact's claims the world
 model cites, a fact about the artifact rather than about any pass's diligence.
-**Read coverage is per pass**: each of the four reconcile passes that owns a
+**Read coverage is per pass**: each reconcile pass that owns a
 claim kind states, in its partial's `inputs_seen`, how many claims of its own
 kinds each input holds and how many of them it cited, and this block prints that
 pass's own-kind rate on one line. Reading only the first of the two is what hid
@@ -686,6 +783,34 @@ converged round prints and exits 0, and gate 1 is the last place a human can tel
 those two apart. The banner states that condition rather than asserting the halt,
 because a goal hole is closable with no binding anywhere — an all-unbound world
 model with goals keeps proposing, against no capability surface at all.
+
+Gate 1 closes with one block per **service a simulator would stand in for**: the
+grouping and the `grouping_evidence` cited for it, the service's tools, any
+`schema_disagreement` the pass had to resolve, every signal beside its locator, and
+the path to the synthesised OpenAPI document — or a stated absence where none was
+written, because `synthesise-interfaces` creates `01-interfaces/` even for an empty
+service list, so the directory existing is not evidence that a document does. Read
+from `01-services.json` rather than from the assembled world model: the seal folds
+the array in verbatim, so the two agree until a human edits one, and after that
+edit the part is the file that matters — `synthesise-interfaces` re-derives the
+documents from it and not from the seal. Nothing in the section is recomputed,
+because there is no number in it to recompute; it renders a judgment, and the one
+thing it derives from disk is whether each document exists.
+
+Two sentences in that block are load-bearing rather than decorative. **A short
+signal list is not reassurance:** three of the five signal kinds need a source file
+to see and only Python source is parsed into structure, so absence of evidence may
+mean nobody could look — and `no_outward_evidence_found`'s locator names what was
+*read*, which is why it renders as `read:` where every other kind renders as `at:`.
+That caveat sits *above* the signal lines it qualifies rather than under the last
+service, because a reader who finds the one service they came for stops there, and
+the misreading it guards against is the dangerous direction: uncertainty about
+containment must never read as containment. **And nothing in the run reads a
+decision about these services** — no stage reads a selection and coverage does not
+narrow from one, so a human who recorded a selection expecting the run to narrow
+would have been misled by a report that showed them services and stayed silent.
+`rubrica decide` is named as the action that does work: it puts the correction on
+the record for whichever run acts on it.
 
 Required: `--run RUN`, `--gate {0,1,2,3}`.
 
@@ -745,7 +870,12 @@ and one that is there and unreadable — bad JSON, a document of the wrong shape
 a permission, bytes that are not UTF-8 — renders as `Present but unreadable`, with
 the reason. That second case is a defect `validate --stage X` will name; it is
 still exit 0 here, and a stage bolded in the spine above such a section is the two
-tests disagreeing about one artifact on purpose. The output is derived rather than
+tests disagreeing about one artifact on purpose. The world-model counts draw the same
+distinction one level down: a collection the sealed document carries as an empty
+array counts `0`, while one whose key the document does not carry at all renders as
+`not recorded`. `services` is where that matters, since it is the one key a
+conforming sealed model omits — an empty array there says a pass looked and found no
+tools, and an absent key says no pass ran. The output is derived rather than
 an artifact: no schema, outside the numbered contract, and read by no stage.
 
 The page is self-contained — inline CSS and JS, no external asset, no network

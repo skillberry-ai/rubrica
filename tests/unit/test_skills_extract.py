@@ -8,6 +8,9 @@ a set compared against a set imported from the code.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from rubrica.skills import SECTIONS, load, section_body, skills_dir
 from rubrica.validate import STAGE_ARTIFACTS
 
@@ -110,6 +113,104 @@ def test_the_claim_kinds_it_names_are_the_schema_s_enum():
     body = load(SKILL).body
     missing = [kind for kind in enum if kind not in body]
     assert not missing, f"the skill never mentions claim kind(s) {missing}"
+
+
+def test_the_tool_kind_tells_the_model_what_the_payload_carries():
+    """Scoped to the Method section, because the frontmatter description and the
+    contract block satisfy a naive substring check over the whole file -- and
+    `skills.load()` sets `body` to the entire file text, which is what made
+    roughly nineteen assertions in this repo vacuous.
+
+    Co-occurrence within the section, not presence anywhere: a Method section
+    that names `payload` while telling a model to summarise the schema in prose
+    would satisfy either half alone.
+    """
+    method = section_body(load(SKILL), "3. Method")
+    assert "tool" in method
+    assert "payload" in method
+    assert "verbatim" in method
+    # The pointer is half the pair: check 6 re-reads the input *at the locator*,
+    # so a payload with no pointer to compare against is unverifiable.
+    assert "pointer" in method.lower()
+
+    # **Measured, both directions.** Deleting the whole tool paragraph from a
+    # /tmp copy under RUBRICA_SKILLS_DIR leaves two of the four assertions above
+    # still green: `tool` is satisfied by step 2's enumeration and by the
+    # `#/tools/0/...` locator example, and `pointer` by that example's "a JSON
+    # Pointer". Only `payload` and `verbatim` discriminate, so the window below is
+    # what makes the other two mean anything.
+    #
+    # `verbatim` is the anchor: it occurs exactly once in the whole file, inside
+    # this rule. radius=600 either side. Measured distances from the anchor, in
+    # the whitespace-collapsed section: `payload` at 11 before, `pointer` at 333
+    # after, `tool` at 37 before -- so `pointer` at 333 is what binds, at a 1.8x
+    # margin. Every unrelated satisfier is outside the window: the locator
+    # example's `pointer` at 1,768 before and `tool` at 1,756, step 2's `tool` at
+    # 2,394.
+    collapsed = " ".join(method.lower().split())
+    at = collapsed.find("verbatim")
+    assert at != -1, "section 3 no longer tells the model to copy the schema verbatim"
+    window = collapsed[max(0, at - 600) : at + 600]
+    assert "payload" in window
+    assert "pointer" in window
+    assert "tool" in window
+
+
+def test_the_refusal_condition_names_the_enum_as_it_now_stands():
+    """The count moved from six to seven, and a partial sweep leaves the repo
+    asserting two different enum sizes. The size is read off the schema rather
+    than written as a literal, so the next kind added fails this instead of
+    silently passing.
+
+    **Asserted as the count words inside the paragraph that owns the rule, not as
+    the sentence they sit in.** Measured, both directions, against a /tmp copy
+    under `RUBRICA_SKILLS_DIR`: deleting the condition and reverting it to the
+    pre-sweep "closest of the six ... a seventh kind" each turn this red, while
+    rewording it meaning-preservingly ("whichever of the seven comes nearest ...
+    Never invent an eighth kind") keeps it green. A pin on the phrase `closest of
+    the seven` went red on that same reword with the rule perfectly intact, which
+    is the phrase-pin failure this repo's conventions name -- and it discriminated
+    nothing the count words below do not. Locating the paragraph by one key with
+    `len(owning) == 1` had the same defect one level up, so the keys are OR'd:
+    measured, rewording the bullet's lead sentence to "**A statement you cannot
+    file under any listed `kind`.**" keeps this green through the other two keys
+    and turned the single-key form red.
+
+    Scoped to the paragraph rather than to section 5, which is long: a stale
+    "six" anywhere else in it would otherwise satisfy the check and a correct
+    paragraph is what the rule needs.
+    """
+    kinds = json.loads(
+        (Path(__file__).parents[2] / "src/rubrica/schema/claims-0.1.json").read_text(
+            encoding="utf-8"
+        )
+    )["$defs"]["claim"]["properties"]["kind"]["enum"]
+    assert len(kinds) == 7
+    assert "tool" in kinds
+
+    # Three alternative keys OR'd and the result asserted truthy, which is the
+    # idiom test_the_refusal_section_names_a_response_for_an_unreadable_input uses
+    # below: a single key with `len(owning) == 1` relocates the phrase pin onto
+    # that key, and goes red on a reworded lead sentence or a rule split across
+    # two bullets with an intact rule. Each key sits in a different clause of the
+    # condition, so a reword of any one of them leaves the other two.
+    refusal = section_body(load(SKILL), "5. Refusal conditions")
+    keys = ("cannot classify", "unlisted kind", "enum is closed")
+    owning = [para for para in paragraphs(refusal) if any(key in para for key in keys)]
+    assert owning, (
+        "no refusal condition tells the model what to do with a statement it cannot "
+        "classify into a listed kind"
+    )
+    # Joined rather than checked per paragraph, so a rule split across two bullets
+    # still reads as one rule -- and so a stale count in either half is caught,
+    # which an `any` over the paragraphs would let the other half excuse.
+    rule = "\n".join(owning)
+    assert "seven" in rule, "the rule must name the enum's current size"
+    assert "eighth" in rule, "and forbid inventing the next one"
+    # `seven` alone would be satisfied by the stale "a seventh kind": these two
+    # are what actually catch a half-swept count, and each was watched fail.
+    assert "six" not in rule, "a half-swept count leaves the repo asserting two enum sizes"
+    assert "seventh" not in rule, "seventh is now a real kind, not the one to refuse"
 
 
 def test_the_refusal_section_names_a_response_for_an_unreadable_input():

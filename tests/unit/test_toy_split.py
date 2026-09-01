@@ -18,6 +18,7 @@ _KIND_FOR_KEY = {
     "entities": "entities-part",
     "goals": "goals-part",
     "gaps": "gaps-part",
+    "services": "services-part",
 }
 
 
@@ -149,6 +150,12 @@ _EXPECTED_INPUTS_SEEN: dict[str, dict[str, tuple[int, int, int]]] = {
     "entities": {"api-json": (2, 2, 0), "notes-md": (2, 2, 0), "trace-json": (0, 0, 0)},
     "outcomes": {"api-json": (2, 2, 0), "notes-md": (1, 1, 0), "trace-json": (2, 1, 1)},
     "goals": {"api-json": (0, 0, 0), "notes-md": (5, 5, 0), "trace-json": (0, 0, 0)},
+    # Read off tests/fixtures/toy/ the same way every row above it was: the corpus
+    # holds exactly one claim of kind `tool` -- clm-api-010 on api-json, whose
+    # payload is api.json's tools[0].input_schema copied verbatim -- and neither
+    # notes.md nor trace.json declares a tool at all. svc-tickets cites that one
+    # claim, so nothing is dropped and no row here carries a note.
+    "services": {"api-json": (1, 1, 0), "notes-md": (0, 0, 0), "trace-json": (0, 0, 0)},
 }
 
 

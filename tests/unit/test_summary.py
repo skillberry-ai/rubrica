@@ -45,6 +45,8 @@ _INTAKE_THROUGH_CHALLENGE = {
     "reconcile-entities",
     "reconcile-goals",
     "reconcile-gaps",
+    "reconcile-services",
+    "synthesise-interfaces",
     "reconcile-seal",
     "propose-batches",
     "propose",
@@ -128,11 +130,11 @@ def test_stage_spine_marks_every_triage_family_stage_produced(tmp_path):
 
 
 def test_stage_spine_marks_every_stage_from_intake_through_challenge_produced(tmp_path):
-    """The other fourteen, same exact-set reasoning.
+    """The rest of the spine, same exact-set reasoning.
 
-    Covers all six `reconcile-*` partial paths, which are six near-identical
-    lines in `_stage_evidence` and so the likeliest place for a copy-paste slip
-    that no earlier test could see.
+    Covers every `reconcile-*` partial path, which are near-identical lines in
+    `_stage_evidence` and so the likeliest place for a copy-paste slip that no
+    earlier test could see.
     """
     run = build_toy_run(tmp_path / "runs")
     assert _produced(run) == _INTAKE_THROUGH_CHALLENGE
@@ -1260,7 +1262,15 @@ def _uncite_trace(sealed: dict) -> None:
 def test_world_model_counts_every_kind(tmp_path):
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     got = summary.world_model(run)
-    for kind in ("capabilities", "entities", "actors", "goals", "gaps", "contradictions"):
+    for kind in (
+        "capabilities",
+        "entities",
+        "actors",
+        "goals",
+        "services",
+        "gaps",
+        "contradictions",
+    ):
         assert kind in got.counts, f"{kind} is a world-model collection"
     assert got.counts["capabilities"] > 0
 
@@ -1268,8 +1278,8 @@ def test_world_model_counts_every_kind(tmp_path):
 def test_world_model_counts_are_the_lengths_of_the_sealed_collections(tmp_path):
     """Every count against the fixture's own arrays, not one spot check.
 
-    The presence test above passes on a `world_model` that returns 0 for five of
-    the six collections -- measured: replacing the length with the literal 0
+    The presence test above passes on a `world_model` that returns 0 for every
+    collection but one -- measured: replacing the length with the literal 0
     leaves it green, because only `capabilities` is asserted non-empty there.
 
     The key set is derived from the sealed document rather than re-typed, so a
@@ -1293,21 +1303,23 @@ def test_world_model_counts_are_the_lengths_of_the_sealed_collections(tmp_path):
         "contradictions",
         "entities",
         "goals",
-    ], "five of the six collections are non-empty in the toy world model"
+        "services",
+    ], "every collection but gaps is non-empty in the toy world model"
     assert got.target == sealed["target"]
     assert got.denominator == sealed["denominator"]
 
 
 @pytest.mark.parametrize(
-    "collection", ["capabilities", "entities", "actors", "goals", "gaps", "contradictions"]
+    "collection",
+    ["capabilities", "entities", "actors", "goals", "services", "gaps", "contradictions"],
 )
 def test_world_model_counts_a_collection_that_is_not_a_list_as_zero(tmp_path, collection):
-    """`_dicts` at each of the six keys, one parametrisation per key.
+    """`_dicts` at every key, one parametrisation per key.
 
     `"actors": "nope"` is a four-character string, and `len()` on it counts four
-    actors. Parametrised rather than asserted once because the six keys are a
+    actors. Parametrised rather than asserted once because the keys are a
     comprehension over a tuple -- the copy-paste slip this shape invites is a key
-    spelled wrong, and only a case per key can see it. The other five counts are
+    spelled wrong, and only a case per key can see it. Every other count is
     asserted unchanged, so a guard that swallowed the whole document would go red.
     """
     from rubrica.artifacts import write_json
@@ -1321,6 +1333,78 @@ def test_world_model_counts_a_collection_that_is_not_a_list_as_zero(tmp_path, co
     assert {kind: n for kind, n in got.counts.items() if kind != collection} == {
         kind: len(_sealed(run)[kind]) for kind in got.counts if kind != collection
     }
+
+
+def test_world_model_reports_an_absent_collection_key_as_none_never_zero(tmp_path):
+    """The distinction the optional `services` key exists to carry, held on the page.
+
+    `reconcile-seal` writes `services` only when `01-services.json` exists, and omits
+    it rather than writing `[]` when it does not, because an empty array asserts that
+    a pass looked and found no tools while absence says no pass ran. Those are
+    different facts about the target, and a report rendering both as 0 would erase on
+    the one surface a human reads exactly the distinction the artifact shape was
+    given in order to preserve.
+
+    All three states are asserted against one document, mutated between them, so this
+    cannot pass by two readings agreeing on the same number.
+    """
+    from rubrica.artifacts import write_json
+    from rubrica.reconcile import seal
+
+    # Sealed from the checkpoint that writes no services part, and by the real seal
+    # rather than by hand: the absent key has to be what the code produces, or this
+    # asserts against a state the pipeline never reaches.
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-gaps")
+    path, findings = seal(run)
+    assert findings == [], findings
+    assert path == run.world_model
+    sealed = _sealed(run)
+    assert "services" not in sealed, "the fixture must reach the absent-key state"
+
+    assert summary.world_model(run).counts["services"] is None
+
+    sealed["services"] = []
+    write_json(run.world_model, sealed)
+    assert summary.world_model(run).counts["services"] == 0
+
+    # A non-empty one still counts, so None is about the key and not about emptiness.
+    sealed["services"] = [{"id": "svc-one"}]
+    write_json(run.world_model, sealed)
+    assert summary.world_model(run).counts["services"] == 1
+
+
+def test_render_shows_an_absent_collection_as_not_recorded_not_a_blank_cell(tmp_path):
+    """`esc(None)` is the empty string, so a None count renders as an empty `<td>`
+    unless the renderer marks it -- and a blank cell in a column of numbers reads as
+    zero, which is the one reading this must not produce. The same measurement that
+    put `_NOT_RECORDED` in this module in the first place.
+
+    Asserted as the whole `<tr>` rather than by looking for "services" and the
+    marker somewhere on the page: the page is long and both tokens appear elsewhere
+    in it. The empty-array row is asserted in the same shape off the same document,
+    which is what makes the two cells comparable rather than two independent claims.
+
+    The marker itself comes from the module's own `_NOT_RECORDED` rather than being
+    typed out here. What this test is about is that the cell carries the absence
+    marker instead of a blank or a number, not what that marker's wording is -- and a
+    pinned phrase in this repo has already broken on a reformat that changed nothing.
+    """
+    from rubrica.artifacts import write_json
+    from rubrica.reconcile import seal
+    from rubrica.summary_html import _NOT_RECORDED
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-gaps")
+    seal(run)
+
+    absent = f'<tr><td>services</td><td class="num">{_NOT_RECORDED}</td></tr>'
+    assert absent in summary.run_summary(run)
+
+    sealed = _sealed(run)
+    sealed["services"] = []
+    write_json(run.world_model, sealed)
+    html = summary.run_summary(run)
+    assert '<tr><td>services</td><td class="num">0</td></tr>' in html
+    assert absent not in html
 
 
 def test_world_model_survives_a_target_and_denominator_that_are_not_mappings(tmp_path):
@@ -1385,9 +1469,12 @@ def test_utilisation_sums_the_report_rather_than_recomputing(tmp_path):
     asserted identical objects-in-order, so re-sorting or rebuilding them here
     goes red; the columns are asserted as its sums.
 
-    The measured totals are pinned alongside: 9/9, 8/8 and 2/2 on the toy
-    fixture, 19 of 19 overall. Derived sums alone would agree with a `utilisation`
-    that summed the wrong column, since cited == total on this fixture.
+    The measured totals are pinned alongside: 9/10, 8/8 and 2/2 on the toy
+    fixture, 19 of 20 overall. They were pinned when the two columns were equal at
+    19/19, where derived sums alone could not tell a `utilisation` that summed the
+    wrong column from one that summed the right one. api-json's denominator has
+    since gained `clm-api-010`, the run's one `tool` claim, which nothing cites
+    yet, so cited != total and the pair now discriminates that on its own.
     """
     from rubrica.utilisation import claim_utilisation
 
@@ -1397,18 +1484,21 @@ def test_utilisation_sums_the_report_rather_than_recomputing(tmp_path):
     assert got.per_artifact == report["artifacts"]
     assert got.cited == sum(a["cited"] for a in report["artifacts"])
     assert got.total == sum(a["total"] for a in report["artifacts"])
-    assert (got.cited, got.total) == (19, 19), "the toy world model cites all 19 claims"
-    assert got.pct == pytest.approx(100.0)
+    assert (got.cited, got.total) == (19, 20), (
+        "the toy world model cites 19 of 20 claims -- every one but the tool claim"
+    )
+    assert got.pct == pytest.approx(95.0)
 
 
 def test_utilisation_names_an_artifact_the_world_model_cites_nothing_of(tmp_path):
     """`uncited`, which the toy fixture cannot reach unaltered.
 
-    Measured: the sealed toy world model cites every claim of all three inputs
-    (9/9, 8/8, 2/2), so the loop in
-    test_utilisation_totals_and_names_uncited_artifacts has an empty body and the
-    list ships unexercised -- and it is the entire input to the
-    `uncited-artifacts` flag.
+    Measured: the sealed toy world model cites every claim of notes-md and
+    trace-json and all but one of api-json's (9/10, 8/8, 2/2), so no input is at
+    zero, the loop in test_utilisation_totals_and_names_uncited_artifacts has an
+    empty body and the list ships unexercised -- and it is the entire input to the
+    `uncited-artifacts` flag. `uncited` is per *input*, not per claim, which is
+    why api-json's own uncited `tool` claim does not put it on the list.
 
     trace-json is emptied of citations here. Its claims are cited in two places
     and both must go: a capability's `claims` array, and the sealed
@@ -1434,8 +1524,8 @@ def test_utilisation_names_an_artifact_the_world_model_cites_nothing_of(tmp_path
     got = summary.utilisation(run)
     assert got.uncited == ["trace-json"]
     assert {a["artifact_id"]: a["cited"] for a in got.per_artifact}["trace-json"] == 0
-    assert (got.cited, got.total) == (17, 19), "trace-json's two claims stopped being cited"
-    assert got.pct == pytest.approx(17 / 19 * 100)
+    assert (got.cited, got.total) == (17, 20), "trace-json's two claims stopped being cited"
+    assert got.pct == pytest.approx(17 / 20 * 100)
 
 
 def test_utilisation_reports_no_percentage_when_no_claim_was_extracted(tmp_path):
@@ -3344,21 +3434,23 @@ def test_code_stages_is_exactly_the_stages_that_run_as_code():
 
 
 def test_flags_fire_low_utilisation_below_the_threshold(tmp_path, monkeypatch):
-    """The threshold is patched *above* 100 because the toy fixture cites everything.
+    """The threshold is patched *above* the fixture's own pct, which is nearly 100.
 
-    Measured: the toy run's claim utilisation is 100.0% (api-json 9/9, notes-md
-    8/8, trace-json 2/2). The predicate is a strict `<`, so patching the threshold
-    to 100.0 -- as this test was first written -- leaves `100.0 < 100.0` False and
-    the flag silently not firing while the test claims to have observed it. 100.1
-    is the smallest round value that makes the predicate observable on a fixture
-    with nothing uncited.
+    Measured: the toy run's claim utilisation is 95.0% (api-json 9/10, notes-md
+    8/8, trace-json 2/2) -- the one uncited claim is `clm-api-010`, the run's
+    `tool` claim, which nothing consumes yet. The predicate is a strict `<`, so
+    patching the threshold to the fixture's own pct -- as this test was first
+    written, when that pct was 100.0 -- leaves `95.0 < 95.0` False and the flag
+    silently not firing while the test claims to have observed it. 95.1 is the
+    smallest round value that makes the predicate observable, and the pct is
+    asserted first so a fixture change moves this test rather than hiding in it.
     """
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
-    assert summary.utilisation(run).pct == 100.0, "the fixture this threshold is chosen against"
-    monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 100.1)
+    assert summary.utilisation(run).pct == 95.0, "the fixture this threshold is chosen against"
+    monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 95.1)
     fired = {f.id_: f for f in summary.flags(run)}
     assert "low-utilisation" in fired
-    assert "100.0%" in fired["low-utilisation"].headline
+    assert "95.0%" in fired["low-utilisation"].headline
 
 
 def test_flags_do_not_fire_low_utilisation_above_the_threshold(tmp_path, monkeypatch):
@@ -3374,9 +3466,13 @@ def test_flags_do_not_fire_low_utilisation_exactly_at_the_threshold(tmp_path, mo
     Without this the pair above is satisfied by `<=` just as well as by `<`, and
     the threshold string on the page says "below". A flag whose stated rule and
     whose predicate disagree at the boundary is worse than no flag.
+
+    95.0 is the fixture's own measured pct -- see the firing test above for where
+    that number comes from -- so this sits exactly on the boundary rather than
+    merely near it.
     """
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
-    monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 100.0)
+    monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 95.0)
     ids = {f.id_ for f in summary.flags(run)}
     assert "low-utilisation" not in ids
 
@@ -3686,7 +3782,9 @@ def _run_with_every_flag(tmp_path, monkeypatch) -> RunPaths:
 
     run = build_toy_run(tmp_path / "runs", upto="challenge")
     # low-utilisation and uncited-artifacts: one claims artifact nothing cites
-    # drops the pct off 100.0 and gives the uncited list a member.
+    # drops the pct off the fixture's own 95.0 and gives the uncited list a
+    # member. The threshold is patched to 100.0 below, which is above the pct
+    # either way -- what this arranges is the uncited list, not the crossing.
     write_json(run.claims_dir / "stray-md.json", _stray_claims_doc())
     monkeypatch.setattr(summary, "LOW_UTILISATION_PCT", 100.0)
     write_json(
@@ -4109,10 +4207,13 @@ def test_render_reports_the_utilisation_percentage_and_both_columns(tmp_path):
     assert f"{got.cited} of {got.total} claims cited" in html
     assert f"{got.pct:.1f}%" in html
     for row in got.per_artifact:
-        # Three cells as one string, not the `cited` cell alone: `cited == total` on
-        # this fixture (9/9, 8/8, 2/2), so the adjacent `total` column satisfied a
-        # lone `cited` assertion -- measured green with the cited cell mutated to
-        # `_val(-1)`. The same adjacent-identical-column trap
+        # Three cells as one string, not the `cited` cell alone: `cited == total`
+        # for two of this fixture's three rows (notes-md 8/8, trace-json 2/2), so
+        # the adjacent `total` column satisfied a lone `cited` assertion --
+        # measured green with the cited cell mutated to `_val(-1)`. api-json is
+        # 9/10 since the `tool` claim nothing cites yet, so it alone would now
+        # catch that; the other two still would not, which is why the three-cell
+        # form stays. The same adjacent-identical-column trap
         # test_render_names_every_round_with_its_verdict_and_cells already records.
         assert (
             f'<td class="mono">{row["artifact_id"]}</td>'
@@ -4488,6 +4589,7 @@ def test_render_says_no_flags_fired_rather_than_leaving_the_section_empty(tmp_pa
             "reconcile-entities",
             "reconcile-goals",
             "reconcile-gaps",
+            "reconcile-services",
             "propose",
             "score",
             "instantiate",

@@ -33,6 +33,7 @@ reads = [
 writes = ["decisions"]
 invokes = [
   "check-skills", "validate", "check-refs", "record-stage", "decide",
+  "synthesise-interfaces", "reconcile-seal",
   "propose-batches", "propose-seal", "score-seal", "dedupe-candidates",
   "emit", "smoke", "claim-utilisation",
 ]
@@ -231,6 +232,10 @@ rb-reconcile-outcomes                        → validate --stage reconcile-outc
 rb-reconcile-entities                        → validate --stage reconcile-entities → check-refs
 rb-reconcile-goals                           → validate --stage reconcile-goals → check-refs
 rb-reconcile-gaps                            → validate --stage reconcile-gaps → check-refs
+rb-reconcile-services                        → validate --stage reconcile-services → check-refs
+rubrica synthesise-interfaces --run <run>     # code: one OpenAPI document per service
+if it printed at least one path              → validate --stage synthesise-interfaces → check-refs
+if it printed nothing                        # no service declared: skip that gate (B4)
 rubrica reconcile-seal --run <run>            # code: assembles the partials into the world model
                                              → validate --stage reconcile-seal → check-refs
 if any gap blocks a stage still to come      → HALT, report the gap, request the missing artifact
@@ -428,9 +433,10 @@ survived, and its skill is what should be on file.
 The stages implemented in code have no skill to hash, and
 `skills.CODE_ONLY_STAGES` is the one list of them: `intake`, which mints the run
 id and the timestamps no skill may invent; `survey`, which walks a corpus before
-you are ever dispatched; `reconcile-seal`, which you run yourself as `rubrica
-reconcile-seal` at B3; and `smoke`, which executes the suite. There is no
-`rb-intake`, `rb-survey`, `rb-reconcile-seal` or `rb-smoke`, so nothing is
+you are ever dispatched; `synthesise-interfaces` and `reconcile-seal`, which you
+run yourself as `rubrica synthesise-interfaces` and `rubrica reconcile-seal` at
+B3; and `smoke`, which executes the suite. There is no `rb-intake`, `rb-survey`,
+`rb-synthesise-interfaces`, `rb-reconcile-seal` or `rb-smoke`, so nothing is
 recorded for any of them, and that absence is the design rather than a stage you
 forgot. Do not reach for `record-stage` after the seal: it would need a skill
 file that does not exist, and `--skill` pointed at anything else records a digest
@@ -504,8 +510,8 @@ contradiction detection still sees every input at once.
 Dispatch `rb-reconcile-subjects`, then fan out `rb-reconcile-contradict` with
 one `subject_id` per subject in `01-subjects.json`, then
 `rb-reconcile-capabilities`, `rb-reconcile-outcomes`,
-`rb-reconcile-entities`, `rb-reconcile-goals` and `rb-reconcile-gaps`, each a
-single dispatch in that order. Gate each with
+`rb-reconcile-entities`, `rb-reconcile-goals`, `rb-reconcile-gaps` and
+`rb-reconcile-services`, each a single dispatch in that order. Gate each with
 `rubrica validate --stage <the pass's stage name> --run <run>` and then
 `rubrica check-refs --run <run>`, and `record-stage` each one -- the entry is
 per stage, which is what lets a think-heavy pass carry a different model or
@@ -538,13 +544,64 @@ every one of those findings is about a member still in flight.
 `validate --stage reconcile-contradict` is safe at any point, because it only
 judges the parts that are already there.
 
-Then run the seal, which is code, not a dispatch:
+Then derive the tool interfaces, which is code and not a dispatch:
+`rubrica synthesise-interfaces --run <run>`. It writes one OpenAPI document per
+service in `01-services.json` under `01-interfaces/`, and prints each path it
+wrote. When it printed at least one path, gate it with
+`rubrica validate --stage synthesise-interfaces --run <run>`, then
+`rubrica check-refs --run <run>`. Record nothing for it: it has no skill, so
+there is no digest to hash -- see A5.
+
+**If it exits 0 having printed nothing, `01-services.json` declared no service,
+there was nothing to derive, and you must NOT run
+`validate --stage synthesise-interfaces`** -- its "produced no interface artifact"
+finding would accuse a stage that behaved correctly, which is the same trap
+`validate --stage propose-batches` sets on a terminal round (B6 step 1) and the
+same rule. A target that declares no tool at all is a real target, not a broken
+run: `rb-reconcile-services` is instructed to write `services: []` for one rather
+than invent a service, so an empty derivation is the honest record of an honest
+part. Record that with `decide` and move on to the seal. `check-refs` is still
+safe and still worth running: it derives what it expects from the same
+`01-services.json`, so a run that declared no service expects no document and the
+empty directory the command leaves behind is clean. It is not indifferent to that
+directory's contents, though -- a document no service asked for *is* one of its
+findings -- so if one is ever reported there, the repair belongs to whatever left
+the file behind and not to a re-derivation.
+
+**Its two exit codes mean different things, and this is the one command where
+mistaking them costs the run's repair attempt on nothing.** A `1` against
+`01-services.json` names something `rb-reconcile-services` wrote -- a service id
+that is not usable as a filename, a tool name the simulator would rewrite, a
+`schema_claim` no claim in `01-claims/` has an id for -- so spend the repair on
+*that pass*, with the findings appended verbatim, never on the synthesis.
+
+**A `1` against `01-claims/<artifact_id>.json` is a different case, and it is no
+repair of yours.** The reachable one is a tool claim whose `payload` is not a
+schema synthesis can use: `rb-extract` wrote that claim, and
+`rb-reconcile-services` is instructed to cite it as the `schema_claim` anyway and
+say in the service's `statement` that the schema is unusable -- so its artifact is
+what it should be and re-dispatching it buys the same bytes back. Do not
+re-dispatch that input's `rb-extract` member either: it would rewrite a claims
+file every `reconcile-*` pass has already read, leaving seven partials describing
+claims that no longer exist, which is a wider defect than the one you started
+with. Record it with `decide`, run the seal, and carry the finding into gate 1 --
+the service is not simulatable as it stands, and which of the two a human would
+rather have is their ruling to make, not a repair's. A `2` is the filesystem:
+`01-interfaces/` cannot be written, or the run directory cannot be read. No
+re-dispatch of any prompt fixes that, so it consumes no repair attempt and it is
+not a stage defect -- report it and halt, exactly as B0's rule says.
+
+Then run the seal, which is also code, not a dispatch:
 `rubrica reconcile-seal --run <run>`. It assembles the partials into
 `01-world-model.json`, folds each capability's outcome classes in, and counts
-the denominator once. It reads the manifest, the five singleton partials and
-every `01-contradictions/*.json` -- and **not** `01-subjects.json`, which has no
-counterpart field in the world model, so the world model itself carries no
-record of whether the cover was total. `check-refs` is what holds the cover; a
+the denominator once. It reads the manifest, the five singleton partials, every
+`01-contradictions/*.json`, and `01-services.json` when that file exists -- and
+**not** `01-subjects.json`, which has no counterpart field in the world model, so
+the world model itself carries no record of whether the cover was total.
+`01-services.json` is its one optional input: an absent one is not a finding and
+the sealed model simply carries no `services` key, so do not read a clean seal on
+such a run as evidence that the services pass produced nothing -- it is evidence
+that nothing was there to fold. `check-refs` is what holds the cover; a
 seal that clears both its gates has had that checked mechanically, but do not
 read a clean seal as having ratified the cover -- mechanical totality is not a
 human's judgment that the subjects themselves are the right ones. Gate it with
@@ -870,8 +927,8 @@ points at:
 4. **Every stage you dispatched has a `manifest.stages` entry** with its
    model, its effort, and the `skill_sha256` of the file it ran. The stages in
    `skills.CODE_ONLY_STAGES` are not among them and are not recorded: you
-   dispatch no subagent for `intake`, `survey`, `reconcile-seal` or `smoke`,
-   because none of the four has a skill.
+   dispatch no subagent for `intake`, `survey`, `synthesise-interfaces`,
+   `reconcile-seal` or `smoke`, because none of them has a skill.
 
 5. **Every branch is in `decisions.md`**, appended through `rubrica decide`,
    one line each, with the timestamp minted by `decide`.

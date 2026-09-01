@@ -46,7 +46,16 @@ OUTPUTS = {"light": ASSETS / "how-it-works.svg", "dark": ASSETS / "how-it-works-
 PAD = 16
 LOOP = 36  # headroom above the boxes for the propose/score round arc and its label
 PLATE_W = 104  # the input and output plates: what you bring, what you get
-BOX_W, BOX_H = 120, 118
+BOX_W = 120
+# 132, not the 118 it was: phase() draws one stage line per fold_lines entry from
+# BOX_Y + 82 at a 14-unit step, so the box has to be tall enough for the phase with
+# the most drawn lines. The understand phase went to four when
+# synthesise-interfaces landed, and at 118 that fourth baseline (176) sat six units
+# *below* the box's bottom edge (170). The remaining 8 units under the last line are
+# what the third line had, so the boxes keep the breathing room they were drawn
+# with. Widening instead was the wrong lever: BOX_W feeds W, so every box would
+# grow and every label would come out smaller after the README downscale.
+BOX_H = 132
 CONN = 16  # plate to first phase, last phase to plate
 GCONN = 40  # between two phases: the gap a gate marker sits in
 GATE_R = 10
@@ -93,6 +102,8 @@ PHASES: list[dict] = [
             "reconcile-entities",
             "reconcile-goals",
             "reconcile-gaps",
+            "reconcile-services",
+            "synthesise-interfaces",
             "reconcile-seal",
         ],
         # Folded for the same two reasons the triage family is. paths.STAGES holds
@@ -100,9 +111,17 @@ PHASES: list[dict] = [
         # one skill to one stage and manifest.stages records model, effort and
         # digest per stage -- but they are one logical step engineered as substeps,
         # and this drawing is the newcomer's altitude. Listing them all would also
-        # not fit: phase() draws one line per entry from a fixed BOX_H, so ten
-        # lines would overflow the box rather than crowd it.
-        folds=["reconcile-"],
+        # not fit: phase() draws one line per entry from a fixed BOX_H, so a line
+        # per pass would overflow the box rather than crowd it.
+        # `synthesise-` is folded too, and for a reason the reconcile fold does not
+        # share: it is one stage, not a family, and the fold buys width rather than
+        # height. Drawn under its own name, `synthesise-interfaces` sets 21
+        # monospace characters at 11.5 -- about 145 units into the 98 the box leaves
+        # between its margins -- so the label would cross the right border and run
+        # into the gate marker. `synthesise*` fits, and at this altitude what the
+        # step derives is beside the point: a newcomer needs to know that
+        # understanding the target is one phase, not which file each pass writes.
+        folds=["reconcile-", "synthesise-"],
         gate=1,
     ),
     dict(
@@ -156,7 +175,14 @@ CAPTIONS: list[list[tuple[str, str]]] = [
         ("gate", "a gate you hold — nothing moves past it until you say so"),
         ("arrow", "every arrow is a file on disk, never a message between stages"),
     ],
-    [("fold", "one line standing for a family of stages")],
+    # Names the mark and what it does, because the reader who needs this row is the
+    # one who has just met `synthesise*` and cannot tell what the star signifies.
+    # It replaced "one line standing for a family of stages", which was true of
+    # every fold in the drawing until synthesise-interfaces landed: a fold is also
+    # how a single stage whose name is too wide for the box gets drawn, so a star no
+    # longer promises more than one stage behind it. Kept in the same words as the
+    # README's `alt` text, which describes this drawing to anyone who cannot see it.
+    [("fold", "a starred line collapses the stages behind it into one")],
 ]
 
 N = len(PHASES)
@@ -302,9 +328,17 @@ def fold_lines(spec: dict) -> list[tuple[str, list[str]]]:
 
 
 def fold_marks() -> list[str]:
-    """Every drawn line that stands for more than one stage, in drawing order --
-    the legend's subject, taken from the drawing rather than typed beside it."""
-    return [label for spec in PHASES for label, stages in fold_lines(spec) if len(stages) > 1]
+    """Every drawn line whose label is a fold rather than a stage name, in drawing
+    order -- the legend's subject, taken from the drawing rather than typed beside
+    it.
+
+    `label not in stages`, not `len(stages) > 1`, and the difference is now
+    reachable: a fold of exactly one stage draws a star (synthesise-interfaces does,
+    because its name does not fit the box), and the older predicate would have left
+    that star on the canvas with no legend row explaining it in a drawing where it
+    was the only fold.
+    """
+    return [label for spec in PHASES for label, stages in fold_lines(spec) if label not in stages]
 
 
 def plate_h() -> float:
