@@ -340,13 +340,31 @@ uv run rubrica validate --run "$RUN" --stage triage-objective  # the gate: layer
 uv run rubrica check-refs --run "$RUN"                         # then layer 2
 ```
 
-`RUBRICA_MODEL`, `RUBRICA_EFFORT` and `RUBRICA_BUDGET` set the dispatch's model,
-effort and hard dollar ceiling (`sonnet`, `medium`, `2`); `RUBRICA_LAB` moves the
-scratch directory that holds the generated settings and the transcripts. The
-model and effort you used are what `record-stage --model/--effort` should then be
-given, per §4 — and for the `triage-objective` dispatch above, note them down:
+`RUBRICA_MODEL` and `RUBRICA_EFFORT` set the dispatch's model and effort
+(`sonnet`, `medium`); `RUBRICA_LAB` moves the scratch directory that holds the
+generated settings and the transcripts. The model and effort you used are what
+`record-stage --model/--effort` should then be given, per §4 — and for the `triage-objective` dispatch above, note them down:
 that run has no manifest yet, so §4's `record-stage` for it cannot run until
 `intake --run` has minted one after gate 0.
+
+**`RUBRICA_BUDGET` has no default, and that is deliberate.** Set it and the
+dispatch runs under `--max-budget-usd`; leave it unset, which is the normal case,
+and no dollar ceiling is imposed at all. A ceiling does not slow a dispatch down,
+it kills it where it stands, and both times one has been observed doing that here
+it cost more than it saved: `summary.py`'s `orphaned_temp_files` docstring records
+a ceiling killing a reconcile pass mid-write, leaving a `02-scenarios.json.tmp.*`
+that had to be removed by hand, and the `reconcile-subjects` dispatch in issue #18
+spent 38 turns and $3.72 of a $10 ceiling without writing an artifact. Neither is
+visible in the run afterwards, because a killed dispatch and a refusing one leave
+identical evidence: nothing.
+
+What you get instead is the spend on every dispatch. The script's closing summary
+carries a `cost` line naming the dollars, the turns and which ceiling was in force
+— `none` unless you asked for one — read back out of the transcript's own `result`
+line rather than counted here. Two shapes of transcript cannot answer it: one from
+a dispatch killed mid-stream, and one whose result line carries no totals. Both
+report `unread` and neither changes the script's exit code, which matters because
+that code is what an orchestrator branches on.
 
 This one *is* shipped, unlike §3's five-line toy-run builder, and the difference
 is worth stating because the reasoning there was that a mapping table is cheaper

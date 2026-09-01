@@ -601,10 +601,28 @@ def test_nothing_check_refs_reads_is_ever_denied(tmp_path):
 # whole blocks around was additionally checked with `bash -n` before running.
 
 STUB_CLAUDE = """#!/usr/bin/env bash
-# Stand-in for the model dispatch. Records the environment the harness spawned it
-# with, prints one line so `tee` has bytes to write, and exits 0 without a model.
+# Stand-in for the model dispatch. Records the environment and the argv the
+# harness spawned it with, prints stream-json lines so `tee` has bytes to write,
+# and exits 0 without a model.
 printf '%s\\n' "${CLAUDE_CODE_MAX_OUTPUT_TOKENS-UNSET}" >> "$STUB_ENV_RECORD"
+# NUL-separated and truncating rather than appending: the prompt is one argv
+# entry containing newlines, so a line-per-arg record cannot be split back, and
+# the retry test invokes the stub twice with only the last call under assertion.
+printf '%s\\0' "$@" > "$STUB_ARGV_RECORD"
 echo "{\\"stub_attempt\\": \\"${STUB_ATTEMPT:-1}\\"}"
+# The closing summary reads the cost out of the transcript, so the stub has to
+# emit the line a real `--output-format stream-json` dispatch ends with. Two ways
+# to withhold it, because they fail the summary differently: STUB_NO_RESULT=1
+# leaves a parseable transcript with no totals in it, STUB_TRUNCATED=1 leaves one
+# jq cannot parse at all.
+if [ "${STUB_TRUNCATED:-0}" = "1" ]; then
+  # A dispatch killed mid-stream: the last line is half an object. jq cannot
+  # parse the file at all, which is a different failure from a missing field.
+  printf '%s' "{\\"type\\": \\"result\\", \\"total_cost_"
+elif [ "${STUB_NO_RESULT:-0}" != "1" ]; then
+  printf '{"type": "result", "total_cost_usd": %s, "num_turns": %s}\\n' \\
+    "${STUB_COST:-1.25}" "${STUB_TURNS:-7}"
+fi
 """
 
 
@@ -614,7 +632,8 @@ def _dispatch_with_stub_claude(tmp_path, *args, run=None, **env):
     The stub sits first on PATH, so it is what `command -v claude` finds and what
     the dispatch line executes -- the script only prepends its own `.venv/bin`,
     which carries no `claude`. `record` is the file the stub appended its view of
-    CLAUDE_CODE_MAX_OUTPUT_TOKENS to, one line per invocation.
+    CLAUDE_CODE_MAX_OUTPUT_TOKENS to, one line per invocation; `_stub_argv` reads
+    the sibling file holding the last invocation's argv.
     """
     bin_dir = tmp_path / "stub-bin"
     bin_dir.mkdir(exist_ok=True)
@@ -635,11 +654,24 @@ def _dispatch_with_stub_claude(tmp_path, *args, run=None, **env):
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
             "RUBRICA_LAB": str(tmp_path / "lab"),
             "STUB_ENV_RECORD": str(record),
+            "STUB_ARGV_RECORD": str(tmp_path / "stub-argv.bin"),
             **env,
         },
     )
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     return proc, record
+
+
+def _stub_argv(tmp_path):
+    """The argv of the last stub invocation, as a list of strings.
+
+    Read from the NUL-separated record rather than reconstructed from the
+    script's source: the mutation that matters here is a flag reaching the
+    spawned process, and a source grep cannot tell a built-but-unpassed array
+    from a passed one.
+    """
+    raw = (tmp_path / "stub-argv.bin").read_bytes()
+    return [arg.decode("utf-8") for arg in raw.split(b"\0")[:-1]]
 
 
 def test_the_dispatch_declares_the_output_token_cap(tmp_path):
@@ -668,8 +700,12 @@ def test_the_dispatch_declares_the_output_token_cap(tmp_path):
 
 
 def test_the_output_token_cap_is_overridable_from_the_environment(tmp_path):
-    """Same shape as RUBRICA_MODEL and RUBRICA_BUDGET: a default in the script,
+    """Same shape as RUBRICA_MODEL and RUBRICA_EFFORT: a default in the script,
     overridable per dispatch, so a probe does not need the file edited.
+
+    RUBRICA_BUDGET used to be named here as a third example and is not one any
+    more -- it has no default, because a dollar ceiling nobody asked for is a
+    barrier rather than a record. See the budget tests at the end of this module.
 
     The mutation this one catches is an unconditional `export VAR=<n>`, which
     would silently discard the value a probe passed in -- and the ceiling is
@@ -758,3 +794,149 @@ def _reported_transcript(proc):
         if line.startswith("transcript"):
             return Path(line.split(maxsplit=1)[1].strip())
     raise AssertionError(f"no transcript line in {proc.stdout!r}")
+
+
+# ---------------------------------------------------------------------------
+# The dollar ceiling: opt-in, and the cost reported either way.
+#
+# `--max-budget-usd` carried a default of 2 until this change, and a ceiling is
+# not a neutral guard -- it kills the dispatch where it stands. MEASURED twice on
+# real runs: `src/rubrica/summary.py`'s `orphaned_temp_files` docstring records a
+# ceiling killing a reconcile pass mid-write, leaving a
+# `02-scenarios.json.tmp.*` a human had to remove by hand, and the
+# reconcile-subjects dispatch in issue #18 spent its whole ceiling before writing
+# anything. Neither failure is legible from the run afterwards: a killed dispatch
+# and a refusing one both leave no artifact.
+#
+# So the default is now no ceiling, and the cost is reported on every dispatch
+# instead. That is strictly more information than a silent default ever gave --
+# a run under a ceiling of 2 never said so anywhere either.
+# ---------------------------------------------------------------------------
+
+
+def test_no_dollar_ceiling_is_imposed_unless_the_caller_asks_for_one(tmp_path):
+    """The default direction: the flag must be absent from argv, not merely large.
+
+    Passing a very high number instead would satisfy any assertion about the
+    dispatch surviving, and would still cap a run at whatever number this file
+    happened to pick. The absence is the property.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run)
+    assert "--max-budget-usd" not in _stub_argv(tmp_path)
+
+
+def test_a_requested_dollar_ceiling_reaches_the_dispatch(tmp_path):
+    """The opt-in direction, asserted on the pairing rather than on presence.
+
+    A flag present with the wrong value -- the old default, say -- would pass a
+    membership check on the flag name alone, so this pins the value that follows
+    it.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run, RUBRICA_BUDGET="7.5")
+    argv = _stub_argv(tmp_path)
+    assert "--max-budget-usd" in argv
+    assert argv[argv.index("--max-budget-usd") + 1] == "7.5"
+
+
+def test_an_empty_budget_variable_asks_for_no_ceiling(tmp_path):
+    """`RUBRICA_BUDGET=` must mean unset, matching how RUBRICA_LIVE reads.
+
+    The mutation this catches is `${RUBRICA_BUDGET+x}` or a bare `-z` test
+    inverted: either would pass an empty string to `--max-budget-usd`, which
+    Claude Code rejects as a usage error. A caller clearing the variable to drop
+    a ceiling would then get a dispatch that never starts.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run, RUBRICA_BUDGET="")
+    assert "--max-budget-usd" not in _stub_argv(tmp_path)
+
+
+def _summary_field(proc, label):
+    """The closing summary's value for a `<label>  <value>` line."""
+    for line in proc.stdout.splitlines():
+        if line.startswith(label):
+            return line[len(label) :].strip()
+    raise AssertionError(f"no {label!r} line in {proc.stdout!r}")
+
+
+def test_the_closing_summary_reports_what_the_dispatch_cost(tmp_path):
+    """Removing the ceiling only holds if the number it hid becomes visible.
+
+    Both figures are asserted because either alone is misleading: a cost with no
+    turn count cannot be compared against another dispatch of the same stage, and
+    issue #18's evidence was exactly the pair (38 turns, $3.72, no artifact).
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    proc, _ = _dispatch_with_stub_claude(
+        tmp_path, "propose", str(run), run=run, STUB_COST="3.716", STUB_TURNS="38"
+    )
+    reported = _summary_field(proc, "cost")
+    assert "3.716" in reported
+    assert "38" in reported
+
+
+def test_the_closing_summary_names_which_ceiling_was_in_force(tmp_path):
+    """A cost figure is only readable next to the ceiling it ran under.
+
+    Asserted in both directions in one test because the two strings have to
+    differ: a summary printing the same text whether or not a ceiling was set
+    would satisfy either assertion alone.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    without, _ = _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run)
+    with_ceiling, _ = _dispatch_with_stub_claude(
+        tmp_path, "propose", str(run), run=run, RUBRICA_BUDGET="10"
+    )
+    assert "10" in _summary_field(with_ceiling, "cost")
+    assert "10" not in _summary_field(without, "cost")
+
+
+def test_a_dispatch_that_reported_no_cost_says_so_rather_than_printing_null(tmp_path):
+    """A transcript with no result line is a killed dispatch, not a crash here.
+
+    Two predicates, because the field being absent has two wrong renderings and
+    only one right one. Dropping jq's `// ""` defaults makes the summary read
+    `cost $null over null turns`, which is a number-shaped answer to a question
+    with no answer -- the class this project calls a reasoned figure presented as
+    an observed one. Reporting nothing at all is the other.
+
+    MEASURED both directions: deleting either default turns the `null` assertion
+    red; deleting the whole cost line turns the other one red.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    proc, _ = _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run, STUB_NO_RESULT="1")
+    assert proc.returncode == 0
+    reported = _summary_field(proc, "cost")
+    assert reported, "the summary dropped the cost line entirely"
+    assert "null" not in reported
+
+
+def test_a_transcript_truncated_mid_stream_does_not_take_the_exit_code_with_it(tmp_path):
+    """The guard that matters most, because it is the exit-code contract's.
+
+    `set -euo pipefail` is on and the summary's `jq` runs in a command
+    substitution, so an unparseable transcript without `|| true` makes the script
+    exit non-zero *after* a dispatch that may well have written a good artifact.
+    The orchestrator branches on that code, and this failure would arrive as a `2`
+    -- a stage defect surfacing as an unreadable run, which the contract forbids
+    outright.
+
+    A missing field cannot reach this: jq parses that file fine. It takes a
+    half-written final line, which is exactly what a killed dispatch leaves, and
+    is why the stub can emit one.
+
+    MEASURED: dropping `|| true` turns this red with the script exiting 5.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    proc, _ = _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run, STUB_TRUNCATED="1")
+    assert proc.returncode == 0
+    assert _summary_field(proc, "cost")
