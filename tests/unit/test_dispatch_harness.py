@@ -60,15 +60,59 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _bwrap_dir(tmp_path, *, works):
+    """A stub `bwrap` for PATH: one that engages, or one that fails as the pod did.
+
+    The script probes `bwrap` before writing the sandbox block, so every test
+    asserting that block's contents would otherwise depend on the developer's own
+    bubblewrap working -- and the machine that motivated the probe is exactly the
+    one where it does not. MEASURED 2026-09-01 on a pod with an empty capability
+    bounding set: `bwrap --unshare-all --dev-bind / / --proc /proc true` exits 1
+    with the message below, while the same command without `--proc` exits 0, which
+    is how the fault stayed hidden.
+    """
+    bin_dir = tmp_path / ("bwrap-ok" if works else "bwrap-broken")
+    bin_dir.mkdir(exist_ok=True)
+    stub = bin_dir / "bwrap"
+    body = "#!/usr/bin/env bash\nexit 0\n"
+    if not works:
+        # Faithful to the pod rather than failing unconditionally: it fails only
+        # when asked to mount `proc`, and succeeds without `--proc`. That asymmetry
+        # IS the fault, and a stub ignoring its arguments let the probe drop
+        # `--proc` with every test still green -- measured, and why this loop exists.
+        body = (
+            "#!/usr/bin/env bash\n"
+            'for a in "$@"; do\n'
+            '  if [ "$a" = "--proc" ]; then\n'
+            '    echo "bwrap: Can\'t mount proc on /newroot/proc: Operation not permitted" >&2\n'
+            "    exit 1\n"
+            "  fi\n"
+            "done\n"
+            "exit 0\n"
+        )
+    stub.write_text(body, encoding="utf-8")
+    stub.chmod(0o755)
+    return bin_dir
+
+
+def _path_with(*dirs):
+    """PATH with each directory prepended, in the order given."""
+    return os.pathsep.join([*(str(d) for d in dirs), os.environ["PATH"]])
+
+
 def _dispatch(tmp_path, *args, run=None, **env):
     """Run the harness in print-settings mode. Returns the CompletedProcess.
 
     The run directory only has to exist -- the script resolves and grants it
     without reading any artifact, and nothing is dispatched in this mode.
+
+    A working stub `bwrap` is the default, so the sandbox block gets written on any
+    machine; a caller passing its own PATH overrides that.
     """
     if run is None:
         run = tmp_path / "run"
         run.mkdir(exist_ok=True)
+    env.setdefault("PATH", _path_with(_bwrap_dir(tmp_path, works=True)))
     return subprocess.run(
         [str(SCRIPT), *args],
         capture_output=True,
@@ -626,7 +670,7 @@ fi
 """
 
 
-def _dispatch_with_stub_claude(tmp_path, *args, run=None, **env):
+def _dispatch_with_stub_claude(tmp_path, *args, run=None, expect_exit=0, **env):
     """Run the harness for real against a stub `claude`, and return (proc, record).
 
     The stub sits first on PATH, so it is what `command -v claude` finds and what
@@ -651,14 +695,14 @@ def _dispatch_with_stub_claude(tmp_path, *args, run=None, **env):
         text=True,
         env={
             **base,
-            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "PATH": _path_with(bin_dir, _bwrap_dir(tmp_path, works=True)),
             "RUBRICA_LAB": str(tmp_path / "lab"),
             "STUB_ENV_RECORD": str(record),
             "STUB_ARGV_RECORD": str(tmp_path / "stub-argv.bin"),
             **env,
         },
     )
-    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert proc.returncode == expect_exit, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     return proc, record
 
 
@@ -940,3 +984,178 @@ def test_a_transcript_truncated_mid_stream_does_not_take_the_exit_code_with_it(t
     proc, _ = _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run, STUB_TRUNCATED="1")
     assert proc.returncode == 0
     assert _summary_field(proc, "cost")
+
+
+# ---------------------------------------------------------------------------
+# The sandbox probe.
+#
+# MEASURED 2026-09-01, three dispatches replicating this script's flags at Claude
+# Code 2.1.252: a stage can enumerate `01-claims/` with the sandbox live AND with
+# no sandbox block at all -- `ls` and `find` are auto-approved as read-only in both
+# -- and can enumerate it in neither when a sandbox is configured that `bwrap`
+# cannot engage, because every Bash command then dies at the bwrap layer, the
+# stage's own `rubrica validate` and `check-refs` included.
+#
+# That third state is what cost issue #18 38 turns and $3.72 for no artifact. It is
+# also invisible: `failIfUnavailable` makes the sandbox loud about not engaging, but
+# the dispatch proceeds anyway and exits 0. So the script probes first and drops the
+# block rather than handing a stage a shell where nothing runs.
+#
+# The probe is the `--proc` form on purpose. The same command without `--proc`
+# succeeds on the pod that motivated this, so a smoke test omitting it reports a
+# working sandbox where there is none.
+# ---------------------------------------------------------------------------
+
+
+def test_a_working_probe_leaves_the_sandbox_block_in_place(tmp_path):
+    """The non-degraded machine must be unaffected, block and failure mode intact.
+
+    `failIfUnavailable` is asserted alongside `enabled` because a probe that
+    replaced the block with a quieter one would satisfy a check on `enabled` alone
+    while removing the signal that layer is not engaging.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    _, sandbox, _ = _paths(_dispatch(tmp_path, "propose", str(run), run=run))
+    assert sandbox["sandbox"]["enabled"] is True
+    assert sandbox["sandbox"]["failIfUnavailable"] is True
+
+
+def test_a_failed_probe_drops_the_block_instead_of_dispatching_into_a_dead_shell(tmp_path):
+    """The degraded machine: an empty user scope, which is what `NO_SANDBOX` writes.
+
+    Asserted as the absence of the key rather than `enabled: false`, because a
+    `sandbox` block present in this scope is the thing that was measured to stop
+    the *other* scope's deny rules from being enforced.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    proc = _dispatch(
+        tmp_path,
+        "propose",
+        str(run),
+        run=run,
+        PATH=_path_with(_bwrap_dir(tmp_path, works=False)),
+    )
+    _, sandbox, _ = _paths(proc)
+    assert sandbox == {}
+
+
+def test_the_probe_asks_bwrap_to_mount_proc_which_is_what_discriminates(tmp_path):
+    """The fault is invisible to the probe form that omits `--proc`.
+
+    Issue #18 records it: on the pod, `bwrap --unshare-all --dev-bind / / true` exits
+    0 while the same command with `--proc /proc` exits 1, so a smoke test without it
+    reports a working sandbox where there is none. The stub carries that asymmetry,
+    so a probe dropping `--proc` sees success, leaves the block in place, and fails
+    here.
+
+    MEASURED: dropping `--proc` from the probe was green against a stub that failed
+    unconditionally. That is why the stub imitates the pod instead, and why this test
+    is separate from the fallback tests it would otherwise duplicate.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    _, sandbox, _ = _paths(
+        _dispatch(
+            tmp_path,
+            "propose",
+            str(run),
+            run=run,
+            PATH=_path_with(_bwrap_dir(tmp_path, works=False)),
+        )
+    )
+    assert sandbox == {}, "the probe did not ask bwrap for --proc"
+
+
+def test_the_fallback_says_which_of_the_two_reasons_dropped_the_sandbox(tmp_path):
+    """A dropped sandbox is a changed measurement, so it may not be silent.
+
+    Both reasons in one test because they have to be distinguishable: a banner
+    printing the same words for a deliberate override and for a broken machine
+    would tell a reader nothing they could act on, and would satisfy either
+    assertion alone.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    broken = _dispatch(
+        tmp_path, "propose", str(run), run=run, PATH=_path_with(_bwrap_dir(tmp_path, works=False))
+    )
+    asked = _dispatch(tmp_path, "propose", str(run), run=run, RUBRICA_NO_SANDBOX="1")
+    assert "bwrap" in broken.stderr
+    assert "RUBRICA_NO_SANDBOX" in asked.stderr
+    assert "bwrap" not in asked.stderr
+
+
+def test_the_probes_own_output_is_kept_where_it_can_be_read_afterwards(tmp_path):
+    """stderr scrolls away; the reason a recording lost its sandbox must not.
+
+    The file is asserted to hold the probe's actual message rather than merely to
+    exist, because an empty file written unconditionally would pass the weaker
+    check and leave the diagnosis nowhere.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    _dispatch(
+        tmp_path, "propose", str(run), run=run, PATH=_path_with(_bwrap_dir(tmp_path, works=False))
+    )
+    logs = sorted((tmp_path / "lab").glob("sandbox-probe-*"))
+    assert logs, f"no probe log under {tmp_path / 'lab'}"
+    assert "Operation not permitted" in logs[0].read_text(encoding="utf-8")
+
+
+def test_requiring_the_sandbox_turns_a_failed_probe_into_a_refusal(tmp_path):
+    """For a measured run, losing the isolation layer beats running without knowing.
+
+    Exit 2 rather than 1: the exit-code contract reserves 1 for a repairable stage
+    defect worth one retry, and no retry fixes a machine whose kernel will not give
+    the sandbox its capabilities.
+
+    The second assertion is the one that matters -- refusing after spending a
+    dispatch would defeat the point.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    proc, _ = _dispatch_with_stub_claude(
+        tmp_path,
+        "propose",
+        str(run),
+        run=run,
+        expect_exit=2,
+        RUBRICA_REQUIRE_SANDBOX="1",
+        PATH=_path_with(
+            tmp_path / "stub-bin", _bwrap_dir(tmp_path, works=False), tmp_path / "bwrap-ok"
+        ),
+    )
+    assert "bwrap" in proc.stderr
+    assert not (tmp_path / "stub-argv.bin").exists(), "it dispatched before refusing"
+
+
+def test_the_closing_summary_records_which_sandbox_the_dispatch_ran_under(tmp_path):
+    """Which configuration produced a recording is not reconstructable afterwards.
+
+    Both directions, because a summary naming the sandbox only when it is present
+    reads identically to one that never mentions it -- and the degraded case is the
+    one a reader needs told.
+
+    The count assertion is here because its absence let a real defect through: the
+    line was first composed as `${VAR:+off -- $VAR}${VAR:-on}`, and `${VAR:-on}`
+    expands to VAR when VAR is set, so the reason printed twice. A test checking
+    only that "off" appeared was green on it, and reading the output caught it.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    on, _ = _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run)
+    off, _ = _dispatch_with_stub_claude(
+        tmp_path,
+        "propose",
+        str(run),
+        run=run,
+        PATH=_path_with(
+            tmp_path / "stub-bin", _bwrap_dir(tmp_path, works=False), tmp_path / "bwrap-ok"
+        ),
+    )
+    assert _summary_field(on, "sandbox") == "on"
+    reported = _summary_field(off, "sandbox")
+    assert reported.startswith("off -- ")
+    assert reported.count("cannot engage") == 1, f"the reason is repeated: {reported!r}"

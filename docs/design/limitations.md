@@ -82,6 +82,32 @@ root. That grant is now scoped to the run directory and the scoping is pinned by
 a test — it is named here only because it is the sharpest evidence for how wide
 the reachable surface is.)
 
+**How wide that surface is has now been measured rather than reasoned.** Three
+dispatches on 2026-09-01, replicating `scripts/dispatch-stage.sh`'s own flags at
+Claude Code 2.1.252:
+
+| Operation | sandbox live | `bwrap` cannot engage | no sandbox block |
+|---|---|---|---|
+| Bash `ls`, `find` | ok | blocked | **ok** |
+| Bash `rubrica --help` | ok | blocked | ok |
+| Bash `python3 -c open('decisions.md')` | blocked, `Errno 13` | blocked | blocked, needs approval |
+| `Read` on a directory | `EISDIR` | `EISDIR` | `EISDIR` |
+| `Read` on a claims file | ok | ok | ok |
+
+Two things in that table matter for this entry. `permissions.allow` grants
+`Bash(rubrica *)` and nothing else, and `ls` ran anyway in the third column —
+Claude Code auto-approves read-only commands, so **the Bash allow list is not the
+bound it reads as**. And `autoAllowBashIfSandboxed: true`, which has sat
+uncommented in the harness since it was written, auto-approves *any* sandboxed
+Bash command in the first column. The exposure being "anything on the filesystem
+the dispatched process can open" is therefore not a worst case; it is the normal
+configuration.
+
+What holds the answer key is the pair that did block: `permissions.deny` over the
+file commands Claude Code parses out of a Bash line, and approval-gating for
+arbitrary execution. The OS-level `denyRead` engaged here too (`Errno 13`), a
+third data point for the two contradictory ones in the harness's own comment.
+
 The only instrument that exists is a **transcript audit at dispatch time**:
 `scripts/audit-reads.sh` extracts every path a dispatched stage actually
 touched from the stream-JSON transcript `scripts/dispatch-stage.sh` writes, so
@@ -597,6 +623,44 @@ fix.** It would grant every dispatched stage broader shell access to solve a
 problem `Write` already solves, against the isolation entry at the top of this
 file, which records how wide the reachable surface already is.
 
+**The ruling stands; the reason above understates it.** Measured 2026-09-01, the
+allowlist is not what constrains a dispatch at all — read-only Bash is
+auto-approved with no sandbox block present, and every Bash command is
+auto-approved when one is (`autoAllowBashIfSandboxed`). So widening it would not
+merely be wrong, it would change nothing. Issue #18 was filed on the opposite
+premise, that a barrier stage could not enumerate `01-claims/` because `ls` was
+off the allowlist; `ls` runs in every configuration except one where `bwrap`
+cannot engage and no Bash command runs at all. See the entry below.
+
+### A dispatch has no `Glob` and no `Grep`, so Bash is a stage's only way to enumerate a directory
+
+Measured 2026-09-01 at Claude Code 2.1.252: the `system` init event's tools array
+carries neither, in a live sandbox, a broken one and no sandbox block alike. Both
+are also missing from the parent session's toolset in this environment, so this
+looks like a property of the build or its configuration rather than of the
+dispatch settings. **The cause is not established, and that is the limitation** —
+nothing here controls it, and a build that restored those tools would change what
+every barrier stage can do without a line of this repository changing.
+
+Two consequences are live now. Every barrier pass that reads a directory
+(`claims_dir`, `contradictions_dir`, `dispositions_dir`) can only enumerate it
+through Bash, which means through Claude Code's classification of `ls` and `find`
+as read-only and auto-approvable — a behaviour no test here can pin and no
+contract mentions. And two of the six arms in `scripts/audit-reads.sh`'s
+file-tools filter cannot match, so an audit showing no `Glob` lines is arithmetic
+rather than evidence.
+
+**Parked with two mitigations rather than a fix, because the fix is not ours to
+make.** `audit-reads.sh` now prints the toolset the dispatch was given, ahead of
+the sections whose width depends on it, so the difference between "the stage used
+no Glob" and "there was no Glob" is legible; `tests/unit/test_audit_reads.py`
+holds the deleted-arms direction, requiring the audit to name a `Glob` event if
+one ever appears. Neither can make a stage's enumeration route contractual. The
+alternative that would — a `rubrica` subcommand printing the file list, reachable
+through the existing `Bash(rubrica *)` grant — buys a guarantee against a
+behaviour change nobody has observed, at the cost of new surface, and is not worth
+it until one is.
+
 ---
 
 ## Before you trust a number a run reports
@@ -611,6 +675,15 @@ longer have; the entries below say what each costs. An exercise record is the
 only behavioural evidence this project has, and one sample is one sample: a
 prompt that refused correctly once, or built a sound world model once, has not
 thereby been shown to do so reliably.
+
+**And one dispatch in three misdescribed its own method.** In the 2026-09-01
+probe, the dispatch given a live sandbox was asked for a factual per-operation
+report and returned `"glob 01-claims/*.json" -> ok` and `"grep schema_version" ->
+ok`. Its actual tool calls were `ls 01-claims/*.json` and `grep -r` through Bash;
+there is no `Glob` or `Grep` tool in a dispatch's toolset to have used. The other
+two dispatches reported the absence correctly. So the failure is not that a model
+cannot report its own actions, it is that a third of this sample did not — and
+every `exercise.md` in this repository is such a report.
 
 `rubrica diff-runs` exists for exactly this measurement — per-stage stability
 across two runs — and the measurement has not been taken. The two real-target

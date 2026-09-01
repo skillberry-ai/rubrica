@@ -25,7 +25,12 @@
 #   RUBRICA_BUDGET       hard dollar ceiling for the dispatch. UNSET BY DEFAULT --
 #                        no ceiling is imposed unless you ask for one. The cost is
 #                        reported either way, in the closing summary below.
-#   RUBRICA_NO_SANDBOX   set to 1 to omit the sandbox block entirely
+#   RUBRICA_NO_SANDBOX   set to 1 to omit the sandbox block entirely. The script
+#                        also omits it on its own when `bwrap` cannot engage --
+#                        see the probe below -- and says so on stderr either way.
+#   RUBRICA_REQUIRE_SANDBOX  set to 1 to refuse the dispatch (exit 2) rather than
+#                        fall back when the probe fails. For a measured run, where
+#                        losing the layer silently is worse than not running.
 #   RUBRICA_RESEED       set to 1 to carry a re-seed verdict's alternative_answers
 #                        and notes into an instantiate re-dispatch, verbatim
 #   RUBRICA_REJECT       space-separated scenario ids whose rejection is being
@@ -169,8 +174,12 @@ export CLAUDE_CODE_MAX_OUTPUT_TOKENS="${CLAUDE_CODE_MAX_OUTPUT_TOKENS:-64000}"
 # So sandbox goes in the isolated user scope and permissions go in --settings.
 #
 # What each layer covers:
-#   permissions.deny Read(...)   the Read/Grep/Glob tools, and the file commands
-#                                Claude Code parses out of a Bash line
+#   permissions.deny Read(...)   the file tools, and the file commands Claude Code
+#                                parses out of a Bash line. This read "the
+#                                Read/Grep/Glob tools" until 2026-09-01, when a
+#                                probe found no Glob and no Grep in the toolset a
+#                                dispatch is given at all -- see the matrix below
+#                                and scripts/audit-reads.sh
 #   sandbox.filesystem.denyRead  OS-level, via bubblewrap, so a Python script
 #                                that opens the file itself is stopped too
 #
@@ -245,7 +254,63 @@ RUN_DENY=("$RUN/decisions.md" "$RUN/measurement")
 # derives this from refs._readable_targets rather than trusting this comment.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# The probe, and why the fallback is not a weakening of the isolation argument.
+#
+# MEASURED 2026-09-01, three dispatches replicating this script's own flags at
+# Claude Code 2.1.252 (~$0.49, transcripts under /tmp were throwaway; the matrix is
+# in docs/design/limitations.md and on issue #18):
+#
+#   sandbox live        `ls`, `find`, `rubrica --help` all run. A `python3 -c
+#                       open()` of a denyRead path got Errno 13, so that layer does
+#                       engage here -- a third data point for the two contradictory
+#                       ones recorded above.
+#   bwrap cannot engage EVERY Bash command dies at the bwrap layer, including the
+#                       `rubrica validate` and `check-refs` the stage's own
+#                       Invariants section orders it to run.
+#   no sandbox block    `ls` and `find` run anyway -- Claude Code auto-approves
+#                       read-only commands -- while `python3 -c` is refused for
+#                       needing approval. So dropping the block does NOT hand a
+#                       stage the answer key, and does not cost it enumeration.
+#
+# The middle state is the one that cost issue #18 38 turns and $3.72 for no
+# artifact, and it is invisible from the outside: `failIfUnavailable` makes the
+# sandbox loud about not engaging, but the dispatch proceeds and exits 0 regardless.
+# So the choice is made here, before a stage is handed a shell where nothing runs.
+#
+# `--proc` is the discriminating part of the probe. Without it the same command
+# exits 0 on the pod that motivated this, which is precisely how the fault stayed
+# hidden through seven triage transcripts.
+#
+# Note what the fallback does NOT do: it never widens the Bash allowlist. The
+# parked ruling against that stands, and the measurement above strengthens it --
+# the allowlist was never what constrained a dispatch.
+# ---------------------------------------------------------------------------
+PROBE_LOG="$LAB/sandbox-probe-$STAGE${SLICE:+-$SLICE}.txt"
+SANDBOX_OFF_REASON=""
 if [ "${RUBRICA_NO_SANDBOX:-0}" = "1" ]; then
+  SANDBOX_OFF_REASON="RUBRICA_NO_SANDBOX=1 was set"
+  : > "$PROBE_LOG"
+elif ! bwrap --unshare-all --dev-bind / / --proc /proc true > "$PROBE_LOG" 2>&1; then
+  # The message is the diagnosis, so it is carried rather than summarised. Read
+  # from the log instead of a variable so the file is the one source of it.
+  SANDBOX_OFF_REASON="bwrap cannot engage: $(head -1 "$PROBE_LOG")"
+fi
+
+if [ -n "$SANDBOX_OFF_REASON" ]; then
+  # Loud, and on stderr, because a recording made without the sandbox is a
+  # different measurement from one made with it. RUBRICA_REQUIRE_SANDBOX turns the
+  # same condition into a refusal for runs where that difference is unacceptable.
+  if [ "${RUBRICA_REQUIRE_SANDBOX:-0}" = "1" ]; then
+    echo "refusing to dispatch $STAGE without the sandbox: $SANDBOX_OFF_REASON" >&2
+    echo "probe output: $PROBE_LOG" >&2
+    echo "unset RUBRICA_REQUIRE_SANDBOX to dispatch anyway" >&2
+    exit 2
+  fi
+  echo "SANDBOX OFF for $STAGE: $SANDBOX_OFF_REASON" >&2
+  echo "  the stage keeps Read, Write and read-only Bash; the answer-key denies in" >&2
+  echo "  permissions.deny still apply, and the OS-level layer does not." >&2
+  echo "  probe output: $PROBE_LOG" >&2
   echo '{}' > "$CLAUDE_CONFIG_DIR/settings.json"
 else
   jq -n --arg repo "$REPO" --arg run "$RUN" --arg skilldir "$SKILL_DIR" \
@@ -572,6 +637,12 @@ claude -p "$PROMPT" \
   ${BUDGET_ARGS[@]+"${BUDGET_ARGS[@]}"} \
   < /dev/null | tee "$TRANSCRIPT"
 
+if [ -n "$SANDBOX_OFF_REASON" ]; then
+  SANDBOX_LINE="off -- $SANDBOX_OFF_REASON"
+else
+  SANDBOX_LINE="on"
+fi
+
 # The spend, read back out of the transcript the dispatch just wrote.
 #
 # `jq -s` over the whole file because `--output-format stream-json` emits one
@@ -607,6 +678,7 @@ cat <<EOF
 
 transcript  $TRANSCRIPT
 cost        $SPENT
+sandbox     $SANDBOX_LINE
 gates       rubrica validate --stage $STAGE --run "$RUN"
             rubrica check-refs --run "$RUN"
 read audit  $REPO/scripts/audit-reads.sh "$TRANSCRIPT"
