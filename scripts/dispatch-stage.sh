@@ -22,7 +22,9 @@
 #                        (default ${TMPDIR:-/tmp}/rubrica-lab)
 #   RUBRICA_MODEL        model for the dispatch (default sonnet)
 #   RUBRICA_EFFORT       effort for the dispatch (default medium)
-#   RUBRICA_BUDGET       hard dollar ceiling for the dispatch (default 2)
+#   RUBRICA_BUDGET       hard dollar ceiling for the dispatch. UNSET BY DEFAULT --
+#                        no ceiling is imposed unless you ask for one. The cost is
+#                        reported either way, in the closing summary below.
 #   RUBRICA_NO_SANDBOX   set to 1 to omit the sandbox block entirely
 #   RUBRICA_RESEED       set to 1 to carry a re-seed verdict's alternative_answers
 #                        and notes into an instantiate re-dispatch, verbatim
@@ -526,6 +528,33 @@ if [ "${RUBRICA_PRINT_TRANSCRIPT:-0}" = "1" ]; then
   exit 0
 fi
 
+# ---------------------------------------------------------------------------
+# The dollar ceiling is opt-in, and it used to be `${RUBRICA_BUDGET:-2}`.
+#
+# A ceiling is not a neutral guard -- it kills the dispatch where it stands, and
+# both measured kills cost more than the money they saved. `summary.py`'s
+# `orphaned_temp_files` docstring records one killing a reconcile pass mid-write,
+# leaving a `02-scenarios.json.tmp.*` a human removed by hand; issue #18's
+# reconcile-subjects dispatch spent 38 turns and $3.72 of a $10 ceiling without
+# writing anything. Neither is legible from the run afterwards, because a killed
+# dispatch and a refusing one leave the same evidence: no artifact.
+#
+# What replaces it is the cost report below, which is strictly more information
+# than the old default carried -- a run under a ceiling of 2 never recorded that
+# anywhere either. A ceiling is still one variable away for a probe that wants
+# one, and the summary then names it, so a cheap probe stays legible as one.
+#
+# `${arr[@]+"${arr[@]}"}` rather than a bare `"${arr[@]}"`: under `set -u` the
+# bare form is an unbound-variable error on an empty array in bash before 4.4,
+# and macOS still ships 3.2.
+# ---------------------------------------------------------------------------
+BUDGET_ARGS=()
+CEILING="none"
+if [ -n "${RUBRICA_BUDGET:-}" ]; then
+  BUDGET_ARGS=(--max-budget-usd "$RUBRICA_BUDGET")
+  CEILING="\$$RUBRICA_BUDGET"
+fi
+
 # cwd is the run directory, not the repository. manifest.inputs[].source_path is
 # a repo-relative path, so a run-dir cwd means it cannot resolve back to the
 # original fixture file even by accident.
@@ -540,12 +569,44 @@ claude -p "$PROMPT" \
   --output-format stream-json --verbose \
   --model "${RUBRICA_MODEL:-sonnet}" \
   --effort "${RUBRICA_EFFORT:-medium}" \
-  --max-budget-usd "${RUBRICA_BUDGET:-2}" \
+  ${BUDGET_ARGS[@]+"${BUDGET_ARGS[@]}"} \
   < /dev/null | tee "$TRANSCRIPT"
+
+# The spend, read back out of the transcript the dispatch just wrote.
+#
+# `jq -s` over the whole file because `--output-format stream-json` emits one
+# object per line and the totals are on the last `result` one.
+#
+# Both guards here are measured, and they cover two different failures:
+#
+#   `|| true`   a dispatch killed mid-stream leaves a half-written final line, so
+#               jq cannot parse the file at all. Unguarded, its exit code becomes
+#               this script's -- a `2` on a run whose stage may have written a
+#               perfectly good artifact, which is the one thing the exit-code
+#               contract forbids outright.
+#   `// ""`     a result line without the fields renders as `$null over null
+#               turns` otherwise: a number-shaped answer where there is no
+#               number. The branch below reports it unread instead.
+SPEND=$(jq -rs 'map(select(type == "object" and .type == "result")) | (last // {})
+                | "\(.total_cost_usd // "") \(.num_turns // "")"' \
+  "$TRANSCRIPT" 2>/dev/null || true)
+COST=""
+TURNS=""
+read -r COST TURNS <<<"$SPEND" || true
+# The ceiling goes inside each branch rather than after both, because the unread
+# branch ends in a clause and "did not finish, ceiling none" reads as one thought
+# when it is two.
+if [ -n "$COST" ]; then
+  SPENT="\$$COST over $TURNS turns, ceiling $CEILING"
+else
+  SPENT="unread, ceiling $CEILING -- the transcript carries no result line, so"
+  SPENT="$SPENT this dispatch did not finish"
+fi
 
 cat <<EOF
 
 transcript  $TRANSCRIPT
+cost        $SPENT
 gates       rubrica validate --stage $STAGE --run "$RUN"
             rubrica check-refs --run "$RUN"
 read audit  $REPO/scripts/audit-reads.sh "$TRANSCRIPT"
