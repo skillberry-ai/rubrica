@@ -417,6 +417,21 @@ it did not engage: with `bubblewrap` 0.9.0 and `socat` installed and
 `denyRead` path. `failIfUnavailable` is set so a silent fall-through becomes loud;
 `RUBRICA_NO_SANDBOX=1` drops the block.
 
+**The script now probes that layer before configuring it.** It runs
+`bwrap --unshare-all --dev-bind / / --proc /proc true`, and when that fails it drops
+the sandbox block, says so on stderr, keeps the probe's output under
+`$RUBRICA_LAB/sandbox-probe-<stage>.txt`, and records `sandbox off -- <reason>` in
+the closing summary. `--proc` is the discriminating part: without it the same
+command succeeds on a pod where the sandbox cannot work, which is how the fault
+behind issue #18 stayed hidden through seven triage transcripts. The state being
+avoided is the middle one — a sandbox configured that cannot engage, where every
+Bash command dies including the `rubrica validate` and `check-refs` a stage is
+ordered to run, and the dispatch still exits 0.
+
+Set `RUBRICA_REQUIRE_SANDBOX=1` to refuse (exit 2) instead of falling back. Use it
+for a measured run: dropping the layer changes what the recording is evidence of,
+and the summary line is the only place that difference is written down.
+
 It has since engaged once, and both observations are kept because neither
 explains the other. At 2.1.231, against a *file* deny entry
 (`$RUN/decisions.md`), a `python3 -c "open(...)"` got

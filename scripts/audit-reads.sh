@@ -22,6 +22,24 @@ T=${1:-}
 [ -f "$T" ] || { echo "no such transcript: $T" >&2; exit 2; }
 command -v jq >/dev/null || { echo "jq is required and not on PATH" >&2; exit 2; }
 
+# The toolset the dispatch was actually given, printed first because the two
+# sections below are only as wide as it is.
+#
+# MEASURED 2026-09-01 at Claude Code 2.1.252, across a live sandbox, a broken one
+# and no sandbox block: the init event's array carried **no Glob and no Grep**. Both
+# are also absent from the parent session's toolset in this environment, so it looks
+# like a property of the build rather than of the dispatch settings -- cause not
+# established.
+#
+# Two of the six arms in the file-tools filter below therefore cannot match here.
+# They are kept rather than deleted, because a build that restores those tools would
+# otherwise get a silent blind spot in the only isolation instrument this project
+# has. Printing the array is what makes the difference legible: with no Glob in it,
+# no Glob lines below is arithmetic, not evidence of restraint.
+echo "== toolset the dispatch was given =="
+jq -r 'select(.type=="system") | (.tools // []) | join(", ")' "$T" | head -1
+
+echo
 echo "== file tools =="
 jq -r 'select(.type=="assistant")
        | .message.content[]? | select(.type=="tool_use")
