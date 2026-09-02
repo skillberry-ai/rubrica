@@ -2714,6 +2714,51 @@ is where that spread comes from; and its example pointer
 `inputSchema` — the dispatch that read the real document used the document's key
 rather than copying the example, but the example is a latent trap.
 
+### An id field is bare where a thing is defined and qualified where it is referenced, and the dispatch address line is always qualified
+
+A fan-out member is addressed by a qualified name — `Your subject_id:`,
+`Your batch_id:`, `Your slice_id:`, `Your scenario_id:`, `Your artifact_id:` —
+and four of those five read a field named plain `id`:
+
+| Kind | Definition site | Referenced from another artifact as |
+|---|---|---|
+| slice | `.slices[].id` | `slice_id` (`dispositions-part`) |
+| subject | `.subjects[].id` | `subject_id` (`contradictions-part`) |
+| batch | `.batches[].id` | `batch_id` (`scenarios-part`) |
+| scenario | `.scenarios[].id` | `scenario_id` (`expected`, `score-part`, `suite-expected`, `report`, `verdict`) |
+| candidate | `.candidates[].candidate_id` | `candidate_id` (`adoptions`, `dispositions-part`, `triage`) |
+| artifact | `.inputs[].artifact_id` | `artifact_id` (`claims`, `inputs-seen`, `world-model`) |
+
+The convention is bare `id` at the definition site and `<thing>_id` wherever
+another artifact points at it, which carries the information that you are
+holding a foreign key. The catalogue and the manifest qualify at their own
+definition sites too, and they are the two artifacts that mint a run from
+outside the system.
+
+The cost lands on anyone writing a loop over a fan-out. `jq -r
+'.subjects[].subject_id'` does not fail — it prints one `null` per subject, so a
+dispatch loop addresses every member as `null` and the mistake surfaces as a
+stage that cannot find its slice.
+
+**Both normalisations were priced and both declined.** Bare `id` everywhere
+makes it worse: `extract` is the only fan-out whose address line and field
+already agree, and it agrees *because* the manifest qualifies, so normalising
+down puts all five loops in disagreement and leaves `artifact_id` meaning
+something else in three other schemas. Qualifying the four definition sites is
+the direction that would remove it, and it costs four breaking schema versions
+cascading into `validate.py`'s mapping, roughly 109 sites in `src/` and 122 in
+`tests/`, 36 in `tests/toy.py` — the golden-fixture builder, which is the model
+answer a skill imitates — and edits to skill `Output` prose that models imitate,
+`rb-reconcile-subjects/SKILL.md:67` among them. No behaviour changes either way.
+
+Parked, and the ruling is that the documents carry it instead of the schemas:
+[`docs/getting-started.md`](../getting-started.md) and
+[`docs/guides/invoking-rubrica.md`](../guides/invoking-rubrica.md) each state the
+address-line-to-`jq`-path mapping in a table. What would close it properly is
+neither rename but a command that answers "what are this stage's slice ids",
+so no document names a field at all — which is a CLI addition rather than a
+schema one, and nobody has needed it enough to specify it.
+
 ---
 
 ## Before you rely on a test or a fixture
