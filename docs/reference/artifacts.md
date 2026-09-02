@@ -222,11 +222,12 @@ The run's identity: `run_id`, `target` (name and interface), the registered
 has actually run,
 recording the `model`, `effort`, and `skill_sha256` `record-stage` computed
 from the skill file used. `stages` gains one entry per prompt stage
-between `extract` and `emit`, plus `triage` — which is recorded **after** gate
-0 rather than when it ran, because a run minted by `survey` has no manifest to
-merge into until `intake --run` writes one
-([`docs/guides/running-a-stage-by-hand.md`](../guides/running-a-stage-by-hand.md)
-§4 has the command). `intake`, `smoke`, `survey`, `triage-slices`,
+between `extract` and `emit`, plus `triage-objective`, `triage-rule` and
+`triage-audit` — which are recorded **after** gate 0 rather than when they ran,
+because a run minted by `survey` has no manifest to merge into until
+`intake --run` writes one
+([`docs/guides/invoking-rubrica.md`](../guides/invoking-rubrica.md)
+§8 has the command). `intake`, `smoke`, `survey`, `triage-slices`,
 `triage-seal`, `synthesise-interfaces`, `reconcile-seal`, `propose-batches`,
 `propose-seal` and `score-seal` — `skills.CODE_ONLY_STAGES`, in full — are code:
 they have no skill file for

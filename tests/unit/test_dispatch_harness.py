@@ -250,6 +250,26 @@ def test_dispatch_hands_a_rule_member_its_slice_id():
     assert "Your slice_id" in script
 
 
+def test_dispatch_hands_a_propose_member_its_batch_id(tmp_path):
+    """propose is a fan-out over the round's batch partition, so its dispatch
+    case must hand the member its own batch_id -- the key it resolves against
+    `02-batches/round-N.json` to find its own hole_refs.
+
+    Asserted against the *composed prompt*, not against the script's source.
+    A `"propose)" in script` grep passes on a rule that is present and
+    unreachable, which is the weakness the script's own print-settings comment
+    names; reading the prompt file proves the arm is reached. Whitespace is
+    split rather than pinned, because the arms are column-aligned and a
+    realignment is not a behaviour change.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    _, _, prompt = _paths(_dispatch(tmp_path, "propose", str(run), "b01", run=run))
+    lines = [ln for ln in Path(prompt).read_text().splitlines() if "batch_id" in ln]
+    assert lines, "the composed prompt carries no batch_id line"
+    assert lines[0].split() == ["Your", "batch_id:", "b01"]
+
+
 def test_the_triage_dispatch_does_not_deny_a_path_check_refs_reads(tmp_path):
     """The mirror of the rule that cost two wrong denies: 2f93726 measured that
     denying a path check-refs reads makes a stage's own gate fabricate findings.

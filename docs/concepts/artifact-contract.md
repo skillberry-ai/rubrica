@@ -45,7 +45,7 @@ against its schema and still passes every reference check. The contamination
 lives only in the dispatch itself, which no artifact records.
 
 - For the tooling that dispatches one stage in isolation, by hand, see
-  [`docs/guides/running-a-stage-by-hand.md`](../guides/running-a-stage-by-hand.md).
+  [`docs/guides/invoking-rubrica.md`](../guides/invoking-rubrica.md).
 - For why this is called the weakest link in the whole design — no schema, no
   `check-refs`, and no digest can detect a violation after the fact — see
   [`docs/design/limitations.md`](../design/limitations.md).

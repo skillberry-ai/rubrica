@@ -403,7 +403,7 @@ Two rules for an exercise record:
   get deleted — a gitignored run directory most of all.
 
 To run a stage by hand, follow
-[`docs/guides/running-a-stage-by-hand.md`](docs/guides/running-a-stage-by-hand.md).
+[`docs/guides/invoking-rubrica.md`](docs/guides/invoking-rubrica.md).
 
 ## Conventions (non-negotiable)
 

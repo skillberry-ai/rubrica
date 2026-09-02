@@ -2,14 +2,36 @@
 
 Rubrica builds an agent test suite for a target system out of whatever
 artifacts describe it — specs, captured trajectories, source — by chaining AI
-skills over a schema-validated contract on disk. This page gets a first-time
-reader from a clone of this repository to a minted run they can inspect.
-Every command below was run against this repository before this page was
-committed; where the output is long, it is shown truncated and said so. One
-step is the exception, and it is called out where it happens: §2 dispatches
-models, which no command in this repository does, so §§3–5 were run against a
-triage record hand-authored for this walkthrough rather than one committed
-here.
+skills over a schema-validated contract on disk. This page walks one run from a
+clone of this repository to a compiled suite, in order, naming every command
+that run takes.
+
+There are two ways to run Rubrica. Both are a shell invocation, both are
+covered here, and neither is the fallback for the other:
+
+- **Stage by stage** — `rubrica …` for the stages that are code,
+  `./scripts/dispatch-stage.sh …` for the stages that are a prompt, one
+  dispatch at a time. That is the body of this page, and it is the only way to
+  give each fan-out member its own read isolation.
+- **In one step** — hand a `claude` session a run directory and
+  `src/rubrica/skills/rb-orchestrate/SKILL.md`, and it dispatches `extract`
+  through `emit` itself, gating each artifact and stopping at each human gate.
+  That is the closing section, "The same run in one step".
+
+**This page states the order.** Where it names a flag — `--stage`, `--round`,
+`--gate` — it does so to make the order unambiguous, not to explain the flag.
+What a flag means, and what environment variables exist, are
+[`docs/guides/invoking-rubrica.md`](guides/invoking-rubrica.md) — §3 for
+`rubrica` subcommands, §4 for `dispatch-stage.sh`, §9 for repairing a
+`re-seed` — and [`docs/reference/cli.md`](reference/cli.md), which documents
+every subcommand and its flags one at a time. Where a block below would need a
+flag's semantics to make sense, it links one of those two rather than restating
+it.
+
+Every stage block has the same four parts in the same order: a sentence or two
+on what the stage does, the command, the gate that checks it, and — wherever a
+model was dispatched — the `record-stage` call that puts that dispatch on the
+record.
 
 ## Install
 
@@ -17,301 +39,508 @@ Prerequisites: Python 3.13+ and [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
 make setup
+export PATH="$PWD/.venv/bin:$PATH"   # or prefix every command with `uv run`
 ```
 
-This runs `uv sync --python 3.13 --extra dev`, producing a `.venv` with the
-`rubrica` console script and the dev dependencies (`pytest`, `ruff`)
-installed from the committed `uv.lock`, so your toolchain matches CI's.
-Everything else on this page assumes that venv is on `PATH`; if it is not,
-prefix every command with `uv run` instead (`uv run rubrica --help`, `uv run
-pytest -q`, and so on).
+`make setup` runs `uv sync --python 3.13 --extra dev`, producing a `.venv` with
+the `rubrica` console script and the dev dependencies installed from the
+committed `uv.lock`, so your toolchain matches CI's. Every command below is
+written bare (`rubrica validate …`); without that venv on `PATH` each one needs
+a `uv run` prefix instead. The two are interchangeable for a command you type
+and *not* for a stage you dispatch — guide §2 carries the measurement.
 
-## The two ways to start a run
+Two tools the package does not install are needed once the dispatched stages
+start: the `claude` CLI and `jq`. `dispatch-stage.sh` checks for both before it
+dispatches anything (guide §4).
 
-Every run lives in one directory (`docs/concepts/artifact-contract.md`
-describes what goes in it), and there are two ways to mint one:
+## Where each fan-out loop reads its ids
 
-- **`rubrica survey --corpus …`** walks a corpus of files, digests each
-  candidate, and writes `00-catalogue.json`. Nothing is admitted yet — the
-  `triage-*` family rules on the catalogue next, admitting or declining each
-  candidate against the survey's stated objective, and a human holds a gate
-  over that ruling before anything downstream ever sees the corpus again.
-  This is the path for "here is a pile of files, tell me what's usable."
-- **`rubrica intake --input …`** mints a run directly from files you name
-  yourself. There is no corpus, no catalogue, no triage record, and no gate
-  over the selection — you already decided which files matter, so nothing
-  reviews that decision.
+A fan-out stage dispatches one member per slice, and every loop below reads its
+slice ids out of an artifact. Read this table once now, because its two right
+columns disagree and the disagreement is silent:
 
-**`intake --input` still works exactly as it always has.** The survey/triage
-path was added alongside it, not in place of it; if you already know which
-few files carry the target's behavior, hand-picking them and skipping straight
-to `intake --input` is the right call, not a shortcut around anything. The
-rest of this page walks the survey path first, because it is the one with
-more steps to show, and then shows the hand-picked path at the end.
+| Loop | Address handed to the member | Read the ids with |
+|---|---|---|
+| `triage-rule` | `Your slice_id:` | `jq -r '.slices[].id' "$RUN"/00-slices.json` |
+| `extract` | `Your artifact_id:` | `jq -r '.inputs[].artifact_id' "$RUN"/manifest.json` |
+| `reconcile-contradict` | `Your subject_id:` | `jq -r '.subjects[].id' "$RUN"/01-subjects.json` |
+| `propose` | `Your batch_id:` | `jq -r '.batches[].id' "$RUN"/02-batches/round-N.json` |
+| `instantiate`, `challenge` | `Your scenario_id:` | `jq -r '.scenarios[] \| select(.status=="active") \| .id' "$RUN"/02-scenarios.json` |
 
-## Path A, walked end to end
+The address a member is handed is always qualified; the JSON field it is read
+out of is bare `id` everywhere except `manifest.json`, so `extract` is the one
+loop whose two columns agree. Getting it wrong does not fail:
+`jq -r '.subjects[].subject_id'` prints one `null` per subject, so the loop
+dispatches every member as `null` and the mistake only surfaces as a stage that
+cannot find its slice. [`docs/design/limitations.md`](design/limitations.md)'s
+entry "An id field is bare where a thing is defined and qualified where it is
+referenced" carries the ruling for why neither side is being renamed.
 
-This section works against `tests/fixtures/corpus-toy`, a small fixture
-describing a fictional ticket-queue tool (TicketQ: `search_tickets`,
-`get_ticket`, `escalate_ticket`) mixed in with files a real survey should
-exclude or decline — a `.gitignore`d file, a duplicate README, a binary logo,
-a `node_modules/` entry, a lockfile, and one file that exists only to
-demonstrate an unrelated permission test.
+`challenge`'s loop is the one that does not use its row: it reads `04-instances`
+instead, for the reason its own block gives.
 
-### 1. Survey the corpus
+## Survey the corpus
 
-`survey` prints the run directory it minted on stdout and nothing else, so
-capture it rather than going looking for it afterwards — the same way
-[`docs/guides/running-a-stage-by-hand.md`](guides/running-a-stage-by-hand.md)
-does. `ls -d "$RUNS"/run-*` yields *two* paths as soon as a second run exists
-under `$RUNS` — the "other path" section at the end of this page mints one — and
-`--run` handed two paths at once exits 2:
+`survey` walks a corpus of files, digests each candidate into a bounded summary
+rather than a copy of its bytes, and writes `00-catalogue.json`. Nothing is
+admitted yet — there is no manifest and nothing to extract from, because
+nothing has been selected.
 
 ```bash
-export RUNS=runs   # or any directory you want runs written under
+export RUNS=runs
 export RUN=$(rubrica survey --corpus tests/fixtures/corpus-toy --runs-dir "$RUNS" \
   --target-name toy --target-interface mcp --objective breadth)
 echo "$RUN"
-```
-
-Prints the new run directory:
-
-```
-runs/run-20260815-201344
-```
-
-```bash
 rubrica validate --run "$RUN" --stage survey
-echo "exit=$?"
 ```
 
-```
-exit=0
-```
+`$RUN` is captured from stdout rather than looked up afterwards because
+`survey` prints the run directory and nothing else, and `ls -d "$RUNS"/run-*`
+stops being unambiguous the moment a second run exists under `$RUNS` — the
+hand-picked shortcut near the end of this page mints one.
 
-`00-catalogue.json` now holds one entry per candidate, each with a bounded
-digest rather than a copy of its bytes:
+`tests/fixtures/corpus-toy` is a small fixture describing a fictional
+ticket-queue tool (TicketQ: `search_tickets`, `get_ticket`,
+`escalate_ticket`), mixed in with files a real survey should exclude or
+decline — a `.gitignore`d file, a duplicate README, a binary logo, a
+`node_modules/` entry, a lockfile, and one file that exists only to demonstrate
+an unrelated permission test.
+
+## Triage rules on every candidate
+
+Triage is a family of passes rather than a single stage, and it brackets the
+earliest gate. `triage-slices` partitions the catalogue into byte-bounded
+shards. `rb-triage-objective` rules on whether the objective the survey
+declared is supported by the surfaces found, and does it reading the corpus map
+rather than any candidate digest. One `rb-triage-rule` dispatch per shard rules
+`admit` or `decline` on every candidate in that shard. `rb-triage-audit` reads
+the parts once every member has landed and states what the admitted set still
+cannot cover. `triage-seal` assembles the staged parts into `00-triage.json`.
 
 ```bash
-cat "$RUN"/00-catalogue.json | head -40
-```
-
-```json
-{
-  "candidates": [
-    {
-      "admissible": true,
-      "bytes": 14,
-      "candidate_id": "gitignore",
-      "digest": {
-        "body_head": "generated.txt",
-        "digest_truncated": false,
-        "headings": [],
-        "lines": 1
-      },
-      "kind": "other",
-      "origin": "corpus",
-      "path": ".gitignore",
-      "root_index": 0,
-      "sha256": "2f52b96d746e0d0b6732f083fe7276ef6e90ff6b80317e29e6d4be46988e3314"
-    },
-    {
-      "admissible": true,
-      "bytes": 474,
-      "candidate_id": "readme-md",
-      "digest": {
-        "body_head": "TicketQ is a small support-ticket queue. An agent searches tickets, reads one,\nand can escalate it to a human when the customer is upset.\n\n\n- `search_tickets(query)` finds tickets by free-text query.\n- `get_ticket(ticket_id)` reads one ticket in full.\n- `escalate_ticket(ticket_id, reason)` flags a ticket for a human.\n\n\n- A **ticket** has an id, a subject, a body, a status, and a priority.\n- A **customer** has an id, a name, and an email.",
-        "digest_truncated": false,
-        "headings": [
-          "# TicketQ",
-          "## Tools",
-          "## Entities"
-        ],
-        "lines": 15
-      },
-      "kind": "design_doc",
-      "origin": "corpus",
-      "path": "README.md",
-      "root_index": 0,
-      "sha256": "385d8d6f8a1f13a95fc58f839742f184b66aa5fc85e9fa41db5adb109e8bcd38"
-    },
-    {
-      "admissible": true,
-```
-
-(cut off at line 40 by `head`; 11 candidates in all, plus an `excluded` list
-naming six paths and why each was left out: `.hg/branch` (`vcs_metadata`),
-`copy-of-README.md` (`duplicate`), `generated.txt` (`gitignored`),
-`logo.png` (`binary`), `node_modules/dep/index.js` (`vendored`), and
-`package-lock.json` (`lockfile`).) One candidate, `capture.json`, is a
-container of four captured tool calls; the survey exploded it into four
-individually admissible candidates (`capture-json-0` … `capture-json-3`) and
-marked the container itself non-admissible, since triage rules on the
-elements, not the container.
-
-### 2. Triage rules on every candidate
-
-Triage is not one step but a family of them, and three of the five are prompts
-rather than code — the only things on this page that do not run as a `rubrica`
-subcommand. `rubrica triage-slices` partitions the catalogue into byte-bounded
-shards; `rb-triage-objective` rules on whether the declared objective is
-supported before any candidate digest is read; one `rb-triage-rule` dispatch per
-shard rules `admit` or `decline` on every candidate in it; `rb-triage-audit`
-reads the parts once every member has landed and states what the admitted set
-still cannot cover; and `rubrica triage-seal` assembles the whole thing into
-`00-triage.json`. Dispatching the prompts is described in
-[`docs/guides/running-a-stage-by-hand.md`](guides/running-a-stage-by-hand.md);
-this page does not repeat that runbook, because a dispatch is not a command
-this repository ships.
-
-**This is gate 0, and it is different from every other gate in the
-pipeline.** Nothing downstream of `intake` ever reads the corpus again, so a
-candidate the family declines is gone as completely as if the corpus never
-contained it. A human reviews the ruling before anything is minted — that
-review is what the rest of this section is building toward.
-
-**The next three sections need those dispatches to have happened.** They read
-`00-triage.json`, and no prompt in this repository can be run for you: the
-record behind the output shown below was hand-authored for this walkthrough and
-is *not* committed here, so you cannot reproduce these three blocks by following
-the page alone. Walking on from §1 without running the family gives you, in
-order, exit 1 from `validate --stage triage-seal` (`stage 'triage-seal' produced
-no triage artifact`), the absence message from `gate-brief --gate 0`, and exit 2
-from `intake --run` (`no triage record at …`). All three are correct
-behaviour — each command is telling you the stage has not run — not a broken
-page. (§3's `check-refs` does exit 0 on a survey-only run, but vacuously:
-with no triage record there is nothing to resolve against the catalogue.)
-
-### 3. Check what triage wrote
-
-Once `triage-seal` has written `00-triage.json`, the same two check layers that
-gate every other stage apply here too:
-
-```bash
-rubrica validate --run "$RUN" --stage triage-seal
-echo "exit=$?"
-```
-
-```
-exit=0
+rubrica triage-slices --run "$RUN"
+rubrica validate --run "$RUN" --stage triage-slices
 ```
 
 ```bash
+./scripts/dispatch-stage.sh triage-objective "$RUN"
+rubrica validate --run "$RUN" --stage triage-objective
+```
+
+```bash
+for slice_id in $(jq -r '.slices[].id' "$RUN"/00-slices.json); do
+  ./scripts/dispatch-stage.sh triage-rule "$RUN" "$slice_id"
+done
+rubrica validate --run "$RUN" --stage triage-rule
+```
+
+```bash
+./scripts/dispatch-stage.sh triage-audit "$RUN"
+rubrica validate --run "$RUN" --stage triage-audit
 rubrica check-refs --run "$RUN"
-echo "exit=$?"
 ```
 
-```
-exit=0
+```bash
+rubrica triage-seal --run "$RUN"
+rubrica validate --run "$RUN" --stage triage-seal
+rubrica check-refs --run "$RUN"
 ```
 
-A clean `validate` means the triage record is shaped correctly — every
-candidate ruled on, every decline carrying a reason. A clean `check-refs`
-means those rulings actually resolve against the catalogue — no disposition
-naming a candidate that does not exist, no `needs_projection` decline left
-without a projection that sources it.
+None of these four blocks carries a `record-stage`, and the reason is in the
+intake step below: there is no manifest for one to write into yet.
 
-### 4. Read the gate 0 brief
+## Gate 0: what the run is allowed to know
 
 ```bash
 rubrica gate-brief --run "$RUN" --gate 0
-echo "exit=$?"
 ```
 
-```
-GATE 0 -- runs/run-20260815-201344
+The brief is the whole reading surface for this gate: the objective verdict up
+top, the predicted-versus-observed surface divergence, every admit and every
+decline grouped by reason, the slice table, and every group the slicer split
+across more than one slice. It is a report and not a gate — it exits `0` on a
+readable run — so the ruling is yours, made by reading it.
 
-Objective verdict
-  declared objective: breadth
-  supported by the surfaces found: yes
-  notes: Every tool TicketQ exposes -- search_tickets, get_ticket, escalate_ticket -- has at least one admitted trace and is named in both the README and the tool schema, so a breadth objective is reachable from what was admitted.
+**This gate is different in kind from the three below it.** Gates 1 through 3
+review a judgment made from evidence that is already in the run. Gate 0 decides
+what the run can ever know: nothing downstream of `intake` reads the corpus
+again, so a candidate the family declines is gone as completely as if the
+corpus never held it. That is also why triage does not hold its own gate — the
+same party selecting the inputs and ratifying the selection would make the
+whole run unfalsifiable.
 
-Admits, by priority (8)
-  [1] api-json: the one MCP tool schema in the corpus.
-  [1] notes-md: the only source for escalate_ticket's undecided reason-length rule and the closed-ticket coverage gap.
-  [1] readme-md: states the three tools and the two entities in one page.
-  [2] capture-json-0: one successful search_tickets call.
-  [2] capture-json-1: one successful get_ticket call.
-  [2] capture-json-2: the one captured error path, for escalate_ticket.
-  [2] tool-defs-py: source for the three tool entry points and the TicketNotFound error path.
-  [3] capture-json-3: a second search_tickets call, distinct query.
+Walking past `survey` without running the family is not a broken page. Run
+against a survey-only run, `validate --stage triage-seal` exits `1` with `stage
+'triage-seal' produced no triage artifact`, and `gate-brief --gate 0` exits `0`
+saying there is no triage record yet and nothing to review until one lands.
+Each is the command telling you the stage has not run.
 
-Declines, by reason code (3)
-  no_evidence_value (1):
-    - gitignore, 14 bytes: one line, no statement about the target system.
-  out_of_scope (1):
-    - locked-md, 423 bytes: documents this fixture's own permission-testing setup, not the TicketQ target.
-  superseded (1):
-    - capture-json, 319 bytes: the container; each of its four elements was exploded and admitted individually above.
+## Intake mints the manifest
 
-Open deficiencies and their projections (0)
-  (none)
-
-exit=0
-```
-
-This is the whole reading surface for gate 0: the objective verdict up top
-(the thing most likely to make a reviewer overturn the selection), then every
-admit and every decline grouped by reason. A human reads this, decides the
-selection is sound (or asks for a re-triage first), and only then does the
-run get minted.
-
-### 5. Mint the run
+`intake --run` writes `manifest.json` and populates `00-inputs/` in place, from
+the catalogue and the triage record. It is the same run directory — `intake`
+does not start a new one here — and it is what fixes the run's identity, which
+is why the on-disk numbering is intake's rather than the corpus path's.
 
 ```bash
 rubrica intake --run "$RUN"
+rubrica validate --run "$RUN" --stage intake
 ```
 
-```
-runs/run-20260815-201344
-```
-
-This is the same run directory — `intake --run` mints `manifest.json` and
-`00-inputs/` in place from the catalogue and the triage record, rather than
-starting a new one. `manifest.json` now lists the eight admitted candidates,
-each with its stored path under `00-inputs/`:
+Now the three dispatched triage passes can be recorded:
 
 ```bash
-cat "$RUN"/manifest.json | head -20
+# record-stage merges into manifest.json, which did not exist until now, so the
+# three dispatched triage passes are recorded here rather than where they ran
+for stage in triage-objective triage-rule triage-audit; do
+  rubrica record-stage --run "$RUN" --stage "$stage" \
+    --model sonnet --effort medium \
+    --skill src/rubrica/skills/rb-$stage/SKILL.md
+done
 ```
 
-```json
-{
-  "created_utc": "2026-08-15T20:13:44Z",
-  "inputs": [
-    {
-      "artifact_id": "api-json",
-      "bytes": 186,
-      "kind": "mcp_tool_schema",
-      "sha256": "8aca0fc985c185ec8c8ce35ada693ff3b3929e227e6f38e774917177178d29ae",
-      "source_path": "tests/fixtures/corpus-toy/api.json",
-      "stored_as": "api-json.json"
-    },
-    {
-      "artifact_id": "notes-md",
-      "bytes": 652,
-      "kind": "design_doc",
-      "sha256": "67b1d4b2cd69a8e82bf86a8642111ce70bcb9c19392585bcb48c3bfc6601d1a4",
-      "source_path": "tests/fixtures/corpus-toy/design/notes.md",
-      "stored_as": "notes-md.md"
-    },
-    {
+Substitute the model and effort you actually dispatched with. Write down what
+you dispatched at the time — nothing on disk remembers it for you until this
+command runs.
+`triage-slices` and `triage-seal` are code, have no skill file, and take no
+entry at all: their absence from `manifest.stages` is not a finding.
+
+## Extract, one dispatch per input
+
+`rb-extract` reads one admitted input and writes that input's claims into
+`01-claims/<artifact_id>.json`. One member per input, and no member sees another
+input or another member's claims.
+
+```bash
+for artifact_id in $(jq -r '.inputs[].artifact_id' "$RUN"/manifest.json); do
+  ./scripts/dispatch-stage.sh extract "$RUN" "$artifact_id"
+done
+rubrica validate --run "$RUN" --stage extract
+rubrica record-stage --run "$RUN" --stage extract \
+  --model sonnet --effort medium --skill src/rubrica/skills/rb-extract/SKILL.md
 ```
 
-(cut off at line 20; the rest is the same shape, one entry per admitted
-candidate, for all eight of them — plus the `limits`, `run_id`,
-`schema_version`, `stages` (empty until a stage is dispatched and recorded),
-and `target` that round out the file.)
+This is the one loop on the page reading a qualified field name
+(`.inputs[].artifact_id`), because the manifest is one of the two artifacts that
+qualify at their own definition site. The other four loops read bare `id`; the
+table above is the mapping, and `limitations.md` carries the ruling.
 
-From here the run is in the same state an `intake --input` run reaches
-directly: a manifest, a populated `00-inputs/`, and nothing written past
-that. The rest of the pipeline — `extract` through `emit` — is what
-`docs/concepts/pipeline.md` describes, and what runs it is the next section.
+`record-stage` goes after the loop and takes a `--stage`, never a slice — one
+entry records the pass, however many members it fanned out to. Every dispatched
+block below does the same.
 
-### The other path, briefly
+## Reconcile: build the world model, one pass per output
 
-`intake --input` reaches the same starting state with no corpus step at all,
-for a hand-picked set of files:
+The reconcile band is one logical step engineered as substeps. Every pass reads
+all of `01-claims/`, so the barrier property holds throughout and a
+contradiction between two inputs is still visible to the pass that records it;
+the split is on *output*, one artifact per pass.
+
+**Eight blocks follow, and they are not a loop on purpose.** Each pass has its
+own `validate --stage`, its own `check-refs`, and its own `record-stage`
+carrying that pass's own model and effort — which is exactly why the band is
+eight stages rather than one skill branching on a slice id, since
+`manifest.stages` records model, effort and skill digest per stage and that is
+what lets a think-heavy pass carry a different budget from a mechanical one. A
+loop would drop those lines or bury them. The repetition below is the honest
+shape of a stretch of pipeline that really does gate eight times.
+
+`reconcile-subjects` is a barrier: it reads every claim and writes the subject
+cover in `01-subjects.json`, the partition the contradiction sweep then fans out
+over.
+
+```bash
+./scripts/dispatch-stage.sh reconcile-subjects "$RUN"
+rubrica validate --run "$RUN" --stage reconcile-subjects
+rubrica check-refs --run "$RUN"
+rubrica record-stage --run "$RUN" --stage reconcile-subjects \
+  --model sonnet --effort medium \
+  --skill src/rubrica/skills/rb-reconcile-subjects/SKILL.md
+```
+
+`reconcile-contradict` fans out over that cover — one member per subject, each
+given only its own `subject_id` and reading that subject's claim list out of
+`01-subjects.json` itself — and records where two inputs disagree, into
+`01-contradictions/<subject_id>.json`.
+
+```bash
+for subject_id in $(jq -r '.subjects[].id' "$RUN"/01-subjects.json); do
+  ./scripts/dispatch-stage.sh reconcile-contradict "$RUN" "$subject_id"
+done
+rubrica validate --run "$RUN" --stage reconcile-contradict
+rubrica check-refs --run "$RUN"   # only meaningful once every member has landed
+rubrica record-stage --run "$RUN" --stage reconcile-contradict \
+  --model sonnet --effort medium \
+  --skill src/rubrica/skills/rb-reconcile-contradict/SKILL.md
+```
+
+That comment is load-bearing: `refs.check_contradiction_parts` reports every
+missing slice from the moment the directory exists, so run mid-fan-out it names
+most of the subjects — by construction, not because anything is wrong. The same
+holds for `challenge` later.
+
+`reconcile-capabilities` merges the capability claims into
+`01-capabilities.json`.
+
+```bash
+./scripts/dispatch-stage.sh reconcile-capabilities "$RUN"
+rubrica validate --run "$RUN" --stage reconcile-capabilities
+rubrica check-refs --run "$RUN"
+rubrica record-stage --run "$RUN" --stage reconcile-capabilities \
+  --model sonnet --effort medium \
+  --skill src/rubrica/skills/rb-reconcile-capabilities/SKILL.md
+```
+
+`reconcile-outcomes` merges the outcome claims into `01-outcomes.json`.
+
+```bash
+./scripts/dispatch-stage.sh reconcile-outcomes "$RUN"
+rubrica validate --run "$RUN" --stage reconcile-outcomes
+rubrica check-refs --run "$RUN"
+rubrica record-stage --run "$RUN" --stage reconcile-outcomes \
+  --model sonnet --effort medium \
+  --skill src/rubrica/skills/rb-reconcile-outcomes/SKILL.md
+```
+
+`reconcile-entities` merges the entity claims into `01-entities.json`.
+
+```bash
+./scripts/dispatch-stage.sh reconcile-entities "$RUN"
+rubrica validate --run "$RUN" --stage reconcile-entities
+rubrica check-refs --run "$RUN"
+rubrica record-stage --run "$RUN" --stage reconcile-entities \
+  --model sonnet --effort medium \
+  --skill src/rubrica/skills/rb-reconcile-entities/SKILL.md
+```
+
+`reconcile-goals` merges the actor and goal claims into `01-goals.json`.
+
+```bash
+./scripts/dispatch-stage.sh reconcile-goals "$RUN"
+rubrica validate --run "$RUN" --stage reconcile-goals
+rubrica check-refs --run "$RUN"
+rubrica record-stage --run "$RUN" --stage reconcile-goals \
+  --model sonnet --effort medium \
+  --skill src/rubrica/skills/rb-reconcile-goals/SKILL.md
+```
+
+`reconcile-gaps` records what the admitted inputs do not settle, into
+`01-gaps.json`.
+
+```bash
+./scripts/dispatch-stage.sh reconcile-gaps "$RUN"
+rubrica validate --run "$RUN" --stage reconcile-gaps
+rubrica check-refs --run "$RUN"
+rubrica record-stage --run "$RUN" --stage reconcile-gaps \
+  --model sonnet --effort medium \
+  --skill src/rubrica/skills/rb-reconcile-gaps/SKILL.md
+```
+
+`reconcile-services` is the band's closing barrier: it groups the target's
+tools into services in `01-services.json`, which is what the next stage derives
+an interface document from.
+
+```bash
+./scripts/dispatch-stage.sh reconcile-services "$RUN"
+rubrica validate --run "$RUN" --stage reconcile-services
+rubrica check-refs --run "$RUN"
+rubrica record-stage --run "$RUN" --stage reconcile-services \
+  --model sonnet --effort medium \
+  --skill src/rubrica/skills/rb-reconcile-services/SKILL.md
+```
+
+## Derive the interfaces
+
+`synthesise-interfaces` writes one OpenAPI document per service under
+`01-interfaces/`, deriving each from the grouping the pass above judged and
+reading `01-claims/` only to resolve the input schema an operation carries. It
+is code rather than a prompt because a service's document is a pure function of
+that grouping: two runs with identical groupings must produce byte-identical
+documents. It is its own stage rather than part of the seal so that a reader who
+corrects one grouping at gate 1 can re-derive that service alone.
+
+```bash
+rubrica synthesise-interfaces --run "$RUN"
+rubrica validate --run "$RUN" --stage synthesise-interfaces
+rubrica check-refs --run "$RUN"
+```
+
+## Seal the world model
+
+`reconcile-seal` assembles the partials into `01-world-model.json`. It is code
+for `emit`'s reason — two runs with identical partials must produce a
+byte-identical world model — and nothing below the seal can tell the file was
+assembled pass by pass rather than written in one dispatch.
+
+```bash
+rubrica reconcile-seal --run "$RUN"
+rubrica validate --run "$RUN" --stage reconcile-seal
+rubrica check-refs --run "$RUN"
+rubrica claim-utilisation --run "$RUN"
+```
+
+## Gate 1: the world model
+
+```bash
+rubrica gate-brief --run "$RUN" --gate 1
+rubrica target-brief --run "$RUN"   # the page written for the target's owners
+```
+
+`gate-brief --gate 1` composes the reconcile sweep, per-input claim
+utilisation, per-pass read coverage, the capabilities the coverage denominator
+excludes, the implied suite size, and one block per service.
+`claim-utilisation` above surfaces each input's cited-over-total count for the
+same reading. Both are reports, not gates: each exits `0` on a readable run,
+and the ruling is yours.
+
+`target-brief` is the odd one out and worth running here: it renders the run's
+description of the *target* — not of the run — for the people who own that
+target, so they can correct it. Nothing in the pipeline reads their answer; you
+do.
+
+## The propose and score round loop
+
+Stages `02a` through `03b` are a loop bounded by the manifest's `max_rounds`,
+and the whole of it repeats, not just `propose` and `score`.
+
+`propose-seal` runs **twice per round** and takes no `--round`: once after
+`propose`, so `score` has a document to read, and again after `score`, so
+`instantiate` sees the statuses this round's rulings produced. It is a pure
+function of the parts and the rulings and never reads its own output, so the
+second run cannot disagree with the first.
+
+```bash
+ROUND=1
+
+rubrica propose-batches --run "$RUN" --round "$ROUND"
+rubrica validate --run "$RUN" --stage propose-batches
+
+for batch_id in $(jq -r '.batches[].id' "$RUN"/02-batches/round-$ROUND.json); do
+  ./scripts/dispatch-stage.sh propose "$RUN" "$batch_id"
+done
+rubrica validate --run "$RUN" --stage propose
+rubrica record-stage --run "$RUN" --stage propose \
+  --model sonnet --effort medium --skill src/rubrica/skills/rb-propose/SKILL.md
+
+rubrica propose-seal --run "$RUN"          # so score has a document to read
+rubrica validate --run "$RUN" --stage propose-seal
+
+./scripts/dispatch-stage.sh score "$RUN"
+rubrica validate --run "$RUN" --stage score
+rubrica record-stage --run "$RUN" --stage score \
+  --model sonnet --effort medium --skill src/rubrica/skills/rb-score/SKILL.md
+
+rubrica propose-seal --run "$RUN"          # again, folding this round's rulings in
+rubrica score-seal --run "$RUN" --round "$ROUND"
+rubrica validate --run "$RUN" --stage score-seal
+rubrica check-refs --run "$RUN"
+
+jq -r '.verdict' "$RUN"/03-score/round-$ROUND.json
+```
+
+The verdict is one of `continue`, `converged`, `halted_no_progress`,
+`halted_round_cap`. Only `continue` means another round: increment `ROUND` and
+repeat the whole block above, `propose-batches` included. `score` computes the
+verdict and `score-seal` composes the document carrying it; nothing in the
+pipeline acts on it, so acting on it is the reader's job.
+
+## Gate 2: coverage
+
+```bash
+rubrica gate-brief --run "$RUN" --gate 2
+```
+
+The coverage matrix, read once the loop has stopped. It is a report and not a
+gate — it exits `0` on a readable run — so whether this coverage is worth what
+instantiating it costs is a ruling you make from it.
+
+## Instantiate, one dispatch per active scenario
+
+`rb-instantiate` turns one scenario into a concrete instance under
+`04-instances/` — a seed, a trajectory, and the oracles a suite can check.
+
+```bash
+for scenario_id in $(jq -r '.scenarios[] | select(.status=="active") | .id' \
+                        "$RUN"/02-scenarios.json); do
+  ./scripts/dispatch-stage.sh instantiate "$RUN" "$scenario_id"
+done
+rubrica validate --run "$RUN" --stage instantiate
+rubrica check-refs --run "$RUN"
+rubrica record-stage --run "$RUN" --stage instantiate \
+  --model sonnet --effort medium --skill src/rubrica/skills/rb-instantiate/SKILL.md
+```
+
+A scenario's `status` is one of `proposed`, `active`, `duplicate`, `rejected`,
+and `active` is the set that gets instantiated — which is why the loop selects
+on it rather than taking every id in the file.
+
+## Challenge, one dispatch per instance
+
+`rb-challenge` is the adversary: one dispatch per instance, each writing a
+verdict into `05-verdicts/`. The loop reads the instance directory rather than
+the scenario list, because the set to challenge is what `instantiate` actually
+wrote.
+
+```bash
+for scenario_id in $(ls "$RUN"/04-instances); do
+  ./scripts/dispatch-stage.sh challenge "$RUN" "$scenario_id"
+done
+rubrica validate --run "$RUN" --stage challenge
+rubrica check-refs --run "$RUN"   # only meaningful once every member has landed
+rubrica record-stage --run "$RUN" --stage challenge \
+  --model sonnet --effort medium --skill src/rubrica/skills/rb-challenge/SKILL.md
+```
+
+## Gate 3: the verdicts
+
+```bash
+rubrica gate-brief --run "$RUN" --gate 3
+```
+
+The verdict tally. A report again, exiting `0` whatever it says: which rejects
+and which re-seeds to act on is yours to rule on, not something the pipeline
+settles.
+
+## Emit the suite
+
+`emit` compiles the accepted instances into one package per accepted scenario
+under `06-suite/`. It is code, not a prompt — two runs with identical stage-4
+and stage-5 artifacts must produce byte-identical suites, or variance can no
+longer be attributed to a stage — and `rb-emit` is a thin wrapper that invokes
+`rubrica emit` and reports what it said.
+
+```bash
+./scripts/dispatch-stage.sh emit "$RUN"
+rubrica validate --run "$RUN" --stage emit
+rubrica check-refs --run "$RUN"
+rubrica record-stage --run "$RUN" --stage emit \
+  --model sonnet --effort medium --skill src/rubrica/skills/rb-emit/SKILL.md
+rubrica run-summary --run "$RUN"
+```
+
+Each `06-suite/<scenario_id>/` holds `task.toml`, `instruction.md`, `seed.json`,
+`golden.json`, `provenance.md`, and a `tests/` directory with
+`expected.json`, `verify.py` and `test.sh`. `emit` prints one task directory per
+emitted scenario, and it owns `06-suite/`: a directory for a scenario this run
+did not emit is pruned rather than left to read as current.
+
+If `challenge` returned `re-seed` for any instance, `emit` refuses to compile
+that instance and reports a finding no further stage can clear. The repair is a
+single re-dispatch of `rb-instantiate` for that scenario carrying the
+adversary's objection verbatim, and guide §9 is how that is done.
+
+Running the suite is the next thing and this page does not take that detour:
+`rubrica smoke --run "$RUN" --agents agents.json` needs a roster you author
+yourself, which the pipeline never produces. See
+[`docs/reference/cli.md`](reference/cli.md) for its shape.
+
+## The hand-picked shortcut
+
+`intake --input` reaches the same state the intake step above reaches, with no
+corpus, no catalogue, no triage record and no gate 0 — you already decided which
+files matter, so nothing reviews that decision. If you know which few files
+carry the target's behaviour, this is the right call rather than a shortcut
+around anything.
 
 ```bash
 rubrica intake \
@@ -323,77 +552,74 @@ rubrica intake \
   --max-rounds 2 --max-scenarios 128
 ```
 
+It prints the new run directory, so it is usually written `RUN=$(rubrica intake
+…)`. From there, pick this page up at "Extract, one dispatch per input" — every
+block from there on is unchanged.
+
+## The same run in one step
+
+The second way to run Rubrica, and a peer of the sequence above. Point a
+`claude` session at the orchestrator skill with a run directory that has a
+manifest:
+
 ```
-runs/run-20260815-201620
+You are the rubrica orchestrator.
+
+Run directory: <absolute path to $RUN>
+Your skill:    <absolute path>/src/rubrica/skills/rb-orchestrate/SKILL.md
 ```
 
-No catalogue, no triage record, no gate — `manifest.json` is written
-straight from the three `--input` files named on the command line.
+It dispatches the prompt stages from `extract` through `emit`, gates every
+artifact before the next stage sees it, holds the round loop, holds gates 1
+through 3, spends at most one repair attempt per stage failure, and writes
+`decisions.md` so the run explains itself afterwards. It never runs `survey`,
+never dispatches a pass of the triage family, and never holds gate 0 — all
+three are finished before it is handed a run at all. `rb-orchestrate` is a
+skill and not a stage: it declares no `stage` and no `schemas`, so it has no
+artifact of its own and no `validate --stage` to pass.
 
-## What runs the prompt stages
+`--no-gate` goes in that prompt's text, not on any command line. It is
+described in the skill as passed to the orchestrator when it was dispatched, so
+it is an instruction to a model rather than a flag of any binary; it makes gates
+1 through 3 skippable, which the reproducibility criterion needs: that criterion
+measures this pipeline by running five identical runs and attributing the
+variance, and five identical runs cannot exist if a human intervenes in each.
+[`docs/concepts/pipeline.md`](concepts/pipeline.md) is where the flag is
+documented, together with the cost of leaving it prompt-level.
 
-No command in this repository dispatches a model. `survey`, `intake`,
-`validate`, `check-refs`, and every other subcommand above are code — the
-dispatch of the triage family's prompt passes, and of the stages from `extract`
-through `emit`, happens by pointing an agent at a skill file and a run
-directory.
-
-`rb-orchestrate` — `src/rubrica/skills/rb-orchestrate/SKILL.md` — is the skill
-that drives a whole run once a manifest exists. Point an agent at it with a
-run directory and it dispatches one subagent per stage from `extract`
-through `emit`, gates every artifact before the next stage sees it, holds the
-round loop between propose and score, holds the three human gates after
-the reconcile seal, score, and challenge, spends at most one repair attempt per stage
-failure, and records what it did — the model, the skill's hash, and every
-branch it took — so the run explains itself afterward. It never runs
-`survey`, never dispatches any pass of the triage family, and never holds
-gate 0: all three are finished, by the time it is ever handed a run, per the
-walkthrough above.
-
-The family's own passes are dispatched the same way, one at a time, before a
-manifest exists at all — see
-[`docs/guides/running-a-stage-by-hand.md`](guides/running-a-stage-by-hand.md)
-for the exact dispatch prompt and the settings that keep a dispatched
-subagent from reading anything its skill does not list.
-
-## What each dispatch carries
-
-Every dispatch — whether `rb-orchestrate` sending out one stage, or a stage
-being run by hand — hands a subagent exactly three things: the run directory,
-the stage's name, and the path to its skill file. Nothing else. No summary of
-what an earlier stage concluded, no excerpt of this page or anything else under
-`docs/`, no "by the way" context. If a stage needs a fact, it reads it from an
-artifact its skill's contract lists, or it does not have it.
-
-The fan-out stages — `extract`, `reconcile-contradict`, `instantiate`,
-`challenge` — get a fourth thing: the id of their own slice (an `artifact_id`, a
-`subject_id` or a `scenario_id`). That id is an address, never a hint about what
-a sibling found, never a sibling's own id, and never the slice's contents: a
-`reconcile-contradict` member reads its own subject's claim list out of
-`01-subjects.json` itself.
-
-[`docs/concepts/artifact-contract.md`](concepts/artifact-contract.md) covers
-the rest of this rule — including the two things an orchestrator may append
-to a *re*-dispatch, and why both must be verbatim machine text rather than a
-paraphrase.
+**This is not `./scripts/dispatch-stage.sh orchestrate`.** The script takes
+that invocation without complaint — `rb-orchestrate/SKILL.md` exists, so nothing
+about it exits `2` — and what comes back is a crippled dispatch rather than a
+refusal. That script grants no subagent capability — its
+`permissions.allow` is `Read`/`Edit`/`Write` scoped to the run directory,
+`Read` on one skill directory, and `Bash(rubrica *)` — and its deny list
+enumerates every sibling `rb-*` skill directory one at a time. Both are
+deliberate: they are what makes a single-stage dispatch measure that skill
+rather than that skill plus a briefing. An orchestrator dispatched through it
+could therefore neither read nor hand out the skills it exists to dispatch.
+Guide §4 and §6 are the mechanics of that isolation and what only looks
+enforced.
 
 ## Where to go next
 
+- [`docs/guides/invoking-rubrica.md`](guides/invoking-rubrica.md) — the
+  mechanics of both invocation types: every flag, every environment variable,
+  what a dispatch is handed and what it is denied.
 - [`docs/concepts/pipeline.md`](concepts/pipeline.md) — every stage, what it
   reads and writes, and the loop between propose and score.
 - [`docs/reference/cli.md`](reference/cli.md) — every subcommand, its flags,
   and its own example.
 - [`docs/reference/artifacts.md`](reference/artifacts.md) — every artifact
   kind, its schema, and what is worth knowing before you open one.
+- [`docs/concepts/artifact-contract.md`](concepts/artifact-contract.md) — the
+  one architectural rule, what a dispatch carries, and the two things an
+  orchestrator may append to a *re*-dispatch.
 - [`docs/concepts/glossary.md`](concepts/glossary.md) — terms used across the
   schemas and the CLI, defined from what actually produces or consumes them.
-- [`docs/guides/running-a-stage-by-hand.md`](guides/running-a-stage-by-hand.md)
-  — dispatch one stage by itself and check what it wrote, whether you are
-  exercising a skill you just changed or debugging one that misbehaved.
 - [`docs/design/rationale.md`](design/rationale.md) — why the pipeline is
-  shaped this way: the one architectural rule, the two check layers, the
-  human gates.
-- [`docs/design/limitations.md`](design/limitations.md) — what is known not
-  to work yet, and why it was parked rather than fixed.
-- [`CONTRIBUTING.md`](../CONTRIBUTING.md) — the three checks a change has to
-  clear, and the commit conventions this repository holds to.
+  shaped this way: the one architectural rule, the two check layers, the human
+  gates.
+- [`docs/design/limitations.md`](design/limitations.md) — what is known not to
+  work yet, and why it was parked rather than fixed.
+- [`CONTRIBUTING.md`](../CONTRIBUTING.md) — the checks a change has to clear,
+  and the commit conventions this repository holds to.

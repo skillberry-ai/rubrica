@@ -3,7 +3,7 @@
 # Dispatch one stage into a Claude Code instance that shares nothing with the
 # developer's own setup.
 #
-# docs/guides/running-a-stage-by-hand.md is the runbook this automates; §7 there covers
+# docs/guides/invoking-rubrica.md is the runbook this automates; §6 there covers
 # why an isolated instance is worth the trouble and what is and is not enforced.
 # The short version: this project's falsifiable claim is that the *prompt*
 # carries the judgment across artifact handoffs. A dispatch that also carries a
@@ -85,6 +85,7 @@ if [ -n "$SLICE" ]; then
   case "$STAGE" in
     extract)               SLICE_LINE="Your artifact_id:  $SLICE" ;;
     reconcile-contradict)  SLICE_LINE="Your subject_id:   $SLICE" ;;
+    propose)               SLICE_LINE="Your batch_id:     $SLICE" ;;
     instantiate|challenge) SLICE_LINE="Your scenario_id:  $SLICE" ;;
     triage-rule)           SLICE_LINE="Your slice_id:     $SLICE" ;;
     *) echo "$STAGE is a single dispatch over everything; it takes no slice id" >&2; exit 2 ;;
@@ -382,9 +383,10 @@ jq -n --arg repo "$REPO" --arg run "$RUN" --arg skilldir "$SKILL_DIR" \
 # re-dispatch, and the reason this mechanism exists at all rather than a human
 # retyping the objection.
 #
-# rb-orchestrate's step 227 and rb-instantiate's section 1 agree on the payload,
-# and it is two fields, not four: the verdict's `alternative_answers` and its
-# `notes`. Nothing else -- not `uniquely_determined`, not the verdict string.
+# rb-orchestrate's named exception for a re-seed re-dispatch and rb-instantiate's
+# section 1 agree on the payload, and it is two fields, not four: the verdict's
+# `alternative_answers` and its `notes`. Nothing else -- not
+# `uniquely_determined`, not the verdict string.
 #
 # Built with jq straight from the verdict file, so a paraphrase is not something
 # this script declines to write, it is something it cannot express. That is the
@@ -500,7 +502,7 @@ $(jq '{uniquely_determined, derivable_without_guessing, notes}' "$V")
   done
 fi
 
-# The dispatch prompt, verbatim from docs/guides/running-a-stage-by-hand.md §2. Nothing
+# The dispatch prompt, verbatim from docs/guides/invoking-rubrica.md §7. Nothing
 # else may be added to it: not a summary of what an earlier stage concluded, not
 # an excerpt of the world model, and not a correction for something a skill got
 # wrong. A skill defect belongs in the skill.
