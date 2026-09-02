@@ -5,8 +5,8 @@ Each line names the question that document answers.
 
 ## Start here
 
-- [`getting-started.md`](getting-started.md) — How do I get from a clone of
-  this repository to a minted run I can inspect?
+- [`getting-started.md`](getting-started.md) — How do I run Rubrica end to end,
+  one command at a time, from a clone of this repository to an emitted suite?
 
 ## Concepts
 
@@ -34,9 +34,9 @@ Each line names the question that document answers.
 
 ## Guides
 
-- [`guides/invoking-rubrica.md`](guides/invoking-rubrica.md) —
-  How do I dispatch one skill for real, against a fresh run, and check what
-  it did?
+- [`guides/invoking-rubrica.md`](guides/invoking-rubrica.md) — What are the
+  two ways to invoke a stage, what does each take, and what setup do they
+  share?
 
 ## Design
 
