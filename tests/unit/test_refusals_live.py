@@ -2,7 +2,7 @@
 
 Marked live because the assertion needs a model's output, and pytest cannot
 dispatch a subagent. So the controller runs the dispatch per
-docs/guides/running-a-stage-by-hand.md and commits the resulting world model under
+docs/guides/invoking-rubrica.md and commits the resulting world model under
 tests/fixtures/<name>/recorded/01-world-model.json.
 
 **The recording is committed on purpose.** A refusal observed once and never
@@ -27,7 +27,7 @@ pytestmark = pytest.mark.live
 RECORDED = "recorded/01-world-model.json"
 RERECORD = (
     "no recorded reconcile output. Produce one with the dispatch in "
-    "docs/guides/running-a-stage-by-hand.md against {fixture}, then commit it to {path}."
+    "docs/guides/invoking-rubrica.md against {fixture}, then commit it to {path}."
 )
 
 

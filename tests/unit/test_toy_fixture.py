@@ -313,7 +313,7 @@ def test_the_open_scenario_count_stays_within_the_manifest_cap():
 
 
 # -- build_toy_run(upto=...): the checkpoint mechanism every per-stage hand
-# exercise depends on, per docs/guides/running-a-stage-by-hand.md's table.
+# exercise depends on, per docs/guides/invoking-rubrica.md's table.
 # Nothing exercised it before this file: Task 4's report deferred a test to
 # Task 5, Task 5 never picked it up (its own toy_run fixture calls
 # build_toy_run with no upto at all), and Task 6's report only checked that

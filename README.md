@@ -81,7 +81,7 @@ dispatch rather than the CLI: `dispatch-stage.sh` and `audit-reads.sh` each need
 `jq` on `PATH`, and `dispatch-stage.sh` needs the `claude` CLI as well. Both
 check up front and exit `2` naming the missing tool — a misconfigured
 environment, not a stage defect. See
-[`docs/guides/running-a-stage-by-hand.md`](docs/guides/running-a-stage-by-hand.md).
+[`docs/guides/invoking-rubrica.md`](docs/guides/invoking-rubrica.md).
 
 There is one more target, `make live`, deliberately not part of `make test`:
 it runs behind the `live` pytest marker and the `RUBRICA_LIVE` opt-in,
@@ -120,7 +120,7 @@ including the survey/triage path for a whole corpus, is
 - Reference: [`docs/reference/cli.md`](docs/reference/cli.md),
   [`docs/reference/artifacts.md`](docs/reference/artifacts.md).
 - Guides:
-  [`docs/guides/running-a-stage-by-hand.md`](docs/guides/running-a-stage-by-hand.md).
+  [`docs/guides/invoking-rubrica.md`](docs/guides/invoking-rubrica.md).
 - Design: [`docs/design/rationale.md`](docs/design/rationale.md),
   [`docs/design/limitations.md`](docs/design/limitations.md).
 

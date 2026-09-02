@@ -34,7 +34,7 @@ Each line names the question that document answers.
 
 ## Guides
 
-- [`guides/running-a-stage-by-hand.md`](guides/running-a-stage-by-hand.md) —
+- [`guides/invoking-rubrica.md`](guides/invoking-rubrica.md) —
   How do I dispatch one skill for real, against a fresh run, and check what
   it did?
 

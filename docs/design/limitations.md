@@ -112,7 +112,7 @@ The only instrument that exists is a **transcript audit at dispatch time**:
 `scripts/audit-reads.sh` extracts every path a dispatched stage actually
 touched from the stream-JSON transcript `scripts/dispatch-stage.sh` writes, so
 the list can be read against that stage's Contract `reads`. Run it — see
-[`docs/guides/running-a-stage-by-hand.md`](../guides/running-a-stage-by-hand.md)
+[`docs/guides/invoking-rubrica.md`](../guides/invoking-rubrica.md)
 for where the transcript lands. A path outside the contract is graded Important,
 not Minor.
 
