@@ -13,8 +13,9 @@ they need credentials — which is why they live behind the `live` pytest marker
 (`tests/conftest.py`) and `make live`, and are never part of `make test`.
 
 This document is the reference for both, and it is about mechanics: the flags,
-the environment variables, what a dispatch is handed and what it is denied. It
-deliberately says nothing about what order to run things in —
+the environment variables, what a dispatch is handed and what it is denied.
+Order appears below only where a mechanism depends on it — a repair that has to
+precede the re-run it repairs, say — and never as the run's sequence:
 [`docs/getting-started.md`](../getting-started.md) walks a run in order, and
 `paths.STAGES` with [`docs/concepts/pipeline.md`](../concepts/pipeline.md) is
 the ordering itself. Two readers were in mind: someone exercising a skill they
@@ -28,7 +29,7 @@ committed.
 Which one to use is not a matter of taste — it is what you are measuring. A
 whole-pipeline `rb-orchestrate` run measures the pipeline; one stage dispatched
 by itself measures that stage, and is the only way to give each fan-out member
-its own read isolation, for the reason §6 ends on. `rb-orchestrate` is also not
+its own read isolation, for the reason §6 gives. `rb-orchestrate` is also not
 a stage: it declares no `stage` and no `schemas`, and it never runs `survey`,
 never dispatches a pass of the triage family and never holds gate 0 — all three
 are finished before it is handed a run at all.
@@ -72,9 +73,11 @@ below is the run directory throughout, and `dispatch-stage.sh` is
 | `smoke` | code | `rubrica smoke --run "$RUN" --agents <path>` |
 
 An invocation ending in an id is a fan-out: one dispatch per id, and §4's
-table says which file each id is read out of. Nothing in the table is an order —
-`survey` and the `triage-*` family run before `intake` mints a manifest, and
-`02a` through `03b` are a loop.
+table says which file each id is read out of. The rows are `paths.STAGES` in
+order, but what the table is *for* here is which invocation each stage takes,
+and reading it as the run's sequence would mislead twice over: `survey` and the
+`triage-*` family run before `intake` mints a manifest, and `02a` through `03b`
+are a loop.
 
 ## 2. What both invocation types need first
 
@@ -281,7 +284,7 @@ dispatching, which is how `tests/unit/test_dispatch_harness.py` checks the deny
 lists without spending a model call — and how to check them by hand:
 
 ```bash
-RUBRICA_PRINT_SETTINGS=1 ./scripts/dispatch-stage.sh propose "$RUN"   # prints both paths
+RUBRICA_PRINT_SETTINGS=1 ./scripts/dispatch-stage.sh propose "$RUN" b01   # prints both paths
 ```
 
 It prints three lines in a fixed order — the `--settings` file holding
@@ -372,10 +375,10 @@ and `rb-challenge` each need `Your scenario_id:`. Omit the line entirely for `rb
 `rb-triage-audit`, the other `rb-reconcile-*` passes, `rb-score` and `rb-emit`,
 which are single
 dispatches over everything. Give the member its own id and nothing about any
-other slice — a sibling's id, or a hint about what a sibling found, is the
-context leak §5 forbids. `rb-orchestrate`'s own §3 A1 states the same rule from
-the dispatcher's side, and this line was missing from the template while all
-four fan-out exercises run so far had to add it by hand.
+other slice — a sibling's id, or a hint about what a sibling found, is exactly
+the context leak the rule above forbids. `rb-orchestrate`'s own §3 A1 states
+the same rule from the dispatcher's side, and this line was missing from the
+template while all four fan-out exercises run so far had to add it by hand.
 
 ### What may be appended to a *re*-dispatch
 
@@ -686,7 +689,7 @@ print(run.root)
 This is a throwaway script, not a shipped one (hence `/tmp`, not `scripts/`):
 the mapping table above is the reusable part, and five lines are cheaper to
 retype than to maintain as a committed CLI. Run it, then dispatch the prompt
-from §7's template above with `<absolute path>` set to the printed run directory.
+template above with `<absolute path>` set to the printed run directory.
 
 ## 8. Verification, reading a failure, and the live suite
 
@@ -810,9 +813,9 @@ compile one — it reports a finding no further stage can clear. The repair is a
 single re-dispatch of `rb-instantiate` for that scenario, carrying the adversary's
 objection. That objection is one of exactly **two** things an orchestrator may
 append to a dispatch, and the payload is fixed by two skills that agree on it:
-`rb-orchestrate` step 227 and `rb-instantiate` §1 both say the verdict's
-**`alternative_answers` and its `notes`** — not the verdict string, not
-`uniquely_determined`, not the flags.
+`rb-orchestrate`'s named exception for a `re-seed` re-dispatch and
+`rb-instantiate` §1 both say the verdict's **`alternative_answers` and its
+`notes`** — not the verdict string, not `uniquely_determined`, not the flags.
 
 ```bash
 RUBRICA_RESEED=1 ./scripts/dispatch-stage.sh instantiate "$RUN" scn-005
@@ -851,9 +854,9 @@ passes the field through empty rather than omitting it, so the member can tell
 which of the two shapes arrived.
 
 After re-seeding, re-challenge that scenario and only then re-run `emit`. A second
-`re-seed` verdict is not another repair: `rb-orchestrate` §505 says treat it as a
-rejection, because `emit` refuses a `re-seed` no matter how many rounds produced
-it.
+`re-seed` verdict is not another repair: `rb-orchestrate`'s rule for a second
+`re-seed` is to stop re-seeding and treat it as a rejection, because `emit`
+refuses a `re-seed` no matter how many rounds produced it.
 
 To inspect what a dispatch *would* send without spending anything:
 

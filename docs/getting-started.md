@@ -18,8 +18,9 @@ covered here, and neither is the fallback for the other:
   through `emit` itself, gating each artifact and stopping at each human gate.
   That is the closing section, "The same run in one step".
 
-**This page is the order, and nothing else.** It explains no flag and no
-environment variable on purpose: those are
+**This page states the order.** Where it names a flag — `--stage`, `--round`,
+`--gate` — it does so to make the order unambiguous, not to explain the flag.
+What a flag means, and what environment variables exist, are
 [`docs/guides/invoking-rubrica.md`](guides/invoking-rubrica.md) — §3 for
 `rubrica` subcommands, §4 for `dispatch-stage.sh`, §9 for repairing a
 `re-seed` — and [`docs/reference/cli.md`](reference/cli.md), which documents
@@ -198,10 +199,9 @@ for stage in triage-objective triage-rule triage-audit; do
 done
 ```
 
-Substitute the model and effort you actually dispatched with; `record-stage`
-hashes the skill file the run used, so a digest that stops matching the file on
-disk means the file changed after the run. Write down what you dispatched at
-the time — nothing on disk remembers it for you until this command runs.
+Substitute the model and effort you actually dispatched with. Write down what
+you dispatched at the time — nothing on disk remembers it for you until this
+command runs.
 `triage-slices` and `triage-seal` are code, have no skill file, and take no
 entry at all: their absence from `manifest.stages` is not a finding.
 
@@ -450,7 +450,9 @@ pipeline acts on it, so acting on it is the reader's job.
 rubrica gate-brief --run "$RUN" --gate 2
 ```
 
-The coverage matrix, read once the loop has stopped.
+The coverage matrix, read once the loop has stopped. It is a report and not a
+gate — it exits `0` on a readable run — so whether this coverage is worth what
+instantiating it costs is a ruling you make from it.
 
 ## Instantiate, one dispatch per active scenario
 
@@ -495,7 +497,9 @@ rubrica record-stage --run "$RUN" --stage challenge \
 rubrica gate-brief --run "$RUN" --gate 3
 ```
 
-The verdict tally.
+The verdict tally. A report again, exiting `0` whatever it says: which rejects
+and which re-seeds to act on is yours to rule on, not something the pipeline
+settles.
 
 ## Emit the suite
 
@@ -577,10 +581,16 @@ artifact of its own and no `validate --stage` to pass.
 `--no-gate` goes in that prompt's text, not on any command line. It is
 described in the skill as passed to the orchestrator when it was dispatched, so
 it is an instruction to a model rather than a flag of any binary; it makes gates
-1 through 3 skippable, which is what makes five identical runs possible at all.
+1 through 3 skippable, which the reproducibility criterion needs: that criterion
+measures this pipeline by running five identical runs and attributing the
+variance, and five identical runs cannot exist if a human intervenes in each.
+[`docs/concepts/pipeline.md`](concepts/pipeline.md) is where the flag is
+documented, together with the cost of leaving it prompt-level.
 
-**This is not `./scripts/dispatch-stage.sh orchestrate`, and the script will
-not do it.** That script grants no subagent capability — its
+**This is not `./scripts/dispatch-stage.sh orchestrate`.** The script takes
+that invocation without complaint — `rb-orchestrate/SKILL.md` exists, so nothing
+about it exits `2` — and what comes back is a crippled dispatch rather than a
+refusal. That script grants no subagent capability — its
 `permissions.allow` is `Read`/`Edit`/`Write` scoped to the run directory,
 `Read` on one skill directory, and `Bash(rubrica *)` — and its deny list
 enumerates every sibling `rb-*` skill directory one at a time. Both are

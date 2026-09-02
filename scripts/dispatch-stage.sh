@@ -383,9 +383,10 @@ jq -n --arg repo "$REPO" --arg run "$RUN" --arg skilldir "$SKILL_DIR" \
 # re-dispatch, and the reason this mechanism exists at all rather than a human
 # retyping the objection.
 #
-# rb-orchestrate's step 227 and rb-instantiate's section 1 agree on the payload,
-# and it is two fields, not four: the verdict's `alternative_answers` and its
-# `notes`. Nothing else -- not `uniquely_determined`, not the verdict string.
+# rb-orchestrate's named exception for a re-seed re-dispatch and rb-instantiate's
+# section 1 agree on the payload, and it is two fields, not four: the verdict's
+# `alternative_answers` and its `notes`. Nothing else -- not
+# `uniquely_determined`, not the verdict string.
 #
 # Built with jq straight from the verdict file, so a paraphrase is not something
 # this script declines to write, it is something it cannot express. That is the
