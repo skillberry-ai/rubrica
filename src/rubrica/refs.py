@@ -1222,10 +1222,18 @@ def check_triage(run: RunPaths) -> list[Finding]:
 def check_manifest(run: RunPaths) -> list[Finding]:
     """The manifest against 01-claims, and each claim's evidence against the manifest.
 
-    Checked in one direction only: every claims file must name a registered
-    input, never the reverse. A registered input with no claims file yet is the
-    normal state during the extract fan-out, and reporting it there would fire
-    on a run in which nothing is wrong.
+    Both directions: every claims file must name a registered input, and every
+    registered input must have a claims file. The second was one-directional
+    until issue #19, on the argument that a registered input with no claims file
+    is the normal state *during* the extract fan-out -- true, but not a state
+    check-refs observes. There is no stage-scoped check-refs; check_all runs
+    every checker the run has inputs for, and the orchestrator dispatches it
+    after a fan-out completes. That is the argument check_disposition_parts,
+    check_contradiction_parts and _scenario_round_findings all make, and until
+    #19 the extract fan-out was the one of the four making it differently: a
+    member that refused, died or was killed passed both layers at zero findings,
+    then surfaced stages later as findings against the reconcile partials that
+    had cited its absent claims.
     """
     manifest = _load(run.manifest)
     if manifest is None:
@@ -1263,6 +1271,25 @@ def check_manifest(run: RunPaths) -> list[Finding]:
             )
             continue
         registered[artifact_id] = i
+
+    # The guard is `is_dir()`, not a count, exactly as the three sibling fan-out
+    # checkers guard theirs: with no 01-claims/ at all the run has not reached
+    # extract, and reporting every input there would spend the orchestrator's
+    # single repair attempt on a phantom. Once the directory exists the
+    # mid-fan-out window is deliberately *not* tolerated -- check-refs is
+    # dispatched after every member has finished, so a missing file is real.
+    if run.claims_dir.is_dir():
+        extracted = {path.stem for path in list_json(run.claims_dir)}
+        for artifact_id in sorted(set(registered) - extracted):
+            out.append(
+                Finding(
+                    run.claims_dir,
+                    "refs",
+                    "",
+                    f"input {artifact_id} has no claims file on disk; every registered input "
+                    "needs one, even one recording that nothing could be extracted from it",
+                )
+            )
 
     for claim_id, paths in sorted(_claim_index(run).items()):
         if len(paths) > 1:

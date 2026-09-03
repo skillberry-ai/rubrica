@@ -33,14 +33,44 @@ def test_no_manifest_is_not_a_finding(tmp_path):
     assert check_manifest(run) == []
 
 
-def test_a_registered_input_with_no_claims_file_is_not_a_finding(tmp_path):
-    """The normal state during the extract fan-out; firing here is a phantom."""
+def test_a_registered_input_with_no_claims_file_is_reported_once_the_directory_exists(tmp_path):
+    """A sibling landed, so the fan-out ran; this input's member wrote nothing."""
+    manifest = minimal_manifest()
+    manifest["inputs"].append(
+        {
+            "artifact_id": "aap2-notes",
+            "source_path": "harness-skills/parsec-aap2/notes.md",
+            "stored_as": "notes.md",
+            "sha256": "c" * 64,
+            "kind": "design_doc",
+            "bytes": 12,
+        }
+    )
+    run = _run(tmp_path, manifest=manifest, claims={"aap2-api": minimal_claims()})
+    findings = check_manifest(run)
+    assert len(findings) == 1
+    assert findings[0].artifact == run.claims_dir
+    assert "aap2-notes" in findings[0].message
+    assert "has no claims file on disk" in findings[0].message
+
+
+def test_a_registered_input_is_not_reported_before_the_claims_directory_exists(tmp_path):
+    """The guard: with no 01-claims/ at all the run has not reached the extract fan-out,
+    and reporting every input there would spend the orchestrator's one repair attempt on a
+    phantom. Once the directory exists the tolerance ends -- see the test above."""
     run = _run(tmp_path)
+    assert not run.claims_dir.exists()
     assert check_manifest(run) == []
 
 
 def test_a_claims_file_naming_an_unregistered_artifact_is_reported(tmp_path):
-    run = _run(tmp_path, claims={"ghost": minimal_claims(artifact_id="ghost")})
+    # The registered input needs a claims file of its own now that a missing one is
+    # itself a finding, and the ghost needs a claim id of its own too: two files
+    # sharing clm-001 is the separate duplicate-id defect the test below owns, and
+    # measured 2 findings here until this fixture gave the ghost clm-002.
+    ghost = minimal_claims(artifact_id="ghost")
+    ghost["claims"][0]["id"] = "clm-002"
+    run = _run(tmp_path, claims={"aap2-api": minimal_claims(), "ghost": ghost})
     findings = check_manifest(run)
     assert len(findings) == 1
     assert "not registered in the manifest" in findings[0].message
