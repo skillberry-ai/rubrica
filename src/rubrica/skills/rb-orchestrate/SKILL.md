@@ -223,7 +223,7 @@ the triage family, pass by pass              → validate --stage triage-seal �
 rubrica intake --run <run>                    # admits it into manifest.json -- not yours
 rubrica check-skills                          # before anything: a bad skill is not a stage defect
 verify manifest.json                          # `rubrica intake` is the operator's, never yours
-fan out rb-extract, one per input artifact   → validate --stage extract
+fan out rb-extract, one per input artifact   → validate --stage extract → check-refs (after all members finish)
 rb-reconcile-subjects                        → validate --stage reconcile-subjects → check-refs
 fan out rb-reconcile-contradict, one per subject → validate --stage reconcile-contradict
     at most 3 members concurrently           → check-refs (after all members finish)
@@ -253,7 +253,7 @@ loop (round = 1..K):                           # K = manifest.limits.max_rounds
     rubrica decide --note "round N: <verdict>, <covered>/<total> cells"
     on latest.json verdict: continue → round++ | converged | halted_* → leave the loop
                                              → HUMAN GATE 2: scenarios and coverage (the cost gate)
-fan out rb-instantiate per active scenario   → validate --stage instantiate → check-refs   ← reachability gate
+fan out rb-instantiate per active scenario   → validate --stage instantiate → check-refs (after all members finish)   ← reachability gate
 fan out rb-challenge per instantiated one    → validate --stage challenge → check-refs (after all members finish)
     re-seed → re-dispatch rb-instantiate ONCE, the adversary's alternatives appended
     reject  → re-dispatch rb-score: rule it rejected, then both seals again
@@ -497,7 +497,10 @@ no run here to drive.
 
 **B2. Fan out `rb-extract`, one member per registered input artifact**, each
 given its own `artifact_id`. Then `rubrica validate --stage extract --run <run>`
-once, after all members are done. `record-stage --stage extract --run <run>`
+once, not per member. Run `rubrica check-refs --run <run>` **only after every
+member has finished** -- `refs.check_manifest` reports every registered input
+with no claims file from the moment `01-claims/` exists, so mid-fan-out most of
+them are missing by construction. `record-stage --stage extract --run <run>`
 with the skill you dispatched.
 
 **B3. The `reconcile-*` passes, in order, then the seal.** One logical step
@@ -769,10 +772,13 @@ money, and reviewing a scenario list is cheap by comparison.
 its own `scenario_id`. `active` and only `active`: a `proposed` scenario has
 not been ruled on, a `duplicate` was folded into another, and a `rejected` one
 is not a test -- instantiating any of them is a defect `check-refs` reports.
-Gate with `validate --stage instantiate`, then `check-refs`, which is **the
-reachability gate**: it is where every oracle's `grounded_in.seed_pointer` is
-resolved against its own scenario's seed, and it is the last chance to catch a
-label that points at nothing before the suite is compiled.
+Gate with `validate --stage instantiate`, then `check-refs` **only after every
+member has finished** -- `refs.check_instances` reports every `active` scenario
+with no instance directory from the moment `04-instances/` exists, so
+mid-fan-out most of them are missing by construction. That `check-refs` is also
+**the reachability gate**: it is where every oracle's `grounded_in.seed_pointer`
+is resolved against its own scenario's seed, and it is the last chance to catch
+a label that points at nothing before the suite is compiled.
 
 **B9. Fan out `rb-challenge`, one member per instantiated scenario**, each
 given its own `scenario_id`. Gate with `validate --stage challenge`, then

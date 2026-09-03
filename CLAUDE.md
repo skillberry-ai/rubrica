@@ -74,7 +74,7 @@ finding's clothes.
 | — | triage-audit | `rb-triage-audit` — barrier, reads the parts, never a candidate | validate · check-refs |
 | — | triage-seal | code — assembles `00-triage.json` from the staged parts | validate · **human gate 0** |
 | `00` | intake | code | validate |
-| `01a` | extract | `rb-extract` — fan-out, one per input | validate |
+| `01a` | extract | `rb-extract` — fan-out, one per input | validate · check-refs |
 | `01b` | reconcile-subjects | `rb-reconcile-subjects` — barrier | validate · check-refs |
 | `01c` | reconcile-contradict | `rb-reconcile-contradict` — fan-out, one per subject | validate · check-refs |
 | `01d` | reconcile-capabilities | `rb-reconcile-capabilities` | validate · check-refs |
@@ -121,12 +121,15 @@ identical partials must produce a byte-identical world model.
 the seal can tell it was assembled pass by pass rather than written in one
 dispatch.
 
-Challenge's and reconcile-contradict's `check-refs` run **only once every member
-has finished**: `refs.check_verdicts` and `refs.check_contradiction_parts` each
-report every missing slice from the moment their directory exists, so
-mid-fan-out most of them are missing by construction. `refs.check_all` runs
-every checker the run has inputs for, so there is no such thing as a
-stage-scoped `check-refs`.
+A fan-out's `check-refs` runs **only once every member has finished**, and the
+reason is a property of the checkers rather than of any one stage:
+`refs.check_manifest` (`01-claims/`), `refs.check_contradiction_parts`
+(`01-contradictions/`), `refs.check_instances` (`04-instances/`) and
+`refs.check_verdicts` (`05-verdicts/`) each report every missing slice from the
+moment their directory exists, so mid-fan-out most of them are missing by
+construction — and a checker written for a later fan-out will do the same.
+`refs.check_all` runs every checker the run has inputs for, so there is no such
+thing as a stage-scoped `check-refs`.
 
 `survey` and the `triage-*` family have no `0N` directory prefix of their own:
 `survey` writes `00-catalogue.json`, the family writes its staged parts, and

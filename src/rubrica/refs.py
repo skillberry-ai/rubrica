@@ -1222,10 +1222,20 @@ def check_triage(run: RunPaths) -> list[Finding]:
 def check_manifest(run: RunPaths) -> list[Finding]:
     """The manifest against 01-claims, and each claim's evidence against the manifest.
 
-    Checked in one direction only: every claims file must name a registered
-    input, never the reverse. A registered input with no claims file yet is the
-    normal state during the extract fan-out, and reporting it there would fire
-    on a run in which nothing is wrong.
+    Both directions: every claims file must name a registered input, and every
+    registered input must have a claims file. The relation was one-directional
+    until issue #19, on the argument that a registered input with no claims file
+    is the normal state *during* the extract fan-out -- true, but not a state
+    check-refs observes. There is no stage-scoped check-refs; check_all runs
+    every checker the run has inputs for, and the orchestrator dispatches it
+    after a fan-out completes. That is the argument check_disposition_parts,
+    check_contradiction_parts, check_instances, check_verdicts and
+    _scenario_round_findings all make, and until #19 the extract and instantiate
+    fan-outs were the ones making it differently: a member that refused, died or
+    was killed passed both layers at zero findings, then surfaced stages later --
+    here as findings against the reconcile partials that had cited its absent
+    claims, and for instantiate as an emitted suite one test short, which
+    check_instances records.
     """
     manifest = _load(run.manifest)
     if manifest is None:
@@ -1263,6 +1273,25 @@ def check_manifest(run: RunPaths) -> list[Finding]:
             )
             continue
         registered[artifact_id] = i
+
+    # The guard is `is_dir()`, not a count, exactly as the sibling fan-out
+    # checkers guard theirs: with no 01-claims/ at all the run has not reached
+    # extract, and reporting every input there would spend the orchestrator's
+    # single repair attempt on a phantom. Once the directory exists the
+    # mid-fan-out window is deliberately *not* tolerated -- check-refs is
+    # dispatched after every member has finished, so a missing file is real.
+    if run.claims_dir.is_dir():
+        extracted = {path.stem for path in list_json(run.claims_dir)}
+        for artifact_id in sorted(set(registered) - extracted):
+            out.append(
+                Finding(
+                    run.claims_dir,
+                    "refs",
+                    "",
+                    f"input {artifact_id} has no claims file on disk; every registered input "
+                    "needs one, even one recording that nothing could be extracted from it",
+                )
+            )
 
     for claim_id, paths in sorted(_claim_index(run).items()):
         if len(paths) > 1:
@@ -3725,7 +3754,25 @@ def _check_reachability(
 
 
 def check_instances(run: RunPaths) -> list[Finding]:
-    """Seed conformance, machine invariants, and the reachability gate."""
+    """Completeness, seed conformance, machine invariants, and the reachability gate.
+
+    Completeness is checked in both directions. The loop below reports an
+    instance directory whose scenario was never judged; the clause above it
+    reports an `active` scenario with no instance directory, which until issue
+    #19 nothing reported at all -- and the silence compounded, because
+    check_verdicts and check_suite both derive their populations from what is on
+    disk, so a dropped active scenario reached an emitted suite one test short
+    with no finding anywhere.
+
+    `rejected` is excluded from the population that must have a directory, and
+    the asymmetry is deliberate: challenge marks a scenario `rejected` *after* it
+    was instantiated, so a rejected scenario legitimately has a directory, and
+    requiring one would fire on a run whose reject path worked exactly as
+    prescribed. Score can also rule a scenario `rejected` during the loop, in
+    which case instantiate was never dispatched for it and it has no directory
+    at all -- so both presence and absence are prescribed states for `rejected`,
+    and neither is checkable here.
+    """
     world = _load(run.world_model)
     if world is None:
         return []
@@ -3749,6 +3796,34 @@ def check_instances(run: RunPaths) -> list[Finding]:
                 "and underscores",
             )
         )
+
+    # The guard is `is_dir()`, not a count, for the reason the sibling fan-out
+    # checkers give: with no 04-instances/ at all the run has not reached
+    # instantiate, and reporting every active scenario there would spend the
+    # orchestrator's single repair attempt on a phantom. Every other loop in
+    # this checker iterates the directory and is empty-safe without a guard,
+    # which is why this is the first clause to need one.
+    if run.instances_dir.is_dir():
+        instantiated = set(run.scenario_ids_with_instances())
+        # `sorted(by_id)` rather than `sorted(by_id.items())`: sorting the items
+        # sorts pairs whose second element is never compared, since the ids that
+        # order them are unique keys -- so it reads as though the scenario dicts
+        # were being ordered, buys nothing over sorting the keys, and diverges
+        # from the idiom the sibling completeness clauses use. A duplicate id in
+        # 02-scenarios.json is reported from the list rather than caught here;
+        # this mapping is a comprehension, so two equal ids collapse into one
+        # key long before anything sorts them.
+        for sid in sorted(by_id):
+            if by_id[sid].get("status") == "active" and sid not in instantiated:
+                out.append(
+                    Finding(
+                        run.instances_dir,
+                        "refs",
+                        "",
+                        f"active scenario {sid} has no instance directory on disk; every "
+                        "scenario score left active is one instantiate was dispatched for",
+                    )
+                )
 
     for sid in run.scenario_ids_with_instances():
         scenario = by_id.get(sid)
