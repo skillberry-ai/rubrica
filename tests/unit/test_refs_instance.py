@@ -113,6 +113,34 @@ def test_an_unfit_status_yields_exactly_one_finding_per_instance(tmp_path, statu
     assert findings[0].artifact == run.instance_dir("scn-001")
 
 
+# -- fan-out completeness -----------------------------------------------
+def test_an_active_scenario_with_no_instance_directory_is_reported(tmp_path):
+    """The instantiate fan-out's missing member: a sibling landed, this one wrote nothing."""
+    scenarios = minimal_scenarios()
+    second = dict(scenarios["scenarios"][0])
+    second["id"] = "scn-002"
+    scenarios["scenarios"].append(second)
+    run = _run(tmp_path)
+    write_json(run.scenarios, scenarios)
+    findings = check_instances(run)
+    assert len(findings) == 1
+    assert findings[0].artifact == run.instances_dir
+    assert "scn-002" in findings[0].message
+    assert "has no instance directory on disk" in findings[0].message
+
+
+def test_an_active_scenario_is_not_reported_before_the_instances_directory_exists(tmp_path):
+    """The guard: with no 04-instances/ at all the run has not reached instantiate, and
+    reporting every active scenario there would spend the orchestrator's one repair attempt
+    on a phantom."""
+    run = RunPaths(tmp_path)
+    write_json(run.claims("aap2-api"), minimal_claims())
+    write_json(run.world_model, minimal_world_model())
+    write_json(run.scenarios, minimal_scenarios())
+    assert not run.instances_dir.exists()
+    assert check_instances(run) == []
+
+
 # -- unsafe instance directory names ------------------------------------
 def test_an_unsafe_instance_directory_name_is_a_finding_not_an_exception(tmp_path):
     """A stage that wrote a badly-named directory is repairable at exit 1.

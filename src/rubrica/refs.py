@@ -1223,14 +1223,14 @@ def check_manifest(run: RunPaths) -> list[Finding]:
     """The manifest against 01-claims, and each claim's evidence against the manifest.
 
     Both directions: every claims file must name a registered input, and every
-    registered input must have a claims file. The second was one-directional
+    registered input must have a claims file. The relation was one-directional
     until issue #19, on the argument that a registered input with no claims file
     is the normal state *during* the extract fan-out -- true, but not a state
     check-refs observes. There is no stage-scoped check-refs; check_all runs
     every checker the run has inputs for, and the orchestrator dispatches it
     after a fan-out completes. That is the argument check_disposition_parts,
-    check_contradiction_parts and _scenario_round_findings all make, and until
-    #19 the extract fan-out was the one of the four making it differently: a
+    check_contradiction_parts, check_verdicts and _scenario_round_findings all
+    make, and until #19 the extract fan-out was the one making it differently: a
     member that refused, died or was killed passed both layers at zero findings,
     then surfaced stages later as findings against the reconcile partials that
     had cited its absent claims.
@@ -1272,7 +1272,7 @@ def check_manifest(run: RunPaths) -> list[Finding]:
             continue
         registered[artifact_id] = i
 
-    # The guard is `is_dir()`, not a count, exactly as the three sibling fan-out
+    # The guard is `is_dir()`, not a count, exactly as the sibling fan-out
     # checkers guard theirs: with no 01-claims/ at all the run has not reached
     # extract, and reporting every input there would spend the orchestrator's
     # single repair attempt on a phantom. Once the directory exists the
@@ -3752,7 +3752,22 @@ def _check_reachability(
 
 
 def check_instances(run: RunPaths) -> list[Finding]:
-    """Seed conformance, machine invariants, and the reachability gate."""
+    """Completeness, seed conformance, machine invariants, and the reachability gate.
+
+    Completeness is checked in both directions. The loop below reports an
+    instance directory whose scenario was never judged; the clause above it
+    reports an `active` scenario with no instance directory, which until issue
+    #19 nothing reported at all -- and the silence compounded, because
+    check_verdicts and check_suite both derive their populations from what is on
+    disk, so a dropped active scenario reached an emitted suite one test short
+    with no finding anywhere.
+
+    `rejected` is excluded from the population that must have a directory, and
+    the asymmetry is deliberate: challenge marks a scenario `rejected` *after* it
+    was instantiated, so a rejected scenario legitimately has a directory, and
+    requiring one would fire on a run whose reject path worked exactly as
+    prescribed.
+    """
     world = _load(run.world_model)
     if world is None:
         return []
@@ -3776,6 +3791,26 @@ def check_instances(run: RunPaths) -> list[Finding]:
                 "and underscores",
             )
         )
+
+    # The guard is `is_dir()`, not a count, for the reason the sibling fan-out
+    # checkers give: with no 04-instances/ at all the run has not reached
+    # instantiate, and reporting every active scenario there would spend the
+    # orchestrator's single repair attempt on a phantom. Every other loop in
+    # this checker iterates the directory and is empty-safe without a guard,
+    # which is why this is the first clause to need one.
+    if run.instances_dir.is_dir():
+        instantiated = set(run.scenario_ids_with_instances())
+        for sid, scenario in sorted(by_id.items()):
+            if scenario.get("status") == "active" and sid not in instantiated:
+                out.append(
+                    Finding(
+                        run.instances_dir,
+                        "refs",
+                        "",
+                        f"active scenario {sid} has no instance directory on disk; every "
+                        "scenario score left active is one instantiate was dispatched for",
+                    )
+                )
 
     for sid in run.scenario_ids_with_instances():
         scenario = by_id.get(sid)
