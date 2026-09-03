@@ -497,11 +497,11 @@ no run here to drive.
 
 **B2. Fan out `rb-extract`, one member per registered input artifact**, each
 given its own `artifact_id`. Then `rubrica validate --stage extract --run <run>`
-once, after all members are done, and `rubrica check-refs --run <run>` **only
-after every member has finished** -- `refs.check_manifest` reports every
-registered input with no claims file from the moment `01-claims/` exists, so
-mid-fan-out most of them are missing by construction.
-`record-stage --stage extract --run <run>` with the skill you dispatched.
+once, not per member. Run `rubrica check-refs --run <run>` **only after every
+member has finished** -- `refs.check_manifest` reports every registered input
+with no claims file from the moment `01-claims/` exists, so mid-fan-out most of
+them are missing by construction. `record-stage --stage extract --run <run>`
+with the skill you dispatched.
 
 **B3. The `reconcile-*` passes, in order, then the seal.** One logical step
 engineered as substeps, because a single dispatch had to hold every claim, plan

@@ -216,6 +216,7 @@ for artifact_id in $(jq -r '.inputs[].artifact_id' "$RUN"/manifest.json); do
   ./scripts/dispatch-stage.sh extract "$RUN" "$artifact_id"
 done
 rubrica validate --run "$RUN" --stage extract
+rubrica check-refs --run "$RUN"   # only meaningful once every member has landed
 rubrica record-stage --run "$RUN" --stage extract \
   --model sonnet --effort medium --skill src/rubrica/skills/rb-extract/SKILL.md
 ```
@@ -277,7 +278,7 @@ rubrica record-stage --run "$RUN" --stage reconcile-contradict \
 That comment is load-bearing: `refs.check_contradiction_parts` reports every
 missing slice from the moment the directory exists, so run mid-fan-out it names
 most of the subjects — by construction, not because anything is wrong. The same
-holds for `challenge` later.
+holds for `extract` above and for `challenge` later.
 
 `reconcile-capabilities` merges the capability claims into
 `01-capabilities.json`.
