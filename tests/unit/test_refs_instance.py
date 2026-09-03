@@ -144,6 +144,7 @@ def test_a_rejected_scenario_with_no_instance_directory_is_not_reported(tmp_path
     second = dict(scenarios["scenarios"][0])
     second["id"] = "scn-002"
     second["status"] = "rejected"
+    second["rejected_reason"] = "out_of_scope"
     scenarios["scenarios"].append(second)
     run = _run(tmp_path)
     write_json(run.scenarios, scenarios)

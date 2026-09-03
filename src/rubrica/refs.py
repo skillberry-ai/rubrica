@@ -3804,10 +3804,13 @@ def check_instances(run: RunPaths) -> list[Finding]:
     if run.instances_dir.is_dir():
         instantiated = set(run.scenario_ids_with_instances())
         # `sorted(by_id)` rather than `sorted(by_id.items())`: sorting the items
-        # compares (str, dict) tuples, which is safe only while every key is
-        # unique -- a duplicate id would raise TypeError from the comparison
-        # instead of reporting anything. This is also the idiom the sibling
-        # completeness clauses in this file use.
+        # sorts pairs whose second element is never compared, since the ids that
+        # order them are unique keys -- so it reads as though the scenario dicts
+        # were being ordered, buys nothing over sorting the keys, and diverges
+        # from the idiom the sibling completeness clauses use. A duplicate id in
+        # 02-scenarios.json is reported from the list rather than caught here;
+        # this mapping is a comprehension, so two equal ids collapse into one
+        # key long before anything sorts them.
         for sid in sorted(by_id):
             if by_id[sid].get("status") == "active" and sid not in instantiated:
                 out.append(
