@@ -129,6 +129,28 @@ def test_an_active_scenario_with_no_instance_directory_is_reported(tmp_path):
     assert "has no instance directory on disk" in findings[0].message
 
 
+def test_a_rejected_scenario_with_no_instance_directory_is_not_reported(tmp_path):
+    """The exclusion `rejected` earns, and the regression this file already shipped once.
+
+    A rejected scenario reaches that status by either of two prescribed routes:
+    score can rule it `rejected` during the loop, in which case instantiate was
+    never dispatched for it and it has no directory at all, or challenge can
+    reject it after the fact, in which case it has one. Requiring a directory
+    would make check-refs permanently dirty in the first state, with no repair
+    able to clear it -- which is the failure JUDGED_STATUSES' own comment
+    records having shipped.
+    """
+    scenarios = minimal_scenarios()
+    second = dict(scenarios["scenarios"][0])
+    second["id"] = "scn-002"
+    second["status"] = "rejected"
+    scenarios["scenarios"].append(second)
+    run = _run(tmp_path)
+    write_json(run.scenarios, scenarios)
+    assert not run.instance_dir("scn-002").exists()
+    assert check_instances(run) == []
+
+
 def test_an_active_scenario_is_not_reported_before_the_instances_directory_exists(tmp_path):
     """The guard: with no 04-instances/ at all the run has not reached instantiate, and
     reporting every active scenario there would spend the orchestrator's one repair attempt

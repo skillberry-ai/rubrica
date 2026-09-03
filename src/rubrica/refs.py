@@ -3766,7 +3766,10 @@ def check_instances(run: RunPaths) -> list[Finding]:
     the asymmetry is deliberate: challenge marks a scenario `rejected` *after* it
     was instantiated, so a rejected scenario legitimately has a directory, and
     requiring one would fire on a run whose reject path worked exactly as
-    prescribed.
+    prescribed. Score can also rule a scenario `rejected` during the loop, in
+    which case instantiate was never dispatched for it and it has no directory
+    at all -- so both presence and absence are prescribed states for `rejected`,
+    and neither is checkable here.
     """
     world = _load(run.world_model)
     if world is None:
@@ -3800,8 +3803,13 @@ def check_instances(run: RunPaths) -> list[Finding]:
     # which is why this is the first clause to need one.
     if run.instances_dir.is_dir():
         instantiated = set(run.scenario_ids_with_instances())
-        for sid, scenario in sorted(by_id.items()):
-            if scenario.get("status") == "active" and sid not in instantiated:
+        # `sorted(by_id)` rather than `sorted(by_id.items())`: sorting the items
+        # compares (str, dict) tuples, which is safe only while every key is
+        # unique -- a duplicate id would raise TypeError from the comparison
+        # instead of reporting anything. This is also the idiom the sibling
+        # completeness clauses in this file use.
+        for sid in sorted(by_id):
+            if by_id[sid].get("status") == "active" and sid not in instantiated:
                 out.append(
                     Finding(
                         run.instances_dir,
