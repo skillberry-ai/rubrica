@@ -721,6 +721,19 @@ built in §7 — that is expected, since the stage's artifact does not exist yet
 "Expect 0" applies only after the dispatched skill has actually written its
 artifact.
 
+**A fan-out stage is the second exception, and unlike the first it does not go
+away once the artifact is written.** A dispatch carries exactly one slice id —
+one `slice_id`, `artifact_id`, `subject_id`, `batch_id` or `scenario_id` — so
+exercising a fan-out by hand dispatches *one* member and leaves the fan-out
+incomplete by construction, and `check-refs` reports the members that never
+landed: `refs.check_manifest`, `check_disposition_parts`,
+`check_contradiction_parts`, `check_instances`, `check_verdicts` and
+`_scenario_round_findings` each report every slice with nothing on disk from the
+moment their directory exists. That is the checker working, not a defect in the
+skill under test. Read each finding's path and take as yours only the ones
+naming *your* member's slice; a lab dispatch of a fan-out therefore expects 0
+from `validate`, and from `check-refs` only the absent siblings.
+
 **The `triage-*` passes are the ones whose `record-stage` runs late.**
 `record-stage` merges into `manifest.json`, and on a run minted by `survey`
 there *is* no manifest until `intake --run` writes it after gate 0 — so at the
@@ -771,7 +784,10 @@ whichever one actually needs to change:
   is missing a constraint — the artifact is well-formed JSON that satisfies
   the schema but breaks a cross-artifact rule (a dangling reference, a seed
   that does not conform to the world model, an unreachable scenario) the
-  Invariants section should have told the model to maintain.
+  Invariants section should have told the model to maintain. **Route it there
+  only if it names your own member's slice.** A finding naming a sibling you
+  never dispatched is the single-member incompleteness described above, and no
+  wording in the skill under test can remove it.
 - **Nothing written, a refusal reported** may well be **correct**. Before
   treating it as a defect, check whether the refusal condition the subagent
   cited actually holds in the toy world: if it does, the skill did its job and

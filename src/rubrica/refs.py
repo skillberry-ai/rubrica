@@ -1229,11 +1229,13 @@ def check_manifest(run: RunPaths) -> list[Finding]:
     check-refs observes. There is no stage-scoped check-refs; check_all runs
     every checker the run has inputs for, and the orchestrator dispatches it
     after a fan-out completes. That is the argument check_disposition_parts,
-    check_contradiction_parts, check_verdicts and _scenario_round_findings all
-    make, and until #19 the extract fan-out was the one making it differently: a
-    member that refused, died or was killed passed both layers at zero findings,
-    then surfaced stages later as findings against the reconcile partials that
-    had cited its absent claims.
+    check_contradiction_parts, check_instances, check_verdicts and
+    _scenario_round_findings all make, and until #19 the extract and instantiate
+    fan-outs were the ones making it differently: a member that refused, died or
+    was killed passed both layers at zero findings, then surfaced stages later --
+    here as findings against the reconcile partials that had cited its absent
+    claims, and for instantiate as an emitted suite one test short, which
+    check_instances records.
     """
     manifest = _load(run.manifest)
     if manifest is None:
