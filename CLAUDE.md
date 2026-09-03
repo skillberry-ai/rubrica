@@ -86,7 +86,7 @@ finding's clothes.
 | `01j` | synthesise-interfaces | code — derives one OpenAPI document per service | validate · check-refs |
 | `01k` | reconcile-seal | code — `rubrica reconcile-seal` assembles the partials | validate · check-refs · **human gate 1** |
 | `02a` | propose-batches | code — partitions the round's closable holes | validate |
-| `02b` | propose | `rb-propose` — fan-out, one per batch | validate |
+| `02b` | propose | `rb-propose` — fan-out, one per batch | validate · check-refs |
 | `02c` | propose-seal | code — assembles the parts into `02-scenarios.json` | validate |
 | `03a` | score | `rb-score` — barrier | validate |
 | `03b` | score-seal | code — computes the matrices, composes the report | validate · check-refs · **human gate 2** |
@@ -123,11 +123,13 @@ dispatch.
 
 A fan-out's `check-refs` runs **only once every member has finished**, and the
 reason is a property of the checkers rather than of any one stage:
-`refs.check_manifest` (`01-claims/`), `refs.check_contradiction_parts`
-(`01-contradictions/`), `refs.check_instances` (`04-instances/`) and
-`refs.check_verdicts` (`05-verdicts/`) each report every missing slice from the
-moment their directory exists, so mid-fan-out most of them are missing by
-construction — and a checker written for a later fan-out will do the same.
+`refs.check_disposition_parts` (`00-dispositions/`), `refs.check_manifest`
+(`01-claims/`), `refs.check_contradiction_parts` (`01-contradictions/`),
+`refs.check_scenario_parts` (`02-scenarios/round-N/`), `refs.check_instances`
+(`04-instances/`) and `refs.check_verdicts` (`05-verdicts/`) each report every
+missing slice from the moment their directory exists, so mid-fan-out most of them
+are missing by construction — and a checker written for a later fan-out will do
+the same.
 `refs.check_all` runs every checker the run has inputs for, so there is no such
 thing as a stage-scoped `check-refs`.
 

@@ -420,6 +420,7 @@ for batch_id in $(jq -r '.batches[].id' "$RUN"/02-batches/round-$ROUND.json); do
   ./scripts/dispatch-stage.sh propose "$RUN" "$batch_id"
 done
 rubrica validate --run "$RUN" --stage propose
+rubrica check-refs --run "$RUN"   # only meaningful once every member has landed
 rubrica record-stage --run "$RUN" --stage propose \
   --model sonnet --effort medium --skill src/rubrica/skills/rb-propose/SKILL.md
 

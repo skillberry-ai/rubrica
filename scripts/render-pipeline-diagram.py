@@ -264,7 +264,7 @@ ROWS: list[dict] = [
         name="propose",
         runs="rb-propose · one member per batch",
         art=["02-scenarios/round-N/<batch>.json"],
-        gates=["validate"],
+        gates=["validate", "check-refs"],
         fan="fan-out · one member per batch",
         note="writes its own batch only; a bounded part, never the whole list",
     ),

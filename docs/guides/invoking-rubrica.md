@@ -728,7 +728,7 @@ exercising a fan-out by hand dispatches *one* member and leaves the fan-out
 incomplete by construction, and `check-refs` reports the members that never
 landed: `refs.check_manifest`, `check_disposition_parts`,
 `check_contradiction_parts`, `check_instances`, `check_verdicts` and
-`_scenario_round_findings` each report every slice with nothing on disk from the
+`check_scenario_parts` each report every slice with nothing on disk from the
 moment their directory exists. That is the checker working, not a defect in the
 skill under test. Read each finding's path and take as yours only the ones
 naming *your* member's slice; a lab dispatch of a fan-out therefore expects 0
