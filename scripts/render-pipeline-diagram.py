@@ -141,7 +141,7 @@ ROWS: list[dict] = [
         name="extract",
         runs="rb-extract",
         art=["01-claims/<artifact_id>.json"],
-        gates=["validate"],
+        gates=["validate", "check-refs"],
         fan="fan-out · one member per admitted input",
         note="",
     ),

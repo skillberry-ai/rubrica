@@ -223,7 +223,7 @@ the triage family, pass by pass              → validate --stage triage-seal �
 rubrica intake --run <run>                    # admits it into manifest.json -- not yours
 rubrica check-skills                          # before anything: a bad skill is not a stage defect
 verify manifest.json                          # `rubrica intake` is the operator's, never yours
-fan out rb-extract, one per input artifact   → validate --stage extract
+fan out rb-extract, one per input artifact   → validate --stage extract → check-refs (after all members finish)
 rb-reconcile-subjects                        → validate --stage reconcile-subjects → check-refs
 fan out rb-reconcile-contradict, one per subject → validate --stage reconcile-contradict
     at most 3 members concurrently           → check-refs (after all members finish)
@@ -497,8 +497,11 @@ no run here to drive.
 
 **B2. Fan out `rb-extract`, one member per registered input artifact**, each
 given its own `artifact_id`. Then `rubrica validate --stage extract --run <run>`
-once, after all members are done. `record-stage --stage extract --run <run>`
-with the skill you dispatched.
+once, after all members are done, and `rubrica check-refs --run <run>` **only
+after every member has finished** -- `refs.check_manifest` reports every
+registered input with no claims file from the moment `01-claims/` exists, so
+mid-fan-out most of them are missing by construction.
+`record-stage --stage extract --run <run>` with the skill you dispatched.
 
 **B3. The `reconcile-*` passes, in order, then the seal.** One logical step
 engineered as substeps, because a single dispatch had to hold every claim, plan

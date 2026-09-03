@@ -74,7 +74,7 @@ finding's clothes.
 | — | triage-audit | `rb-triage-audit` — barrier, reads the parts, never a candidate | validate · check-refs |
 | — | triage-seal | code — assembles `00-triage.json` from the staged parts | validate · **human gate 0** |
 | `00` | intake | code | validate |
-| `01a` | extract | `rb-extract` — fan-out, one per input | validate |
+| `01a` | extract | `rb-extract` — fan-out, one per input | validate · check-refs |
 | `01b` | reconcile-subjects | `rb-reconcile-subjects` — barrier | validate · check-refs |
 | `01c` | reconcile-contradict | `rb-reconcile-contradict` — fan-out, one per subject | validate · check-refs |
 | `01d` | reconcile-capabilities | `rb-reconcile-capabilities` | validate · check-refs |
