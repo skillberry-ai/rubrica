@@ -70,7 +70,7 @@ finding's clothes.
 | — | survey | code — walks a corpus, writes `00-catalogue.json` | validate |
 | — | triage-slices | code — partitions the catalogue, writes `00-slices.json` and its shards | validate |
 | — | triage-objective | `rb-triage-objective` — barrier, reads the corpus map, never a digest | validate |
-| — | triage-rule | `rb-triage-rule` — fan-out, one per slice | validate |
+| — | triage-rule | `rb-triage-rule` — fan-out, one per slice | validate · check-refs |
 | — | triage-audit | `rb-triage-audit` — barrier, reads the parts, never a candidate | validate · check-refs |
 | — | triage-seal | code — assembles `00-triage.json` from the staged parts | validate · **human gate 0** |
 | `00` | intake | code | validate |

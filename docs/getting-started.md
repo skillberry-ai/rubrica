@@ -132,6 +132,7 @@ for slice_id in $(jq -r '.slices[].id' "$RUN"/00-slices.json); do
   ./scripts/dispatch-stage.sh triage-rule "$RUN" "$slice_id"
 done
 rubrica validate --run "$RUN" --stage triage-rule
+rubrica check-refs --run "$RUN"   # only meaningful once every member has landed
 ```
 
 ```bash

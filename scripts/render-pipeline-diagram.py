@@ -97,7 +97,7 @@ ROWS: list[dict] = [
         name="triage-rule",
         runs="rb-triage-rule",
         art=["00-dispositions/<slice_id>.json"],
-        gates=["validate"],
+        gates=["validate", "check-refs"],
         fan="fan-out · one member per slice",
         note="rules on every candidate in one slice -- admit, or decline with a reason",
     ),
