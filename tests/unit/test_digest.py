@@ -9,9 +9,14 @@ wrong -- not the test.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from rubrica import digest, slices
 from rubrica.intake import classify
+
+# One number above any cap under test, so a cap change cannot silently make these
+# generators stop exceeding it.
+_OVER = 400
 
 
 def test_prose_carries_the_full_heading_outline(tmp_path):
@@ -117,6 +122,118 @@ def test_a_python_file_that_genuinely_does_not_parse_still_says_parse_failed(tmp
     # The two markers are mutually exclusive by construction: this is a Python
     # file and Python has a parser, so nothing here is unsupported.
     assert "unsupported_language" not in result
+
+
+def _generated_module(
+    path: Path,
+    *,
+    defs: int = 0,
+    assigns: int = 0,
+    classes: int = 0,
+    imports: int = 0,
+    name_chars: int = 8,
+) -> Path:
+    """A Python module of exactly the requested top-level shape.
+
+    Generated rather than fixtured because the point is a count no real file in
+    this tree reaches: the largest real module here has 269 top-level defs, and
+    the rows the issue measured are at 500 and 2,000.
+    """
+    pad = "x" * max(0, name_chars - 6)
+    lines = [f"import mod_{i}_{pad}" for i in range(imports)]
+    lines += [f"A_{i}_{pad} = {i}" for i in range(assigns)]
+    lines += [f"def f_{i}_{pad}():\n    pass" for i in range(defs)]
+    lines += [f"class C_{i}_{pad}:\n    pass" for i in range(classes)]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def test_a_source_digest_caps_every_one_of_its_four_name_lists(tmp_path):
+    """`_source_digest` bounded nothing: `defs`, `classes`, `assignments` and
+    `imports` were each emitted in full, so one candidate's digest grew linearly
+    with its top-level name count. Every other producer in this module has a bound
+    and a visible flag for hitting it -- `_MAX_NAMES`, `_MAX_ROLE_CHARS`,
+    `_SKELETON_MAX_NODES`, `keys_truncated`, `digest_truncated`. This one had
+    neither.
+    """
+    path = _generated_module(
+        tmp_path / "wide.py",
+        defs=_OVER,
+        assigns=_OVER,
+        classes=_OVER,
+        imports=_OVER,
+    )
+    result = digest.digest_for_path(path, "source_code", body_chars=2000)
+    for field in ("defs", "classes", "assignments", "imports"):
+        assert len(result[field]) == digest._MAX_SOURCE_NAMES, field
+
+
+def test_a_capped_source_digest_stays_far_inside_one_slice(tmp_path):
+    """The consequence the caps exist to prevent, asserted on the quantity survey
+    actually refuses on. Measured before them: 2,000 defs plus 2,000 assignments
+    digested to 199,852 bytes, three times over the 65,536-byte slice cap, and a
+    slice holding one candidate is already minimal so no slicer could rescue the
+    row. 500 + 500 produced 49,352 bytes -- 75% of one slice in a single row.
+    """
+    path = _generated_module(tmp_path / "huge.py", defs=2000, assigns=2000)
+    result = digest.digest_for_path(path, "source_code", body_chars=2000)
+    assert len(json.dumps(result).encode("utf-8")) < slices.DEFAULT_SLICE_BYTES // 2
+
+
+def test_a_source_name_is_bounded_in_characters_as_well_as_in_entries(tmp_path):
+    """An entry cap without a character bound is the defect this module already
+    carried on `names`, and `ast` will parse an identifier of any width -- so caps
+    alone would leave the byte hole open in a sibling producer. Reuses
+    `_MAX_NAME_CHARS` rather than inventing a second number: the longest real
+    top-level name in this tree is 92 characters, so 128 truncates none of the
+    3,456 measured.
+    """
+    path = _generated_module(tmp_path / "verbose.py", defs=2, name_chars=40_000)
+    result = digest.digest_for_path(path, "source_code", body_chars=2000)
+    assert all(len(name) <= digest._MAX_NAME_CHARS for name in result["defs"])
+
+
+def test_a_truncated_source_digest_says_so(tmp_path):
+    """Same convention as every sibling flag: a truncation a prompt can see is a
+    fact about the candidate, one it cannot see is a lie about it."""
+    path = _generated_module(tmp_path / "wide.py", defs=_OVER)
+    result = digest.digest_for_path(path, "source_code", body_chars=2000)
+    assert result["source_names_truncated"] is True
+
+
+def test_an_untruncated_source_digest_says_so_rather_than_omitting_the_flag(tmp_path):
+    """Unconditional, for the reason `keys_truncated` is: a flag a reader only sees
+    when it is true cannot be told apart from a digest written before the flag
+    existed. The median module in this tree has 14 top-level names in its widest
+    list, so False is what nearly every real candidate reports."""
+    path = _generated_module(tmp_path / "ordinary.py", defs=3, assigns=2, imports=1)
+    result = digest.digest_for_path(path, "source_code", body_chars=2000)
+    assert result["source_names_truncated"] is False
+
+
+def test_a_source_list_exactly_at_the_cap_is_not_reported_truncated(tmp_path):
+    """The flag is set where the budget actually refuses a name, never re-derived
+    from `len(...) >= CAP`. `_skeleton`'s `truncated[0]` records the measurement
+    that forced this: the length comparison false-positives on a walk whose
+    natural size lands exactly on the cap, where nothing was cut off.
+    """
+    at_cap = _generated_module(tmp_path / "at.py", defs=digest._MAX_SOURCE_NAMES)
+    past_cap = _generated_module(tmp_path / "past.py", defs=digest._MAX_SOURCE_NAMES + 1)
+    at = digest.digest_for_path(at_cap, "source_code", body_chars=2000)
+    past = digest.digest_for_path(past_cap, "source_code", body_chars=2000)
+    assert at["source_names_truncated"] is False
+    assert past["source_names_truncated"] is True
+
+
+def test_a_parse_failure_grows_no_truncation_flag(tmp_path):
+    """`{"parse_failed": True}` is the whole digest for bytes that are not Python,
+    so it must not grow a flag about names nothing collected -- the rule that keeps
+    `role_keys_truncated` off a dict-shaped trace."""
+    path = tmp_path / "broken.py"
+    path.write_text("def (:\n", encoding="utf-8")
+    result = digest.digest_for_path(path, "source_code", body_chars=2000)
+    assert result["parse_failed"] is True
+    assert "source_names_truncated" not in result
 
 
 def test_an_unsupported_source_file_carries_no_heading_outline(tmp_path):

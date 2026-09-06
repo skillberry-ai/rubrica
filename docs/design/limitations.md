@@ -2220,11 +2220,16 @@ bounded-output discipline. Two things a patch round must not miss: the
 `headings` field is deliberately complete rather than truncated, so it is
 dropped on this route (500 Ruby comment lines measured to 500 headings and
 21,890 bytes in one candidate row, against the 65,536-byte cap a row may not
-exceed without `survey` exiting 2); and `_source_digest` bounds nothing at all
-today — `defs`, `classes`, `assignments` and `imports` have no entry cap — so a
-parser over a file like parsec's 101KB `static/app.js`, which carries on the
-order of 144 top-level names, needs a cap and a visible truncation flag in the
-`keys_truncated` / `skeleton_nodes_truncated` / `role_keys_truncated` family.
+exceed without `survey` exiting 2); and `_source_digest`'s own bounds are now in
+place, so a parser round inherits a bounded producer rather than having to add
+one. `defs`, `classes`, `assignments` and `imports` are each capped at
+`_MAX_SOURCE_NAMES`, every name is bounded by `_MAX_NAME_CHARS`, and
+`source_names_truncated` reports either cut in the `keys_truncated` /
+`skeleton_nodes_truncated` / `role_keys_truncated` family. That was the state
+this entry recorded as owed and it is no longer owed: a parser over a file like
+parsec's 101KB `static/app.js`, which carries on the order of 144 top-level
+names, would emit 64 of them and say so. What a per-language round still owes is
+the parser itself, and the `headings` ruling above it.
 
 ### Nothing reads a human's decision about which services to simulate
 
