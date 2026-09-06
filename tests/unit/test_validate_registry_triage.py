@@ -20,6 +20,7 @@ from tests.builders import (
     minimal_audit,
     minimal_dispositions_part,
     minimal_objective,
+    minimal_slices,
 )
 from tests.toy import split_world_model
 
@@ -31,8 +32,12 @@ PART_KINDS = ("slices", "objective", "dispositions-part", "audit", "adoptions")
 
 
 # Every *substantive* cross-file $ref site among the five part schemas -- one
-# row per place a part schema points at one of triage-0.1.json's $defs rather
-# than restating it. `slices` is absent: every $ref it carries points at
+# row per place a part schema points at a shared definition rather than
+# restating it. Most point at triage-0.1.json's $defs; `slices`'
+# catalogue_facts points at catalogue-0.1.json's own, because the contract on
+# those two fields is that they are verbatim copies of the catalogue's.
+#
+# `slices`' remaining $refs are still absent from this table: they point at
 # $defs/id, which every other site's id fields already exercise too, and the
 # id pattern is already covered by test_schemas_instance's ref-following
 # anchor check.
@@ -74,6 +79,31 @@ def _full_adoption(**over):
 
 
 REF_SITES = [
+    # catalogue_facts' three copied children, of which only `entries` had a $ref.
+    # The field's whole contract is that `request` and `policy` are VERBATIM
+    # copies of the catalogue's own, so layer 1 is the only place that contract
+    # can be enforced: refs.check_slices deliberately abstains, recomputing the
+    # block's derived numbers and never its verbatim copies. `request` matters
+    # most of the two -- catalogue_facts is the only thing rb-triage-objective
+    # reads, so its `request` is where that pass takes the run's declared
+    # objective from, and the pass's own gate validates 00-objective.json rather
+    # than the plan it read.
+    {
+        "id": "slices.catalogue_facts.request->catalogue.request",
+        "kind": "slices",
+        "path": ("properties", "catalogue_facts", "properties", "request"),
+        "build": lambda: minimal_slices(),
+        "mutate": lambda doc: doc["catalogue_facts"]["request"].pop("corpus_roots"),
+        "dropped_field": "corpus_roots",
+    },
+    {
+        "id": "slices.catalogue_facts.policy->catalogue.policy",
+        "kind": "slices",
+        "path": ("properties", "catalogue_facts", "properties", "policy"),
+        "build": lambda: minimal_slices(),
+        "mutate": lambda doc: doc["catalogue_facts"]["policy"].pop("max_candidates"),
+        "dropped_field": "max_candidates",
+    },
     {
         "id": "dispositions-part.dispositions[]->disposition",
         "kind": "dispositions-part",
