@@ -98,6 +98,24 @@ _SKELETON_MAX_NODES = 128
 # 33 keys of at most 69 characters.
 _MAX_ROLE_CHARS = 64
 
+# The character bound `_MAX_NAMES` was missing. That cap is on *entries*, so a
+# candidate with verbose names produced a row larger than one slice and made
+# `survey` exit 2 on the whole corpus -- measured end-to-end at 80,549 bytes
+# against the 65,536-byte cap, from a file that digests to 433 bytes as a
+# skeleton.
+#
+# Justified against the real vocabulary rather than against the slice cap, which
+# is how `_MAX_ROLE_CHARS` is justified: the longest name in any corpus on this
+# pod is `query_tickets.find_tickets` at 26 characters, and tau2's are ordinary
+# identifiers such as `get_reservation_details` at 23. 128 is ~4.9x the longest
+# observed, which leaves room for the shapes that legitimately compose -- a
+# dotted path, or a server-prefixed MCP tool name -- rather than pinning the cap
+# to today's sample. The arithmetic in the other direction is what makes it safe:
+# `_MAX_NAMES` * `_MAX_NAME_CHARS` is 64 * 128 = 8,192 bytes of names in the worst
+# case, an eighth of one slice, so this field can no longer be the reason a row
+# is refused.
+_MAX_NAME_CHARS = 128
+
 
 # Capture formats that wrap the trace in an envelope, keyed by the envelope's own
 # field names. MLflow 3 puts everything one level down -- `info.state`,
@@ -189,20 +207,41 @@ def _first_scalar(payload: dict, keys: tuple[str, ...]) -> Any | None:
     return None
 
 
-def _collect_names(node: Any, depth: int, out: set[str]) -> None:
+def _collect_names(node: Any, depth: int, out: set[str], truncated: list[bool]) -> None:
+    """Collect names, each bounded by `_MAX_NAME_CHARS`.
+
+    `truncated` is written at the moment a name is actually cut, not re-derived
+    afterwards by comparing widths to the cap -- the same reason `_skeleton`
+    records its own budget refusal inline. A name landing exactly on the cap
+    loses nothing, so the comparison is `>`, and reporting it truncated would be
+    the false positive that rewrite existed to remove.
+
+    Because `out` is a set, two names differing only past the cap collapse into
+    one entry and the sorted list loses one. That is a possibility of truncating
+    into a set rather than a certainty -- names differing within the cap keep both
+    entries -- and it is the reason the flag is not optional: a narrow digest is
+    fine, a digest that quietly drops a tool the candidate calls is not.
+    """
     if depth < 0 or len(out) >= _MAX_NAMES:
         return
     if isinstance(node, dict):
         for key, value in node.items():
             if key in _NAME_KEYS and isinstance(value, str):
-                out.add(value)
+                out.add(_bounded_name(value, truncated))
             elif key in _NAME_KEYS and isinstance(value, list):
-                out.update(v for v in value if isinstance(v, str))
+                out.update(_bounded_name(v, truncated) for v in value if isinstance(v, str))
             else:
-                _collect_names(value, depth - 1, out)
+                _collect_names(value, depth - 1, out, truncated)
     elif isinstance(node, list):
         for item in node:
-            _collect_names(item, depth - 1, out)
+            _collect_names(item, depth - 1, out, truncated)
+
+
+def _bounded_name(name: str, truncated: list[bool]) -> str:
+    if len(name) > _MAX_NAME_CHARS:
+        truncated[0] = True
+        return name[:_MAX_NAME_CHARS]
+    return name
 
 
 def _has_error_key(node: Any, depth: int) -> bool:
@@ -421,9 +460,14 @@ def _trace_digest_from_dict(payload: dict, *, body_chars: int) -> tuple[dict, li
         fired.append("request_text")
 
     names: set[str] = set()
-    _collect_names(payload, _SKELETON_DEPTH, names)
+    names_truncated = [False]
+    _collect_names(payload, _SKELETON_DEPTH, names, names_truncated)
     if names:
         result["names"] = sorted(names)
+        # A sibling of the field, not of the digest: a candidate carrying no name
+        # must not grow a flag about names it does not have, which is the rule
+        # that keeps `role_keys_truncated` off a dict-shaped trace.
+        result["names_truncated"] = names_truncated[0]
         fired.append("names")
 
     if _has_error_marker(payload, status, _SKELETON_DEPTH):
@@ -508,10 +552,12 @@ def _trace_digest_from_messages(payload: list, *, body_chars: int) -> tuple[dict
     # a message: that is what reaches `tool_calls[].function.name`, which is the
     # field carrying 14 distinct tool names and 68 toolset signatures here.
     names: set[str] = set()
+    names_truncated = [False]
     for message in payload:
-        _collect_names(message, _SKELETON_DEPTH, names)
+        _collect_names(message, _SKELETON_DEPTH, names, names_truncated)
     if names:
         result["names"] = sorted(names)
+        result["names_truncated"] = names_truncated[0]
         fired.append("names")
 
     if any(_has_error_key(message, _SKELETON_DEPTH) for message in payload):

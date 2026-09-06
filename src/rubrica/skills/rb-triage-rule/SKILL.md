@@ -88,6 +88,14 @@ can have merged into one tally. Read it the same way as the two flags below: a
 fact about the digest, never a fact about the candidate having had one role
 where it had two.
 
+`names_truncated` is that same shape on the `names` list, and it is the one flag
+here that can make a digest carry *fewer* entries than the candidate has tools.
+A name too long to spell is cut to a bounded prefix, and `names` is a set, so two
+tools differing only past that prefix collapse into one entry. When
+`names_truncated` is `true`, the length of `names` is a fact about the digest and
+not a count of the candidate's tools -- so a candidate whose `names` looks
+narrow is not thereby thin, exactly as a capped key list is not a thin object.
+
 Non-trace digests carry no such list; instead they carry a `skeleton`, and it
 can mislead the same way if you read it as complete. `digest.py` caps how
 many of an object's keys it shows -- thirty-two -- and records the true count
