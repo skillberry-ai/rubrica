@@ -284,7 +284,7 @@ dispatching, which is how `tests/unit/test_dispatch_harness.py` checks the deny
 lists without spending a model call — and how to check them by hand:
 
 ```bash
-RUBRICA_PRINT_SETTINGS=1 ./scripts/dispatch-stage.sh propose "$RUN" b01   # prints both paths
+RUBRICA_PRINT_SETTINGS=1 ./scripts/dispatch-stage.sh propose "$RUN" r1-b01   # prints both paths
 ```
 
 It prints three lines in a fixed order — the `--settings` file holding

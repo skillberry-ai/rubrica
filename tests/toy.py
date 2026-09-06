@@ -903,7 +903,7 @@ def toy_scenarios(**over: Any) -> dict[str, Any]:
 # test_upto_propose_writes_the_batch_plan_and_the_part_and_seals_nothing asserts
 # scenario_part_batch_ids(1) is exactly this id -- so a partition that grew to two
 # batches fails there rather than leaving a stale constant behind.
-TOY_BATCH_ID = "b01"
+TOY_BATCH_ID = "r1-b01"
 
 
 def _proposed_scenarios() -> list[dict[str, Any]]:
