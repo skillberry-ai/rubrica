@@ -13,6 +13,18 @@ unrelated content before that convention existed. Task 11's brief measured
 each of these in both directions; a predicate nobody has watched fail is not
 a guard.
 
+**Unit convention, and it comes before the margin convention below.** A
+prohibition claim -- "the section forbids X" -- is scoped to a *sentence* or to a
+list *item*, never to a byte radius, through `_states_together`. A radius cannot
+state that claim: it can say a prohibition word is NEAR an object, never that it
+governs that object, and the two are indistinguishable in the only quantity a
+window measures. Measured: a prohibition aimed at a different object sits 15
+characters from the anchor while the shipped prose needs at least 33, so no radius
+separates correct prose from prose that grants the opposite permission. The three
+converted predicates carry their own both-directions measurements. Windows remain
+for the co-occurrence claims that are not prohibitions, and those keep the margin
+convention that follows.
+
 **Window margin convention.** Every `_window_around`/`_window_after` call in
 this module carries a `radius` sized to at least 2x the measured
 anchor-to-token distance for whichever required token sits farthest from the
@@ -103,6 +115,161 @@ def _window_after(body: str, index: int, radius: int = 250) -> str:
     return body[index : index + radius]
 
 
+# A prohibition vocabulary, word-bounded, in one place because the three
+# predicates below all mean the same thing by it. Bare `not` is deliberately
+# absent: as a veto it is a length pin, since these sections already carry bare
+# `not` within any plausible distance of most anchors -- the objective pass's
+# Inputs section carries one near three of its four `shard` mentions and survives
+# only because the first has none. Word boundaries matter here and are NOT worth
+# sweeping across this module: `never` is inside `whenever`, and an inversion
+# reading "yours to open whenever you like" -- prose granting the exact forbidden
+# permission -- passed a windowed check at radius 300. But `reject` appears in
+# `rb-triage-rule`'s Refusal conditions only as "rejects", 1 substring hit and 0
+# `\breject\b` hits, so anchoring that predicate would fail it against prose that
+# is entirely correct. Anchor where a substring can forge a hit, not everywhere.
+_PROHIBITION = re.compile(r"\b(?:never|not yours|do not|may not|must not|not permitted)\b")
+
+# Sentence-enders that are not sentence ends. `00-catalogue.json` is the reason a
+# naive `.` split is wrong, and it is handled by requiring whitespace after the
+# stop rather than by listing extensions -- `.json` is followed by a letter or a
+# backtick in every real mention. These are the remaining cases where a stop does
+# have whitespace after it and still ends nothing.
+_ABBREV = re.compile(r"\b(?:e\.g|i\.e|cf|vs|etc|approx)\.$", re.I)
+
+# A block boundary: a blank line, or a line opening a list item, heading, table
+# row, fence or quote. Treated as hard as a full stop, because a prohibition in a
+# *different* bullet does not govern this one -- which is the whole point of
+# scoping to a sentence rather than to a byte radius.
+_BLOCK_SPLIT = re.compile(r"\n\s*\n|\n(?=\s*(?:[-*+]\s|\d+\.\s|#|\||```|>))")
+_LIST_MARKER = re.compile(r"^\s*(?:[-*+]\s+|\d+\.\s+|>\s*)")
+
+
+def _sentences(body: str) -> list[str]:
+    """Every sentence of a section body, lowercased and whitespace-normalised.
+
+    Takes the RAW body, not a `_norm`ed one: `_norm` collapses the newlines that
+    mark where one list item ends and the next begins, and those boundaries are
+    half of what makes this unit tighter than a window. Each returned sentence is
+    lowercased and flattened, so callers compare exactly as they did before.
+
+    The unit exists because a byte radius cannot state the claim these predicates
+    mean. Measured, on the objective pass's Inputs section: a *misaimed*
+    prohibition -- "`decisions.md` is never yours. A shard under `00-slices/` is
+    yours to open." -- puts `never` 15 characters from `shard`, green from
+    radius=15, while the shipped prose itself needs radius >= 33. No radius
+    separates the two. A sentence does, because the prohibition and the object are
+    then in different ones.
+
+    What it fixes, and the two claims are worth separating:
+
+    - **The vacuity ceiling stops existing.** A neighbouring sentence's `never`
+      can no longer be borrowed, so the upper edge of the old [33, 747] band --
+      which held only because the fourth `shard` mention sat 743 characters from
+      the section's next `never`, a property of the prose and not of the test --
+      is gone. One honest inserted sentence had dropped that ceiling from 748 to
+      334 and nothing reported it.
+    - **The floor cannot break.** A sentence may lengthen freely, so the
+      meaning-preserving reword that pushes a token out of a tight window cannot
+      happen here. That was the failure the module docstring calls a length pin.
+
+    What it does NOT fix, stated because a reader should not mistake this for
+    soundness: a **negated** prohibition still passes. "It is not the case that a
+    shard under `00-slices/` is never yours to open" carries both the anchor and a
+    word-bounded `never` in one sentence, and no mechanical rule over tokens tells
+    that from the real thing. That is the same semantic/mechanical boundary
+    `CLAUDE.md` draws for layer-2 support checks, and a sentence unit does not
+    cross it -- it only stops a prohibition being borrowed from a neighbour or
+    aimed at a different object.
+    """
+    out: list[str] = []
+    for block in _BLOCK_SPLIT.split(body):
+        flat = re.sub(r"\s+", " ", _LIST_MARKER.sub("", block)).strip().lower()
+        if not flat:
+            continue
+        start = 0
+        # Closing markup may sit between the stop and the space, and missing that
+        # merges sentences rather than splitting them: `**You may not act on that
+        # recommendation.**` ends with `.**`, so a bare `[.!?](?=\s)` ran it into
+        # the next sentence and produced a 353-character unit that borrowed a
+        # `never` from prose 300 characters downstream. Measured -- that merge made
+        # an inverted-prohibition probe pass, which is the probe going blind.
+        for match in re.finditer(r"[.!?][*_`\"')\]]*(?=\s)", flat):
+            head = flat[start : match.end()]
+            # An abbreviation's stop ends no sentence, so the text keeps
+            # accumulating into the next candidate rather than being emitted here.
+            if _ABBREV.search(head.strip()):
+                continue
+            out.append(head.strip())
+            start = match.end()
+        tail = flat[start:].strip()
+        if tail:
+            out.append(tail)
+    return out
+
+
+def _blocks(body: str) -> list[str]:
+    """Each list item or paragraph of a section, flattened and lowercased.
+
+    The right unit for a numbered Invariants list, where one item is one
+    statement: item 3 of the objective pass's Invariants names its field in a bold
+    lede -- "**`recommended_objective` is a recommendation.**" -- and carries the
+    prohibition in the sentence explaining it, "you never substitute a different
+    objective for the one you were given". Scoping that to a sentence asserts the
+    lede alone must carry the prohibition, which no invariant in that section does,
+    so it would fail against correct prose.
+
+    It is still bounded where a byte radius was not: item 2's `never` cannot reach
+    into item 3. That is not hypothetical -- it is the measured failure that made
+    `_window_after` forward-only in the first place, where a symmetric window
+    around `recommended_objective` reached backward into item 2's "never over a
+    slice's ... serialized size" and passed a probe that had deleted item 3's
+    prohibition outright.
+    """
+    return [
+        flat
+        for block in _BLOCK_SPLIT.split(body)
+        if (flat := re.sub(r"\s+", " ", _LIST_MARKER.sub("", block)).strip().lower())
+    ]
+
+
+def _states_together(
+    body: str,
+    anchors: tuple[str, ...],
+    pattern: re.Pattern[str] = _PROHIBITION,
+    unit=_sentences,
+) -> bool:
+    """Whether some ONE unit of `body` names one of `anchors` and matches `pattern`.
+
+    `unit` is `_sentences` by default and `_blocks` where the prose's own unit of
+    statement is a list item. Both are bounded by structure rather than by bytes,
+    which is the property that matters; which one is right is a fact about the
+    section, so each caller states its choice and why.
+
+    An OR over sentences for the reason `_occurrences` is an OR over mentions: the
+    claim was never "the first mention carries it", it is "the section states this
+    somewhere as one statement". Deleting the claim still leaves no sentence that
+    satisfies it, which is the direction each caller re-measured.
+
+    `anchors` is a tuple rather than one string because English states a
+    prohibition about a thing it has just named by referring back to it, and that
+    is not a defect in the prose. Measured on the objective pass's Output section:
+    the field is named in one sentence ("say so in `recommended_objective` with a
+    `reason`") and forbidden in the next ("**You may not act on that
+    recommendation.**"). A single-anchor rule fails there against prose that is
+    entirely correct -- the mirror failure this module's docstring warns about.
+
+    Admitting the anaphor keeps the unit at ONE sentence, which is what matters:
+    the alternative was to let a claim span a sentence and its successor, and that
+    reopens exactly the hole this unit closes. Measured -- "`decisions.md` is never
+    yours. A shard under `00-slices/` is yours to open." is a prohibition aimed at
+    a different object, and under a two-sentence span it reads as satisfying a
+    predicate about shards. Under one sentence it does not.
+    """
+    return any(
+        any(anchor in chunk for anchor in anchors) and pattern.search(chunk) for chunk in unit(body)
+    )
+
+
 def _occurrences(body: str, token: str) -> list[int]:
     """Every index at which `token` occurs, not merely the first.
 
@@ -168,63 +335,62 @@ def test_the_objective_pass_forbids_reading_a_shard():
     re-run of the same corpus later. The counts and the absolutes are
     checkout-specific; the near-equality is what both measurements say.
 
-    Windowed rather than section-wide, because the unwindowed form of this
-    predicate was measured vacuous: inverting the skill to grant the opposite
-    permission left it green.
+    Sentence-scoped rather than windowed, and rather than section-wide. The
+    section-wide form was measured vacuous -- inverting the skill to grant the
+    opposite permission left it green -- and the windowed form that replaced it
+    bought a band rather than a claim. What is asserted now is that some ONE
+    sentence both names a shard and forbids opening it.
 
-    Measured unbounded rather than clipped to the window: the section holds
-    exactly three prohibition words, all of them `never`, and its four `shard`
-    mentions sit 28, 123, 176 and 743 characters from the nearest one. The
-    first three all resolve to the *same* `never` -- the one inside the
-    prohibition sentence itself -- so this is an OR over mentions, and the
-    "Window margin convention" in this module's own docstring sizes a radius
-    from the nearer of an OR-group's alternatives (a line number would drift;
-    the heading will not): the governing distance is 28, not 176. That is
-    load-bearing rather than tidier bookkeeping, because reading 176 as
-    governing would put the 2x floor at 352 and oblige *raising* the radius
-    this predicate was actually measured at. The fourth mention ("firming up a
-    surface judgment by opening a shard") is 743 away and outside the window on
-    purpose -- it states the consequence, not the prohibition.
+    **What the change of unit buys, measured.** The windowed form was a value
+    inside a band [33, 747] whose upper edge was a property of the *prose*, not of
+    the test: 747 held only because the fourth `shard` mention -- "firming up a
+    surface judgment by opening a shard", which states the consequence rather than
+    the prohibition -- sat 743 characters from the section's next `never`. That
+    mention had sat 220 away rather than 743 until an earlier reword, and at 220 the
+    inversion probe passed for free at radius 300. One honest inserted sentence
+    dropped that ceiling from 748 to 334 and nothing reported it. Neither probe
+    direction could detect it, because soundness was a claim about a counterfactual
+    the suite never held.
 
-    **radius=300 is a value inside a measured band, not a tuned number, and the
-    edge that can break is the upper one.** Swept in both directions: green on
-    the shipped prose from radius 33 up, and green on the *inverted* prose --
-    that is, vacuous -- from radius 748 up, where the fourth mention reaches
-    the section's next `never`. The band is [33, 747]; 300 sits 9.1x above the
-    lower edge and 2.5x below vacuity. **Do not widen it.** Every failure this
-    predicate has had has been a ceiling failure: the unwindowed form was
-    vacuous, and that fourth mention sat 220 away rather than 743 until the
-    sentence above it was reworded from "never by how large they are" to
-    "rather than by how large they are" -- at 220 the inversion probe passed
-    for free at this very radius. The floor, by contrast, has never broken and
-    for the surviving alternative barely can: `shard` and `never` are 28
-    characters apart inside one sentence.
+    Both edges are gone rather than re-tuned. The ceiling cannot exist, because a
+    neighbouring sentence's `never` is not in this sentence. The floor cannot
+    break, because a sentence may lengthen freely -- the length-pin failure the
+    module docstring describes -- and that is measured in both directions: adding
+    "-- not to sample, not to count, not to confirm a surface you already suspect
+    --" inside the prohibition sentence keeps this green, and so does inserting a
+    whole honest sentence beside it.
 
-    **The vocabulary is matched on word boundaries, and that is load-bearing
-    rather than fastidious.** `"never" in window` is also satisfied by
-    "whe-never": an inversion reading "a shard under `00-slices/` is yours to
-    open **whenever** you like" -- prose granting the exact permission this
-    predicate exists to forbid -- put that substring 42 characters from the
-    first mention and passed at radius=300. What that defeats is not the
-    predicate directly but the *inversion probe*, which is the only evidence
-    this predicate has: a probe that goes green against permission-granting
-    prose measures nothing. So the measurement is three-directional, and
-    direction 3 is an inversion whose only prohibition-looking token is a
-    substring. Switching to `\\b...\\b` changed no distance and no band edge --
-    28/123/176/743 and [33, 747] are the same under both matchers, because none
-    of the three real hits was ever a substring artefact.
+    **The hole no radius could close is closed.** A prohibition aimed at a
+    different object -- "`decisions.md` is never yours. A shard under `00-slices/`
+    is yours to open." -- put `never` 15 characters from `shard`, green from
+    radius=15, while the shipped prose itself needs radius >= 33. No radius
+    separates those two. A sentence does, and this predicate now goes red on that
+    construction.
+
+    **What is still open, stated so nobody reads this as soundness.** A negated
+    prohibition passes: "not never yours to open" carries both the anchor and a
+    word-bounded `never` in one sentence, and no rule over tokens tells that from
+    the real thing. Measured, still green. That is the semantic/mechanical boundary
+    `CLAUDE.md` draws for layer-2 support checks, and changing the unit does not
+    cross it.
+
+    **The vocabulary is still matched on word boundaries, and that is load-bearing
+    rather than fastidious.** A substring `never` is also satisfied by "whe-never":
+    an inversion reading "a shard under `00-slices/` is yours to open **whenever**
+    you like" -- prose granting the exact permission this predicate exists to
+    forbid -- passed the windowed form, and would pass the sentence form too under a
+    substring matcher, because the forgery sits in the same sentence as the anchor.
+    What that defeats is not the predicate directly but the *inversion probe*, which
+    is the only evidence this predicate has: a probe that goes green against
+    permission-granting prose measures nothing. Word boundaries are applied here and
+    deliberately NOT swept across this module -- see `_PROHIBITION` for the
+    `rejects` measurement that makes a blanket sweep actively wrong.
     """
-    body = _norm(skills.section_body(_objective(), "1. Inputs"))
-    indices = _occurrences(body, "shard")
-    assert indices, "the Inputs section never names a shard"
-    # Word-boundary rather than substring, for the reason direction 3 records:
-    # `"never" in window` is also satisfied by "whenever", which is how
-    # permission-granting prose passes a prohibition check.
-    prohibition = re.compile(r"\b(?:never|not yours|do not)\b")
-    near_prohibition = any(
-        prohibition.search(_window_around(body, at, radius=300)) for at in indices
+    body = skills.section_body(_objective(), "1. Inputs")
+    assert _occurrences(_norm(body), "shard"), "the Inputs section never names a shard"
+    assert _states_together(body, ("shard",)), (
+        "no single sentence both names a shard and forbids opening it"
     )
-    assert near_prohibition, "no `shard` mention sits near a prohibition"
 
 
 def test_the_objective_pass_admits_that_a_map_is_thinner_than_the_digests():
@@ -298,14 +464,33 @@ def test_the_objective_pass_states_that_it_may_not_act_on_its_recommendation():
     sat here and failed a good-faith reword ("acting on that recommendation
     yourself is not permitted") that keeps the same meaning in different
     words -- the reword was the honest one; the pin was what was wrong, and
-    fixing it means widening the accepted prohibition vocabulary and
-    checking proximity instead of an exact phrase."""
-    body = _norm(skills.section_body(_objective(), "2. Output"))
-    indices = _occurrences(body, "recommended_objective")
-    assert indices, "the section never names recommended_objective"
-    prohibition = ("may not", "must not", "never", "not permitted", "is not yours")
-    assert any(p in _window_after(body, index) for index in indices for p in prohibition), (
-        "no mention of recommended_objective is followed by a prohibition"
+    fixing it means widening the accepted prohibition vocabulary and checking that
+    the two are stated together instead of matching an exact phrase.
+
+    Scoped to a sentence, and the anchor admits the anaphor because this section
+    names the field in one sentence and forbids acting on it in the next: "say so
+    in `recommended_objective` with a `reason`. **You may not act on that
+    recommendation.**" A single-anchor rule fails there against correct prose.
+
+    Measured in both directions: deleting the prohibition sentence goes red, and so
+    does inverting it to "**You may act on that recommendation.**". That second
+    probe is the one worth keeping, and it caught a real defect in the sentence
+    splitter rather than in the prose -- `.**` ends a sentence with markup between
+    the stop and the space, so a bare `[.!?](?=\\s)` ran the bold prohibition into
+    the next sentence, producing a 353-character unit that borrowed a `never` from
+    prose 300 characters downstream and let the inverted prose pass. A probe that
+    goes green against inverted prose measures nothing, which is how that was
+    found."""
+    body = skills.section_body(_objective(), "2. Output")
+    assert _occurrences(_norm(body), "recommended_objective"), (
+        "the section never names recommended_objective"
+    )
+    # The anaphor is admitted deliberately: this section names the field in one
+    # sentence and forbids acting on it in the next, referring back to it as "that
+    # recommendation". See `_states_together` for why that keeps the unit at one
+    # sentence rather than widening it to two.
+    assert _states_together(body, ("recommended_objective", "that recommendation")), (
+        "no single sentence both names the recommendation and forbids acting on it"
     )
 
 
@@ -347,15 +532,29 @@ def test_the_objective_pass_forbids_acting_on_a_recommended_objective_in_invaria
     reword keeping the field name while dropping the prohibition ("reflects
     one path you could take") would still have passed the old assertion.
 
-    radius=300 against a measured anchor-to-token distance of 142 chars to
-    the nearest prohibition word ("never") -- margin ~2.1x, per this
-    module's floor (see the module docstring)."""
-    body = _norm(skills.section_body(_objective(), "4. Invariants"))
-    index = body.find("recommended_objective")
-    assert index != -1
-    window = _window_after(body, index, radius=300)
-    prohibition = ("may not", "must not", "never", "not permitted", "is not yours")
-    assert any(p in window for p in prohibition)
+    Scoped to the list ITEM rather than to the sentence, which is a fact about how
+    this section is written: every invariant is a bold lede naming its subject plus
+    the sentence explaining it, and item 3 carries the prohibition in the
+    explanation -- "you never substitute a different objective for the one you were
+    given". Asserting the lede alone must carry it would fail against prose that is
+    entirely correct. See `_blocks`.
+
+    Still bounded where the old radius was not, and this is the case that proves it
+    rather than an argument that it should be: deleting item 3's prohibition goes
+    red, including when the replacement text leaves item 2's own `never` exactly
+    where it was. That cross-item borrow is the measured failure that made
+    `_window_after` forward-only, and an item-scoped unit closes it by
+    construction rather than by direction."""
+    body = skills.section_body(_objective(), "4. Invariants")
+    assert _occurrences(_norm(body), "recommended_objective"), (
+        "the Invariants section never names recommended_objective"
+    )
+    # Scoped to the list item, not the sentence: this invariant names its field in
+    # a bold lede and carries the prohibition in the sentence explaining it, which
+    # is how every item in this section is written. See `_blocks`.
+    assert _states_together(body, ("recommended_objective", "that recommendation"), unit=_blocks), (
+        "no single invariant both names recommended_objective and forbids acting on it"
+    )
 
 
 def test_the_objective_pass_names_the_audit_pass_in_inputs():

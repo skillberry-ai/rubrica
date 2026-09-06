@@ -3149,6 +3149,46 @@ pin this module's docstring already warns about.
 The branch converted the hardest ones and left the rest in the shape it found
 them. What is owed is the conversion, not a decision.
 
+**Three prohibition predicates now use a structural unit, and this is what that
+measured.** `_states_together` asserts that some one *sentence* — or, where the
+prose's own unit of statement is a list item, some one *item* — carries both the
+anchor and a word-bounded prohibition. The three converted are
+`…forbids_reading_a_shard`, `…states_that_it_may_not_act_on_its_recommendation`
+and `…forbids_acting_on_a_recommended_objective_in_invariants`, which are exactly
+the windowed prohibition predicates this entry names, including the two called
+with the unanchored tuple.
+
+Both edges of the band stop existing rather than being re-tuned. The ceiling
+cannot exist, since a neighbouring sentence's `never` is not in this sentence, so
+the 748→74 and 748→106 perturbations recorded above are no longer reachable by any
+honest edit. The floor cannot break, since a sentence may lengthen freely: adding
+a clause inside the prohibition sentence, and inserting a whole honest sentence
+beside it, were both measured green. And the **misaimed** hole — the one where no
+radius separates correct prose from a prohibition aimed at `decisions.md`, because
+15 sits below the floor of 33 — now goes red.
+
+**The negated hole is still open, and remains open by construction.** "Not never
+yours to open" carries the anchor and a word-bounded `never` in one sentence;
+measured, still green. A unit change bounds *which* prose a predicate may draw its
+prohibition from. It does not make a token rule read meaning, which is the root
+this entry already states.
+
+Two things the conversion found that were not in this entry, both defects in the
+probing rather than in the prose. A sentence splitter that stops at `[.!?]`
+followed by whitespace **merges** a bold sentence into the next, because `.**` puts
+markup between the stop and the space — that produced a 353-character unit which
+borrowed a `never` from prose 300 characters downstream and let an
+inverted-prohibition probe pass, which is a probe going blind in the same way the
+`whenever` forgery did. And a mutation probe that fails to match its anchor text
+reports nothing at all: three of the eleven probes written for this conversion
+silently measured the unmodified prose until the harness was made to assert its own
+replacement landed. Both are recorded because the second is the more general
+hazard — every inversion figure in this entry rests on a mutation nobody re-read.
+
+The remaining eleven plain `in body and` predicates are untouched, and the mirror
+warnings above still hold for them: a mechanical `\b` sweep is measurably wrong,
+and the audit's synonym failure is a predicate problem rather than a prose one.
+
 ### `tests/unit/test_live_marker.py` writes into the tracked tree
 
 Its subprocess helper writes `tests/test_generated_<name>.py` into the
