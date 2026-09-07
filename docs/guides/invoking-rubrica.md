@@ -425,6 +425,33 @@ outside the scratch directory:
 | `CLAUDE_CONFIG_DIR` | own history, transcripts, plugin set |
 | `--safe-mode` | `CLAUDE.md`, plugins, hooks, custom agents and skills |
 | `--settings` with `permissions.deny` | `docs/`, `tests/`, `CLAUDE.md`, `README.md`, sibling skills |
+| `--settings` with a contract-derived `allow` | every path in `$RUN` that is not one of this stage's declared `writes` |
+
+**The write grant is the stage's own contract, not the run directory.** It used to
+be `Write(/$RUN/**)`, which stopped a dispatch escaping the run and permitted
+anything inside it — and a dispatch used that too, writing a `compute_weights.py`
+helper into the run root. `scripts/stage-write-scope.py` resolves the contract's
+`writes` to concrete paths and the script grants exactly those, so an `extract`
+member working on `api-json` gets:
+
+```
+Write(//$RUN/01-claims/api-json.json)
+Edit(//$RUN/01-claims/api-json.json)
+```
+
+and nothing else — not a scratch file at the run root, and not a sibling's claims
+file, which makes the grant an enforcement of the fan-out isolation rule as well
+as of the artifact one. Read stays `Read(/$RUN/**)`: a stage reads widely by
+design, and narrowing it would break `check-refs`, which reads artifacts the stage
+itself does not.
+
+Where an id cannot be pinned the resolver grants the artifact's own *directory*
+rather than failing — a round-parameterised write on a run with no batch plan, or
+a hand dispatch with no slice id. A grant that is too tight breaks the dispatch it
+was meant to protect, and a denied write surfaces mid-turn as a model working
+around it rather than as a clean error. The directory grant still refuses
+everything else in the run, which is what the ruling asked for. A resolution that
+collapsed to the run root is refused outright rather than granted.
 
 `--safe-mode` does not remove the *built-in* skills, so the script also passes
 `--disable-slash-commands`.
