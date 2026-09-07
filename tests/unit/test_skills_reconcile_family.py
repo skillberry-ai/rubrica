@@ -192,6 +192,70 @@ OWNING = tuple(
 )
 
 
+# The complement, derived so it cannot drift from OWNING: these passes have no
+# field in which a partial read could be recorded, which is why the reading bound
+# below says so to them and routes the others to their accounting.
+UNACCOUNTED = tuple(stage for stage in FAMILY if stage not in OWNING)
+
+
+def test_the_unaccounted_passes_are_the_complement_of_the_owning_ones():
+    """A guard on the derivation, the mirror of the one below it. If a partial ever
+    gains inputs_seen, this roster shrinks and the pass moves to the accounting
+    branch of the reading bound rather than keeping prose that says its partial
+    reads are invisible."""
+    assert UNACCOUNTED == (
+        "reconcile-subjects",
+        "reconcile-contradict",
+        "reconcile-gaps",
+    ), UNACCOUNTED
+
+
+@pytest.mark.parametrize("stage", FAMILY)
+def test_the_method_bounds_how_the_claims_are_read(stage):
+    """Every pass reads all of `01-claims/` and nothing bounded HOW.
+
+    The band is linear in admitted-input count, and on tau2-retail it crossed the
+    ceiling: `rb-reconcile-outcomes` died with `Prompt is too long` after 84 turns
+    and 80 `Read` calls against a 22-input, 403 KB `01-claims/`. None of those 80
+    calls passed `offset` or `limit`, and the same eight claim files were read three
+    times each as the member ran out of room.
+
+    `offset` and `limit` occur in **no** Method section in this family today --
+    measured across all eight before this predicate was written -- so it cannot be
+    satisfied by prose that predates the instruction.
+    """
+    method = _flat(stage, "3. Method")
+    assert "offset" in method and "limit" in method, (
+        f"{stage}'s Method names no bounded-read mechanism"
+    )
+
+
+@pytest.mark.parametrize("stage", FAMILY)
+def test_the_reading_bound_carries_the_failure_that_justifies_it(stage):
+    """Prose buys a probability, and an instruction whose cost is invisible is the
+    first thing a member under pressure drops. The measured failure is what makes
+    this one worth obeying, so the instruction and the death are asserted together.
+    """
+    method = _flat(stage, "3. Method")
+    assert "prompt is too long" in method, f"{stage}'s Method does not name the failure"
+    assert "re-read" in method or "reread" in method, (
+        f"{stage}'s Method does not name re-reading as what caused it"
+    )
+
+
+@pytest.mark.parametrize("stage", UNACCOUNTED)
+def test_a_pass_with_no_accounting_is_told_its_partial_reads_are_invisible(stage):
+    """These three have no `inputs_seen`, so nothing downstream can tell that one of
+    them read half the claims. That is an argument for the bound being tighter here,
+    not looser, and the prose has to say which of the two situations the pass is in
+    -- otherwise the instruction reads as though a note somewhere would cover it.
+    """
+    method = _flat(stage, "3. Method")
+    assert "no field" in method or "nowhere" in method, (
+        f"{stage} has no inputs_seen and its Method does not say a partial read is recorded nowhere"
+    )
+
+
 def test_the_owning_passes_are_exactly_the_ones_with_a_claim_kind():
     """A guard on the derivation above, not a restatement of it.
 

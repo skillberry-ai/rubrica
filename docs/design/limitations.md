@@ -1766,6 +1766,64 @@ taken from the committed tree. Written down now rather than when somebody runs t
 family, so that the first run's numbers land against a premise already on the
 record instead of quietly becoming the premise.
 
+### The reconcile family's input band is linear in admitted-input count, and it is reported rather than bounded
+
+Every pass in the family reads *all* of `01-claims/` — the split is on output, not
+on claims, which is what keeps the barrier property and is also why a claims-level
+fan-out is not available as a remedy. Nothing bounds the total, so a pass's input
+band grows with the number of admitted inputs, and on tau2-retail it crossed the
+model's ceiling: `rb-reconcile-outcomes` died with `Prompt is too long` after 84
+turns and 80 `Read` calls against a 22-input, 403 KB `01-claims/`.
+
+Measured on `run-20260906-102327`, sonnet, and the numbers bound the band rather
+than attributing it — the three passes differ in prompt and in output size as well
+as in model, so this is that run's driver records and not a controlled sweep:
+
+| pass | peak input tokens | turns | result |
+|---|---|---|---|
+| `reconcile-subjects` | 180,284 | 32 | ok |
+| `reconcile-capabilities` | 166,263 | 115 | ok |
+| `reconcile-outcomes` | 190,160 | 84 | **failed** |
+
+The two that survived were at 91% and 83% of the ceiling, so the margin was gone
+before this run; retail is where it ran out, not where it appeared. For scale, the
+rossoctl-reservation run's `01-claims/` was 14 files. Re-dispatching the failing
+pass on opus with the same inputs and the same skill peaked around 90k against
+190k and landed its partial — so the shape is not structural, but what cleared it
+was roughly 2x headroom rather than a better merge.
+
+**Two things changed and a third deliberately did not.** `gate-brief --gate 0` now
+carries the read cost of the admits — the admitted count, their total source bytes,
+and the structural multiplier — so the price of an admit is in front of the human
+who ratifies it. And each of the eight passes' Method sections now carries a
+bounded-read instruction: read each claims file once, in slices with `offset` and
+`limit`, and never re-open a finished one, with the measured death quoted as its
+justification. Of the 80 reads in the failing pass, zero used `offset` or `limit`
+and eight files were read three times each, which is a member behaving reasonably
+under a prompt that said only "read all of it".
+
+**What did not change is any cap.** A manifest limit on admitted claim bytes,
+refused at intake the way `survey` refuses an oversized corpus, was considered and
+declined on the ground that its ceiling would be a number justified by one run.
+So the band is still linear and still unbounded; what exists now is a price tag and
+a technique. Both are prose or report, and
+[the entry on read coverage](#rb-reconcile-gaps-read-coverage-cannot-be-forced-by-any-output-shape)
+already records that no output shape can force a pass to have read what it says it
+read — so the instruction buys a probability, and the report buys an informed
+human. Neither buys a guarantee, and a future run on a wider corpus is the thing
+that would justify the cap.
+
+Note also what the report cannot say. `01-claims/` does not exist at gate 0, and a
+claims file is not a function of its input's size, so the block reports source
+bytes as an explicit proxy and refuses to estimate the band. A reader who wants the
+relationship between the two has one observation — 22 inputs to 403 KB — and one
+observation is not a ratio.
+
+Adjacent but distinct, and the two are regularly conflated: the entry above this
+one is about **time to first byte**, whether a bounded pass thinks fast enough to
+beat the gateway's ~300 s no-bytes close. This is the **input band**. A fix aimed at
+one does nothing for the other.
+
 ### Golden `scn-empty`'s `answer_excludes` marks a correct answer wrong
 
 Measured through the real scorer on the emitted package. The oracle's own

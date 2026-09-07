@@ -700,12 +700,26 @@ Gate 0 renders more than the others because it is the one gate held before any
 downstream stage has read the corpus: the objective verdict, then the
 predicted-vs-observed surface divergence (`00-objective.json`'s
 `predicted_surface_count` against the surfaces the disposition parts confirmed
-or added), then admits by priority, declines grouped by reason code, and every
+or added), then admits by priority, **the read cost of those admits**, declines
+grouped by reason code, and every
 open deficiency beside the projection that would close it — and last, the
 mechanics of how the fan-out read the corpus: the slice table (candidates and
 bytes per slice) and every group `triage-slices` split across more than one
 slice. That final summary is where the near-duplicate residue lives, and gate 0
 is the only place a human can act on it.
+
+The **read cost** block sits directly beneath the admits because it is the price
+of the decision above it, and it reports two measured numbers while refusing to
+report a third. The admitted count and their total source bytes are facts about
+the catalogue. The multiplier beside them is structural: every pass in the
+reconcile family reads *all* of `01-claims/`, so an admit is read in full once per
+pass, and `reconcile-contradict` fans out one member per subject on top of that.
+What those inputs *extract to* is deliberately not estimated — `01-claims/` does
+not exist at gate 0, and a claims file is not a function of its input's size, so
+the block says the source bytes are a proxy rather than a prediction. A candidate
+whose `bytes` is not a usable integer is counted in the admit total and named as
+unsummable rather than raising, since this command exits clean on any readable
+run.
 
 Gate 1's brief leads with the **reconcile sweep**, and it is an aggregate rather
 than a per-subject listing: how many subjects cover how many claims, how many

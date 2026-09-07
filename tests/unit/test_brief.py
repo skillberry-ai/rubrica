@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from rubrica import brief, cli, refs, survey
+from rubrica import brief, cli, refs, skills, survey
 from rubrica.artifacts import read_json, write_json
 from rubrica.paths import RunPaths, list_json
 from rubrica.utilisation import claim_utilisation
@@ -1093,6 +1093,118 @@ def test_gate_zero_reports_a_surface_a_slice_observed_but_the_map_never_predicte
     divergence = _section(brief.gate_brief(run, 0), DIVERGENCE_HEADER)
     assert "retry semantics" in divergence
     assert re.search(r"observed[^\n]*: 4", divergence)
+
+
+# The read-cost surface. Gate 0 ratified an admit with its price invisible: a
+# candidate admitted here is read in full by every reconcile pass downstream, and
+# nothing at this gate said so. On the retail run that made roughly a quarter of a
+# 403 KB context band self-inflicted, and the pass that ran out of room died.
+_READS_ALL_CLAIMS = "reads all of 01-claims/"
+
+
+def _read_cost(text: str) -> str:
+    return _section(text, "Read cost of these admits")
+
+
+def test_gate_zero_states_what_the_admits_will_cost_every_reconcile_pass(tmp_path):
+    """The number in front of a human at the moment they ratify an admit.
+
+    `gate-brief --gate 0` reported the objective verdict, the surface divergence,
+    grouped declines with their bytes, and the slice table -- everything about
+    whether an admit is *plausible* and nothing about what it costs. The cost is
+    paid downstream by eight passes that each read all of `01-claims/`, and it is
+    not visible until gate 1, by construction: utilisation is computed from a world
+    model that does not exist until those passes have already run.
+    """
+    run = _staged_and_sealed_run(tmp_path)
+    section = _read_cost(brief.gate_brief(run, 0))
+    assert _has_number(_row(section, "admitted candidates"), 3)
+    assert _has_number(_row(section, "admitted source bytes"), 2447)
+
+
+def test_the_read_cost_multiplier_is_derived_from_the_stage_list(tmp_path):
+    """Not a typed number. `paths.STAGES` is the one ordering, so a reconcile pass
+    added later raises this count without anybody remembering to, and the test that
+    follows is what keeps the derivation honest about what those passes read."""
+    run = _staged_and_sealed_run(tmp_path)
+    section = _read_cost(brief.gate_brief(run, 0))
+    assert _has_number(_row(section, "read in full by"), len(brief.CLAIMS_READING_PASSES))
+    # Belt to that braces: the count is 8 today, and a rendering that dropped the
+    # number entirely would satisfy the row check above against a section whose
+    # furniture happens to contain an 8.
+    assert len(brief.CLAIMS_READING_PASSES) == 8
+
+
+def test_every_pass_the_read_cost_counts_actually_declares_it_reads_the_claims(tmp_path):
+    """The derivation binds to the contracts, not to a naming convention.
+
+    `CLAIMS_READING_PASSES` is filtered from `paths.STAGES` by name, which is only
+    honest while every stage it selects really does read all of `01-claims/`. Each
+    of the eight declares `claims_dir` in its contract's `reads`, and this asserts
+    it -- so a future `reconcile-` pass that reads something narrower fails here
+    rather than silently inflating a number a human budgets against.
+    """
+    for stage in brief.CLAIMS_READING_PASSES:
+        skill = skills.load(skills.skills_dir() / f"rb-{stage}" / "SKILL.md")
+        reads = skill.contract.get("reads", [])
+        assert "claims_dir" in reads, (
+            f"{stage} is counted as reading all of 01-claims/ but its contract's reads is {reads}"
+        )
+
+
+def test_the_read_cost_says_the_claims_bytes_are_not_knowable_here(tmp_path):
+    """The honesty clause, and it is the point of the section rather than a caveat
+    on it. `01-claims/` does not exist at gate 0 -- `extract` has not run -- and a
+    claims file is not a function of its input's size. Reporting source bytes as
+    though they predicted the context band would be a reasoned number presented as
+    an observed one, which this project treats as corrupting the evidence.
+    """
+    run = _staged_and_sealed_run(tmp_path)
+    section = _read_cost(brief.gate_brief(run, 0)).lower()
+    assert "01-claims/" in section
+    assert "not knowable" in section or "cannot be known" in section
+    # The proxy is named as a proxy: a reader must be able to tell which number is
+    # measured (source bytes) from which is not (what they extract to).
+    assert "source bytes" in section
+
+
+def test_the_read_cost_counts_admits_and_not_declines(tmp_path):
+    """A declined candidate costs no pass anything, so counting it would overstate
+    exactly the number this section exists to make honest. The toy world declines
+    nothing, so the decline is introduced here rather than asserted absent."""
+    run = _staged_and_sealed_run(tmp_path)
+    before = _read_cost(brief.gate_brief(run, 0))
+    assert _has_number(_row(before, "admitted candidates"), 3)
+
+    triage = read_json(run.triage)
+    for disposition in triage["dispositions"]:
+        if disposition["candidate_id"] == "notes-md":
+            disposition["disposition"] = "decline"
+            disposition["reason_code"] = "no_evidence_value"
+    write_json(run.triage, triage)
+
+    after = _read_cost(brief.gate_brief(run, 0))
+    assert _has_number(_row(after, "admitted candidates"), 2)
+    # 2447 - 898, so the bytes follow the disposition rather than the catalogue.
+    assert _has_number(_row(after, "admitted source bytes"), 1549)
+
+
+def test_a_candidate_with_no_usable_bytes_does_not_break_the_read_cost_line(tmp_path):
+    """`gate-brief` always exits clean on a readable run, so a hand-edited
+    catalogue at this gate must render rather than raise -- the same rule the
+    unhashable-candidate_id guards in this module already carry. The count still
+    reports every admit; only the byte total narrows to what is summable.
+    """
+    run = _staged_and_sealed_run(tmp_path)
+    catalogue = read_json(run.catalogue)
+    for candidate in catalogue["candidates"]:
+        if candidate["candidate_id"] == "api-json":
+            candidate["bytes"] = "1231"
+    write_json(run.catalogue, catalogue)
+
+    section = _read_cost(brief.gate_brief(run, 0))
+    assert _has_number(_row(section, "admitted candidates"), 3)
+    assert _has_number(_row(section, "admitted source bytes"), 1216)
 
 
 def test_gate_zero_names_a_group_split_across_slices(tmp_path):
