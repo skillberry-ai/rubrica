@@ -11,8 +11,8 @@ import os
 
 import pytest
 
-from rubrica import reconcile, refs, validate
-from rubrica.artifacts import read_json, write_json
+from rubrica import cli, reconcile, refs, validate
+from rubrica.artifacts import read_json, sha256_of, write_json
 from tests.toy import build_toy_run, split_world_model, toy_world_model
 
 
@@ -36,6 +36,225 @@ def test_the_seal_rebuilds_the_golden_world_model_exactly(tmp_path):
     assert findings == []
     assert path == run.world_model
     assert read_json(run.world_model) == toy_world_model()
+
+
+def _sealed(tmp_path):
+    """A run carried to a clean seal, which is the state every digest test starts from."""
+    run = build_toy_run(tmp_path, upto="extract")
+    _write_parts(run, split_world_model())
+    path, findings = reconcile.seal(run)
+    assert findings == [], findings
+    assert path == run.world_model
+    return run
+
+
+def test_the_seal_records_a_digest_for_every_partial_it_assembled(tmp_path):
+    """The hole this closes: `01-world-model.json` recorded no digest of the partials
+    it was assembled from, so a partial edited *after* the seal was undetectable by
+    anything a human reads at gate 1. Measured on two domains -- rewriting
+    `01-capabilities.json` after the seal left `validate --stage reconcile-seal`,
+    `check-refs` and `gate-brief --gate 1` byte-identical to the clean run.
+
+    Recorded in `manifest.json` rather than in the sealed document, and that is the
+    ruling rather than an implementation detail. The manifest is already this
+    project's home for digests -- `inputs[].sha256`, re-hashed by
+    `refs.check_inputs` -- and `01-world-model.json` keeps its path, schema and byte
+    shape, which is a property `CLAUDE.md` freezes deliberately so nothing below the
+    seal can tell it was assembled pass by pass.
+    """
+    run = _sealed(tmp_path)
+    recorded = {entry["path"]: entry for entry in read_json(run.manifest)["partials"]}
+    # Derived from the fixture rather than listed: the toy world's contradiction parts
+    # are one per subject and a literal roster here would be a second spelling of
+    # split_world_model()'s own. What is asserted is the *rule* -- the five singleton
+    # parts plus every contradiction part, and nothing else.
+    expected = {
+        "01-capabilities.json",
+        "01-outcomes.json",
+        "01-entities.json",
+        "01-goals.json",
+        "01-gaps.json",
+    } | {f"01-contradictions/{p.name}" for p in run.contradictions_dir.iterdir()}
+    assert set(recorded) == expected, sorted(set(recorded) ^ expected)
+    # `01-subjects.json` is absent on purpose, and asserted so rather than left to the
+    # set comparison: the seal never reads it -- it is the cover the contradict fan-out
+    # slices, and no key of the world model comes from it -- so recording a digest for
+    # it would claim an assembly read a file it did not.
+    assert "01-subjects.json" not in recorded
+    assert run.subjects.is_file(), "the fixture must actually have a subjects cover"
+
+
+def test_the_recorded_digest_is_the_partial_s_actual_content(tmp_path):
+    """A digest of something else is worse than none: it would clear a check while
+    describing a file nobody wrote."""
+    run = _sealed(tmp_path)
+    for entry in read_json(run.manifest)["partials"]:
+        path = run.root / entry["path"]
+        assert entry["sha256"] == sha256_of(path), entry["path"]
+        assert entry["bytes"] == path.stat().st_size, entry["path"]
+
+
+def test_a_partial_edited_after_the_seal_is_a_finding_naming_it(tmp_path):
+    """The reported defect, end to end. Everything at gate 1 was byte-identical
+    before this; now the edit has one place that reports it, and the finding names
+    the partial rather than the world model -- which is correct because the world
+    model faithfully describes the partials as they were when it was sealed.
+    """
+    run = _sealed(tmp_path)
+    assert refs.check_partials(run) == []
+
+    capabilities = read_json(run.capabilities_part)
+    capabilities["capabilities"][0]["description"] = "rewritten after the seal"
+    write_json(run.capabilities_part, capabilities)
+
+    findings = refs.check_partials(run)
+    assert len(findings) == 1, findings
+    assert findings[0].artifact == run.capabilities_part
+    # The message has to carry both hashes and the remedy, not merely say something
+    # is wrong: a `1` sends the orchestrator to repair a stage, so a reader who
+    # cannot tell "edited since the seal" from "the seal is broken" spends the run's
+    # one repair attempt on the wrong thing.
+    message = findings[0].message
+    assert sha256_of(run.capabilities_part) in message
+    assert "reconcile-seal" in message
+
+
+def test_the_edit_is_reported_through_check_all_and_not_only_its_own_checker(tmp_path):
+    """A checker nothing calls closes nothing. `check-refs` is what a human runs at
+    gate 1, so the hole is only closed if the finding arrives there."""
+    run = _sealed(tmp_path)
+    before = refs.check_all(run)
+
+    capabilities = read_json(run.capabilities_part)
+    capabilities["capabilities"][0]["description"] = "rewritten after the seal"
+    write_json(run.capabilities_part, capabilities)
+
+    after = refs.check_all(run)
+    added = [f for f in after if f not in before]
+    assert [f.artifact for f in added] == [run.capabilities_part], added
+
+
+def test_a_partial_deleted_after_the_seal_is_a_finding_naming_it(tmp_path):
+    """An absent partial is the same class as a changed one -- the sealed world model
+    describes something that is no longer there -- and it must not surface as a
+    traceback or as a finding against the world model."""
+    run = _sealed(tmp_path)
+    run.gaps_part.unlink()
+    findings = refs.check_partials(run)
+    assert [f.artifact for f in findings] == [run.gaps_part], findings
+
+
+def test_a_manifest_with_no_partials_block_reports_nothing(tmp_path):
+    """A run sealed before this existed has no record to check against, and inventing
+    a finding for one would be the fabricated-finding failure `CLAUDE.md` records:
+    `check-refs` over an unreadable 01-claims/ once reported four invented `no such
+    claim` findings against a correct world model. The committed live recordings are
+    exactly this case -- world models sealed by the superseded single-dispatch stage,
+    with no manifest at all.
+    """
+    run = build_toy_run(tmp_path, upto="extract")
+    _write_parts(run, split_world_model())
+    manifest = read_json(run.manifest)
+    assert "partials" not in manifest
+    assert refs.check_partials(run) == []
+
+
+def test_two_runs_sealed_from_identical_partials_record_identical_digests(tmp_path):
+    """The seal's byte-identity property must survive gaining a record. It does
+    because every field is content-derived: the digest and the byte count come from
+    the file, and the path is run-relative rather than absolute.
+    """
+    first = _sealed(tmp_path / "a")
+    second = _sealed(tmp_path / "b")
+    assert read_json(first.manifest)["partials"] == read_json(second.manifest)["partials"]
+    assert first.world_model.read_bytes() == second.world_model.read_bytes()
+
+
+def test_re_sealing_after_a_legitimate_correction_updates_the_record(tmp_path):
+    """The workflow this gate actually invites. `CLAUDE.md` says a human at gate 1
+    corrects a grouping by hand, so an edit below the seal is encouraged rather than
+    tamper-only -- what was missing was any signal that the seal has to be re-run.
+    Re-running it must clear the finding, or the check would punish the correct
+    workflow instead of the incorrect one.
+    """
+    run = _sealed(tmp_path)
+    capabilities = read_json(run.capabilities_part)
+    capabilities["capabilities"][0]["description"] = "corrected by a human at gate 1"
+    write_json(run.capabilities_part, capabilities)
+    assert refs.check_partials(run)
+
+    path, findings = reconcile.seal(run)
+    assert findings == []
+    assert path == run.world_model
+    assert refs.check_partials(run) == []
+
+
+def test_an_unreadable_partial_is_a_finding_naming_it_and_not_a_traceback(tmp_path):
+    """`CLAUDE.md`'s rule for touching refs.py: test the unreadable-input paths, not
+    just the happy path. A stage defect must never surface as exit 2, and a `1` must
+    name the right artifact -- `check-refs` over an unreadable `01-claims/` once
+    reported four fabricated `no such claim` findings against a correct world model.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = _sealed(tmp_path)
+    run.capabilities_part.chmod(0o000)
+    try:
+        findings = refs.check_partials(run)
+    finally:
+        run.capabilities_part.chmod(0o644)
+    assert [f.artifact for f in findings] == [run.capabilities_part], findings
+    assert "cannot read" in findings[0].message
+
+
+@pytest.mark.parametrize(
+    "bad_path",
+    ["../escaped.json", "/etc/passwd", "01-contradictions/../../escaped.json"],
+    ids=["relative-traversal", "absolute", "nested-traversal"],
+)
+def test_a_recorded_path_outside_the_run_is_a_finding_against_the_manifest(tmp_path, bad_path):
+    """The one class where the finding names the manifest rather than the partial:
+    there is no partial to name, and the recorded path is what is wrong. Refused by
+    resolving rather than by scanning for `..`, so a spelling nobody anticipated
+    cannot slip past a substring test -- and never read, since a stage output that
+    points outside the run must arrive as a repairable finding rather than as a read
+    of somebody else's file.
+    """
+    run = _sealed(tmp_path)
+    manifest = read_json(run.manifest)
+    manifest["partials"] = [{"path": bad_path, "sha256": "0" * 64, "bytes": 1}]
+    write_json(run.manifest, manifest)
+    findings = refs.check_partials(run)
+    assert [f.artifact for f in findings] == [run.manifest], findings
+    assert "inside the run directory" in findings[0].message
+
+
+def test_a_stale_seal_reaches_the_orchestrator_as_exit_one_with_findings_on_stdout(
+    tmp_path, capsys
+):
+    """The contract the orchestrator branches on. A stage defect is exit 1 with one
+    finding per line on stdout -- never exit 2, which says retrying cannot help, and
+    never exit 1 with empty stdout, which is what an exception escaping the handler
+    produces.
+    """
+    run = _sealed(tmp_path)
+    capabilities = read_json(run.capabilities_part)
+    capabilities["capabilities"][0]["description"] = "rewritten after the seal"
+    write_json(run.capabilities_part, capabilities)
+
+    code = cli.main(["check-refs", "--run", str(run.root)])
+    captured = capsys.readouterr()
+    assert code == 1, captured.out + captured.err
+    assert captured.out.strip(), "a 1 must never have empty stdout"
+    assert "01-capabilities.json" in captured.out
+
+
+def test_the_manifest_still_passes_layer_one_with_the_partials_block(tmp_path):
+    """The block is a schema addition, so the document that carries it has to clear
+    its own schema -- and the manifest is code output, which makes a layer-1 finding
+    against it unrepairable by any re-dispatch."""
+    run = _sealed(tmp_path)
+    assert validate.validate_artifact(run.manifest, "manifest") == []
 
 
 def test_the_sealed_world_model_passes_layer_one(tmp_path):

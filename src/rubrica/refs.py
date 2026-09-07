@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from rubrica.artifacts import ArtifactError, read_json, sha256_of
@@ -1416,6 +1416,131 @@ def check_inputs(run: RunPaths) -> list[Finding]:
                 )
             )
     return out
+
+
+def check_partials(run: RunPaths) -> list[Finding]:
+    """The reconcile partials on disk against the digests the seal recorded.
+
+    The hole this closes was confirmed on two domains: `01-world-model.json` records
+    no digest of the partials it was assembled from, so a partial rewritten *after*
+    `reconcile-seal` left `validate --stage reconcile-seal`, `check-refs` and
+    `gate-brief --gate 1` byte-identical to the clean run. Re-running the seal would
+    have caught it, and nothing at gate 1 obliged anyone to.
+
+    Mechanically `check_inputs` one layer in -- that closes the reproducibility hole
+    for the run's corpus inputs, this one for the intermediate artifacts a human is
+    actually invited to hand-edit. `CLAUDE.md` has a reader correct a grouping at
+    gate 1, so an edit below the seal is a workflow this design encourages rather
+    than a tamper-only path; re-running the seal after such a correction updates the
+    record and clears the finding, which is why this reports a *stale* seal rather
+    than an edit.
+
+    Silent when the manifest records no `partials` block, and that is load-bearing
+    rather than lenient. A run sealed before the block existed has nothing to check
+    against, and the two committed live recordings are exactly that case. Reporting
+    its absence would be the fabricated-finding failure the exit-code contract
+    exists to prevent: `check-refs` over an unreadable `01-claims/` once reported
+    four invented `no such claim` findings against a correct world model.
+
+    Each finding names the *partial*, not the world model, except where the recorded
+    path itself is unusable -- there the manifest is the artifact at fault. The world
+    model is not wrong: it faithfully describes the partials as they were when it was
+    sealed, which is precisely why the drift is invisible without this.
+    """
+    manifest = _load(run.manifest)
+    if not isinstance(manifest, dict):
+        return []
+    recorded = manifest.get("partials")
+    if not isinstance(recorded, list):
+        return []
+
+    out: list[Finding] = []
+    for i, entry in enumerate(recorded):
+        if not isinstance(entry, dict):
+            out.append(
+                Finding(run.manifest, "refs", f"/partials/{i}", "partial entry is not an object")
+            )
+            continue
+        relative = entry.get("path")
+        if not isinstance(relative, str) or not relative:
+            out.append(
+                Finding(run.manifest, "refs", f"/partials/{i}/path", "partial entry has no path")
+            )
+            continue
+        # Refused rather than joined, for the reason check_inputs validates
+        # `stored_as`: a traversing or absolute path in a stage output must arrive as
+        # a repairable finding, never as a read outside the run directory.
+        if not _within_run(run, relative):
+            out.append(
+                Finding(
+                    run.manifest,
+                    "refs",
+                    f"/partials/{i}/path",
+                    f"{relative!r} is not a path inside the run directory",
+                )
+            )
+            continue
+        path = run.root / relative
+        if not path.is_file():
+            out.append(
+                Finding(
+                    path,
+                    "refs",
+                    "",
+                    f"the seal assembled {relative} but no such file exists now; "
+                    "01-world-model.json describes partials that are no longer on disk, so "
+                    "re-run `rubrica reconcile-seal` or restore the file",
+                )
+            )
+            continue
+        try:
+            actual = sha256_of(path)
+            size = path.stat().st_size
+        except OSError as exc:
+            # A finding rather than a raise, and against the partial rather than the
+            # manifest: an unreadable partial is a repairable state, and naming the
+            # wrong artifact here is the misdirection CLAUDE.md records as having
+            # cost this project a fix round.
+            out.append(Finding(path, "refs", "", f"cannot read partial {relative} ({exc})"))
+            continue
+        if actual != entry.get("sha256"):
+            out.append(
+                Finding(
+                    path,
+                    "refs",
+                    "",
+                    f"{relative} hashes to {actual} but the seal recorded "
+                    f"{entry.get('sha256')}; the partial has been edited since "
+                    "01-world-model.json was sealed, so the sealed model describes the "
+                    "file as it was and not as it is -- re-run `rubrica reconcile-seal`",
+                )
+            )
+            continue
+        if size != entry.get("bytes"):
+            out.append(
+                Finding(
+                    path,
+                    "refs",
+                    "",
+                    f"{relative} is {size} bytes but the seal recorded {entry.get('bytes')}",
+                )
+            )
+    return out
+
+
+def _within_run(run: RunPaths, relative: str) -> bool:
+    """Whether `relative` stays inside the run directory once joined.
+
+    Checked by resolving rather than by scanning for `..`, so a spelling this
+    function did not anticipate cannot slip past a substring test.
+    """
+    if PurePosixPath(relative).is_absolute():
+        return False
+    try:
+        (run.root / relative).resolve().relative_to(run.root.resolve())
+    except (ValueError, OSError):
+        return False
+    return True
 
 
 def check_admitted_inputs(run: RunPaths) -> list[Finding]:
@@ -4249,6 +4374,12 @@ def check_all(run: RunPaths) -> list[Finding]:
     findings.extend(check_limits(run))
     findings.extend(check_subjects(run))
     findings.extend(check_contradiction_parts(run))
+    # Before anything reasons about the assembled model, because a stale seal makes
+    # every later finding describe partials the world model was not built from. It
+    # sits after check_inputs for the same reason it mirrors it: both are "is what
+    # this run recorded still what is on disk", one for the corpus and one for the
+    # intermediates.
+    findings.extend(check_partials(run))
     findings.extend(check_outcomes(run))
     # After the partials are readable, before anything reasons about the model
     # assembled from them: the accounting is a property of what each pass wrote,

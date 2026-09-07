@@ -22,6 +22,24 @@
         "interface": { "type": "string", "minLength": 1 }
       }
     },
+    "partials": {
+      "type": "array",
+      "description": "One entry per reconcile partial the seal actually assembled from, recorded by `rubrica reconcile-seal` and re-hashed by refs.check_partials. Optional, because a run sealed before this block existed has no record to check against and inventing a finding for its absence would be the fabricated-finding failure the exit-code contract exists to prevent. Recorded here rather than in 01-world-model.json deliberately: the manifest is already where this project records digests (inputs[].sha256, re-hashed by check_inputs), and the sealed world model keeps its path, schema and byte shape so nothing below the seal can tell it was assembled pass by pass. Every field is content-derived, so two runs sealed from identical partials record an identical array.",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256", "bytes"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Run-relative, so the record does not embed the machine the run happened on."
+          },
+          "sha256": { "$ref": "#/$defs/sha256" },
+          "bytes": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
     "inputs": {
       "type": "array",
       "minItems": 1,

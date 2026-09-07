@@ -1509,7 +1509,14 @@ an orchestrator-set value would go.
 
 `refs.check_inputs` re-hashes the bytes in `00-inputs/` against the digests
 `manifest.json` records for them, which closes the reproducibility hole inside
-one run.
+one run. `refs.check_partials` now does the same thing one layer in, for the
+reconcile partials `01-world-model.json` was assembled from — the hole where a
+partial edited *after* the seal left `validate --stage reconcile-seal`,
+`check-refs` and `gate-brief --gate 1` byte-identical to the clean run, confirmed
+on two domains. The digests live in `manifest.json` rather than in the sealed
+document, so the world model keeps the byte shape it is deliberately frozen at.
+Everything the rest of this entry says about `diff-runs` applies to that record
+too: it is re-verified within a run and never across two.
 
 `diff-runs` does not chain to it. Its comparability precondition refuses to
 call two runs comparable unless their manifests record identical input
@@ -1539,6 +1546,16 @@ array — against numbers the same code derived from the same lists. **For any
 world model this pipeline now produces, both comparisons are identities.** They
 can fail only if `reconcile.seal` and `refs.py` come to disagree about the
 arithmetic, or if somebody hand-edits a sealed world model.
+
+The mirror case — an edit **below** the seal rather than to the sealed document —
+is now covered by `refs.check_partials`, which re-hashes each partial against the
+digest the seal recorded in `manifest.json`. That is the closer of the two to a
+real workflow: gate 1 is where a human is *invited* to correct a grouping by hand,
+so an edit below the seal is encouraged rather than tamper-only, and what was
+missing was any signal that the seal has to be re-run afterwards. Re-running it
+updates the record and clears the finding, so the finding says the seal is stale
+rather than that somebody tampered. A hand-edit of the sealed document itself is
+still uncovered, and remains the case this paragraph describes.
 
 The scope of that sentence is load-bearing, because the tree still holds world
 models the pipeline did not produce. `tests/fixtures/toy-contradiction/recorded/`
