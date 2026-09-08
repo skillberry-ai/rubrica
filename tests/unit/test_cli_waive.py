@@ -223,3 +223,80 @@ def test_record_refuses_a_blank_reason(tmp_path):
             finding_text="whatever the finding said",
         )
     assert not run.waivers.exists()
+
+
+# -- the handler's error path, which nothing above reaches -------------------
+#
+# Measured: narrowing the handler's `except (UsageError, OSError)` to
+# `except UsageError` left the whole suite green before these two landed. Both
+# cases are exit 2 with empty stdout, the shape test_cli.py's
+# test_an_unreadable_run_directory_is_exit_2_not_a_finding asserts for every
+# other subcommand that touches the filesystem.
+
+
+def test_a_waivers_path_that_is_a_directory_is_exit_2(tmp_path, capsys):
+    """A filesystem problem, not a stage defect: no prompt re-dispatch fixes it."""
+    run = build_toy_run(tmp_path)
+    _uncited(run)
+    run.waivers.mkdir()
+    code = main(_waive_argv(run))
+    captured = capsys.readouterr()
+    assert code == 2, captured.out
+    assert captured.out.strip() == "", "a filesystem problem must not print a finding line"
+    assert captured.err.startswith("error: ")
+
+
+def test_an_unappendable_decisions_md_says_the_waiver_is_already_in_effect(tmp_path, capsys):
+    """waivers.json is written first and stays written, so the exit 2 must not
+    read as "nothing happened".
+
+    Appending the prose first would instead leave decisions.md asserting a waiver
+    that does not exist, and that false line accumulates on every retry. The
+    waiver being live here is correct; the silence was not, so the message names
+    the id a human needs in order to undo it.
+    """
+    run = build_toy_run(tmp_path)
+    _uncited(run)
+    run.decisions.unlink(missing_ok=True)
+    run.decisions.mkdir()
+    code = main(_waive_argv(run))
+    captured = capsys.readouterr()
+    assert code == 2, captured.out
+    assert captured.out.strip() == ""
+    assert captured.err.startswith("error: ")
+    assert "wv-0001" in captured.err and "in effect" in captured.err
+    # The waiver really is live, which is what the message has to be telling the
+    # truth about: the finding it names is waived from here on.
+    assert read_json(run.waivers)["waivers"][0]["id"] == "wv-0001"
+    assert _by_subject(run)[SUBJECT].waived
+
+
+def test_record_refuses_a_blank_subject(tmp_path):
+    """minLength: 1 in the schema, so `""` writes a document load() rejects --
+    every later check-refs on that run exits 2 and only a hand edit clears it."""
+    run = build_toy_run(tmp_path)
+    with pytest.raises(UsageError, match="subject cannot be empty"):
+        waivers.record(
+            run,
+            check="claim-utilisation",
+            subject="   ",
+            remedy="none",
+            reason=_REASON,
+            finding_text="whatever the finding said",
+        )
+    assert not run.waivers.exists()
+
+
+def test_record_refuses_a_blank_finding_text(tmp_path):
+    """The same self-poisoning shape as a blank subject, one field over."""
+    run = build_toy_run(tmp_path)
+    with pytest.raises(UsageError, match="finding text cannot be empty"):
+        waivers.record(
+            run,
+            check="claim-utilisation",
+            subject=SUBJECT,
+            remedy="none",
+            reason=_REASON,
+            finding_text="   ",
+        )
+    assert not run.waivers.exists()

@@ -923,9 +923,13 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
                 return USAGE
-            # (UsageError, OSError), matching decide above: waivers.json being a
-            # directory, or the run being read-only, raises a bare OSError that
-            # would otherwise become a fabricated exit-1 "internal" finding.
+            # (UsageError, OSError), matching decide above, so the error names this
+            # subcommand's write rather than reaching the shared handler:
+            # waivers.json or decisions.md being a directory, or the run being
+            # read-only, raises a bare OSError. Measured: removing this catch
+            # entirely gives byte-identical output for both, because main's outer
+            # handler names OSError too -- so what it buys is attribution, not a
+            # different exit code.
             try:
                 waiver_id = waivers.record(
                     run,

@@ -158,6 +158,12 @@ def record(
     validated here for the mirror reason and *only* here -- `load` does not hold
     an existing file to remedy_choices(), since a stage renamed after a waiver was
     written must not turn the human record into an exit 2.
+
+    **One raise here does not mean nothing was written.** Every check runs before
+    any filesystem mutation, so a UsageError from one of them leaves the run
+    untouched -- but the append to decisions.md happens *after* waivers.json is
+    written, and its failure is re-raised as a UsageError that says so and names
+    the id. A caller must not read that one as "the waiver was not recorded".
     """
     if check not in WAIVABLE_CHECKS:
         raise UsageError(
@@ -166,6 +172,19 @@ def record(
     choices = remedy_choices()
     if remedy not in choices:
         raise UsageError(f"unknown remedy {remedy!r}; expected one of {', '.join(choices)}")
+    # Blank-string guards for the two fields the CLI cannot send blank but a
+    # programmatic caller can. Both are minLength: 1 in waivers-0.1.json, so `""`
+    # writes a document `load` then rejects -- and every later check-refs on that
+    # run exits 2, leaving a run that poisoned itself and is recoverable only by a
+    # hand edit, in the one mechanism whose purpose is auditability. decide sets
+    # the precedent by refusing a blank note.
+    #
+    # Tested for blankness but stored unchanged, unlike `reason` below: `subject`
+    # is the key waived_subjects compares against, and `finding_text` is a byte
+    # copy of the finding's own message. Stripping either would make the record
+    # differ from what the caller matched.
+    if not subject.strip():
+        raise UsageError("a waiver subject cannot be empty")
     text = reason.strip()
     if not text:
         raise UsageError("a waiver reason cannot be empty")
@@ -173,11 +192,16 @@ def record(
         raise UsageError(
             "a waiver reason cannot contain a newline; decisions.md is one line per entry"
         )
+    if not finding_text.strip():
+        raise UsageError("a waiver's finding text cannot be empty")
 
-    # Imported here rather than at module scope: refs.py imports this module, and
-    # manifest.py imports validate.py, so a module-level import would build
-    # refs -> waivers -> manifest -> validate at import time. skills.py:318 defers
-    # an import for the same reason.
+    # Deferred rather than imported at module scope, to keep manifest -- and
+    # through it skills -- out of this module's import graph: refs.py imports
+    # waivers at module scope, so every consumer of refs pays for whatever sits
+    # there. Measured: this is not a cycle. manifest reaches artifacts, errors,
+    # paths, skills and validate, none of which reaches refs or waivers, and this
+    # module already imports validate at module scope. So the deferral buys
+    # narrowness, not import-ability.
     from rubrica.manifest import utc_stamp
 
     stamp = utc_stamp(now)
@@ -202,8 +226,22 @@ def record(
     # reads at every gate rather than only in a JSON document they would have to
     # know to open. One line, `decide`'s shape, which is why the newline above is
     # refused.
-    append_decision(
-        run.decisions,
-        f"- {stamp} waived {check}/{subject}: remedy {remedy}; {text}",
-    )
+    try:
+        append_decision(
+            run.decisions,
+            f"- {stamp} waived {check}/{subject}: remedy {remedy}; {text}",
+        )
+    except OSError as exc:
+        # waivers.json is written first and stays written: it is the artifact the
+        # gate reads, and appending the prose first would leave decisions.md
+        # asserting a waiver that does not exist -- a false record that
+        # accumulates on every retry. What was wrong here was never the order but
+        # the silence: the waiver is live and already suppressing a finding, so
+        # the failure names the id and both files rather than letting a caller
+        # read the exit 2 as "nothing happened".
+        raise UsageError(
+            f"waiver {waiver_id} was recorded in {run.waivers} and is in effect, but "
+            f"{run.decisions} could not be appended to: {exc}. The waiver stands; "
+            f"remove it by hand to undo it."
+        ) from exc
     return waiver_id
