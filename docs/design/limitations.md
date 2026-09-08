@@ -78,9 +78,13 @@ The exposure is therefore not "another scenario's slice." It is anything on the
 filesystem the dispatched process can open. (One *write* outside a run has also
 been observed, when the dispatch harness's permission allow list carried a bare
 `Write` grant and a stage used it to drop a scratch script in the repository
-root. That grant is now scoped to the run directory and the scoping is pinned by
-a test — it is named here only because it is the sharpest evidence for how wide
-the reachable surface is.)
+root. That grant is now derived from the dispatched stage's own `writes` contract
+— narrower than the run directory it was first scoped to, which a later dispatch
+also used, writing a scratch helper *inside* the run root where nothing reacts to
+it. Both scopings are pinned by tests. It is named here only because it is the
+sharpest evidence for how wide the reachable surface is, and note what the
+narrowing does not touch: `Read` is still the whole run, and this entry is about
+reads.)
 
 **How wide that surface is has now been measured rather than reasoned.** Three
 dispatches on 2026-09-01, replicating `scripts/dispatch-stage.sh`'s own flags at

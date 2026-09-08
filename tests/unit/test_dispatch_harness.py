@@ -200,11 +200,50 @@ def test_write_is_scoped_to_the_run_and_not_granted_bare(settings):
 
     Asserting the absence of the bare string as well as the presence of the scoped
     one: granting both would leave the hole open while looking fixed.
+
+    The scope is now the stage's own `writes` contract rather than the run
+    directory, which closes the second half of the same hole. `Write(/$RUN/**)`
+    stopped a dispatch escaping the run and permitted anything inside it -- and one
+    dispatch used that too, putting a `compute_weights.py` helper in the run root
+    (issue #15). Both the blanket grant and the bare one are asserted absent, since
+    either would make the derived list decorative.
     """
     perms, _, run = settings
     allow = perms["permissions"]["allow"]
     assert "Write" not in allow
-    assert f"Write(/{run}/**)" in allow
+    assert f"Write(/{run}/**)" not in allow, "the run-wide grant is the hole #15 reports"
+    assert f"Edit(/{run}/**)" not in allow
+    # `propose` writes one scenario part. The fixture's run has no batch plan on
+    # disk, so the resolver falls back to the artifact's own directory -- which is
+    # the documented behaviour and still refuses everything else in the run.
+    assert f"Write(/{run}/02-scenarios/**)" in allow
+    assert f"Edit(/{run}/02-scenarios/**)" in allow
+
+
+def test_no_write_grant_reaches_a_scratch_file_at_the_run_root(settings):
+    """The measured defect in #15, stated as the property that refuses it.
+
+    `rb-triage-objective`'s contract is `writes = ["objective"]`, and the dispatch
+    documented in #12 also wrote `compute_weights.py` into the run directory. A
+    scratch script there is not an artifact, is cleaned up by nothing, is covered by
+    no schema, and `check-refs` exits 0 with it present -- `summary.orphaned_temp_files`
+    keeps `p.name` where `".tmp." in p.name`, so it is a shape that mechanism does not
+    cover.
+
+    Asserted as "no grant matches" rather than "this one grant is absent", because
+    the hole was a grant that matched *everything* in the run: a test naming one
+    forbidden path would pass against a rule that still permitted the rest.
+    """
+    perms, _, run = settings
+    grants = [g for g in perms["permissions"]["allow"] if g.startswith(("Write(", "Edit("))]
+    assert grants, "the stage must be able to write something"
+    stray = f"/{run}/compute_weights.py"
+    for grant in grants:
+        pattern = grant[grant.index("(") + 1 : -1]
+        prefix = pattern[: -len("**")] if pattern.endswith("**") else pattern
+        assert not stray.startswith(prefix) or pattern == stray, (
+            f"{grant} would permit a scratch script at the run root"
+        )
 
 
 def test_the_run_artifacts_a_stage_must_read_are_not_denied(settings):

@@ -365,17 +365,47 @@ done
 # scope's allowWrite: [$run] did NOT stop it, which is a third data point for the
 # "do not rely on this layer" comment above.
 #
+# The write scope comes from the stage's own contract rather than from the run
+# directory, and that is the enforcement of a ruling rather than a tightening for
+# its own sake. `Write(/$RUN/**)` let a stage write anything inside the run, and one
+# did: the `rb-triage-objective` dispatch documented in issue #12 put a
+# `compute_weights.py` helper in the run root -- not an artifact, covered by no
+# schema, cleaned up by nothing, and `check-refs` exits 0 with it present. The one
+# mechanism that looks for unmanaged files keeps `p.name` where `".tmp." in p.name`,
+# so a scratch script is a shape it does not cover. The ruling is that a stage's
+# `writes` is the whole truth about what appears in $RUN, and the sandbox scope is
+# what holds it to that.
+#
+# Resolved in Python because the mapping from a contract name to a path is
+# RunPaths' to own; a second copy of it in bash would be a second thing to keep
+# right. `check-skills` already holds every `writes` entry to a RunPaths attribute,
+# so this cannot be asked to resolve a name that gate would have rejected.
+#
+# A failure here is fatal on purpose. Falling back to the old blanket grant would
+# reinstate the hole at exactly the moment something was wrong, which is the shape
+# of a mitigation that is worse than none.
+mapfile -t WRITE_PATHS < <("$REPO/.venv/bin/python" "$REPO/scripts/stage-write-scope.py" \
+  "$RUN" "$STAGE" ${SLICE:+"$SLICE"}) || {
+  echo "error: could not resolve the write scope for stage '$STAGE'" >&2
+  exit 2
+}
+[ "${#WRITE_PATHS[@]}" -gt 0 ] || {
+  echo "error: stage '$STAGE' resolved to an empty write scope" >&2
+  exit 2
+}
+
 # A "//abs" rule is "/" prepended to a path that already starts with "/".
 SETTINGS_FILE="$LAB/settings-$STAGE${SLICE:+-$SLICE}.json"
 jq -n --arg repo "$REPO" --arg run "$RUN" --arg skilldir "$SKILL_DIR" \
   --argjson deny "$( { printf '%s\n' "${DENY[@]}" \
       | jq -R '"Read(/" + . + ")", "Read(/" + . + "/**)"'; \
       printf '%s\n' "${WS_DENY[@]}" | jq -R .; } | jq -s .)" \
+  --argjson writes "$(printf '%s\n' "${WRITE_PATHS[@]}" \
+      | jq -R '"Write(/" + . + ")", "Edit(/" + . + ")"' | jq -s .)" \
   '{permissions: {
       deny: $deny,
-      allow: ["Read(/" + $skilldir + "/**)", "Read(/" + $run + "/**)",
-              "Edit(/" + $run + "/**)", "Write(/" + $run + "/**)",
-              "Bash(rubrica *)", "Bash(" + $repo + "/.venv/bin/rubrica *)"]
+      allow: (["Read(/" + $skilldir + "/**)", "Read(/" + $run + "/**)",
+               "Bash(rubrica *)", "Bash(" + $repo + "/.venv/bin/rubrica *)"] + $writes)
     }}' > "$SETTINGS_FILE"
 
 # ---------------------------------------------------------------------------
