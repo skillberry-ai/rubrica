@@ -198,7 +198,13 @@ def test_a_remedy_the_schema_rejects_is_a_usage_error(tmp_path):
     STAGES grows, so the enum lives in `rubrica waive` rather than in the schema.
     Measured: a document carrying `remedy: "banana"` validates clean, so this test
     pins what the schema does refuse rather than asserting a check it does not
-    make. See the fix report for the ruling that gap is owed.
+    make.
+
+    That gap is deliberate rather than owed. `record` holds `remedy` to
+    `remedy_choices()` on write, and `load` does not hold an existing file to it,
+    so a stage renamed after a waiver was written does not turn a human's record
+    into an exit 2 -- `gate-brief` marks the unknown pointer for a reader instead,
+    which is where a stale remedy is meant to surface.
     """
     run = _run(tmp_path)
     _write(run, _entry(remedy=""))

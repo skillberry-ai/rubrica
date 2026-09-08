@@ -535,12 +535,20 @@ def test_it_states_that_a_waived_finding_is_not_part_of_a_repair_request():
     every test green, so this one is pinned rather than trusted to survive a
     reflow.
 
-    Scoped to the Method section and asserted as a co-occurrence, which is
-    discriminating by construction here: all four occurrences of `waived` in the
-    file sit inside this one paragraph, so nothing else in the prose can satisfy
-    it. `(never|not)` rather than a single spelling, for the reason PROHIBITIONS
-    above exists -- English has several ways to forbid a thing and a reword
-    between them changes nothing.
+    Scoped to the Method section and asserted as a co-occurrence, and the
+    discrimination is measured rather than argued from where the word appears:
+    `waived` is now written in several places in this file -- A3's exit-code table
+    and invariant 4's pre-report check among them -- so deleting this paragraph
+    from a copy under RUBRICA_SKILLS_DIR is what shows the predicate still fails
+    without it, which it does.
+
+    `(never|not|no|forbidden)` rather than a single spelling, for the reason
+    PROHIBITIONS above exists -- English has several ways to forbid a thing and a
+    reword between them changes nothing. `no|forbidden` is there because the
+    narrower `(never|not)` was measured false-red: "has no place in any repair
+    dispatch, and appending one to a repair prompt is forbidden" prohibits exactly
+    what the shipped sentence prohibits, and turned this test red as completely as
+    deleting the paragraph did.
 
     The noun is alternated for that same reason, and this one is measured rather
     than anticipated: the first version of this predicate required the literal
@@ -556,7 +564,7 @@ def test_it_states_that_a_waived_finding_is_not_part_of_a_repair_request():
     whitespace, which is what the two Task 20 predicates above already use it for.
     """
     assert re.search(
-        r"\[waived\].{0,200}(never|not).{0,140}repair (prompt|dispatch|request)",
+        r"\[waived\].{0,200}(never|not|no|forbidden).{0,140}repair (prompt|dispatch|request)",
         _norm(method_body()),
         re.S,
     ), "the Method must say a `[waived] ` line is never appended to a repair prompt"

@@ -394,8 +394,13 @@ def _report(findings) -> int:
     """Print every finding; let only the unwaived ones set the exit code.
 
     The split lives here rather than in the check-refs branch so it is uniform
-    across every command that reports findings, and inert for every command whose
-    checks never set the flag.
+    across every command that reports *through this function*, and inert for every
+    command whose checks never set the flag. Two arms print findings and return
+    FINDINGS without coming through here -- `intake --run` and
+    `adopt-projection`, each with its own catch -- so the split is not literally
+    universal. Neither can produce a waived finding: `waivers.WAIVABLE_CHECKS`
+    has one row and its checker is `refs.check_claim_utilisation`, which neither
+    of those two runs.
 
     Both invariants of the exit-code contract survive: a `1` still means unwaived
     findings, one per line on stdout, and still never has empty stdout. A run
@@ -881,14 +886,14 @@ def main(argv: list[str] | None = None) -> int:
             run = _run_dir(args.run)
             # (UsageError, OSError), matching record-stage above -- not just
             # UsageError. decisions.md being a directory, or the run directory
-            # being read-only with no decisions.md yet, raises a bare OSError
-            # out of append_decision's open(); without OSError here that falls
-            # through to the catch-all below and becomes exit 1 with a
-            # fabricated "internal" finding, the same misreading
-            # smoke.load_agents' docstring already names for --agents: a
-            # harness-level filesystem problem told the orchestrator a stage
-            # was broken and sent it to spend its one repair attempt re-running
-            # a stage that was fine.
+            # being read-only with no decisions.md yet, raises a bare OSError out
+            # of append_decision's open(). Measured, because this comment used to
+            # claim the catch-all below would turn that into an exit 1 with a
+            # fabricated "internal" finding: it does not. `main`'s outer handler
+            # names OSError too, so with this arm narrowed to UsageError the
+            # directory case still exits 2 with byte-identical output. What the
+            # arm buys is attribution to this subcommand, which is exactly what
+            # the `waive` arm below records for its own two writes.
             try:
                 decide(run, args.note)
             except (UsageError, OSError) as exc:
@@ -899,10 +904,14 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "waive":
             run = _run_dir(args.run)
-            # The finding must exist before it can be waived, and that is the whole
-            # integrity property: no pre-emptive waivers, none left behind by a
-            # fixed defect, and `finding_text` copied from the finding rather than
-            # typed by a person who could paraphrase it.
+            # The finding must exist before it can be waived: no pre-emptive
+            # waivers for findings nobody has seen, and `finding_text` copied from
+            # the finding rather than typed by a person who could paraphrase it.
+            #
+            # It bounds *creation* and nothing else. Measured: fix the defect a
+            # waiver answers and the waiver stays, `check-refs` exits 0 with no
+            # line at all, and `gate-brief` goes on reporting it in force -- so
+            # this refusal is not a claim that a run carries no stale waiver.
             #
             # Dispatched through the registry rather than calling one check
             # directly: --check is a choice over waivers.WAIVABLE_CHECKS, so
@@ -924,12 +933,15 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return USAGE
             # (UsageError, OSError), matching decide above, so the error names this
-            # subcommand's write rather than reaching the shared handler:
-            # waivers.json or decisions.md being a directory, or the run being
-            # read-only, raises a bare OSError. Measured: removing this catch
-            # entirely gives byte-identical output for both, because main's outer
-            # handler names OSError too -- so what it buys is attribution, not a
-            # different exit code.
+            # subcommand's write rather than reaching the shared handler. Both
+            # members are needed, and for different reasons -- measured:
+            # waivers.json being a directory, or the run being read-only, raises a
+            # bare OSError out of write_json, while a decisions.md append that
+            # fails is *not* a bare OSError any more. Since the ordered-write fix,
+            # `record` catches it and re-raises a UsageError naming the waiver id
+            # and saying the waiver stands. Removing this catch entirely gives
+            # byte-identical output either way, because main's outer handler names
+            # both -- so what it buys is attribution, not a different exit code.
             try:
                 waiver_id = waivers.record(
                     run,

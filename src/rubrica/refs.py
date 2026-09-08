@@ -4405,6 +4405,12 @@ def check_all(run: RunPaths) -> list[Finding]:
     findings that blame artifacts which are fine and never names the one that is
     broken -- and the orchestrator's single bounded repair attempt then rewrites
     the wrong file.
+
+    One checker is the exception, and it is deliberate: `check_claim_utilisation`
+    reads the human-authored `waivers.json`, and an unreadable one *raises* rather
+    than reading as absent, which cli.py turns into an exit 2. The comment at its
+    call below carries the ruling, and
+    `test_an_unreadable_waivers_file_is_exit_two` is where it is pinned.
     """
     unreadable = check_readable(run)
     if unreadable:

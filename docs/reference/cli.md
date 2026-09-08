@@ -1056,10 +1056,14 @@ in `gate-brief`.
 
 **It refuses a finding that is not currently raised** (exit 2, naming the kind
 of subject the check expects). That refusal is the integrity property: no
-pre-emptive waivers for findings nobody has seen, and none left behind by a
-defect that has since been fixed. `finding_text` is then copied from the matched
-finding rather than accepted as a flag — a person retyping a finding is a person
-who can paraphrase one.
+pre-emptive waivers for findings nobody has seen. `finding_text` is then copied
+from the matched finding rather than accepted as a flag — a person retyping a
+finding is a person who can paraphrase one.
+
+It bounds the moment a waiver is *written*, and nothing after it: fix the defect
+a waiver answers and the entry stays, with `check-refs` printing no line and
+`gate-brief` still reporting the waiver in force. A waiver that has gone stale is
+removed the same way any other is — by hand.
 
 **It also refuses a `(check, subject)` that is already waived** (exit 2, naming
 the id of the waiver that holds it, so the reader can go to that entry rather
@@ -1082,7 +1086,11 @@ appends one line to `decisions.md`, so the prose trail sits in the file a human
 already reads at every gate. Both are append-only through this command; a waiver
 is revoked by **deleting its entry by hand**, which is why ids are minted one
 past the highest number present rather than from the entry count — the gap a
-deletion leaves must not remint an id that was already used.
+deletion leaves must not remint an id that was already used. That hand-deletion
+appends nothing, so `decisions.md` goes on carrying the line that granted the
+waiver, and the trail then asserts a waiver the run no longer has: record the
+revocation with [`rubrica decide`](#rubrica-decide) yourself, since nothing else
+will.
 
 Every check runs before either write, so a refusal leaves the run untouched. The
 two writes are ordered, though, `waivers.json` first, and if the `decisions.md`

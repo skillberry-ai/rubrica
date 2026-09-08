@@ -65,10 +65,15 @@ def _orphan(run, artifact_id):
     Well-formed matters: refs.check_manifest indexes `claim["evidence"]` directly,
     so a claim without it raises KeyError before claim_utilisation is reached at
     all. Its evidence cites a registered artifact, so beside the zero-citation
-    finding these tests are about it adds exactly two more, both measured:
-    check_manifest's "artifact_id 'orphan' is not registered in the manifest" and
-    check_subjects' "no subject covers claim clm-orphan-001". Both are unwaived and
-    unwaivable, which is what the one test using this helper needs.
+    finding these tests are about it adds exactly two more, both measured and both
+    quoted with `artifact_id` as a placeholder because callers pass different ids:
+    check_manifest's "artifact_id '<artifact_id>' is not registered in the
+    manifest" and check_subjects' "no subject covers claim clm-<artifact_id>-001".
+
+    Those two are unwaived and unwaivable, which is what the callers asserting an
+    exit 1 *beside* a waived finding need. The callers that only want a second
+    uncited subject -- the prefix trap below, and the appending case in
+    test_cli_waive.py -- do not rest on them, and each says what it needs.
     """
     (run.claims_dir / f"{artifact_id}.json").write_text(
         json.dumps(

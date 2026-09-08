@@ -81,7 +81,14 @@ def test_the_finding_text_is_copied_from_the_finding_not_typed(tmp_path):
 
 
 def test_waiving_a_finding_that_is_not_raised_is_refused(tmp_path, capsys):
-    """No pre-emptive waivers, and none left behind by a fixed defect."""
+    """No pre-emptive waivers: a waiver may only be written for a finding the
+    named check is raising right now.
+
+    Only that. Nothing detects a waiver that has gone stale, and the docstring
+    used to claim it did: measured, a run whose defect is fixed after the waiver
+    was written keeps the entry, `check-refs` exits 0 printing nothing, and
+    `gate-brief` still reports the waiver in force.
+    """
     run = build_toy_run(tmp_path)  # nothing uncited
     assert main(_waive_argv(run)) == 2
     assert not run.waivers.exists()

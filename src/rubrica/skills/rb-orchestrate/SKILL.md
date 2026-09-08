@@ -363,7 +363,7 @@ to keep, and this is the table:
 
 | Exit | Meaning | What you do |
 |---|---|---|
-| **exit 0** | Clean. | Continue. |
+| **exit 0** | Clean -- either nothing was found, or every line printed is prefixed `[waived] `, which a human ruled correct and unfixable in the stage it names. | Continue. Read the lines, if any: what you continue past is a person's standing ruling, not silence. |
 | **exit 1** | Findings, one per line on stdout. | A repairable stage defect. Spend the one repair attempt of A4 with those findings appended. |
 | **exit 2** | A usage error, or a run directory or artifact that could not be read at all. | **Halt.** The harness is misconfigured; repeating the stage cannot help. |
 
@@ -389,6 +389,21 @@ are the most useful thing anybody debugging that stage can be handed. A retry
 spiral also destroys the one property this system is built for: with an
 unbounded number of attempts, "this stage produces valid artifacts" stops
 being a measurement of anything.
+
+**When you halt on a finding, say whether any stage you dispatch could have
+fixed it.** Read the artifact the finding names against the `writes` of the stages
+you can dispatch: `check-refs` raises its zero-citation finding against
+`01-world-model.json`, which none of them declares, so every re-dispatch must
+refuse and your one repair attempt is not exhausted but *unspendable*. Report that
+as the fact it is -- *"this finding names `01-world-model.json`, which no stage I
+can dispatch declares in `writes`"* -- and stop there. Diagnosis is not
+ratification, and it is exactly what a person needs in order to rule: a human can
+record that ruling with `rubrica waive`, after which the finding keeps printing --
+prefixed `[waived] ` -- while no longer setting the exit code. **That command is
+theirs, and it is deliberately not in your `invokes`.** You do not run it, do not
+recommend that it be run, and do not treat your own diagnosis as the ruling: the
+party that made a judgment must not also ratify it, which is gate 0's argument
+applied to your own halt.
 
 Scope the repair the way the findings scope themselves. In a fan-out,
 re-dispatch only the members whose own artifacts the findings name -- one
@@ -968,7 +983,11 @@ Before you report a run *completed*, confirm the two things that are yours
 rather than any stage's: run `rubrica check-refs --run <run>` once more against
 the finished run and confirm it exits 0, and read `manifest.stages` back to
 confirm it holds
-an entry for every stage you dispatched. Unlike a stage, you have no artifact of
+an entry for every stage you dispatched. **If that exit 0 printed any `[waived] `
+line, name each of them in the completion report**, with the artifact each names:
+an exit 0 a person's ruling is holding clean is different evidence from a silent
+one, and reporting it as though it were silent overstates what you checked.
+Unlike a stage, you have no artifact of
 your own for a gate to check, so those two checks plus the trail in
 `decisions.md` are the only evidence that what you did is what you say you did.
 Before you report a run *halted*, the bar is different and no lighter: name the

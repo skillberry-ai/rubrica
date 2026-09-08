@@ -16,7 +16,12 @@ import json
 import pytest
 
 from rubrica import cli
-from rubrica.brief import GATES, WAIVERS_HEADER, WAIVERS_UNREADABLE, gate_brief
+
+# `_fold` is imported private on the reasoning `brief.py` itself gives where it imports
+# `refs._as_list` (and `test_validate.py` where it imports `validate._validator_for`): it
+# is the one definition of how a reason is folded into the block, and the pin below is
+# about the *rendered* height rather than about this string's own length.
+from rubrica.brief import GATES, WAIVERS_HEADER, WAIVERS_UNREADABLE, _fold, gate_brief
 from rubrica.waivers import remedy_choices
 from tests.toy import build_toy_catalogue_and_triage, build_toy_run
 
@@ -70,12 +75,34 @@ _REALISTIC_REASON = (
 )
 
 
-def _waive_many(run, count):
-    """`count` recorded waivers, each with a two-line reason.
+def test_the_fixture_reason_folds_to_at_least_three_lines():
+    """`[1]`'s discrimination below rests on this, and nothing enforced it.
 
-    Written for the ten-line invariant below, which a single-waiver fixture cannot
-    see: the measurement that condemned the old placement needed two waivers, so a
-    guard pinned at one block size is a guard for the one size that passes.
+    Measured, with the block back on top of gate 0: shortened to fold to two
+    lines, `_REALISTIC_REASON` leaves both `objective` and `supported` inside the
+    first ten lines, so `[1]` passes under the placement the module condemns and
+    only `[3]` still fires -- the fixture would have stopped guarding the smaller
+    block size with every test green.
+
+    `>=`, not `== 3`: a meaning-preserving reword folding to four lines is a
+    *stronger* fixture for this guard, and `== 3` would go red on it.
+
+    Through `brief._fold`, the function that renders the block, rather than a
+    line count of this string: what the promise is about is the rendered height,
+    and a second spelling of the folding would be free to disagree with it.
+    """
+    assert len(_fold(_REALISTIC_REASON, "    ", "    ")) >= 3
+
+
+def _waive_many(run, count):
+    """`count` recorded waivers, each carrying `_REALISTIC_REASON`.
+
+    Written for the ten-line invariant below, and parametrised there over more
+    than one block size because a guard pinned at a single size is a guard for
+    that size. Measured with this fixture and the block back on top of gate 0:
+    at one waiver `supported` is past line ten while `objective` is not, and at
+    three both are -- so each parameter fails for a reason of its own and neither
+    is redundant.
     """
     run.waivers.write_text(
         json.dumps(
