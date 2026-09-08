@@ -512,9 +512,24 @@ def write_batches(run: RunPaths, *, round_n: int) -> Path | None:
             "bytes_per_scenario": per_scenario,
             # Zero-padded so b10 sorts after b09 both as a path segment and in
             # any listing -- the same reason triage's slice ids are s01, not s1.
+            #
+            # Round-scoped, and that half is load-bearing rather than cosmetic.
+            # rb-propose has each member mint scenario ids beginning
+            # `sc-<batch_id>-`, numbering from its own batch's position, and its
+            # invariant 4 states the prefix is the whole of what stops two members
+            # choosing the same id. Without the round term that was true within a
+            # round and false across rounds: every round's first batch was `b01`,
+            # so a round-2 member numbering from position minted `sc-b01-01` again
+            # and seal_scenarios correctly refused the round. Measured on
+            # run-20260906-102327 round 2. The round belongs in the id rather than
+            # in a second field the prompt has to read because this way the
+            # namespace is distinct in CODE -- the member needs to know nothing
+            # about round 1 to avoid it, which also closes the contract gap that
+            # sent two round-2 members reading files their `reads` forbids in
+            # search of the ids already taken.
             "batches": [
                 {
-                    "id": f"b{i:02d}",
+                    "id": f"r{round_n}-b{i:02d}",
                     "hole_refs": batch,
                     "projected_bytes": len(batch) * per_scenario,
                 }

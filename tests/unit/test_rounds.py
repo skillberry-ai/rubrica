@@ -360,7 +360,7 @@ def test_write_batches_writes_a_schema_valid_document(tmp_path):
     assert doc["round"] == 1
     assert doc["cap_bytes"] == rounds.DEFAULT_SCENARIO_PART_BYTES
     assert doc["bytes_per_scenario"] == rounds.DEFAULT_BYTES_PER_SCENARIO
-    assert [b["id"] for b in doc["batches"]] == ["b01"]
+    assert [b["id"] for b in doc["batches"]] == ["r1-b01"]
     assert doc["batches"][0]["hole_refs"] == rounds.closable_holes(run)
     assert doc["batches"][0]["projected_bytes"] == 5 * rounds.DEFAULT_BYTES_PER_SCENARIO
 
@@ -375,7 +375,23 @@ def test_write_batches_honours_the_manifest_budget(tmp_path):
     assert doc["cap_bytes"] == 3200
     # 3200 // 1600 == 2 holes per batch over 20 holes -> 10 batches, zero-padded
     # ids so b10 sorts after b09 as a path segment and in any listing.
-    assert [b["id"] for b in doc["batches"]] == [f"b{i:02d}" for i in range(1, 11)]
+    assert [b["id"] for b in doc["batches"]] == [f"r1-b{i:02d}" for i in range(1, 11)]
+
+
+def test_batch_ids_are_scoped_to_their_round(tmp_path):
+    # rb-propose tells each member to mint scenario ids beginning
+    # `sc-<batch_id>-`, and states the prefix is the whole of what stops two
+    # members choosing the same id. That holds within a round and used to be
+    # false across rounds: both rounds' first batch was `b01`, so two rounds'
+    # members were told to mint from one namespace. The id carries the round for
+    # that reason -- not for legibility -- so the guarantee is in code and no
+    # prompt has to get a second field right.
+    run = _run_with_world(tmp_path, _world(caps=2, ocs=2, goals=1))
+    first = [b["id"] for b in read_json(rounds.write_batches(run, round_n=1))["batches"]]
+    second = [b["id"] for b in read_json(rounds.write_batches(run, round_n=2))["batches"]]
+    assert first == ["r1-b01"]
+    assert second == ["r2-b01"]
+    assert set(first).isdisjoint(second)
 
 
 def test_write_batches_writes_nothing_when_no_hole_is_closable(tmp_path):
@@ -859,10 +875,15 @@ def _refuse(run, note=None):
 
 
 def test_the_seal_assembles_every_round_in_order(tmp_path):
+    # The ids are the ones a member would actually mint -- round-scoped batch id,
+    # numbered from the member's own position, so round 2's first scenario is
+    # `-01` exactly as round 1's is. This test used to hand-pick `sc-b01-002` for
+    # round 2, which constructed the cross-round case and then chose an id no
+    # member would have chosen, sidestepping the collision inside it.
     run = _run_with_world(tmp_path, _world())
-    _part(run, 1, "b02", [_scenario("sc-b02-001")])
-    _part(run, 1, "b01", [_scenario("sc-b01-001")])
-    _part(run, 2, "b01", [_scenario("sc-b01-002", round_n=2)])
+    _part(run, 1, "r1-b02", [_scenario("sc-r1-b02-01")])
+    _part(run, 1, "r1-b01", [_scenario("sc-r1-b01-01")])
+    _part(run, 2, "r2-b01", [_scenario("sc-r2-b01-01", round_n=2)])
     path, findings = rounds.seal_scenarios(run)
     assert findings == []
     assert path == run.scenarios
@@ -870,11 +891,39 @@ def test_the_seal_assembles_every_round_in_order(tmp_path):
     # Ordered by (round, batch id, position in part): deterministic, and it is
     # the order a reader scanning rounds expects.
     assert [s["id"] for s in doc["scenarios"]] == [
-        "sc-b01-001",
-        "sc-b02-001",
-        "sc-b01-002",
+        "sc-r1-b01-01",
+        "sc-r1-b02-01",
+        "sc-r2-b01-01",
     ]
     assert doc["denominator_version"] == 1
+
+
+def test_two_rounds_of_members_minting_from_their_batch_id_do_not_collide(tmp_path):
+    """The blocked round #20 reports, reproduced through the ids a member mints.
+
+    Every other two-round test in this module hand-picks scenario ids, and the
+    one that assembles two rounds picked `sc-b01-002` for round 2 -- an id that
+    happens not to collide with round 1's `sc-b01-001`, so it constructed the
+    cross-round case and then sidestepped the defect inside it. A member does not
+    choose ids that way: rb-propose has it number from its own batch's position,
+    so it starts at `-01` every round. This test takes the batch ids
+    `write_batches` actually plans and mints exactly what the prompt asks for.
+    """
+    run = _run_with_world(tmp_path, _world(caps=2, ocs=2, goals=1))
+    for round_n in (1, 2):
+        planned = read_json(rounds.write_batches(run, round_n=round_n))["batches"]
+        for batch in planned:
+            # Precisely the rule at rb-propose/SKILL.md's invariant 4: the id
+            # begins `sc-<batch_id>-`, numbered from this member's own position.
+            _part(
+                run,
+                round_n,
+                batch["id"],
+                [_scenario(f"sc-{batch['id']}-01", round_n=round_n)],
+            )
+    path, findings = rounds.seal_scenarios(run)
+    assert findings == []
+    assert path == run.scenarios
 
 
 def test_the_sealed_document_is_schema_valid(tmp_path):

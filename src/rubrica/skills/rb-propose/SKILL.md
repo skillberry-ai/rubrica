@@ -137,10 +137,13 @@ carries no `minItems` for exactly that reason.
 one, because a missing file cannot be told apart from a member that was never
 dispatched at all.
 
-**Every scenario `id` you mint must begin `sc-<batch_id>-`** -- `sc-b03-01`,
-`sc-b03-02`, and so on, for your own batch id. Members mint their own ids and
+**Every scenario `id` you mint must begin `sc-<batch_id>-`** -- `sc-r1-b03-01`,
+`sc-r1-b03-02`, and so on, for your own batch id. Members mint their own ids and
 no member can see a sibling's part, so that prefix is the whole of what stops
-two members choosing the same id. `rubrica propose-seal` refuses a collision
+two members choosing the same id. Your batch id carries its round, so numbering
+from your own position is safe against every *other* round as well: you never
+have to know which ids an earlier round already took, and you must not go
+looking for them. `rubrica propose-seal` refuses a collision
 rather than carrying the id twice, and it writes nothing at all when it
 refuses -- so one member ignoring the prefix costs the whole round's seal, not
 just its own part.
@@ -404,8 +407,10 @@ findings are real.
    disagreement means one member wrote a sibling's slice.
 
 4. Every scenario `id` begins `sc-<batch_id>-` and is unique within your part.
-   The prefix is what makes it unique across the round as well, which is the
-   only guarantee available to a member that cannot see a sibling's ids.
+   The prefix is what makes it unique across the round -- and, because a batch id
+   carries its round, across every other round too. That is the only guarantee
+   available to a member that cannot see a sibling's ids, and it is why numbering
+   from your own batch's position is sufficient rather than merely conventional.
    **Nothing checks the prefix**, and that is why it is yours to keep: the seal
    refuses an actual *collision* -- two parts carrying one id -- and writes
    nothing when it does, but an id without the prefix that happens not to collide

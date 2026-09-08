@@ -3011,10 +3011,14 @@ def _scenario_part_findings(
         # the world model's frozen list -- and that goal is not a hole assignment
         # at all. `partition` chunks a sorted ref list and `cell:` sorts before
         # `goal:`, so a cell-only batch is the normal shape: on a real
-        # write_batches partition of 20 cells and 2 goals (b01 = 17 cells, b02 = 3
-        # cells + 2 goals), resolving those two fields reported 19 of 22 CORRECT
-        # scenarios -- b01's 17 cell scenarios for naming the goal b02 owns, and
-        # b02's 2 goal scenarios for naming the cell b01 owns. The same parts
+        # write_batches partition of 20 cells and 2 goals (first batch = 17 cells,
+        # second = 3 cells + 2 goals), resolving those two fields reported 19 of 22
+        # CORRECT scenarios -- the first batch's 17 cell scenarios for naming the
+        # goal the second owns, and the second's 2 goal scenarios for naming the
+        # cell the first owns. Positionally rather than by id because the ids that
+        # run actually carried were b01/b02, before the round term was added to
+        # them; restating them in today's spelling would attribute the measurement
+        # to a partition nobody ran. The same parts
         # against `provenance.hole_refs` report none.
         #
         # This stays a reference check, in layer 2's remit: does this ref name a

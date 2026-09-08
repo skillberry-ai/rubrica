@@ -30,7 +30,7 @@
         "properties": {
           "id": {
             "$ref": "world-model-0.1.json#/$defs/id",
-            "description": "Code-minted (b01, b02, ...), short and stable, because it is a path segment: 02-scenarios/round-N/<id>.json joins it through safe_segment, and it prefixes the scenario ids the member mints so two members cannot collide."
+            "description": "Code-minted (r1-b01, r1-b02, ..., r2-b01, ...), short and stable, because it is a path segment: 02-scenarios/round-N/<id>.json joins it through safe_segment, and it prefixes the scenario ids the member mints so two members cannot collide. The round term is what makes that true ACROSS rounds and not merely within one: a member numbers from its own batch position, so without it every round's first batch was b01 and round 2 minted round 1's ids again."
           },
           "hole_refs": {
             "type": "array",
