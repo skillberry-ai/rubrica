@@ -403,8 +403,10 @@ argument above rather than the throughput one.
 
 The reconcile passes that own a claim kind each carry an `inputs_seen`
 accounting whose `own_kind_total` is recomputed from `01-claims/`, so a wrong
-count is a finding against the pass that wrote it (the entry below records how
-far short of forcing a read that falls). `rb-reconcile-gaps` has no such
+count is a finding against the pass that wrote it (the `own_kind_total` entry
+further down this section records how far short of forcing a read that falls --
+named rather than pointed at, because inserting an entry between the two once
+left this reference aimed at something that records neither). `rb-reconcile-gaps` has no such
 accounting and cannot be given one: `refs.PASS_OWN_KINDS` gives it no claim kind
 at all — the kinds `claims-0.1.json` defines partition onto the passes that own
 one — and a gap is an assertion about what no input **contains**. A
@@ -442,8 +444,8 @@ transcript rather than the gaps.
 
 ### A missing input is a refusal for every reconcile pass, and never a gap
 
-**Specified as of issue #36, and recorded here because the entry above is where a
-reader looking for the boundary will land.** Nothing used to pick between a
+**Specified as of issue #36, and recorded here because the read-coverage entry
+above is where a reader looking for the boundary will land.** Nothing used to pick between a
 refusal and a gap for the case "an input my contract names is not on disk."
 Measured on `run-20260907-065440` (tau2-retail), where six B3 singleton passes
 were dispatched concurrently by mistake, each ahead of an input that was not
@@ -493,14 +495,18 @@ form of "the rule lives in one place."
 third suggestion was to forbid `blocks` on a gap with no target subject as a
 schema constraint. `subject` is prose, so no schema can tell a target subject from
 `pipeline:`; a check that tried would be deciding whether a subject *is about* the
-target, which is the semantic judgment the entry near the top of this file rules
-out for exactly this reason. The prose ruling plus the uniform refusal is the
+target, which is the semantic judgment the layer-2 entry near the top of this
+file rules out for exactly this reason. The prose ruling plus the uniform refusal is the
 enforceable part, and it is prompt-level: it buys a probability, not a guarantee.
 
-What this means for you: **if a run halts on a gap whose `subject` is not
-something the target has or does, the finding is against this rule rather than
-against the gap.** Re-dispatch the pass once its inputs exist; do not look for a
-gate that should have caught it, because none can.
+What this means for you: **if a run halts on a gap whose `unknown` is a fact
+about this run rather than about the target — a step that has not happened yet,
+most often — the finding is against this rule rather than against the gap.**
+`subject` is not the tell, and reaching for it is the residue this entry has
+twice had to have corrected out of it: an audit gap's `subject` legitimately names an artifact
+and element, so a rule read off `subject` flags the very gaps §3 step 3 exists
+to produce. Re-dispatch the pass once its inputs exist; do not look for a gate
+that should have caught it, because none can.
 
 ### `own_kind_total` is recomputable, so a skimming pass can state a right one without reading the file
 
@@ -548,8 +554,9 @@ is enough for a human at gate 1 to see a skimmed run and not enough for any exit
 code to refuse one, which is the same division `check_claim_utilisation` draws for
 the threshold it declines to enforce.
 
-Parked rather than fixed for the reason the entry above gives for gaps: every
-candidate fix is a self-report. The honest instrument for whether a file was
+Parked rather than fixed for the reason the read-coverage entry above gives for
+`rb-reconcile-gaps` — named, not pointed at, for the reason that entry's own
+forward reference now gives: every candidate fix is a self-report. The honest instrument for whether a file was
 opened is the transcript — `scripts/audit-reads.sh` over a real dispatch.
 
 ### Some gaps are written for rubrica's own reviewer, and the page the owner reads ships them verbatim

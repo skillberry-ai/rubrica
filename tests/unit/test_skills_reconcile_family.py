@@ -11,6 +11,21 @@ text and the five headings are mandatory, so a substring check against `body` is
 satisfied by the frontmatter `description:` line, by the contract block, or by
 any other section -- roughly nineteen assertions in this repository were
 measured satisfiable that way before the convention changed.
+
+**Probe both directions, and expect the green one to be where the fragility is.**
+CLAUDE.md requires both; what this module has measured is which half actually
+finds things. Deleting the prose a predicate claims to check finds *vacuity* --
+the failure everybody anticipates, and the one a careful author rarely ships.
+Rewording it meaning-preservingly finds *over-pinning*, and that is the failure
+this repository keeps taking: 399dba5 fixed two phrase pins that broke on an
+innocuous reformat, and issue #36's own round added three more, every one of them
+green under deletion probing first. Two of those three were two-way alternations
+that a single honest reword emptied, and the third -- the §3 restriction below --
+was a window assertion that a *neighbouring sentence* satisfied, so deleting the
+rule it named left it green. The rule that follows: a predicate is not measured
+until at least one meaning-preserving reword of the prose it pins has been run
+against it, and an alternation of two is a hypothesis about which words survive a
+reword rather than a finding about it.
 """
 
 from __future__ import annotations
@@ -660,11 +675,25 @@ def test_every_pass_refuses_a_missing_input_rather_than_modelling_around_it(stag
     # recoverable on the measured run: both named `01-capabilities.json`, and an
     # operator acts on the file name rather than on the refusal. Measured:
     # reducing the sentence to "Refuse and stop." in every member's copy left
-    # other predicate in this module green.
-    assert re.search(r"\b(?:which|the) file\b", bullet), bullet
-    # And what it may not do instead. The verb is the rewordable part, so this is
-    # an OR over the two formulations the bullet uses for one prohibition.
-    assert any(k in bullet for k in ("do not model around", "do not infer")), bullet
+    # every other predicate in this module green.
+    #
+    # Widened rather than documented as a limitation, because the lexical family
+    # is small and enumerable -- but widened as verb-plus-object, not as the bare
+    # object. Measured: `\b(?:which|the) (?:file|input)\b` is **vacuous** here,
+    # because the bullet's own recovery sentence says "once the input exists", so
+    # the predicate stayed green with the diagnostic sentence struck. Requiring
+    # the naming verb in front of it is what keeps the assertion on the
+    # instruction.
+    assert re.search(
+        r"(?:say|name|state|report)s?\s+(?:which|the|what)\s+(?:file|input|artifact|path)",
+        bullet,
+    ), bullet
+    # And what it may not do instead. Both the prohibition form and the verb are
+    # rewordable, so both are free -- the same shape the record-the-absence
+    # predicate in the next test already used. Measured: the substring pair
+    # ("do not model around", "do not infer") went red on "never model around /
+    # never infer", which changes no meaning.
+    assert re.search(r"(?:do not|never) (?:model around|infer)", bullet), bullet
 
 
 @pytest.mark.parametrize("stage", FAMILY)
@@ -735,10 +764,32 @@ def test_gaps_routes_an_absent_partial_to_refusal_and_a_wrong_one_to_a_gap():
     # target has or does") contradicted §3 step 3, which requires an audit gap to
     # name the artifact and element it found wrong. Two of the three statements
     # would then have to lose, and the review found the losing one is the ruling.
-    assert any(k in absent for k in ("no target knowledge", "leaves the run unfinished")), absent
+    #
+    # Six alternatives, spanning both halves of the reason -- that an absent
+    # partial leaves no *target* knowledge unknown, and that what it leaves is
+    # the run incomplete. Either half states the reason, so an OR across both is
+    # the right shape and the deletion probe removes all six together. Measured
+    # counter-example for the narrow pair this replaces: "leaves nothing about
+    # the target unknown ... a run half-finished" means the same and carries
+    # neither "no target knowledge" nor "leaves the run unfinished".
+    assert any(
+        k in absent
+        for k in (
+            "no target knowledge",
+            "nothing about the target",
+            "no knowledge about the target",
+            "leaves the run unfinished",
+            "run unfinished",
+            "half-finished",
+        )
+    ), absent
     # And that the audit reference §3 step 3 requires is explicitly not what the
-    # ruling forbids -- otherwise the ruling reads as revoking it.
-    assert "audit gap" in absent, absent
+    # ruling forbids -- otherwise the ruling reads as revoking it. Pinned to the
+    # two structural halves of the carve-out, the cross-reference and its object,
+    # rather than to the noun phrase "audit gap": measured, that phrase goes red
+    # on "a gap the audit raises under §3 step 3", which changes no meaning.
+    assert re.search(r"§3[^.]{0,24}(?:step 3|audit)", absent), absent
+    assert re.search(r"artifact and (?:the )?element", absent), absent
     # And the cost that makes it worse than an ordinary bad gap: it was true when
     # written and false by the time anyone could read it.
     assert "false when read" in absent, absent
@@ -770,8 +821,21 @@ def test_the_gaps_audit_step_records_what_it_finds_wrong_and_not_what_is_absent(
     method = _flat("reconcile-gaps", "3. Method")
     anchor = method.index("audit every earlier partial")
     opener = method[anchor : anchor + 400]
-    # The audit's product is restricted to what is wrong ...
-    assert "wrong" in opener, opener
+
+    # The audit's product is restricted to what is wrong, and the restriction is
+    # scoped to the step's own **bold lead** rather than to the window. Measured:
+    # reverting the lead to the exact pre-#36 "record what you find as a gap"
+    # while keeping the new absence sentence left `"wrong" in opener` green,
+    # because that sentence says "absent rather than wrong" -- so the window
+    # satisfied the predicate with the restriction it names actually gone. The
+    # absence half was guarded and the restriction was not.
+    #
+    # The lead is where the instruction lives, and it is delimited: every §3 step
+    # and §5 bullet in this family opens with a bold condition, and `*wrong*`
+    # inside it is single-asterisk, so the first `**` after the anchor closes the
+    # lead rather than appearing within it.
+    lead = method[anchor : method.index("**", anchor)]
+    assert "wrong" in lead, lead
     # ... and absence is routed out of the step rather than left to §5 to catch.
     assert "absent" in opener, opener
     # The exclusion, over four formulations rather than two. Measured: a

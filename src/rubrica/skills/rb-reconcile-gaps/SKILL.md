@@ -243,16 +243,15 @@ actually correct.
   legitimately names an artifact and element there, because what it records as
   unknown is target knowledge an earlier pass got wrong. A partial nobody has
   written yet is not that. It leaves no target knowledge unknown at all -- it
-  leaves the run unfinished -- so recording it as a gap files this pipeline's
-  own sequencing in the one collection a human reads for what is unknown about
-  the *target*. Two costs follow, and
-  both were measured on a real run. §3 step 1 is right to tell you to name
-  `blocks` widely, so such a gap halts the whole pipeline over a dispatch
-  order, and there is no input a human could supply to close it. And it was
-  true when written and false when read: every partial it named was present by
-  the time anybody saw it, because the passes writing them were still working
-  when it was written. A gap the artifacts beside it refute is worse than no
-  gap.
+  leaves the run unfinished -- so recording it as a gap files a fact about this
+  pipeline's own sequencing in the one collection a human reads for what is
+  unknown about the *target*. Two costs follow, and both were measured on a
+  real run. §3 step 1 is right to tell you to name `blocks` widely, so such
+  a gap halts the whole pipeline over a dispatch order, and there is no
+  input a human could supply to close it. And it was true when written and
+  false when read: every partial it named was present by the time anybody
+  saw it, because the passes writing them were still working when it was
+  written. A gap the artifacts beside it refute is worse than no gap.
 
 - **An input this pass's contract names is absent from the run directory, or
   is unreadable.** Refuse, say which file and what happened, and stop. Do not
