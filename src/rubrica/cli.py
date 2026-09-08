@@ -73,6 +73,7 @@ from rubrica import (
     survey,
     target_brief,
     triage,
+    waivers,
 )
 from rubrica.artifacts import ArtifactError, read_json
 from rubrica.dedupe import candidate_pairs
@@ -123,6 +124,7 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("check-skills", "check every skill's contract against the code it names"),
     ("record-stage", "record a stage's model, effort, and skill hash in the manifest"),
     ("decide", "append one orchestrator decision to the run's decisions.md"),
+    ("waive", "record a human's waiver of one finding whose remedy lives elsewhere"),
     ("claim-utilisation", "per-artifact share of claims the world model cites"),
     ("gate-brief", "compose the existing reports into the human surface at one gate"),
     ("run-summary", "render one run as a single self-contained HTML page"),
@@ -310,6 +312,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p_decide = parsers["decide"]
     p_decide.add_argument("--run", required=True)
     p_decide.add_argument("--note", required=True)
+
+    p_waive = parsers["waive"]
+    p_waive.add_argument("--run", required=True)
+    # Both choice lists are read from the registries rather than restated: --check
+    # from waivers.WAIVABLE_CHECKS, which is what the handler indexes into
+    # refs.WAIVABLE_FINDING_SOURCES with, and --remedy from remedy_choices(), which
+    # derives every stage name from paths.STAGES. A second spelling of either set
+    # is a thing to forget the day a stage or a waivable check is added.
+    p_waive.add_argument("--check", required=True, choices=sorted(waivers.WAIVABLE_CHECKS))
+    p_waive.add_argument("--subject", required=True)
+    p_waive.add_argument("--remedy", required=True, choices=waivers.remedy_choices())
+    p_waive.add_argument("--reason", required=True)
 
     p_utilisation = parsers["claim-utilisation"]
     p_utilisation.add_argument("--run", required=True)
@@ -881,6 +895,50 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"error: {exc}", file=sys.stderr)
                 return USAGE
             print(run.decisions)
+            return CLEAN
+
+        if args.command == "waive":
+            run = _run_dir(args.run)
+            # The finding must exist before it can be waived, and that is the whole
+            # integrity property: no pre-emptive waivers, none left behind by a
+            # fixed defect, and `finding_text` copied from the finding rather than
+            # typed by a person who could paraphrase it.
+            #
+            # Dispatched through the registry rather than calling one check
+            # directly: --check is a choice over waivers.WAIVABLE_CHECKS, so
+            # hardcoding one accessor would silently run the wrong check the day a
+            # second row lands.
+            pairs = refs.WAIVABLE_FINDING_SOURCES[args.check](run)
+            # `subject == args.subject`, never `args.subject in finding.message`.
+            # Measured: `"api-json" in "...any claim from api-json2 (1 claims)"` is
+            # True, so a substring match over the prose waives the wrong artifact.
+            matched = next(
+                (finding for subject, finding in pairs if subject == args.subject),
+                None,
+            )
+            if matched is None:
+                print(
+                    f"error: no such finding to waive: {args.check} raises nothing for "
+                    f"{waivers.WAIVABLE_CHECKS[args.check]} {args.subject!r}",
+                    file=sys.stderr,
+                )
+                return USAGE
+            # (UsageError, OSError), matching decide above: waivers.json being a
+            # directory, or the run being read-only, raises a bare OSError that
+            # would otherwise become a fabricated exit-1 "internal" finding.
+            try:
+                waiver_id = waivers.record(
+                    run,
+                    check=args.check,
+                    subject=args.subject,
+                    remedy=args.remedy,
+                    reason=args.reason,
+                    finding_text=matched.message,
+                )
+            except (UsageError, OSError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return USAGE
+            print(waiver_id)
             return CLEAN
     except (OSError, UsageError, ArtifactError, UnknownStage) as exc:
         # A run directory that cannot be read, an artifact that is absent or is

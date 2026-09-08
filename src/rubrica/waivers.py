@@ -20,8 +20,9 @@ vouch for its own refusal) may record one.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
-from rubrica.artifacts import ArtifactError, read_json
+from rubrica.artifacts import ArtifactError, append_decision, read_json, write_json
 from rubrica.errors import UsageError
 from rubrica.findings import format_findings
 from rubrica.paths import STAGES, RunPaths
@@ -133,3 +134,76 @@ def next_id(entries: list[dict]) -> str:
         if matched:
             highest = max(highest, int(matched.group(1)))
     return f"wv-{highest + 1:04d}"
+
+
+def record(
+    run: RunPaths,
+    *,
+    check: str,
+    subject: str,
+    remedy: str,
+    reason: str,
+    finding_text: str,
+    now: datetime | None = None,
+) -> str:
+    """Append one waiver and return its id.
+
+    `finding_text` is the caller's copy of the finding this waiver answers, and
+    the CLI takes it from the finding itself rather than from a flag -- a human
+    retyping a finding is a human who can paraphrase one.
+
+    `check` is validated against WAIVABLE_CHECKS here because nothing else does:
+    waivers-0.1.json deliberately keeps `check` a free string, so an entry naming
+    a check no code consults is schema-valid and permanently inert. `remedy` is
+    validated here for the mirror reason and *only* here -- `load` does not hold
+    an existing file to remedy_choices(), since a stage renamed after a waiver was
+    written must not turn the human record into an exit 2.
+    """
+    if check not in WAIVABLE_CHECKS:
+        raise UsageError(
+            f"unknown check {check!r}; waivable checks are {', '.join(sorted(WAIVABLE_CHECKS))}"
+        )
+    choices = remedy_choices()
+    if remedy not in choices:
+        raise UsageError(f"unknown remedy {remedy!r}; expected one of {', '.join(choices)}")
+    text = reason.strip()
+    if not text:
+        raise UsageError("a waiver reason cannot be empty")
+    if "\n" in text:
+        raise UsageError(
+            "a waiver reason cannot contain a newline; decisions.md is one line per entry"
+        )
+
+    # Imported here rather than at module scope: refs.py imports this module, and
+    # manifest.py imports validate.py, so a module-level import would build
+    # refs -> waivers -> manifest -> validate at import time. skills.py:318 defers
+    # an import for the same reason.
+    from rubrica.manifest import utc_stamp
+
+    stamp = utc_stamp(now)
+    # Through `load`, so a file whose existing content is malformed is refused
+    # before anything is appended to it: minting an id from entries that failed
+    # validation would write a second entry into a document already unusable.
+    entries = load(run)
+    waiver_id = next_id(entries)
+    entries.append(
+        {
+            "id": waiver_id,
+            "check": check,
+            "subject": subject,
+            "remedy": remedy,
+            "reason": text,
+            "finding_text": finding_text,
+            "recorded_at": stamp,
+        }
+    )
+    write_json(run.waivers, {"schema_version": "0.1", "waivers": entries})
+    # Also in decisions.md, so the prose trail sits in the file a human already
+    # reads at every gate rather than only in a JSON document they would have to
+    # know to open. One line, `decide`'s shape, which is why the newline above is
+    # refused.
+    append_decision(
+        run.decisions,
+        f"- {stamp} waived {check}/{subject}: remedy {remedy}; {text}",
+    )
+    return waiver_id
