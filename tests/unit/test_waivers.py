@@ -4,7 +4,7 @@ import pytest
 
 from rubrica import waivers
 from rubrica.artifacts import ArtifactError
-from rubrica.paths import RunPaths
+from rubrica.paths import STAGES, RunPaths
 
 
 def _run(tmp_path) -> RunPaths:
@@ -22,7 +22,7 @@ def test_a_recorded_waiver_loads(tmp_path):
     run.waivers.write_text(
         json.dumps(
             {
-                "version": "0.1",
+                "schema_version": "0.1",
                 "waivers": [
                     {
                         "id": "wv-0001",
@@ -51,7 +51,7 @@ def test_a_waiver_for_another_check_does_not_leak(tmp_path):
     run.waivers.write_text(
         json.dumps(
             {
-                "version": "0.1",
+                "schema_version": "0.1",
                 "waivers": [
                     {
                         "id": "wv-0001",
@@ -81,7 +81,18 @@ def test_a_malformed_document_raises_rather_than_failing_open(tmp_path):
 
 def test_a_non_object_entry_raises(tmp_path):
     run = _run(tmp_path)
-    run.waivers.write_text(json.dumps({"version": "0.1", "waivers": ["nope"]}), encoding="utf-8")
+    run.waivers.write_text(
+        json.dumps({"schema_version": "0.1", "waivers": ["nope"]}), encoding="utf-8"
+    )
+    with pytest.raises(ArtifactError):
+        waivers.load(run)
+
+
+def test_a_document_without_the_waivers_array_raises(tmp_path):
+    """The likeliest hand-produced shape: the wrapper key forgotten. It reaches
+    the same raise as a malformed root rather than reading as "no waivers"."""
+    run = _run(tmp_path)
+    run.waivers.write_text(json.dumps({"schema_version": "0.1"}), encoding="utf-8")
     with pytest.raises(ArtifactError):
         waivers.load(run)
 
@@ -102,9 +113,9 @@ def test_every_stage_is_a_remedy_and_so_are_the_two_sentinels():
     human who believes no artifact should change must not be made to name a
     remedy they do not believe in."""
     choices = waivers.remedy_choices()
-    assert "reconcile-gaps" in choices
-    assert "triage-rule" in choices
-    assert "outside-the-run" in choices
+    assert set(choices) == set(STAGES) | {"outside-the-run", "none"}
+    # Kept as its own line even though the equality above covers it: `none` is
+    # the editorial point of the docstring, not just one more member.
     assert "none" in choices
 
 

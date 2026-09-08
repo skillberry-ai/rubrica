@@ -2,11 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "waivers-0.1.json",
   "title": "Waivers a human recorded for one run",
+  "description": "Human-authored, not a stage output, and the only such file that lives at the run root beside manifest.json and decisions.md. It records that a check-refs finding is correct and its remedy is not available in the stage the finding names: the finding keeps printing, prefixed [waived], and only its contribution to the exit code goes away. Written by `rubrica waive` rather than by hand, so that id, recorded_at and the remedy choices are minted rather than typed. Because a person wrote this file, a schema failure here is a usage error (exit 2) rather than a finding -- there is no stage to send a repair prompt to, which is the same reason it carries no entry in validate.STAGE_ARTIFACTS.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "waivers"],
+  "required": ["schema_version", "waivers"],
   "properties": {
-    "version": { "const": "0.1" },
+    "schema_version": { "const": "0.1" },
     "waivers": {
       "type": "array",
       "items": {

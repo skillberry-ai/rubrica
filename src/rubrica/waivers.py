@@ -96,6 +96,11 @@ def next_id(entries: list[dict]) -> str:
     highest = 0
     for entry in entries:
         raw = entry.get("id")
-        if isinstance(raw, str) and raw.startswith("wv-") and raw[3:].isdigit():
+        # isdecimal, not isdigit: isdigit admits superscripts, which int() then
+        # rejects -- `wv-²` raised ValueError here, escaping into cli.py's
+        # catch-all and reporting a malformed human artifact to the orchestrator
+        # as a repairable stage defect. isdecimal still admits `wv-١٢`, which
+        # int() handles.
+        if isinstance(raw, str) and raw.startswith("wv-") and raw[3:].isdecimal():
             highest = max(highest, int(raw[3:]))
     return f"wv-{highest + 1:04d}"

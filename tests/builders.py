@@ -835,11 +835,10 @@ def minimal_score_part(**over: Any) -> dict[str, Any]:
 
 
 def minimal_waivers(**over: Any) -> dict[str, Any]:
-    # `version`, not `schema_version`: waivers-0.1.json is human-authored and
-    # names its key that way, and a builder that renamed it here would assert a
-    # schema this one does not have.
+    # `schema_version`, the same top-level key every other schema in the package
+    # names: waivers-0.1.json is human-authored, not exempt from the convention.
     payload: dict[str, Any] = {
-        "version": "0.1",
+        "schema_version": "0.1",
         "waivers": [
             {
                 "id": "wv-0001",
