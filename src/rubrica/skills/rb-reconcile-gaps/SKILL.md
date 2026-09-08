@@ -216,9 +216,43 @@ actually correct.
   closely enough to catch it -- you are the last pass to read the claims
   against the model built from them.
 
-- **The audit in §3 step 3 finds a defect in an earlier pass's artifact.**
-  Record it as a gap. Do not edit that artifact -- it is not yours to write
-  and a silent correction destroys the record of which pass made the mistake,
-  which is the only thing that makes a bad run evidence rather than an
+- **The audit in §3 step 3 finds an earlier pass's artifact wrong.** A
+  capability its cited claims do not establish, an invariant promoted to
+  `machine:` on something the claims only imply, an outcome class nothing
+  states: record it as a gap. Do not edit that artifact -- it is not yours to
+  write and a silent correction destroys the record of which pass made the
+  mistake, which is the only thing that makes a bad run evidence rather than an
   anecdote. Do not stay quiet about it either: nothing else in this pipeline
   looks for it.
+
+- **The audit finds an earlier pass's artifact absent rather than wrong.**
+  That is not a gap; it is the missing-input refusal the last condition in this
+  section states, and it is the answer every pass in this family gives. **A
+  `gaps` entry is about the target, never about the run that studied it.** A
+  gap's `subject` names something the target has or does, and a partial nobody
+  has written yet has no target subject at all -- so recording it as a gap
+  files a complaint about this pipeline's own sequencing in the one collection
+  a human reads for what is unknown about the *target*. Two costs follow, and
+  both were measured on a real run. §3 step 1 is right to tell you to name
+  `blocks` widely, so such a gap halts the whole pipeline over a dispatch
+  order, and there is no input a human could supply to close it. And it was
+  true when written and false when read: every partial it named was present by
+  the time anybody saw it, because the passes writing them were still working
+  when it was written. A gap the artifacts beside it refute is worse than no
+  gap.
+
+- **An input this pass's contract names is absent from the run directory, or
+  is unreadable.** Refuse, say which file and what happened, and stop. Do not
+  model around the hole, and do not infer what the missing file would have
+  said: a partial written over an input that was not there is
+  indistinguishable, downstream, from one written over a complete run, and no
+  stage after you reopens that input to find out. Do not record the absence in
+  the artifact you write either -- your artifact describes the target, and a
+  file the run has not produced yet is a fact about the run. Refusing is the
+  cheap answer and it is the recoverable one: the orchestrator re-dispatches
+  you once the input exists. Measured on one real run, where several passes of
+  this family were dispatched concurrently and each found an input that was
+  not yet on disk: the ones that refused cost a re-dispatch each, and the one that
+  recorded the absence in its own artifact instead halted the run -- by which
+  time the partials it named were all present, so what it recorded was true
+  when written and false when read.

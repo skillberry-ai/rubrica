@@ -440,6 +440,53 @@ What this means for you: **a gap is the one world-model element whose evidence o
 diligence is entirely outside the artifact.** If a run's gaps look thin, read the
 transcript rather than the gaps.
 
+### A missing input is a refusal for every reconcile pass, and never a gap
+
+**Specified as of issue #36, and recorded here because the entry above is where a
+reader looking for the boundary will land.** Nothing used to pick between a
+refusal and a gap for the case "an input my contract names is not on disk."
+Measured on `run-20260907-065440` (tau2-retail), where six B3 singleton passes
+were dispatched concurrently by mistake, each ahead of an input that was not
+yet on disk: `rb-reconcile-outcomes` and `rb-reconcile-entities` refused, naming the
+missing `01-capabilities.json`; `rb-reconcile-gaps` recorded
+`gap-prior-pass-partials-absent` with `subject: pipeline:` and six stages in
+`blocks`, which is the orchestrator's blocking-halt trigger, and the run stopped.
+
+The gaps pass was not confabulating and had not misread its skill. Its §5 said a
+defect the audit finds in an earlier pass's artifact is recorded as a gap, and an
+absent artifact is a defect by any reading; §3 step 1 told it never to name
+`blocks` narrowly, and it did not. The gap was also **true when it was written** —
+the partials really were absent — and false by the time a human could read it,
+because the passes writing them were still running. That last property is what no
+check layer reaches: the assertion is prose about the filesystem, `check-refs` has
+nothing to compare it against, and the `blocks` entries are real stage names.
+
+**The rule now stated in prose, and the reasoning behind it.** A `gaps` entry is
+about the *target*, never about the run that studied it. An earlier artifact that
+is **wrong** — a capability its claims do not establish — has a target subject and
+stays gap-able, which is the audit's whole purpose. An earlier artifact that is
+**absent** has no target subject at all, so a gap recording one files a fact about
+the pipeline's own sequencing in the collection a human reads for what is unknown
+about the target, and there is no input anybody could supply to close it. The
+`rb-reconcile-gaps` audit condition is therefore split in two, and every pass in
+the family now carries the same missing-input refusal, worded identically —
+`tests/unit/test_skills_reconcile_family.py` holds the byte-identity, since a
+SKILL.md has no include mechanism and identical copies are the only enforceable
+form of "the rule lives in one place."
+
+**What was ruled against, and why it is not parked but rejected.** The issue's
+third suggestion was to forbid `blocks` on a gap with no target subject as a
+schema constraint. `subject` is prose, so no schema can tell a target subject from
+`pipeline:`; a check that tried would be deciding whether a subject *is about* the
+target, which is the semantic judgment the entry near the top of this file rules
+out for exactly this reason. The prose ruling plus the uniform refusal is the
+enforceable part, and it is prompt-level: it buys a probability, not a guarantee.
+
+What this means for you: **if a run halts on a gap whose `subject` is not
+something the target has or does, the finding is against this rule rather than
+against the gap.** Re-dispatch the pass once its inputs exist; do not look for a
+gate that should have caught it, because none can.
+
 ### `own_kind_total` is recomputable, so a skimming pass can state a right one without reading the file
 
 The `inputs_seen` accounting issue #6 added was specified as a **forcing
