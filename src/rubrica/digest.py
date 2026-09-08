@@ -116,6 +116,27 @@ _MAX_ROLE_CHARS = 64
 # is refused.
 _MAX_NAME_CHARS = 128
 
+# `_source_digest` emitted `defs`, `classes`, `assignments` and `imports` in full,
+# with no entry cap and no flag, so one candidate's digest grew linearly with its
+# top-level name count. Measured on generated modules: 500 defs + 500 assignments
+# digested to 49,352 bytes (75% of one slice in a single row), and 2,000 + 2,000 to
+# 199,852 -- three times over the cap, on a row a slice holding one candidate
+# cannot rescue.
+#
+# 64 rather than a number read off the cap, measured against the real sample: over
+# the 140 Python files in this tree the widest list per file has a median of 14,
+# and 64 covers all but two -- test modules of 269 and 109 defs, for which a
+# bounded list plus a visible flag is the right answer rather than a 269-name row.
+# It is `_MAX_NAMES`' number on purpose: this module already has one breadth
+# budget of this shape, and a second one invented here would be a number nobody
+# could later justify against the first.
+#
+# The byte arithmetic, which is what makes it safe rather than merely plausible:
+# four lists * 64 entries * (`_MAX_NAME_CHARS` + 3 for quotes and comma) is 33,536
+# bytes worst case, half a slice, and against the measured median name width of 46
+# characters it is about 12.5 KB.
+_MAX_SOURCE_NAMES = 64
+
 
 # Capture formats that wrap the trace in an envelope, keyed by the envelope's own
 # field names. MLflow 3 puts everything one level down -- `info.state`,
@@ -401,31 +422,66 @@ def _source_digest(text: str) -> dict:
     try:
         tree = ast.parse(text)
     except SyntaxError:
+        # The whole digest for bytes that are not Python, so no truncation flag
+        # joins it: a flag about names nothing collected is the same lie as one
+        # about roles a dict-shaped trace never had.
         return {"parse_failed": True}
+    truncated = [False]
     assignments: set[str] = set()
     defs: list[str] = []
     classes: list[str] = []
     imports: set[str] = set()
     for node in tree.body:
         if isinstance(node, ast.Assign):
-            assignments.update(target.id for target in node.targets if isinstance(target, ast.Name))
+            assignments.update(
+                _bounded_name(target.id, truncated)
+                for target in node.targets
+                if isinstance(target, ast.Name)
+            )
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            assignments.add(node.target.id)
+            assignments.add(_bounded_name(node.target.id, truncated))
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            defs.append(node.name)
+            defs.append(_bounded_name(node.name, truncated))
         elif isinstance(node, ast.ClassDef):
-            classes.append(node.name)
+            classes.append(_bounded_name(node.name, truncated))
         elif isinstance(node, ast.Import):
-            imports.update(alias.name.split(".")[0] for alias in node.names)
+            imports.update(
+                _bounded_name(alias.name.split(".")[0], truncated) for alias in node.names
+            )
         elif isinstance(node, ast.ImportFrom) and node.module:
-            imports.add(node.module.split(".")[0])
+            imports.add(_bounded_name(node.module.split(".")[0], truncated))
     return {
-        "assignments": sorted(assignments),
-        "defs": defs,
-        "classes": classes,
-        "imports": sorted(imports),
+        "assignments": _capped_names(sorted(assignments), truncated),
+        "defs": _capped_names(defs, truncated),
+        "classes": _capped_names(classes, truncated),
+        "imports": _capped_names(sorted(imports), truncated),
         "lines": len(text.splitlines()),
+        # One flag for both events -- a name dropped by the entry cap and a name
+        # shortened by the character cap -- because a reader's action is the same
+        # for either: this list understates the candidate, so do not rule it thin.
+        # That is not the case `_skeleton` splits into two flags: there, a depth
+        # bound reaching its floor is ordinary shape rather than truncation, so
+        # sharing would have reported truncation on a digest that lost nothing.
+        "source_names_truncated": truncated[0],
     }
+
+
+def _capped_names(names: list[str], truncated: list[bool]) -> list[str]:
+    """The first `_MAX_SOURCE_NAMES` names, recording whether any were dropped.
+
+    `>` on the collected length is exact here, and this is the one place in the
+    module where re-deriving truncation from a length is sound: the list is
+    complete before it is cut, so more-than-cap means strictly more names existed
+    than are emitted, and exactly-cap loses nothing. `_skeleton` cannot do this
+    because its walk STOPS at the budget -- there `len(out) >= CAP` cannot tell
+    "exactly full" from "cut off", which is the false positive its inline flag
+    exists to avoid. Same rule, different arithmetic, so the difference is stated
+    rather than left for the next reader to rediscover.
+    """
+    if len(names) > _MAX_SOURCE_NAMES:
+        truncated[0] = True
+        return names[:_MAX_SOURCE_NAMES]
+    return names
 
 
 def _trace_digest_from_dict(payload: dict, *, body_chars: int) -> tuple[dict, list[str]]:
