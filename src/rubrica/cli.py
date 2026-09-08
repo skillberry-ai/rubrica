@@ -377,10 +377,22 @@ def _run_dir(raw: str) -> RunPaths:
 
 
 def _report(findings) -> int:
+    """Print every finding; let only the unwaived ones set the exit code.
+
+    The split lives here rather than in the check-refs branch so it is uniform
+    across every command that reports findings, and inert for every command whose
+    checks never set the flag.
+
+    Both invariants of the exit-code contract survive: a `1` still means unwaived
+    findings, one per line on stdout, and still never has empty stdout. A run
+    whose only findings are waived exits 0 *with those lines still printed* --
+    which is the point, since a waived finding a reader can no longer see is a
+    mute button rather than a record.
+    """
     if not findings:
         return CLEAN
     print(format_findings(findings))
-    return FINDINGS
+    return FINDINGS if any(not f.waived for f in findings) else CLEAN
 
 
 def main(argv: list[str] | None = None) -> int:
