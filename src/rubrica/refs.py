@@ -22,6 +22,7 @@ ran, so a caller running them out of order gets a traceback, not a finding.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -35,6 +36,7 @@ from rubrica.paths import RunPaths, is_safe_segment, list_json
 from rubrica.slices import candidate_bytes_index, excluded_summary, row_bytes
 from rubrica.suite.verify import DATA_KINDS, TRAJECTORY_KINDS
 from rubrica.utilisation import claim_utilisation
+from rubrica.waivers import waived_subjects
 
 _CELL_RE = re.compile(r"\Acell:([A-Za-z0-9][A-Za-z0-9._-]*)/([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
 _GOAL_RE = re.compile(r"\Agoal:([A-Za-z0-9][A-Za-z0-9._-]*)\Z")
@@ -2875,8 +2877,8 @@ def check_interfaces(run: RunPaths) -> list[Finding]:
     return missing + extra + mismatched
 
 
-def check_claim_utilisation(run: RunPaths) -> list[Finding]:
-    """An input whose claims the world model cites *none* of.
+def claim_utilisation_findings(run: RunPaths) -> list[tuple[str, Finding]]:
+    """An input whose claims the world model cites *none* of, as (subject, finding).
 
     The mirror of check_world_model's claim check, which reports a world model
     citing an id that does not exist; this reports a claims file no world model
@@ -2889,8 +2891,27 @@ def check_claim_utilisation(run: RunPaths) -> list[Finding]:
     every reading -- a human registered that input through intake, so either
     rb-extract produced nothing usable from it or the reconcile passes ignored a
     whole artifact.
+
+    Two causes are named above and both are real defects. There is a third this
+    check cannot distinguish from them: rb-extract produced good claims and every
+    reconcile pass correctly declined them, because the artifact is outside the
+    target's domain. Measured on a tau2-airline run where all seven passes dropped
+    two admitted harness files, each recording its reason. That case is not
+    repairable here -- the finding names 01-world-model.json, which no dispatchable
+    stage declares in `writes` -- so a human waives it and the finding keeps
+    printing without holding the gate open.
+
+    The subject travels beside the finding rather than being recoverable from its
+    message. `rubrica waive` needs to match a subject exactly, and a substring
+    match over the message is wrong in a way that is easy to miss: an artifact id
+    that is a prefix of another ("orphan" against "orphan2") would waive the wrong
+    one. Parsing an id back out of prose is the text keying this design rejects.
     """
-    out: list[Finding] = []
+    out: list[tuple[str, Finding]] = []
+    # Read once rather than per artifact: this raises on a malformed waivers.json,
+    # and doing it before the loop means a corrupt human record surfaces as one
+    # exit 2 rather than as a partial list of findings.
+    waived = waived_subjects(run, "claim-utilisation")
     for entry in claim_utilisation(run)["artifacts"]:
         # `entry["total"]` guards a claims file with zero claims -- exactly the first
         # of the two causes named above ("rb-extract produced nothing usable"), which
@@ -2899,15 +2920,38 @@ def check_claim_utilisation(run: RunPaths) -> list[Finding]:
         # artifact at 0/0, so a human at gate 1 still sees it, it just is not a finding.
         if entry["total"] and entry["cited"] == 0:
             out.append(
-                Finding(
-                    run.world_model,
-                    "refs",
-                    "/",
-                    f"no world-model element cites any claim from "
-                    f"{entry['artifact_id']} ({entry['total']} claims)",
+                (
+                    entry["artifact_id"],
+                    Finding(
+                        run.world_model,
+                        "refs",
+                        "/",
+                        f"no world-model element cites any claim from "
+                        f"{entry['artifact_id']} ({entry['total']} claims)",
+                        # The third cause above: rb-extract produced good claims and
+                        # every reconcile pass correctly declined them as out of the
+                        # target's domain. That is not a defect, and the finding names
+                        # an artifact no dispatchable stage owns, so no repair can
+                        # clear it. A human rules on it with `rubrica waive`.
+                        waived=entry["artifact_id"] in waived,
+                    ),
                 )
             )
     return out
+
+
+def check_claim_utilisation(run: RunPaths) -> list[Finding]:
+    """The findings alone, for check_all and every caller that has no subject to key on."""
+    return [finding for _, finding in claim_utilisation_findings(run)]
+
+
+# check name -> the accessor that yields its (subject, finding) pairs. Kept here
+# rather than in waivers.py because that module must not import refs (refs imports
+# it), and asserted equal to waivers.WAIVABLE_CHECKS by a test: the comment above
+# validate.CONFIG_KINDS records what letting two such sets drift cost last time.
+WAIVABLE_FINDING_SOURCES: dict[str, Callable[[RunPaths], list[tuple[str, Finding]]]] = {
+    "claim-utilisation": claim_utilisation_findings,
+}
 
 
 # Exactly the two statuses scenarios-0.1.json's enum carries that OPEN_STATUSES
