@@ -221,6 +221,25 @@ A `decline` carries `disposition: "decline"`, `reason` (prose) and a
 | `digest_insufficient` | You cannot rule on it from its digest |
 | `needs_projection` | Valuable, not usable as-is; write the projection's brief in `reason` |
 
+**Separate the target from the harness that runs it.** A corpus assembled around
+a target usually also contains the machinery that exercises, configures or grades
+it -- a benchmark's task loader, its tool-dispatch layer, its environment
+scaffolding. Such a file makes real statements, but they are statements about the
+harness, and `no_evidence_value` is the code for a candidate that carries no
+statement about *the target*. Ask which of the two a file describes before you
+rank it: the question is not whether the code is well written or even whether it
+mentions the target's operations, but whether what it says is a fact about the
+target's own behaviour or a fact about the thing driving it.
+
+This is a question, not an automatic decline, and the difference matters because
+the harness sometimes is where a target's expected behaviour is actually written
+down. So if you admit such a file anyway, say in `reason` which claim about the
+*target* you expect it to yield. That sentence is what a reader at gate 1 checks
+the admit against, and the check already exists: an input nothing cites shows up
+as a zero-utilisation finding there -- after every reconcile pass has already paid
+to read it in full. Measured on one real run, five framework files came to 23.8%
+of `01-claims/` and were cited by 4 of their 148 claims.
+
 `digest_insufficient` obliges you to write a matching entry in
 `deficiency_notes[]` naming that same `candidate_id` -- `check-refs` rejects
 your part if the pair never appears. `needs_projection` obliges no entry in

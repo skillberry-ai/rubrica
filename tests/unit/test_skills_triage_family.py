@@ -776,6 +776,70 @@ def test_the_rule_pass_states_authority_is_triage_on_every_disposition():
     )
 
 
+def test_the_rule_pass_separates_the_target_from_the_harness_that_runs_it():
+    """The admit that cost tau2-retail roughly a quarter of its context band.
+
+    Triage admitted five tau2 framework files -- `tasks.py`, `tool.py`,
+    `retail-environment.py`, `environment.py`, `toolkit.py` -- on a
+    plausible-sounding rationale ("EvaluationCriteria encodes the grading logic").
+    They came to 95,746 of the 402,758 bytes in `01-claims/`, 23.8%, and the world
+    model cited 4 of their 148 claims. Every one of the eight reconcile passes read
+    all of it.
+
+    tau2 is the corpus generator for both domains run so far, so "the framework
+    that runs the target is not the target" is a distinction that pays on every
+    future tau2 domain rather than a one-off.
+
+    The claim is co-occurrence: the distinction and the code it resolves to have to
+    be stated together. `harness` and `framework` occur in **no** section of this
+    skill today -- measured across all five before this predicate was written -- so
+    it cannot be satisfied by prose that predates the guidance.
+
+    radius=300 against measured distances of 259, 14 and 448 characters from the
+    three `harness` mentions to the nearest `no_evidence_value`. This is an OR over
+    mentions, so per this module's docstring the governing distance is the nearer of
+    the alternatives -- 14, not 448 -- putting the floor at 31 once the token's own
+    length is counted, and 300 is ~9.7x above it.
+
+    **This predicate has no vacuity ceiling, which is unusual here and is a property
+    of the anchor rather than of the radius.** Every other windowed predicate in this
+    module anchors on a token the section would still carry with the claim removed,
+    so a wide enough radius eventually reaches an unrelated prohibition. `harness`
+    occurs nowhere else in this skill -- measured across all five sections -- so
+    deleting the guidance removes the anchor itself and the predicate goes red at
+    every radius. There is no upper edge to sweep for, and if a later edit
+    introduces a second `harness` mention elsewhere, that stops being true.
+    """
+    body = _norm(skills.section_body(_rule(), "2. Output"))
+    indices = _occurrences(body, "harness")
+    assert indices, "the Output section never distinguishes the harness from the target"
+    assert any("no_evidence_value" in _window_around(body, at, radius=300) for at in indices), (
+        "the harness distinction is not stated with the code it resolves to"
+    )
+
+
+def test_the_rule_pass_does_not_make_framework_source_an_automatic_decline():
+    """The guidance has to survive its own counter-example, which the issue records
+    as a caveat rather than as a settled judgment: whether those five files were
+    *right* to decline is a judgment about the retail target, and a claim from
+    `tasks.py` could in principle have been the right anchor for a scenario and
+    simply was not reached. So the rule is a question the pass must answer, not a
+    blanket refusal -- and if it admits such a file anyway, the obligation is to say
+    which claim about the *target* it expects the file to yield.
+    """
+    body = _norm(skills.section_body(_rule(), "2. Output"))
+    indices = _occurrences(body, "harness")
+    # radius=400 against measured distances of 836, 548 and 86 characters from the
+    # three `harness` mentions to "if you admit". The nearer alternative governs, so
+    # the floor is 86 + len("if you admit") = 98, and 400 is ~4.1x above it. The
+    # anchor-uniqueness argument in the predicate above applies here too.
+    windows = [_window_around(body, at, radius=400) for at in indices]
+    assert any("if you admit" in w or "admit it anyway" in w for w in windows), (
+        "the guidance reads as an automatic decline, with no path for admitting "
+        "framework source that really does describe the target"
+    )
+
+
 def test_the_rule_pass_names_the_disposition_key_itself():
     """The key holding `admit`/`decline` has to be *named*, not just described.
 
