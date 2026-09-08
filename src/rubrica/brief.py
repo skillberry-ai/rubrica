@@ -8,9 +8,14 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   holdable at all. It leads with the objective verdict -- supported or not --
   because that is the single fact most likely to make a tired reader overturn
   the whole triage record, and a reader who stops after ten lines must have
-  seen it. The predicted-vs-observed surface divergence follows immediately,
-  because it is the one available measure of how well the corpus map the
-  objective pass ruled from actually described the corpus. Admits by priority,
+  seen it. The waivers in force follow, on the runs that carry any -- see below
+  for why this one gate renders them under the verdict rather than over it -- and
+  then the predicted-vs-observed surface divergence, because it is the one
+  available measure of how well the corpus map the objective pass ruled from
+  actually described the corpus. Verdict, waivers, divergence -- and the order is
+  spelled out because this bullet used to say the divergence follows the verdict
+  *immediately*, which a reachable run with a waiver in force makes false.
+  Admits by priority,
   declines grouped by reason code, and every open deficiency beside the
   projection that would close it come next. The slice table and the summary of
   every group split across more than one slice close the brief: they are the
@@ -85,22 +90,31 @@ gate 3 has as much reason to re-read it as the person who recorded it at gate 1 
 and a clean `check-refs` on a run carrying one is clean *because a human said so*,
 which changes how every number below it reads.
 
-**Gate 0 renders it under the verdict instead, and the reason is a measurement.**
-It led there for one draft, and the ten-line promise above is measurably false
-under a block of any realistic size: two waivers with two-line reasons, or one
-waiver with a five-line reason -- `reason` has no `maxLength` -- push both
-`objective` and `supported` past line ten, and the motivating case in
-`docs/design/limitations.md` is exactly two admitted harness files. Set against
-that cost, the block buys nothing at all at that gate: `waivers.WAIVABLE_CHECKS`
-has one row, its finding names `01-world-model.json`, and `rubrica waive` refuses
-a finding that is not currently raised -- so **no waiver can exist at gate-0 time**,
-and one placed there by hand would displace the verdict for a run that cannot
-happen. It is therefore the one thing that can come between the verdict and the
-divergence, and today nothing can put it there. Gate 0's two absent-triage exits
-keep it at the top, where no verdict competes with it.
+**Gate 0 renders it under the verdict instead, and the ten-line promise above is
+the whole reason.** It led the gate for one draft, and that promise is measurably
+false under a block of any realistic size: with the block on top, two waivers with
+two-line reasons put both `objective` and `supported` past line ten, and one waiver
+with a three-line reason puts `supported` past it -- `reason` has no `maxLength`,
+so nothing bounds a real one -- while the motivating case in
+`docs/design/limitations.md` is exactly two admitted harness files. Gate 0 is the
+gate that decides what the run can ever know, so the verdict wins the top of the
+page. Gate 0's two absent-triage exits still lead with the block, where there is no
+verdict to compete with it.
 `test_gate_zero_still_leads_with_the_objective_verdict` is parametrised over one
 and three waivers, so the promise is guarded at more than one block size rather
 than at whichever size a fixture happens to use.
+
+What is *not* an argument for the placement, recorded because an earlier draft of
+this docstring made it: that no waiver can exist at gate-0 time. Only the narrow
+version of that is true -- none can exist at the moment gate 0 is **held**, since
+that is before `intake`, and the one `waivers.WAIVABLE_CHECKS` row's finding needs
+`01-claims/` and a world model to be raised at all. A waiver is perfectly
+reachable on a run whose triage record is on disk, and it is a run a reader
+revisits: strip the world model's citations of one input, `check-refs` raises the
+zero-citation finding, `rubrica waive` records it, and this gate's brief renders
+the block -- measured end to end through those commands, on the tau2-airline shape
+`docs/design/limitations.md` records. Which is why the block renders here at all
+rather than being skipped.
 
 Read through `_quietly` rather than `waivers.load` -- see `_waiver_lines`, which is
 the one consumer of that file that must not raise on it.
@@ -1179,19 +1193,21 @@ def _gate_0(run: RunPaths) -> str:
         )
     lines.append("")
 
-    # Under the verdict, not above it, and unlike gates 1 through 3. Measured: two
-    # waivers with two-line reasons -- or one with a five-line reason, since
-    # `reason` has no maxLength -- push `objective` and `supported` past line ten,
-    # breaking this module's own promise for the gate that decides what the run can
-    # ever know. And the block buys nothing here to weigh against that: the one
-    # WAIVABLE_CHECKS row's finding names 01-world-model.json, and `rubrica waive`
-    # refuses a finding that is not currently raised, so no waiver can exist at
-    # gate-0 time at all. The two absent-triage exits above still lead with it,
-    # where there is no verdict to displace.
+    # Under the verdict, not above it, and unlike gates 1 through 3. Measured with
+    # the block on top: two waivers with two-line reasons push both `objective` and
+    # `supported` past line ten, and one waiver with a three-line reason pushes
+    # `supported` past it -- breaking this module's own promise for the gate that
+    # decides what the run can ever know. Not because a waiver is unreachable here:
+    # it is reachable, measured end to end, on any run whose triage record is on
+    # disk when a zero-citation finding gets waived, and only the moment gate 0 is
+    # *held* is waiver-free (it precedes intake, so the finding cannot be raised
+    # yet). So the block belongs on this page -- under the verdict, not over it.
+    # The two absent-triage exits above still lead with it, where there is no
+    # verdict to displace.
     lines.extend(waivers)
 
-    # Immediately after the verdict and its waivers, because it is the only measure
-    # of the corpus map that verdict was ruled from -- see section 4.1.
+    # After the verdict and any waivers, because it is the only measure of the
+    # corpus map that verdict was ruled from -- see section 4.1.
     lines.extend(_divergence_lines(run))
     lines.append("")
 

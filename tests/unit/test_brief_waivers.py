@@ -56,10 +56,13 @@ def _waive(run, remedy="triage-rule", subject=SUBJECT):
     )
 
 
-# A reason of the length a real one runs to. Folded by `_fold` at 78 columns, this
-# is two rendered lines -- the size the reviewer measured pushing gate 0's verdict
-# out of its first ten lines when the block led the brief. `reason` has no
-# `maxLength` in waivers-0.1.json, so nothing bounds this from above.
+# A reason of the length a real one runs to. Folded by `_fold` at 78 columns this is
+# **three** rendered lines, measured, and the number is load-bearing rather than
+# incidental: with a genuine two-line reason and the block back on top of gate 0,
+# one waiver leaves both `objective` and `supported` inside the first ten lines, so
+# the `[1]` parameter below stops discriminating and only `[3]` still fires. Do not
+# shorten this string to match a comment. `reason` has no `maxLength` in
+# waivers-0.1.json, so nothing bounds a real one from above either.
 _REALISTIC_REASON = (
     "out of the target's domain: this is a harness file the target's own tests "
     "call, admitted at gate 0 on contract grounds, and all seven reconcile passes "
@@ -255,14 +258,26 @@ def test_gate_zero_still_leads_with_the_objective_verdict(count, tmp_path):
     Parametrised over block sizes, and asserting the two tokens
     `test_brief.py::test_the_gate_zero_brief_leads_with_the_objective_verdict`
     asserts, because the first version of this test was weaker than the one it
-    restated in both respects. It pinned a single waiver with a short reason and
-    the section *heading* only -- and measured, two waivers with two-line reasons
-    push both `objective` and `supported` past line ten while leaving "Objective
-    verdict" itself inside them. So it passed the block placement that was
-    condemned, at the one size that survives it.
+    restated in both respects: it pinned one waiver with a short reason, and it
+    pinned the section *heading* rather than the tokens.
 
-    Three rather than two: it is one past the size the measurement condemned, so
-    the guard has margin, and the motivating case in limitations.md is two.
+    Both weaknesses measured, with the block back on top of gate 0 and this
+    module's own fixtures:
+
+    - **one waiver, this three-line reason:** `"Objective verdict"` is still
+      inside the first ten lines, and `supported` is not. So the heading-only
+      assertion was green on a placement that had already broken the promise, and
+      `supported` is the token doing the discriminating at `[1]`. (`objective` is
+      inside too, matched by the heading itself -- which is why asserting the
+      heading is not the same test as asserting the token.)
+    - **one waiver, a two-line reason:** both tokens inside the ten lines. The
+      `[1]` case therefore depends on the fixture's reason being three lines, and
+      the comment on `_REALISTIC_REASON` says so.
+    - **two waivers, two-line reasons:** both tokens out, and the heading out with
+      them.
+
+    Three rather than two: it is one past the size that fails outright, so the
+    guard has margin, and the motivating case in limitations.md is two.
     """
     run = build_toy_run(tmp_path)
     build_toy_catalogue_and_triage(run)

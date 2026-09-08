@@ -704,7 +704,9 @@ input, read coverage per reconcile pass, the implied suite size and one block pe
 service at gate 1; the coverage matrix at gate 2; the verdict tally at gate 3.
 
 Gate 0 renders more than the others because it is the one gate held before any
-downstream stage has read the corpus: the objective verdict, then the
+downstream stage has read the corpus: the objective verdict, then the waivers in
+force on a run that carries any (see below — this is the one gate that renders
+them *under* the verdict), then the
 predicted-vs-observed surface divergence (`00-objective.json`'s
 `predicted_surface_count` against the surfaces the disposition parts confirmed
 or added), then admits by priority, **the read cost of those admits**, declines
@@ -839,11 +841,15 @@ the reason recorded for it. Rendered at all four gates rather than only at the o
 where it was written, because a waiver is a standing ruling — and a clean
 `check-refs` on a run carrying one is clean because a human said so, which changes
 how every number under it reads. **Gate 0 renders it under the verdict rather than
-above it**, because a waiver block of any realistic size pushes that verdict out
-of the ten lines a tired reader is promised, and because no waiver can exist at
-gate-0 time in the first place: the one waivable check's finding names
-`01-world-model.json`, and `waive` refuses a finding that is not currently
-raised. A `remedy` of `none` renders as an acceptance rather than
+above it**, and for one reason: a waiver block of any realistic size pushes that
+verdict out of the ten lines a tired reader is promised, and gate 0 is the gate
+that decides what the run can ever know. Not because a waiver is unreachable
+there — it is reachable on any run whose triage record is on disk, which is a run
+a reader revisits, and only the moment gate 0 is *held* is waiver-free, since that
+precedes `intake` and the one waivable check's finding needs claims and a world
+model to be raised at all. **On a run whose triage record has not landed yet**,
+where gate 0 has no verdict to render, the block leads the brief as it does at the
+other three gates. A `remedy` of `none` renders as an acceptance rather than
 as a deferral, and one that is no longer a stage name renders with a marker
 saying so, since a stage renamed after a waiver was written leaves a stale
 pointer that nothing rejects. A run with no waivers renders no such section at

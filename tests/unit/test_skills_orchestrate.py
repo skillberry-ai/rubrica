@@ -541,11 +541,24 @@ def test_it_states_that_a_waived_finding_is_not_part_of_a_repair_request():
     it. `(never|not)` rather than a single spelling, for the reason PROHIBITIONS
     above exists -- English has several ways to forbid a thing and a reword
     between them changes nothing.
+
+    The noun is alternated for that same reason, and this one is measured rather
+    than anticipated: the first version of this predicate required the literal
+    "repair prompt", and rewording the paragraph to "the prompt of a repair
+    dispatch" -- which forbids exactly the same thing -- turned it red. That is the
+    phrase-pin failure this repository has taken before, in a predicate written to
+    guard against reflow.
+
+    Read through `_norm` for a second measured reason, and it is the same class
+    caught one layer down: with the raw section text, "Do not put one in a repair
+    request" **also** failed, because the skill hard-wraps between `repair` and
+    `request` and a literal space cannot cross a newline. `_norm` collapses
+    whitespace, which is what the two Task 20 predicates above already use it for.
     """
     assert re.search(
-        r"\[waived\].{0,200}(never|not).{0,120}repair prompt",
-        method_body(),
-        re.I | re.S,
+        r"\[waived\].{0,200}(never|not).{0,140}repair (prompt|dispatch|request)",
+        _norm(method_body()),
+        re.S,
     ), "the Method must say a `[waived] ` line is never appended to a repair prompt"
 
 
