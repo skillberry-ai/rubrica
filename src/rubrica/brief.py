@@ -79,16 +79,31 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
 - **Gates 2 and 3** render what already exists: the coverage verdict, and the
   challenge stage's verdict tallies.
 
-Every gate leads with the **waivers in force**, on the runs that carry any. A
-waiver is a standing ruling rather than a note taken at one gate, so a reader at
+Gates 1, 2 and 3 lead with the **waivers in force**, on the runs that carry any.
+A waiver is a standing ruling rather than a note taken at one gate, so a reader at
 gate 3 has as much reason to re-read it as the person who recorded it at gate 1 --
 and a clean `check-refs` on a run carrying one is clean *because a human said so*,
-which changes how every number below it reads. That is why it sits above even gate
-0's verdict, and the block is short enough for the ten-line promise made for that
-verdict to survive it: `test_gate_zero_still_leads_with_the_objective_verdict` is
-the assertion, and it goes red on a waiver block long enough to break it. Read
-through `_quietly` rather than `waivers.load` -- see `_waiver_lines`, which is the
-one consumer of that file that must not raise on it.
+which changes how every number below it reads.
+
+**Gate 0 renders it under the verdict instead, and the reason is a measurement.**
+It led there for one draft, and the ten-line promise above is measurably false
+under a block of any realistic size: two waivers with two-line reasons, or one
+waiver with a five-line reason -- `reason` has no `maxLength` -- push both
+`objective` and `supported` past line ten, and the motivating case in
+`docs/design/limitations.md` is exactly two admitted harness files. Set against
+that cost, the block buys nothing at all at that gate: `waivers.WAIVABLE_CHECKS`
+has one row, its finding names `01-world-model.json`, and `rubrica waive` refuses
+a finding that is not currently raised -- so **no waiver can exist at gate-0 time**,
+and one placed there by hand would displace the verdict for a run that cannot
+happen. It is therefore the one thing that can come between the verdict and the
+divergence, and today nothing can put it there. Gate 0's two absent-triage exits
+keep it at the top, where no verdict competes with it.
+`test_gate_zero_still_leads_with_the_objective_verdict` is parametrised over one
+and three waivers, so the promise is guarded at more than one block size rather
+than at whichever size a fixture happens to use.
+
+Read through `_quietly` rather than `waivers.load` -- see `_waiver_lines`, which is
+the one consumer of that file that must not raise on it.
 
 `gate_brief` treats a readable run's *content* as something to render, never to
 raise on -- every artifact it reads is optional, and its absence renders as a
@@ -561,7 +576,9 @@ def _waiver_lines(run: RunPaths) -> list[str]:
     as much reason to re-read it as the person who recorded it at gate 1. It
     also changes how every number below it reads -- a clean `check-refs` on a
     run carrying a waiver is clean *because a human said so* -- which is why it
-    leads each gate rather than sitting beneath the content it qualifies.
+    leads gates 1 through 3 rather than sitting beneath the content it qualifies.
+    Gate 0 is the exception and renders it under the verdict: this module's
+    docstring carries the measurement, and `_gate_0` the comment.
 
     Read through `_quietly`'s reasoning rather than `waivers.load`'s, and that
     is the one deliberate divergence from every other consumer of this file.
@@ -571,10 +588,17 @@ def _waiver_lines(run: RunPaths) -> list[str]:
     """
     doc = _quietly(run.waivers)
     if doc is None:
-        # Absent is the common case and silent. Present-but-unreadable is not:
-        # this is the one artifact in a run a human is invited to hand-edit, so
-        # a reader whose waiver has stopped working must be told the file is the
-        # reason rather than left inferring it from a section that vanished.
+        # Absent is the common case and silent. Present-but-unparseable is not:
+        # this is the one artifact in a run a human is invited to hand-edit, and
+        # `_quietly` cannot tell a reader with a broken waiver anything at all.
+        #
+        # Narrowly the unparseable case, and not a general rule that a reader is
+        # always told why a section is missing -- the code does not do that, on
+        # purpose. A file that parses and holds the wrong shape (a top-level
+        # array, `"waivers": "oops"`, a list of strings) renders no section at
+        # all, because `_dicts` drops what it cannot read; `check-refs` raises
+        # exit 2 on the same file, which is what names the shape. Saying more
+        # here would be this report inventing a finding.
         return [WAIVERS_UNREADABLE, ""] if run.waivers.exists() else []
     entries = _dicts(_mapping(doc).get("waivers"))
     if not entries:
@@ -1140,7 +1164,7 @@ def _gate_0(run: RunPaths) -> str:
     }
 
     review = _mapping(triage.get("objective_review"))
-    lines = [f"GATE 0 -- {run.root}", "", *waivers, "Objective verdict"]
+    lines = [f"GATE 0 -- {run.root}", "", "Objective verdict"]
     lines.append(f"  declared objective: {review.get('declared_objective', '?')}")
     lines.append(
         "  supported by the surfaces found: " + ("yes" if review.get("supported") else "no")
@@ -1155,8 +1179,19 @@ def _gate_0(run: RunPaths) -> str:
         )
     lines.append("")
 
-    # Immediately after the verdict, because it is the only measure of the
-    # corpus map that verdict was ruled from -- see section 4.1.
+    # Under the verdict, not above it, and unlike gates 1 through 3. Measured: two
+    # waivers with two-line reasons -- or one with a five-line reason, since
+    # `reason` has no maxLength -- push `objective` and `supported` past line ten,
+    # breaking this module's own promise for the gate that decides what the run can
+    # ever know. And the block buys nothing here to weigh against that: the one
+    # WAIVABLE_CHECKS row's finding names 01-world-model.json, and `rubrica waive`
+    # refuses a finding that is not currently raised, so no waiver can exist at
+    # gate-0 time at all. The two absent-triage exits above still lead with it,
+    # where there is no verdict to displace.
+    lines.extend(waivers)
+
+    # Immediately after the verdict and its waivers, because it is the only measure
+    # of the corpus map that verdict was ruled from -- see section 4.1.
     lines.extend(_divergence_lines(run))
     lines.append("")
 

@@ -56,6 +56,46 @@ def _waive(run, remedy="triage-rule", subject=SUBJECT):
     )
 
 
+# A reason of the length a real one runs to. Folded by `_fold` at 78 columns, this
+# is two rendered lines -- the size the reviewer measured pushing gate 0's verdict
+# out of its first ten lines when the block led the brief. `reason` has no
+# `maxLength` in waivers-0.1.json, so nothing bounds this from above.
+_REALISTIC_REASON = (
+    "out of the target's domain: this is a harness file the target's own tests "
+    "call, admitted at gate 0 on contract grounds, and all seven reconcile passes "
+    "declined it on domain grounds with a recorded reason each"
+)
+
+
+def _waive_many(run, count):
+    """`count` recorded waivers, each with a two-line reason.
+
+    Written for the ten-line invariant below, which a single-waiver fixture cannot
+    see: the measurement that condemned the old placement needed two waivers, so a
+    guard pinned at one block size is a guard for the one size that passes.
+    """
+    run.waivers.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1",
+                "waivers": [
+                    {
+                        "id": f"wv-{n:04d}",
+                        "check": "claim-utilisation",
+                        "subject": f"{SUBJECT}-{n}",
+                        "remedy": "none",
+                        "reason": _REALISTIC_REASON,
+                        "finding_text": f"no world-model element cites any claim from {SUBJECT}",
+                        "recorded_at": "2026-09-08T04:12:33Z",
+                    }
+                    for n in range(1, count + 1)
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 @pytest.mark.parametrize("gate", GATES)
 def test_a_waiver_appears_at_every_gate(gate, tmp_path):
     """A waived finding is re-read at each gate rather than forgotten after the
@@ -71,9 +111,18 @@ def test_a_waiver_appears_at_every_gate(gate, tmp_path):
 @pytest.mark.parametrize("gate", GATES)
 def test_no_waiver_section_when_there_are_none(gate, tmp_path):
     """The common case must stay quiet -- an empty section at every gate is
-    noise a reader learns to skip."""
+    noise a reader learns to skip.
+
+    Both anchors, and both read from `brief.py` rather than spelled here. A bare
+    `"Waivers" not in text` was measured to pass a mutant that still renders the
+    block, as soon as `WAIVERS_HEADER` is reworded to anything not starting with
+    that word -- a false green, and the same phrase-pin failure this module
+    replaced with constants everywhere else.
+    """
     run = build_toy_run(tmp_path)
-    assert "Waivers" not in gate_brief(run, gate)
+    text = gate_brief(run, gate)
+    assert WAIVERS_HEADER not in text
+    assert WAIVERS_UNREADABLE not in text
 
 
 @pytest.mark.parametrize("gate", GATES)
@@ -197,15 +246,30 @@ def test_gate_zero_shows_the_waiver_on_a_run_that_has_a_triage_record(tmp_path):
     assert f"{WAIVERS_HEADER}: 1" in text
 
 
-def test_gate_zero_still_leads_with_the_objective_verdict(tmp_path):
-    """Gate 0's stated ruling -- a tired reader who stops after ten lines must
-    have seen the verdict -- survives the waiver block being added above it.
+@pytest.mark.parametrize("count", [1, 3])
+def test_gate_zero_still_leads_with_the_objective_verdict(count, tmp_path):
+    """Gate 0's stated ruling: a tired reader who stops after ten lines must have
+    seen the verdict, because it is the fact most likely to make them overturn the
+    whole selection.
 
-    Asserted on a run that has a triage record, since that is the only run whose
-    gate 0 renders a verdict at all.
+    Parametrised over block sizes, and asserting the two tokens
+    `test_brief.py::test_the_gate_zero_brief_leads_with_the_objective_verdict`
+    asserts, because the first version of this test was weaker than the one it
+    restated in both respects. It pinned a single waiver with a short reason and
+    the section *heading* only -- and measured, two waivers with two-line reasons
+    push both `objective` and `supported` past line ten while leaving "Objective
+    verdict" itself inside them. So it passed the block placement that was
+    condemned, at the one size that survives it.
+
+    Three rather than two: it is one past the size the measurement condemned, so
+    the guard has margin, and the motivating case in limitations.md is two.
     """
     run = build_toy_run(tmp_path)
     build_toy_catalogue_and_triage(run)
-    _waive(run)
-    lines = gate_brief(run, 0).splitlines()
-    assert "Objective verdict" in lines[:10], lines[:10]
+    _waive_many(run, count)
+    text = gate_brief(run, 0)
+    head = "\n".join(text.splitlines()[:10]).lower()
+    assert "objective" in head, text.splitlines()[:10]
+    assert "supported" in head, text.splitlines()[:10]
+    # And the block is still rendered, lower down: moved, not dropped.
+    assert WAIVERS_HEADER in text

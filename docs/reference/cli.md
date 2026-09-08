@@ -833,12 +833,17 @@ would have been misled by a report that showed them services and stayed silent.
 `rubrica decide` is named as the action that does work: it puts the correction on
 the record for whichever run acts on it.
 
-Every gate leads with **the waivers in force**, on a run that carries any: each
-waiver's id, the check and subject it suppresses, where its remedy lies, and the
-reason recorded for it. Shown at all four gates rather than only at the one where
-it was written, because a waiver is a standing ruling — and a clean `check-refs`
-on a run carrying one is clean because a human said so, which changes how every
-number under it reads. A `remedy` of `none` renders as an acceptance rather than
+Gates 1, 2 and 3 lead with **the waivers in force**, on a run that carries any:
+each waiver's id, the check and subject it suppresses, where its remedy lies, and
+the reason recorded for it. Rendered at all four gates rather than only at the one
+where it was written, because a waiver is a standing ruling — and a clean
+`check-refs` on a run carrying one is clean because a human said so, which changes
+how every number under it reads. **Gate 0 renders it under the verdict rather than
+above it**, because a waiver block of any realistic size pushes that verdict out
+of the ten lines a tired reader is promised, and because no waiver can exist at
+gate-0 time in the first place: the one waivable check's finding names
+`01-world-model.json`, and `waive` refuses a finding that is not currently
+raised. A `remedy` of `none` renders as an acceptance rather than
 as a deferral, and one that is no longer a stage name renders with a marker
 saying so, since a stage renamed after a waiver was written leaves a stale
 pointer that nothing rejects. A run with no waivers renders no such section at
@@ -1049,15 +1054,17 @@ mechanism at all.
 
 Writes the [`waivers`](artifacts.md#waivers) artifact at the run root and
 appends one line to `decisions.md`, so the prose trail sits in the file a human
-already reads at every gate. Every check runs before either write, so a refusal
-leaves the run untouched — but the two writes are ordered, `waivers.json` first,
-and if the `decisions.md` append then fails the command exits 2 with a message
-naming the waiver id and saying the waiver stands. **Do not read that exit as
-"nothing happened":** the waiver is live and already suppressing a finding, and
-undoing it means removing the entry by hand. Both are append-only through this command; a waiver
+already reads at every gate. Both are append-only through this command; a waiver
 is revoked by **deleting its entry by hand**, which is why ids are minted one
 past the highest number present rather than from the entry count — the gap a
 deletion leaves must not remint an id that was already used.
+
+Every check runs before either write, so a refusal leaves the run untouched. The
+two writes are ordered, though, `waivers.json` first, and if the `decisions.md`
+append then fails the command exits 2 with a message naming the waiver id and
+saying the waiver stands. **Do not read that exit as "nothing happened":** the
+waiver is live and already suppressing a finding, and undoing it takes the same
+hand-deletion as any other revocation.
 
 ```bash
 rubrica waive --run runs/run-20260806-123005 \

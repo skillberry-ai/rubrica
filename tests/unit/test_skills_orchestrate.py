@@ -522,6 +522,33 @@ def test_it_names_the_three_human_gates_and_the_no_gate_flag():
         )
 
 
+def test_it_states_that_a_waived_finding_is_not_part_of_a_repair_request():
+    """A4's last rule, and the one that closes the finding-waiver branch.
+
+    A `[waived] ` line is a finding a human read, ruled correct, and recorded as
+    unrepairable in the stage the finding names. Appending one to a repair prompt
+    hands a stage a request it cannot satisfy: it either attempts a fix nobody
+    believes is available, or refuses because the finding names an artifact
+    outside its `writes` -- the exact stall the waiver mechanism exists to remove.
+    A4's own budget rule records what an unpinned rule in this file costs: a
+    weaker version of that test let the whole bounded-repair rule be deleted with
+    every test green, so this one is pinned rather than trusted to survive a
+    reflow.
+
+    Scoped to the Method section and asserted as a co-occurrence, which is
+    discriminating by construction here: all four occurrences of `waived` in the
+    file sit inside this one paragraph, so nothing else in the prose can satisfy
+    it. `(never|not)` rather than a single spelling, for the reason PROHIBITIONS
+    above exists -- English has several ways to forbid a thing and a reword
+    between them changes nothing.
+    """
+    assert re.search(
+        r"\[waived\].{0,200}(never|not).{0,120}repair prompt",
+        method_body(),
+        re.I | re.S,
+    ), "the Method must say a `[waived] ` line is never appended to a repair prompt"
+
+
 def test_it_states_that_a_rejection_does_not_loop_back_to_propose():
     """Deferred on purpose: looping after instantiation makes run cost unbounded.
     An orchestrator that loops instead of reporting an honest hole turns a
