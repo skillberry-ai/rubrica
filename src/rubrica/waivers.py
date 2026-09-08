@@ -19,8 +19,13 @@ vouch for its own refusal) may record one.
 
 from __future__ import annotations
 
+import re
+
 from rubrica.artifacts import ArtifactError, read_json
+from rubrica.errors import UsageError
+from rubrica.findings import format_findings
 from rubrica.paths import STAGES, RunPaths
+from rubrica.validate import validate_artifact
 
 # Which checks may be waived at all, and what a `subject` names for each. The
 # value is documentation with a consumer: the CLI quotes it when it rejects a
@@ -41,6 +46,15 @@ WAIVABLE_CHECKS: dict[str, str] = {
 # not have contained the input at all.
 _SENTINEL_REMEDIES: tuple[str, ...] = ("outside-the-run", "none")
 
+# Mirrors waivers-0.1.json's `id` pattern rather than re-deriving it. The explicit
+# [0-9] class is load-bearing for the reason paths.py's _ROUND_PART records as a
+# ruling: `\d`, isdigit() and isdecimal() are all Unicode-wide, and int() folds
+# `wv-١٢` to 12, so a laxer filter invents a number no ASCII reading of the id
+# contains -- the same invented-round defect that comment was written for.
+# Mirroring is coherent because `load` schema-validates: next_id only ever sees
+# ids this pattern already accepted.
+_WAIVER_ID = re.compile(r"\Awv-([0-9]{4,})\Z")
+
 
 def remedy_choices() -> tuple[str, ...]:
     """Every stage name, plus the two sentinels. Derived, never restated."""
@@ -55,6 +69,22 @@ def load(run: RunPaths) -> list[dict]:
     as "no waivers". Failing open would be safe in the narrow sense -- the
     finding would simply reappear -- and it would hide a corrupted human record
     behind a gate that then looks correct, which is the worse failure.
+
+    **Schema-validated here, in the consumer, because nothing else in the run
+    ever validates this artifact.** It is deliberately outside STAGE_ARTIFACTS,
+    so no `validate --stage X` reaches it, and `rubrica waive`'s own checks are
+    bypassed by exactly the hand-edit the design designates as the way to revoke
+    a waiver. An invalid entry would otherwise suppress a finding silently and
+    permanently, in the one mechanism whose whole purpose is auditability. This
+    is the treatment smoke.load_agents and recall.load_gold already give their
+    human-authored inputs, and the reason is theirs: a person wrote this file, so
+    there is no stage to hand a repair prompt to, which makes it a UsageError
+    (exit 2) rather than a finding.
+
+    The three shape checks below run *first* and keep raising ArtifactError.
+    Validation is an additional gate rather than a replacement: a document that
+    is a JSON array, or whose entries are strings, must be refused by name here
+    rather than reaching the validator and being described in schema vocabulary.
     """
     path = run.waivers
     if not path.exists():
@@ -68,6 +98,9 @@ def load(run: RunPaths) -> list[dict]:
     for entry in entries:
         if not isinstance(entry, dict):
             raise ArtifactError(f"{path}: every waiver must be an object")
+    findings = validate_artifact(path, "waivers")
+    if findings:
+        raise UsageError(f"unusable waivers: {path}:\n{format_findings(findings)}")
     return entries
 
 
@@ -96,11 +129,7 @@ def next_id(entries: list[dict]) -> str:
     highest = 0
     for entry in entries:
         raw = entry.get("id")
-        # isdecimal, not isdigit: isdigit admits superscripts, which int() then
-        # rejects -- `wv-²` raised ValueError here, escaping into cli.py's
-        # catch-all and reporting a malformed human artifact to the orchestrator
-        # as a repairable stage defect. isdecimal still admits `wv-١٢`, which
-        # int() handles.
-        if isinstance(raw, str) and raw.startswith("wv-") and raw[3:].isdecimal():
-            highest = max(highest, int(raw[3:]))
+        matched = _WAIVER_ID.match(raw) if isinstance(raw, str) else None
+        if matched:
+            highest = max(highest, int(matched.group(1)))
     return f"wv-{highest + 1:04d}"
