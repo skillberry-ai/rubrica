@@ -923,6 +923,16 @@ conforming sealed model omits — an empty array there says a pass looked and fo
 tools, and an absent key says no pass ran. The output is derived rather than
 an artifact: no schema, outside the numbered contract, and read by no stage.
 
+Its flags read the waivers too. An input whose claims nothing cites raises the
+`uncited-artifacts` flag, and a [waiver](#rubrica-waive) for it takes it out of
+that flag while the page still names it — on its own line under claim
+utilisation, marked as waived, with its row left in the table. So the page and
+`check-refs` reach the same judgment about one run rather than the page calling
+an open problem what the gate has already exited 0 on. `waivers.json` is read
+tolerantly here, unlike everywhere else: one that cannot be read suppresses
+nothing and leaves this page at exit 0, because `check-refs` raises its exit 2 on
+that same file and a report is never a gate.
+
 The page is self-contained — inline CSS and JS, no external asset, no network
 — so it still reads when the run is archived. Links to sibling artifacts are
 relative, so the page travels with the run: written to the default destination

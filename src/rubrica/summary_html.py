@@ -594,8 +594,19 @@ def _utilisation(run: RunPaths):
             f"<p>{esc(len(got.uncited))} input(s) contributed no cited claim: "
             f'<span class="mono">{esc(", ".join(got.uncited))}</span></p>'
         )
-    else:
+    elif not got.waived:
         parts.append("<p>Every input with claims contributed at least one cited claim.</p>")
+    # Named on their own line, never folded into the sentence above: a waived
+    # zero-citation input is a finding a human read and ruled correct, so it is not
+    # one of the inputs still open -- and it is not absent from the run either,
+    # which is why the "every input" sentence above is suppressed when there is one.
+    # `check-refs` prints the same finding prefixed `[waived] ` and exits 0.
+    if got.waived:
+        parts.append(
+            f"<p>{esc(len(got.waived))} further input(s) contributed no cited claim and "
+            f'were <b>waived</b> by a human: <span class="mono">{esc(", ".join(got.waived))}'
+            "</span></p>"
+        )
     rows = [
         "<tr>"
         f'<td class="mono">{_val(row.get("artifact_id"))}</td>'

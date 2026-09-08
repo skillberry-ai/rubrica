@@ -120,6 +120,27 @@ def waived_subjects(run: RunPaths, check: str) -> frozenset[str]:
     )
 
 
+def waived_subjects_quietly(run: RunPaths, check: str) -> frozenset[str]:
+    """`waived_subjects`, but an unreadable file reads as no waivers at all.
+
+    For a *report* rather than a gate, and the divergence is deliberate and
+    narrow. `waived_subjects` raises, which cli.py turns into an exit 2 -- correct
+    for `check-refs`, and wrong for `run-summary`, which exits 0 on a run it
+    cannot read at all and must not gain a new way to fail on one it can. The
+    malformed file is still somebody's exit 2: `check-refs` raises it on the same
+    run, so failing quiet here loses no report of the defect.
+
+    One spelling of the `(check, subject)` filter, delegated rather than copied:
+    a second copy is how a report and the gate it mirrors come to disagree about
+    which findings a human ruled on -- which is the disagreement the report grew
+    in the first place.
+    """
+    try:
+        return waived_subjects(run, check)
+    except Exception:  # deliberate, matching brief._quietly's reasoning
+        return frozenset()
+
+
 def next_id(entries: list[dict]) -> str:
     """One past the highest `wv-` number present.
 
