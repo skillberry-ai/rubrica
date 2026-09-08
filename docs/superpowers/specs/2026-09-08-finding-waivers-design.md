@@ -95,7 +95,7 @@ A run-level `waivers.json`, reached as `run.waivers`, beside `manifest.json` and
 Schema `waivers-0.1.json`, `additionalProperties: false` throughout.
 
 ```json
-{ "version": "0.1",
+{ "schema_version": "0.1",
   "waivers": [
     { "id": "wv-0001",
       "check": "claim-utilisation",

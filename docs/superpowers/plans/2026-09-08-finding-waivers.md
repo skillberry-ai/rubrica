@@ -70,7 +70,7 @@ def test_a_recorded_waiver_loads(tmp_path):
     run.waivers.write_text(
         json.dumps(
             {
-                "version": "0.1",
+                "schema_version": "0.1",
                 "waivers": [
                     {
                         "id": "wv-0001",
@@ -99,7 +99,7 @@ def test_a_waiver_for_another_check_does_not_leak(tmp_path):
     run.waivers.write_text(
         json.dumps(
             {
-                "version": "0.1",
+                "schema_version": "0.1",
                 "waivers": [
                     {
                         "id": "wv-0001",
@@ -130,7 +130,7 @@ def test_a_malformed_document_raises_rather_than_failing_open(tmp_path):
 def test_a_non_object_entry_raises(tmp_path):
     run = _run(tmp_path)
     run.waivers.write_text(
-        json.dumps({"version": "0.1", "waivers": ["nope"]}), encoding="utf-8"
+        json.dumps({"schema_version": "0.1", "waivers": ["nope"]}), encoding="utf-8"
     )
     with pytest.raises(ArtifactError):
         waivers.load(run)
@@ -196,9 +196,9 @@ Create `src/rubrica/schema/waivers-0.1.json`:
   "title": "Waivers a human recorded for one run",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "waivers"],
+  "required": ["schema_version", "waivers"],
   "properties": {
-    "version": { "const": "0.1" },
+    "schema_version": { "const": "0.1" },
     "waivers": {
       "type": "array",
       "items": {
@@ -568,7 +568,7 @@ def _waive(run, subject, check="claim-utilisation"):
     run.waivers.write_text(
         json.dumps(
             {
-                "version": "0.1",
+                "schema_version": "0.1",
                 "waivers": [
                     {
                         "id": "wv-0001",
@@ -592,7 +592,7 @@ def _uncited(run):
     claims.write_text(
         json.dumps(
             {
-                "version": "0.1",
+                "schema_version": "0.1",
                 "artifact_id": "orphan",
                 "claims": [
                     {
@@ -875,7 +875,7 @@ def test_waiving_a_live_finding_records_it(tmp_path):
     _uncited(run)
     assert main(_waive_argv(run)) == 0
     doc = read_json(run.waivers)
-    assert doc["version"] == "0.1"
+    assert doc["schema_version"] == "0.1"
     (entry,) = doc["waivers"]
     assert entry["id"] == "wv-0001"
     assert entry["check"] == "claim-utilisation"
@@ -962,7 +962,7 @@ def test_a_subject_that_is_a_prefix_of_another_is_not_confused(tmp_path):
     (run.claims_dir / "orphan2.json").write_text(
         json.dumps(
             {
-                "version": "0.1",
+                "schema_version": "0.1",
                 "artifact_id": "orphan2",
                 "claims": [
                     {"id": "clm-orphan2-001", "kind": "actor",
@@ -986,7 +986,7 @@ def test_a_second_waiver_appends_rather_than_replacing(tmp_path):
     (run.claims_dir / "orphan2.json").write_text(
         json.dumps(
             {
-                "version": "0.1",
+                "schema_version": "0.1",
                 "artifact_id": "orphan2",
                 "claims": [
                     {"id": "clm-orphan2-001", "kind": "actor",
@@ -1062,7 +1062,7 @@ def record(
             "recorded_at": utc_stamp(now),
         }
     )
-    write_json(run.waivers, {"version": "0.1", "waivers": entries})
+    write_json(run.waivers, {"schema_version": "0.1", "waivers": entries})
     append_decision(
         run.decisions,
         f"- {utc_stamp(now)} waived {check}/{subject}: remedy {remedy}; {text}",
@@ -1201,7 +1201,7 @@ def _waive(run, remedy="triage-rule"):
     run.waivers.write_text(
         json.dumps(
             {
-                "version": "0.1",
+                "schema_version": "0.1",
                 "waivers": [
                     {
                         "id": "wv-0001",
