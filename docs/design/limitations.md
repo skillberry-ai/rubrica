@@ -3409,17 +3409,30 @@ layer-2 requirement safe rather than a second unrepairable finding: a missing
 flag is remedied by a flag in `05-verdicts/<scenario_id>.json`, which is
 `rb-challenge`'s own `writes`, so a re-dispatch closes it.
 
-**What is still owed.** A human at gate 3 reads the flag and has no mechanical
-move inside the run: the scenario ships with a correct label only if that human
-edits `02-scenarios.json` by hand and re-runs from propose. The proper fix is the
+**Where the flag is visible, and where it is not.** `run-summary` raises it in
+the flag table and annotates the scenario row, and `review.confidence_band`
+demotes a flagged `accept` from "high" to "low", so a mislabelled scenario
+becomes eligible for the human review packet without any further change. **The
+gate-3 brief does not show it**: `brief._gate_3` renders the verdict tally and
+never reads `flags`, so an understated verdict reads there as an ordinary
+`accept`. A human at gate 3 sees the finding only because `rb-orchestrate` B10
+presents the raw verdict documents alongside the brief. A flag tally in
+`_gate_3` is the obvious surface and it is **owed**, not done — it was left out
+of this change deliberately, because adding a section to that brief means
+updating `docs/reference/cli.md` and the accuracy test that guards it, which is a
+wider change than the comparison this entry is about.
+
+**What is still owed besides that.** A human at gate 3 has no mechanical move
+inside the run: the scenario ships with a correct label only if that human edits
+`02-scenarios.json` by hand and re-runs from propose. The proper fix is the
 same *disposition* the unrepairable-re-seed entry asks for — a first-class
-"unrepairable here, remedy lives upstream" outcome. Until that exists this flag
-is a warning to a reader and not an input to any stage: nothing in `rb-score` or
-`emit` branches on it, so a suite can still ship a scenario whose declared depth
-is wrong, and the per-hop-depth coverage credit computed from that depth is still
-wrong with it. Parked deliberately, and recorded rather than deferred — making
-the flag actionable is the disposition work, not a further change to this
-comparison.
+"unrepairable here, remedy lives upstream" outcome. Until that exists the flag's
+only mechanical effect is the confidence-band demotion above, and **no stage
+branches on it** — not `rb-score`, not `emit` — so a suite can still ship a
+scenario whose declared depth is wrong, and the per-hop-depth coverage credit
+computed from that depth is still wrong with it. Parked deliberately, and
+recorded rather than deferred — making the flag actionable is the disposition
+work, not a further change to this comparison.
 
 ---
 

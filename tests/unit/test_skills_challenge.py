@@ -293,3 +293,45 @@ def test_invariant_four_requires_the_flag_in_both_directions():
         "either absence, and a one-sided invariant spends the repair attempt on the "
         "direction the skill was never told about"
     )
+
+
+def test_the_verdict_table_row_for_an_understated_depth_scopes_its_absolute():
+    """The table row must not read as governing the whole verdict.
+
+    Step 4 says "read the verdict off the table", so a bolded absolute in a cell
+    outranks a walk-back two blocks below it. The first draft of this row said
+    "**never** a `re-seed`" flat, and issue #37's own measured case is exactly the
+    collision it mishandles: `sc-r1-b01-05` was a legitimate `re-seed` for an
+    undeclared `cap-search-restaurants` *and* had an understated depth. A model
+    treating the cell as governing downgrades a real row-2/3/4 `re-seed` to
+    `accept`, shipping an ambiguous or non-derivable scenario -- strictly worse
+    than the mislabel this issue set out to fix.
+
+    So: the row must exist (it was reachable by no test at all -- deleting it left
+    every predicate in this module green, because the flag name and the ruling both
+    live elsewhere), and if it denies a `re-seed` it must scope the denial. The
+    scoping alternation is deliberately loose: dropping the clause entirely also
+    passes, because the paragraph below carries the ruling and a table cell is not
+    the place to argue it. What must not pass is an unscoped absolute.
+    """
+    rows = [
+        line
+        for line in _method_body().splitlines()
+        if line.lstrip().startswith("|")
+        and "hop_depth" in line
+        and "difficulty_understated" in line
+    ]
+    assert rows, (
+        "the Method verdict table has no row for a call count above the claimed "
+        "hop_depth; step 4 tells the adversary to read the verdict off that table, so a "
+        "missing row is a case with no stated answer"
+    )
+    scoped = ("on this row", "on this ground", "this ground alone", "by itself", "alone")
+    for row in rows:
+        if "re-seed" not in row:
+            continue
+        assert any(marker in row for marker in scoped), (
+            "the row denies a re-seed without scoping the denial to this ground; rows 2 to 4 "
+            "can each warrant a genuine re-seed on the same scenario, and a cell read as "
+            f"governing downgrades one of those to accept:\n{row}"
+        )

@@ -582,11 +582,30 @@ def test_a_matching_call_count_needs_neither_difficulty_flag(tmp_path):
     `minimal_verdict` and `minimal_scenarios` already agree at 2, so this asserts
     the check is not firing on equality -- a `>=` or `<=` in either comparison
     passes every test above and fails here.
+
+    **Narrowed on review.** The flag-present half asserted `findings == []`, which
+    pinned *in* the absence of a converse check: nothing recomputes whether a flag
+    that is present is warranted, and a test demanding silence on that shape would
+    have to be edited before the check could ever be added -- which is how a guard
+    gets deleted instead. So the assertion is scoped to the property this test is
+    about, the missing-flag requirement not firing at equality, and says nothing
+    about what else a future checker might report there.
+
+    No converse check is owed today, and the reason is that its one consumer errs
+    the safe way. `review.confidence_band` is the only reader of the raw `flags`
+    array besides this checker, and it tests truthiness: an unwarranted flag
+    demotes an otherwise-clean `accept` from "high" to "low", which puts the
+    package *into* the human review pool rather than out of it. Nothing else reads
+    the array -- `summary.scenarios` recomputes both booleans from the two numbers,
+    and `emit` and `brief` never read it.
     """
     assert check_verdicts(_run(tmp_path, verdict=minimal_verdict())) == []
     for flag in ("difficulty_overstated", "difficulty_understated"):
         findings = check_verdicts(_run(tmp_path, verdict=minimal_verdict(flags=[flag])))
-        assert findings == [], f"an unwarranted {flag} is a challenge defect no check names"
+        assert not [f for f in findings if "is required" in f.message], (
+            f"an unwarranted {flag} at equal counts must not be reported as a *missing* "
+            f"flag; the requirement is on the relation, not on the array: {findings}"
+        )
 
 
 # -- aggregation --------------------------------------------------------

@@ -169,7 +169,10 @@ failure, not a smaller verdict. Two fields are conditional:
   the scenario's claimed `hop_depth` -- and each is required whenever its
   direction holds. Invariant 4 states both. They are mutually exclusive on
   any one scenario: at most one of the two can be true at a time, and
-  neither is true when the two numbers agree.
+  neither is true when the two numbers agree. **The schema rejects a
+  verdict carrying both**, so a document claiming a scenario is at once
+  easier and harder than declared fails `validate` rather than reaching a
+  reader.
 
 `verdict` is one of three values and nothing else: `accept`, `re-seed`,
 `reject`. `minimum_tool_calls_found` is a non-negative integer. Every object
@@ -330,7 +333,7 @@ worth nothing at all unless steps 1 to 3 finished first.
    | Not derivable from the available capabilities | `reject` -- the test is unfair |
    | Disagrees with expected, and you are right | `reject` or `re-seed` |
    | `minimum_tool_calls_found` < the claimed `hop_depth` | `accept`, flagged `difficulty_overstated` |
-   | `minimum_tool_calls_found` > the claimed `hop_depth` | `accept`, flagged `difficulty_understated` -- **never** a `re-seed` |
+   | `minimum_tool_calls_found` > the claimed `hop_depth` | `accept` on this row alone, flagged `difficulty_understated` -- never a `re-seed` *on this ground* |
 
    **Row 4 is the highest-value catch in this pipeline.** It is how a wrong
    gold label is found before it becomes a benchmark that punishes correct
@@ -367,17 +370,16 @@ worth nothing at all unless steps 1 to 3 finished first.
    nothing actually tests, and the matrix reports covered what was never
    covered. So set `difficulty_understated`, and say in `notes` which calls
    you needed and why the first one was unavoidable -- naming the fact the
-   intent withholds is what makes the finding actionable. But the verdict
-   stays `accept`, because the remedy is not yours and is not
-   `rb-instantiate`'s either:
-   `hop_depth` lives in `02-scenarios.json`, which `rb-propose` owns and
-   the orchestrator does not reopen. A `re-seed` demanding a `hop_depth`
-   change is a request no stage downstream of propose can satisfy, so it
-   would stall the scenario instead of repairing it. Reserve `re-seed` and
-   `reject` for what rows 1 to 4 describe, and where an understated depth
-   comes with one of those -- an undeclared capability the extra call
-   needs, say -- it is that row that carries the verdict, with this flag
-   beside it.
+   intent withholds is what makes the finding actionable. But on this
+   ground the verdict stays `accept`, because the remedy is neither yours
+   nor `rb-instantiate`'s: `hop_depth` lives in `02-scenarios.json`, which
+   `rb-propose` owns and the orchestrator does not reopen. A `re-seed`
+   demanding a `hop_depth` change is a request no stage downstream of
+   propose can satisfy, so it would stall the scenario instead of repairing
+   it. Reserve `re-seed` and `reject` for what rows 1 to 4 describe, and
+   where an understated depth comes with one of those -- an undeclared
+   capability the extra call needs, say -- it is that row that carries the
+   verdict, with this flag beside it.
 
    The rows are not mutually exclusive, and more than one can apply at
    once. When two verdicts are in play, the more severe wins: `reject` over

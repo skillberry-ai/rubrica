@@ -362,7 +362,9 @@ def _flags(run: RunPaths) -> str:
     whose rule is not on the page is a black box a reader cannot argue with --
     Task 7 measured that a renderer omitting it would pass every test that module
     has, which is why `test_render_states_every_flag_with_its_threshold` asserts
-    the threshold text of all seven over a run where all seven fire.
+    every flag's threshold text over a run engineered to fire all of them. No
+    numeral here on purpose: the table grows, and the count that used to be written
+    down in three places went stale the moment issue #37 added a flag.
     """
     fired = summary.flags(run)
     if not fired:

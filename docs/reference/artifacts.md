@@ -943,10 +943,10 @@ ambiguity it found, not merely assert it.
 Fields worth knowing: `flags` (`difficulty_overstated` and
 `difficulty_understated` — the two directions of one comparison, the
 adversary's own `minimum_tool_calls_found` against the scenario's claimed
-`hop_depth`; `check-refs` requires whichever one holds, and neither changes the
-verdict); `notes` (required on every verdict — the field `rb-orchestrate` quotes
-verbatim on a `re-seed` re-dispatch, so its wording is what the next attempt
-actually receives).
+`hop_depth`; `check-refs` requires whichever one holds, the schema rejects a
+verdict carrying both, and neither changes the verdict); `notes` (required on
+every verdict — the field `rb-orchestrate` quotes verbatim on a `re-seed`
+re-dispatch, so its wording is what the next attempt actually receives).
 
 ## `suite-expected`
 

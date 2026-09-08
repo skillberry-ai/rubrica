@@ -3908,8 +3908,8 @@ _EVERY_FLAG_ID: tuple[str, ...] = (
 def _run_with_every_flag(tmp_path, monkeypatch) -> RunPaths:
     """A run engineered so every flag in the table fires at once.
 
-    One fixture rather than seven, because the property under test is about the
-    table as a whole: that no flag can reach the page without stating the rule
+    One fixture rather than one per flag, because the property under test is about
+    the table as a whole: that no flag can reach the page without stating the rule
     that put it there. Each edit below is the same one the single-flag test above
     it makes, so a flag that stops firing here fails there too and the diagnosis
     is not ambiguous.
@@ -3954,7 +3954,7 @@ def test_every_flag_states_its_threshold(tmp_path, monkeypatch):
 
     Asserted over a run where *every* flag fires, not over the two that happen to
     fire on a propose-level run with a stray temp file: the property is that no
-    flag can reach the page without its rule, and a loop over two of seven checks
+    flag can reach the page without its rule, and a loop over two of them checks
     it for two. The id set is pinned in the same assertion, so a flag added
     without a threshold cannot slip in behind a `for` loop that never sees it.
     """
@@ -3994,11 +3994,11 @@ def test_flags_are_unique_and_ordered_stably(tmp_path, monkeypatch):
 def test_flags_keep_their_relative_order_on_a_partial_run(tmp_path):
     """The same fixed order over a subset, because partial runs are the primary case.
 
-    A propose-level run with a stray temp file fires two of the seven flags, and
-    they must come out in the order they hold in the full table. Asserted
-    separately from the all-seven test above: a table whose order is fixed only
-    when every rule fires is not a fixed order, and 10 of the 11 runs measured at
-    design time would have rendered a subset.
+    A propose-level run with a stray temp file fires two of the flags, and they
+    must come out in the order they hold in the full table. Asserted separately
+    from the every-flag test above: a table whose order is fixed only when every
+    rule fires is not a fixed order, and 10 of the 11 runs measured at design time
+    would have rendered a subset.
     """
     run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     (run.root / "02-scenarios.json.tmp.1.x").write_text("{}", encoding="utf-8")
@@ -4687,14 +4687,35 @@ def test_render_states_every_flag_with_its_threshold(tmp_path, monkeypatch):
     html = summary.run_summary(run)
     fired = summary.flags(run)
     assert len(fired) == len(_EVERY_FLAG_ID), "the loop below must not be vacuous"
+
+    # Each flag's own `<div class="flag">`, keyed by the headline it carries.
+    # **Scoped to the div rather than asserted over the page, and that is a
+    # measured requirement, not tidiness.** The page-wide version of the three
+    # assertions below stayed green with the threshold blanked for both difficulty
+    # flags, because the scenario table's `(overstated)` / `(understated)`
+    # annotation renders the identical escaped string in its `title`. So a
+    # renderer could drop the rule from the flag table -- the black box this test
+    # exists to prevent -- and no test in this module would notice. The weakness
+    # predates the second flag (it was green for `difficulty-overstated` alone);
+    # issue #37 only doubled it. It is the same substring-of-message shape as the
+    # one `test_render_annotates_both_difficulty_directions_beside_the_call_count`
+    # closes, seen from the other side: there the annotation borrowed the flag
+    # table's string, here the flag table borrows the annotation's.
+    divs = [chunk.split("</div>")[0] for chunk in html.split('<div class="flag">')[1:]]
+    assert len(divs) == len(fired), "one div per fired flag"
     for flag in fired:
+        owning = [div for div in divs if summary.esc(flag.headline) in div]
+        assert owning, f"{flag.id_} has no flag div of its own on the page"
+        div = owning[0]
         # Through `esc`, not raw: `difficulty-overstated`'s threshold is
         # "minimum_tool_calls_found < hop_depth", so the page carries it with the
         # `<` escaped -- and a test comparing the raw string would push a
         # renderer towards *not* escaping the one flag whose rule contains markup.
-        assert summary.esc(flag.headline) in html, f"{flag.id_} has no headline on the page"
-        assert summary.esc(flag.threshold) in html, f"{flag.id_} reached the page without its rule"
-        assert summary.esc(flag.detail) in html, f"{flag.id_} has no detail on the page"
+        assert summary.esc(flag.threshold) in div, (
+            f"{flag.id_} reached the page without its rule beside it; a flag whose "
+            "threshold is not in its own div is a black box wherever else the string appears"
+        )
+        assert summary.esc(flag.detail) in div, f"{flag.id_} has no detail in its own div"
 
 
 def test_render_annotates_both_difficulty_directions_beside_the_call_count(tmp_path):
