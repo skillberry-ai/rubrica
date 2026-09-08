@@ -253,7 +253,12 @@ meaning-preservingly, confirm green.
 
 - `docs/reference/cli.md` — a `rubrica waive` section, which
   `test_docs_accuracy.py` requires for every entry in `cli.SUBCOMMANDS`
-- `docs/reference/artifacts.md` — the `waivers` kind, likewise required
+- `docs/reference/artifacts.md` — the `waivers` kind. Documented because a
+  reader needs it, **not** because a test demands it: that parametrization
+  derives from `STAGE_ARTIFACTS`, which this kind is deliberately outside. It
+  joins `ARTIFACT_SCHEMAS` so it can be schema-validated, and stays out of both
+  `STAGE_ARTIFACTS` and `CONFIG_KINDS` — it is a fourth category, human-authored
+  but living inside the run, where the config kinds never do.
 - `docs/design/limitations.md` — both parked entries point at this mechanism, and
   the `check_claim_utilisation` third cause is recorded
 - `CLAUDE.md` — `waive` in the deterministic-subcommands rulings, since it is a
