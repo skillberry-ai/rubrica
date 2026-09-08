@@ -64,8 +64,11 @@ def _orphan(run, artifact_id):
 
     Well-formed matters: refs.check_manifest indexes `claim["evidence"]` directly,
     so a claim without it raises KeyError before claim_utilisation is reached at
-    all. Its evidence cites a registered artifact so the only findings it adds are
-    the ones these tests are about plus check_manifest's unregistered-artifact one.
+    all. Its evidence cites a registered artifact, so beside the zero-citation
+    finding these tests are about it adds exactly two more, both measured:
+    check_manifest's "artifact_id 'orphan' is not registered in the manifest" and
+    check_subjects' "no subject covers claim clm-orphan-001". Both are unwaived and
+    unwaivable, which is what the one test using this helper needs.
     """
     (run.claims_dir / f"{artifact_id}.json").write_text(
         json.dumps(
@@ -99,7 +102,8 @@ def test_an_uncited_artifact_is_a_finding(tmp_path):
     run = build_toy_run(tmp_path)
     _uncited(run)
     found = refs.check_claim_utilisation(run)
-    assert [f.message for f in found if SUBJECT in f.message]
+    assert len(found) == 1, found
+    assert set(_by_subject(run)) == {SUBJECT}
     assert all(not f.waived for f in found)
     assert all(f.artifact == run.world_model for f in found)
 

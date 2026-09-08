@@ -4440,6 +4440,13 @@ def check_all(run: RunPaths) -> list[Finding]:
     findings.extend(check_services(run))
     findings.extend(check_interfaces(run))
     findings.extend(check_world_model(run))
+    # The one checker below that may *raise* rather than return findings, and the one
+    # exception to this function's promise above. It reads waivers.json, which is
+    # human-authored and therefore deliberately outside check_readable: a malformed one
+    # is a UsageError/ArtifactError that cli.py turns into exit 2, not a repairable
+    # stage defect, because there is no stage to hand a repair prompt to. Converting
+    # that raise into a finding would flip the code to 1 and undo the ruling -- it is
+    # not the layer-1 precondition violation this module's docstring describes.
     findings.extend(check_claim_utilisation(run))
     findings.extend(check_batches(run))
     findings.extend(check_scenario_parts(run))
