@@ -122,11 +122,14 @@ This pass has **no field in which a partial read can be recorded**: it carries n
    only state as `prose:` because nothing stated them outright, and for a
    contradiction recorded `unresolved` whose resolution a scenario would need.
 
-3. **Audit every earlier partial, and record what you find as a gap.** No
-   other pass reads them all against the claims, and no gate can do this
-   work: layer 2 checks that an element *references* a resolvable claim,
-   never that the claim *supports* it, because support is semantic. So read
-   for the things a reference check cannot see:
+3. **Audit every earlier partial, and record what you find *wrong* as a
+   gap.** An earlier partial that is *absent* rather than wrong is not a gap
+   at all -- it is the missing-input refusal in §5, and nothing about it goes
+   into the artifact you write. No other pass reads them all against the
+   claims, and no gate can do this work: layer 2 checks that an element
+   *references* a resolvable claim, never that the claim *supports* it,
+   because support is semantic. So read for the things a reference check
+   cannot see:
 
    - a capability in `01-capabilities.json` whose cited claims do not
      actually establish it -- or that has no supporting claim at all;
@@ -143,9 +146,15 @@ This pass has **no field in which a partial read can be recorded**: it carries n
 
    Record each as a gap whose `subject` names the artifact and element, whose
    `unknown` says what evidence is missing, and whose `blocks` reflects what
-   it actually costs. You are not editing another pass's artifact -- you have
-   no write access to one and no authority over it. You are making the defect
-   visible to the human at gate 1, who does.
+   it actually costs. Naming another artifact in `subject` is right here, and
+   §5's ruling says why it does not license naming one anywhere: what an audit
+   gap records as `unknown` is still knowledge about the *target* -- a
+   capability the target may not have, an invariant it may not hold -- and the
+   artifact and element are where the human at gate 1 goes to correct it. What
+   may never reach a gap is a fact about this run's own progress, which is
+   what an absent partial is. You are not editing another pass's artifact --
+   you have no write access to one and no authority over it. You are making
+   the defect visible to the human at gate 1, who does.
 
 ## 4. Invariants
 
@@ -228,11 +237,15 @@ actually correct.
 - **The audit finds an earlier pass's artifact absent rather than wrong.**
   That is not a gap; it is the missing-input refusal the last condition in this
   section states, and it is the answer every pass in this family gives. **A
-  `gaps` entry is about the target, never about the run that studied it.** A
-  gap's `subject` names something the target has or does, and a partial nobody
-  has written yet has no target subject at all -- so recording it as a gap
-  files a complaint about this pipeline's own sequencing in the one collection
-  a human reads for what is unknown about the *target*. Two costs follow, and
+  `gaps` entry is about the target, never about the run that studied it.** What
+  a gap asserts `unknown` is knowledge about the target, and that is the rule
+  rather than anything about `subject`: an audit gap under §3 step 3
+  legitimately names an artifact and element there, because what it records as
+  unknown is target knowledge an earlier pass got wrong. A partial nobody has
+  written yet is not that. It leaves no target knowledge unknown at all -- it
+  leaves the run unfinished -- so recording it as a gap files this pipeline's
+  own sequencing in the one collection a human reads for what is unknown about
+  the *target*. Two costs follow, and
   both were measured on a real run. §3 step 1 is right to tell you to name
   `blocks` widely, so such a gap halts the whole pipeline over a dispatch
   order, and there is no input a human could supply to close it. And it was

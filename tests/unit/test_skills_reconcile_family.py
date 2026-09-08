@@ -601,18 +601,30 @@ def test_gaps_says_a_gap_cites_the_claims_that_make_the_absence_matter():
 def _missing_input_refusal(stage: str) -> str:
     """The one §5 bullet in `stage` that owns the missing-input refusal.
 
-    Located by "run directory"/"unreadable" rather than by "absent", and the
-    choice is the instrument. Measured before the bullet was written: no §5
-    bullet anywhere in the family carried "absent", "run directory" or
-    "unreadable", so any of the three was a unique locator then -- but
+    Located by the trigger's vocabulary rather than by "absent", and the choice
+    is the instrument. Measured before the bullet was written: no §5 bullet
+    anywhere in the family carried "absent", "absent from", "run directory" or
+    "unreadable", so any of them was a unique locator then -- but
     `reconcile-gaps` now deliberately carries a *second* bullet naming absence,
-    the one routing it here, so "absent" would locate two bullets there and
+    the one routing it here, so bare "absent" locates two bullets there and
     `_bullet_carrying`'s exactly-one check would fail against correct prose.
-    The alternation is over the two ways the trigger names a file it cannot
-    take, because which of them survives a meaning-preserving reword is exactly
-    the part not worth pinning to one.
+    "absent from" does not: measured, it locates exactly this bullet in every
+    member, because the second one says "absent rather than wrong".
+
+    **This is a token pin and the alternation only widens it.** Measured
+    counter-example: "is not present in the run's directory, or cannot be read"
+    means the same thing and carries none of the three, and all three
+    predicates then fail as "locates 0 bullet(s)" -- reporting the rule gone
+    when it is intact, which is the mirror failure CLAUDE.md names. Three
+    alternatives from three lexical families (the state, the place, the
+    capability) is as far as an alternation gets it; what closes the gap is not
+    a fourth token but the identity test below, which is red on drift and blind
+    to wording. So: a reword of this bullet must keep one of these three, and
+    that is the pin this instrument accepts rather than a robustness claim.
     """
-    return _bullet_carrying(stage, "5. Refusal conditions", "run directory", "unreadable")
+    return _bullet_carrying(
+        stage, "5. Refusal conditions", "absent from", "run directory", "unreadable"
+    )
 
 
 @pytest.mark.parametrize("stage", FAMILY)
@@ -644,6 +656,12 @@ def test_every_pass_refuses_a_missing_input_rather_than_modelling_around_it(stag
     # inflection.
     assert re.search(r"\b(?:refuse|decline)\b", bullet), bullet
     assert re.search(r"\bstop\b", bullet), bullet
+    # And the diagnostic half, which is what made the two sibling refusals
+    # recoverable on the measured run: both named `01-capabilities.json`, and an
+    # operator acts on the file name rather than on the refusal. Measured:
+    # reducing the sentence to "Refuse and stop." in every member's copy left
+    # other predicate in this module green.
+    assert re.search(r"\b(?:which|the) file\b", bullet), bullet
     # And what it may not do instead. The verb is the rewordable part, so this is
     # an OR over the two formulations the bullet uses for one prohibition.
     assert any(k in bullet for k in ("do not model around", "do not infer")), bullet
@@ -673,11 +691,14 @@ def test_the_missing_input_refusal_forbids_recording_the_absence_as_output(stage
 def test_the_missing_input_refusal_is_worded_identically_across_the_family():
     """Uniformity is the fix, not the wording. Issue #36's second suggestion asks
     for the rule to live in one place; there is no include mechanism for a
-    SKILL.md, so byte-identity across the eight copies is the enforceable proxy.
+    SKILL.md, so byte-identity across the family's copies is the enforceable
+    proxy.
 
     This is deliberately *not* a phrase pin: it is invariant under any reword
-    applied to all eight and red only on drift in one, which is the state the
-    issue reported -- three passes asked the same question, two answers.
+    applied to every member and red only on drift in one, which is the state
+    the issue reported -- three passes asked the same question, two answers. It
+    is also the only predicate here that is blind to wording, which is what
+    makes it the backstop for the token pin `_missing_input_refusal` documents.
     """
     worded = {stage: _missing_input_refusal(stage) for stage in FAMILY}
     assert len(set(worded.values())) == 1, sorted(worded)
@@ -708,9 +729,16 @@ def test_gaps_routes_an_absent_partial_to_refusal_and_a_wrong_one_to_a_gap():
     # The ruling, stated as the rule rather than as this one case, so a later
     # reader does not have to re-derive it from the example.
     assert "`gaps` entry is about the target" in absent, absent
-    # Why an absent partial cannot be one: a gap's subject names the target, and
-    # a file nobody has written names nothing about it.
-    assert any(k in absent for k in ("no target subject", "names nothing about")), absent
+    # Why an absent partial cannot be one. The reason is stated over what a gap
+    # asserts `unknown` rather than over `subject`, and that is not a wording
+    # preference: the `subject`-only form ("a gap's `subject` names something the
+    # target has or does") contradicted §3 step 3, which requires an audit gap to
+    # name the artifact and element it found wrong. Two of the three statements
+    # would then have to lose, and the review found the losing one is the ruling.
+    assert any(k in absent for k in ("no target knowledge", "leaves the run unfinished")), absent
+    # And that the audit reference §3 step 3 requires is explicitly not what the
+    # ruling forbids -- otherwise the ruling reads as revoking it.
+    assert "audit gap" in absent, absent
     # And the cost that makes it worse than an ordinary bad gap: it was true when
     # written and false by the time anyone could read it.
     assert "false when read" in absent, absent
@@ -720,3 +748,48 @@ def test_gaps_routes_an_absent_partial_to_refusal_and_a_wrong_one_to_a_gap():
     wrong = _bullet_carrying("reconcile-gaps", "5. Refusal conditions", "do not edit that artifact")
     assert "wrong" in wrong, wrong
     assert "record it as a gap" in wrong, wrong
+
+
+def test_the_gaps_audit_step_records_what_it_finds_wrong_and_not_what_is_absent():
+    """§5 is the exception list; §3 is the procedure the pass executes.
+
+    The whole diagnosis behind issue #36 is that an undifferentiated "record what
+    you find as a gap" is what the pass obeyed -- an absent partial is something
+    you find. A ruling in §5 that §3 step 3 still contradicts leaves the pass
+    holding three statements, two of them inconsistent, and the reading that
+    survives is whichever one the procedure states. So the restriction is pinned
+    where the instruction lives, not only where the exception does.
+
+    Windowed forward from the step's own opener, radius 400. Measured
+    anchor-to-token distances in the shipped prose: "wrong" 55, "absent" 102,
+    "not a gap" 131, "refusal in §5" 175 -- so 400 is over 2x the farthest
+    required token, per the margin convention `test_skills_triage_family.py`
+    documents. A radius sized to the measurement instead would be a length pin:
+    it passes today and fails on an honest lengthening between the two.
+    """
+    method = _flat("reconcile-gaps", "3. Method")
+    anchor = method.index("audit every earlier partial")
+    opener = method[anchor : anchor + 400]
+    # The audit's product is restricted to what is wrong ...
+    assert "wrong" in opener, opener
+    # ... and absence is routed out of the step rather than left to §5 to catch.
+    assert "absent" in opener, opener
+    # The exclusion, over four formulations rather than two. Measured: a
+    # meaning-preserving reword of this very sentence to "it is no gap at all:
+    # §5's missing-input refusal covers it" carries neither "not a gap" nor
+    # "refusal in §5", and the narrower alternation went red against prose that
+    # was entirely correct -- the mirror failure, caught by probing the green
+    # direction rather than the red one. Both the negation and the cross-
+    # reference are alternatives here because either alone states the exclusion.
+    assert any(k in opener for k in ("no gap", "not a gap", "refusal", "§5")), opener
+
+    # And the reconciliation, at the step's own instruction to name the artifact
+    # and element: that reference is legitimate because what such a gap asserts
+    # unknown is target knowledge, and a fact about the run's progress is not.
+    # Measured from "names the artifact and element" (1 occurrence in the
+    # section): "§5" at 187, "knowledge about the *target*" at 297, "run's own
+    # progress" at 526 -- radius 1100 is over 2x the farthest.
+    ref = method.index("names the artifact and element")
+    window = method[ref : ref + 1100]
+    assert "knowledge about the *target*" in window, window
+    assert any(k in window for k in ("run's own progress", "absent partial")), window

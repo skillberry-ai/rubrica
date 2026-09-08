@@ -462,14 +462,29 @@ check layer reaches: the assertion is prose about the filesystem, `check-refs` h
 nothing to compare it against, and the `blocks` entries are real stage names.
 
 **The rule now stated in prose, and the reasoning behind it.** A `gaps` entry is
-about the *target*, never about the run that studied it. An earlier artifact that
-is **wrong** — a capability its claims do not establish — has a target subject and
-stays gap-able, which is the audit's whole purpose. An earlier artifact that is
-**absent** has no target subject at all, so a gap recording one files a fact about
-the pipeline's own sequencing in the collection a human reads for what is unknown
-about the target, and there is no input anybody could supply to close it. The
-`rb-reconcile-gaps` audit condition is therefore split in two, and every pass in
-the family now carries the same missing-input refusal, worded identically —
+about the *target*, never about the run that studied it — and the rule is over
+what a gap asserts **`unknown`**, not over `subject`. That distinction is not
+decoration, and the first draft of this entry got it wrong: it said a wrong
+earlier artifact "has a target subject", which §3 step 3 does not say. That step
+requires an audit gap's `subject` to name **the artifact and element** it found
+wrong, so a ruling pinned to `subject` alone contradicts the procedure the pass
+executes, and the pass would then be holding two inconsistent instructions with
+the procedural one likely to win — which is the shape of the original bug, not a
+fix for it. Located on `unknown` instead, both hold: an earlier artifact that is
+**wrong** — a capability its claims do not establish — leaves *target* knowledge
+unreliable, so it stays gap-able and may name the artifact and element that got it
+wrong, which is the audit's whole purpose. An earlier artifact that is **absent**
+leaves no target knowledge unknown at all; it leaves the run unfinished. A gap
+recording one therefore files a fact about the pipeline's own sequencing in the
+collection a human reads for what is unknown about the target, and there is no
+input anybody could supply to close it.
+
+The `rb-reconcile-gaps` audit condition is split in two on that line in **both**
+sections — §3 step 3 records what it finds *wrong*, and §5 routes an absent
+partial to the refusal — because §5 is the exception list and §3 is the procedure,
+and an undifferentiated "record what you find as a gap" in §3 is the sentence the
+measured run actually obeyed. Every pass in the family now carries the same
+missing-input refusal, worded identically;
 `tests/unit/test_skills_reconcile_family.py` holds the byte-identity, since a
 SKILL.md has no include mechanism and identical copies are the only enforceable
 form of "the rule lives in one place."
