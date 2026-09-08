@@ -396,6 +396,17 @@ member's defect is not a reason to re-run the four that were clean. The budget
 is one attempt per dispatch, not one per run: a repair spent on `rb-propose`
 in round 1 does not deny `rb-score` its own attempt in round 3.
 
+**A line prefixed `[waived] ` is not part of the repair request, and must never
+be appended to a repair prompt.** It is a finding a human read, ruled correct,
+and recorded as unrepairable in the stage the finding names -- so it prints, and
+it does not set the exit code. Handing it to a stage asks for a fix nobody
+believes is available: the stage either attempts one it cannot make, or refuses
+because the finding names an artifact outside its `writes`, which is the stall
+the ruling exists to remove. If every line of an exit 1 is `[waived] `, that is
+not an exit 1 -- a run whose only findings are waived exits 0. So the rule is
+mechanical: append the unwaived lines, and if there are none, there is nothing to
+repair.
+
 **A5. `record-stage` after every stage you dispatched.**
 
 ```bash
