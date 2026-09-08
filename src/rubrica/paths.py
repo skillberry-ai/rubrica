@@ -502,6 +502,16 @@ class RunPaths:
     def decisions(self) -> Path:
         return self.root / "decisions.md"
 
+    @property
+    def waivers(self) -> Path:
+        """A human's waivers for this run, or an absent file when there are none.
+
+        Beside `manifest.json` and `decisions.md` rather than under a stage's
+        numbered directory, because no stage writes it: it records a person's
+        ruling about a finding, and the numbering belongs to the stages.
+        """
+        return self.root / "waivers.json"
+
     # -- per-id artifacts ------------------------------------------------
     def input_file(self, stored_as: str) -> Path:
         """The registered copy of one input artifact, by its manifest name.

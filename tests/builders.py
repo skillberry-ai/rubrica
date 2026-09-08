@@ -832,3 +832,25 @@ def minimal_score_part(**over: Any) -> dict[str, Any]:
     }
     payload.update(over)
     return payload
+
+
+def minimal_waivers(**over: Any) -> dict[str, Any]:
+    # `version`, not `schema_version`: waivers-0.1.json is human-authored and
+    # names its key that way, and a builder that renamed it here would assert a
+    # schema this one does not have.
+    payload: dict[str, Any] = {
+        "version": "0.1",
+        "waivers": [
+            {
+                "id": "wv-0001",
+                "check": "claim-utilisation",
+                "subject": "llm-agent-py",
+                "remedy": "none",
+                "reason": "out of target domain",
+                "finding_text": "no world-model element cites any claim from llm-agent-py",
+                "recorded_at": "2026-09-08T04:12:33Z",
+            }
+        ],
+    }
+    payload.update(over)
+    return payload

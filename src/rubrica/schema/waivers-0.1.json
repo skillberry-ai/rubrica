@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "waivers-0.1.json",
+  "title": "Waivers a human recorded for one run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "waivers"],
+  "properties": {
+    "version": { "const": "0.1" },
+    "waivers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "check",
+          "subject",
+          "remedy",
+          "reason",
+          "finding_text",
+          "recorded_at"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "\\Awv-[0-9]{4,}\\Z" },
+          "check": { "type": "string", "minLength": 1 },
+          "subject": { "type": "string", "minLength": 1 },
+          "remedy": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 },
+          "finding_text": { "type": "string", "minLength": 1 },
+          "recorded_at": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}
