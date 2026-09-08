@@ -51,7 +51,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rubrica.artifacts import ArtifactError, read_json, write_json
+from rubrica.artifacts import ArtifactError, read_json, sha256_of, write_json
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths, list_json
 from rubrica.refs import drivable_cells
@@ -196,10 +196,18 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
     manifest = _read_checked(run.manifest, ("target",), findings)
 
     parts: dict[str, dict] = {}
+    # The partials this seal actually assembled from, collected as they are read
+    # rather than re-derived afterwards from _SINGLETON_PARTS: the optional services
+    # part and the contradiction parts are not in that tuple, and a list rebuilt from
+    # the roster would record a file the seal never opened. `01-subjects.json` is
+    # absent for the same reason -- the seal does not read it.
+    assembled: list[Path] = []
     for attribute, keys in _SINGLETON_PARTS:
-        parts_document = _read_checked(getattr(run, attribute), keys, findings)
+        part_path = getattr(run, attribute)
+        parts_document = _read_checked(part_path, keys, findings)
         if parts_document is not None:
             parts[attribute] = parts_document
+            assembled.append(part_path)
 
     # Read outside _SINGLETON_PARTS because it is the one optional partial. Every
     # entry in that tuple is required and an absent one is a finding, which is right
@@ -221,6 +229,7 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
         services_document = _read_checked(run.services_part, ("services",), findings)
         if services_document is not None:
             services = services_document["services"]
+            assembled.append(run.services_part)
 
     contradictions: list[dict] = []
     for path in list_json(run.contradictions_dir):
@@ -232,6 +241,7 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
         part = _read_checked(path, ("contradictions",), findings)
         if part is not None:
             contradictions.extend(part.get("contradictions", []))
+            assembled.append(path)
 
     if findings:
         return None, findings
@@ -369,4 +379,53 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
     if services is not None:
         world["services"] = services
     write_json(run.world_model, world)
+    _record_partials(run, assembled)
     return run.world_model, []
+
+
+def _record_partials(run: RunPaths, assembled: list[Path]) -> None:
+    """Record a digest per assembled partial into `manifest.json`.
+
+    Closes a hole that had been confirmed on two domains: nothing in the sealed
+    world model digested its inputs, so a partial rewritten *after* the seal left
+    `validate --stage reconcile-seal`, `check-refs` and `gate-brief --gate 1`
+    byte-identical to the clean run. `refs.check_partials` re-hashes against this,
+    which makes it mechanically the same shape as `check_inputs` one layer in.
+
+    In the manifest rather than in the sealed document, which is the ruling this
+    implements: `01-world-model.json` keeps its path, schema and byte shape --
+    frozen deliberately, so nothing below the seal can tell it was assembled pass by
+    pass -- and the manifest is already where digests live here.
+
+    Written only after the world model is, and never when the seal reported: a
+    digest record for a document that was not written would describe an assembly
+    that did not happen.
+
+    Sorted, and every field content-derived, so two runs sealed from identical
+    partials record an identical array. `relative_to(run.root)` with `as_posix()`
+    rather than a raw path, so the record does not embed the machine the run
+    happened on and does not change spelling on a different filesystem.
+
+    A missing or unreadable manifest is left alone rather than raised on. The seal
+    has already written its world model at this point, so raising would turn a
+    successful assembly into a traceback, and a manifest that cannot be read is
+    check_inputs' finding to report rather than this function's to discover.
+    """
+    try:
+        manifest = read_json(run.manifest)
+    except (ArtifactError, OSError):
+        return
+    if not isinstance(manifest, dict):
+        return
+    manifest["partials"] = sorted(
+        (
+            {
+                "path": path.relative_to(run.root).as_posix(),
+                "sha256": sha256_of(path),
+                "bytes": path.stat().st_size,
+            }
+            for path in assembled
+        ),
+        key=lambda entry: entry["path"],
+    )
+    write_json(run.manifest, manifest)

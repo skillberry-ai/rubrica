@@ -209,7 +209,8 @@ adopt-projection`, but are necessary and never sufficient — `prose` is where
 
 - **Schema:** `src/rubrica/schema/manifest-0.1.json`
 - **Written by:** `intake` (code); amended by `rb-orchestrate`'s
-  `record-stage` and `set-limit` calls
+  `record-stage` and `set-limit` calls, and by `reconcile-seal` (code), which
+  records one `partials` entry per partial it assembled from
 - **Read by:** `rb-extract`, every `rb-reconcile-*` pass, `reconcile-seal`
   (code), `rb-propose`, `rb-score`, `rb-orchestrate`
 - **Path:** `manifest.json`
@@ -235,6 +236,28 @@ they have no skill file for
 finding. The schema's `propertyNames` enum permits exactly `paths.STAGES` —
 `tests/unit/test_manifest_stages.py` holds the two equal, in order — so it
 constrains the vocabulary, not which of them a real run records.
+
+`partials` is the record of what `01-world-model.json` was assembled from: one
+entry per partial the seal actually read — the five singleton parts, every
+contradiction part, and `01-services.json` when a services pass ran — each with a
+run-relative `path`, `sha256` and `bytes`. `refs.check_partials` re-hashes each
+against it, which is `check_inputs` one layer in: that one closes the
+reproducibility hole for the run's corpus inputs, this one for the intermediate
+artifacts a human is invited to hand-edit at gate 1. `01-subjects.json` is
+absent because the seal does not read it.
+
+Three things about it are deliberate. It lives here rather than in the sealed
+world model, because `01-world-model.json` keeps its path, schema and byte shape
+so nothing below the seal can tell it was assembled pass by pass — and the
+manifest is already where this project records digests. It is **optional**, so a
+run sealed before the block existed reports nothing rather than a finding
+invented for its absence. And every field is content-derived, so two runs sealed
+from identical partials record an identical array and the seal's byte-identity
+property is untouched.
+
+Re-running `rubrica reconcile-seal` after a legitimate correction updates the
+record and clears the finding, which is the point: the finding says *the seal is
+stale*, not *somebody tampered*.
 
 Fields worth knowing: `inputs[].provenance` (present only for an input that
 came from inside a container file or from a projection — `container_sha256`
