@@ -100,7 +100,7 @@ import textwrap
 from rubrica.artifacts import read_json
 from rubrica.errors import UsageError
 from rubrica.intake import admit_sort_key
-from rubrica.paths import RunPaths, is_safe_segment, list_json
+from rubrica.paths import STAGES, RunPaths, is_safe_segment, list_json
 
 # Imported rather than re-spelled, private name and all: `_as_list` is the one
 # definition of "a list or nothing" in this build, and its docstring carries the
@@ -132,6 +132,24 @@ GATES = (0, 1, 2, 3)
 DIVERGENCE_HEADER = "Surface divergence (predicted vs observed)"
 SLICES_HEADER = "Slices the triage family read"
 SPLIT_HEADER = "Groups split across more than one slice"
+READ_COST_HEADER = "Read cost of these admits"
+
+# Every reconcile pass reads ALL of 01-claims/ -- the family is split on output, not
+# on claims, which is what keeps the barrier property and is why a claims-level
+# fan-out is not available as a remedy. The consequence is that a pass's input band
+# is linear in the number of admitted inputs, and gate 0 is where that number is
+# decided while being the one gate that reported nothing about it.
+#
+# Derived from `paths.STAGES` rather than typed, so a pass added later raises this
+# without anybody remembering to. Filtering by name is only honest while every stage
+# it selects really does read all the claims; all eight declare `claims_dir` in their
+# contract's `reads`, and a test asserts exactly that, so a future `reconcile-` pass
+# reading something narrower fails there rather than silently inflating a number a
+# human budgets against. `reconcile-seal` is excluded because it is code and reads
+# the partials, not the claims.
+CLAIMS_READING_PASSES = tuple(
+    stage for stage in STAGES if stage.startswith("reconcile-") and stage != "reconcile-seal"
+)
 
 # Gate 1's excluded-capability section header, named for the three above's reason:
 # it is the anchor a reader and a test both scope to. What this section reports is
@@ -930,6 +948,58 @@ def _slice_lines(run: RunPaths) -> list[str]:
     return table + [""] + split
 
 
+def _read_cost_lines(admits: list[dict], candidates: dict[str, dict]) -> list[str]:
+    """What these admits will cost every pass that reads all of `01-claims/`.
+
+    Reports two measured numbers and refuses to report a third. The admitted count
+    and their total source bytes are facts about this catalogue. What those inputs
+    *extract to* is not: `01-claims/` does not exist at gate 0 -- `extract` has not
+    run -- and a claims file is not a function of its input's size, so presenting
+    source bytes as a prediction of the context band would be a reasoned number
+    wearing an observed one's clothes. The section says so rather than implying it.
+
+    The multiplier is the honest half of the warning, because it is structural
+    rather than estimated: whatever the claims come to, eight passes each read all
+    of them, and `reconcile-contradict` fans out one member per subject, so the
+    number of full reads is higher than eight by an amount gate 0 cannot know
+    either -- subjects are `rb-reconcile-subjects`' output.
+
+    A non-integer `bytes` is summed past rather than raised on. `gate-brief` exits 0
+    on any readable run, and a hand-edited catalogue is exactly what this gate
+    invites; the count still reports every admit, so a reader can see that the byte
+    total covers fewer candidates than the count.
+    """
+    summable = 0
+    unsummable = 0
+    for disposition in admits:
+        candidate_id = disposition.get("candidate_id")
+        candidate = candidates.get(candidate_id) if isinstance(candidate_id, str) else None
+        raw = candidate.get("bytes") if candidate is not None else None
+        # bool is an int in Python and `True` would add 1; the same exclusion every
+        # integer guard in this repo carries.
+        if isinstance(raw, int) and not isinstance(raw, bool):
+            summable += raw
+        else:
+            unsummable += 1
+
+    note = "" if not unsummable else f" ({unsummable} with no usable byte count)"
+    lines = [
+        READ_COST_HEADER,
+        f"  admitted candidates: {len(admits)}",
+        f"  admitted source bytes: {summable}{note}",
+        f"  read in full by {len(CLAIMS_READING_PASSES)} reconcile passes, each of which "
+        "reads all of 01-claims/;",
+        "  reconcile-contradict fans out one member per subject, so the number of full",
+        "  reads is higher than that by a count this gate cannot know either.",
+        "",
+        "  What these inputs extract to is not knowable here: 01-claims/ does not exist",
+        "  until extract has run, and a claims file is not a function of its input's",
+        "  size. The source bytes above are the only measure available at this gate,",
+        "  and they are a proxy rather than a prediction of what each pass will read.",
+    ]
+    return lines
+
+
 def _gate_0(run: RunPaths) -> str:
     if not run.triage.is_file():
         # A ruling held by the report as well as by
@@ -1012,6 +1082,13 @@ def _gate_0(run: RunPaths) -> str:
             lines.append(f"  {marker} {d.get('candidate_id', '?')}: {d.get('reason', '')}")
     else:
         lines.append("  (none)")
+    lines.append("")
+
+    # Immediately after the admits, because the price belongs beside the decision
+    # it is the price of. A human ratifying an admit here is committing every
+    # reconcile pass to reading it, and this gate reported nothing about that until
+    # a run died of it.
+    lines.extend(_read_cost_lines(admits, candidates))
     lines.append("")
 
     declines_by_code: dict[str, list[dict]] = {}

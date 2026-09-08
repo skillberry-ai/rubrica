@@ -269,8 +269,9 @@ are judgments rather than list entries:
   finding it shares its arithmetic with lives in `check-refs`, never here.
   `gate-brief` composes what already exists into the reading surface at each
   human gate: at gate 0 the objective verdict, the predicted-vs-observed surface
-  divergence, grouped declines, the slice table and every group the slicer split
-  across more than one slice; the reconcile sweep plus per-input utilisation,
+  divergence, the read cost of the admits, grouped declines, the slice table and
+  every group the slicer split across more than one slice; the reconcile sweep
+  plus per-input utilisation,
   per-pass read coverage, the capabilities the coverage denominator excludes,
   implied size and one block per service at gate 1; the coverage matrix at gate 2;
   the verdict tally at gate 3.

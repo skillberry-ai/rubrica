@@ -81,6 +81,22 @@ stable ids and to put the prose in `label`.
 
 ## 3. Method
 
+**Read each claims file once, in bounded slices, and never re-open one you
+have finished.** This is a budget instruction, not a matter of style. Measured on a real dispatch of `rb-reconcile-outcomes`, a sibling pass in this family, against a 22-input, 403 KB `01-claims/`:
+the dispatch died with `Prompt is too long` after 84 turns and 80 `Read` calls,
+**none** of which passed `offset` or `limit`, and the same eight claim files were
+re-read three times each as the member ran out of room. It wrote nothing, so the
+round cost a whole pass and produced no partial to repair.
+
+Concretely: work through `manifest.inputs` in order, so you can always say which
+files you have not opened yet; read a large claims file in slices with `offset`
+and `limit` rather than whole; and when you have taken what a file offers, write
+down the claim ids you are carrying forward instead of planning to re-read it. A
+re-read is the one behaviour that turns a bounded read into an unbounded one, and
+it does not feel like one at the time -- it feels like checking.
+
+This pass has **no field in which a partial read can be recorded**: it carries no `inputs_seen`, so nothing downstream can tell that you read half the claims rather than all of them. That is a reason to hold the bound tighter here, not looser -- there is nowhere to confess it later.
+
 1. **Read every file under `01-claims/`.** Skim first for scope, then read
    closely enough to know what each claim is *about*. You do not have to
    judge whether a claim is true; you have to know which other claims it
