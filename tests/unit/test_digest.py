@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from rubrica import digest
+from rubrica import digest, slices
 from rubrica.intake import classify
 
 
@@ -801,6 +801,124 @@ def test_a_dict_shaped_trace_digest_grows_no_role_flag():
     the same rule that keeps `skeleton_nodes_truncated` off a trace digest."""
     result = digest.digest_for_payload({"trace_id": "t", "spans": []}, "trace", body_chars=2000)
     assert "role_keys_truncated" not in result
+
+
+def test_a_long_name_is_bounded_in_characters_and_not_only_in_entries():
+    """`_MAX_NAMES` caps the list at 64 *entries* and bounded nothing about their
+    width, so one verbose name made the row larger than the slice that has to
+    hold it. Measured before this bound, end-to-end: a two-message conversation
+    whose `name` values are 40,000 characters each surveyed to `1 candidate
+    row(s) exceed one slice of 65536 bytes: chat-json at 80549 bytes` -- exit 2,
+    refusing the whole corpus, where the same file digested as a skeleton is 433
+    bytes.
+    """
+    payload = [
+        {"role": "user", "content": "x", "name": "t" * 40_000},
+        {"role": "assistant", "content": "y", "name": "u" * 40_000},
+    ]
+    result = digest.digest_for_payload(payload, "trace", body_chars=2000)
+    assert result["names"]
+    assert all(len(name) <= digest._MAX_NAME_CHARS for name in result["names"])
+
+
+def test_a_bounded_name_keeps_the_whole_row_inside_one_slice():
+    """The bound exists for the row, not for the field, so this asserts the thing
+    survey actually refuses on rather than only the field it refuses because of.
+    `_MAX_NAMES` * `_MAX_NAME_CHARS` is the field's worst case; both together are
+    what keep it a fraction of a slice.
+    """
+    payload = [
+        {"role": "user", "content": "x", "name": f"tool_{i}_" + "z" * 40_000} for i in range(80)
+    ]
+    result = digest.digest_for_payload(payload, "trace", body_chars=2000)
+    assert len(json.dumps(result).encode("utf-8")) < slices.DEFAULT_SLICE_BYTES
+
+
+def test_a_truncated_name_is_reported_rather_than_silently_dropped():
+    """Truncation is where two distinct names can collapse into one entry -- `names`
+    is collected into a set, so the sorted list loses one. That is a digest that
+    lies about the candidate rather than one that is merely narrow, which is the
+    same argument `role_keys_truncated` carries, and the collision is a
+    possibility of truncating into a set rather than a certainty: two names that
+    differ within the cap keep both entries.
+    """
+    a = "t" * digest._MAX_NAME_CHARS + "-planner"
+    b = "t" * digest._MAX_NAME_CHARS + "-critic"
+    result = digest.digest_for_payload(
+        [{"role": "user", "content": "x", "name": a}, {"role": "user", "content": "y", "name": b}],
+        "trace",
+        body_chars=2000,
+    )
+    assert result["names_truncated"] is True
+    assert result["names"] == ["t" * digest._MAX_NAME_CHARS]
+
+
+def test_an_untruncated_name_says_so_rather_than_omitting_the_flag():
+    """Unconditional beside the field it describes, for the reason
+    `role_keys_truncated` is: a flag a reader only sees when it is true cannot be
+    told apart from a digest written before the flag existed. The longest name in
+    any corpus on this pod is `query_tickets.find_tickets` at 26 characters, so
+    False is what every real candidate reports.
+    """
+    result = digest.digest_for_payload(_TRAJECTORY, "trace", body_chars=2000)
+    assert result["names_truncated"] is False
+
+
+def test_a_name_exactly_at_the_cap_is_not_reported_truncated():
+    """The comparison is `>`, and a name landing exactly on the cap loses no
+    characters -- so reporting it truncated would be the false positive
+    `skeleton_nodes_truncated` was rewritten to avoid. A negative one character
+    past the cap cannot see an off-by-one edit; this can."""
+    at_cap = "n" * digest._MAX_NAME_CHARS
+    past_cap = "n" * (digest._MAX_NAME_CHARS + 1)
+    # Two messages, because `is_message_list` refuses a one-element list: a single
+    # role-tagged element is a shape common in configuration, and this producer is
+    # only reached for a conversation.
+    at = digest.digest_for_payload(
+        [{"role": "user", "content": "x", "name": at_cap}, {"role": "assistant", "content": "y"}],
+        "trace",
+        body_chars=2000,
+    )
+    past = digest.digest_for_payload(
+        [{"role": "user", "content": "x", "name": past_cap}, {"role": "assistant", "content": "y"}],
+        "trace",
+        body_chars=2000,
+    )
+    assert at["names_truncated"] is False
+    assert past["names_truncated"] is True
+
+
+def test_both_trace_producers_bound_the_names_they_collect():
+    """`_collect_names` is shared: the dict-shaped producer calls it once on the
+    payload and the message-list producer calls it per message. The defect was in
+    the shared collector, so a fix that reached only the message-list route would
+    leave the dict-shaped capture -- which has always been exposed -- unbounded.
+    """
+    long_name = "w" * 40_000
+    from_dict = digest.digest_for_payload(
+        {"trace_id": "t", "spans": [{"name": long_name}]}, "trace", body_chars=2000
+    )
+    from_messages = digest.digest_for_payload(
+        [
+            {"role": "user", "content": "x", "name": long_name},
+            {"role": "assistant", "content": "y"},
+        ],
+        "trace",
+        body_chars=2000,
+    )
+    for result in (from_dict, from_messages):
+        assert result["names"] == ["w" * digest._MAX_NAME_CHARS]
+        assert result["names_truncated"] is True
+
+
+def test_a_digest_with_no_names_grows_no_names_flag():
+    """The flag is a sibling of the field, not of the digest. `names` is emitted
+    only when something was collected, so a candidate carrying none must not grow
+    a truncation flag about names it does not have -- the same rule that keeps
+    `role_keys_truncated` off a dict-shaped trace."""
+    result = digest.digest_for_payload({"trace_id": "t", "spans": []}, "trace", body_chars=2000)
+    assert "names" not in result
+    assert "names_truncated" not in result
 
 
 def test_a_message_list_classified_other_still_digests_to_a_skeleton():
