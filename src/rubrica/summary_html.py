@@ -924,11 +924,25 @@ def _scenarios(run: RunPaths):
             if row.verdict
             else _val(row.id_)
         )
-        # `(overstated)` beside the count rather than a column of its own: the
-        # comparison is already a flag, and this is where a reader who followed the
-        # flag looks.
+        # `(overstated)` / `(understated)` beside the count rather than a column of
+        # its own: the comparison is already a flag, and this is where a reader who
+        # followed the flag looks.
+        #
+        # Both directions since issue #37, and the understated branch is first
+        # because the two are mutually exclusive per row and the order of an
+        # if/elif is the only place a reader can see which one was considered the
+        # more consequential: an overstated hop_depth wastes a tool call, an
+        # understated one ships a scenario tagged shallower than it is, and coverage
+        # is credited per hop depth. `<b>` on that one alone, for the same reason --
+        # the flag table already ranks them, and a row a reader lands on from the
+        # flag should not read as its sibling's equal.
         calls = _val(row.min_tool_calls)
-        if row.difficulty_overstated:
+        if row.difficulty_understated:
+            calls = (
+                f'<span title="minimum_tool_calls_found &gt; hop_depth">'
+                f"{esc(row.min_tool_calls)} <b>(understated)</b></span>"
+            )
+        elif row.difficulty_overstated:
             calls = (
                 f'<span title="minimum_tool_calls_found &lt; hop_depth">'
                 f"{esc(row.min_tool_calls)} (overstated)</span>"

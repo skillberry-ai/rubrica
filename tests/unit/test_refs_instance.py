@@ -551,6 +551,44 @@ def test_an_easier_than_claimed_test_with_the_flag_is_accepted(tmp_path):
     assert check_verdicts(_run(tmp_path, verdict=verdict)) == []
 
 
+def test_a_harder_than_claimed_test_must_carry_the_flag(tmp_path):
+    """The mirror of the two checks above, added with the flag (issue #37).
+
+    Enforced in layer 2 rather than left to the prompt for the reason the
+    overstated direction is: both numbers are in the run, the comparison is
+    mechanical, and a rule nothing recomputes is a rule an adversary can omit on a
+    verdict that is otherwise correct. It is also *repairable* -- the remedy is a
+    flag in `05-verdicts/<sid>.json`, which is `rb-challenge`'s own `writes`, so a
+    re-dispatch closes it. That is what distinguishes this finding from the forced
+    re-seed the ruling on issue #37 declined: that one would have asked for a
+    `hop_depth` edit in `02-scenarios.json`, which no stage below propose may make.
+    """
+    verdict = minimal_verdict(minimum_tool_calls_found=3)
+    findings = check_verdicts(_run(tmp_path, verdict=verdict))
+    assert any("difficulty_understated" in f.message for f in findings)
+    # The finding names both numbers, so a reader does not have to open two files
+    # to see which way round the mismatch went.
+    assert any("3" in f.message and "2" in f.message for f in findings)
+
+
+def test_a_harder_than_claimed_test_with_the_flag_is_accepted(tmp_path):
+    verdict = minimal_verdict(minimum_tool_calls_found=3, flags=["difficulty_understated"])
+    assert check_verdicts(_run(tmp_path, verdict=verdict)) == []
+
+
+def test_a_matching_call_count_needs_neither_difficulty_flag(tmp_path):
+    """The control both directions share: `found == claimed` warrants no finding.
+
+    `minimal_verdict` and `minimal_scenarios` already agree at 2, so this asserts
+    the check is not firing on equality -- a `>=` or `<=` in either comparison
+    passes every test above and fails here.
+    """
+    assert check_verdicts(_run(tmp_path, verdict=minimal_verdict())) == []
+    for flag in ("difficulty_overstated", "difficulty_understated"):
+        findings = check_verdicts(_run(tmp_path, verdict=minimal_verdict(flags=[flag])))
+        assert findings == [], f"an unwarranted {flag} is a challenge defect no check names"
+
+
 # -- aggregation --------------------------------------------------------
 def test_check_all_now_includes_instance_and_verdict_findings(tmp_path):
     """A genuinely warranted verdict finding reaches check_all's output.

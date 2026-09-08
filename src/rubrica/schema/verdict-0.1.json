@@ -30,7 +30,7 @@
     "flags": {
       "type": "array",
       "uniqueItems": true,
-      "items": { "enum": ["difficulty_overstated"] }
+      "items": { "enum": ["difficulty_overstated", "difficulty_understated"] }
     },
     "notes": { "type": "string", "minLength": 1 }
   },

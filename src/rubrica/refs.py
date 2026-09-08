@@ -4068,17 +4068,33 @@ def check_verdicts(run: RunPaths) -> list[Finding]:
                 )
         claimed = hop_depths.get(sid)
         found = verdict.get("minimum_tool_calls_found")
-        if (
-            isinstance(claimed, int)
-            and isinstance(found, int)
-            and found < claimed
-            and "difficulty_overstated" not in verdict.get("flags", [])
-        ):
-            report(
-                "/minimum_tool_calls_found",
-                f"adversary solved this in {found} call(s) but the scenario claims hop_depth "
-                f"{claimed}; the difficulty_overstated flag is required",
-            )
+        flags = verdict.get("flags", [])
+        if isinstance(claimed, int) and isinstance(found, int):
+            # Both directions since issue #37, and each is required rather than
+            # merely permitted for the same reason: both numbers are already in the
+            # run, the comparison is mechanical, and an adversary that finds the
+            # mismatch and has nowhere structured to record it writes prose no report
+            # reads -- which is exactly what was measured on run-20260907-065438.
+            #
+            # Both are repairable stage defects, so a `1` here is the right exit
+            # code: the remedy is a flag in this file, which is `rb-challenge`'s own
+            # `writes`. That is *not* true of the mislabelled `hop_depth` an
+            # understatement reveals -- fixing that means editing
+            # `02-scenarios.json`, which `rb-propose` owns -- which is why the flag
+            # is required and a forced re-seed is not (see docs/design/
+            # limitations.md).
+            if found < claimed and "difficulty_overstated" not in flags:
+                report(
+                    "/minimum_tool_calls_found",
+                    f"adversary solved this in {found} call(s) but the scenario claims hop_depth "
+                    f"{claimed}; the difficulty_overstated flag is required",
+                )
+            if found > claimed and "difficulty_understated" not in flags:
+                report(
+                    "/minimum_tool_calls_found",
+                    f"adversary needed {found} call(s) but the scenario claims hop_depth "
+                    f"{claimed}; the difficulty_understated flag is required",
+                )
 
     if run.verdicts_dir.is_dir():
         known = set(instantiated)

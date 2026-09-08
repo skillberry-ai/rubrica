@@ -125,9 +125,26 @@ def test_verdict_notes_may_not_be_empty(tmp_path):
     assert _findings(tmp_path, "verdict", minimal_verdict(notes=""))
 
 
-def test_difficulty_overstated_is_the_only_flag(tmp_path):
+def test_the_flags_enum_holds_both_difficulty_directions_and_nothing_else(tmp_path):
+    """Renamed from `..._overstated_is_the_only_flag` (issue #37).
+
+    The old name *was* the specification, and the specification was wrong: an
+    overstated difficulty wastes a tool call, an understated one mislabels a
+    scenario in the shipped suite, and only the harmless direction had a member.
+    Both members are asserted here and an invented third is still rejected --
+    `additionalProperties: false` does not reach inside an enum, so without the
+    negative half a `flags` array could carry anything.
+    """
     assert _findings(tmp_path, "verdict", minimal_verdict(flags=["too_easy"]))
     assert _findings(tmp_path, "verdict", minimal_verdict(flags=["difficulty_overstated"])) == []
+    assert _findings(tmp_path, "verdict", minimal_verdict(flags=["difficulty_understated"])) == []
+    # Both at once is schema-legal and semantically impossible, and that is
+    # deliberate: `uniqueItems` is the only constraint the array carries, and
+    # ruling the pair out here would put a semantic judgment in layer 1. The
+    # contradiction is a challenge-stage defect a human reads, not a schema error.
+    both = ["difficulty_overstated", "difficulty_understated"]
+    assert _findings(tmp_path, "verdict", minimal_verdict(flags=both)) == []
+    assert _findings(tmp_path, "verdict", minimal_verdict(flags=["difficulty_understated"] * 2))
 
 
 # -- world model: claims on the three child element defs (issue #6) ------

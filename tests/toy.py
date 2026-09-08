@@ -1433,6 +1433,13 @@ def toy_verdict(scenario_id: str, **over: Any) -> dict[str, Any]:
     difficulty_overstated flag when the adversary beats the claim, and a golden
     fixture that needed the flag would be asserting a defect is tolerated
     rather than that a clean run is clean.
+
+    Since issue #37 the same is true upward -- a count *above* the claim requires
+    difficulty_understated -- so equality is now the only value that needs no flag
+    at all, and that is what makes it the right one here. The tests that want
+    either flag edit one verdict on a built run, which keeps the direction under
+    test visible in the test rather than folded into the fixture every other test
+    shares.
     """
     scenario = next(s for s in _SCENARIOS if s["id"] == scenario_id)
     payload: dict[str, Any] = {

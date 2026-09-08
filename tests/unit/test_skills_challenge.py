@@ -119,10 +119,14 @@ def test_it_names_every_verdict_value():
 
 
 def test_it_names_every_flag_the_schema_allows():
-    """difficulty_overstated is the only one today, and it is required when the
-    adversary beats the claimed hop_depth -- refs.check_verdicts reports its
-    absence, so a skill that does not know it exists produces a finding on a
-    verdict that is otherwise correct.
+    """Each flag is required in one direction of the same comparison, and
+    refs.check_verdicts reports either absence -- so a skill that does not know a
+    flag exists produces a finding on a verdict that is otherwise correct.
+
+    Derived from the enum rather than listed, which is why this test is the one
+    that caught `difficulty_understated` (issue #37) the moment the schema gained
+    it: the docstring used to say "the only one today", and the enum is the
+    authority for that claim, not the docstring.
     """
     schema = read_json(schema_dir() / ARTIFACT_SCHEMAS["verdict"])
     enum = schema["properties"]["flags"]["items"]["enum"]
@@ -216,4 +220,76 @@ def test_it_tells_the_adversary_to_report_the_oracle_wrong_when_it_is():
     assert any("disagree" in para.lower() for para in owning), (
         "that paragraph must state the trigger as a disagreement, so the reader knows when "
         "the instruction applies"
+    )
+
+
+def test_the_output_section_names_both_flag_directions_together():
+    """Section 2 introduces `flags`, so the reader who learns the field exists must
+    learn there that it has two members and which comparison each answers.
+
+    A co-occurrence inside the block that owns the field, not a whole-body check:
+    both names appear in the Method table and in Invariant 4 as well, so a section-2
+    field list that had kept saying "the only permitted value" would pass any
+    presence check over `body` while telling the adversary the opposite of the
+    schema. Which is what it said before issue #37, when it was true.
+    """
+    both = [
+        block
+        for block in paragraphs(section_body(load(SKILL), SECTIONS[1]))
+        if "difficulty_overstated" in block and "difficulty_understated" in block
+    ]
+    assert both, (
+        "no single Output block names both flag directions; the field list is where the "
+        "adversary learns what flags exist, and a one-sided list contradicts the schema"
+    )
+
+
+def test_the_method_says_an_understated_hop_depth_does_not_force_a_verdict():
+    """The ruling on issue #37, and it has to be in the prompt with its reason.
+
+    A flag whose remedy is a `hop_depth` edit cannot force a `re-seed`: `hop_depth`
+    lives in `02-scenarios.json`, which `rb-propose` owns, `rb-instantiate` cannot
+    change it, and the orchestrator shuts the propose door -- so a forced re-seed
+    would be unrepairable by construction, the shape docs/design/limitations.md
+    already records. Stating the verdict without the reason is what invites a later
+    reader to "fix" it into a forced re-seed, so the reason is asserted alongside it.
+
+    Three-way co-occurrence in one Method block: the flag, the verdict it leaves
+    alone, and the ownership fact that is the reason. An alternation on the reason
+    rather than a phrase pin -- naming the file or naming the stage that owns it are
+    equally good, and pinning one of the two would break on a reformat.
+    """
+    owning = [
+        block
+        for block in paragraphs(_method_body())
+        if "difficulty_understated" in block
+        and "accept" in block
+        and ("02-scenarios.json" in block or "rb-propose" in block)
+    ]
+    assert owning, (
+        "no single Method block pairs difficulty_understated with the verdict it does not "
+        "force and the reason it cannot -- hop_depth belongs to rb-propose, so a forced "
+        "re-seed would be unrepairable; without the reason someone later 'fixes' this"
+    )
+
+
+def test_invariant_four_requires_the_flag_in_both_directions():
+    """`refs.check_verdicts` reports a missing flag on either side of the
+    comparison, so the invariant that tells the adversary about it must cover both.
+
+    Scoped to the Invariants section for the reason
+    `test_it_states_that_accept_is_incompatible_with_the_two_negatives` records:
+    both flag names occur elsewhere in this file, so deleting half of this invariant
+    leaves every whole-body check green on the direction that mislabels a shipped
+    scenario.
+    """
+    owning = [
+        block
+        for block in paragraphs(section_body(load(SKILL), SECTIONS[3]))
+        if "difficulty_overstated" in block and "difficulty_understated" in block
+    ]
+    assert owning, (
+        "no single Invariants block requires both difficulty flags; check_verdicts reports "
+        "either absence, and a one-sided invariant spends the repair attempt on the "
+        "direction the skill was never told about"
     )
