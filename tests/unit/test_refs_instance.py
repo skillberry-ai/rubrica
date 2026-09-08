@@ -598,6 +598,14 @@ def test_a_matching_call_count_needs_neither_difficulty_flag(tmp_path):
     package *into* the human review pool rather than out of it. Nothing else reads
     the array -- `summary.scenarios` recomputes both booleans from the two numbers,
     and `emit` and `brief` never read it.
+
+    **That demotion is held by a test, not merely asserted here:**
+    `test_review.test_any_flag_the_schema_allows_costs_an_accept_its_high_band`.
+    It was added because this paragraph is an argument resting on one clause of
+    another module, and nothing held that clause -- measured, narrowing it to
+    `difficulty_overstated` alone left every test in the repository green while
+    making the reasoning above silently false. A docstring whose claim no test
+    holds is worse than an unpinned rule, because a reader takes it as settled.
     """
     assert check_verdicts(_run(tmp_path, verdict=minimal_verdict())) == []
     for flag in ("difficulty_overstated", "difficulty_understated"):
