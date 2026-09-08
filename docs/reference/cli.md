@@ -1051,6 +1051,15 @@ defect that has since been fixed. `finding_text` is then copied from the matched
 finding rather than accepted as a flag — a person retyping a finding is a person
 who can paraphrase one.
 
+**It also refuses a `(check, subject)` that is already waived** (exit 2, naming
+the id of the waiver that holds it, so the reader can go to that entry rather
+than search for it). Two entries for one pair can carry contradictory remedies —
+`none` says nothing should change, a stage name says somebody still owes work —
+and, since a waiver is revoked by hand-deleting its entry, deleting the one a
+reader found would leave the finding still suppressed by the survivor. A second
+waiver under the same check for a *different* subject is not a duplicate and is
+appended normally: suppression keys on the pair.
+
 **Only a human runs this.** Gate 0's argument applies unchanged: the party that
 made a judgment must not also ratify it, so neither `rb-orchestrate` — which
 would diagnose and ratify in one move — nor the stage that declined the input,

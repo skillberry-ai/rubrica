@@ -159,6 +159,11 @@ def record(
     an existing file to remedy_choices(), since a stage renamed after a waiver was
     written must not turn the human record into an exit 2.
 
+    A `(check, subject)` already waived is refused, and the message names the id
+    of the waiver that holds it: two entries for one pair can carry contradictory
+    remedies, and the hand-deletion that revokes a waiver would then leave the
+    finding suppressed by the survivor.
+
     **One raise here does not mean nothing was written.** Every check runs before
     any filesystem mutation, so a UsageError from one of them leaves the run
     untouched -- but the append to decisions.md happens *after* waivers.json is
@@ -209,6 +214,25 @@ def record(
     # before anything is appended to it: minting an id from entries that failed
     # validation would write a second entry into a document already unusable.
     entries = load(run)
+    # One waiver per `(check, subject)`, which is the key `waived_subjects`
+    # suppresses on. Measured before this guard existed: waiving the same pair
+    # twice landed wv-0001 with `remedy: none` and wv-0002 with
+    # `remedy: triage-rule` -- two contradictory rulings for one finding (`none`
+    # says nothing should change, a stage name says somebody owes work), and
+    # `gate-brief` printed `Waivers in force: 2` for it. The harm lands on
+    # revocation, which is a hand-deletion: deleting the entry a reader found
+    # leaves the finding suppressed by the survivor, in the one mechanism whose
+    # whole purpose is auditability. The existing id is named so the person can
+    # go to that entry instead of searching the file for it.
+    #
+    # Appending for a *different* subject under the same check stays correct: the
+    # key is the pair, not the check.
+    for existing in entries:
+        if existing.get("check") == check and existing.get("subject") == subject:
+            raise UsageError(
+                f"{check}/{subject} is already waived by {existing['id']}; "
+                f"amend or delete that entry in {run.waivers} rather than recording a second"
+            )
     waiver_id = next_id(entries)
     entries.append(
         {

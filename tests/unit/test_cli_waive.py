@@ -172,6 +172,38 @@ def test_a_second_waiver_appends_rather_than_replacing(tmp_path):
     assert ids == ["wv-0001", "wv-0002"]
 
 
+def test_waiving_the_same_pair_twice_is_refused(tmp_path, capsys):
+    """One waiver per `(check, subject)` -- the key suppression is done on.
+
+    Measured before the guard existed: the same pair waived twice landed `wv-0001`
+    with `remedy: none` and `wv-0002` with `remedy: triage-rule`, two
+    contradictory rulings for one finding, and `gate-brief` then reported
+    `Waivers in force: 2` for it. The harm lands on revocation, which is a
+    hand-deletion: a reader who deleted the entry they found would leave the
+    finding still suppressed by the survivor. The test above stays green because
+    its second waiver names a *different* subject, which is the appending case
+    this refusal must not touch.
+
+    Both writes are asserted untouched, not just the exit code: `record` runs
+    every check before it mutates anything, so a refused duplicate must leave
+    waivers.json and decisions.md byte-identical.
+    """
+    run = build_toy_run(tmp_path)
+    _uncited(run)
+    assert main(_waive_argv(run, remedy="none")) == 0
+    waivers_before = run.waivers.read_text(encoding="utf-8")
+    decisions_before = run.decisions.read_text(encoding="utf-8")
+    capsys.readouterr()
+    assert main(_waive_argv(run, remedy="triage-rule")) == 2
+    captured = capsys.readouterr()
+    # The id, so a human can go to the entry that holds the pair rather than
+    # search the file for it.
+    assert "wv-0001" in captured.err
+    assert captured.out.strip() == "", "an exit 2 must not print a finding line"
+    assert run.waivers.read_text(encoding="utf-8") == waivers_before
+    assert run.decisions.read_text(encoding="utf-8") == decisions_before
+
+
 # -- record's own guards, which argparse's choices make unreachable from the CLI --
 #
 # waivers-0.1.json keeps `check` a free string on purpose, so `record`'s check
