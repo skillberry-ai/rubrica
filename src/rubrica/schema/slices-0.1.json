@@ -20,8 +20,14 @@
       "required": ["request", "policy", "excluded", "candidate_bytes"],
       "additionalProperties": false,
       "properties": {
-        "request": {"type": "object"},
-        "policy": {"type": "object"},
+        "request": {
+          "$ref": "catalogue-0.1.json#/properties/request",
+          "description": "The catalogue's request, copied verbatim -- so it is held to the catalogue's own definition of it, the way its sibling entries[] already is, rather than to a bare object that would accept a pair catalogue-0.1.json itself would reject. Layer 1 is the only place this contract can live: refs.check_slices recomputes this block's derived numbers and deliberately abstains from its verbatim copies, on the rule that a derived number is arithmetic a reader recomputes while a copy is not testimony."
+        },
+        "policy": {
+          "$ref": "catalogue-0.1.json#/properties/policy",
+          "description": "The catalogue's policy, copied verbatim, held to the catalogue's own definition for the reason request is."
+        },
         "excluded": {
           "description": "The catalogue's excluded array as a tally plus the paths for the four exclusion reasons that embed a disputable judgment. Bounded in bytes, not entries: a count cap without a character bound is the defect open against digest's names.",
           "type": "object",
