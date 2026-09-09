@@ -310,3 +310,33 @@ def test_the_prefix_and_status_invariants_do_not_lean_on_a_gate_they_lack():
         "the status invariant must say no layer catches a member that writes `active`, "
         "which is the reason it is an invariant rather than a gate's job"
     )
+
+
+def test_method_states_the_cost_of_understating_a_hop_depth():
+    """`hop_depth` is this stage's to get right, and the prose framed only the
+    inflated direction until issue #37 -- the cheap one.
+
+    An overstated depth spends a later stage's finding budget. An understated one
+    ships: coverage is credited per hop depth, so a scenario tagged shallower than
+    it is credits a depth nothing actually tests, and the matrix reports covered
+    what was never covered. This stage is the only one that can prevent it, because
+    it is the only one that may write the field.
+
+    Co-occurrence inside the Method block that owns `hop_depth`, with an alternation
+    on how the consequence is worded: a phrase pin on any single sentence here has
+    broken on a reformat before, and "credited per depth", "shallower than it is"
+    and "mislabelled" are the same fact.
+    """
+    consequence = ("coverage", "credit", "shallow", "mislabel", "depth nothing")
+    owning = [
+        block
+        for block in blocks(METHOD)
+        if "hop_depth" in block
+        and "difficulty_understated" in block
+        and any(word in block.lower() for word in consequence)
+    ]
+    assert owning, (
+        "no single Method block pairs hop_depth with difficulty_understated and what an "
+        "understated depth costs; this stage is the only one that may write the field, so "
+        "prose that names only the inflated direction leaves the harmful one unaddressed"
+    )

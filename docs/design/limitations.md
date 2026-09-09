@@ -3502,6 +3502,79 @@ finding is unrepairable where it was raised; it does not give the verdict
 vocabulary a way to say what the pipeline should do next, which is the half this
 entry is about.
 
+### An understated `hop_depth` is flagged and cannot be repaired
+
+Appended at the end of this section rather than beside the entry it cites,
+because two entries above already say "the entry above it" and an insertion
+would have silently repointed them.
+
+Added with `difficulty_understated` (issue #37). The flag closes half a hole; the
+other half stays open, so the shape is worth writing down rather than
+rediscovering.
+
+**What is caught now.** `rb-challenge` compares its own
+`minimum_tool_calls_found` against the scenario's claimed `hop_depth` in both
+directions. `difficulty_overstated` — the adversary needed *fewer* calls — has
+always existed. `difficulty_understated` — it needed *more* — did not, so the
+adversary that found the more consequential of the two errors had only free-text
+`notes` to record it in and no report read the field. Measured on
+`run-20260907-065438`, scenario `sc-r1-b01-05`: two calls found against a
+declared depth of 1, recorded in prose, with
+`cap-check-availability/oc-check-no-availability` credited at hop 1 by it.
+`refs.check_verdicts` now requires whichever flag holds, `summary.flags` raises
+one per direction, and the scenario table annotates the row.
+
+**Why it forces no verdict.** The remedy for an understated depth is an edit to
+`hop_depth` in `02-scenarios.json`, which `rb-propose` owns. `rb-instantiate`
+cannot write that file, and `rb-orchestrate` shuts the propose door explicitly,
+so a verdict that forced a `re-seed` on this flag alone would produce exactly the
+case *A re-seed whose remedy lies outside `rb-instantiate`'s `writes` cannot be
+repaired at all* records: the run stalls on the scenario instead of repairing it,
+and spends its one repair attempt doing so. **So the verdict stays `accept` and
+the flag carries the finding** — prominently: understated ahead of overstated in
+the flag table, and bolded beside the call count in the scenario table.
+`rb-challenge`'s decision table states that ruling *with* this reason, so it is
+not later "fixed" into a forced re-seed.
+
+The flag's own *absence* is repairable, and that distinction is what makes the
+layer-2 requirement safe rather than a second unrepairable finding: a missing
+flag is remedied by a flag in `05-verdicts/<scenario_id>.json`, which is
+`rb-challenge`'s own `writes`, so a re-dispatch closes it.
+
+**Where the flag is visible, and where it is not.** `run-summary` raises it in
+the flag table and annotates the scenario row, and `review.confidence_band`
+demotes a flagged `accept` from "high" to "low", so a mislabelled scenario
+becomes eligible for the human review packet without any further change. **The
+gate-3 brief does not show it**: `brief._gate_3` renders the verdict tally and
+never reads `flags`, so an understated verdict reads there as an ordinary
+`accept`. A human at gate 3 sees the finding only because `rb-orchestrate` B10
+presents the raw verdict documents alongside the brief. A flag tally in
+`_gate_3` is the obvious surface and it is **owed**, not done — it was left out
+of this change deliberately, because adding a section to that brief means
+updating `docs/reference/cli.md` and the accuracy test that guards it, which is a
+wider change than the comparison this entry is about.
+
+**What is still owed besides that.** A human at gate 3 has no mechanical move
+inside the run: the scenario ships with a correct label only if that human edits
+`02-scenarios.json` by hand and re-runs from propose. The proper fix is the
+same *disposition* the unrepairable-re-seed entry asks for — a first-class
+"unrepairable here, remedy lives upstream" outcome. **Half of that disposition
+now exists, and it does not reach this case.** `rubrica waive` records that a
+finding is correct and unrepairable where it was raised; it does not give the
+verdict vocabulary a way to say what the pipeline should do next, which is the
+half this entry is about. It could not reach here in any event:
+`waivers.WAIVABLE_CHECKS` carries one row, `claim-utilisation`, and this flag's
+surface is a `summary.flags` entry plus the confidence-band demotion rather than
+an unrepairable `check-refs` finding a waiver could key a subject on — the only
+`check-refs` finding here is the flag's *absence*, which the paragraph above
+records as already repairable. So the flag's only mechanical effect stays the
+confidence-band demotion above, and **no stage
+branches on it** — not `rb-score`, not `emit` — so a suite can still ship a
+scenario whose declared depth is wrong, and the per-hop-depth coverage credit
+computed from that depth is still wrong with it. Parked deliberately, and
+recorded rather than deferred — making the flag actionable is the disposition
+work, not a further change to this comparison.
+
 ---
 
 ## Deliberately out of scope

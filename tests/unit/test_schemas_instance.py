@@ -125,9 +125,54 @@ def test_verdict_notes_may_not_be_empty(tmp_path):
     assert _findings(tmp_path, "verdict", minimal_verdict(notes=""))
 
 
-def test_difficulty_overstated_is_the_only_flag(tmp_path):
+def test_the_flags_enum_holds_both_difficulty_directions_and_nothing_else(tmp_path):
+    """Renamed from `..._overstated_is_the_only_flag` (issue #37).
+
+    The old name *was* the specification, and the specification was wrong: an
+    overstated difficulty wastes a tool call, an understated one mislabels a
+    scenario in the shipped suite, and only the harmless direction had a member.
+    Both members are asserted here and an invented third is still rejected --
+    `additionalProperties: false` does not reach inside an enum, so without the
+    negative half a `flags` array could carry anything. Six cases in all: empty,
+    each singleton, both orderings of the pair, a duplicate, and an invented
+    member.
+    """
     assert _findings(tmp_path, "verdict", minimal_verdict(flags=["too_easy"]))
     assert _findings(tmp_path, "verdict", minimal_verdict(flags=["difficulty_overstated"])) == []
+    assert _findings(tmp_path, "verdict", minimal_verdict(flags=["difficulty_understated"])) == []
+    assert _findings(tmp_path, "verdict", minimal_verdict(flags=[])) == []
+    # Both at once is rejected, in either order. **This reverses the first ruling
+    # on it**, which permitted the pair on the grounds that exclusivity is a
+    # semantic judgment and belongs outside layer 1. Two measurements overturned
+    # that:
+    #
+    # First, the consequence. A verdict carrying both flags with `found` 1 against
+    # a `hop_depth` of 2 passes layer 1, passes `check-refs` with exit 0 and no
+    # finding, and surfaces nowhere at all -- `summary.scenarios` recomputes both
+    # booleans from the two numbers and never reads this array, `emit` and `brief`
+    # never read it, and `review.confidence_band` only tests truthiness. So the
+    # claim that "a human reads the contradiction" was false: no report renders
+    # the field.
+    #
+    # Second, the premise. Exclusivity here is *structural* -- it constrains one
+    # array's shape, naming no other artifact and appealing to no meaning, the
+    # same register as the `uniqueItems` line above it. CLAUDE.md's prohibition is
+    # about layer 2 asserting that a claim *supports* an element; it is not about
+    # array shape, and this schema already carries a strictly more semantic layer-1
+    # rule in the `allOf` that requires `alternative_answers` when
+    # `uniquely_determined` is false.
+    #
+    # And leaving it permissive made the skill's own §2 statement of the
+    # exclusivity decorative: a rule the adversary is told to follow with nothing
+    # enforcing it, which is the shape the argument for the layer-2 mirror
+    # rejected.
+    both = ["difficulty_overstated", "difficulty_understated"]
+    assert _findings(tmp_path, "verdict", minimal_verdict(flags=both))
+    assert _findings(tmp_path, "verdict", minimal_verdict(flags=both[::-1])), (
+        "order must not matter: a `contains`-based constraint that fired on only "
+        "one ordering would let the contradiction through half the time"
+    )
+    assert _findings(tmp_path, "verdict", minimal_verdict(flags=["difficulty_understated"] * 2))
 
 
 # -- world model: claims on the three child element defs (issue #6) ------

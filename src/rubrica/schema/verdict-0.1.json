@@ -30,7 +30,13 @@
     "flags": {
       "type": "array",
       "uniqueItems": true,
-      "items": { "enum": ["difficulty_overstated"] }
+      "items": { "enum": ["difficulty_overstated", "difficulty_understated"] },
+      "not": {
+        "allOf": [
+          { "contains": { "const": "difficulty_overstated" } },
+          { "contains": { "const": "difficulty_understated" } }
+        ]
+      }
     },
     "notes": { "type": "string", "minLength": 1 }
   },

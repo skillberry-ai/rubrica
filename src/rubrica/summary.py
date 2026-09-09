@@ -1255,6 +1255,10 @@ class ScenarioRow:
     has_instance: bool
     suite_files: list[str]
     difficulty_overstated: bool
+    # The mirror, added for issue #37. Two fields rather than one tri-state, because
+    # every reader of this row is a report that surfaces one direction or the other
+    # and a tri-state would make each of them branch on a value meaning "neither".
+    difficulty_understated: bool
 
 
 def _suite_files(run: RunPaths, scenario_id: str) -> list[str]:
@@ -1323,6 +1327,15 @@ def scenarios(run: RunPaths) -> list[ScenarioRow] | Marker:
         verdict = _mapping(_quietly(run.verdict(sid))) if joinable else {}
         hop = member.get("hop_depth")
         found = verdict.get("minimum_tool_calls_found")
+        # Whether the two counts can be *compared at all*. See the two flag fields
+        # below for what each exclusion closes; it is one name because both flags
+        # need the identical guard and a second copy is a second thing to drift.
+        comparable = (
+            isinstance(found, int)
+            and not isinstance(found, bool)
+            and isinstance(hop, int)
+            and not isinstance(hop, bool)
+        )
         rows.append(
             ScenarioRow(
                 id_=sid,
@@ -1353,7 +1366,7 @@ def scenarios(run: RunPaths) -> list[ScenarioRow] | Marker:
                 notes=str(verdict.get("notes", "")),
                 has_instance=(_exists(run.instance_dir(sid)) if joinable else False),
                 suite_files=_suite_files(run, sid),
-                # Both sides must be real ints before this comparison means
+                # Both sides must be real ints before either comparison means
                 # anything, and each exclusion closes a measured shape rather than a
                 # hypothetical one. A scenario with no verdict leaves `found` None
                 # and `None < 1` raises TypeError -- reachable on an unedited toy
@@ -1365,13 +1378,21 @@ def scenarios(run: RunPaths) -> list[ScenarioRow] | Marker:
                 # strength of a nonsense comparison -- the opposite ruling from
                 # `_as_int`'s, which renders `True` as 1 rather than crash, because
                 # rendering a count is not asserting a relation between two.
-                difficulty_overstated=(
-                    isinstance(found, int)
-                    and not isinstance(found, bool)
-                    and isinstance(hop, int)
-                    and not isinstance(hop, bool)
-                    and found < hop
-                ),
+                #
+                # Hoisted into one name for issue #37, which added the opposite
+                # direction: the guard is a property of the *pair of operands*, not
+                # of either inequality, and duplicating it inline would let the two
+                # flags drift apart on which malformed documents they tolerate. The
+                # `bool` half is not inherited either -- `True > 0` and `2 > True`
+                # are the nonsense comparisons that reach the understated flag, and
+                # neither is one of the two that reach its sibling.
+                difficulty_overstated=(comparable and found < hop),
+                # An understated hop_depth is the consequential direction: coverage
+                # is credited per hop depth, so a scenario tagged shallower than it
+                # is credits a depth nothing actually tests. Before this flag existed
+                # the adversary that found one had only free-text `notes` (issue #37,
+                # measured on run-20260907-065438).
+                difficulty_understated=(comparable and found > hop),
             )
         )
     return rows
@@ -1628,6 +1649,24 @@ def flags(run: RunPaths) -> list[Flag]:
 
     rows = scenarios(run)
     if isinstance(rows, list):
+        # Understated first, and the order is the finding rather than a style
+        # choice (issue #37). An overstated hop_depth wastes a tool call; an
+        # understated one ships a mislabelled scenario, and because coverage is
+        # credited per hop depth it can credit a goal's shallower depth with a
+        # scenario that exercises a deeper one -- leaving the shallow depth
+        # untested while the matrix reports it covered. The more consequential
+        # direction is not allowed to sit below its sibling in a list read
+        # top-down.
+        understated = [r.id_ for r in rows if r.difficulty_understated]
+        if understated:
+            found.append(
+                Flag(
+                    id_="difficulty-understated",
+                    headline=f"{len(understated)} scenario(s) need more calls than claimed",
+                    threshold="minimum_tool_calls_found > hop_depth",
+                    detail=", ".join(understated) + " -- shipped tagged shallower than it is",
+                )
+            )
         overstated = [r.id_ for r in rows if r.difficulty_overstated]
         if overstated:
             found.append(

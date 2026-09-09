@@ -551,6 +551,71 @@ def test_an_easier_than_claimed_test_with_the_flag_is_accepted(tmp_path):
     assert check_verdicts(_run(tmp_path, verdict=verdict)) == []
 
 
+def test_a_harder_than_claimed_test_must_carry_the_flag(tmp_path):
+    """The mirror of the two checks above, added with the flag (issue #37).
+
+    Enforced in layer 2 rather than left to the prompt for the reason the
+    overstated direction is: both numbers are in the run, the comparison is
+    mechanical, and a rule nothing recomputes is a rule an adversary can omit on a
+    verdict that is otherwise correct. It is also *repairable* -- the remedy is a
+    flag in `05-verdicts/<sid>.json`, which is `rb-challenge`'s own `writes`, so a
+    re-dispatch closes it. That is what distinguishes this finding from the forced
+    re-seed the ruling on issue #37 declined: that one would have asked for a
+    `hop_depth` edit in `02-scenarios.json`, which no stage below propose may make.
+    """
+    verdict = minimal_verdict(minimum_tool_calls_found=3)
+    findings = check_verdicts(_run(tmp_path, verdict=verdict))
+    assert any("difficulty_understated" in f.message for f in findings)
+    # The finding names both numbers, so a reader does not have to open two files
+    # to see which way round the mismatch went.
+    assert any("3" in f.message and "2" in f.message for f in findings)
+
+
+def test_a_harder_than_claimed_test_with_the_flag_is_accepted(tmp_path):
+    verdict = minimal_verdict(minimum_tool_calls_found=3, flags=["difficulty_understated"])
+    assert check_verdicts(_run(tmp_path, verdict=verdict)) == []
+
+
+def test_a_matching_call_count_needs_neither_difficulty_flag(tmp_path):
+    """The control both directions share: `found == claimed` warrants no finding.
+
+    `minimal_verdict` and `minimal_scenarios` already agree at 2, so this asserts
+    the check is not firing on equality -- a `>=` or `<=` in either comparison
+    passes every test above and fails here.
+
+    **Narrowed on review.** The flag-present half asserted `findings == []`, which
+    pinned *in* the absence of a converse check: nothing recomputes whether a flag
+    that is present is warranted, and a test demanding silence on that shape would
+    have to be edited before the check could ever be added -- which is how a guard
+    gets deleted instead. So the assertion is scoped to the property this test is
+    about, the missing-flag requirement not firing at equality, and says nothing
+    about what else a future checker might report there.
+
+    No converse check is owed today, and the reason is that its one consumer errs
+    the safe way. `review.confidence_band` is the only reader of the raw `flags`
+    array besides this checker, and it tests truthiness: an unwarranted flag
+    demotes an otherwise-clean `accept` from "high" to "low", which puts the
+    package *into* the human review pool rather than out of it. Nothing else reads
+    the array -- `summary.scenarios` recomputes both booleans from the two numbers,
+    and `emit` and `brief` never read it.
+
+    **That demotion is held by a test, not merely asserted here:**
+    `test_review.test_any_flag_the_schema_allows_costs_an_accept_its_high_band`.
+    It was added because this paragraph is an argument resting on one clause of
+    another module, and nothing held that clause -- measured, narrowing it to
+    `difficulty_overstated` alone left every test in the repository green while
+    making the reasoning above silently false. A docstring whose claim no test
+    holds is worse than an unpinned rule, because a reader takes it as settled.
+    """
+    assert check_verdicts(_run(tmp_path, verdict=minimal_verdict())) == []
+    for flag in ("difficulty_overstated", "difficulty_understated"):
+        findings = check_verdicts(_run(tmp_path, verdict=minimal_verdict(flags=[flag])))
+        assert not [f for f in findings if "is required" in f.message], (
+            f"an unwarranted {flag} at equal counts must not be reported as a *missing* "
+            f"flag; the requirement is on the relation, not on the array: {findings}"
+        )
+
+
 # -- aggregation --------------------------------------------------------
 def test_check_all_now_includes_instance_and_verdict_findings(tmp_path):
     """A genuinely warranted verdict finding reaches check_all's output.

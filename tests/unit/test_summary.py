@@ -2869,6 +2869,39 @@ def test_scenarios_does_not_flag_difficulty_when_calls_match(tmp_path):
     write_json(run.verdict(sid), verdict)
     row = {r.id_: r for r in summary.scenarios(run)}[sid]
     assert row.difficulty_overstated is False
+    # The mirror is asserted on the same equal-counts run rather than in a test of
+    # its own: `found == hop` is the one input both flags must answer False to, and
+    # a mirror written as `found >= hop` would pass every test that only varies the
+    # understated direction upward.
+    assert row.difficulty_understated is False
+
+
+def test_scenarios_flags_difficulty_understated_when_more_calls_are_needed(tmp_path):
+    """The direction issue #37 measured: a 2-call solve against `hop_depth: 1`.
+
+    Consequential in a way the overstated direction is not -- coverage is credited
+    per hop depth (`hop_depths_expected` / `hop_depths_present`), so a scenario
+    tagged shallower than it is credits a depth nothing actually tests. The edit
+    mirrors the overstated test's exactly, in the other direction.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.scenarios)
+    sid = doc["scenarios"][0]["id"]
+    doc["scenarios"][0]["hop_depth"] = 1
+    write_json(run.scenarios, doc)
+    verdict = read_json(run.verdict(sid))
+    verdict["minimum_tool_calls_found"] = 3
+    write_json(run.verdict(sid), verdict)
+    rows = summary.scenarios(run)
+    row = {r.id_: r for r in rows}[sid]
+    assert row.difficulty_understated is True
+    assert row.difficulty_overstated is False, "the two directions are exclusive"
+    # The same control the overstated test carries: every other row is judged
+    # against its own hop_depth, so a flag that had become unconditional would
+    # still pass above.
+    assert not [r for r in rows if r.id_ != sid and r.difficulty_understated]
 
 
 def test_scenarios_does_not_flag_difficulty_without_a_verdict(tmp_path):
@@ -2884,6 +2917,9 @@ def test_scenarios_does_not_flag_difficulty_without_a_verdict(tmp_path):
     row = {r.id_: r for r in summary.scenarios(run)}["scn-open-dup"]
     assert row.min_tool_calls is None
     assert row.difficulty_overstated is False
+    # `None > 1` raises exactly as `None < 1` does, so the mirror needs the same
+    # isinstance guard rather than inheriting it.
+    assert row.difficulty_understated is False
 
 
 def test_scenarios_does_not_flag_difficulty_for_a_boolean_call_count(tmp_path):
@@ -2923,6 +2959,39 @@ def test_scenarios_does_not_flag_difficulty_for_a_boolean_call_count(tmp_path):
     assert row.difficulty_overstated is False
 
 
+def test_scenarios_does_not_flag_understated_difficulty_for_a_boolean(tmp_path):
+    """The `bool`-is-an-`int` guard, measured in the new direction.
+
+    Not covered by the overstated test's pair: `True < 3` and `0 < True` are the
+    two nonsense comparisons that reach *that* flag, and neither reaches this one.
+    The shapes that do are `True > 0` -- a hand-edited
+    `"minimum_tool_calls_found": true` against a `hop_depth: 0` -- and
+    `2 > True`, a `"hop_depth": true` under a real count. Both are `True` in
+    Python, so without the guard copied verbatim from the sibling comparison a
+    malformed document would report a scenario as mislabelled in the shipped suite.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    doc = read_json(run.scenarios)
+    doc["scenarios"][0]["hop_depth"] = 0
+    write_json(run.scenarios, doc)
+    verdict = read_json(run.verdict("scn-open"))
+    verdict["minimum_tool_calls_found"] = True
+    write_json(run.verdict("scn-open"), verdict)
+    row = {r.id_: r for r in summary.scenarios(run)}["scn-open"]
+    assert row.min_tool_calls is True, "rendered as the document holds it"
+    assert row.difficulty_understated is False
+
+    doc["scenarios"][0]["hop_depth"] = True
+    write_json(run.scenarios, doc)
+    verdict["minimum_tool_calls_found"] = 2
+    write_json(run.verdict(row.id_), verdict)
+    row = {r.id_: r for r in summary.scenarios(run)}["scn-open"]
+    assert row.hop_depth is True, "rendered as the document holds it"
+    assert row.difficulty_understated is False
+
+
 @pytest.mark.parametrize("bad", ["two", None, [2], 2.5])
 def test_scenarios_does_not_flag_difficulty_for_a_hop_depth_that_is_not_an_int(tmp_path, bad):
     """A non-int `hop_depth` renders uncoerced and flags nothing.
@@ -2943,6 +3012,10 @@ def test_scenarios_does_not_flag_difficulty_for_a_hop_depth_that_is_not_an_int(t
     row = {r.id_: r for r in summary.scenarios(run)}["scn-open"]
     assert row.hop_depth == bad
     assert row.difficulty_overstated is False
+    # `1 > "two"` raises where `1 < "two"` does, and `1 > 2.5` is a legal
+    # comparison against a malformed document -- the same two failure shapes, so
+    # the mirror is asserted over the same parametrisation.
+    assert row.difficulty_understated is False
 
 
 def test_scenarios_reports_which_suite_files_landed(tmp_path):
@@ -3664,6 +3737,50 @@ def test_flags_do_not_fire_difficulty_overstated_on_an_unedited_run(tmp_path):
     assert "difficulty-overstated" not in ids
 
 
+def test_flags_fire_difficulty_understated_and_name_the_scenario(tmp_path):
+    """`scn-open` is proposed at `hop_depth: 1` and its verdict finds the same 1
+    call; raising the found count to 2 is the minimal edit that makes the column
+    non-uniform, and it is the exact shape issue #37 measured on a real run.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    assert not any(r.difficulty_understated for r in summary.scenarios(run))
+    doc = read_json(run.verdict("scn-open"))
+    doc["minimum_tool_calls_found"] = 2
+    write_json(run.verdict("scn-open"), doc)
+    fired = {f.id_: f for f in summary.flags(run)}
+    assert "difficulty-understated" in fired
+    # The id, and the consequence beside it -- the `orphaned-temp` flag's shape,
+    # for the same reason: a bare id tells a reader nothing about why this
+    # direction matters more than its sibling's.
+    assert fired["difficulty-understated"].detail.startswith("scn-open")
+    assert "shallower" in fired["difficulty-understated"].detail
+    assert fired["difficulty-understated"].threshold == "minimum_tool_calls_found > hop_depth"
+    # The understated flag is the more consequential of the pair -- it mislabels a
+    # scenario that ships -- so it is not allowed to sit below its sibling in the
+    # list a reader scans top-down. Asserted as an ordering rather than trusted to
+    # the source, because "beside its sibling" was the requirement and an append at
+    # the end of `flags()` would have satisfied every other assertion here.
+    # `scn-blocked` claims hop_depth 2 and finds 2, so dropping its count to 1
+    # fires the sibling on a different scenario and puts both flags in one list.
+    blocked = read_json(run.verdict("scn-blocked"))
+    blocked["minimum_tool_calls_found"] = 1
+    write_json(run.verdict("scn-blocked"), blocked)
+    both = [f.id_ for f in summary.flags(run)]
+    assert "difficulty-overstated" in both, "the sibling must also be reachable here"
+    assert both.index("difficulty-understated") < both.index("difficulty-overstated"), (
+        "the understated flag must precede the overstated one: it mislabels a scenario in "
+        f"the shipped suite where the other wastes a call -- got {both}"
+    )
+
+
+def test_flags_do_not_fire_difficulty_understated_on_an_unedited_run(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    ids = {f.id_ for f in summary.flags(run)}
+    assert "difficulty-understated" not in ids
+
+
 def test_flags_fire_orphaned_temp(tmp_path):
     run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     (run.root / "02-scenarios.json.tmp.1.x").write_text("{}", encoding="utf-8")
@@ -3769,11 +3886,30 @@ def _stray_claims_doc() -> dict:
     }
 
 
+# Every flag id in `summary.flags`' declaration order. Written down rather than
+# derived from a call to `flags`, for the reason
+# `test_flags_are_unique_and_ordered_stably` records: comparing the call to itself
+# is satisfied by `found[::-1]` and by `sorted(...)`, so the order is only
+# assertable against a literal. One constant rather than three copies because
+# issue #37 added a member and the three copies would have gone out of step -- the
+# count in `test_render_states_every_flag_with_its_threshold` was a bare `7`.
+_EVERY_FLAG_ID: tuple[str, ...] = (
+    "low-utilisation",
+    "uncited-artifacts",
+    "unresolved-contradictions",
+    "coverage-halted",
+    "difficulty-understated",
+    "difficulty-overstated",
+    "orphaned-temp",
+    "stage-record-incomplete",
+)
+
+
 def _run_with_every_flag(tmp_path, monkeypatch) -> RunPaths:
     """A run engineered so every flag in the table fires at once.
 
-    One fixture rather than seven, because the property under test is about the
-    table as a whole: that no flag can reach the page without stating the rule
+    One fixture rather than one per flag, because the property under test is about
+    the table as a whole: that no flag can reach the page without stating the rule
     that put it there. Each edit below is the same one the single-flag test above
     it makes, so a flag that stops firing here fails there too and the diagnosis
     is not ambiguous.
@@ -3801,6 +3937,12 @@ def _run_with_every_flag(tmp_path, monkeypatch) -> RunPaths:
     verdict = read_json(run.verdict("scn-blocked"))
     verdict["minimum_tool_calls_found"] = 1
     write_json(run.verdict("scn-blocked"), verdict)
+    # difficulty-understated needs its own scenario: the two flags are exclusive
+    # per row, so the edit above cannot reach both. `scn-open` claims hop_depth 1
+    # and finds 1, so raising its count is the mirror of the edit above it.
+    understated = read_json(run.verdict("scn-open"))
+    understated["minimum_tool_calls_found"] = 2
+    write_json(run.verdict("scn-open"), understated)
     (run.root / "01-goals.json.tmp.5.abc").write_text("{}", encoding="utf-8")
     # stage-record-incomplete needs no edit: build_toy_run mints an empty
     # manifest.stages.
@@ -3812,21 +3954,13 @@ def test_every_flag_states_its_threshold(tmp_path, monkeypatch):
 
     Asserted over a run where *every* flag fires, not over the two that happen to
     fire on a propose-level run with a stray temp file: the property is that no
-    flag can reach the page without its rule, and a loop over two of seven checks
+    flag can reach the page without its rule, and a loop over two of them checks
     it for two. The id set is pinned in the same assertion, so a flag added
     without a threshold cannot slip in behind a `for` loop that never sees it.
     """
     run = _run_with_every_flag(tmp_path, monkeypatch)
     fired = summary.flags(run)
-    assert {f.id_ for f in fired} == {
-        "low-utilisation",
-        "uncited-artifacts",
-        "unresolved-contradictions",
-        "coverage-halted",
-        "difficulty-overstated",
-        "orphaned-temp",
-        "stage-record-incomplete",
-    }
+    assert {f.id_ for f in fired} == set(_EVERY_FLAG_ID)
     for flag in fired:
         assert flag.threshold, f"{flag.id_} states no threshold"
         assert flag.headline, f"{flag.id_} states no headline"
@@ -3854,25 +3988,17 @@ def test_flags_are_unique_and_ordered_stably(tmp_path, monkeypatch):
     run = _run_with_every_flag(tmp_path, monkeypatch)
     ids = [f.id_ for f in summary.flags(run)]
     assert len(ids) == len(set(ids))
-    assert ids == [
-        "low-utilisation",
-        "uncited-artifacts",
-        "unresolved-contradictions",
-        "coverage-halted",
-        "difficulty-overstated",
-        "orphaned-temp",
-        "stage-record-incomplete",
-    ]
+    assert ids == list(_EVERY_FLAG_ID)
 
 
 def test_flags_keep_their_relative_order_on_a_partial_run(tmp_path):
     """The same fixed order over a subset, because partial runs are the primary case.
 
-    A propose-level run with a stray temp file fires two of the seven flags, and
-    they must come out in the order they hold in the full table. Asserted
-    separately from the all-seven test above: a table whose order is fixed only
-    when every rule fires is not a fixed order, and 10 of the 11 runs measured at
-    design time would have rendered a subset.
+    A propose-level run with a stray temp file fires two of the flags, and they
+    must come out in the order they hold in the full table. Asserted separately
+    from the every-flag test above: a table whose order is fixed only when every
+    rule fires is not a fixed order, and 10 of the 11 runs measured at design time
+    would have rendered a subset.
     """
     run = build_toy_run(tmp_path / "runs", upto="propose-seal")
     (run.root / "02-scenarios.json.tmp.1.x").write_text("{}", encoding="utf-8")
@@ -4560,15 +4686,83 @@ def test_render_states_every_flag_with_its_threshold(tmp_path, monkeypatch):
     run = _run_with_every_flag(tmp_path, monkeypatch)
     html = summary.run_summary(run)
     fired = summary.flags(run)
-    assert len(fired) == 7
+    assert len(fired) == len(_EVERY_FLAG_ID), "the loop below must not be vacuous"
+
+    # Each flag's own `<div class="flag">`, keyed by the headline it carries.
+    # **Scoped to the div rather than asserted over the page, and that is a
+    # measured requirement, not tidiness.** The page-wide version of the three
+    # assertions below stayed green with the threshold blanked for both difficulty
+    # flags, because the scenario table's `(overstated)` / `(understated)`
+    # annotation renders the identical escaped string in its `title`. So a
+    # renderer could drop the rule from the flag table -- the black box this test
+    # exists to prevent -- and no test in this module would notice. The weakness
+    # predates the second flag (it was green for `difficulty-overstated` alone);
+    # issue #37 only doubled it. It is the same substring-of-message shape as the
+    # one `test_render_annotates_both_difficulty_directions_beside_the_call_count`
+    # closes, seen from the other side: there the annotation borrowed the flag
+    # table's string, here the flag table borrows the annotation's.
+    divs = [chunk.split("</div>")[0] for chunk in html.split('<div class="flag">')[1:]]
+    assert len(divs) == len(fired), "one div per fired flag"
     for flag in fired:
+        owning = [div for div in divs if summary.esc(flag.headline) in div]
+        assert owning, f"{flag.id_} has no flag div of its own on the page"
+        div = owning[0]
         # Through `esc`, not raw: `difficulty-overstated`'s threshold is
         # "minimum_tool_calls_found < hop_depth", so the page carries it with the
         # `<` escaped -- and a test comparing the raw string would push a
         # renderer towards *not* escaping the one flag whose rule contains markup.
-        assert summary.esc(flag.headline) in html, f"{flag.id_} has no headline on the page"
-        assert summary.esc(flag.threshold) in html, f"{flag.id_} reached the page without its rule"
-        assert summary.esc(flag.detail) in html, f"{flag.id_} has no detail on the page"
+        assert summary.esc(flag.threshold) in div, (
+            f"{flag.id_} reached the page without its rule beside it; a flag whose "
+            "threshold is not in its own div is a black box wherever else the string appears"
+        )
+        assert summary.esc(flag.detail) in div, f"{flag.id_} has no detail in its own div"
+
+
+def test_render_annotates_both_difficulty_directions_beside_the_call_count(tmp_path):
+    """The scenario table's `(overstated)` / `(understated)` annotation.
+
+    Untested for either direction until issue #37, which is how the one-sided
+    renderer went unnoticed: the flag table above states the rule, and this is
+    where a reader who followed the flag looks for *which* row it was about. Both
+    directions in one test, over one run that carries one of each, because the
+    property is that the annotation is not one-sided -- and asserting only the new
+    direction would leave a renderer free to drop the old one.
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    plain = summary.run_summary(run)
+    assert "(understated)" not in plain, "an unedited run annotates neither direction"
+    assert "(overstated)" not in plain
+
+    over = read_json(run.verdict("scn-blocked"))  # hop_depth 2
+    over["minimum_tool_calls_found"] = 1
+    write_json(run.verdict("scn-blocked"), over)
+    under = read_json(run.verdict("scn-open"))  # hop_depth 1
+    under["minimum_tool_calls_found"] = 2
+    write_json(run.verdict("scn-open"), under)
+    html = summary.run_summary(run)
+    assert "(overstated)" in html
+    assert "(understated)" in html
+
+    def rule_on_the_annotation(annotation: str) -> str:
+        """The `title` of the span that actually carries `annotation`.
+
+        Scoped to the enclosing span rather than asserted over the page, and that
+        is not fussiness: measured, `assert "minimum_tool_calls_found &gt;
+        hop_depth" in html` stayed **green** with the title deleted from this
+        annotation, because the flag table above renders the same string as the
+        `difficulty-understated` flag's threshold. A page-wide substring check for
+        the rule is satisfied by a different element -- the substring-of-message
+        weakness, one level up.
+        """
+        at = html.index(annotation)
+        return html[html.rindex("<span", 0, at) : at]
+
+    # The rule travels with the annotation, escaped -- the same requirement the
+    # flag table is held to, and `>` is markup exactly as `<` is.
+    assert "minimum_tool_calls_found &gt; hop_depth" in rule_on_the_annotation("(understated)")
+    assert "minimum_tool_calls_found &lt; hop_depth" in rule_on_the_annotation("(overstated)")
 
 
 def test_render_says_no_flags_fired_rather_than_leaving_the_section_empty(tmp_path):

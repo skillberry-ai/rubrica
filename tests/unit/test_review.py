@@ -28,6 +28,7 @@ from rubrica.review import (
     sample_run,
     stratified,
 )
+from rubrica.validate import ARTIFACT_SCHEMAS, schema_dir
 from tests.builders import minimal_scenarios, minimal_verdict
 from tests.unit.test_refs_states import build_state
 
@@ -64,6 +65,43 @@ def test_an_accept_the_adversary_qualified_is_low_confidence():
 
 def test_a_non_accept_verdict_is_low_confidence():
     assert confidence_band(minimal_verdict(verdict="re-seed")) == "low"
+
+
+def test_any_flag_the_schema_allows_costs_an_accept_its_high_band():
+    """A flagged `accept` is qualified, so it must not reach the `high` band.
+
+    Untested until issue #37, and the gap mattered because an *argument* came to
+    rest on it: `test_refs_instance.
+    test_a_matching_call_count_needs_neither_difficulty_flag` records that no
+    converse check is owed for an unwarranted flag, on the grounds that its only
+    consequence here is a demotion -- which puts the package *into* the human
+    review pool rather than out of it. That reasoning is only true while this
+    demotion happens, and nothing held it: narrowing `confidence_band`'s
+    `not verdict.get("flags")` clause to `difficulty_overstated` alone left every
+    test in this repository green while silently making that docstring false.
+
+    Derived from the schema's enum rather than listing the two members, so a third
+    flag added later is held by this test on the day it is added -- the same reason
+    `test_skills_challenge.test_it_names_every_flag_the_schema_allows` reads the
+    enum instead of naming what it expects to find. One flag per call because the
+    schema now forbids carrying both.
+
+    The empty-array case is the control, and it is not decoration: without it a
+    `confidence_band` that returned `"low"` unconditionally would satisfy every
+    assertion above.
+    """
+    schema = read_json(schema_dir() / ARTIFACT_SCHEMAS["verdict"])
+    enum = schema["properties"]["flags"]["items"]["enum"]
+    assert enum, "the flags enum must not be empty, or the loop below is vacuous"
+    for flag in enum:
+        assert confidence_band(minimal_verdict(flags=[flag])) == "low", (
+            f"an accept flagged {flag} reached the high band; a flagged verdict is one the "
+            "adversary qualified, and the demotion is what puts it in front of a human"
+        )
+    assert confidence_band(minimal_verdict(flags=[])) == "high", (
+        "an empty flags array is not a qualification; without this the assertions above "
+        "are satisfied by a band that is always low"
+    )
 
 
 # -- candidates --------------------------------------------------------------

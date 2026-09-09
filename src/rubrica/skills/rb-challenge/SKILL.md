@@ -163,9 +163,16 @@ failure, not a smaller verdict. Two fields are conditional:
   objects. Required, with at least one entry, whenever
   `uniquely_determined` is `false`; the schema enforces that, and the
   *quality* of the reason is yours (Invariant 2).
-- **`flags`** -- an array whose only permitted value today is
-  `difficulty_overstated`. It is required in exactly one circumstance,
-  stated in Invariant 4.
+- **`flags`** -- an array with two permitted values,
+  `difficulty_overstated` and `difficulty_understated`. They are the two
+  directions of one comparison -- your `minimum_tool_calls_found` against
+  the scenario's claimed `hop_depth` -- and each is required whenever its
+  direction holds. Invariant 4 states both. They are mutually exclusive on
+  any one scenario: at most one of the two can be true at a time, and
+  neither is true when the two numbers agree. **The schema rejects a
+  verdict carrying both**, so a document claiming a scenario is at once
+  easier and harder than declared fails `validate` rather than reaching a
+  reader.
 
 `verdict` is one of three values and nothing else: `accept`, `re-seed`,
 `reject`. `minimum_tool_calls_found` is a non-negative integer. Every object
@@ -326,6 +333,7 @@ worth nothing at all unless steps 1 to 3 finished first.
    | Not derivable from the available capabilities | `reject` -- the test is unfair |
    | Disagrees with expected, and you are right | `reject` or `re-seed` |
    | `minimum_tool_calls_found` < the claimed `hop_depth` | `accept`, flagged `difficulty_overstated` |
+   | `minimum_tool_calls_found` > the claimed `hop_depth` | `accept` on this row alone, flagged `difficulty_understated` -- never a `re-seed` *on this ground* |
 
    **Row 4 is the highest-value catch in this pipeline.** It is how a wrong
    gold label is found before it becomes a benchmark that punishes correct
@@ -342,19 +350,36 @@ worth nothing at all unless steps 1 to 3 finished first.
    that instead -- the honest report is the point, in whichever direction it
    falls.
 
-   **Row 5 is how the hop-depth distribution gets audited by something
-   other than the stage that claimed it.** It contributes a *flag*, not a
-   verdict: rows 1 to 4 decide the verdict, and row 5 adds
-   `difficulty_overstated` on top of whatever that verdict turns out to be.
-   `refs.check_verdicts` recomputes the comparison from your own
-   `minimum_tool_calls_found` against your scenario's `hop_depth` and
-   reports a missing flag by name, whatever the verdict says. And never
-   raise the number to make the flag unnecessary: the number is your
+   **Rows 5 and 6 are how the hop-depth distribution gets audited by
+   something other than the stage that claimed it.** They contribute a
+   *flag*, not a verdict: rows 1 to 4 decide the verdict, and rows 5 and 6
+   add `difficulty_overstated` or `difficulty_understated` on top of
+   whatever that verdict turns out to be. `refs.check_verdicts` recomputes
+   the comparison from your own `minimum_tool_calls_found` against your
+   scenario's `hop_depth` and reports a missing flag by name in either
+   direction, whatever the verdict says. And never adjust the number to
+   make a flag unnecessary -- in either direction: the number is your
    evidence and the flag is the finding, so adjusting the evidence to
    suppress the finding is the one edit that makes this whole stage
-   worthless. There is no flag for the other direction -- if you needed
-   *more* calls than the claim, the `flags` enum has nothing to say it, so
-   record it in `notes`.
+   worthless.
+
+   **Row 6 is the more consequential of the two, and it still does not
+   force a verdict.** An overstated `hop_depth` wastes a tool call. An
+   understated one ships a mislabelled scenario: coverage is credited per
+   hop depth, so a scenario tagged shallower than it is credits a depth
+   nothing actually tests, and the matrix reports covered what was never
+   covered. So set `difficulty_understated`, and say in `notes` which calls
+   you needed and why the first one was unavoidable -- naming the fact the
+   intent withholds is what makes the finding actionable. But on this
+   ground the verdict stays `accept`, because the remedy is neither yours
+   nor `rb-instantiate`'s: `hop_depth` lives in `02-scenarios.json`, which
+   `rb-propose` owns and the orchestrator does not reopen. A `re-seed`
+   demanding a `hop_depth` change is a request no stage downstream of
+   propose can satisfy, so it would stall the scenario instead of repairing
+   it. Reserve `re-seed` and `reject` for what rows 1 to 4 describe, and
+   where an understated depth comes with one of those -- an undeclared
+   capability the extra call needs, say -- it is that row that carries the
+   verdict, with this flag beside it.
 
    The rows are not mutually exclusive, and more than one can apply at
    once. When two verdicts are in play, the more severe wins: `reject` over
@@ -403,8 +428,10 @@ worth nothing at all unless steps 1 to 3 finished first.
 
 4. `minimum_tool_calls_found` is what **you** needed, not what the scenario
    claimed. If it is below the claimed `hop_depth`, the
-   `difficulty_overstated` flag is **required** -- layer 2 reports its
-   absence, on any verdict.
+   `difficulty_overstated` flag is **required**; if it is above,
+   `difficulty_understated` is **required**. Layer 2 reports either
+   absence, on any verdict. Neither flag changes the verdict -- see rows 5
+   and 6 of the Method table for why the second one in particular does not.
 
 5. `notes` says what you actually did, and it **opens with the four
    pre-registered lines of Method step 1** -- the answer you reached, the

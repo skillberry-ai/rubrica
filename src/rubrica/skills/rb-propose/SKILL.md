@@ -327,8 +327,19 @@ about the three header fields you *do* write.
    asks you not to do elsewhere. Getting this wrong has a real cost:
    `rb-challenge` independently measures the minimum number of calls a
    solution actually needs and flags `difficulty_overstated` when your claim
-   does not match, spending that stage's finding budget on a defect this
-   stage chose to create instead of catching before it shipped. Set
+   is above what it needed, spending that stage's finding budget on a defect
+   this stage chose to create instead of catching before it shipped. The
+   opposite error is worse and it is the one this stage must not make: a
+   depth *below* the calls the scenario really requires is flagged
+   `difficulty_understated`, and nothing downstream can repair it, because
+   `hop_depth` is in a file only this stage writes. It ships. Coverage is
+   credited per hop depth, so a scenario tagged shallower than it is credits
+   a depth nothing actually tests, and the matrix reports covered what was
+   never covered. The count includes every call a solving agent cannot skip,
+   the lookups among them: if the `user_intent` names an entity by a label
+   and the capability takes an id, the call that resolves one to the other
+   is part of the depth, and the capability that serves it belongs in
+   `capability_refs`. Set
    `status: "proposed"` on every scenario you write, full stop -- never
    `active`, `duplicate`, or `rejected`. Those three are outcomes only
    `rb-score` can assign, after it has actually run its judgment over the
