@@ -42,14 +42,30 @@ receives security fixes; there are no long-term support branches.
 Rubrica is a command-line tool, not a service, so most of its surface is the file
 system of whoever runs it. One part is worth naming explicitly.
 
-`scripts/dispatch-stage.sh` dispatches a model to run a pipeline stage. It passes
-that model credentials from the environment, and it grants it `Write` access
-derived from the dispatched stage's own `writes` contract. Both of the wider
-scopings that preceded that one were observed being used to drop a scratch file
-the pipeline had no use for and nothing reacted to — a bare `Write` grant put one
-in the repository root, and the run-directory scoping that replaced it put one in
-the run root — which is recorded in `docs/design/limitations.md`. Both are now
-pinned by tests. `Read` access is still the whole run directory.
+`scripts/dispatch-stage.sh` dispatches a model to run a pipeline stage, and it
+passes that model credentials by two paths. Exported `ANTHROPIC_*` variables are
+used as-is; when neither `ANTHROPIC_AUTH_TOKEN` nor `ANTHROPIC_API_KEY` is
+exported, the script reads `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and
+`ANTHROPIC_API_KEY` out of `~/.claude/settings.json` and exports those instead.
+So an empty environment is **not** evidence that no credential reaches the
+dispatched model — the settings file is the other source, and it is read at
+launch rather than copied, specifically so a token does not come to rest in the
+scratch directory the dispatch runs in.
+
+The same script grants the model `Write` access derived from the dispatched
+stage's own `writes` contract. Both of the wider scopings that preceded it were
+observed being used to drop a scratch file the pipeline had no use for, and the
+two are not equally harmless:
+
+- the **bare `Write` grant** put one in the repository root. That grant was not
+  confined to scratch files: it reached `src/rubrica/*.py` and any sibling
+  `SKILL.md`, so a dispatched stage could have edited the code or the prompt its
+  own output was about to be judged against.
+- the **run-directory scoping** that replaced it put one inside the run root,
+  where nothing read it and nothing reacted to it.
+
+Both are recorded in `docs/design/limitations.md`, and both are now pinned by
+tests. `Read` access is still the whole run directory.
 
 **CodeQL does not analyse shell.** `dispatch-stage.sh` is a substantial shell
 program, so a clean CodeQL run on this repository is not evidence about it. If you
