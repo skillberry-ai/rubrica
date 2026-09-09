@@ -114,9 +114,21 @@ def test_notes_group_by_type_in_declared_order(repo):
 
 
 def test_an_empty_range_produces_nothing(repo):
+    """The only notes case whose assertion is purely negative, so the only one
+    that needs the exit code checked as well.
+
+    A bash failure -- a renamed function, an unsourceable library, a typo in the
+    snippet -- also produces empty stdout, so `out.strip() == ""` alone is
+    satisfied by the function not existing. Measured: renaming
+    `generate_release_notes` in the library left this case green without the
+    returncode assertion and reddens it with one. Every other case in this
+    module asserts some substring is *present* in stdout, which no failure mode
+    can satisfy, so none of them needs the same guard.
+    """
     _commit(repo, "chore: base")
-    out = _bash(repo, NOTES_LIB, 'generate_release_notes "HEAD..HEAD"').stdout
-    assert out.strip() == ""
+    result = _bash(repo, NOTES_LIB, 'generate_release_notes "HEAD..HEAD"')
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
 
 
 def test_a_range_starting_at_a_tag_excludes_the_tagged_commit(repo):
