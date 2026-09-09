@@ -400,3 +400,86 @@ population for two prescribed reasons. `extract` and `propose` both now run
 **first** of 25, the 24 after it being the sibling-blaming misdirection.
 `triage-rule` is a fourth instance of the class and was left for a separate
 decision.
+
+## The gap about the run
+
+**What was measured.** On `run-20260907-065440` (tau2-retail), six singleton
+reconcile passes were dispatched concurrently ahead of inputs that were not yet
+on disk — a sequencing mistake in the dispatch rather than a stage defect, and
+the point of the report is what each pass did with the same bad condition.
+`rb-reconcile-outcomes` and `rb-reconcile-entities` **refused**, each naming
+the missing `01-capabilities.json`. `rb-reconcile-gaps`, under the identical
+condition, wrote `gap-prior-pass-partials-absent` with `subject: pipeline:` and
+six stages in `blocks` — which is the orchestrator's blocking-halt trigger —
+and the run stopped. The gap was **true when it was written** and false by the
+time anybody could read it: all four partials it named were present and the
+world model had sealed. Neither check layer reaches that, because the gap is
+schema-valid, its `blocks` entries are real stage names, and `check-refs` has
+nothing to compare prose about the filesystem against. The recorded cost is a
+re-dispatch of the gaps pass and a fresh gate evaluation before the run could
+proceed at all. The pass had not misread its skill: §5 said a defect the audit
+finds in an earlier artifact is recorded as a gap, and an absent artifact is a
+defect by any reading.
+
+**What changed.** Fixed across `3d9d673`, `fcd94c2` and `a112f60`. A `gaps`
+entry is now stated to be about the target and never about the run, and the
+rule is located on what a gap asserts `unknown` rather than on `subject` — the
+first draft pinned it to `subject` and had to be corrected out twice, because
+§3 step 3 legitimately requires an audit gap's `subject` to name the artifact
+and element it found wrong. `rb-reconcile-gaps` carries the split in **both**
+sections, since §3 is the procedure and §5 only the exception list, and the
+undifferentiated §3 sentence is the one the measured run actually obeyed. All
+eight passes of the family now carry the same missing-input refusal worded
+identically, with `tests/unit/test_skills_reconcile_family.py` holding the
+byte-identity, since a `SKILL.md` has no include mechanism. The issue's third
+suggestion — a schema constraint forbidding `blocks` on a gap with no target
+subject — was rejected rather than parked: `subject` is prose, so such a check
+would be deciding whether a subject is *about* the target. Two things the
+closure records rather than claims: the fix is prompt-level, so it **buys a
+probability rather than a guarantee**, and it was verified structurally — every
+predicate measured in both directions under `RUBRICA_SKILLS_DIR`, with **no
+dispatch of the amended prose on record** either way.
+
+## The unrecordable understatement
+
+**What was measured.** The challenge verdict's `flags` enum had exactly one
+member, `difficulty_overstated`, computed as `found < hop`. The opposite
+relation had no flag and no computation, so an adversary that measured a
+scenario as *harder* than declared had only free-text `notes`, which no report
+reads. Measured on `run-20260907-065438` (reservation-service), scenario
+`sc-r1-b01-05`: `rb-challenge` returned `re-seed` **twice**, before and after a
+re-instantiate, with `minimum_tool_calls_found: 2` against a declared
+`hop_depth: 1`, and wrote the direction into prose while saying in the same
+sentence that no flag for it existed. The cause was a real declaration defect —
+`user_intent` names the restaurant while `check_availability` takes a
+`restaurant_id` that appears nowhere in the intent, so a solving agent must
+first call `search_restaurants`, and `capability_refs` declared only
+`cap-check-availability`, which was credited at hop 1 for
+`oc-check-no-availability` by a scenario needing two calls. The finding did
+cost that run a cell, coverage recomputed 13/17 to 12/17, but only because the
+double `re-seed` escalated to a rejection. That an `accept` plus a note would
+have shipped the mislabel silently is the issue's **reasoned** path, not one it
+observed.
+
+**What changed.** Fixed across `c25f03c`, `c9c4897` and `fa451d3`.
+`difficulty_understated` is in the enum and computed as the mirror, with the
+`bool`-versus-`int` guard hoisted into one local because it is a property of
+the pair of operands rather than of either inequality. It is surfaced *ahead*
+of its sibling and bolded beside the call count, both asserted, since an append
+at the end would have satisfied every other assertion. Layer 2 requires
+whichever flag holds — not on the issue's list, and safe only because a missing
+flag is repairable inside `rb-challenge`'s own `writes`. Layer 1 now forbids
+both flags on one verdict, which **reverses** the first ruling that exclusivity
+was a semantic judgment: a verdict carrying both was measured passing layer 1,
+passing `check-refs` at exit 0 and surfacing nowhere, because the summary
+recomputes both booleans from the two numbers and never reads the array. An
+understatement forces no verdict, and the reason is written down so nobody
+later fixes it into one: the remedy is an edit to `hop_depth` in
+`02-scenarios.json`, which `rb-propose` owns and `rb-instantiate` cannot write.
+A docstring resting on the confidence-band demotion is now pinned, after
+measuring that narrowing that one clause to the overstated flag alone left the
+whole repository green while making the docstring false. The flag closes half
+the hole; the unrepairable half is parked rather than fixed, and **nothing here
+was verified by a dispatch** — the toy fixture's data is unchanged, and no
+exercise record was produced or re-recorded, because those state what a
+dispatch did against the schema as it stood.
