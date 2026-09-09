@@ -314,6 +314,23 @@ are judgments rather than list entries:
 - `set-limit` changes a manifest limit — `max_scenarios` most often — with the
   reason recorded in `decisions.md`, so raising a ceiling is a decision on the
   record rather than a silent hand-edit.
+- `waive` records a human's ruling that a `check-refs` finding is **correct and
+  its remedy is not available in the stage the finding names.** The case it was
+  built for is `check_claim_utilisation`'s third cause: an admitted input every
+  reconcile pass correctly declined as out of the target's domain, whose finding
+  names `01-world-model.json` — a file no dispatchable stage declares in `writes`,
+  so the orchestrator's one repair attempt is not exhausted but *unspendable*.
+  **A waived finding still prints**, prefixed `[waived] `; only its contribution
+  to the exit code goes away, because a finding a reader can no longer see is a
+  mute button rather than a record. Suppression keys on `(check, subject)`
+  exactly, never on the finding's message text, so a reworded finding does not
+  lose its waiver. **Only a human writes one** — neither `rb-orchestrate`, which
+  would diagnose and ratify in one move, nor the stage that declined, which would
+  vouch for its own refusal: that is gate 0's argument, and it is why no stage
+  learns about waivers at all. A malformed `waivers.json` is a `2`, like the
+  other human-authored artifacts: a person wrote it, so there is no stage to hand
+  a repair prompt to. `gate-brief` renders the waivers in force at every gate,
+  and reads that file *without* validating it — a report is never a gate.
 
 ## Testing prompts: the traps that actually recur here
 

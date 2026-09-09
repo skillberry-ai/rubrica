@@ -403,8 +403,10 @@ argument above rather than the throughput one.
 
 The reconcile passes that own a claim kind each carry an `inputs_seen`
 accounting whose `own_kind_total` is recomputed from `01-claims/`, so a wrong
-count is a finding against the pass that wrote it (the entry below records how
-far short of forcing a read that falls). `rb-reconcile-gaps` has no such
+count is a finding against the pass that wrote it (the `own_kind_total` entry
+further down this section records how far short of forcing a read that falls --
+named rather than pointed at, because inserting an entry between the two once
+left this reference aimed at something that records neither). `rb-reconcile-gaps` has no such
 accounting and cannot be given one: `refs.PASS_OWN_KINDS` gives it no claim kind
 at all — the kinds `claims-0.1.json` defines partition onto the passes that own
 one — and a gap is an assertion about what no input **contains**. A
@@ -439,6 +441,72 @@ gets, and for the same reason.
 What this means for you: **a gap is the one world-model element whose evidence of
 diligence is entirely outside the artifact.** If a run's gaps look thin, read the
 transcript rather than the gaps.
+
+### A missing input is a refusal for every reconcile pass, and never a gap
+
+**Specified as of issue #36, and recorded here because the read-coverage entry
+above is where a reader looking for the boundary will land.** Nothing used to pick between a
+refusal and a gap for the case "an input my contract names is not on disk."
+Measured on `run-20260907-065440` (tau2-retail), where six B3 singleton passes
+were dispatched concurrently by mistake, each ahead of an input that was not
+yet on disk: `rb-reconcile-outcomes` and `rb-reconcile-entities` refused, naming the
+missing `01-capabilities.json`; `rb-reconcile-gaps` recorded
+`gap-prior-pass-partials-absent` with `subject: pipeline:` and six stages in
+`blocks`, which is the orchestrator's blocking-halt trigger, and the run stopped.
+
+The gaps pass was not confabulating and had not misread its skill. Its §5 said a
+defect the audit finds in an earlier pass's artifact is recorded as a gap, and an
+absent artifact is a defect by any reading; §3 step 1 told it never to name
+`blocks` narrowly, and it did not. The gap was also **true when it was written** —
+the partials really were absent — and false by the time a human could read it,
+because the passes writing them were still running. That last property is what no
+check layer reaches: the assertion is prose about the filesystem, `check-refs` has
+nothing to compare it against, and the `blocks` entries are real stage names.
+
+**The rule now stated in prose, and the reasoning behind it.** A `gaps` entry is
+about the *target*, never about the run that studied it — and the rule is over
+what a gap asserts **`unknown`**, not over `subject`. That distinction is not
+decoration, and the first draft of this entry got it wrong: it said a wrong
+earlier artifact "has a target subject", which §3 step 3 does not say. That step
+requires an audit gap's `subject` to name **the artifact and element** it found
+wrong, so a ruling pinned to `subject` alone contradicts the procedure the pass
+executes, and the pass would then be holding two inconsistent instructions with
+the procedural one likely to win — which is the shape of the original bug, not a
+fix for it. Located on `unknown` instead, both hold: an earlier artifact that is
+**wrong** — a capability its claims do not establish — leaves *target* knowledge
+unreliable, so it stays gap-able and may name the artifact and element that got it
+wrong, which is the audit's whole purpose. An earlier artifact that is **absent**
+leaves no target knowledge unknown at all; it leaves the run unfinished. A gap
+recording one therefore files a fact about the pipeline's own sequencing in the
+collection a human reads for what is unknown about the target, and there is no
+input anybody could supply to close it.
+
+The `rb-reconcile-gaps` audit condition is split in two on that line in **both**
+sections — §3 step 3 records what it finds *wrong*, and §5 routes an absent
+partial to the refusal — because §5 is the exception list and §3 is the procedure,
+and an undifferentiated "record what you find as a gap" in §3 is the sentence the
+measured run actually obeyed. Every pass in the family now carries the same
+missing-input refusal, worded identically;
+`tests/unit/test_skills_reconcile_family.py` holds the byte-identity, since a
+SKILL.md has no include mechanism and identical copies are the only enforceable
+form of "the rule lives in one place."
+
+**What was ruled against, and why it is not parked but rejected.** The issue's
+third suggestion was to forbid `blocks` on a gap with no target subject as a
+schema constraint. `subject` is prose, so no schema can tell a target subject from
+`pipeline:`; a check that tried would be deciding whether a subject *is about* the
+target, which is the semantic judgment the layer-2 entry near the top of this
+file rules out for exactly this reason. The prose ruling plus the uniform refusal is the
+enforceable part, and it is prompt-level: it buys a probability, not a guarantee.
+
+What this means for you: **if a run halts on a gap whose `unknown` is a fact
+about this run rather than about the target — a step that has not happened yet,
+most often — the finding is against this rule rather than against the gap.**
+`subject` is not the tell, and reaching for it is the residue this entry has
+twice had to have corrected out of it: an audit gap's `subject` legitimately names an artifact
+and element, so a rule read off `subject` flags the very gaps §3 step 3 exists
+to produce. Re-dispatch the pass once its inputs exist; do not look for a gate
+that should have caught it, because none can.
 
 ### `own_kind_total` is recomputable, so a skimming pass can state a right one without reading the file
 
@@ -486,8 +554,9 @@ is enough for a human at gate 1 to see a skimmed run and not enough for any exit
 code to refuse one, which is the same division `check_claim_utilisation` draws for
 the threshold it declines to enforce.
 
-Parked rather than fixed for the reason the entry above gives for gaps: every
-candidate fix is a self-report. The honest instrument for whether a file was
+Parked rather than fixed for the reason the read-coverage entry above gives for
+`rb-reconcile-gaps` — named, not pointed at, for the reason that entry's own
+forward reference now gives: every candidate fix is a self-report. The honest instrument for whether a file was
 opened is the transcript — `scripts/audit-reads.sh` over a real dispatch.
 
 ### Some gaps are written for rubrica's own reviewer, and the page the owner reads ships them verbatim
@@ -2429,6 +2498,47 @@ closed, and because the deterministic pipeline never reaches it —
 passed. Small fix, low reach; it is here so that finding it does not cost a
 round.
 
+### The zero-citation finding cannot tell a correctly declined input from an ignored one
+
+`refs.claim_utilisation_findings` raises when the world model cites *no* claim
+from a registered input, and its docstring names two causes, both real defects:
+`rb-extract` produced nothing usable from that input, or the reconcile passes
+ignored a whole artifact. There is a third, and the check cannot tell it from
+either — `rb-extract` produced good claims and every reconcile pass **correctly**
+declined them, because the artifact is outside the target's domain.
+
+Measured on a tau2-airline run of 36 admitted inputs: gate 0 admitted two harness
+files on contract grounds, and all seven reconcile passes then declined them on
+domain grounds, each recording its reason in its own partial. Every one of those
+rulings is right, and together they produce a finding no repair can clear: it
+names `01-world-model.json`, which no dispatchable stage declares in `writes`, so
+the orchestrator's one repair attempt is not exhausted but **unspendable** — every
+pass it could dispatch must refuse, because the finding names a file that is not
+its output.
+
+**Why it is not fixed in the check:** telling the third cause from the first two
+is semantic. It requires knowing that an admitted artifact is out of the target's
+domain, which is the judgment gate 0 made when it admitted the file and the
+reconcile passes made when they declined it — and layer 2 is forbidden to
+mechanise a judgment of that kind, for the same reason it resolves a claim
+reference without ruling on whether the claim *supports* the element citing it. A
+threshold would not help either and was measured: on `run-20260812-130056`, 130 of
+287 claims were uncited and almost all of those drops were correct, so any
+percentage rule fails a run whose reconcile family was behaving. Zero is the one
+figure that is indefensible under every reading — a human registered the input, so
+either extraction or reconciliation ignored an entire artifact — right up to the
+third cause, where it is defensible and unfixable at once.
+
+**What exists instead:** a human records the ruling with
+[`rubrica waive`](../reference/cli.md#rubrica-waive), and the finding keeps
+printing, prefixed `[waived] `, while no longer setting the exit code. That is
+deliberately not a fix for the *check*: the check still cannot tell the three
+causes apart, and a run whose input really was ignored by every pass produces a
+byte-identical finding. What the waiver adds is a place for the human judgment to
+be recorded and re-read — `gate-brief` renders it at every gate — rather than
+having to live in somebody's memory of why one gate was left dirty. So this stays
+open as a limitation of the check, not of the disposition.
+
 ### `claim-utilisation` and `gate-brief` exit 1 on a hand-edited claims document, and both are reports
 
 `CLAUDE.md` rules both commands **reports, not gates**: each always exits clean
@@ -3354,6 +3464,21 @@ loop is the unbounded path the entry above rules out. What is actually owed is a
 here, remedy lives upstream" as a first-class outcome rather than as a stage
 declining and an `emit` exit 1.
 
+**That disposition now exists, and it does not yet reach this instance.**
+`rubrica waive` records exactly the ruling this paragraph asked for — the finding
+is correct, the remedy is not available in the stage the finding names, and the
+finding keeps printing, prefixed `[waived] `, while no longer setting the exit
+code. It is built for `check_claim_utilisation`'s third cause (see the entry in
+the check-layers group below) and reaches a finding only through
+`waivers.WAIVABLE_CHECKS`, which has one row. Unparking *this* case is therefore a
+row in that registry plus a subject key travelling beside the finding — the
+`(check, subject)` pair suppression is keyed on — and **not** a second mechanism:
+a waiver whose subject nothing keys on would suppress nothing while looking, on
+the record, as though it had. What still has to be ruled on before that row lands
+is which check should raise here at all. Today the surface is `rb-instantiate`
+declining and `emit` exiting 1, and neither is a `check-refs` finding with a
+subject to key a waiver on.
+
 ### The rejection notice cannot express an escalated re-seed
 
 The notice a score re-dispatch carries quotes three fields from the verdict —
@@ -3369,6 +3494,13 @@ Parked with the entry above it, because both are the same missing concept: the
 verdict vocabulary can express what the adversary concluded and not what the
 pipeline should now do about it. Fixing either one alone leaves the other
 stalling on the same run.
+
+The pointer the entry above now carries applies here unchanged: `rubrica waive`
+is the disposition both entries said was owed, and it reaches a finding only
+through a `waivers.WAIVABLE_CHECKS` row and a subject key. It records that a
+finding is unrepairable where it was raised; it does not give the verdict
+vocabulary a way to say what the pipeline should do next, which is the half this
+entry is about.
 
 ### An understated `hop_depth` is flagged and cannot be repaired
 
@@ -3426,8 +3558,17 @@ wider change than the comparison this entry is about.
 inside the run: the scenario ships with a correct label only if that human edits
 `02-scenarios.json` by hand and re-runs from propose. The proper fix is the
 same *disposition* the unrepairable-re-seed entry asks for — a first-class
-"unrepairable here, remedy lives upstream" outcome. Until that exists the flag's
-only mechanical effect is the confidence-band demotion above, and **no stage
+"unrepairable here, remedy lives upstream" outcome. **Half of that disposition
+now exists, and it does not reach this case.** `rubrica waive` records that a
+finding is correct and unrepairable where it was raised; it does not give the
+verdict vocabulary a way to say what the pipeline should do next, which is the
+half this entry is about. It could not reach here in any event:
+`waivers.WAIVABLE_CHECKS` carries one row, `claim-utilisation`, and this flag's
+surface is a `summary.flags` entry plus the confidence-band demotion rather than
+an unrepairable `check-refs` finding a waiver could key a subject on — the only
+`check-refs` finding here is the flag's *absence*, which the paragraph above
+records as already repairable. So the flag's only mechanical effect stays the
+confidence-band demotion above, and **no stage
 branches on it** — not `rb-score`, not `emit` — so a suite can still ship a
 scenario whose declared depth is wrong, and the per-hop-depth coverage credit
 computed from that depth is still wrong with it. Parked deliberately, and

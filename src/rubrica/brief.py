@@ -8,9 +8,14 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   holdable at all. It leads with the objective verdict -- supported or not --
   because that is the single fact most likely to make a tired reader overturn
   the whole triage record, and a reader who stops after ten lines must have
-  seen it. The predicted-vs-observed surface divergence follows immediately,
-  because it is the one available measure of how well the corpus map the
-  objective pass ruled from actually described the corpus. Admits by priority,
+  seen it. The waivers in force follow, on the runs that carry any -- see below
+  for why this one gate renders them under the verdict rather than over it -- and
+  then the predicted-vs-observed surface divergence, because it is the one
+  available measure of how well the corpus map the objective pass ruled from
+  actually described the corpus. Verdict, waivers, divergence -- and the order is
+  spelled out because this bullet used to say the divergence follows the verdict
+  *immediately*, which a reachable run with a waiver in force makes false.
+  Admits by priority,
   declines grouped by reason code, and every open deficiency beside the
   projection that would close it come next. The slice table and the summary of
   every group split across more than one slice close the brief: they are the
@@ -79,6 +84,41 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
 - **Gates 2 and 3** render what already exists: the coverage verdict, and the
   challenge stage's verdict tallies.
 
+Gates 1, 2 and 3 lead with the **waivers in force**, on the runs that carry any.
+A waiver is a standing ruling rather than a note taken at one gate, so a reader at
+gate 3 has as much reason to re-read it as the person who recorded it at gate 1 --
+and a clean `check-refs` on a run carrying one is clean *because a human said so*,
+which changes how every number below it reads.
+
+**Gate 0 renders it under the verdict instead, and the ten-line promise above is
+the whole reason.** It led the gate for one draft, and that promise is measurably
+false under a block of any realistic size: with the block on top, two waivers with
+two-line reasons put both `objective` and `supported` past line ten, and one waiver
+with a three-line reason puts `supported` past it -- `reason` has no `maxLength`,
+so nothing bounds a real one -- while the motivating case in
+`docs/design/limitations.md` is exactly two admitted harness files. Gate 0 is the
+gate that decides what the run can ever know, so the verdict wins the top of the
+page. Gate 0's two absent-triage exits still lead with the block, where there is no
+verdict to compete with it.
+`test_gate_zero_still_leads_with_the_objective_verdict` is parametrised over one
+and three waivers, so the promise is guarded at more than one block size rather
+than at whichever size a fixture happens to use.
+
+What is *not* an argument for the placement, recorded because an earlier draft of
+this docstring made it: that no waiver can exist at gate-0 time. Only the narrow
+version of that is true -- none can exist at the moment gate 0 is **held**, since
+that is before `intake`, and the one `waivers.WAIVABLE_CHECKS` row's finding needs
+`01-claims/` and a world model to be raised at all. A waiver is perfectly
+reachable on a run whose triage record is on disk, and it is a run a reader
+revisits: strip the world model's citations of one input, `check-refs` raises the
+zero-citation finding, `rubrica waive` records it, and this gate's brief renders
+the block -- measured end to end through those commands, on the tau2-airline shape
+`docs/design/limitations.md` records. Which is why the block renders here at all
+rather than being skipped.
+
+Read through `_quietly` rather than `waivers.load` -- see `_waiver_lines`, which is
+the one consumer of that file that must not raise on it.
+
 `gate_brief` treats a readable run's *content* as something to render, never to
 raise on -- every artifact it reads is optional, and its absence renders as a
 stated absence rather than an exception, on the same ruling that already governs
@@ -123,6 +163,12 @@ from rubrica.paths import STAGES, RunPaths, is_safe_segment, list_json
 from rubrica.refs import PASS_OWN_KINDS, _as_list, _cells, drivable_cells
 from rubrica.sizing import implied_size
 from rubrica.utilisation import claim_utilisation
+
+# The one definition of what `--remedy` accepts, derived from paths.STAGES. Imported
+# rather than re-spelled so that a stage added later is a known remedy here on the
+# same commit: a second copy of the set would make this report call a legitimate
+# value stale, which is the opposite of the mistake the marker exists to catch.
+from rubrica.waivers import remedy_choices
 
 GATES = (0, 1, 2, 3)
 
@@ -177,6 +223,14 @@ EXCLUDED_HEADER = "Capabilities excluded from the denominator (no tool binding)"
 # all. Deliberately not the bare word "Services": that is the word the section is
 # found by, and a one-word anchor is satisfiable by any sentence containing it.
 SERVICES_HEADER = "Services a simulator would stand in for"
+
+# The waiver block's two anchors, named for the five above's reason. This one has a
+# measurement of its own: pinning the unreadable notice's prose in the test made a
+# meaning-preserving reword ("could not be read" -> "is unreadable") fail it, which
+# is the phrase-pin failure this repository has already taken once. Both are
+# rendered from here and asserted against from here, so a reword lands in one place.
+WAIVERS_HEADER = "Waivers in force"
+WAIVERS_UNREADABLE = "Waivers: waivers.json could not be read."
 
 
 def gate_brief(run: RunPaths, gate: int) -> str:
@@ -526,6 +580,83 @@ def _wrapped(label: str, values: list[str]) -> list[str]:
     if not values:
         return [f"    {label}: (none)"]
     return _fold(f"{label}: {', '.join(values)}", "    ", "      ")
+
+
+def _waiver_lines(run: RunPaths) -> list[str]:
+    """The waivers in force, or [] when there are none.
+
+    Shown at every gate rather than only at the one where the waiver was
+    written: a waived finding is a standing ruling, and a reader at gate 3 has
+    as much reason to re-read it as the person who recorded it at gate 1. It
+    also changes how every number below it reads -- a clean `check-refs` on a
+    run carrying a waiver is clean *because a human said so* -- which is why it
+    leads gates 1 through 3 rather than sitting beneath the content it qualifies.
+    Gate 0 is the exception and renders it under the verdict: this module's
+    docstring carries the measurement, and `_gate_0` the comment.
+
+    Read through `_quietly`'s reasoning rather than `waivers.load`'s, and that
+    is the one deliberate divergence from every other consumer of this file.
+    `load` schema-validates and raises, which becomes an exit 2; here that would
+    make a report into a second gate. A malformed `waivers.json` is
+    `check-refs`' exit 2 to raise, and it will raise it on the same run.
+    """
+    doc = _quietly(run.waivers)
+    if doc is None:
+        # Absent is the common case and silent. Present-but-unparseable is not:
+        # this is the one artifact in a run a human is invited to hand-edit, and
+        # `_quietly` cannot tell a reader with a broken waiver anything at all.
+        #
+        # Narrowly the unparseable case, and not a general rule that a reader is
+        # always told why a section is missing -- the code does not do that, on
+        # purpose. A file that parses and holds the wrong shape (a top-level
+        # array, `"waivers": "oops"`, a list of strings) renders no section at
+        # all, because `_dicts` drops what it cannot read; `check-refs` raises
+        # exit 2 on the same file, which is what names the shape. Saying more
+        # here would be this report inventing a finding.
+        return [WAIVERS_UNREADABLE, ""] if run.waivers.exists() else []
+    entries = _dicts(_mapping(doc).get("waivers"))
+    if not entries:
+        return []
+    # Computed once outside the loop: remedy_choices() rebuilds a tuple from
+    # paths.STAGES on every call, and a run may carry many waivers.
+    choices = remedy_choices()
+    lines = [f"{WAIVERS_HEADER}: {len(entries)}"]
+    for entry in entries:
+        remedy = entry.get("remedy", "?")
+        if remedy == "none":
+            # `none` is the ruling that nothing should change, and it must not
+            # read like a deferral to a stage that still owes work.
+            gloss = "accepted; no artifact should change"
+        elif remedy in choices:
+            gloss = f"remedy {remedy}"
+        else:
+            # A stage renamed after the waiver was written, or a hand-edit.
+            # Marked here rather than refused by `load`, because rejecting it
+            # would turn cosmetic staleness into an exit 2 on every later check
+            # of a run whose suppression -- keyed on (check, subject) -- was
+            # never affected by it. `rubrica waive` validates it on write; this
+            # is the read-side net, and a stale pointer a reader cannot see is
+            # worse than one they can.
+            gloss = f"remedy {remedy} (not a known stage)"
+        lines.append(
+            f"  {entry.get('id', '?')} {entry.get('check', '?')}/"
+            f"{entry.get('subject', '?')} -- {gloss}"
+        )
+        lines.extend(_fold(str(entry.get("reason", "")), "    ", "    "))
+    lines.append("")
+    return lines
+
+
+def _joined(prefix: list[str], body: str) -> str:
+    """A header block, then one paragraph of prose, as one document.
+
+    `_gate_0`'s two triage early returns compose their whole output from a header
+    and a sentence, and the waiver block now has to sit between them. The prose
+    keeps its own trailing newline, so with no waivers this produces the byte
+    sequence the f-strings it replaced produced -- which is what lets the existing
+    assertions on those two messages stand unchanged.
+    """
+    return "\n".join([*prefix, body])
 
 
 def _service_lines(run: RunPaths) -> list[str]:
@@ -1001,6 +1132,11 @@ def _read_cost_lines(admits: list[dict], candidates: dict[str, dict]) -> list[st
 
 
 def _gate_0(run: RunPaths) -> str:
+    # Read before the two early returns below and rendered inside them: a waiver
+    # is a standing ruling, so it must not be invisible on the one run shape whose
+    # gate 0 has nothing else to say. Computed once and reused by all three exits
+    # rather than called three times, so the file is read once.
+    waivers = _waiver_lines(run)
     if not run.triage.is_file():
         # A ruling held by the report as well as by
         # the check: a run minted through `intake --input` never had a triage
@@ -1014,20 +1150,20 @@ def _gate_0(run: RunPaths) -> str:
         # all" was false, and false at precisely the moment they are waiting for
         # triage and asking this command whether it has landed.
         if run.catalogue.is_file():
-            return (
-                f"GATE 0 -- {run.root}\n\n"
+            return _joined(
+                [f"GATE 0 -- {run.root}", "", *waivers],
                 "No triage record for this run yet (00-triage.json is absent), but "
                 "00-catalogue.json is present: this run was minted by `survey` and the "
                 "triage family has not run, or has not reached `triage-seal`. Run the "
                 "family through to `triage-seal` and read this brief again -- there is "
-                "nothing to review at gate 0 until it lands.\n"
+                "nothing to review at gate 0 until it lands.\n",
             )
-        return (
-            f"GATE 0 -- {run.root}\n\n"
+        return _joined(
+            [f"GATE 0 -- {run.root}", "", *waivers],
             "No triage record for this run (00-triage.json is absent), and no "
             "00-catalogue.json either. This run was minted through `intake --input`, "
             "which has no catalogue and no triage step at all -- nothing to review "
-            "at gate 0.\n"
+            "at gate 0.\n",
         )
 
     triage = _mapping(_quietly(run.triage))
@@ -1057,7 +1193,20 @@ def _gate_0(run: RunPaths) -> str:
         )
     lines.append("")
 
-    # Immediately after the verdict, because it is the only measure of the
+    # Under the verdict, not above it, and unlike gates 1 through 3. Measured with
+    # the block on top: two waivers with two-line reasons push both `objective` and
+    # `supported` past line ten, and one waiver with a three-line reason pushes
+    # `supported` past it -- breaking this module's own promise for the gate that
+    # decides what the run can ever know. Not because a waiver is unreachable here:
+    # it is reachable, measured end to end, on any run whose triage record is on
+    # disk when a zero-citation finding gets waived, and only the moment gate 0 is
+    # *held* is waiver-free (it precedes intake, so the finding cannot be raised
+    # yet). So the block belongs on this page -- under the verdict, not over it.
+    # The two absent-triage exits above still lead with it, where there is no
+    # verdict to displace.
+    lines.extend(waivers)
+
+    # After the verdict and any waivers, because it is the only measure of the
     # corpus map that verdict was ruled from -- see section 4.1.
     lines.extend(_divergence_lines(run))
     lines.append("")
@@ -1162,6 +1311,7 @@ def _gate_0(run: RunPaths) -> str:
 
 def _gate_1(run: RunPaths) -> str:
     lines = [f"GATE 1 -- {run.root}", ""]
+    lines.extend(_waiver_lines(run))
 
     # The reconcile sweep, read before anything derived from it. Cross-pass
     # incoherence -- a later pass modelling what rb-reconcile-contradict recorded
@@ -1392,6 +1542,7 @@ def _gate_1(run: RunPaths) -> str:
 
 def _gate_2(run: RunPaths) -> str:
     lines = [f"GATE 2 -- {run.root}", ""]
+    lines.extend(_waiver_lines(run))
     coverage = _quietly(run.coverage_latest)
     if coverage is None:
         lines.append("No coverage report yet (03-coverage/latest.json is absent).")
@@ -1428,6 +1579,7 @@ def _gate_2(run: RunPaths) -> str:
 
 def _gate_3(run: RunPaths) -> str:
     lines = [f"GATE 3 -- {run.root}", ""]
+    lines.extend(_waiver_lines(run))
     tallies: dict[str, int] = {}
     for path in list_json(run.verdicts_dir):
         payload = _quietly(path)

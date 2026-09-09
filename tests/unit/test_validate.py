@@ -44,6 +44,7 @@ from tests.builders import (
     minimal_suite_expected,
     minimal_triage,
     minimal_verdict,
+    minimal_waivers,
     minimal_world_model,
 )
 
@@ -123,6 +124,7 @@ MINIMAL_BUILDERS = {
     "report": minimal_report,
     "agents": minimal_agents,
     "gold": minimal_gold,
+    "waivers": minimal_waivers,
 }
 
 

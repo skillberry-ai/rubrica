@@ -522,6 +522,54 @@ def test_it_names_the_three_human_gates_and_the_no_gate_flag():
         )
 
 
+def test_it_states_that_a_waived_finding_is_not_part_of_a_repair_request():
+    """A4's last rule, and the one that closes the finding-waiver branch.
+
+    A `[waived] ` line is a finding a human read, ruled correct, and recorded as
+    unrepairable in the stage the finding names. Appending one to a repair prompt
+    hands a stage a request it cannot satisfy: it either attempts a fix nobody
+    believes is available, or refuses because the finding names an artifact
+    outside its `writes` -- the exact stall the waiver mechanism exists to remove.
+    A4's own budget rule records what an unpinned rule in this file costs: a
+    weaker version of that test let the whole bounded-repair rule be deleted with
+    every test green, so this one is pinned rather than trusted to survive a
+    reflow.
+
+    Scoped to the Method section and asserted as a co-occurrence, and the
+    discrimination is measured rather than argued from where the word appears:
+    `waived` is now written in several places in this file -- A3's exit-code table
+    and invariant 4's pre-report check among them -- so deleting this paragraph
+    from a copy under RUBRICA_SKILLS_DIR is what shows the predicate still fails
+    without it, which it does.
+
+    `(never|not|no|forbidden)` rather than a single spelling, for the reason
+    PROHIBITIONS above exists -- English has several ways to forbid a thing and a
+    reword between them changes nothing. `no|forbidden` is there because the
+    narrower `(never|not)` was measured false-red: "has no place in any repair
+    dispatch, and appending one to a repair prompt is forbidden" prohibits exactly
+    what the shipped sentence prohibits, and turned this test red as completely as
+    deleting the paragraph did.
+
+    The noun is alternated for that same reason, and this one is measured rather
+    than anticipated: the first version of this predicate required the literal
+    "repair prompt", and rewording the paragraph to "the prompt of a repair
+    dispatch" -- which forbids exactly the same thing -- turned it red. That is the
+    phrase-pin failure this repository has taken before, in a predicate written to
+    guard against reflow.
+
+    Read through `_norm` for a second measured reason, and it is the same class
+    caught one layer down: with the raw section text, "Do not put one in a repair
+    request" **also** failed, because the skill hard-wraps between `repair` and
+    `request` and a literal space cannot cross a newline. `_norm` collapses
+    whitespace, which is what the two Task 20 predicates above already use it for.
+    """
+    assert re.search(
+        r"\[waived\].{0,200}(never|not|no|forbidden).{0,140}repair (prompt|dispatch|request)",
+        _norm(method_body()),
+        re.S,
+    ), "the Method must say a `[waived] ` line is never appended to a repair prompt"
+
+
 def test_it_states_that_a_rejection_does_not_loop_back_to_propose():
     """Deferred on purpose: looping after instantiation makes run cost unbounded.
     An orchestrator that loops instead of reporting an honest hole turns a
