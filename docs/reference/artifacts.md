@@ -345,10 +345,12 @@ claim of the pass's kinds, and `docs/design/limitations.md` records the other tw
 routes to a right number without a read, together with what the accounting does
 deliver instead. The accounting is **total over `manifest.inputs`** — a registered input with no row is a finding, because a
 pass that never opened a claims file is otherwise indistinguishable from one that
-opened it and cited nothing. Issue #6 is what that measures: read coverage of
-`01-claims/` varied from three files of twenty-three to all twenty-three across
-byte-identical dispatches, and both check layers accepted the skimmed run,
-because a skimmed read still produces a well-formed partial.
+opened it and cited nothing. [The read-coverage
+variance](../design/findings.md#the-read-coverage-variance) is what that
+measures: read coverage of `01-claims/` varied from three files of twenty-three
+to all twenty-three across byte-identical dispatches, and both check layers
+accepted the skimmed run, because a skimmed read still produces a well-formed
+partial.
 
 The drops themselves are **nobody's finding**. Every row with a non-zero
 `dropped` carries the `note` layer 1 requires of it, which is what makes the drop
@@ -673,14 +675,16 @@ simulator would stand in for, present only when `01-services.json` was written),
 and a `denominator` frozen at a `version` for the rest of the run. Every element
 carries a `claims` array of the claim ids
 that support it — **including the nested ones**: an outcome class, an invariant
-and a gap each require their own non-empty array, and until issue #6 none of the
-three could carry one at all, so an invariant's provenance went onto its parent
-entity and an outcome class's into `description` prose. Measured on the run that
-issue reports: `invariant` claims were cited 0 of 55 times and `outcome_class` 7
-of 62, with 24 more appearing only inside prose — 117 of 434 claims with nowhere
-structured to record where they came from, and none of them visible to
-`claim-utilisation` or to `check-refs`. As everywhere else here, resolving a
-citation means the claim *exists*, never that it supports the element.
+and a gap each require their own non-empty array, and until [the read-coverage
+variance](../design/findings.md#the-read-coverage-variance) was closed none of
+the three could carry one at all, so an invariant's provenance went onto its
+parent entity and an outcome class's into `description` prose. Measured on the
+run that finding reports: `invariant` claims were cited 0 of 55 times and
+`outcome_class` 7 of 62, with 24 more appearing only inside prose — 117 of 434
+claims with nowhere structured to record where they came from, and none of them
+visible to `claim-utilisation` or to `check-refs`. As everywhere else here,
+resolving a citation means the claim *exists*, never that it supports the
+element.
 
 **No representation for a field's value domain.** `capability.params` and
 `entity.fields` carry only a name and a type, with `additionalProperties:

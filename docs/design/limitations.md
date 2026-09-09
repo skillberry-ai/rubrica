@@ -418,9 +418,10 @@ names, and its `claims` cite ids that exist.
 What it did gain is a required `claims` array on `$defs/gap`, so the evidence
 that an absence *matters* is resolvable rather than sitting in prose. That closes
 a self-contradicting gate-1 brief, and the case is worth stating with its ids
-because the tree cannot hold it: `runs/` is gitignored. Quoted from issue #6,
-which is where run 1's figures survive at all — on `run-20260823-112746` its
-brief reported `trajectories2-json-14: 0/19 claims cited (0%)` while
+because the tree cannot hold it: `runs/` is gitignored. Quoted from [the
+read-coverage variance](findings.md#the-read-coverage-variance), which is where
+run 1's figures survive at all — on `run-20260823-112746` its brief reported
+`trajectories2-json-14: 0/19 claims cited (0%)` while
 `gap-search-tool-error-response`, in the same brief, rested its `unknown` on
 `clm-trajectories2-json-14-019`. The directory that survives holds run 2's
 re-seal — its utilisation recomputes to run 2's 146/434, and that artifact's row
@@ -444,15 +445,17 @@ transcript rather than the gaps.
 
 ### A missing input is a refusal for every reconcile pass, and never a gap
 
-**Specified as of issue #36, and recorded here because the read-coverage entry
-above is where a reader looking for the boundary will land.** Nothing used to pick between a
+**Specified when [the gap about the run](findings.md#the-gap-about-the-run) was
+closed, and recorded here because the read-coverage entry above is where a
+reader looking for the boundary will land.** Nothing used to pick between a
 refusal and a gap for the case "an input my contract names is not on disk."
 Measured on `run-20260907-065440` (tau2-retail), where six B3 singleton passes
-were dispatched concurrently by mistake, each ahead of an input that was not
-yet on disk: `rb-reconcile-outcomes` and `rb-reconcile-entities` refused, naming the
+were dispatched concurrently by mistake, each ahead of an input that was not yet
+on disk: `rb-reconcile-outcomes` and `rb-reconcile-entities` refused, naming the
 missing `01-capabilities.json`; `rb-reconcile-gaps` recorded
 `gap-prior-pass-partials-absent` with `subject: pipeline:` and six stages in
-`blocks`, which is the orchestrator's blocking-halt trigger, and the run stopped.
+`blocks`, which is the orchestrator's blocking-halt trigger, and the run
+stopped.
 
 The gaps pass was not confabulating and had not misread its skill. Its §5 said a
 defect the audit finds in an earlier pass's artifact is recorded as a gap, and an
@@ -510,9 +513,10 @@ that should have caught it, because none can.
 
 ### `own_kind_total` is recomputable, so a skimming pass can state a right one without reading the file
 
-The `inputs_seen` accounting issue #6 added was specified as a **forcing
-function**: `own_kind_total` was to be the one figure a pass could not state for a
-claims file it never opened. It is not, and three shipped routes give a right
+The `inputs_seen` accounting added to close [the read-coverage
+variance](findings.md#the-read-coverage-variance) was specified as a **forcing
+function**: `own_kind_total` was to be the one figure a pass could not state for
+a claims file it never opened. It is not, and three shipped routes give a right
 number without a read.
 
 - **Zero is the honest answer for most pairs.** Each pass owns one or two of the
@@ -700,7 +704,8 @@ file, which records how wide the reachable surface already is.
 allowlist is not what constrains a dispatch at all — read-only Bash is
 auto-approved with no sandbox block present, and every Bash command is
 auto-approved when one is (`autoAllowBashIfSandboxed`). So widening it would not
-merely be wrong, it would change nothing. Issue #18 was filed on the opposite
+merely be wrong, it would change nothing. [The enumeration
+deadlock](findings.md#the-enumeration-deadlock) was raised on the opposite
 premise, that a barrier stage could not enumerate `01-claims/` because `ls` was
 off the allowlist; `ls` runs in every configuration except one where `bwrap`
 cannot engage and no Bash command runs at all. See the entry below.
@@ -766,8 +771,9 @@ variance.
 
 **"Nobody has yet run the same inputs twice and diffed the result" was this
 entry's closing sentence, and it no longer holds for the `reconcile-*` family.**
-Issue #6 re-dispatched the passes that own a structured `claims` array over a
-byte-identical run directory — `run-20260823-112746`, the reservation-service
+[The read-coverage variance](findings.md#the-read-coverage-variance) was
+measured by re-dispatching the passes that own a structured `claims` array over
+a byte-identical run directory — `run-20260823-112746`, the reservation-service
 corpus, 23 admitted inputs and 434 claims — same skill file, same model, same
 effort, nothing appended to either dispatch. Read coverage of `01-claims/` came
 out 3 of 23 files for one pass and 23 of 23 for another, and the entry below
@@ -881,8 +887,9 @@ stage halts rather than whether one does.
 #### A later pair over the same inputs had no prompt confound, and disagreed on read coverage
 
 The confound above — the prompt was not byte-identical between the two runs — is
-absent from the pair issue #6 measured, which makes it the clean measurement this
-entry says is still owed, for the `reconcile-*` family. On
+absent from the pair that measured [the read-coverage
+variance](findings.md#the-read-coverage-variance), which makes it the clean
+measurement this entry says is still owed, for the `reconcile-*` family. On
 `run-20260823-112746` the passes that own a structured `claims` array were
 re-dispatched over a byte-identical run directory: same skill file, same model,
 same effort, no appended findings and no prompt additions. What differed between
@@ -1018,33 +1025,35 @@ every entry this design added to this file wherever the arithmetic guessed
 wrong. Until that exists, the staged family is a well-tested hypothesis about
 judgment and not a demonstrated improvement in it.
 
-### Issue #3 was closed on arithmetic, and the run that would confirm it has not happened
+### The untriageable catalogue was closed on arithmetic, and the run that would confirm it has not happened
 
-The death issue #3 reports is real and was observed twice: the monolithic
-`rb-triage` stage died on a 595KB / 351-candidate catalogue, once in context
-compaction and once by exhausting its whole dollar budget. What closed the
-issue is not a run that survived it. It is a partition whose shards measure
-small enough to hold, plus a `catalogue_facts` block that takes the one
-remaining unbounded pass from 472,799 bytes to 51,792 on the tau2 catalogue the
-design was measured against — both arithmetic over catalogues that already
-existed, which is the entry above this one restated about a specific issue. The
-absolute figures move with the corpus checkout and the ratio does not: a re-run
-during this change measured 480,399 to 52,542, 9.14x against the design's
-9.13x.
+The death [the untriageable catalogue](findings.md#the-untriageable-catalogue)
+reports is real and was observed twice: the monolithic `rb-triage` stage died on
+a 595KB / 351-candidate catalogue, once in context compaction and once by
+exhausting its whole dollar budget. What closed the issue is not a run that
+survived it. It is a partition whose shards measure small enough to hold, plus a
+`catalogue_facts` block that takes the one remaining unbounded pass from 472,799
+bytes to 51,792 on the tau2 catalogue the design was measured against — both
+arithmetic over catalogues that already existed, which is the entry above this
+one restated about a specific issue. The absolute figures move with the corpus
+checkout and the ratio does not: a re-run during this change measured 480,399 to
+52,542, 9.14x against the design's 9.13x.
 
 The gap is narrow and worth naming precisely. That the objective pass's input
 now fits one `Read` is measured and not in doubt. That a dispatch which *fits*
 produces a better **judgment** than one that died is the claim the whole design
 rests on, and it is the claim nothing here measures.
 
-There is also a way for #3 to come back on the artifact that closed it, and
-nothing would report it. A shard is bounded in bytes — `DEFAULT_SLICE_BYTES` is
-64KB against the harness's 256KB whole-file `Read` refusal — and the plan is
-bounded only in *count*. The spec's own reason for giving `excluded.entries` a
-byte budget was that issue #8 is "a count cap without a character bound", and
-the `catalogue_facts` block as a whole took the count bound rather than the byte
-one: `max_candidates` limits how many `candidate_bytes` entries there can be,
-and no check anywhere asserts that `00-slices.json` fits one `Read`.
+There is also a way for the untriageable catalogue to come back on the artifact
+that closed it, and nothing would report it. A shard is bounded in bytes —
+`DEFAULT_SLICE_BYTES` is 64KB against the harness's 256KB whole-file `Read`
+refusal — and the plan is bounded only in *count*. The spec's own reason for
+giving `excluded.entries` a byte budget was that what [the uncapped digest
+names](findings.md#the-uncapped-digest-names) records is "a count cap without a
+character bound", and the `catalogue_facts` block as a whole took the count
+bound rather than the byte one: `max_candidates` limits how many
+`candidate_bytes` entries there can be, and no check anywhere asserts that
+`00-slices.json` fits one `Read`.
 
 **What bounds the plan is the candidate count, and the dial to leave alone is
 therefore `--max-candidates`.** The plan costs 116.9 to 118.6 bytes per
@@ -1058,9 +1067,10 @@ the ceiling whatever the catalogue weighs.** Reaching the ceiling takes about
 2,200 candidates at either density measured here, and the true figure moves
 inversely with per-candidate cost — dominated by how long candidate ids and
 paths are, so a corpus of short ids would push it higher and one of deep nested
-paths lower. Raise `--max-candidates` into the low thousands and #3 re-opens
-**on the plan**, with the objective pass chunk-reading the artifact that exists
-to spare it exactly that, and no gate between the change and the symptom.
+paths lower. Raise `--max-candidates` into the low thousands and the
+untriageable catalogue re-opens **on the plan**, with the objective pass
+chunk-reading the artifact that exists to spare it exactly that, and no gate
+between the change and the symptom.
 
 `max_catalogue_bytes` is a second, indirect path to the same place, and only
 indirect: it bounds the catalogue, which bounds the plan only through a
@@ -1082,8 +1092,8 @@ cap and a rate.
 Recorded rather than parked-with-a-fix because the fix for the main claim is a
 dispatch, not a change: run the staged family against a parsec-class corpus and
 write what happened into the passes' `exercise.md` files. Until then, a reader
-who finds #3 closed should not infer that anyone watched `00-triage.json` get
-written on the corpus that killed the monolith.
+who finds the untriageable catalogue closed should not infer that anyone watched
+`00-triage.json` get written on the corpus that killed the monolith.
 
 ### The loop's stopping rule is blind to goal-coverage progress
 
@@ -1746,14 +1756,14 @@ the same run 10 of the 19 unbound capabilities cite `pyproject-toml` among their
 claims and 4 cite nothing else (`cap-keycloak`, `cap-langchain-community`,
 `cap-ollama-backend`, `cap-openai-backend`) — dependency lines promoted to
 capabilities, which is an `rb-reconcile-capabilities` accounting question and
-issue #17's third suggestion. It is parked for a different reason than this
-entry: it is a prompt change that only a paid dispatch can validate, and
-entangling it with the arithmetic would have blocked a deterministic fix behind
-that dispatch. Do not read the two numbers as one — 10 is how many cite the file
-at all, 4 is how many rest on nothing else. The two have been conflated once
-already, in a write-up that gave the second count as five and then listed four
-ids; both figures here are re-measured off the run named above, and this is the
-live record of them.
+[the undrivable denominator](findings.md#the-undrivable-denominator)'s third
+suggestion. It is parked for a different reason than this entry: it is a prompt
+change that only a paid dispatch can validate, and entangling it with the
+arithmetic would have blocked a deterministic fix behind that dispatch. Do not
+read the two numbers as one — 10 is how many cite the file at all, 4 is how many
+rest on nothing else. The two have been conflated once already, in a write-up
+that gave the second count as five and then listed four ids; both figures here
+are re-measured off the run named above, and this is the live record of them.
 
 **And do not read this 10 as the table's 10 either, which is the harder mistake
 because the two numbers are equal and their sets are not.** The editorial table's
@@ -2109,25 +2119,27 @@ On a corpus whose container elements classify as `other` rather than `trace`,
 the mitigation does not apply at all — such elements cluster on skeleton shape
 alone.
 
-Issue #4 was read as an instance of that, and the reading was wrong twice over.
-Measured on the skeleton digests those 200 tau2 chat trajectories used to get,
-the digests were **39 distinct**, largest identical group 18, differing only by
-message count — not identical, as this entry previously said. They no longer get
-a skeleton at all: they classify `trace`, and their digests carry `names`, which
-is where the 68 toolset signatures in the entry below come from. So the
-conclusion cannot rest on a skeleton carrying neither `heuristics_fired` nor
-`names` — it rests on the grouping key described below, which holds before and
-after.
+The finding recorded as [the chat-trajectory
+skeletons](findings.md#the-chat-trajectory-skeletons) was read as an instance of
+that, and the reading was wrong twice over. Measured on the skeleton digests
+those 200 tau2 chat trajectories used to get, the digests were **39 distinct**,
+largest identical group 18, differing only by message count — not identical, as
+this entry previously said. They no longer get a skeleton at all: they classify
+`trace`, and their digests carry `names`, which is where the 68 toolset
+signatures in the entry below come from. So the conclusion cannot rest on a
+skeleton carrying neither `heuristics_fired` nor `names` — it rests on the
+grouping key described below, which holds before and after.
 
-The second correction is the ordering. The projection that made #4 look
-downstream of this design — roughly 5,425 candidates and ~2.9MB, past both of
-`survey`'s caps — holds only if chat trajectories *explode* into one candidate
-per message. They should not: a trajectory is one episode, in which message 7 is
-unreadable without 1 through 6, which is the same shape the OpenAPI ruling keeps
-whole. Measured for the file-level digest instead: 443 candidates unchanged, a
-472,799-byte catalogue against a 444,355-byte baseline, 7 slices. The candidate
-count does not change at all and the byte figure barely moves, so there is no
-ordering dependency in either direction.
+The second correction is the ordering. The projection that made the
+chat-trajectory skeletons look downstream of this design — roughly 5,425
+candidates and ~2.9MB, past both of `survey`'s caps — holds only if chat
+trajectories *explode* into one candidate per message. They should not: a
+trajectory is one episode, in which message 7 is unreadable without 1 through 6,
+which is the same shape the OpenAPI ruling keeps whole. Measured for the
+file-level digest instead: 443 candidates unchanged, a 472,799-byte catalogue
+against a 444,355-byte baseline, 7 slices. The candidate count does not change
+at all and the byte figure barely moves, so there is no ordering dependency in
+either direction.
 
 That "should not" was a ruling with nothing enforcing it, and the gap was not
 theoretical. The trajectory files those figures were taken on are the stripped
@@ -2578,20 +2590,22 @@ now pins both commands at 2 and goes red under exactly the guard someone might
 add.
 
 **Why it is parked, when the other half of the same defect was closed in this
-branch.** Two grounds, and neither reaches this half. Issue #6 widened
-`utilisation._cited_claim_ids` so that a world-model *container* it cannot walk is
-skipped rather than raised through, and it closed every container that walk
+branch.** Two grounds, and neither reaches this half. Closing [the read-coverage
+variance](findings.md#the-read-coverage-variance) widened
+`utilisation._cited_claim_ids` so that a world-model *container* it cannot walk
+is skipped rather than raised through, and it closed every container that walk
 touches — three of which, `gaps`, `capabilities[].outcome_classes` and
 `entities[].invariants`, are walks the same change had just added, so it was
 cleaning up after itself as much as inheriting a hole. It never touched the
 `01-claims/` path. Underneath that sat a prior ruling, recorded in
 `tests/unit/test_summary.py::test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run`
-rather than here: these shapes were to be guarded in `summary.py` and not widened
-in `utilisation.py`, on the grounds that `run-summary`'s "Present but unreadable"
-marker is a signal a widening would delete. That ruling was half overturned and
-half left standing, which is why a reader now finds two records of one decision —
-and it is the main reason this entry exists, so the split is on the record here
-instead of only in a docstring a reader has to already know to open.
+rather than here: these shapes were to be guarded in `summary.py` and not
+widened in `utilisation.py`, on the grounds that `run-summary`'s "Present but
+unreadable" marker is a signal a widening would delete. That ruling was half
+overturned and half left standing, which is why a reader now finds two records
+of one decision — and it is the main reason this entry exists, so the split is
+on the record here instead of only in a docstring a reader has to already know
+to open.
 
 **The exit-code argument reaches both halves equally, and this entry must not be
 read as saying otherwise.** Each shape in the table takes two reports to exit 1
@@ -2662,7 +2676,9 @@ is the mirror case: `check_manifest` indexes the same document earlier in
 `check-refs` caller can observe, and would be a fix asserted in prose that the
 exit code does not show. The same holds for `01-capabilities.json` and
 `01-outcomes.json`, which `check_outcomes` reads unguarded before this checker is
-reached; that reader predates issue #6 and is the class this entry already parks.
+reached; that reader predates the closure of [the read-coverage
+variance](findings.md#the-read-coverage-variance) and is the class this entry
+already parks.
 
 Reachable only by a hand-edit or a tampered artifact: measured, layer 1 exits 1
 on every one of these shapes at the stage that wrote it — `validate --stage
@@ -2692,7 +2708,8 @@ by `check_input_dispositions`, which reads the generic walk, and **not** counted
 `claim_utilisation`, and **not** resolved by `check_world_model` — leaving a
 fabricated id at that site uncheckable, while every site-list test helper stayed
 green, because a helper that strips a site it does not know about strips nothing.
-Issue #6 is the demonstration: it added three nested sites, and closing them meant
+[The read-coverage variance](findings.md#the-read-coverage-variance) is the
+demonstration: its closure added three nested sites, and closing them meant
 editing each of the site lists by hand.
 
 Recorded rather than collapsed, because the two kinds of reader are not
@@ -3508,9 +3525,10 @@ Appended at the end of this section rather than beside the entry it cites,
 because two entries above already say "the entry above it" and an insertion
 would have silently repointed them.
 
-Added with `difficulty_understated` (issue #37). The flag closes half a hole; the
-other half stays open, so the shape is worth writing down rather than
-rediscovering.
+Added with `difficulty_understated` ([the unrecordable
+understatement](findings.md#the-unrecordable-understatement)). The flag closes
+half a hole; the other half stays open, so the shape is worth writing down
+rather than rediscovering.
 
 **What is caught now.** `rb-challenge` compares its own
 `minimum_tool_calls_found` against the scenario's claimed `hop_depth` in both

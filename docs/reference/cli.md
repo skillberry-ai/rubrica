@@ -753,16 +753,17 @@ model cites, a fact about the artifact rather than about any pass's diligence.
 claim kind states, in its partial's `inputs_seen`, how many claims of its own
 kinds each input holds and how many of them it cited, and this block prints that
 pass's own-kind rate on one line. Reading only the first of the two is what hid
-issue #6: on one measured run per-input utilisation read 33.6% while the pass
-that had read every claims file was citing 110 of 135 claims of its own kind, and
-the pass that had read three of twenty-three was citing 2 of 38 — a per-artifact
-number cannot say which pass did the citing, so one diligent pass masks another's
-skipped file. Under each pass, only the rows that dropped a claim are printed,
-each beside the `note` the drop required; a run's accounting is total over
-`manifest.inputs`, so most rows read `0/0/0` and printing them would bury the one
-line a human is at this gate to rule on. A pass whose partial is absent or
-carries no readable rows is named as such rather than omitted, and a run with no
-partial carrying an accounting at all says so instead.
+[the read-coverage variance](../design/findings.md#the-read-coverage-variance):
+on one measured run per-input utilisation read 33.6% while the pass that had
+read every claims file was citing 110 of 135 claims of its own kind, and the
+pass that had read three of twenty-three was citing 2 of 38 — a per-artifact
+number cannot say which pass did the citing, so one diligent pass masks
+another's skipped file. Under each pass, only the rows that dropped a claim are
+printed, each beside the `note` the drop required; a run's accounting is total
+over `manifest.inputs`, so most rows read `0/0/0` and printing them would bury
+the one line a human is at this gate to rule on. A pass whose partial is absent
+or carries no readable rows is named as such rather than omitted, and a run with
+no partial carrying an accounting at all says so instead.
 
 Gate 1 also lists **the capabilities the coverage denominator excludes** — every
 capability declaring no `binding.tool`, with the cells it would have added, its
