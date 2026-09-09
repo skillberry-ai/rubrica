@@ -50,10 +50,10 @@ def claim_utilisation(run: RunPaths) -> dict:
         # The exit-0 contract argument that widened the world-model reads below
         # reaches these reads just as far: they are the same breach, two reports at
         # exit 1 on a readable run. What keeps them unguarded is scope, not the
-        # contract -- issue #6 widened the world-model walk and never touched this
-        # path, and only that half was ruled in -- so this is a live hole, and the
-        # ruling that parks it belongs in docs/design/limitations.md rather than
-        # only in a comment here.
+        # contract -- closing the read-coverage variance (docs/design/findings.md)
+        # widened the world-model walk and never touched this path, and only that
+        # half was ruled in -- so this is a live hole, and the ruling that parks it
+        # belongs in docs/design/limitations.md rather than only in a comment here.
         ids = [claim["id"] for claim in payload.get("claims", [])]
         used = sum(1 for claim_id in ids if claim_id in cited)
         artifacts.append(
@@ -80,13 +80,13 @@ def _cited_claim_ids(run: RunPaths) -> set[str] | None:
         for item in _elements(world.get(group)):
             cited.update(_claim_ids(item.get("claims")))
     # The three nested sites. `$defs/invariant`, `$defs/outcome_class` and
-    # `$defs/gap` carried no `claims` array at all until issue #6, so an
-    # invariant's provenance had to go on its entity or into `description`
-    # prose. Measured on run-20260823-112746 while that was still true:
-    # `invariant` claims were cited 0 of 55 times and `outcome_class` 7 of 62,
-    # with 24 more appearing only inside prose -- 117 of 434 claims, 27% of
-    # the corpus, that this function could not see. Walking the children is
-    # what makes those citations structural rather than prose.
+    # `$defs/gap` carried no `claims` array at all until the read-coverage variance
+    # was closed, so an invariant's provenance had to go on its entity or into
+    # `description` prose. Measured on run-20260823-112746 while that was still
+    # true: `invariant` claims were cited 0 of 55 times and `outcome_class` 7 of
+    # 62, with 24 more appearing only inside prose -- 117 of 434 claims, 27% of the
+    # corpus, that this function could not see. Walking the children is what makes
+    # those citations structural rather than prose.
     for capability in _elements(world.get("capabilities")):
         for outcome_class in _elements(capability.get("outcome_classes")):
             cited.update(_claim_ids(outcome_class.get("claims")))
@@ -125,8 +125,9 @@ def _elements(value) -> list[dict]:
     it yields characters that then reach `.get` -- and an integer raised
     `TypeError: 'int' object is not iterable`. Both reports exited 1 with one
     fabricated `[internal]` finding. Three of those eight containers -- `gaps`,
-    `outcome_classes` and `invariants` -- are walks issue #6 added, so those
-    crashes were through a path this build created rather than one it inherited.
+    `outcome_classes` and `invariants` -- are walks added when the read-coverage
+    variance was closed, so those crashes were through a path this build created
+    rather than one it inherited.
 
     Guarding here rather than at the gate that reads it is the point: a layer-2
     checker that raises degrades to an `internal` finding at exit 1, which is bad
@@ -154,9 +155,10 @@ def _claim_ids(value) -> list[str]:
     cli.py turned that into exit 1 with one fabricated `[internal]` finding for
     `claim-utilisation` and for `gate-brief --gate 1`, which reads this report.
     Both are reports, and a report always exits 0 on a readable run -- so that
-    was a violation of the exit-code contract, not a strictness question. Issue
-    #6 widened the exposure from four citation sites to seven and `gaps[].claims`
-    is the newest of them, but the shape was always reachable.
+    was a violation of the exit-code contract, not a strictness question. Closing
+    the read-coverage variance widened the exposure from four citation sites to
+    seven and `gaps[].claims` is the newest of them, but the shape was always
+    reachable.
 
     A non-list `claims` is dropped whole for `refs._as_list`'s measured reason,
     and a bare string is the sharper case of it: `set.update("clm-api-001")` does

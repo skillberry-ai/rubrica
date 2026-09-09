@@ -260,7 +260,8 @@ RUN_DENY=("$RUN/decisions.md" "$RUN/measurement")
 #
 # MEASURED 2026-09-01, three dispatches replicating this script's own flags at
 # Claude Code 2.1.252 (~$0.49, transcripts under /tmp were throwaway; the matrix is
-# in docs/design/limitations.md and on issue #18):
+# in docs/design/limitations.md and under the enumeration deadlock in
+# docs/design/findings.md):
 #
 #   sandbox live        `ls`, `find`, `rubrica --help` all run. A `python3 -c
 #                       open()` of a denyRead path got Errno 13, so that layer does
@@ -274,10 +275,11 @@ RUN_DENY=("$RUN/decisions.md" "$RUN/measurement")
 #                       needing approval. So dropping the block does NOT hand a
 #                       stage the answer key, and does not cost it enumeration.
 #
-# The middle state is the one that cost issue #18 38 turns and $3.72 for no
-# artifact, and it is invisible from the outside: `failIfUnavailable` makes the
-# sandbox loud about not engaging, but the dispatch proceeds and exits 0 regardless.
-# So the choice is made here, before a stage is handed a shell where nothing runs.
+# The middle state is the one that cost the enumeration deadlock's dispatch 38
+# turns and $3.72 for no artifact, and it is invisible from the outside:
+# `failIfUnavailable` makes the sandbox loud about not engaging, but the dispatch
+# proceeds and exits 0 regardless. So the choice is made here, before a stage is
+# handed a shell where nothing runs.
 #
 # `--proc` is the discriminating part of the probe. Without it the same command
 # exits 0 on the pod that motivated this, which is precisely how the fault stayed
@@ -368,7 +370,7 @@ done
 # The write scope comes from the stage's own contract rather than from the run
 # directory, and that is the enforcement of a ruling rather than a tightening for
 # its own sake. `Write(/$RUN/**)` let a stage write anything inside the run, and one
-# did: the `rb-triage-objective` dispatch documented in issue #12 put a
+# did: the `rb-triage-objective` dispatch recorded under the digest over-read put a
 # `compute_weights.py` helper in the run root -- not an artifact, covered by no
 # schema, cleaned up by nothing, and `check-refs` exits 0 with it present. The one
 # mechanism that looks for unmanaged files keeps `p.name` where `".tmp." in p.name`,
@@ -631,10 +633,11 @@ fi
 # A ceiling is not a neutral guard -- it kills the dispatch where it stands, and
 # both measured kills cost more than the money they saved. `summary.py`'s
 # `orphaned_temp_files` docstring records one killing a reconcile pass mid-write,
-# leaving a `02-scenarios.json.tmp.*` a human removed by hand; issue #18's
-# reconcile-subjects dispatch spent 38 turns and $3.72 of a $10 ceiling without
-# writing anything. Neither is legible from the run afterwards, because a killed
-# dispatch and a refusing one leave the same evidence: no artifact.
+# leaving a `02-scenarios.json.tmp.*` a human removed by hand; the enumeration
+# deadlock's reconcile-subjects dispatch spent 38 turns and $3.72 of a $10
+# ceiling without writing anything. Neither is legible from the run afterwards,
+# because a killed dispatch and a refusing one leave the same evidence: no
+# artifact.
 #
 # What replaces it is the cost report below, which is strictly more information
 # than the old default carried -- a run under a ceiling of 2 never recorded that

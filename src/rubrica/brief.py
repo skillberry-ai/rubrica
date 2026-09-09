@@ -42,13 +42,14 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   `unresolved` -- is not something layer 2 can see, and a non-zero `unresolved`
   in the tally is the cheapest signal that there is a part worth opening.
   Read coverage is reported *per pass* beside the per-input utilisation, and the
-  two are not the same measure: utilisation is a fact about an input, and issue
-  #6 measured a run where averaging it across every citing pass reported 33.6%
-  while one pass was citing 110 of 135 claims of its own kind and another 2 of
-  38. Each pass's own-kind rate is its own line, and only the rows that dropped
-  a claim are printed under it, each beside the note the drop required. A pass
-  that wrote no readable accounting gets a line too, saying so: a pass silently
-  missing from a block of four is the anomaly a reader is at this gate to notice.
+  two are not the same measure: utilisation is a fact about an input, and a run
+  was measured where averaging it across every citing pass reported 33.6% while
+  one pass was citing 110 of 135 claims of its own kind and another 2 of 38 --
+  the read-coverage variance (docs/design/findings.md). Each pass's own-kind rate
+  is its own line, and only the rows that dropped a claim are printed under it,
+  each beside the note the drop required. A pass that wrote no readable
+  accounting gets a line too, saying so: a pass silently missing from a block of
+  four is the anomaly a reader is at this gate to notice.
   The capabilities the coverage denominator *excludes* are listed here too, and
   what makes this listing matter is its timing rather than any uniqueness: the
   same exclusion is reported twice more, and both are too late to act on.
@@ -59,15 +60,15 @@ that already exist (`utilisation.claim_utilisation`, coverage, verdicts) plus
   (emit.py:101-108, `to_contract`'s `unbound` closure; documented in
   world-model-0.1.json). Gate 1 precedes propose,
   so a reader who does not act here has the loop spend every round against the
-  narrowed denominator before either of those two says a word. Issue 17 narrowed
-  `denominator.capability_cells` to the cells a scenario can be driven through,
-  and the finding that was to have accompanied it miscategorised its own
-  condition -- `check-refs` exit 1 buys one stage re-dispatch, which cannot add a
-  binding `rb-reconcile-capabilities` was told not to guess. Both numbers print
-  either way, for the sweep's reason. Nothing here classifies *why* a binding is
-  absent, because that is semantic; the operation and the citing inputs are
-  printed so a reader can group them, and the remedy is named because a reader at
-  this gate is the last person who can act on it.
+  narrowed denominator before either of those two says a word. Closing the
+  undrivable denominator narrowed `denominator.capability_cells` to the cells a
+  scenario can be driven through, and the finding that was to have accompanied it
+  miscategorised its own condition -- `check-refs` exit 1 buys one stage
+  re-dispatch, which cannot add a binding `rb-reconcile-capabilities` was told not
+  to guess. Both numbers print either way, for the sweep's reason. Nothing here
+  classifies *why* a binding is absent, because that is semantic; the operation
+  and the citing inputs are printed so a reader can group them, and the remedy is
+  named because a reader at this gate is the last person who can act on it.
   Last of gate 1's content sections comes one block per **service** a simulator
   would stand in for: its grouping and the evidence cited for it, its tools, any
   schema disagreement the pass had to resolve, every signal beside its locator, and
@@ -1398,14 +1399,14 @@ def _gate_1(run: RunPaths) -> str:
     lines.append("")
 
     # Per pass, not per input, and that distinction is the whole point: the block
-    # above is an aggregate across every citing pass, which is what hid issue #6.
-    # Measured on run-20260823-112746, utilisation read 33.6% while the pass that
-    # had read every claims file was citing 110 of 135 claims of its own kind and
-    # the pass that had read three of twenty-three was citing 2 of 38 -- and
-    # trajectories-json-9 reported 13 claims cited, every one of them a capability
-    # claim, while the goals pass never opened the file. A per-artifact number
-    # cannot say which pass did the citing, so one diligent pass masks another's
-    # skipped file.
+    # above is an aggregate across every citing pass, which is what hid the
+    # read-coverage variance. Measured on run-20260823-112746, utilisation read
+    # 33.6% while the pass that had read every claims file was citing 110 of 135
+    # claims of its own kind and the pass that had read three of twenty-three was
+    # citing 2 of 38 -- and trajectories-json-9 reported 13 claims cited, every one
+    # of them a capability claim, while the goals pass never opened the file. A
+    # per-artifact number cannot say which pass did the citing, so one diligent
+    # pass masks another's skipped file.
     lines.append("Read coverage, per pass")
     rendered = False
     for attribute, own_kinds in PASS_OWN_KINDS:

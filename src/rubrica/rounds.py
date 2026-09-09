@@ -936,12 +936,12 @@ def _live_statuses() -> frozenset[str]:
 def capability_matrix(world: dict, scenarios: list[dict]) -> dict:
     """One cell per capability x outcome-class pair the target can be driven on.
 
-    Not every pair the world model *declares* -- that was the rule before issue
-    17, and the fourth bullet below is the narrowing that replaced it. This line
-    is worth its own correction because it went on saying "declares" after the
-    body below stopped meaning it, so a reader grepping for the change that IS
-    issue 17 met the superseded rule first and its replacement twelve lines
-    later.
+    Not every pair the world model *declares* -- that was the rule before the
+    undrivable denominator (docs/design/findings.md) was closed, and the fourth
+    bullet below is the narrowing that replaced it. This line is worth its own
+    correction because it went on saying "declares" after the body below stopped
+    meaning it, so a reader grepping for the change that IS that narrowing met the
+    superseded rule first and its replacement twelve lines later.
 
     Transcribed from rb-score's Method step 4, which already specifies it as a
     pure function of the world model and the scenario list -- so this takes over

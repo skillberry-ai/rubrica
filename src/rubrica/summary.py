@@ -807,7 +807,8 @@ def utilisation(run: RunPaths) -> Utilisation | Marker:
     Three world-model shapes used to be on that list -- a group member that is a
     string, `"contradictions": ["oops"]`, `"capabilities": "nope"`, all three
     `AttributeError: 'str' object has no attribute 'get'` out of
-    `_cited_claim_ids`. Issue #6 widened `utilisation.py` for those instead of
+    `_cited_claim_ids`. Closing the read-coverage variance
+    (docs/design/findings.md) widened `utilisation.py` for those instead of
     guarding them here, because `claim-utilisation` and `gate-brief` are reports
     that must exit 0 on a readable run and neither has a findings channel to report
     a malformed document through. They no longer reach this guard, and this page
@@ -817,13 +818,14 @@ def utilisation(run: RunPaths) -> Utilisation | Marker:
     **That contract argument reaches the three hand-edited-document shapes above
     just as far**: each takes both reports to exit 1 on a readable run, and
     `utilisation.py` says so beside the unguarded line. What kept them here is
-    scope and authorisation, not the contract -- issue #6 widened the world-model
-    walk and never touched the `01-claims/` path, the ruling being overturned was
-    written specifically about these shapes with this page's marker attached to
-    them, and only the world-model half was ruled in. So this guard is the whole
-    answer for them *for now*, and it is a known-wrong thing rather than a settled
-    one -- which belongs in `docs/design/limitations.md`, where this project keeps
-    what it knows is wrong, rather than only in a comment beside the code.
+    scope and authorisation, not the contract -- closing the read-coverage variance
+    widened the world-model walk and never touched the `01-claims/` path, the
+    ruling being overturned was written specifically about these shapes with this
+    page's marker attached to them, and only the world-model half was ruled in. So
+    this guard is the whole answer for them *for now*, and it is a known-wrong
+    thing rather than a settled one -- which belongs in
+    `docs/design/limitations.md`, where this project keeps what it knows is wrong,
+    rather than only in a comment beside the code.
 
     **The fourth bullet is not part of that hole, and closing it would be a
     regression.** An unreadable `01-claims/` is a filesystem problem, and the
@@ -1255,9 +1257,10 @@ class ScenarioRow:
     has_instance: bool
     suite_files: list[str]
     difficulty_overstated: bool
-    # The mirror, added for issue #37. Two fields rather than one tri-state, because
-    # every reader of this row is a report that surfaces one direction or the other
-    # and a tri-state would make each of them branch on a value meaning "neither".
+    # The mirror, added for the unrecordable understatement. Two fields rather than
+    # one tri-state, because every reader of this row is a report that surfaces one
+    # direction or the other and a tri-state would make each of them branch on a
+    # value meaning "neither".
     difficulty_understated: bool
 
 
@@ -1379,19 +1382,20 @@ def scenarios(run: RunPaths) -> list[ScenarioRow] | Marker:
                 # `_as_int`'s, which renders `True` as 1 rather than crash, because
                 # rendering a count is not asserting a relation between two.
                 #
-                # Hoisted into one name for issue #37, which added the opposite
-                # direction: the guard is a property of the *pair of operands*, not
-                # of either inequality, and duplicating it inline would let the two
-                # flags drift apart on which malformed documents they tolerate. The
-                # `bool` half is not inherited either -- `True > 0` and `2 > True`
-                # are the nonsense comparisons that reach the understated flag, and
-                # neither is one of the two that reach its sibling.
+                # Hoisted into one name for the unrecordable understatement, which
+                # added the opposite direction: the guard is a property of the *pair
+                # of operands*, not of either inequality, and duplicating it inline
+                # would let the two flags drift apart on which malformed documents
+                # they tolerate. The `bool` half is not inherited either --
+                # `True > 0` and `2 > True` are the nonsense comparisons that reach
+                # the understated flag, and neither is one of the two that reach its
+                # sibling.
                 difficulty_overstated=(comparable and found < hop),
                 # An understated hop_depth is the consequential direction: coverage
                 # is credited per hop depth, so a scenario tagged shallower than it
                 # is credits a depth nothing actually tests. Before this flag existed
-                # the adversary that found one had only free-text `notes` (issue #37,
-                # measured on run-20260907-065438).
+                # the adversary that found one had only free-text `notes` (the
+                # unrecordable understatement, measured on run-20260907-065438).
                 difficulty_understated=(comparable and found > hop),
             )
         )
@@ -1650,10 +1654,10 @@ def flags(run: RunPaths) -> list[Flag]:
     rows = scenarios(run)
     if isinstance(rows, list):
         # Understated first, and the order is the finding rather than a style
-        # choice (issue #37). An overstated hop_depth wastes a tool call; an
-        # understated one ships a mislabelled scenario, and because coverage is
-        # credited per hop depth it can credit a goal's shallower depth with a
-        # scenario that exercises a deeper one -- leaving the shallow depth
+        # choice (the unrecordable understatement). An overstated hop_depth wastes
+        # a tool call; an understated one ships a mislabelled scenario, and because
+        # coverage is credited per hop depth it can credit a goal's shallower depth
+        # with a scenario that exercises a deeper one -- leaving the shallow depth
         # untested while the matrix reports it covered. The more consequential
         # direction is not allowed to sit below its sibling in a list read
         # top-down.
