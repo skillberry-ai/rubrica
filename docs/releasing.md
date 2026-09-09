@@ -36,10 +36,30 @@ The release page is created on `$RELEASE_GH_REPO`, which defaults to
 `RELEASE_SKIP_GH=1` skips the page entirely, and `RELEASE_REMOTE` selects the
 push remote (default `origin`).
 
-`CHANGELOG.md` ships with a Keep a Changelog header and nothing below it:
-`scripts/release.sh` prepends every section, so the file grows only at release
-time. What lands in a section is the Conventional Commit subject as written, so
-write the subject you would want to read there.
+## The changelog
+
+`CHANGELOG.md` is `# Changelog` and nothing else, and **that is a constraint
+rather than an omission.** `scripts/release.sh` inserts each new section
+immediately under the header and re-emits everything else below it, so any prose
+added to that file lands *under* the newest release section and sinks one section
+further with every release after it. No position in the file stays above the
+sections, which is why the format is explained here instead of there. The file
+follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
+follows [Semantic Versioning](https://semver.org/) — currently `0.x`, so anything
+may change.
+
+What lands in a section is the Conventional Commit subject as written, so write
+the subject you would want to read there.
+
+**There are no `compare` links.** Keep a Changelog pairs each version with a link
+to GitHub's compare view; `scripts/release.sh` generates none, neither an
+`[Unreleased]` one nor a per-version one. A seeded `[Unreleased]:` link
+definition is not a substitute and used to be in this repository: no `[Unreleased]`
+text referenced it, so it rendered as nothing, its `compare/main...HEAD` target
+compared `main` to itself, and it sank below the sections like any other line.
+Delivering them means teaching the script to mint one per release, which is a
+change to a script this repository transplanted rather than wrote, and it has not
+been made.
 
 ## PyPI
 
@@ -73,6 +93,23 @@ script created, on a `chore(release): vX.Y.Z` commit at `HEAD` whose
 `pyproject.toml` already holds that version. A tag made or pushed by hand is
 rejected with `tag vX.Y.Z already exists locally`, since there would be no bump
 and no changelog section to publish.
+
+## Exit codes: one divergence from the project's contract
+
+Rubrica's exit-code contract reserves `2` for a usage error or an unreadable,
+misconfigured run and `1` for findings. `scripts/release.sh` does not follow it,
+and the divergence is recorded here rather than fixed. Its `usage()` exits `2`,
+but every other failure routes through `die()`, which exits `1` — including four
+states the contract assigns to `2`: `not inside a git repository`, `gh is not
+installed or not on PATH`, `uv.lock exists but uv is not on PATH`, and `must be
+on main to cut a release`. Each is a misconfigured environment, and each reports
+`1`.
+
+It stays that way because the script is a transplant kept in step with the
+sibling repository it came from, and because nothing branches on its exit code
+the way the orchestrator branches on a stage's — the contract exists so a `1` can
+be retried and a `2` cannot, and there is no retry loop here. So do not read a
+`1` from `release.sh` as "findings"; read the message.
 
 ## Tests
 

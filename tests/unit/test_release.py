@@ -38,7 +38,26 @@ version = "0.1.0"
 requires-python = ">=3.13"
 """
 
-CHANGELOG = "# Changelog\n\nNotable changes, newest first.\n"
+# Eight lines below the header, not one, and the length is the point. The real
+# CHANGELOG.md used to carry three paragraphs and a link definition here, and the
+# insertion below re-emits every one of them *under* the newest release section --
+# a one-line preamble made that displacement look like a rounding error instead of
+# the whole shape of the file. Sections and a link definition too, so a positional
+# assertion has something to be wrong about.
+CHANGELOG_PREAMBLE = """Notable changes to the fixture, newest first. The format follows
+Keep a Changelog, and this project follows Semantic Versioning --
+currently `0.x`, so anything may change.
+
+Sections below are generated at release time from Conventional Commit
+subjects since the previous release tag.
+
+[Unreleased]: https://example.invalid/compare/main...HEAD
+"""
+CHANGELOG = f"# Changelog\n\n{CHANGELOG_PREAMBLE}"
+
+# The first line of the preamble, used wherever a case needs to say where the
+# preamble ended up relative to the new section.
+CHANGELOG_PREAMBLE_FIRST_LINE = CHANGELOG_PREAMBLE.splitlines()[0]
 
 # The fixture sets every git setting release.sh depends on in the repository's own
 # config, so the developer's global and system config must not reach it. This is
@@ -274,6 +293,20 @@ def test_the_changelog_gains_a_section_and_keeps_one_trailing_newline(
     assert "## v0.1.0" in text
     assert "- **scope:** a feature" in text
     assert text == text.rstrip("\n") + "\n", "exactly one trailing newline"
+
+    # *Where* the section lands, not merely that it is present. The insertion
+    # point is immediately under the header, which is what makes a header-only
+    # seed the only shape that stays coherent across releases.
+    assert text.startswith("# Changelog\n\n## v0.1.0"), (
+        "the section is not directly under the header"
+    )
+    if starting_changelog is CHANGELOG:
+        # And the consequence, asserted rather than described: prose that was
+        # under the header is now under the *section*. This is why the
+        # repository's own CHANGELOG.md carries none -- see the case below.
+        assert text.index("## v0.1.0") < text.index(CHANGELOG_PREAMBLE_FIRST_LINE), (
+            "the preamble did not sink below the new section"
+        )
 
 
 def test_the_release_commit_and_tag_are_both_signed(fixture_repo):
@@ -563,6 +596,39 @@ def test_a_hand_written_changelog_preamble_survives(fixture_repo):
     assert text.count("# Changelog\n") == 1, "the header was duplicated"
     assert "## v0.1.0" in text, "the previous release section was lost"
     assert text == text.rstrip("\n") + "\n", "exactly one trailing newline"
+    # Survives, but not where its author put it, and "survives" on its own reads
+    # as "is preserved" -- which is the claim this case used to leave a reader
+    # with and is not true. Measured: the line sinks past exactly the one new
+    # section, so it ends up between v0.2.0 and the v0.1.0 it was written above.
+    # One place lower per release, which is the whole argument for seeding the
+    # repository's own CHANGELOG.md with the header alone.
+    assert (
+        text.index("# Changelog")
+        < text.index("## v0.2.0")
+        < text.index("Hand-written preamble line")
+        < text.index("## v0.1.0")
+    ), f"the preamble did not sink past exactly the new section:\n{text}"
+
+
+def test_the_repositorys_own_changelog_is_seeded_with_the_header_and_nothing_else():
+    """The seed shape the insertion above requires, asserted on the real file.
+
+    Not a style rule. `release.sh` re-emits everything below line 1 *after* the
+    new section, so prose seeded here would appear under the newest release and
+    move down at every release after that. The file this repository shipped
+    before this case existed carried three paragraphs and an `[Unreleased]:` link
+    definition; simulating the first release put all of it below the v0.1.0
+    section, left "Sections below are generated at release time" pointing at
+    nothing, and left the link definition dangling -- no `[Unreleased]` text
+    referenced it, so it rendered as nothing at all.
+
+    The explanation of the format lives in docs/releasing.md, which is a file the
+    insertion cannot move.
+    """
+    text = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert text == "# Changelog\n", (
+        f"CHANGELOG.md must be the header alone until release.sh writes a section; found {text!r}"
+    )
 
 
 def test_tempfiles_are_cleaned_up(fixture_repo):
