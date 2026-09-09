@@ -27,9 +27,9 @@ allows) and commit the resulting `uv.lock`. CI installs with `uv sync
 with `pyproject.toml` rather than quietly re-resolving — so a forgotten
 re-lock is a red gate, not a silent divergence between your machine and CI.
 
-## The gates CI runs
+## The gates, and the rest of what CI runs
 
-CI runs exactly three checks, in this order:
+The project's gates are these, in this order:
 
 1. **Lint and format** — `ruff check .` and `ruff format --check .`, making no
    changes.
@@ -37,6 +37,13 @@ CI runs exactly three checks, in this order:
 3. **Skill contracts** — `rubrica check-skills`, validating every skill's
    `## Contract` block against the code that owns those names (stages, artifact
    kinds, subcommands).
+
+**The gates are not all of CI, and this file will not tell you how much more
+there is** — that number has gone stale here before. `.github/workflows/ci.yml`
+carries the gates in its `check` job and a `dco` job beside them, which fails a
+PR whose commits lack a `Signed-off-by` trailer; further workflows in
+`.github/workflows/` run code scanning and dependency review on the same events.
+Read that directory for the current set.
 
 A red gate is not mergeable. Run all three locally before opening a PR — these
 `make` targets are the same three checks, in the same order:
@@ -57,7 +64,7 @@ in CI while this file claims it does.
 
 `make live` dispatches a model against the `live`-marked tests, gated by
 `RUBRICA_LIVE` and the `live` pytest marker. Running it against the
-recordings already committed in the repo is free — that's what CI's three
+recordings already committed in the repo is free — that's what the three
 gates exercise indirectly, since they never touch `live` tests at all.
 *Producing* a new recording costs money, because it means an actual model
 call. For that reason `make live` and `RUBRICA_LIVE` never run in CI, and a

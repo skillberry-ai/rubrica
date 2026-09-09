@@ -214,9 +214,9 @@ _NUMBER = (
 # sense from the closed one: `## The three gates you must pass`, over the three
 # checks CI runs, matches too, and that is semantically the `Two check layers`
 # case rather than a defect. Rewording the heading is the right response to such
-# a hit -- CONTRIBUTING.md's own section is titled `## The gates CI runs` for
-# exactly this reason -- because narrowing the token would cost the predicate the
-# case it exists for. Judge a hit before obeying it.
+# a hit -- CONTRIBUTING.md's own section is titled `## The gates, and the rest of
+# what CI runs` for exactly this reason -- because narrowing the token would cost
+# the predicate the case it exists for. Judge a hit before obeying it.
 _GROWING = r"(?:stages?|skills?|subcommands?|gates?)"
 # `[ \t]` rather than `\s`, twice, and `[^\n]*` rather than `.*`: with `\s+` the
 # pattern spans the newline at the end of a heading and consumes words from the
