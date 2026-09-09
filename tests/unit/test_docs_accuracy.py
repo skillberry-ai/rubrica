@@ -238,6 +238,107 @@ def _doc_id(path: Path) -> str:
 _HISTORY_TREE = "superpowers"
 
 
+# Citations of the internal tracker. Issue numbers do not survive the move to the
+# public repository: its own numbering starts from one, so a bare hash-and-number
+# written here resolves to a different, unrelated issue there. That is worse than a
+# dead link -- it is a live link to the wrong thing -- so every citation was
+# rewritten to name its finding and point at docs/design/findings.md.
+#
+# `\s+` rather than a space, and no line anchors, because four citations wrapped
+# across a line break: the word `issue` ended one line and the number began the
+# next, in brief.py, refs.py, rounds.py and utilisation.py. A line-scoped search
+# reports fewer hits than exist, so a line-based guard would have gone green over
+# the exact four it could not see -- a passing gate over the defect it exists for.
+#
+# `PR #N` and `(#N)` are included although the tree carried none of either when
+# this was written: both are pointer forms a future comment would reach for, and
+# the point of a guard is the citation nobody has written yet.
+_TRACKER_CITATION = re.compile(
+    r"\bissues?\s+#?\d+\b|\bPR\s+#\d+\b|\(#\d+\)",
+    re.IGNORECASE,
+)
+
+# The bare form, and it is not optional. Measured over the pre-rewrite tree
+# (commit 3300022, both scan sets): the pattern above found 118 sites and this one
+# ten more -- a lone 19 in refs.py, a 20, two 15s and a 12 across the test tree, a
+# 36 in test_skills_reconcile_family.py, and three 3s and a 4 in limitations.md,
+# each written with a bare hash and no `issue` in front of it. One of those ten,
+# the 20, was the only citation anywhere of a fourteenth issue nobody had noticed
+# was referenced at all. A guard without this half would have gone green over every
+# one of them.
+#
+# Those numbers are written without their hash on purpose: this module is inside
+# the scan set below, so quoting a citation here would fail the predicate this
+# comment documents.
+#
+# 1-3 digits with hex-digit context excluded on both sides, because the CSS colours
+# in this repository are pure decimal (`#121514`, `#212327`) and a bare hash-digit
+# pattern otherwise matches their leading digits.
+_TRACKER_CITATION_BARE = re.compile(r"(?<![0-9A-Fa-f#])#(\d{1,3})(?![0-9A-Fa-f])")
+
+# Three false-positive families, each eyeballed against the tree rather than
+# guessed: `notes#2.md` is a filename this repo uses as a fixture example, a
+# declaration like `color: #000` is a colour and not a reference, and "Success
+# criterion #1" in test_toy_end_to_end.py is a label. Narrow this list only with
+# evidence -- each entry stands for real content that would otherwise fail the
+# gate.
+#
+# Each is quoted above in the form its own filter recognises, which makes this
+# comment a live example of that filter: break the colour rule or the criterion
+# rule and this file is the first to fail.
+_CITATION_FALSE_POSITIVES = ("notes#", "#2.md")
+
+
+def _bare_citations(text: str) -> list[str]:
+    """Bare hash-number hits, minus the three verified false-positive families.
+
+    Filtered per line rather than per match: all three families are recognisable
+    only from their context -- a bare number is a citation everywhere except beside
+    a filename like `notes#2.md`, and a three-digit one is a colour only where a
+    `color:` property precedes it.
+    """
+    out = []
+    for m in _TRACKER_CITATION_BARE.finditer(text):
+        end = text.find("\n", m.end())
+        line = text[text.rfind("\n", 0, m.start()) + 1 : end if end != -1 else len(text)]
+        if any(tok in line for tok in _CITATION_FALSE_POSITIVES):
+            continue
+        if re.search(r"(?:color|fill|background|stroke)\s*:", line):
+            continue
+        if re.search(r"criterion\s+#", line):
+            continue
+        out.append(m.group(0))
+    return out
+
+
+def _code_files() -> list[Path]:
+    """The source, test and script files the citation guard scans.
+
+    The predicates above run over documentation only. This set exists because 104
+    of the 128 tracker citations lived in code comments and docstrings -- 81% of
+    them -- so a docs-only guard would have reported a clean tree over four fifths
+    of the defect.
+
+    Fixtures and vendored trees are excluded for the same reason docs/superpowers/
+    is: tests/fixtures/ holds committed capture and recording output, a record
+    rather than prose, and a guard that fired on a record would demand an edit the
+    project's own rules forbid. Measured at commit 3300022 and again at HEAD: the
+    excluded paths carry no citation, so the exclusion costs no coverage today and
+    prevents an unfixable failure later.
+    """
+    keep = {".py", ".sh", ".json", ".md"}
+    skip = ("fixtures", "node_modules", "__pycache__")
+    out: list[Path] = []
+    for top in ("src", "tests", "scripts"):
+        for path in sorted((REPO_ROOT / top).rglob("*")):
+            if not path.is_file() or path.suffix not in keep:
+                continue
+            if any(part in skip for part in path.relative_to(REPO_ROOT).parts):
+                continue
+            out.append(path)
+    return out
+
+
 @pytest.mark.parametrize("doc", _user_facing(), ids=_doc_id)
 def test_no_user_facing_document_carries_a_hand_typed_test_count(doc):
     """The count grows with every capability, so a number typed into prose is
@@ -251,6 +352,31 @@ def test_no_heading_counts_something_that_grows(doc):
     hits = _COUNTED_HEADING.findall(_without_fences(_read(doc)))
     assert not hits, (
         f"{_doc_id(doc)} has a heading counting stages/skills/subcommands/gates: {hits}"
+    )
+
+
+@pytest.mark.parametrize("doc", _user_facing(), ids=_doc_id)
+def test_no_user_facing_document_cites_the_internal_tracker(doc):
+    """A bare hash-number resolves to an unrelated issue in the public repository.
+
+    Findings are named and anchored at docs/design/findings.md instead.
+    """
+    text = _read(doc)
+    hits = _TRACKER_CITATION.findall(text) + _bare_citations(text)
+    assert not hits, (
+        f"{_doc_id(doc)} cites the internal tracker: {hits}. "
+        "Name the finding and link docs/design/findings.md instead."
+    )
+
+
+@pytest.mark.parametrize("src", _code_files(), ids=_doc_id)
+def test_no_source_file_cites_the_internal_tracker(src):
+    """The same rule for code. 104 of the 128 citations were here."""
+    text = _read(src)
+    hits = _TRACKER_CITATION.findall(text) + _bare_citations(text)
+    assert not hits, (
+        f"{_doc_id(src)} cites the internal tracker: {hits}. "
+        "Name the finding and cite docs/design/findings.md instead."
     )
 
 
