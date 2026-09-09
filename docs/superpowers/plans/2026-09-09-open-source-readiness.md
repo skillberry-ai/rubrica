@@ -2068,11 +2068,17 @@ def test_a_non_main_branch_is_rejected(fixture_repo):
     assert "must be on main" in result.stderr
 
 
-def test_a_double_dash_does_not_swallow_the_version(fixture_repo):
-    """It used to leave VERSION empty, printing usage here but letting an empty
-    version through to the release step."""
-    result = _release(fixture_repo, "--", "0.2.0")
-    assert "0.2.0" in (result.stdout + result.stderr) or result.returncode != 0
+def test_a_bare_double_dash_with_no_version_is_rejected(fixture_repo):
+    """`--` used to leave VERSION empty: usage printed here, but an empty version
+    went through to the release step. The empty version is the failure that
+    mattered, so assert on it directly rather than on the presence of a string
+    somewhere in the combined output -- which almost nothing could fail.
+    """
+    result = _release(fixture_repo, "--")
+    assert result.returncode != 0
+    assert "sage" in result.stderr or "version" in result.stderr.lower()
+    assert _version(fixture_repo) == "0.1.0", "an empty version reached the bump"
+    assert _git(fixture_repo, "tag", "-l").stdout.strip() == ""
 
 
 # --- first release ----------------------------------------------------------
@@ -2122,8 +2128,12 @@ def test_uv_lock_is_refreshed_with_the_bump_when_present(fixture_repo):
     if result.returncode != 0 and "uv is not on PATH" in result.stderr:
         pytest.skip("uv not on PATH; the preflight check for it is the behaviour here")
     assert result.returncode == 0, result.stderr
-    assert '"0.2.0"' in (fixture_repo / "pyproject.toml").read_text() or \
-        _version(fixture_repo) == "0.2.0"
+    assert _version(fixture_repo) == "0.2.0"
+    # The point of the test: a stale lock is what breaks `uv sync --locked` in CI,
+    # so assert the lockfile's own recorded version moved -- not just pyproject's.
+    assert '0.2.0' in (fixture_repo / "uv.lock").read_text(), (
+        "uv.lock still records the old version; the re-lock step did not run"
+    )
 
 
 # --- second release ---------------------------------------------------------
