@@ -41,7 +41,13 @@ dependencies = [
 # the belt to that braces: it bounds what `uv lock --upgrade` can pull in, so a
 # formatter bump has to be a deliberate widening of this line rather than a
 # side effect of refreshing the lock.
-dev = ["pytest>=8.3", "ruff>=0.8,<0.17"]
+# pyyaml is a test-only dependency and the reason is a gate, not a convenience:
+# nine tracked files under .github/ are YAML, ruff does not read YAML, and
+# tests/unit/test_github_workflows.py is the only thing in this repository that
+# parses them before they reach GitHub. Uncapped, unlike ruff: it is a parser
+# whose output does not drift the way a formatter's does, and uv.lock pins it for
+# both contributor and CI regardless.
+dev = ["pytest>=8.3", "ruff>=0.8,<0.17", "pyyaml>=6.0"]
 
 [project.urls]
 Homepage = "https://github.com/skillberry-ai/rubrica"
