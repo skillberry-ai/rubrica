@@ -41,20 +41,41 @@ DIAGRAM = DOCS / "concepts" / "pipeline-diagram.html"
 RENDERER = REPO_ROOT / "scripts" / "render-pipeline-diagram.py"
 
 
+# CHANGELOG.md is the one root document these predicates must not read, and the
+# reason is the same one that excludes docs/superpowers/ and tests/fixtures/:
+# it is generated, not written. scripts/release.sh builds each section from
+# Conventional Commit subjects, so a hit there would demand an edit the next
+# release overwrites -- and the subject that produced it is already immutable
+# history in the log. The remedy for a citation reaching the changelog is the
+# commit-subject guard on the code set below, not a predicate over generated
+# prose.
+_GENERATED_ROOT_DOCS = {"CHANGELOG.md"}
+
+
 def _user_facing() -> list[Path]:
     """Every document a reader with no build context is expected to read.
+
+    The root set is *discovered*, not hand-typed, and that is the fix for a
+    measured hole rather than a tidiness preference: the list used to name
+    README.md, CONTRIBUTING.md and CLAUDE.md, so when SECURITY.md and
+    CODE_OF_CONDUCT.md arrived all three predicates below went green over them.
+    Measured before the change -- an `issue #N` citation appended to either file
+    left the whole module passing. Discovery means the next root-level policy
+    document is covered on the commit that adds it, with no edit here.
 
     docs/superpowers/ is excluded on purpose. It is recorded history: its counts
     are correct records of what was true on their own date, so a predicate that
     bans a count must not fire on them.
     """
-    fixed = [REPO_ROOT / "README.md", REPO_ROOT / "CONTRIBUTING.md", REPO_ROOT / "CLAUDE.md"]
+    at_root = [
+        path for path in sorted(REPO_ROOT.glob("*.md")) if path.name not in _GENERATED_ROOT_DOCS
+    ]
     under_docs = [
         path
         for path in sorted(DOCS.rglob("*.md"))
         if "superpowers" not in path.relative_to(DOCS).parts
     ]
-    return [path for path in fixed if path.is_file()] + under_docs
+    return [path for path in at_root if path.is_file()] + under_docs
 
 
 def _read(path: Path) -> str:
