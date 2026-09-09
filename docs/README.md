@@ -46,6 +46,8 @@ Each line names the question that document answers.
   this way, including the choices that cost something and were made anyway?
 - [`design/limitations.md`](design/limitations.md) — What is known to be
   wrong or missing, and what was the ruling that left it that way on purpose?
+- [`design/findings.md`](design/findings.md) — What was found, measured and
+  fixed, and what is the measurement a comment elsewhere is citing?
 
 ## History
 
