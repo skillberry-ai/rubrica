@@ -269,3 +269,19 @@ difference.
   without opening the file is indistinguishable, in the artifact, from one you
   filled in after reading it. A refusal here is recoverable; a fabricated
   count is not, because nothing downstream can tell it from a real one.
+
+- **An input this pass's contract names is absent from the run directory, or
+  is unreadable.** Refuse, say which file and what happened, and stop. Do not
+  model around the hole, and do not infer what the missing file would have
+  said: a partial written over an input that was not there is
+  indistinguishable, downstream, from one written over a complete run, and no
+  stage after you reopens that input to find out. Do not record the absence in
+  the artifact you write either -- your artifact describes the target, and a
+  file the run has not produced yet is a fact about the run. Refusing is the
+  cheap answer and it is the recoverable one: the orchestrator re-dispatches
+  you once the input exists. Measured on one real run, where several passes of
+  this family were dispatched concurrently and each found an input that was
+  not yet on disk: the ones that refused cost a re-dispatch each, and the one that
+  recorded the absence in its own artifact instead halted the run -- by which
+  time the partials it named were all present, so what it recorded was true
+  when written and false when read.

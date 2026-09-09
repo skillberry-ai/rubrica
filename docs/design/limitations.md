@@ -403,8 +403,10 @@ argument above rather than the throughput one.
 
 The reconcile passes that own a claim kind each carry an `inputs_seen`
 accounting whose `own_kind_total` is recomputed from `01-claims/`, so a wrong
-count is a finding against the pass that wrote it (the entry below records how
-far short of forcing a read that falls). `rb-reconcile-gaps` has no such
+count is a finding against the pass that wrote it (the `own_kind_total` entry
+further down this section records how far short of forcing a read that falls --
+named rather than pointed at, because inserting an entry between the two once
+left this reference aimed at something that records neither). `rb-reconcile-gaps` has no such
 accounting and cannot be given one: `refs.PASS_OWN_KINDS` gives it no claim kind
 at all — the kinds `claims-0.1.json` defines partition onto the passes that own
 one — and a gap is an assertion about what no input **contains**. A
@@ -439,6 +441,72 @@ gets, and for the same reason.
 What this means for you: **a gap is the one world-model element whose evidence of
 diligence is entirely outside the artifact.** If a run's gaps look thin, read the
 transcript rather than the gaps.
+
+### A missing input is a refusal for every reconcile pass, and never a gap
+
+**Specified as of issue #36, and recorded here because the read-coverage entry
+above is where a reader looking for the boundary will land.** Nothing used to pick between a
+refusal and a gap for the case "an input my contract names is not on disk."
+Measured on `run-20260907-065440` (tau2-retail), where six B3 singleton passes
+were dispatched concurrently by mistake, each ahead of an input that was not
+yet on disk: `rb-reconcile-outcomes` and `rb-reconcile-entities` refused, naming the
+missing `01-capabilities.json`; `rb-reconcile-gaps` recorded
+`gap-prior-pass-partials-absent` with `subject: pipeline:` and six stages in
+`blocks`, which is the orchestrator's blocking-halt trigger, and the run stopped.
+
+The gaps pass was not confabulating and had not misread its skill. Its §5 said a
+defect the audit finds in an earlier pass's artifact is recorded as a gap, and an
+absent artifact is a defect by any reading; §3 step 1 told it never to name
+`blocks` narrowly, and it did not. The gap was also **true when it was written** —
+the partials really were absent — and false by the time a human could read it,
+because the passes writing them were still running. That last property is what no
+check layer reaches: the assertion is prose about the filesystem, `check-refs` has
+nothing to compare it against, and the `blocks` entries are real stage names.
+
+**The rule now stated in prose, and the reasoning behind it.** A `gaps` entry is
+about the *target*, never about the run that studied it — and the rule is over
+what a gap asserts **`unknown`**, not over `subject`. That distinction is not
+decoration, and the first draft of this entry got it wrong: it said a wrong
+earlier artifact "has a target subject", which §3 step 3 does not say. That step
+requires an audit gap's `subject` to name **the artifact and element** it found
+wrong, so a ruling pinned to `subject` alone contradicts the procedure the pass
+executes, and the pass would then be holding two inconsistent instructions with
+the procedural one likely to win — which is the shape of the original bug, not a
+fix for it. Located on `unknown` instead, both hold: an earlier artifact that is
+**wrong** — a capability its claims do not establish — leaves *target* knowledge
+unreliable, so it stays gap-able and may name the artifact and element that got it
+wrong, which is the audit's whole purpose. An earlier artifact that is **absent**
+leaves no target knowledge unknown at all; it leaves the run unfinished. A gap
+recording one therefore files a fact about the pipeline's own sequencing in the
+collection a human reads for what is unknown about the target, and there is no
+input anybody could supply to close it.
+
+The `rb-reconcile-gaps` audit condition is split in two on that line in **both**
+sections — §3 step 3 records what it finds *wrong*, and §5 routes an absent
+partial to the refusal — because §5 is the exception list and §3 is the procedure,
+and an undifferentiated "record what you find as a gap" in §3 is the sentence the
+measured run actually obeyed. Every pass in the family now carries the same
+missing-input refusal, worded identically;
+`tests/unit/test_skills_reconcile_family.py` holds the byte-identity, since a
+SKILL.md has no include mechanism and identical copies are the only enforceable
+form of "the rule lives in one place."
+
+**What was ruled against, and why it is not parked but rejected.** The issue's
+third suggestion was to forbid `blocks` on a gap with no target subject as a
+schema constraint. `subject` is prose, so no schema can tell a target subject from
+`pipeline:`; a check that tried would be deciding whether a subject *is about* the
+target, which is the semantic judgment the layer-2 entry near the top of this
+file rules out for exactly this reason. The prose ruling plus the uniform refusal is the
+enforceable part, and it is prompt-level: it buys a probability, not a guarantee.
+
+What this means for you: **if a run halts on a gap whose `unknown` is a fact
+about this run rather than about the target — a step that has not happened yet,
+most often — the finding is against this rule rather than against the gap.**
+`subject` is not the tell, and reaching for it is the residue this entry has
+twice had to have corrected out of it: an audit gap's `subject` legitimately names an artifact
+and element, so a rule read off `subject` flags the very gaps §3 step 3 exists
+to produce. Re-dispatch the pass once its inputs exist; do not look for a gate
+that should have caught it, because none can.
 
 ### `own_kind_total` is recomputable, so a skimming pass can state a right one without reading the file
 
@@ -486,8 +554,9 @@ is enough for a human at gate 1 to see a skimmed run and not enough for any exit
 code to refuse one, which is the same division `check_claim_utilisation` draws for
 the threshold it declines to enforce.
 
-Parked rather than fixed for the reason the entry above gives for gaps: every
-candidate fix is a self-report. The honest instrument for whether a file was
+Parked rather than fixed for the reason the read-coverage entry above gives for
+`rb-reconcile-gaps` — named, not pointed at, for the reason that entry's own
+forward reference now gives: every candidate fix is a self-report. The honest instrument for whether a file was
 opened is the transcript — `scripts/audit-reads.sh` over a real dispatch.
 
 ### Some gaps are written for rubrica's own reviewer, and the page the owner reads ships them verbatim
