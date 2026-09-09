@@ -39,6 +39,9 @@ Each line names the question that document answers.
   a stage either way, with every flag and environment variable each one takes —
   and how do I dispatch one skill for real against a fresh run, isolate what
   it reads, and check what it did?
+- [`releasing.md`](releasing.md) — How do I cut a numbered release, what does
+  the script do in what order, and what is the one move that recovers each way a
+  release can fail part-way through?
 
 ## Design
 
