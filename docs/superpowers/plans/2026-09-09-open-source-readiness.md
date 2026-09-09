@@ -493,7 +493,7 @@ make the provenance reachable. Two link forms, chosen by file type:
 sites; the pattern generalises to the rest.
 
 1. **Subject noun** — the token is the sentence's subject.
-   `src/rubrica/refs.py:2146`:
+   `src/rubrica/refs.py:2148`:
    `Issue #6 measured a pass's read coverage of 01-claims/ varying 3/23 to 23/23`
    → `A pass's read coverage of 01-claims/ was measured varying 3/23 to 23/23 --`
    `the read-coverage variance (docs/design/findings.md)`.
@@ -510,7 +510,7 @@ sites; the pattern generalises to the rest.
    `at each of issue #6's three sites` → `at each of the read-coverage variance's`
    `three sites`. Substitutes cleanly; no recast needed.
 4. **Heading** — the only one in the tree.
-   `docs/design/limitations.md:952`:
+   `docs/design/limitations.md:1021`:
    `### Issue #3 was closed on arithmetic, and the run that would confirm it has not happened`
    → `### The untriageable catalogue was closed on arithmetic, and the run that would confirm it has not happened`.
    Then run `git grep -n 'closed on arithmetic'` and fix any cross-reference to the
@@ -526,8 +526,8 @@ naive single-line edit leaves a fragment behind:
 
 | Site | Current text |
 |---|---|
-| `src/rubrica/brief.py:40` | `issue` / newline+2 spaces / `#6` |
-| `src/rubrica/refs.py:3890` | `issue` / newline+4 spaces / `#19` |
+| `src/rubrica/brief.py:45` | `issue` / newline+2 spaces / `#6` |
+| `src/rubrica/refs.py:3934` | `issue` / newline+4 spaces / `#19` |
 | `src/rubrica/rounds.py:939` | `issue` / newline+4 spaces / `17` |
 | `src/rubrica/utilisation.py:157` | `Issue` / newline+4 spaces / `#6` |
 
@@ -701,9 +701,9 @@ PY
 
 Expected: 18 lines.
 
-- [ ] **Step 2: Rewrite the heading at `docs/design/limitations.md:952`**
+- [ ] **Step 2: Rewrite the heading at `docs/design/limitations.md:1021`**
 
-Run: `sed -n '950,956p' docs/design/limitations.md`
+Run: `sed -n '1019,1025p' docs/design/limitations.md`
 
 `### Issue #3 was closed on arithmetic, …` → `### The untriageable catalogue was closed on arithmetic, …`
 

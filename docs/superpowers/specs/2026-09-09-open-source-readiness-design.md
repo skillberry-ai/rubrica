@@ -344,7 +344,7 @@ so that two sites citing the same finding stay linked to each other — decision
 
 Sites needing more than substitution:
 
-- **`docs/design/limitations.md:952`** is a *heading* naming issue #3. It
+- **`docs/design/limitations.md:1021`** is a *heading* naming issue #3. It
   rewrites to the finding's name.
 - **`src/rubrica/schema/inputs-seen-0.1.json`**'s `description` is shipped
   package data (`[tool.setuptools.package-data]` includes `schema/*.json`), so its
