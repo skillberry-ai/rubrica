@@ -4,7 +4,7 @@
 
 **Goal:** Prepare rubrica for its public home at `github.com/skillberry-ai/rubrica` — policy files, DCO enforcement, a release process — and rewrite every internal issue citation so it carries its finding rather than a pointer that would resolve to an unrelated issue in the public repo.
 
-**Architecture:** Three independent workstreams executed in a fixed order. **B first** (provenance: a new `docs/design/findings.md`, 89 citation rewrites, a guard predicate) so that policy files land into a citation-clean tree. **A second** (the preparation commit mirroring `simulation-harness`'s `fb7116a`: policy files, `.github/` templates, `check-dco.sh` + a `dco` CI job, package metadata). **C last** (a release process modelled on the harness: three transplanted shell scripts, a generated `CHANGELOG.md`, PyPI publication via Trusted Publishing) because it is the only workstream whose output is inert until somebody configures a service.
+**Architecture:** Three independent workstreams executed in a fixed order. **B first** (provenance: a new `docs/design/findings.md`, 118 citation rewrites, a guard predicate) so that policy files land into a citation-clean tree. **A second** (the preparation commit mirroring `simulation-harness`'s `fb7116a`: policy files, `.github/` templates, `check-dco.sh` + a `dco` CI job, package metadata). **C last** (a release process modelled on the harness: three transplanted shell scripts, a generated `CHANGELOG.md`, PyPI publication via Trusted Publishing) because it is the only workstream whose output is inert until somebody configures a service.
 
 **Tech Stack:** Python 3.13, `uv`, pytest, ruff, bash, GitHub Actions, `gh` CLI. No new runtime dependencies.
 
@@ -21,7 +21,7 @@
 - **The exit-code contract is load-bearing:** `0` clean, `1` findings one per line on stdout, `2` usage error or unreadable run. A stage defect must never surface as `2`; a `1` must never have empty stdout.
 - **Comment density here is high and deliberate** — comments explain *why*, usually citing a measurement. Match that; do not strip them.
 - **Do not write a test count anywhere.** `tests/unit/test_docs_accuracy.py` fails on a hand-typed count in any user-facing document, and no heading may count something that grows (stages, skills, subcommands, gates).
-- **Measured baseline, authoritative as of 2026-09-09 on `main` at `9f877b6`:** 89 tracker citations across 35 tracked files outside `docs/superpowers/`, spanning 11 distinct issue numbers. Per tree: `tests/` 48 across 21 files, `docs/` 18 across 4, `src/` 18 across 8, `scripts/` 5 across 2.
+- **Measured baseline, RE-MEASURED 2026-09-09 after PRs #38, #39 and #40 merged:** **118** tracker citations across **40** tracked files outside `docs/superpowers/`, spanning **13** distinct issue numbers. Per tree: `tests/` 68 across 25 files, `src/` 25 across 9, `docs/` 20 across 4, `scripts/` 5 across 2. This supersedes an earlier baseline of 89/35/11 — those three PRs added 29 citations in five new files plus two newly-closed issues to cite, #36 and #37. Absorbing them is not optional: Task 6's guard scans `src/`, `tests/` and `scripts/`, so it cannot go green while any citation remains. **If further work merges into `main` before this branch lands, re-measure again before Tasks 3-6.**
 - **Harness source tree for every transplant:** `/home/bnayahu/work/kaegis/simulation-harness` at `acb1c55`. Referred to below as `$HARNESS`.
 
 ---
@@ -32,7 +32,7 @@
 
 | Path | Responsibility |
 |---|---|
-| `docs/design/findings.md` | One entry per closed-and-cited issue: title, what was measured, what changed. The in-repo provenance the 89 rewrites anchor at. Sibling to `limitations.md`, never inside it — `limitations.md` is what is *parked*, these are *closed*. |
+| `docs/design/findings.md` | One entry per closed-and-cited issue: title, what was measured, what changed. The in-repo provenance the 118 rewrites anchor at. Sibling to `limitations.md`, never inside it — `limitations.md` is what is *parked*, these are *closed*. |
 | `CODE_OF_CONDUCT.md` | Contributor Covenant 2.1, enforcement routed to this repo's private advisories. |
 | `SECURITY.md` | Reporting route plus the decision-5 scope statement naming the dispatch harness's credential handling, its contract-derived `Write` grant, and that CodeQL does not read shell. |
 | `CHANGELOG.md` | Keep a Changelog header and compare links only. `release.sh` prepends every section after that. |
@@ -58,7 +58,7 @@
 | Path | Change |
 |---|---|
 | `docs/README.md` | One index line for `findings.md` under `## Design`. |
-| 35 files across `src/`, `tests/`, `docs/`, `scripts/` | The 89 citation rewrites. Enumerated per task below. |
+| 40 files across `src/`, `tests/`, `docs/`, `scripts/` | The 118 citation rewrites. Enumerated per task below. |
 | `tests/unit/test_docs_accuracy.py` | One new policy predicate plus a `_code_files()` scan set. |
 | `scripts/capture-reservation-trajectories.py:38-39` | `TOOL_DIR` / `AGENT_SRC` become environment reads with documented defaults. |
 | `tests/fixtures/reservation-trajectories/README.md:35` | Names the new environment variables instead of telling re-runners to edit source. |
@@ -80,7 +80,7 @@
 
 # Phase 1 — Provenance and the citation rewrite (Workstream B)
 
-The spec puts the 89 rewrites and the guard in one commit. **This plan splits
+The spec puts the 118 rewrites and the guard in one commit. **This plan splits
 them into four commits** — one per tree, then the guard — and the deviation is
 deliberate: a 35-file prose commit is not reviewable, and each tree's rewrites
 pass the gates on their own because the guard does not exist yet. The guard lands
@@ -290,8 +290,11 @@ rendered an empty ruling while exiting 0.>
 ...
 ````
 
-The eleven entries, in this order, with these exact headings — **the naming table
-is the interface Tasks 3–5 consume, so it is fixed here**:
+The thirteen entries, in this order, with these exact headings — **the naming table
+is the interface Tasks 3–5 consume, so it is fixed here**. The last two were added
+when PRs #38, #39 and #40 merged mid-execution and brought two newly-closed issues
+into the tree; if Task 2 has already landed, they are Task 2b's job, not a rewrite
+of Task 2:
 
 | Heading | Anchor | Source issue |
 |---|---|---|
@@ -306,6 +309,8 @@ is the interface Tasks 3–5 consume, so it is fixed here**:
 | `## The undrivable denominator` | `#the-undrivable-denominator` | #17 |
 | `## The enumeration deadlock` | `#the-enumeration-deadlock` | #18 |
 | `## The silent fan-out gap` | `#the-silent-fan-out-gap` | #19 |
+| `## The gap about the run` | `#the-gap-about-the-run` | #36 |
+| `## The unrecordable understatement` | `#the-unrecordable-understatement` | #37 |
 
 If an issue's finding genuinely cannot be carried by its phrase without
 distorting it, **change the heading here and record why in the commit message** —
@@ -357,6 +362,111 @@ parked, and every entry here is closed. A fixed finding filed among parked
 defects reads as still open.
 
 The rewrites that cite these anchors follow, one commit per tree.
+MSG
+)"
+```
+
+---
+
+### Task 2b: Add the two findings entries the merged PRs brought into scope
+
+**Why this exists.** PRs #38, #39 and #40 merged into `main` while this plan was
+executing, and were merged into this branch. They added 29 tracker citations across
+five files and two newly-closed issues to cite: **#36** and **#37**. Task 2 shipped
+eleven entries; the tree now needs thirteen. This is an extension of Task 2, not a
+rewrite of it — the eleven existing entries and their anchors are untouched.
+
+**Files:**
+- Modify: `docs/design/findings.md` — append two entries
+
+**Interfaces:**
+- Consumes: the document and prose register Task 2 established.
+- Produces: two more anchors that Tasks 3, 4 and 5 consume:
+  - `## The gap about the run` → `#the-gap-about-the-run` (issue #36)
+  - `## The unrecordable understatement` → `#the-unrecordable-understatement` (issue #37)
+
+- [ ] **Step 1: Read the document you are extending**
+
+Run: `sed -n '1,60p' docs/design/findings.md` then `grep -n '^## ' docs/design/findings.md`
+
+Expected: a preamble and eleven `## ` headings. Match their register, structure and
+length exactly — each entry is a short reference under two bold labels, not an essay.
+**Do not edit any existing entry or the preamble.**
+
+- [ ] **Step 2: Read both issues in full**
+
+Run: `for n in 36 37; do echo "===== #$n"; gh issue view $n --json title,body,comments --jq '.title, .body, (.comments[]?.body)'; done`
+
+Titles, for reference:
+- **#36** — "rb-reconcile-gaps writes a blocking gap about the run when its inputs are absent, where its siblings refuse"
+- **#37** — "Verdict flags carry difficulty_overstated but not difficulty_understated — the harmful direction is unrecordable"
+
+- [ ] **Step 3: Write the two entries**
+
+Append after `## The silent fan-out gap`, in this order, with these exact headings:
+
+```markdown
+## The gap about the run
+
+**What was measured.** <from #36 and its closure>
+
+**What changed.** <what the issue and its closing commit record>
+
+## The unrecordable understatement
+
+**What was measured.** <from #37 and its closure>
+
+**What changed.** <what the issue and its closing commit record>
+```
+
+**The rule that governs this task, as it governed Task 2:** state what the issue
+*measured*, and never present a reasoned, projected or constructed figure as an
+observed one. If a figure was arithmetic, or a fix was verified structurally rather
+than by a dispatch, say so in those words — the issues themselves carry such
+qualifiers, and Task 2's entries preserved five of them. A defect of exactly this
+class was found and fixed in Task 1 of this plan, so it is live, not hypothetical.
+
+For #37 specifically, the tree already carries a long `limitations.md` entry
+(`### An understated hop_depth is flagged and cannot be repaired`). **Read it before
+writing**, and do not duplicate it: `findings.md` records what was measured and what
+changed, `limitations.md` records what remains open. Cite neither from the other.
+
+- [ ] **Step 4: Confirm no placeholder survives and the anchors are right**
+
+```bash
+grep -n '<[a-z]' docs/design/findings.md | grep -v '`' || echo "  no placeholders"
+grep -c '^## ' docs/design/findings.md
+```
+
+Expected: no angle-bracket placeholders, and `13`.
+
+- [ ] **Step 5: Run the docs policy suite, then the three gates**
+
+Run: `uv run pytest tests/unit/test_docs_accuracy.py -q`
+Expected: PASS. `findings.md` is user-facing: no hand-typed test count, and no heading
+that counts something which grows. If a predicate fires, reword — never touch it.
+
+Run: `make test && make check && uv run rubrica check-skills`
+Expected: all green.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add docs/design/findings.md
+git commit -S -s -m "$(cat <<'MSG'
+docs(design): record the two findings the merged work brought into scope
+
+PRs #38, #39 and #40 merged mid-execution and added 29 tracker citations across
+five files, along with two newly-closed issues to cite. The document shipped
+eleven entries; the tree needs thirteen, or those citations have nowhere to point
+and the guard predicate cannot go green.
+
+Extends the document rather than rewriting it: the eleven existing entries and
+their anchors are untouched, so nothing already consuming them has to change.
+
+Same evidence rule as the first eleven -- what the issue measured, with its own
+qualifiers kept where a figure was arithmetic or a fix was verified structurally
+rather than by a dispatch.
 MSG
 )"
 ```
@@ -428,7 +538,7 @@ afterwards.
 
 ### Task 3: Rewrite the citations in `src/` and `scripts/`
 
-23 hits across 10 files. Do this tree first: it is the smallest, it contains all
+30 hits across 11 files. Do this tree first: it is the smallest, it contains all
 four cross-line sites, and one of its files ships inside the wheel.
 
 **Files:**
@@ -440,14 +550,15 @@ four cross-line sites, and one of its files ships inside the wheel.
 | `src/rubrica/brief.py` | 3 | #6, #17 |
 | `src/rubrica/digest.py` | 1 | #4 |
 | `src/rubrica/intake.py` | 1 | #4 |
-| `src/rubrica/refs.py` | 4 | #6, #19 |
+| `src/rubrica/refs.py` | 5 | #6, #19, #37 |
 | `src/rubrica/rounds.py` | 2 | #17 |
 | `src/rubrica/schema/inputs-seen-0.1.json` | 1 | #6 |
-| `src/rubrica/summary.py` | 2 | #6 |
+| `src/rubrica/summary.py` | 6 | #6, #37 |
+| `src/rubrica/summary_html.py` | 2 | #37 |
 | `src/rubrica/utilisation.py` | 4 | #6 |
 
 **Interfaces:**
-- Consumes: the eleven finding names and anchors fixed in Task 2's table.
+- Consumes: the thirteen finding names and anchors fixed in Task 2's table (the last two added by Task 2b).
 - Produces: nothing other tasks depend on. Tasks 4 and 5 are independent of this
   one and may be done in any order relative to it.
 
@@ -556,14 +667,14 @@ MSG
 
 ### Task 4: Rewrite the citations in `docs/`
 
-18 hits across 4 files. This tree uses real anchor links, and it holds the only
+20 hits across 4 files. This tree uses real anchor links, and it holds the only
 heading citation in the repository.
 
 **Files:**
 
 | Modify | Hits | Issues cited |
 |---|---|---|
-| `docs/design/limitations.md` | 13 | #3, #4, #6, #8, #17, #18 |
+| `docs/design/limitations.md` | 15 | #3, #4, #6, #8, #17, #18, #36, #37 |
 | `docs/guides/invoking-rubrica.md` | 2 | #18 |
 | `docs/reference/artifacts.md` | 2 | #6 |
 | `docs/reference/cli.md` | 1 | #6 |
@@ -669,7 +780,7 @@ MSG
 
 ### Task 5: Rewrite the citations in `tests/`
 
-48 hits across 21 files — the largest tree, and the lowest-risk: every hit is a
+68 hits across 25 files — the largest tree, and the lowest-risk: every hit is a
 docstring or a comment. **The spec measured that no test asserts on citation
 text.** That measurement is the reason this task is safe; if it turns out wrong,
 that is a finding, not something to edit through.
@@ -678,17 +789,19 @@ that is a finding, not something to edit through.
 
 | Modify | Hits | Issues | | Modify | Hits | Issues |
 |---|---|---|---|---|---|---|
-| `tests/builders.py` | 2 | #6 | | `tests/unit/test_schemas_instance.py` | 2 | #6 |
-| `tests/toy.py` | 2 | #6 | | `tests/unit/test_skills_output_dirs.py` | 3 | #5 |
-| `tests/unit/test_brief.py` | 5 | #6, #17 | | `tests/unit/test_skills_reconcile_family.py` | 1 | #6 |
-| `tests/unit/test_digest.py` | 1 | #4 | | `tests/unit/test_skills_triage_family.py` | 3 | #1, #3 |
-| `tests/unit/test_dispatch_harness.py` | 5 | #15, #18 | | `tests/unit/test_slices.py` | 2 | #3, #8 |
-| `tests/unit/test_intake.py` | 1 | #4 | | `tests/unit/test_stage_write_scope.py` | 1 | #15 |
-| `tests/unit/test_reconcile_seal.py` | 2 | #17 | | `tests/unit/test_summary.py` | 6 | #6 |
-| `tests/unit/test_refs_input_dispositions.py` | 1 | #6 | | `tests/unit/test_toy_split.py` | 2 | #6 |
-| `tests/unit/test_refs_planning.py` | 4 | #6, #17 | | `tests/unit/test_utilisation.py` | 2 | #6 |
-| `tests/unit/test_rounds.py` | 1 | #17 | | `tests/unit/test_validate.py` | 1 | #6 |
-| | | | | `tests/unit/test_validate_registry_triage.py` | 1 | #6 |
+| `tests/builders.py` | 2 | #6 | | `tests/unit/test_review.py` | 1 | #37 |
+| `tests/toy.py` | 3 | #6, #37 | | `tests/unit/test_rounds.py` | 1 | #17 |
+| `tests/unit/test_brief.py` | 5 | #6, #17 | | `tests/unit/test_schemas_instance.py` | 3 | #6, #37 |
+| `tests/unit/test_digest.py` | 1 | #4 | | `tests/unit/test_skills_challenge.py` | 4 | #37 |
+| `tests/unit/test_dispatch_harness.py` | 5 | #15, #18 | | `tests/unit/test_skills_output_dirs.py` | 3 | #5 |
+| `tests/unit/test_intake.py` | 1 | #4 | | `tests/unit/test_skills_propose.py` | 1 | #37 |
+| `tests/unit/test_reconcile_seal.py` | 2 | #17 | | `tests/unit/test_skills_reconcile_family.py` | 6 | #6, #36 |
+| `tests/unit/test_refs_input_dispositions.py` | 1 | #6 | | `tests/unit/test_skills_triage_family.py` | 3 | #1, #3 |
+| `tests/unit/test_refs_instance.py` | 2 | #37 | | `tests/unit/test_slices.py` | 2 | #3, #8 |
+| `tests/unit/test_refs_planning.py` | 4 | #6, #17 | | `tests/unit/test_stage_write_scope.py` | 1 | #15 |
+| `tests/unit/test_summary.py` | 11 | #6, #37 | | `tests/unit/test_toy_split.py` | 2 | #6 |
+| `tests/unit/test_utilisation.py` | 2 | #6 | | `tests/unit/test_validate.py` | 1 | #6 |
+| `tests/unit/test_validate_registry_triage.py` | 1 | #6 | | | | |
 
 **Interfaces:**
 - Consumes: Task 2's eleven finding names.
@@ -823,7 +936,7 @@ the comment says why, because that is the part a later reader would otherwise
 # `\s+` rather than a space, and no line anchors, because four citations wrapped
 # across a line break: `issue\n  #6` in brief.py, `issue\n    #19` in refs.py,
 # `issue\n    17` in rounds.py and `Issue\n    #6` in utilisation.py. A
-# line-scoped search reports 85 hits where there are 89, so a line-based guard
+# line-scoped search reports fewer hits than exist, so a line-based guard
 # would have gone green over the four it could not see -- a passing gate over the
 # exact defect it exists for.
 #
@@ -840,7 +953,7 @@ def _code_files() -> list[Path]:
     """Tracked source, test and script files the citation guard scans.
 
     The predicates above run over documentation only. This set exists because 66
-    of the 89 tracker citations lived in code comments and docstrings -- 74% of
+    of the 118 tracker citations lived in code comments and docstrings -- 79% of
     them -- so a docs-only guard would have reported a clean tree over three
     quarters of the defect.
 
@@ -879,7 +992,7 @@ def test_no_user_facing_document_cites_the_internal_tracker(doc):
 
 @pytest.mark.parametrize("src", _code_files(), ids=_doc_id)
 def test_no_source_file_cites_the_internal_tracker(src):
-    """The same rule for code. 66 of the 89 original citations were here."""
+    """The same rule for code. 93 of the 118 citations are here."""
     hits = _TRACKER_CITATION.findall(_read(src))
     assert not hits, (
         f"{_doc_id(src)} cites the internal tracker: {hits}. "
@@ -953,13 +1066,13 @@ git commit -S -s -m "$(cat <<'MSG'
 test(docs): guard against citing the internal tracker, in docs and in code
 
 Two predicates, because a docs-only guard would have covered a quarter of the
-problem: 66 of the 89 original citations lived in code comments and docstrings.
+problem: 93 of the 118 citations live in code comments and docstrings.
 The second scan set reaches src/, tests/ and scripts/, excluding fixtures and
 vendored trees -- measured to carry no citation, and records that a guard must
 never demand an edit to.
 
 The regex spans newlines deliberately. Four citations wrapped across a line
-break, so a line-scoped search reports 85 where there are 89; a line-based guard
+break, so a line-scoped search under-reports; a line-based guard
 would have passed over the exact four it could not see. Measured in three
 directions before committing: fails on a reintroduced citation in each scan set,
 fails on a wrapped one, and stays green on a meaning-preserving reword.
@@ -2610,7 +2723,7 @@ Run against the spec after the plan is written, before execution starts.
 | Decision 5 — `SECURITY.md` scope, no threat model | 8 (Step 3) |
 | Workstream A — files added / changed | 7, 8 |
 | Workstream A — `dco` job and its pytest test | 7 |
-| Workstream B — `findings.md`, 89 rewrites, guard | 2, 3, 4, 5, 6 |
+| Workstream B — `findings.md`, 118 rewrites, guard | 2, 2b, 3, 4, 5, 6 |
 | Workstream C — transplant, changelog, docs, target | 9, 10 |
 | Workstream C — four adopted practices | 10 (compare links), 11 (OIDC, dependency review, permissions) |
 | Workstream C — practice not adopted (sha pins) | 8 (Step 6 keeps the `ignore` comment); Task 12 restates it |
@@ -2622,7 +2735,7 @@ Run against the spec after the plan is written, before execution starts.
 **Placeholder scan.** No `TBD`, `TODO`, "add error handling", or "similar to Task
 N". Where a file is transplanted rather than written, the plan gives the exact
 source path and the exact adaptations. Where content depends on reading source
-material that would not survive being paraphrased — the eleven issue bodies in
+material that would not survive being paraphrased — the thirteen issue bodies in
 Task 2, the harness's `releasing.md` in Task 10 — the plan gives the exact command
 to read it and the exact structure to produce.
 

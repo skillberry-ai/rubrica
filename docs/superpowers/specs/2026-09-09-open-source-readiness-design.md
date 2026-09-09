@@ -245,28 +245,36 @@ convention with no cause here, and `make test` would not run it.
 So: `tests/unit/test_check_dco.py`, covering the signed case, the unsigned case,
 the merge-commit exemption, the bot exemption, and the merge-base scoping.
 
-## Workstream B — `docs/design/findings.md` and the 89 rewrites
+## Workstream B — `docs/design/findings.md` and the 118 rewrites
 
 ### The measurement
 
-89 citations across 35 tracked files, outside `docs/superpowers/`. Eleven
+118 citations across 40 tracked files, outside `docs/superpowers/`. Thirteen
 distinct issue numbers, heavily skewed:
 
 | Issue | Hits | Issue | Hits |
 |---|---|---|---|
-| #6 | 48 | #8 | 2 |
-| #18 | 10 | #12 | 2 |
-| #17 | 9 | #15 | 2 |
-| #4 | 5 | #1 | 2 |
-| #3 | 4 | #19 | 2 |
-| #5 | 3 | | |
+| #6 | 48 | #4 | 5 |
+| #37 | 23 | #3 | 4 |
+| #18 | 10 | #5 | 3 |
+| #17 | 9 | #1, #8, #12, #15, #19 | 2 each |
+| #36 | 6 | | |
 
-Most of the hits are in code, not documentation: `src/` and `tests/` hold 66 of
-the 89 between them (`tests/` 48 across 21 files, `src/` 18 across 8), against 18
+Most of the hits are in code, not documentation: `src/` and `tests/` hold 93 of
+the 118 between them (`tests/` 68 across 25 files, `src/` 25 across 9), against 20
 in `docs/` across 4 files and 5 in `scripts/` across 2.
-`docs/design/limitations.md` carries 13.
+`docs/design/limitations.md` carries 15.
 
-**Four of the 89 are invisible to a line-scoped search, and finding them changed
+**This baseline was re-measured on 2026-09-09 after PRs #38, #39 and #40 merged**,
+superseding an earlier one of 89 across 35 files spanning eleven issues. Those
+three added 29 citations in five files that did not exist when this design was
+written, and two newly-closed issues to cite — #36 and #37. The re-measure was not
+optional: the guard predicate below scans `src/`, `tests/` and `scripts/`, so it
+cannot go green while any citation remains, and a stale scope would have left the
+workstream unable to complete. Expect the same again if further work merges before
+this lands.
+
+**Four of the original 89 are invisible to a line-scoped search, and finding them changed
 this number.** `git grep -E '(Issue|issue) #?[0-9]+'` reports 85, because four
 citations wrap across a line break: `src/rubrica/brief.py:40` (`issue\n  #6`),
 `src/rubrica/refs.py:3890` (`issue\n    #19`), `src/rubrica/rounds.py:939`
@@ -315,7 +323,7 @@ Two constraints on how it is written, both from existing policy in
 
 ### The rewrites
 
-Each of the 89 sites becomes a named finding plus an anchor into
+Each of the 118 sites becomes a named finding plus an anchor into
 `findings.md`. The names derive from the issue titles, one per issue, fixed once
 so that two sites citing the same finding stay linked to each other — decision
 1's reasoning about co-measured corpora, applied to co-measured findings:
@@ -356,7 +364,7 @@ existing `_HISTORY_TREE` idiom in that file's policy block: no bare `#N` or
 It needs **two scan sets**, and that is the one structural change to the module.
 The existing predicates run over `_user_facing()` — `README.md`,
 `CONTRIBUTING.md`, `CLAUDE.md`, and `docs/**/*.md` excluding `superpowers`. A
-docs-only guard would leave 66 of the 89 hits unguarded — 74% of them, in
+docs-only guard would leave 93 of the 118 hits unguarded — 79% of them, in
 exactly the `src/` and `tests/` comments where the problem mostly lives. So the
 predicate also scans tracked files under `src/` and `tests/`, and `scripts/` for
 the remaining 5.
@@ -562,16 +570,16 @@ belong under `make test`.
 Six commits, each `git commit -S -s`, each leaving the three gates green.
 Workstream B lands before A so that the policy files arrive into a tree whose
 citations are already clean, rather than the reverse — which would publish
-`SECURITY.md` alongside 89 pointers to the wrong issues. C lands last because it
+`SECURITY.md` alongside 118 pointers to the wrong issues. C lands last because it
 is the only workstream whose output is inert until somebody configures a service,
 so it is the one where a review pause costs nothing.
 
 1. **Decision 3's code change** — `capture-reservation-trajectories.py`'s two
    constants become environment reads; the fixture README names them.
 2. **`findings.md` and its index line** — the document only. No guard yet,
-   because a predicate banning bare `#N` cannot be committed green while the 89
+   because a predicate banning bare `#N` cannot be committed green while the 118
    citations are still there.
-3. **The 89 rewrites, then the guard** — the substantive prose work across 35
+3. **The 118 rewrites, then the guard** — the substantive prose work across 40
    files, and in the same commit the predicate that pins it. They land together
    because that is the first point at which the guard passes. The predicate's
    red direction is measured against the pre-rewrite tree *before* this commit is
