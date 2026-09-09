@@ -483,3 +483,64 @@ the hole; the unrepairable half is parked rather than fixed, and **nothing here
 was verified by a dispatch** — the toy fixture's data is unchanged, and no
 exercise record was produced or re-recorded, because those state what a
 dispatch did against the schema as it stood.
+
+## The colliding batch ids
+
+**What was measured.** `rounds.write_batches` minted batch ids from
+`enumerate(batches, start=1)` with no round term, so **every round's first batch
+was `b01`**. `rb-propose` has each member mint scenario ids beginning
+`sc-<batch_id>-`, numbering from its own batch's position, and its invariant 4
+stated that the prefix is the whole of what stops two members choosing the same
+id — true *within* a round and false *across* rounds, since two rounds' `b01`
+members were told to mint from one namespace. Observed on `run-20260906-102327`
+(tau2-retail), round 2: the round-2 batch was planned as `b01`, the dispatched
+member complied with the prefix rule and minted `sc-b01-01` .. `sc-b01-05`,
+colliding with round 1's five. `propose-seal` exited 1 and wrote nothing, layer 2
+named the collision, and the `RUBRICA_FINDINGS_FILE` repair path fixed the ids in
+one dispatch at 0.33 USD. So the consequence was a **blocked round rather than a
+wrong artifact**, and each mechanism downstream of the defect behaved exactly as
+designed. That it would hit every run reaching round 2 is the issue's
+**reasoned** claim from both terms sitting in code and prompt with neither
+reading the round — the sample was one run and one round-2 dispatch. No test
+caught it, and the reason is *fixture-cannot-reach* rather than a missing test:
+`test_the_seal_assembles_every_round_in_order` was the one test that assembled
+two rounds, and it hand-picked `sc-b01-002` for round 2 — an id that happens not
+to collide with round 1's `sc-b01-001` — so it constructed the cross-round case
+and then chose an id no member would have chosen, sidestepping the defect inside
+it. A narrower finding shares the root cause and is visible only because the
+transcript was read: both round-2 members went looking for the ids already taken,
+one of them reading `02-scenarios.json`, which its own frontmatter forbids, and
+minting a colliding id anyway while holding all 49 existing ones. All five
+round-1 members were clean. That the old scheme left a round-2 member **no
+in-contract way to see which ids exist** is the issue's own charitable reading of
+that, offered as a contract gap rather than measured as one.
+
+**What changed.** Fixed at `b0e1ac5`; the issue carries no closing comment, so
+that commit is the record of what changed. Batch ids are now `r<N>-b<NN>`, making
+scenario ids `sc-r2-b01-01`. The round went into the id rather than into a second
+field a prompt has to read, because that puts the guarantee in code: a member
+needs to know nothing about any other round to avoid a collision, and so has no
+reason to go looking — which is how the read half was addressed, there being no
+artifact-level check that can detect a read violation at all. `rb-propose` says
+so in both places, §2's prefix rule and invariant 4, since the invariant is where
+the false across-round claim was written down. The issue's second candidate —
+have members number from the coverage document — was rejected rather than parked:
+it moves a uniqueness guarantee from code into a prompt whose invariant text
+already concedes that nothing checks the prefix. Two guards were added, each
+watched failing first. `test_batch_ids_are_scoped_to_their_round` pins the
+mechanism, and
+`test_two_rounds_of_members_minting_from_their_batch_id_do_not_collide` is the
+reproduction: it takes the batch ids `write_batches` actually plans and mints
+exactly what the prompt asks for in both rounds, so reverting the fix fails it
+with the collision the issue reports. The sidestepping test now uses ids a member
+would mint; its own assertion is about ordering and passes either way, so the
+edit is about no longer teaching the wrong id shape. `TOY_BATCH_ID` followed, and
+it is asserted against the real `write_batches` plan, so a stale value fails at
+the assert rather than leaving a fixture that disagrees with the code. The
+`refs.py` comment recording a measured 20-cell/2-goal partition now names its two
+batches positionally: restating them as `r1-b01`/`r1-b02` would attribute that
+measurement to a partition nobody ran, and its numbers are unchanged. The prompt
+half was **verified structurally** — the guards are unit tests over
+`write_batches` and the seal, and there is **no dispatch of the amended prose on
+record**; `rb-propose`'s exercise record predates the fix and was not
+re-recorded.
