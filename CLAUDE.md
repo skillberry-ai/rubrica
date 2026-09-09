@@ -28,6 +28,7 @@ make check     # ruff check + ruff format --check, no changes
 make live      # RUBRICA_LIVE=1 pytest -m live  (see "Live tests" below)
 make lint      # ruff check --fix
 make format    # ruff format
+make release   # VERSION=X.Y.Z ./scripts/release.sh (see docs/releasing.md)
 ```
 
 `make test` green, `make check` clean, and `uv run rubrica check-skills` exiting

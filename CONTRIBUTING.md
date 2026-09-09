@@ -63,6 +63,18 @@ gates exercise indirectly, since they never touch `live` tests at all.
 call. For that reason `make live` and `RUBRICA_LIVE` never run in CI, and a
 PR should never need them to pass.
 
+## Releasing
+
+Releases are cut from `main` with one command:
+
+```sh
+make release VERSION=0.2.0
+```
+
+Everything that command does, what it refuses to do, and what to do when a run
+fails part-way is in [`docs/releasing.md`](docs/releasing.md) — read it before
+cutting one rather than working from this summary.
+
 ## Commits
 
 Every commit must be both DCO signed-off and cryptographically signed:

@@ -1,0 +1,51 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# id-token: write is what lets the job mint an OIDC token for PyPI's trusted
+# publisher. contents: read is everything else it needs.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    # A GitHub environment, so publication can carry its own protection rules
+    # (required reviewers, branch restrictions) independently of the workflow.
+    # PyPI's trusted publisher is registered against this name, so it is not
+    # decorative -- changing it breaks publication.
+    environment: pypi
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+
+      - name: Build
+        run: uv build
+
+      - name: Check distribution metadata
+        run: uv run --with twine twine check dist/*
+
+      # No `password:` and no `secrets.*`. Authentication is the OIDC token the
+      # `id-token: write` permission above allows, exchanged for a short-lived
+      # upload token by the trusted publisher registered on PyPI for this
+      # repository, this workflow filename and the `pypi` environment. A stored
+      # API token would be a long-lived credential with upload rights to the
+      # package, and PEP 740 attestations are generated automatically only on the
+      # OIDC path.
+      #
+      # This step fails until that publisher is registered. That is the intended
+      # failure mode: visible in the Actions tab, rather than a release that
+      # silently ships nothing.
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
