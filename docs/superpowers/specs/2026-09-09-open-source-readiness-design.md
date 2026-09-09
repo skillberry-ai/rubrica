@@ -22,6 +22,20 @@ Measured against both trees on 2026-09-09: rubrica's working tree on `main` at
 `9f877b6`, and `simulation-harness` at `acb1c55`. Every count below is a
 `git grep` over tracked files.
 
+**The citation scope was corrected TWICE — read this before trusting any count
+below, and do not re-derive one from an older revision of this file.** The
+delivered scope is **128** citations across **40** tracked files spanning **14**
+issues, and `docs/design/findings.md` carries fourteen entries. The first
+baseline (89 / 35 files / 11 issues) missed four citations that wrap across a
+line break. The second (118 / 40 files / 13 issues) missed **ten more in bare
+`#N` form** — a lone `19` in `refs.py`, two `15`s and a `12` across the test
+tree, a `36` in `test_skills_reconcile_family.py`, three `3`s and a `4` in
+`limitations.md`, and a `20` that was the only citation anywhere of a fourteenth
+issue nobody had noticed was referenced — because the counting pattern required
+the word "issue", a `PR` prefix, or parentheses. The figures in this section were
+re-derived against the pre-rewrite tree at `3300022` with **both** patterns and
+overlapping spans counted once; the file count is 40 under both patterns, not 41.
+
 ## What this design does not cover
 
 Deliberately out of scope, each to its own follow-on:
@@ -245,28 +259,30 @@ convention with no cause here, and `make test` would not run it.
 So: `tests/unit/test_check_dco.py`, covering the signed case, the unsigned case,
 the merge-commit exemption, the bot exemption, and the merge-base scoping.
 
-## Workstream B — `docs/design/findings.md` and the 118 rewrites
+## Workstream B — `docs/design/findings.md` and the 128 rewrites
 
 ### The measurement
 
-118 citations across 40 tracked files, outside `docs/superpowers/`. Thirteen
+128 citations across 40 tracked files, outside `docs/superpowers/`. Fourteen
 distinct issue numbers, heavily skewed:
 
 | Issue | Hits | Issue | Hits |
 |---|---|---|---|
-| #6 | 48 | #4 | 5 |
-| #37 | 23 | #3 | 4 |
-| #18 | 10 | #5 | 3 |
-| #17 | 9 | #1, #8, #12, #15, #19 | 2 each |
-| #36 | 6 | | |
+| #6 | 48 | #4 | 6 |
+| #37 | 23 | #15 | 4 |
+| #18 | 10 | #5, #12, #19 | 3 each |
+| #17 | 9 | #1, #8 | 2 each |
+| #3, #36 | 7 each | #20 | 1 |
 
-Most of the hits are in code, not documentation: `src/` and `tests/` hold 93 of
-the 118 between them (`tests/` 68 across 25 files, `src/` 25 across 9), against 20
+Most of the hits are in code, not documentation: `src/` and `tests/` hold 99 of
+the 128 between them (`tests/` 73 across 25 files, `src/` 26 across 9), against 24
 in `docs/` across 4 files and 5 in `scripts/` across 2.
-`docs/design/limitations.md` carries 15.
+`docs/design/limitations.md` carries 19.
 
 **This baseline was re-measured on 2026-09-09 after PRs #38, #39 and #40 merged**,
-superseding an earlier one of 89 across 35 files spanning eleven issues. Those
+superseding an earlier one of 89 across 35 files spanning eleven issues, and was
+then corrected again by the bare-`#N` pattern — see the warning at the top of
+this file for all three figures and what each one missed. Those
 three added 29 citations in five files that did not exist when this design was
 written, and two newly-closed issues to cite — #36 and #37. The re-measure was not
 optional: the guard predicate below scans `src/`, `tests/` and `scripts/`, so it
@@ -323,7 +339,7 @@ Two constraints on how it is written, both from existing policy in
 
 ### The rewrites
 
-Each of the 118 sites becomes a named finding plus an anchor into
+Each of the 128 sites becomes a named finding plus an anchor into
 `findings.md`. The names derive from the issue titles, one per issue, fixed once
 so that two sites citing the same finding stay linked to each other — decision
 1's reasoning about co-measured corpora, applied to co-measured findings:
@@ -463,6 +479,20 @@ else; `release.sh` prepends every section after that.
    them. Generation does not preclude them — they are header lines, not section
    content — so they go in the seeded header.
 
+   **Corrected on 2026-09-09, and this reasoning was wrong.** `release.sh`
+   inserts each section immediately after line 1 and re-emits everything below it
+   *after* that section, so a seeded link definition is not a header line in any
+   durable sense: it sinks one section lower at every release. Nor does the script
+   mint a per-version link — `grep -rn 'compare/' scripts/` returns zero hits — so
+   the seeded `[Unreleased]:` definition shipped as a **dangling reference** with
+   no `[Unreleased]` text referring to it, rendering as nothing, and with a
+   `compare/main...HEAD` target that compared `main` to itself. This practice is
+   therefore **not delivered**: the seed is `# Changelog` and nothing else, the
+   dangling definition is removed, and `docs/releasing.md` records the absence and
+   what delivering it would cost. Delivering it means teaching a transplanted
+   script to mint one link per release, which was judged the wrong trade against
+   keeping that script in step with its source.
+
 ### What cannot be mimicked, and what replaces it
 
 The harness's release publishes a **container image**: `docker-publish.yml`
@@ -570,16 +600,16 @@ belong under `make test`.
 Six commits, each `git commit -S -s`, each leaving the three gates green.
 Workstream B lands before A so that the policy files arrive into a tree whose
 citations are already clean, rather than the reverse — which would publish
-`SECURITY.md` alongside 118 pointers to the wrong issues. C lands last because it
+`SECURITY.md` alongside 128 pointers to the wrong issues. C lands last because it
 is the only workstream whose output is inert until somebody configures a service,
 so it is the one where a review pause costs nothing.
 
 1. **Decision 3's code change** — `capture-reservation-trajectories.py`'s two
    constants become environment reads; the fixture README names them.
 2. **`findings.md` and its index line** — the document only. No guard yet,
-   because a predicate banning bare `#N` cannot be committed green while the 118
+   because a predicate banning bare `#N` cannot be committed green while the 128
    citations are still there.
-3. **The 118 rewrites, then the guard** — the substantive prose work across 40
+3. **The 128 rewrites, then the guard** — the substantive prose work across 40
    files, and in the same commit the predicate that pins it. They land together
    because that is the first point at which the guard passes. The predicate's
    red direction is measured against the pre-rewrite tree *before* this commit is
