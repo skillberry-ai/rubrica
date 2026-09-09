@@ -468,7 +468,7 @@ def _cap_bytes(run: RunPaths) -> tuple[int, str]:
     `isinstance(True, int)` is True in Python, so a `max_scenario_part_bytes:
     true` would otherwise cap every batch at one byte -- the standing bool guard
     in this repo, present at triage.py:456 (`digest_body_chars`), manifest.py:176
-    (`set_limit`'s requested limits), intake.py:247 (`root_index`) and seal.py:311
+    (`set_limit`'s requested limits), intake.py:248 (`root_index`) and seal.py:311
     (a disposition's `priority`) -- each of those the guard clause itself, not the
     comment above it.
     """

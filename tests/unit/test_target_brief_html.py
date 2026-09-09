@@ -930,7 +930,7 @@ def test_page_labels_a_slice_of_a_file_rather_than_juxtaposing_the_fragment(tmp_
     assert "notes.md</span> (at #error-behaviour)" in page
     # And a path that is *nothing but* a fragment keeps it as the only name there
     # is, rather than being labelled a piece of an empty file. `intake` cannot
-    # write this shape (`intake.py:333` builds the fragment from a `Path`, which
+    # write this shape (`intake.py:334` builds the fragment from a `Path`, which
     # never stringifies empty), so a hand-edited manifest is the only way in --
     # which is also why `_common_prefix` carries a filter for it.
     trace["source_path"] = "#/spans/1"
@@ -946,7 +946,7 @@ def test_page_labels_a_slice_of_a_file_rather_than_juxtaposing_the_fragment(tmp_
 def test_page_keeps_a_hash_in_the_owners_own_filename_whole(tmp_path):
     """A `#` in a filename is not the slicer's fragment.
 
-    `intake.py:333` writes a sliced input's `source_path` as
+    `intake.py:334` writes a sliced input's `source_path` as
     `<container>#<json_pointer>`, and a JSON pointer always begins `/`, so a `#`
     followed by anything else belongs to the name the owner gave the file. Nothing
     forbids one there.

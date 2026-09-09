@@ -96,7 +96,7 @@ def test_source_index_returns_a_marker_when_claims_cannot_be_read(tmp_path):
         # half-trimmed path is worse than a full one.
         (["/abs/one.py", "rel/two.py"], ""),
         ([], ""),
-        # Fragment-bearing paths sharing one container file. `intake.py:333`
+        # Fragment-bearing paths sharing one container file. `intake.py:334`
         # builds a sliced input's source_path as `<container>#<json_pointer>`
         # and a JSON pointer starts with "/", so commonpath -- which is
         # component-aware -- walks into the fragment and answers
@@ -145,7 +145,7 @@ def test_shorten_keeps_the_slice_fragment():
     [
         # The ordinary source path: no piece, and the file is the whole string.
         ("src/tool.py", ("src/tool.py", "")),
-        # The slicer's own shape, `intake.py:333`'s `<container>#<json_pointer>`.
+        # The slicer's own shape, `intake.py:334`'s `<container>#<json_pointer>`.
         ("capture.json#/41", ("capture.json", "#/41")),
         # A `#` the owner put in their own filename. Read as a piece, this named a
         # file we never read (`notes`) and a piece that does not exist (`#2.md`).
@@ -265,7 +265,7 @@ def test_disputed_claim_ids_tolerates_a_world_model_that_is_not_an_object():
 
 
 def test_provenance_counts_two_slices_of_one_file_as_two_sources():
-    """A ruling, not an accident. `intake.py:333` writes a sliced input's
+    """A ruling, not an accident. `intake.py:334` writes a sliced input's
     source_path as `<container>#<json_pointer>`, so two slices of one capture reach
     `files` as two entries and the element is not single-source. That is what "how
     many sources back this" asks: parsec's 71 trace inputs are 71 slices of one
@@ -861,7 +861,7 @@ def test_headline_marks_a_missing_world_model(tmp_path):
 
 
 def test_inputs_read_keeps_a_hash_that_belongs_to_the_filename(tmp_path):
-    """Only a JSON pointer is the slicer's fragment. `intake.py:333` writes a slice
+    """Only a JSON pointer is the slicer's fragment. `intake.py:334` writes a slice
     as `<container>#<json_pointer>` and a pointer always begins `/`, so a `#`
     followed by anything else is part of the name the owner gave the file.
 
