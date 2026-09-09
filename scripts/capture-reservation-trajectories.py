@@ -41,9 +41,12 @@ SERVER_PORT = 8765
 # which is a worse contract than a variable: editing source to run a script makes
 # the edit indistinguishable from a change to the script. The defaults are the
 # paths the 2026-08-12 capture actually used, kept verbatim so that record stays
-# reproducible for whoever still has that checkout -- note that
-# /home/bnayahu/work/rossoctl no longer exists, so anyone re-running this must
-# set both.
+# reproducible for whoever still has that checkout. Measured 2026-09-09: that
+# directory is still present on the capture machine and both defaults still
+# resolve there, but it is no longer a git checkout (`git rev-parse HEAD` reports
+# "not a git repository"), so the commit sha the fixture README's capture
+# conditions record can no longer be verified against it. Anyone re-running this
+# anywhere else must set both.
 TOOL_DIR = Path(
     os.environ.get(
         "RUBRICA_ROSSOCTL_TOOL_DIR",

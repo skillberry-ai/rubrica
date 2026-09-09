@@ -142,8 +142,11 @@ The fixture is load-bearing, which is why "drop it" was never the cheap option:
 `src/rubrica/survey.py` all depend on it.
 
 One fact worth recording because it bears on any future re-capture rather than on
-this ruling: `/home/bnayahu/work/rossoctl` no longer exists, so the capture is
-not currently reproducible from this machine in any case.
+this ruling: `/home/bnayahu/work/rossoctl` is still present on this machine and
+both default paths still resolve, but it is no longer a git checkout
+(`git rev-parse HEAD` there reports "not a git repository"), so the
+`dbbc5e0f46cc92c8f642e44d1124965394cf36e5` the fixture README's capture
+conditions record can no longer be verified against it.
 
 ### Decision 5 — no `THREAT_MODEL.md`; a scope statement in `SECURITY.md`
 

@@ -132,9 +132,12 @@ cost concern.
 # which is a worse contract than a variable: editing source to run a script makes
 # the edit indistinguishable from a change to the script. The defaults are the
 # paths the 2026-08-12 capture actually used, kept verbatim so that record stays
-# reproducible for whoever still has that checkout -- note that
-# /home/bnayahu/work/rossoctl no longer exists, so anyone re-running this must
-# set both.
+# reproducible for whoever still has that checkout. Measured 2026-09-09: that
+# directory is still present on the capture machine and both defaults still
+# resolve there, but it is no longer a git checkout (`git rev-parse HEAD` reports
+# "not a git repository"), so the commit sha the fixture README's capture
+# conditions record can no longer be verified against it. Anyone re-running this
+# anywhere else must set both.
 TOOL_DIR = Path(
     os.environ.get(
         "RUBRICA_ROSSOCTL_TOOL_DIR",
@@ -176,15 +179,19 @@ Replacement:
 
 ```
 `capture-reservation-trajectories.py` reads its two target paths from the
-environment, defaulting to the absolute paths this capture actually used:
+environment. The defaults are the paths the 2026-08-12 capture actually used,
+written here relative to the `rossoctl` checkout named in *Capture conditions*
+below; the script's own defaults are those two paths absolute:
 
     RUBRICA_ROSSOCTL_TOOL_DIR    -> examples/mcp/reservation_tool
     RUBRICA_ROSSOCTL_AGENT_SRC   -> examples/a2a/reservation_service/src
 
-Anyone re-running the harness must set both, since the original checkout is not
-part of this repository. Set them rather than editing the script: an edit to the
-source is indistinguishable from a change to the harness, which is exactly what
-this record exists to let a reader rule out.
+That checkout is still present on the capture machine and both defaults still
+resolve there, but it is no longer a git checkout, so the commit sha in the table
+below can no longer be verified against it. Anyone re-running the harness
+anywhere else must set both. Set them rather than editing the script: an edit to
+the source is indistinguishable from a change to the harness, which is exactly
+what this record exists to let a reader rule out.
 ```
 
 Do **not** touch anything else in this README. The capture-conditions table, the
