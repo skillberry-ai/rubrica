@@ -335,7 +335,8 @@ def test_structured_machine_invariant_is_valid(tmp_path):
                 "local_key": "job_id",
                 "foreign_key": "job_id",
             },
-            # $defs/invariant has required `claims` since issue #6. The one id
+            # $defs/invariant has required `claims` since the read-coverage
+            # variance (docs/design/findings.md) was closed. The one id
             # minimal_claims declares: this test is about the `machine` form
             # validating, so the rest of the invariant is the minimum the schema
             # accepts rather than anything the test asserts on.

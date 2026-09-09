@@ -400,10 +400,10 @@ def _minimal_part(kind):
 def test_a_partial_without_inputs_seen_is_rejected(tmp_path, kind):
     """Every pass that owns a claim kind must account for every input.
 
-    Issue #6: read coverage of 01-claims/ varied 3/23 to 23/23 across
-    byte-identical dispatches, and nothing in either check layer could see the
-    difference -- a skimmed read produces a well-formed partial. The accounting
-    is what makes it visible.
+    The read-coverage variance (docs/design/findings.md): read coverage of
+    01-claims/ varied 3/23 to 23/23 across byte-identical dispatches, and nothing
+    in either check layer could see the difference -- a skimmed read produces a
+    well-formed partial. The accounting is what makes it visible.
     """
     document = _minimal_part(kind)
     del document["inputs_seen"]

@@ -27,8 +27,9 @@ def _strip_claim_refs(world: dict, doomed: set[str]) -> None:
     """Drop every id in `doomed` from every citation site in `world`, in place.
 
     Every site, including the three child ones $defs/invariant, $defs/outcome_class
-    and $defs/gap gained in issue #6. A stripper that walked only the four
-    top-level groups would leave the golden fixture still citing api-json from
+    and $defs/gap gained when the read-coverage variance (docs/design/findings.md)
+    was closed. A stripper that walked only the four top-level groups would leave
+    the golden fixture still citing api-json from
     its outcome classes -- so a test that means "nothing in the world model rests
     on this input" would be asserting against a world model that plainly does,
     and `check_claim_utilisation` would be right to stay quiet.
@@ -147,7 +148,7 @@ def test_a_claim_cited_only_on_a_child_element_counts_as_cited(tmp_path):
     record provenance was their parent's `claims` array or their own
     `description` prose. A counter that misses them reports an input as
     uncited while the world model rests on it -- the self-contradicting gate-1
-    brief issue #6 reports.
+    brief the read-coverage variance records.
     """
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     world = read_json(run.world_model)

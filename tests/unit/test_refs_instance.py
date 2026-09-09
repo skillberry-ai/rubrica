@@ -552,7 +552,8 @@ def test_an_easier_than_claimed_test_with_the_flag_is_accepted(tmp_path):
 
 
 def test_a_harder_than_claimed_test_must_carry_the_flag(tmp_path):
-    """The mirror of the two checks above, added with the flag (issue #37).
+    """The mirror of the two checks above, added with the flag for the
+    unrecordable understatement (docs/design/findings.md).
 
     Enforced in layer 2 rather than left to the prompt for the reason the
     overstated direction is: both numbers are in the run, the comparison is
@@ -560,8 +561,9 @@ def test_a_harder_than_claimed_test_must_carry_the_flag(tmp_path):
     verdict that is otherwise correct. It is also *repairable* -- the remedy is a
     flag in `05-verdicts/<sid>.json`, which is `rb-challenge`'s own `writes`, so a
     re-dispatch closes it. That is what distinguishes this finding from the forced
-    re-seed the ruling on issue #37 declined: that one would have asked for a
-    `hop_depth` edit in `02-scenarios.json`, which no stage below propose may make.
+    re-seed the ruling on the unrecordable understatement declined: that one would
+    have asked for a `hop_depth` edit in `02-scenarios.json`, which no stage below
+    propose may make.
     """
     verdict = minimal_verdict(minimum_tool_calls_found=3)
     findings = check_verdicts(_run(tmp_path, verdict=verdict))

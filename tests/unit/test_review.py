@@ -70,8 +70,9 @@ def test_a_non_accept_verdict_is_low_confidence():
 def test_any_flag_the_schema_allows_costs_an_accept_its_high_band():
     """A flagged `accept` is qualified, so it must not reach the `high` band.
 
-    Untested until issue #37, and the gap mattered because an *argument* came to
-    rest on it: `test_refs_instance.
+    Untested until the unrecordable understatement (docs/design/findings.md) was
+    closed, and the gap mattered because an *argument* came to rest on it:
+    `test_refs_instance.
     test_a_matching_call_count_needs_neither_difficulty_flag` records that no
     converse check is owed for an unwarranted flag, on the grounds that its only
     consequence here is a demotion -- which puts the package *into* the human

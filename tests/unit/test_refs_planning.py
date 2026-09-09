@@ -350,7 +350,8 @@ def _at_gap(world):
     ids=["outcome-class", "invariant", "gap"],
 )
 def test_a_fabricated_claim_id_on_a_child_element_is_reported(tmp_path, site, fabricate):
-    """The mirror of the parent-element check, at the three sites issue #6 added.
+    """The mirror of the parent-element check, at the three sites added when the
+    read-coverage variance (docs/design/findings.md) was closed.
 
     Without this, a pass could satisfy the new `claims` requirement with an id it
     invented, and layer 2 -- whose whole job is that every reference resolves --
@@ -409,7 +410,8 @@ def test_a_resolvable_claim_id_on_every_child_element_is_clean(tmp_path):
     ],
 )
 def test_a_malformed_gaps_array_is_a_finding_or_nothing_never_a_crash(tmp_path, over):
-    """`gaps` was iterated by no checker in this module until issue #6.
+    """`gaps` was iterated by no checker in this module until the read-coverage
+    variance was closed.
 
     So these shapes were all clean here, and a loop added without guards makes
     them raise instead. Exit **1**, not 2: `cli.py`'s named handler maps only
@@ -470,7 +472,8 @@ def _non_string_claim_at_gap(world):
 def test_a_non_string_claim_entry_on_a_child_element_is_skipped_not_raised(
     tmp_path, prefix, mutate
 ):
-    """A dict where a claim id belongs, at each of issue #6's three sites.
+    """A dict where a claim id belongs, at each of the read-coverage variance's
+    three sites.
 
     Measured before the `isinstance(claim_id, str)` guards: every one of the three
     raised `TypeError: unhashable type: 'dict'` from `claim_id not in
@@ -629,7 +632,7 @@ def test_a_coverage_matrix_inventing_a_cell_is_reported(tmp_path):
 
 
 def test_check_coverage_accepts_a_matrix_of_drivable_cells_with_holes_on_the_rest(tmp_path):
-    """The fabricated-finding guard for issue 17's narrowing.
+    """The fabricated-finding guard for the undrivable denominator's narrowing.
 
     check_coverage compared matrix rows against the WIDE cell set, so a matrix
     that correctly enumerates only drivable cells reported one 'matrix omits

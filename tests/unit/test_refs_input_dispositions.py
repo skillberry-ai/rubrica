@@ -1,10 +1,10 @@
 """The read-coverage accounting, and the five ways a row can be wrong.
 
-Issue #6: three reconcile passes were re-dispatched over a byte-identical run
-directory and read 12/23, 10/23 and 9/23 of 01-claims/ the first time, 23/23,
-13/23 and 3/23 the second. One improved to full coverage and one got materially
-worse, which is what rules out a systematic cause. Both runs reported success
-and both passed layer 1.
+The read-coverage variance (docs/design/findings.md): three reconcile passes were
+re-dispatched over a byte-identical run directory and read 12/23, 10/23 and 9/23
+of 01-claims/ the first time, 23/23, 13/23 and 3/23 the second. One improved to
+full coverage and one got materially worse, which is what rules out a systematic
+cause. Both runs reported success and both passed layer 1.
 
 Every test here mutates one field of a clean toy run and asserts exactly its own
 finding, because the five shapes are close enough that a mutation reaching two of

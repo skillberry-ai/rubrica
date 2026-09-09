@@ -59,10 +59,11 @@ def test_no_subject_names_the_same_claim_twice():
     A cover may put one claim under several subjects -- that is what
     rb-reconcile-subjects is instructed to do when a claim bears on more than one
     -- but a repeat inside a single subject's array says nothing a member could
-    act on. Reachable since issue #6 moved the fixture's outcome_class-kind
-    citations onto the outcome classes: clm-api-005 is on both of
-    cap-find-tickets' outcome classes, deliberately, and the capability's subject
-    covers what its outcome classes cite, so it arrives at that subject twice.
+    act on. Reachable since the read-coverage variance (docs/design/findings.md)
+    was closed, which moved the fixture's outcome_class-kind citations onto the
+    outcome classes: clm-api-005 is on both of cap-find-tickets' outcome classes,
+    deliberately, and the capability's subject covers what its outcome classes
+    cite, so it arrives at that subject twice.
     """
     for subject in split_world_model()["subjects"]["subjects"]:
         claims = subject["claims"]
@@ -169,9 +170,9 @@ def test_the_derived_rows_match_a_hand_written_table():
     pass with a mirrored bug in both -- two identical algorithms agreeing is not
     evidence. This table was read off tests/fixtures/toy/ by hand, so it fails
     if either walk drifts, and it fails if the fixture's claim kinds change
-    without someone noticing. Issue #6, where read coverage varied 3/23 to 23/23
-    across byte-identical dispatches, is exactly the class of defect that a
-    self-confirming measurement cannot see.
+    without someone noticing. The read-coverage variance -- read coverage varying
+    3/23 to 23/23 across byte-identical dispatches -- is exactly the class of
+    defect that a self-confirming measurement cannot see.
 
     trace-json's outcomes row is the one non-zero drop, so it is also the one
     row required to carry a note.

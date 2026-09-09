@@ -899,7 +899,8 @@ def test_the_seal_assembles_every_round_in_order(tmp_path):
 
 
 def test_two_rounds_of_members_minting_from_their_batch_id_do_not_collide(tmp_path):
-    """The blocked round #20 reports, reproduced through the ids a member mints.
+    """The blocked round of the colliding batch ids (docs/design/findings.md),
+    reproduced through the ids a member mints.
 
     Every other two-round test in this module hand-picks scenario ids, and the
     one that assembles two rounds picked `sc-b01-002` for round 2 -- an id that
@@ -1478,8 +1479,9 @@ def test_every_declared_cell_appears_even_with_no_scenarios():
 
 def test_capability_matrix_enumerates_only_drivable_cells():
     """pct has to divide by the same number the denominator holds, or one run
-    carries two disagreeing denominators -- the flaw in issue 17's own suggested
-    patch, which narrowed the seal and left the matrix at 56.
+    carries two disagreeing denominators -- the flaw in the undrivable
+    denominator's own suggested patch, which narrowed the seal and left the matrix
+    at 56.
     """
     world = {
         "capabilities": [

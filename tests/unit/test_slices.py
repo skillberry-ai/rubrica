@@ -454,9 +454,10 @@ def test_an_empty_exclusion_list_produces_the_zero_shape_not_absent_keys():
 def test_the_entry_block_is_bounded_by_bytes_and_says_so_when_it_bit():
     """The budget stops filling before it is exceeded, and records that it did.
 
-    A count cap is what issue #8 is open about: `digest`'s `names` is capped at
-    64 entries and unbounded in characters, so a verbose value makes `survey`
-    exit 2 on a row that used to be small. Paths vary in length far more than
+    A count cap is what remains open under the uncapped digest names
+    (docs/design/findings.md): `digest`'s `names` is capped at 64 entries and
+    unbounded in characters, so a verbose value makes `survey` exit 2 on a row
+    that used to be small. Paths vary in length far more than
     tool names do, so this block is bounded in bytes.
     """
     many = [_excl("duplicate", path_len=400) for _ in range(40)]
@@ -583,7 +584,8 @@ def test_the_written_plan_carries_catalogue_facts_agreeing_with_the_catalogue(tm
 
 
 def test_catalogue_facts_sorts_ahead_of_the_slices_array_on_disk(tmp_path):
-    """The head lands in the first bytes, which is the seek issue #3 filed.
+    """The head lands in the first bytes, which is the seek the untriageable
+    catalogue records.
 
     canonical_bytes sorts keys, so `catalogue_facts` and `run_id` both precede
     `slices`. On the 472,799-byte tau2 catalogue `run_id` sat at byte 470,054

@@ -19,10 +19,11 @@ branch's pipeline -- makes one file correct everywhere, and the filter is not a
 silent cap: a row whose stage this branch runs but whose skill is missing fails
 the table test rather than being skipped.
 
-MEASURED 2026-08-23, on the reservation-service run in issue #5: an
-`rb-triage-rule` member dispatched into a run whose `00-dispositions/` did not
-exist spent roughly seven turns and one `dangerouslyDisableSandbox` escalation
-attempt trying to `mkdir` it before naming `Write` as the way round. `mkdir` is
+MEASURED 2026-08-23, on the reservation-service run recorded under the fan-out
+output directory (docs/design/findings.md): an `rb-triage-rule` member dispatched
+into a run whose `00-dispositions/` did not exist spent roughly seven turns and
+one `dangerouslyDisableSandbox` escalation attempt trying to `mkdir` it before
+naming `Write` as the way round. `mkdir` is
 not on the dispatch's Bash allowlist (`scripts/dispatch-stage.sh` allows
 `rubrica *` and nothing else), so under `claude -p` the command lands on an
 approval prompt that cannot be answered.
@@ -39,8 +40,9 @@ it before this module: `tests/toy.py` stages every part with
 below. This is the *fixture-cannot-reach* shape, not a missing assertion.
 
 `test_..._is_declared_write_created_in_its_skill` pins the prose. If somebody
-later decides the mkdir belongs in code after all -- the alternative issue #5
-proposed, whose cost is measured in `docs/design/limitations.md` -- the first
+later decides the mkdir belongs in code after all -- the alternative proposed
+under the fan-out output directory, whose cost is measured in
+`docs/design/limitations.md` -- the first
 predicate fails and the prose has to go with it. That is the point: the two
 must agree, and neither may drift alone.
 """
@@ -122,8 +124,8 @@ def test_every_write_created_output_directory_is_absent_until_its_writer_runs(
     """The premise the prose rests on, measured rather than assumed: at the
     checkpoint immediately before its writer, the directory is not there.
 
-    An mkdir added to code -- issue #5's other candidate fix -- turns this red,
-    which is the coupling this module exists for."""
+    An mkdir added to code -- the fan-out output directory's other candidate fix
+    -- turns this red, which is the coupling this module exists for."""
     if upto is None:
         # reconcile-contradict: extract's claims written, reconcile-subjects'
         # cover written, its own fan-out not started. No checkpoint stops here.

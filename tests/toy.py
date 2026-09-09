@@ -330,10 +330,11 @@ def toy_world_model(**over: Any) -> dict[str, Any]:
                     },
                 ],
                 # The capability's own claims are the capability-kind ones only, now that
-                # the outcome_class-kind evidence sits on the outcome class it is about
-                # (issue #6). Before that, $defs/outcome_class had no `claims` array at
-                # all and was additionalProperties: false, so this list was the only
-                # place the evidence for an outcome could go.
+                # the outcome_class-kind evidence sits on the outcome class it is about --
+                # the read-coverage variance (docs/design/findings.md). Before that,
+                # $defs/outcome_class had no `claims` array at all and was
+                # additionalProperties: false, so this list was the only place the
+                # evidence for an outcome could go.
                 "claims": ["clm-api-001", "clm-api-007", "clm-api-008"],
                 "confidence": "high",
             },
@@ -616,12 +617,13 @@ def split_world_model(
                 remaining.remove(claim_id)
 
     # A capability's subject covers what its outcome classes cite, and an entity's
-    # what its invariants cite. Since issue #6 those are the elements that hold the
-    # outcome_class- and invariant-kind evidence, and a cover built from the parent
-    # array alone would strand it: measured with the child arrays ignored, all six
-    # moved ids fell through to sub-uncited, and con-missing-semantics
-    # -- whose claim_a is oc-missing's clm-notes-004 -- followed them there, out of
-    # the subject that names the capability the disagreement is about.
+    # what its invariants cite. Since the read-coverage variance was closed those are
+    # the elements that hold the outcome_class- and invariant-kind evidence, and a
+    # cover built from the parent array alone would strand it: measured with the child
+    # arrays ignored, all six moved ids fell through to sub-uncited, and
+    # con-missing-semantics -- whose claim_a is oc-missing's clm-notes-004 -- followed
+    # them there, out of the subject that names the capability the disagreement is
+    # about.
     for capability in world["capabilities"]:
         take(
             f"sub-{capability['id']}",
@@ -1434,12 +1436,12 @@ def toy_verdict(scenario_id: str, **over: Any) -> dict[str, Any]:
     fixture that needed the flag would be asserting a defect is tolerated
     rather than that a clean run is clean.
 
-    Since issue #37 the same is true upward -- a count *above* the claim requires
-    difficulty_understated -- so equality is now the only value that needs no flag
-    at all, and that is what makes it the right one here. The tests that want
-    either flag edit one verdict on a built run, which keeps the direction under
-    test visible in the test rather than folded into the fixture every other test
-    shares.
+    Since the unrecordable understatement was closed the same is true upward -- a
+    count *above* the claim requires difficulty_understated -- so equality is now
+    the only value that needs no flag at all, and that is what makes it the right
+    one here. The tests that want either flag edit one verdict on a built run, which
+    keeps the direction under test visible in the test rather than folded into the
+    fixture every other test shares.
     """
     scenario = next(s for s in _SCENARIOS if s["id"] == scenario_id)
     payload: dict[str, Any] = {
