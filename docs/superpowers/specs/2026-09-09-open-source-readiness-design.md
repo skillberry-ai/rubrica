@@ -4,11 +4,19 @@
 `github.com/skillberry-ai/rubrica`: policy files, DCO enforcement, scanning, and
 the internal references the tree still carries"
 
-Design for the two workstreams of issue #24 that change files in this repository:
-the preparation commit that mirrors `simulation-harness`'s `fb7116a`, and the
-execution of decision 2 — rewriting every internal issue citation to carry its
+Design for the three workstreams of issue #24 that change files in this
+repository: the preparation commit that mirrors `simulation-harness`'s `fb7116a`,
+the execution of decision 2 — rewriting every internal issue citation to carry its
 finding rather than a pointer that will resolve to an unrelated issue in the
-public repo.
+public repo — and a release process modelled on the harness's.
+
+**The release process is a scoped-in reversal of one of issue #24's own
+rulings.** The issue excluded it: *"`CHANGELOG.md` and a release path are
+deliberately not in that list — rubrica has no release process today and
+inventing one is not migration work. Whether it should be published to PyPI is a
+separate question worth its own issue."* That ruling was overturned deliberately
+on 2026-09-09, and it is recorded here rather than quietly dropped so that a
+reader who finds the issue text first can see which document is later.
 
 Measured against both trees on 2026-09-09: rubrica's working tree on `main` at
 `9f877b6`, and `simulation-harness` at `acb1c55`. Every count below is a
@@ -25,9 +33,16 @@ Deliberately out of scope, each to its own follow-on:
   has to land first regardless.
 - **The post-move security-triage round.** Its size is unknown until scanning
   runs against a populated repo, so specifying it now would be inventing work.
-- **`CHANGELOG.md`, a release process, and PyPI publication.** Issue #24 rules
-  these out on the grounds that rubrica has no release process today and
-  inventing one is not migration work.
+- **Registering the PyPI trusted publisher and creating the `pypi` GitHub
+  environment.** Both are settings on services, not files in a commit, and they
+  share the ordering property that makes this split safe: `publish.yml` is inert
+  until a trusted publisher exists for this repository, workflow filename and
+  environment, exactly as the `DCO` ruleset rule is inert until the job exists.
+  Workstream C specifies the workflow; the follow-on registers the publisher.
+- **`llm-switchboard`.** Its `publish.yml` carries the finding that motivates
+  rubrica's OIDC choice (below) and it is cited here as evidence, but it is
+  explicitly out of scope: no issue is filed against it and no change is proposed
+  to it.
 - **History rewriting.** All 666 commits will carry `parsec`, `/home/bnayahu`
   and `github.ibm.com` into the public repo. `simulation-harness` did the same
   with its 292 — `fb7116a` is present in the public history at its original sha
@@ -338,6 +353,144 @@ red; reword a rewritten citation meaning-preservingly and confirm it stays green
 A predicate nobody has watched fail is not yet a guard, and the mirror failure —
 a phrase pin that breaks on an innocuous reformat — is equally real here.
 
+## Workstream C — the release process
+
+Modelled on the harness, which is the instruction: mimic it except where a
+sibling repo shows something better. Four places do, and one place cannot be
+mimicked at all.
+
+### What transplants unchanged
+
+`scripts/release.sh` and the **two** libraries it sources — `scripts/lib/release-tag.sh`
+(the single definition of what a release tag is: strictly `vX.Y.Z`, so a
+`v0.3.0-rc1` is never treated as the previous release) and
+`scripts/lib/release-notes.sh` (Conventional Commit subjects → grouped markdown).
+Issue #24's checklist named only `check-dco.sh`, so the transplant is three
+scripts and their tests rather than one — worth stating because it roughly triples
+what the checklist implies.
+
+`make release VERSION=0.2.0` runs on `main` only, with a clean worktree in sync
+with `origin/main`. It bumps `version` in `pyproject.toml`, re-locks `uv.lock`,
+prepends a `CHANGELOG.md` section, commits `chore(release): vX.Y.Z`, creates a
+signed annotated tag, pushes `main` and the tag `--atomic`, and creates the
+GitHub Release. `--dry-run` previews without writing.
+
+The re-lock step is **required here, not optional**: `uv.lock:198` pins rubrica's
+own version (`0.1.0`), so a bump that skipped the re-lock would leave the lockfile
+stale — and CI runs `uv sync --locked`, which fails on a stale lock. The release
+would therefore break the build it just tagged.
+
+Resumability transplants with it, and it is the part worth keeping rather than
+simplifying: four partial-failure states, each with exactly one move, documented
+in a table. Resume is deliberately narrow — it fires only for a tag this script
+created, on a `chore(release): vX.Y.Z` commit at `HEAD` whose `pyproject.toml`
+already holds that version — so a hand-made tag is rejected rather than resumed
+into a release with no bump and no changelog section.
+
+### Generated changelog, and the measurement that settles it
+
+The org holds two positions. `cap-evolve` and `skillberry-store` hand-maintain a
+Keep a Changelog `## [Unreleased]` section; the harness generates from commit
+subjects at release time.
+
+Generation is right for rubrica, on evidence rather than preference:
+
+- **`skillberry-store` states its own reason for hand-maintaining, and that
+  reason does not hold here.** Its header says the squash-merge workflow collapses
+  commit messages, so the changelog is the only place a migration note survives.
+  Rubrica merges rather than squashes — 24 merge commits, every underlying subject
+  preserved — so nothing is collapsed and nothing needs rescuing by hand.
+- **640 of rubrica's 643 non-merge commits (99%) are Conventional Commits.**
+  Measured on 2026-09-09 with the harness's own type list.
+- **The generator was run against rubrica's history before this was specified,
+  not after.** `generate_release_notes 'HEAD~12..HEAD'`, sourced unmodified,
+  produced correctly grouped Features / Fixes / Documentation / Tests sections
+  with scopes rendered as bold prefixes. `--no-merges` drops the 24 merge commits
+  and picks up the real subjects beneath them, which is the behaviour rubrica's
+  merge-based history needs.
+
+So `CHANGELOG.md` is created seeded with a Keep a Changelog header and nothing
+else; `release.sh` prepends every section after that.
+
+### The four practices adopted from siblings
+
+1. **PyPI Trusted Publishing, no stored token.** `.github/workflows/publish.yml`
+   on `release: published` (plus `workflow_dispatch`), `permissions: {contents: read,
+   id-token: write}`, `environment: pypi`, building an sdist and a wheel, `twine
+   check dist/*`, then `pypa/gh-action-pypi-publish` **with no `password:` input**
+   — OIDC only.
+
+   The evidence is a gap in the one org repo that publishes to PyPI today:
+   `llm-switchboard`'s `publish.yml` already sets `id-token: write` and
+   `environment: pypi`, the complete OIDC scaffolding, and then passes
+   `password: ${{ secrets.PYPI_API_TOKEN }}`. It is live on PyPI at 0.1.0, so the
+   token path is the one doing the work and the OIDC block is inert. Rubrica takes
+   the configuration that repo was evidently reaching for: no long-lived secret to
+   rotate or leak, and PEP 740 attestations generated automatically. The
+   `rubrica` name is unclaimed on PyPI as of 2026-09-09 (the JSON API returns
+   404), which is also an argument for claiming it before the repo is public.
+2. **`.github/workflows/dependency-review.yml`** — `llm-switchboard` has it,
+   neither the harness nor rubrica does. Pull-request scoped,
+   `fail-on-severity: high`, `permissions: {contents: read, pull-requests: read}`.
+3. **Least-privilege `permissions:` at workflow level.** Neither the harness's
+   `ci.yml` nor rubrica's declares a `permissions:` block, so both inherit the
+   repository default. `ci.yml` gains `permissions: {contents: read}`; the `dco`
+   job needs nothing more, since it only reads history.
+4. **Changelog compare links**, from `cap-evolve`: `[Unreleased]` and per-version
+   links to GitHub's `compare` view. The harness `CHANGELOG.md` has **zero** of
+   them. Generation does not preclude them — they are header lines, not section
+   content — so they go in the seeded header.
+
+### What cannot be mimicked, and what replaces it
+
+The harness's release publishes a **container image**: `docker-publish.yml`
+triggers on `tags: ["v*.*.*"]`, so the tag push builds and pushes to
+`ghcr.io/<owner>/simulation-harness`. Rubrica has no Dockerfile and is a CLI
+library, so there is nothing to build and `docker-publish.yml` is not
+transplanted. `docs/releasing.md`'s "Container images" section is replaced by a
+PyPI section, and its note about the atomic push firing that workflow twice
+drops with it.
+
+`publish.yml` is what takes its place, and the two are the same shape: cutting a
+release does not publish the artifact directly — publishing the *release* does.
+
+### One practice deliberately not adopted
+
+**No sha-pinning of actions.** Nothing in the org pins by commit sha; everything
+floats on major tags, and the harness's `dependabot.yml` argues the choice
+explicitly — floating majors pick up patches at run time, and Dependabot would
+otherwise open a PR per patch release, which *narrows* the ref and adds churn.
+Sha-pinning is GitHub's own hardening advice and the trade-off is real, but it is
+org-wide supply-chain policy rather than release-process work, and adopting it
+would mean revisiting those `ignore` rules in the same change. Named here so that
+a reader can tell it was weighed rather than missed.
+
+### Two documents no test will remind us about
+
+`make release` is a new target, and two documents enumerate this project's
+commands by hand: `CLAUDE.md`'s "Setup and commands" block and
+`CONTRIBUTING.md`'s gate list. **No test guards either list** —
+`tests/unit/test_docs_accuracy.py` checks stages, skills, subcommands and
+artifact kinds against the code that owns them, and a Makefile target is none of
+those. `release.sh` is a script rather than a `rubrica` subcommand, so
+`cli.SUBCOMMANDS` and `docs/reference/cli.md` are correctly untouched and their
+guard will stay green while the command list goes stale.
+
+So both documents are updated in commit 5 as part of the work, not left to a test
+to catch. Both are in `_user_facing()`, so their edits are subject to the
+no-hand-typed-count and no-counting-heading policies, and `CLAUDE.md` and
+`README.md` are not ruff-excluded — `make check` reads them.
+
+### The harness gets an issue, not a patch
+
+Practices 2, 3 and 4 apply to `simulation-harness` and it has none of them.
+Rather than open a PR into another project's live release path from this branch,
+this cycle files one issue against `skillberry-ai/simulation-harness` recording
+all three with the evidence: no `permissions:` block in `ci.yml`, no
+`dependency-review.yml`, and zero compare links in `CHANGELOG.md`. Practice 1
+does not apply to it — it publishes images with `GITHUB_TOKEN`, not packages to
+an index.
+
 ## Testing
 
 The three gates, green at every commit: `make test`, `make check` (which covers
@@ -349,21 +502,55 @@ New tests:
 - `tests/unit/test_check_dco.py` — the five cases named above.
 - One predicate in `tests/unit/test_docs_accuracy.py`, measured in both
   directions.
+- `tests/unit/test_release.py` and `tests/unit/test_release_notes.py` — the ports
+  of the harness's two shell suites (402 and 150 lines respectively).
+
+### Why the shell suites become pytest modules
+
+The harness keeps its script tests as shell — `scripts/tests/test-release.sh`,
+`test-release-notes.sh`, `test-check-dco.sh`, 673 lines across the three — behind
+a `make test-scripts` target. Rubrica does not copy that, and the reason is
+stronger than the stylistic one given for `check-dco.sh` in workstream A.
+
+`CLAUDE.md` states that `make test` green, `make check` clean, and
+`rubrica check-skills` exiting 0 **are the three gates, and anything else means
+something broke.** A `make test-scripts` target would be a fourth gate: one more
+command a contributor and CI both have to remember, sitting outside the set the
+project documents as complete. A gate nobody is obliged to run is a gate that
+eventually stops running, and it would stop running silently.
+
+Porting instead puts the release scripts under the gate that already exists.
+The idiom is present: `tests/unit/test_dispatch_harness.py` drives
+`scripts/dispatch-stage.sh` through `subprocess.run` with `tmp_path` fixtures,
+and `tests/unit/test_docs_accuracy.py` loads a script from `scripts/` by path on
+the stated grounds that it is a directory of tools rather than a package. The
+harness suites build throwaway git repositories as fixtures, touch no network
+remote and call no `gh`; `tmp_path` plus `git init` reproduces that directly.
+
+This is the largest single piece of work in workstream C, and it is the piece
+most likely to be underestimated — 552 lines of shell assertions to port, against
+a script whose failure modes are the four resumable states.
 
 No existing test should need changing. If one does, that is a signal worth
 stopping on rather than editing through: it would mean a citation was
 load-bearing in a way the measurement above missed.
 
-`docs/` is excluded from ruff (`extend-exclude = ["docs"]`), so `findings.md` and
-this spec carry no formatting obligation. `scripts/capture-reservation-trajectories.py`
-is not excluded and must satisfy `ruff check` and `ruff format --check`.
+`docs/` is excluded from ruff (`extend-exclude = ["docs"]`), so `findings.md`,
+`CHANGELOG.md` and this spec carry no formatting obligation.
+`scripts/capture-reservation-trajectories.py` is not excluded and must satisfy
+`ruff check` and `ruff format --check`. The three transplanted shell scripts are
+not Python and ruff does not read them, so nothing in `make check` covers them —
+their tests are the only gate they have, which is a second reason those tests
+belong under `make test`.
 
 ## Commit sequence
 
-Four commits, each `git commit -S -s`, each leaving the three gates green.
+Six commits, each `git commit -S -s`, each leaving the three gates green.
 Workstream B lands before A so that the policy files arrive into a tree whose
 citations are already clean, rather than the reverse — which would publish
-`SECURITY.md` alongside 85 pointers to the wrong issues.
+`SECURITY.md` alongside 85 pointers to the wrong issues. C lands last because it
+is the only workstream whose output is inert until somebody configures a service,
+so it is the one where a review pause costs nothing.
 
 1. **Decision 3's code change** — `capture-reservation-trajectories.py`'s two
    constants become environment reads; the fixture README names them.
@@ -376,10 +563,22 @@ citations are already clean, rather than the reverse — which would publish
    red direction is measured against the pre-rewrite tree *before* this commit is
    made, not asserted after.
 4. **The preparation commit** — everything in workstream A.
+5. **The release scripts and their tests** — the three transplanted scripts,
+   `CHANGELOG.md` seeded with its header and compare links, `docs/releasing.md`,
+   the `release` Makefile target, and the two ported pytest modules.
+6. **The publishing and hardening workflows** — `publish.yml`,
+   `dependency-review.yml`, and the `permissions:` block on `ci.yml`. Separate
+   from commit 5 because these three are the ones that do nothing until the PyPI
+   trusted publisher and the `pypi` environment exist, and a reviewer should be
+   able to see that boundary in the history.
+
+Plus one action outside this repository: **an issue filed against
+`skillberry-ai/simulation-harness`** for practices 2, 3 and 4. No change is
+proposed to `llm-switchboard`.
 
 ## What would falsify this design
 
-Three things, named so they are checked rather than assumed:
+Five things, named so they are checked rather than assumed:
 
 - **A test that does assert on citation text.** The measurement says none does.
   If commit 3 breaks a test, the measurement was wrong and the rewrite needs
@@ -394,3 +593,15 @@ Three things, named so they are checked rather than assumed:
   by a phrase without distorting it, that entry keeps a longer name and the table
   is corrected. The finding is never trimmed to fit the name it was given — that
   would be the same error as presenting a reasoned number as an observed one.
+- **`release.sh` depending on something the harness has and rubrica does not.**
+  The same risk as `check-dco.sh`, and larger: it is 18KB and it was read for its
+  structure and its env knobs (`RELEASE_REMOTE`, `RELEASE_GH_REPO`,
+  `RELEASE_SKIP_GH`), not line by line. The two sourced libraries were read in
+  full and are self-contained. If `release.sh` reaches for a harness-specific
+  path, target or config file, commit 5 grows and the port grows with it.
+- **The changelog generator behaving differently at a real release boundary.**
+  It was exercised over `HEAD~12..HEAD`, a range with no tag in it, because
+  rubrica has no tags yet. The first real run computes `prev_tag` as empty and
+  takes the whole history as its range, which is a path the trial did not cover.
+  The dry run is what checks this, and it must be run before the first release
+  rather than after.
