@@ -494,9 +494,9 @@ missing-input refusal, worded identically;
 SKILL.md has no include mechanism and identical copies are the only enforceable
 form of "the rule lives in one place."
 
-**What was ruled against, and why it is not parked but rejected.** The issue's
-third suggestion was to forbid `blocks` on a gap with no target subject as a
-schema constraint. `subject` is prose, so no schema can tell a target subject from
+**What was ruled against, and why it is not parked but rejected.** A third
+remedy was proposed when the defect was first written up: forbid `blocks` on a
+gap with no target subject as a schema constraint. `subject` is prose, so no schema can tell a target subject from
 `pipeline:`; a check that tried would be deciding whether a subject *is about* the
 target, which is the semantic judgment the layer-2 entry near the top of this
 file rules out for exactly this reason. The prose ruling plus the uniform refusal is the
@@ -1028,14 +1028,14 @@ judgment and not a demonstrated improvement in it.
 ### The untriageable catalogue was closed on arithmetic, and the run that would confirm it has not happened
 
 The death [the untriageable catalogue](findings.md#the-untriageable-catalogue)
-reports is real and was observed twice: the monolithic `rb-triage` stage died on
-a 595KB / 351-candidate catalogue, once in context compaction and once by
-exhausting its whole dollar budget. What closed the issue is not a run that
-survived it. It is a partition whose shards measure small enough to hold, plus a
+reports is real, and it was observed over **three** dispatches on a 595KB /
+351-candidate catalogue: two died during context compaction and one exhausted
+its whole dollar budget. What closed the finding is not a run that survived it.
+It is a partition whose shards measure small enough to hold, plus a
 `catalogue_facts` block that takes the one remaining unbounded pass from 472,799
 bytes to 51,792 on the tau2 catalogue the design was measured against — both
 arithmetic over catalogues that already existed, which is the entry above this
-one restated about a specific issue. The absolute figures move with the corpus
+one restated about a specific finding. The absolute figures move with the corpus
 checkout and the ratio does not: a re-run during this change measured 480,399 to
 52,542, 9.14x against the design's 9.13x.
 
@@ -1251,11 +1251,11 @@ gate 1 is the guard. Two things not to do meanwhile — do not make the banner
 assert that the loop halts, because with goals present it does not, and do not
 promote it to a `check-refs` finding for the reason the revert records.
 
-### The propose/score loop's per-response bound, and the term the issue blamed
+### The propose/score loop's per-response bound, and the term first blamed for it
 
 The loop is bounded by a code partition now. This entry is here for the
-arithmetic behind that — because the issue that reported the failure diagnosed
-it wrongly and the next reader would too — and for the terms that are still not
+arithmetic behind that — because the write-up that first reported the failure
+diagnosed it wrongly and the next reader would too — and for the terms that are still not
 bounded.
 
 `rb-propose` declared `scenarios` under both `reads` and `writes`, so round N's
@@ -1275,12 +1275,12 @@ Measured against that run's surviving artifacts:
 | one response | 124,545, about 35,600 output tokens |
 
 **The re-emit was 20% of that, and the round's own batch was the other 80%.**
-The issue concluded the opposite — that the cap binds on how large round 1
+That diagnosis concluded the opposite — that the cap binds on how large round 1
 was — and named `run-20260823-112746` as the counter-example. That run
 cleared round 2 with **4** closable holes against this run's 86. The two runs'
 round-1 documents differ by roughly a factor of two; their closable-hole counts
-differ by more than twenty. So the deterministic `append-scenarios` the issue
-leaned toward would have removed the minority contributor and left the 99,932
+differ by more than twenty. So the deterministic `append-scenarios` that
+diagnosis leaned toward would have removed the minority contributor and left the 99,932
 bytes untouched, on a term that scales with the world model's denominator.
 **Anyone reaching for "just append incrementally" is reaching for the 20%.**
 
@@ -1306,7 +1306,7 @@ Three precisions, because each is a place a re-derivation goes wrong:
   `02-scenarios.json` measures 24,613 bytes today; the run's own log recorded
   24,607 at the moment round 2 failed, because the score re-dispatch that
   recorded the sc-001 rejection rewrote the file afterwards. And the comparison
-  run's 17,669-byte document, from which the issue's "1.4×" came, is that run's
+  run's 17,669-byte document, from which that diagnosis's "1.4×" came, is that run's
   file *after* round 2; its round-1 document was 11 scenarios and about 12,577
   bytes. Both corrections widen the gap the argument rests on rather than
   narrowing it, and the 20% share holds under every one of the three figures.

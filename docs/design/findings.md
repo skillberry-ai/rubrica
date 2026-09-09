@@ -67,7 +67,7 @@ sharded the candidate list so that each member reads one holdable shard.
 contract became `reads = ["slices"]`, with `request`, `policy`, the exclusion
 tally and each candidate's own source bytes carried on `00-slices.json` as a
 `catalogue_facts` block that `triage-slices` writes and `refs.check_slices`
-recomputes from the catalogue. On this issue's own corpus the objective
+recomputes from the catalogue. On this finding's own corpus the objective
 dispatch's input measured **472,799 bytes down to 51,792**, 9.13x, inside the
 harness's whole-file `Read` refusal where the catalogue was not; a re-run during
 the work measured 480,399 to 52,542, and the ratio held while the absolutes
@@ -431,9 +431,9 @@ sections, since §3 is the procedure and §5 only the exception list, and the
 undifferentiated §3 sentence is the one the measured run actually obeyed. All
 eight passes of the family now carry the same missing-input refusal worded
 identically, with `tests/unit/test_skills_reconcile_family.py` holding the
-byte-identity, since a `SKILL.md` has no include mechanism. The issue's third
-suggestion — a schema constraint forbidding `blocks` on a gap with no target
-subject — was rejected rather than parked: `subject` is prose, so such a check
+byte-identity, since a `SKILL.md` has no include mechanism. A third remedy was
+proposed when the defect was first written up — a schema constraint forbidding
+`blocks` on a gap with no target subject — and was rejected rather than parked: `subject` is prose, so such a check
 would be deciding whether a subject is *about* the target. Two things the
 closure records rather than claims: the fix is prompt-level, so it **buys a
 probability rather than a guarantee**, and it was verified structurally — every
@@ -458,8 +458,8 @@ first call `search_restaurants`, and `capability_refs` declared only
 `oc-check-no-availability` by a scenario needing two calls. The finding did
 cost that run a cell, coverage recomputed 13/17 to 12/17, but only because the
 double `re-seed` escalated to a rejection. That an `accept` plus a note would
-have shipped the mislabel silently is the issue's **reasoned** path, not one it
-observed.
+have shipped the mislabel silently is this finding's **reasoned** path, not one
+it observed.
 
 **What changed.** Fixed across `c25f03c`, `c9c4897` and `fa451d3`.
 `difficulty_understated` is in the enum and computed as the mirror, with the
@@ -467,8 +467,8 @@ observed.
 the pair of operands rather than of either inequality. It is surfaced *ahead*
 of its sibling and bolded beside the call count, both asserted, since an append
 at the end would have satisfied every other assertion. Layer 2 requires
-whichever flag holds — not on the issue's list, and safe only because a missing
-flag is repairable inside `rb-challenge`'s own `writes`. Layer 1 now forbids
+whichever flag holds — not a remedy this finding asked for, and safe only
+because a missing flag is repairable inside `rb-challenge`'s own `writes`. Layer 1 now forbids
 both flags on one verdict, which **reverses** the first ruling that exclusivity
 was a semantic judgment: a verdict carrying both was measured passing layer 1,
 passing `check-refs` at exit 0 and surfacing nowhere, because the summary
@@ -498,8 +498,8 @@ round 1's five. `propose-seal` exited 1 and wrote nothing, layer 2 named the
 collision, and the `RUBRICA_FINDINGS_FILE` repair path fixed the ids in one
 dispatch at 0.33 USD. The consequence was a **blocked round rather than a wrong
 artifact**: every mechanism downstream of it behaved as designed. That it
-would hit every run reaching round 2 is the issue's **reasoned** claim from both
-terms being in code and prompt, neither reading the round — the sample was one
+would hit every run reaching round 2 is this finding's **reasoned** claim, from
+both terms being in code and prompt, neither reading the round — the sample was one
 run and one round-2 dispatch. No test caught it, and the reason is
 *fixture-cannot-reach* rather than a missing test: the one test that assembled
 two rounds passed, on ids no member mints. A narrower finding shares the root
@@ -507,13 +507,15 @@ cause, visible only in the transcript: both of round 2's dispatches read
 outside their `reads` contract — the member read `02-scenarios.json`, which its
 own frontmatter forbids, and minted a colliding id anyway while holding all 49
 existing ones, and the repair dispatch after it read a sibling's part. Round 2
-planned one batch, so that is **one observation of one member**, which is the
-issue's own caveat; all five round-1 members were clean. That the old scheme left
-such a member **no in-contract way to see which ids exist** is the issue's
-charitable reading, offered as a contract gap rather than measured as one.
+planned one batch, so that is **one observation of one member**, which is this
+finding's own caveat; all five round-1 members were clean. That the old scheme
+left such a member **no in-contract way to see which ids exist** is this
+finding's charitable reading, offered as a contract gap rather than measured as
+one.
 
-**What changed.** Fixed at `b0e1ac5`, the record of what changed since the
-issue carries no closing comment. Batch ids are now `r<N>-b<NN>`, making
+**What changed.** Fixed at `b0e1ac5`, and that commit is the whole record of
+what changed — nothing was written down anywhere else at closing time. Batch ids
+are now `r<N>-b<NN>`, making
 scenario ids `sc-r2-b01-01` — the round in the id rather than a second field a
 prompt must read, putting the guarantee in code and leaving a member no
 reason to go looking. `rb-propose`'s prefix rule and invariant 4 were amended to
@@ -521,7 +523,7 @@ match. Two guards were added, each watched failing first:
 `test_batch_ids_are_scoped_to_their_round` pins the mechanism, and
 `test_two_rounds_of_members_minting_from_their_batch_id_do_not_collide`
 reproduces it from the batch ids `write_batches` actually plans, so reverting the
-fix fails it with the collision the issue reports. The prompt half was
+fix fails it with the collision this finding reports. The prompt half was
 **verified structurally** — the guards are unit tests, and there is **no dispatch
 of the amended prose on record**; `rb-propose`'s exercise record predates the fix
 and was not re-recorded.
