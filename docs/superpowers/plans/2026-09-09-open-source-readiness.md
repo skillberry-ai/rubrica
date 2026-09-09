@@ -21,7 +21,7 @@
 - **The exit-code contract is load-bearing:** `0` clean, `1` findings one per line on stdout, `2` usage error or unreadable run. A stage defect must never surface as `2`; a `1` must never have empty stdout.
 - **Comment density here is high and deliberate** — comments explain *why*, usually citing a measurement. Match that; do not strip them.
 - **Do not write a test count anywhere.** `tests/unit/test_docs_accuracy.py` fails on a hand-typed count in any user-facing document, and no heading may count something that grows (stages, skills, subcommands, gates).
-- **Measured baseline, RE-MEASURED 2026-09-09 after PRs #38, #39 and #40 merged:** **118** tracker citations across **40** tracked files outside `docs/superpowers/`, spanning **13** distinct issue numbers. Per tree: `tests/` 68 across 25 files, `src/` 25 across 9, `docs/` 20 across 4, `scripts/` 5 across 2. This supersedes an earlier baseline of 89/35/11 — those three PRs added 29 citations in five new files plus two newly-closed issues to cite, #36 and #37. Absorbing them is not optional: Task 6's guard scans `src/`, `tests/` and `scripts/`, so it cannot go green while any citation remains. **If further work merges into `main` before this branch lands, re-measure again before Tasks 3-6.**
+- **Measured baseline, corrected TWICE — read this before trusting any count below.** Total scope is **128** citations across 41 files spanning **14** issues. The first baseline (89/35/11) missed four citations that wrap across a line break. The second (118/40/13) missed **ten more in bare `#N` form** — a `#19` with no "issue" before it, and nine others — because the counting pattern required the word "issue", a "PR" prefix, or parentheses. It also missed a fourteenth issue, **#20**, cited once. Task 3 rewrote 31 sites in `src/` and `scripts/`; **97 remain — `docs/` 24 across 4 files, `tests/` 73 across 25.** Use the canonical enumeration script in the conventions section; do not write your own pattern.
 - **Harness source tree for every transplant:** `/home/bnayahu/work/kaegis/simulation-harness` at `acb1c55`. Referred to below as `$HARNESS`.
 
 ---
@@ -290,7 +290,7 @@ rendered an empty ruling while exiting 0.>
 ...
 ````
 
-The thirteen entries, in this order, with these exact headings — **the naming table
+The fourteen entries, in this order, with these exact headings — **the naming table
 is the interface Tasks 3–5 consume, so it is fixed here**. The last two were added
 when PRs #38, #39 and #40 merged mid-execution and brought two newly-closed issues
 into the tree; if Task 2 has already landed, they are Task 2b's job, not a rewrite
@@ -311,6 +311,7 @@ of Task 2:
 | `## The silent fan-out gap` | `#the-silent-fan-out-gap` | #19 |
 | `## The gap about the run` | `#the-gap-about-the-run` | #36 |
 | `## The unrecordable understatement` | `#the-unrecordable-understatement` | #37 |
+| `## The colliding batch ids` | `#the-colliding-batch-ids` | #20 |
 
 If an issue's finding genuinely cannot be carried by its phrase without
 distorting it, **change the heading here and record why in the commit message** —
@@ -473,6 +474,98 @@ MSG
 
 ---
 
+### Task 2c: Add the fourteenth findings entry, for issue #20
+
+**Why this exists.** The citation count was corrected twice. The second correction
+found ten citations in bare `#N` form that the counting pattern had never matched —
+and one of them, in `tests/unit/test_rounds.py:902`, is the only reference anywhere
+to **issue #20**, a fourteenth closed issue. `findings.md` has thirteen entries, so
+that citation has nowhere to point and Task 5 cannot rewrite it.
+
+**Files:**
+- Modify: `docs/design/findings.md` — append one entry
+
+**Interfaces:**
+- Consumes: the register Tasks 2 and 2b established.
+- Produces: one anchor Task 5 consumes —
+  `## The colliding batch ids` → `#the-colliding-batch-ids` (issue #20).
+
+- [ ] **Step 1: Read what you are extending**
+
+Run: `grep -n '^## ' docs/design/findings.md` — expect thirteen headings. Read two
+entries in full to match the register: a short reference under two bold labels,
+roughly 25-40 lines. **Do not edit the preamble or any existing entry.**
+
+- [ ] **Step 2: Read the issue and its closing commit**
+
+Run: `gh issue view 20 --json title,body,comments --jq '.title, .body, (.comments[]?.body)'`
+
+Title: *"`propose-batches` restarts batch numbering each round, so round 2's scenario
+ids collide with round 1's and the seal refuses the round"*.
+
+Then find the commit that closed it: `git log --all --grep='Closes #20' --format='%h %s'`.
+If the issue carries no closing comment, the commit is your evidence for what
+changed — say so in the entry rather than implying the tracker recorded it.
+
+- [ ] **Step 3: Read the site that cites it, so the entry serves that citation**
+
+Run: `sed -n '895,910p' tests/unit/test_rounds.py`
+
+This is the one place `#20` appears. The entry has to make that docstring
+comprehensible to a reader who follows it.
+
+- [ ] **Step 4: Write the entry**
+
+Append after `## The unrecordable understatement`, with this exact heading:
+
+```markdown
+## The colliding batch ids
+
+**What was measured.** <from the issue and its closing commit>
+
+**What changed.** <what the closing commit records>
+```
+
+**The rule that governs this task.** State what the source *measured*. Never present
+a reasoned, projected or constructed figure as an observed one; if the fix was
+verified structurally rather than by a real dispatch, say so in those words. Three
+prior tasks in this plan preserved such qualifiers and one earlier defect in this
+plan was exactly this class of error.
+
+- [ ] **Step 5: Verify**
+
+```bash
+grep -c '^## ' docs/design/findings.md
+grep -n '<[a-z]' docs/design/findings.md | grep -v '`' || echo "  no placeholders"
+uv run pytest tests/unit/test_docs_accuracy.py -q
+```
+
+Expected: `14`, no placeholders, docs suite PASS.
+
+- [ ] **Step 6: Three gates, then commit**
+
+Run: `make test && make check && uv run rubrica check-skills`
+Expected: all green; the test count must stay at its current baseline.
+
+```bash
+git add docs/design/findings.md
+git commit -S -s -m "$(cat <<'MSG'
+docs(design): record the colliding batch ids, the fourteenth cited finding
+
+The citation count was corrected twice. The second correction found ten citations
+in bare `#N` form that the counting pattern had never matched, and one of them was
+the only reference anywhere to a fourteenth closed issue -- so a real citation had
+nowhere to point and the guard predicate could not have gone green.
+
+Same evidence rule as the thirteen before it: what the source measured, with its
+own qualifiers kept where a fix was verified structurally rather than by a
+dispatch.
+MSG
+)"
+```
+
+---
+
 ## How to rewrite a citation (read once, applies to Tasks 3, 4 and 5)
 
 **The rule:** replace the pointer with the finding's name from Task 2's table, and
@@ -567,21 +660,42 @@ four cross-line sites, and one of its files ships inside the wheel.
 Run:
 
 ```bash
-python3 - <<'PY'
-import re, subprocess
-PAT = re.compile(r"(?i)\bissues?\s+#?\d+\b|\bPR\s+#\d+\b|\(#\d+\)")
-files = subprocess.run(["git","ls-files","src","scripts"],
-                       capture_output=True, text=True).stdout.split()
+python3 - <<'EOF'
+import re, subprocess, sys
+TREES = ["src", "scripts"]
+# Two patterns, because one was not enough and the second was learned the hard
+# way. NAMED catches "issue 17", "Issue #6", "PR #12", "(#33)". BARE catches a
+# lone "#19" -- the form that made the second baseline undercount by ten, and
+# hid a fourteenth cited issue entirely.
+NAMED = re.compile(r"(?i)\bissues?\s+#?(\d+)\b|\bPR\s+#(\d+)\b|\(#(\d+)\)")
+BARE  = re.compile(r"(?<![0-9A-Fa-f#])#(\d{1,3})(?![0-9A-Fa-f])")
+# Three verified false-positive families, each eyeballed against the tree: the
+# `notes#2.md` filename example, CSS colours like `#000`, and "Success criterion
+# #1". None is a tracker citation. Narrow this list only with evidence.
+def is_false(txt, m):
+    line = txt[txt.rfind("\n", 0, m.start()) + 1 : txt.find("\n", m.end())]
+    return bool("notes#" in line or "#2.md" in line
+                or re.search(r"(?:color|fill|background|stroke)\s*:", line)
+                or re.search(r"criterion\s+#", line))
+files = [f for f in subprocess.run(["git", "ls-files", *TREES],
+         capture_output=True, text=True).stdout.split()
+         if not f.startswith("docs/superpowers/")]
+total = 0
 for f in files:
     try: txt = open(f, encoding="utf-8").read()
     except Exception: continue
-    for m in PAT.finditer(txt):
-        line = txt[:m.start()].count("\n") + 1
-        print(f"{f}:{line}: {m.group(0)!r}")
-PY
+    covered = set()
+    for m in NAMED.finditer(txt):
+        covered.update(range(m.start(), m.end()))
+        print(f"{f}:{txt[:m.start()].count(chr(10)) + 1}: {m.group(0)!r}"); total += 1
+    for m in BARE.finditer(txt):
+        if m.start() in covered or is_false(txt, m): continue
+        print(f"{f}:{txt[:m.start()].count(chr(10)) + 1}: {m.group(0)!r} (bare)"); total += 1
+print("total:", total)
+EOF
 ```
 
-Expected: 23 lines. Keep this output — it is your worklist and your checklist.
+Expected: 30 lines. Keep this output — it is your worklist and your checklist.
 
 - [ ] **Step 2: Rewrite `src/rubrica/schema/inputs-seen-0.1.json` first, and carefully**
 
@@ -616,19 +730,39 @@ just `the <name>`.
 Run:
 
 ```bash
-python3 - <<'PY'
-import re, subprocess
-PAT = re.compile(r"(?i)\bissues?\s+#?\d+\b|\bPR\s+#\d+\b|\(#\d+\)")
-files = subprocess.run(["git","ls-files","src","scripts"],
-                       capture_output=True, text=True).stdout.split()
-n = 0
+python3 - <<'EOF'
+import re, subprocess, sys
+TREES = ["src", "scripts"]
+# Two patterns, because one was not enough and the second was learned the hard
+# way. NAMED catches "issue 17", "Issue #6", "PR #12", "(#33)". BARE catches a
+# lone "#19" -- the form that made the second baseline undercount by ten, and
+# hid a fourteenth cited issue entirely.
+NAMED = re.compile(r"(?i)\bissues?\s+#?(\d+)\b|\bPR\s+#(\d+)\b|\(#(\d+)\)")
+BARE  = re.compile(r"(?<![0-9A-Fa-f#])#(\d{1,3})(?![0-9A-Fa-f])")
+# Three verified false-positive families, each eyeballed against the tree: the
+# `notes#2.md` filename example, CSS colours like `#000`, and "Success criterion
+# #1". None is a tracker citation. Narrow this list only with evidence.
+def is_false(txt, m):
+    line = txt[txt.rfind("\n", 0, m.start()) + 1 : txt.find("\n", m.end())]
+    return bool("notes#" in line or "#2.md" in line
+                or re.search(r"(?:color|fill|background|stroke)\s*:", line)
+                or re.search(r"criterion\s+#", line))
+files = [f for f in subprocess.run(["git", "ls-files", *TREES],
+         capture_output=True, text=True).stdout.split()
+         if not f.startswith("docs/superpowers/")]
+total = 0
 for f in files:
     try: txt = open(f, encoding="utf-8").read()
     except Exception: continue
-    for m in PAT.finditer(txt):
-        print(f"{f}:{txt[:m.start()].count(chr(10))+1}: {m.group(0)!r}"); n += 1
-print("remaining:", n)
-PY
+    covered = set()
+    for m in NAMED.finditer(txt):
+        covered.update(range(m.start(), m.end()))
+        print(f"{f}:{txt[:m.start()].count(chr(10)) + 1}: {m.group(0)!r}"); total += 1
+    for m in BARE.finditer(txt):
+        if m.start() in covered or is_false(txt, m): continue
+        print(f"{f}:{txt[:m.start()].count(chr(10)) + 1}: {m.group(0)!r} (bare)"); total += 1
+print("total:", total)
+EOF
 ```
 
 Expected: `remaining: 0`
@@ -667,14 +801,14 @@ MSG
 
 ### Task 4: Rewrite the citations in `docs/`
 
-20 hits across 4 files. This tree uses real anchor links, and it holds the only
+24 hits across 4 files. This tree uses real anchor links, and it holds the only
 heading citation in the repository.
 
 **Files:**
 
 | Modify | Hits | Issues cited |
 |---|---|---|
-| `docs/design/limitations.md` | 15 | #3, #4, #6, #8, #17, #18, #36, #37 |
+| `docs/design/limitations.md` | 19 | #3, #4, #6, #8, #17, #18, #36, #37 |
 | `docs/guides/invoking-rubrica.md` | 2 | #18 |
 | `docs/reference/artifacts.md` | 2 | #6 |
 | `docs/reference/cli.md` | 1 | #6 |
@@ -688,18 +822,42 @@ heading citation in the repository.
 Run:
 
 ```bash
-python3 - <<'PY'
-import re, subprocess
-PAT = re.compile(r"(?i)\bissues?\s+#?\d+\b|\bPR\s+#\d+\b|\(#\d+\)")
-for f in subprocess.run(["git","ls-files","docs"],capture_output=True,text=True).stdout.split():
-    if f.startswith("docs/superpowers/"): continue
-    txt = open(f, encoding="utf-8").read()
-    for m in PAT.finditer(txt):
-        print(f"{f}:{txt[:m.start()].count(chr(10))+1}: {m.group(0)!r}")
-PY
+python3 - <<'EOF'
+import re, subprocess, sys
+TREES = ["docs"]
+# Two patterns, because one was not enough and the second was learned the hard
+# way. NAMED catches "issue 17", "Issue #6", "PR #12", "(#33)". BARE catches a
+# lone "#19" -- the form that made the second baseline undercount by ten, and
+# hid a fourteenth cited issue entirely.
+NAMED = re.compile(r"(?i)\bissues?\s+#?(\d+)\b|\bPR\s+#(\d+)\b|\(#(\d+)\)")
+BARE  = re.compile(r"(?<![0-9A-Fa-f#])#(\d{1,3})(?![0-9A-Fa-f])")
+# Three verified false-positive families, each eyeballed against the tree: the
+# `notes#2.md` filename example, CSS colours like `#000`, and "Success criterion
+# #1". None is a tracker citation. Narrow this list only with evidence.
+def is_false(txt, m):
+    line = txt[txt.rfind("\n", 0, m.start()) + 1 : txt.find("\n", m.end())]
+    return bool("notes#" in line or "#2.md" in line
+                or re.search(r"(?:color|fill|background|stroke)\s*:", line)
+                or re.search(r"criterion\s+#", line))
+files = [f for f in subprocess.run(["git", "ls-files", *TREES],
+         capture_output=True, text=True).stdout.split()
+         if not f.startswith("docs/superpowers/")]
+total = 0
+for f in files:
+    try: txt = open(f, encoding="utf-8").read()
+    except Exception: continue
+    covered = set()
+    for m in NAMED.finditer(txt):
+        covered.update(range(m.start(), m.end()))
+        print(f"{f}:{txt[:m.start()].count(chr(10)) + 1}: {m.group(0)!r}"); total += 1
+    for m in BARE.finditer(txt):
+        if m.start() in covered or is_false(txt, m): continue
+        print(f"{f}:{txt[:m.start()].count(chr(10)) + 1}: {m.group(0)!r} (bare)"); total += 1
+print("total:", total)
+EOF
 ```
 
-Expected: 18 lines.
+Expected: 24 lines.
 
 - [ ] **Step 2: Rewrite the heading at `docs/design/limitations.md:1021`**
 
@@ -780,7 +938,7 @@ MSG
 
 ### Task 5: Rewrite the citations in `tests/`
 
-68 hits across 25 files — the largest tree, and the lowest-risk: every hit is a
+73 hits across 25 files — the largest tree, and the lowest-risk: every hit is a
 docstring or a comment. **The spec measured that no test asserts on citation
 text.** That measurement is the reason this task is safe; if it turns out wrong,
 that is a finding, not something to edit through.
@@ -825,18 +983,42 @@ needs per-site review.
 Run:
 
 ```bash
-python3 - <<'PY'
-import re, subprocess
-PAT = re.compile(r"(?i)\bissues?\s+#?\d+\b|\bPR\s+#\d+\b|\(#\d+\)")
-for f in subprocess.run(["git","ls-files","tests"],capture_output=True,text=True).stdout.split():
+python3 - <<'EOF'
+import re, subprocess, sys
+TREES = ["tests"]
+# Two patterns, because one was not enough and the second was learned the hard
+# way. NAMED catches "issue 17", "Issue #6", "PR #12", "(#33)". BARE catches a
+# lone "#19" -- the form that made the second baseline undercount by ten, and
+# hid a fourteenth cited issue entirely.
+NAMED = re.compile(r"(?i)\bissues?\s+#?(\d+)\b|\bPR\s+#(\d+)\b|\(#(\d+)\)")
+BARE  = re.compile(r"(?<![0-9A-Fa-f#])#(\d{1,3})(?![0-9A-Fa-f])")
+# Three verified false-positive families, each eyeballed against the tree: the
+# `notes#2.md` filename example, CSS colours like `#000`, and "Success criterion
+# #1". None is a tracker citation. Narrow this list only with evidence.
+def is_false(txt, m):
+    line = txt[txt.rfind("\n", 0, m.start()) + 1 : txt.find("\n", m.end())]
+    return bool("notes#" in line or "#2.md" in line
+                or re.search(r"(?:color|fill|background|stroke)\s*:", line)
+                or re.search(r"criterion\s+#", line))
+files = [f for f in subprocess.run(["git", "ls-files", *TREES],
+         capture_output=True, text=True).stdout.split()
+         if not f.startswith("docs/superpowers/")]
+total = 0
+for f in files:
     try: txt = open(f, encoding="utf-8").read()
     except Exception: continue
-    for m in PAT.finditer(txt):
-        print(f"{f}:{txt[:m.start()].count(chr(10))+1}: {m.group(0)!r}")
-PY
+    covered = set()
+    for m in NAMED.finditer(txt):
+        covered.update(range(m.start(), m.end()))
+        print(f"{f}:{txt[:m.start()].count(chr(10)) + 1}: {m.group(0)!r}"); total += 1
+    for m in BARE.finditer(txt):
+        if m.start() in covered or is_false(txt, m): continue
+        print(f"{f}:{txt[:m.start()].count(chr(10)) + 1}: {m.group(0)!r} (bare)"); total += 1
+print("total:", total)
+EOF
 ```
 
-Expected: 48 lines.
+Expected: 73 lines.
 
 - [ ] **Step 3: Rewrite file by file**
 
@@ -948,6 +1130,41 @@ _TRACKER_CITATION = re.compile(
     re.IGNORECASE,
 )
 
+# The bare form, and it is not optional. A pattern requiring the word "issue", a
+# "PR" prefix or parentheses undercounted this repository by ten -- a lone `#19`
+# in refs.py, three `#3` and one `#4` in limitations.md, `#15` twice and `#12`
+# once in test_dispatch_harness.py, `#36` in test_skills_reconcile_family.py, and
+# a `#20` that was the only citation of a fourteenth issue nobody had noticed was
+# referenced at all. A guard without this half would have gone green over all of
+# them.
+#
+# 1-3 digits with hex-digit context excluded on both sides, because CSS colours
+# here are pure decimal (`#121514`, `#000`) and would otherwise match.
+_TRACKER_CITATION_BARE = re.compile(r"(?<![0-9A-Fa-f#])#(\d{1,3})(?![0-9A-Fa-f])")
+
+# Three false-positive families, each eyeballed against the tree rather than
+# guessed: `notes#2.md` is a filename this repo uses as a fixture example, `#000`
+# and friends are CSS colours in the rendered-brief and diagram code, and
+# "Success criterion #1" in test_toy_end_to_end.py is a label, not a reference.
+# Narrow this list only with evidence -- each entry stands for real content that
+# would otherwise fail the gate.
+_CITATION_FALSE_POSITIVES = ("notes#", "#2.md")
+
+
+def _bare_citations(text: str) -> list[str]:
+    """Bare `#N` hits, minus the three verified false-positive families."""
+    out = []
+    for m in _TRACKER_CITATION_BARE.finditer(text):
+        line = text[text.rfind("\n", 0, m.start()) + 1 : text.find("\n", m.end())]
+        if any(tok in line for tok in _CITATION_FALSE_POSITIVES):
+            continue
+        if re.search(r"(?:color|fill|background|stroke)\s*:", line):
+            continue
+        if re.search(r"criterion\s+#", line):
+            continue
+        out.append(m.group(0))
+    return out
+
 
 def _code_files() -> list[Path]:
     """Tracked source, test and script files the citation guard scans.
@@ -983,7 +1200,8 @@ def test_no_user_facing_document_cites_the_internal_tracker(doc):
 
     Findings are named and anchored at docs/design/findings.md instead.
     """
-    hits = _TRACKER_CITATION.findall(_read(doc))
+    text = _read(doc)
+    hits = _TRACKER_CITATION.findall(text) + _bare_citations(text)
     assert not hits, (
         f"{_doc_id(doc)} cites the internal tracker: {hits}. "
         "Name the finding and link docs/design/findings.md instead."
@@ -993,7 +1211,8 @@ def test_no_user_facing_document_cites_the_internal_tracker(doc):
 @pytest.mark.parametrize("src", _code_files(), ids=_doc_id)
 def test_no_source_file_cites_the_internal_tracker(src):
     """The same rule for code. 93 of the 118 citations are here."""
-    hits = _TRACKER_CITATION.findall(_read(src))
+    text = _read(src)
+    hits = _TRACKER_CITATION.findall(text) + _bare_citations(text)
     assert not hits, (
         f"{_doc_id(src)} cites the internal tracker: {hits}. "
         "Name the finding and cite docs/design/findings.md instead."
@@ -1033,6 +1252,25 @@ git checkout src/rubrica/refs.py
 
 Expected: FAIL. If it passes, the regex has lost its multiline behaviour and the
 four sites Task 3 fixed could silently come back.
+
+- [ ] **Step 4b: Measure the bare form, in both directions**
+
+The half that was missing when this plan was first written. Reintroduce a bare
+citation and a false positive, and confirm the guard tells them apart:
+
+```bash
+printf '\n# see #20 for the batch-id collision\n' >> src/rubrica/rounds.py
+uv run pytest tests/unit/test_docs_accuracy.py -k tracker -q 2>&1 | tail -3
+git checkout src/rubrica/rounds.py
+
+printf '\n# a piece like notes#2.md is a filename, not a citation\n' >> src/rubrica/rounds.py
+uv run pytest tests/unit/test_docs_accuracy.py -k tracker -q 2>&1 | tail -3
+git checkout src/rubrica/rounds.py
+```
+
+Expected: the first FAILS, the second PASSES. If the first passes, the bare half
+is inert and nine real citations could return unseen. If the second fails, the
+false-positive list is too narrow and the gate will block correct content.
 
 - [ ] **Step 5: Measure the green direction — no false positives on a reword**
 
