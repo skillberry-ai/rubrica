@@ -1210,7 +1210,7 @@ def test_no_user_facing_document_cites_the_internal_tracker(doc):
 
 @pytest.mark.parametrize("src", _code_files(), ids=_doc_id)
 def test_no_source_file_cites_the_internal_tracker(src):
-    """The same rule for code. 93 of the 118 citations are here."""
+    """The same rule for code. 104 of the 128 citations were here."""
     text = _read(src)
     hits = _TRACKER_CITATION.findall(text) + _bare_citations(text)
     assert not hits, (
@@ -1304,7 +1304,7 @@ git commit -S -s -m "$(cat <<'MSG'
 test(docs): guard against citing the internal tracker, in docs and in code
 
 Two predicates, because a docs-only guard would have covered a quarter of the
-problem: 93 of the 118 citations live in code comments and docstrings.
+problem: 104 of the 128 citations lived in code comments and docstrings.
 The second scan set reaches src/, tests/ and scripts/, excluding fixtures and
 vendored trees -- measured to carry no citation, and records that a guard must
 never demand an edit to.

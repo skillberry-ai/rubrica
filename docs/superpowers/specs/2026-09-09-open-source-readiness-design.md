@@ -364,7 +364,7 @@ existing `_HISTORY_TREE` idiom in that file's policy block: no bare `#N` or
 It needs **two scan sets**, and that is the one structural change to the module.
 The existing predicates run over `_user_facing()` — `README.md`,
 `CONTRIBUTING.md`, `CLAUDE.md`, and `docs/**/*.md` excluding `superpowers`. A
-docs-only guard would leave 93 of the 118 hits unguarded — 79% of them, in
+docs-only guard would leave 104 of the 128 hits unguarded — 81% of them, in
 exactly the `src/` and `tests/` comments where the problem mostly lives. So the
 predicate also scans tracked files under `src/` and `tests/`, and `scripts/` for
 the remaining 5.
