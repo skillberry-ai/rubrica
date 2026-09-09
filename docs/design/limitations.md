@@ -2429,6 +2429,47 @@ closed, and because the deterministic pipeline never reaches it —
 passed. Small fix, low reach; it is here so that finding it does not cost a
 round.
 
+### The zero-citation finding cannot tell a correctly declined input from an ignored one
+
+`refs.claim_utilisation_findings` raises when the world model cites *no* claim
+from a registered input, and its docstring names two causes, both real defects:
+`rb-extract` produced nothing usable from that input, or the reconcile passes
+ignored a whole artifact. There is a third, and the check cannot tell it from
+either — `rb-extract` produced good claims and every reconcile pass **correctly**
+declined them, because the artifact is outside the target's domain.
+
+Measured on a tau2-airline run of 36 admitted inputs: gate 0 admitted two harness
+files on contract grounds, and all seven reconcile passes then declined them on
+domain grounds, each recording its reason in its own partial. Every one of those
+rulings is right, and together they produce a finding no repair can clear: it
+names `01-world-model.json`, which no dispatchable stage declares in `writes`, so
+the orchestrator's one repair attempt is not exhausted but **unspendable** — every
+pass it could dispatch must refuse, because the finding names a file that is not
+its output.
+
+**Why it is not fixed in the check:** telling the third cause from the first two
+is semantic. It requires knowing that an admitted artifact is out of the target's
+domain, which is the judgment gate 0 made when it admitted the file and the
+reconcile passes made when they declined it — and layer 2 is forbidden to
+mechanise a judgment of that kind, for the same reason it resolves a claim
+reference without ruling on whether the claim *supports* the element citing it. A
+threshold would not help either and was measured: on `run-20260812-130056`, 130 of
+287 claims were uncited and almost all of those drops were correct, so any
+percentage rule fails a run whose reconcile family was behaving. Zero is the one
+figure that is indefensible under every reading — a human registered the input, so
+either extraction or reconciliation ignored an entire artifact — right up to the
+third cause, where it is defensible and unfixable at once.
+
+**What exists instead:** a human records the ruling with
+[`rubrica waive`](../reference/cli.md#rubrica-waive), and the finding keeps
+printing, prefixed `[waived] `, while no longer setting the exit code. That is
+deliberately not a fix for the *check*: the check still cannot tell the three
+causes apart, and a run whose input really was ignored by every pass produces a
+byte-identical finding. What the waiver adds is a place for the human judgment to
+be recorded and re-read — `gate-brief` renders it at every gate — rather than
+having to live in somebody's memory of why one gate was left dirty. So this stays
+open as a limitation of the check, not of the disposition.
+
 ### `claim-utilisation` and `gate-brief` exit 1 on a hand-edited claims document, and both are reports
 
 `CLAUDE.md` rules both commands **reports, not gates**: each always exits clean
@@ -3354,6 +3395,21 @@ loop is the unbounded path the entry above rules out. What is actually owed is a
 here, remedy lives upstream" as a first-class outcome rather than as a stage
 declining and an `emit` exit 1.
 
+**That disposition now exists, and it does not yet reach this instance.**
+`rubrica waive` records exactly the ruling this paragraph asked for — the finding
+is correct, the remedy is not available in the stage the finding names, and the
+finding keeps printing, prefixed `[waived] `, while no longer setting the exit
+code. It is built for `check_claim_utilisation`'s third cause (see the entry in
+the check-layers group below) and reaches a finding only through
+`waivers.WAIVABLE_CHECKS`, which has one row. Unparking *this* case is therefore a
+row in that registry plus a subject key travelling beside the finding — the
+`(check, subject)` pair suppression is keyed on — and **not** a second mechanism:
+a waiver whose subject nothing keys on would suppress nothing while looking, on
+the record, as though it had. What still has to be ruled on before that row lands
+is which check should raise here at all. Today the surface is `rb-instantiate`
+declining and `emit` exiting 1, and neither is a `check-refs` finding with a
+subject to key a waiver on.
+
 ### The rejection notice cannot express an escalated re-seed
 
 The notice a score re-dispatch carries quotes three fields from the verdict —
@@ -3369,6 +3425,13 @@ Parked with the entry above it, because both are the same missing concept: the
 verdict vocabulary can express what the adversary concluded and not what the
 pipeline should now do about it. Fixing either one alone leaves the other
 stalling on the same run.
+
+The pointer the entry above now carries applies here unchanged: `rubrica waive`
+is the disposition both entries said was owed, and it reaches a finding only
+through a `waivers.WAIVABLE_CHECKS` row and a subject key. It records that a
+finding is unrepairable where it was raised; it does not give the verdict
+vocabulary a way to say what the pipeline should do next, which is the half this
+entry is about.
 
 ---
 

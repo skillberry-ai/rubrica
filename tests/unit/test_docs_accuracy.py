@@ -118,7 +118,17 @@ def _artifact_kinds() -> set[str]:
     return {kind for kinds in validate.STAGE_ARTIFACTS.values() for kind in kinds}
 
 
-@pytest.mark.parametrize("kind", sorted(_artifact_kinds()))
+# The stage-produced kinds, plus `waivers` by name. The union is needed because
+# `waivers` is the one kind in validate.ARTIFACT_SCHEMAS that is in neither
+# STAGE_ARTIFACTS (no stage produces it) nor CONFIG_KINDS (it lives inside a run),
+# so deriving the parameters from STAGE_ARTIFACTS alone never sees it -- its
+# artifacts.md entry shipped unguarded. Widening to ARTIFACT_SCHEMAS instead was
+# measured and is wrong: it fails on `adoptions`, `agents` and `gold`, which
+# artifacts.md documents under their schema filenames rather than as a kind.
+_DOCUMENTED_KINDS = sorted(_artifact_kinds() | {"waivers"})
+
+
+@pytest.mark.parametrize("kind", _DOCUMENTED_KINDS)
 def test_every_artifact_kind_is_documented(kind):
     """Backtick-delimited on purpose: a bare `expected in text` check is
     satisfied by the string `suite-expected`, so two distinct artifact kinds
@@ -126,6 +136,40 @@ def test_every_artifact_kind_is_documented(kind):
     assert f"`{kind}`" in _read(ARTIFACTS_REF), (
         f"docs/reference/artifacts.md never names the {kind} artifact as `{kind}`"
     )
+
+
+def _artifacts_section(heading: str) -> str:
+    """One `## ` section of artifacts.md, up to the next one.
+
+    Scoped rather than whole-file, because the predicate above is a *presence*
+    check by design -- most kinds are documented under a grouped heading, so it
+    asserts that the kind is named and not that it has a section. Measured: with
+    the whole `waivers` entry deleted, `test_every_artifact_kind_is_documented`
+    stays green on the one backticked mention left in the file's own intro
+    paragraph. So for the one kind whose registry membership is the thing worth
+    documenting, the section is read directly.
+    """
+    text = _read(ARTIFACTS_REF)
+    start = text.index(heading)
+    rest = text.index("\n## ", start + len(heading))
+    return text[start:rest]
+
+
+def test_the_waivers_entry_states_which_registries_it_is_in_and_out_of():
+    """`waivers` is in `ARTIFACT_SCHEMAS` and deliberately in neither
+    `STAGE_ARTIFACTS` nor `CONFIG_KINDS`, and each half of that has a reason a
+    reader needs: no stage produces it, so no `validate --stage X` may hunt for
+    it, and it lives inside a run, which is what the config set excludes. A
+    reader who assumes it is a config looks for it beside a `--flag`; one who
+    assumes it is stage output goes looking for the stage that writes it.
+
+    Asserted on the three names the code owns rather than on prose, which is this
+    module's rule, and scoped to the entry's own section so the file's intro
+    sentence cannot satisfy it.
+    """
+    section = _artifacts_section("## `waivers`")
+    for name in ("ARTIFACT_SCHEMAS", "STAGE_ARTIFACTS", "CONFIG_KINDS"):
+        assert name in section, f"the waivers entry does not say where it sits in {name}"
 
 
 # Policy predicates. Unlike the four above, these do not check that a document

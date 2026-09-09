@@ -62,6 +62,14 @@ from rubrica.sizing import implied_size
 # utilisation means. This module composes; it does not analyse.
 from rubrica.utilisation import claim_utilisation
 
+# The tolerant reader, not `waived_subjects`: a waiver is a human's ruling that a
+# finding is correct and unrepairable where it was raised, and a page that reported
+# a ruled-on finding as an open problem is the page and the gate disagreeing about
+# one run in judgment rather than in arithmetic. Tolerant because `run-summary` is a
+# report -- see the accessor's docstring for why raising here would be a new way for
+# it to fail on a run it can otherwise read.
+from rubrica.waivers import waived_subjects_quietly
+
 # The one tunable threshold in the flag table. Every other flag triggers on a
 # count crossing zero or on a comparison between two fields, so it has nothing
 # to tune. 50.0 splits the three runs measured at design time 2-to-1 (32.3% and
@@ -750,7 +758,16 @@ class Utilisation:
     # schema-valid (claims-0.1.json sets no minItems), so this is reachable
     # without a hand edit.
     pct: float | None
+    # The inputs whose claims nothing cites and on which *nobody has ruled*, which
+    # is `check-refs`' judgment and not merely its arithmetic. A waived subject is
+    # in `waived` below instead, so the two lists are disjoint and their union is
+    # the raw `total and cited == 0` set.
     uncited: list[str]
+    # The same predicate's members a human waived. Kept beside `uncited` rather
+    # than folded into it or dropped: a waived finding still prints from
+    # `check-refs`, so a page that showed nothing at all would be the mute button
+    # the waiver design refuses -- it just must not be listed as an open problem.
+    waived: list[str]
     per_artifact: list[dict]
 
 
@@ -761,6 +778,13 @@ def utilisation(run: RunPaths) -> Utilisation | Marker:
     actionable half: "18.4% overall" tells a reader the run is thin, and "these
     eleven inputs contributed nothing" tells them where to look. Measured across
     the three runs on disk at design time: 32.3%, 33.6%, 65.6%.
+
+    They are split into `uncited` and `waived` for the reason the arithmetic is
+    imported rather than rewritten: `check-refs` prints a waived finding and does
+    not let it set the exit code, so a page listing that same input among the open
+    ones disagrees with the gate about one run -- measured, on a run where
+    `check-refs` exited 0. The split is on the human's ruling only; the predicate
+    underneath is unchanged, and both lists still appear on the page.
 
     `Absent` when the report holds no artifacts, which is the one state
     `claim_utilisation` documents for a run with no world model yet -- an empty
@@ -829,6 +853,16 @@ def utilisation(run: RunPaths) -> Utilisation | Marker:
     # total.
     cited = sum(_as_int(a.get("cited")) for a in artifacts)
     total = sum(_as_int(a.get("total")) for a in artifacts)
+    raw_uncited = [
+        str(a.get("artifact_id", ""))
+        for a in artifacts
+        if _as_int(a.get("total")) and _as_int(a.get("cited")) == 0
+    ]
+    # Read tolerantly, never through `waivers.load`: this command exits 0 on a run
+    # it cannot read at all, and a malformed waivers.json must not be the one
+    # content shape that changes that. `check-refs` raises its exit 2 on the same
+    # file, so nothing goes unreported.
+    waived = waived_subjects_quietly(run, "claim-utilisation")
     return Utilisation(
         cited=cited,
         total=total,
@@ -842,11 +876,14 @@ def utilisation(run: RunPaths) -> Utilisation | Marker:
         # 1 to see. Dropping the guard here would name inputs the gate deliberately
         # exempts, which is the disagreement this docstring claims not to have; the
         # row is still in `per_artifact`, so the page still shows it.
-        uncited=[
-            str(a.get("artifact_id", ""))
-            for a in artifacts
-            if _as_int(a.get("total")) and _as_int(a.get("cited")) == 0
-        ],
+        #
+        # Split on the waiver, for the same reason the predicate is imported rather
+        # than reinvented: mirroring the gate's arithmetic while ignoring its
+        # *judgment* was measured producing exactly the disagreement above -- a run
+        # where `check-refs` exited 0 with a `[waived] ` line while this page called
+        # the same input an open problem with nothing marking it as ruled on.
+        uncited=[a for a in raw_uncited if a not in waived],
+        waived=[a for a in raw_uncited if a in waived],
         # The report's own rows, unmodified and in its own order, which is
         # `list_json(run.claims_dir)`'s sort. Re-sorting them here would make the
         # page disagree with the `claim-utilisation` subcommand a reader runs
@@ -1528,7 +1565,19 @@ def flags(run: RunPaths) -> list[Flag]:
                     detail=f"{util.cited} of {util.total} claims cited by the world model",
                 )
             )
+        # `util.uncited` is already the unwaived half, so a run whose only
+        # zero-citation input a human ruled on raises no flag here -- which is the
+        # judgment `check-refs` reaches on that same run when it exits 0 with the
+        # `[waived] ` line still printed. The waived ones are named in the detail
+        # rather than left out of the page: dropping them would make this section
+        # quieter than the record, and the count in the headline stays the number of
+        # inputs still open so a reader can act on it.
         if util.uncited:
+            waived_note = (
+                f" ({len(util.waived)} more waived: {', '.join(util.waived)})"
+                if util.waived
+                else ""
+            )
             found.append(
                 Flag(
                     id_="uncited-artifacts",
@@ -1536,8 +1585,9 @@ def flags(run: RunPaths) -> list[Flag]:
                     # `cited == 0` and not a percentage: the `total` guard is
                     # already applied in `utilisation`, so a 0-of-0 artifact is not
                     # in this list and the gate this mirrors exempts it too.
-                    threshold="any artifact with claims of which none is cited",
-                    detail=", ".join(util.uncited),
+                    threshold="any artifact with claims of which none is cited "
+                    "and not waived by a human",
+                    detail=", ".join(util.uncited) + waived_note,
                 )
             )
 

@@ -66,10 +66,19 @@ class Finding:
     layer: str
     pointer: str
     message: str
+    # Last and defaulted, so every one of the existing constructions keeps
+    # working unchanged. True only where a check consulted waivers.WAIVABLE_CHECKS
+    # and found a human's waiver for this finding's (check, subject) pair.
+    #
+    # The finding is still reported. A waiver removes its contribution to the
+    # exit code and nothing else -- see cli._report, which is the one place that
+    # distinction is applied.
+    waived: bool = False
 
     def __str__(self) -> str:
         where = f"{self.artifact}#{self.pointer}" if self.pointer else str(self.artifact)
-        return f"[{self.layer}] {where}: {self.message}"
+        line = f"[{self.layer}] {where}: {self.message}"
+        return f"[waived] {line}" if self.waived else line
 
 
 def format_findings(items: list[Finding]) -> str:

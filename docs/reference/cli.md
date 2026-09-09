@@ -148,6 +148,13 @@ invariant evaluation over the whole run so far.
 
 Required: `--run RUN`. Exits 0 clean, or 1 with findings.
 
+A finding a human has waived with [`rubrica waive`](#rubrica-waive) still
+prints, prefixed `[waived] `, and does not set the exit code — so a run whose
+only remaining findings are waived exits 0 with those lines still on stdout. A
+`waivers.json` that is malformed or unreadable is exit 2 here rather than a
+finding: a person wrote that file, so there is no stage to hand a repair prompt
+to.
+
 ```bash
 rubrica check-refs --run runs/run-20260806-123005
 ```
@@ -683,10 +690,10 @@ rubrica decide --run runs/run-20260806-123005 \
 
 A few subcommands serve the human holding a gate rather than a stage. Most of
 them — `gate-brief`, `claim-utilisation`, `run-summary` and `target-brief` —
-only compose or report what the run already contains; `set-limit` is the odd one
-out and *writes*, changing a manifest limit and appending its reason to
-`decisions.md`. None of them is itself a gate: none can turn a readable run into
-a defect finding.
+only compose or report what the run already contains; `set-limit` and `waive`
+*write*, the first changing a manifest limit and the second recording a ruling
+about one finding, and both appending their reason to `decisions.md`. None of
+them is itself a gate: none can turn a readable run into a defect finding.
 
 ### `rubrica gate-brief`
 
@@ -697,7 +704,9 @@ input, read coverage per reconcile pass, the implied suite size and one block pe
 service at gate 1; the coverage matrix at gate 2; the verdict tally at gate 3.
 
 Gate 0 renders more than the others because it is the one gate held before any
-downstream stage has read the corpus: the objective verdict, then the
+downstream stage has read the corpus: the objective verdict, then the waivers in
+force on a run that carries any (see below — this is the one gate that renders
+them *under* the verdict), then the
 predicted-vs-observed surface divergence (`00-objective.json`'s
 `predicted_surface_count` against the surfaces the disposition parts confirmed
 or added), then admits by priority, **the read cost of those admits**, declines
@@ -826,6 +835,28 @@ would have been misled by a report that showed them services and stayed silent.
 `rubrica decide` is named as the action that does work: it puts the correction on
 the record for whichever run acts on it.
 
+Gates 1, 2 and 3 lead with **the waivers in force**, on a run that carries any:
+each waiver's id, the check and subject it suppresses, where its remedy lies, and
+the reason recorded for it. Rendered at all four gates rather than only at the one
+where it was written, because a waiver is a standing ruling — and a clean
+`check-refs` on a run carrying one is clean because a human said so, which changes
+how every number under it reads. **Gate 0 renders it under the verdict rather than
+above it**, and for one reason: a waiver block of any realistic size pushes that
+verdict out of the ten lines a tired reader is promised, and gate 0 is the gate
+that decides what the run can ever know. Not because a waiver is unreachable
+there — it is reachable on any run whose triage record is on disk, which is a run
+a reader revisits, and only the moment gate 0 is *held* is waiver-free, since that
+precedes `intake` and the one waivable check's finding needs claims and a world
+model to be raised at all. **On a run whose triage record has not landed yet**,
+where gate 0 has no verdict to render, the block leads the brief as it does at the
+other three gates. A `remedy` of `none` renders as an acceptance rather than
+as a deferral, and one that is no longer a stage name renders with a marker
+saying so, since a stage renamed after a waiver was written leaves a stale
+pointer that nothing rejects. A run with no waivers renders no such section at
+all, and a `waivers.json` that cannot be read renders one line saying so: this
+command reads that file without validating it, on the standing ruling that a
+report is never a gate, and `check-refs` is where its exit 2 comes from.
+
 Required: `--run RUN`, `--gate {0,1,2,3}`.
 
 Like `claim-utilisation` below, it always exits clean on a readable run — it
@@ -891,6 +922,16 @@ array counts `0`, while one whose key the document does not carry at all renders
 conforming sealed model omits — an empty array there says a pass looked and found no
 tools, and an absent key says no pass ran. The output is derived rather than
 an artifact: no schema, outside the numbered contract, and read by no stage.
+
+Its flags read the waivers too. An input whose claims nothing cites raises the
+`uncited-artifacts` flag, and a [waiver](#rubrica-waive) for it takes it out of
+that flag while the page still names it — on its own line under claim
+utilisation, marked as waived, with its row left in the table. So the page and
+`check-refs` reach the same judgment about one run rather than the page calling
+an open problem what the gate has already exited 0 on. `waivers.json` is read
+tolerantly here, unlike everywhere else: one that cannot be read suppresses
+nothing and leaves this page at exit 0, because `check-refs` raises its exit 2 on
+that same file and a report is never a gate.
 
 The page is self-contained — inline CSS and JS, no external asset, no network
 — so it still reads when the run is archived. Links to sibling artifacts are
@@ -979,6 +1020,91 @@ Prints the manifest path.
 ```bash
 rubrica set-limit --run runs/run-20260806-123005 --max-scenarios 200 \
   --reason "breadth objective under-covered the tool surface at 128"
+```
+
+### `rubrica waive`
+
+Records a human's ruling that one `check-refs` finding is **correct and not
+repairable where it was raised**. The finding keeps printing, prefixed
+`[waived] `, and only its contribution to the exit code goes away — so a gate
+stops being permanently dirty without the finding disappearing from anybody's
+screen. A waived finding a reader could no longer see would be a mute button
+rather than a record.
+
+Required: `--run RUN`, `--check CHECK`, `--subject SUBJECT`, `--remedy REMEDY`,
+`--reason REASON`. Prints the new waiver's id.
+
+`--check` accepts only the checks that consult the waiver registry —
+`waivers.WAIVABLE_CHECKS`, one row today, `claim-utilisation`. A check absent
+from it is not waivable, deliberately: a waiver nothing reads would suppress
+nothing while looking on the record as though it had.
+
+`--subject` is what that check keys on, and each row of the registry says which
+kind of name it expects — an `artifact_id` for `claim-utilisation`. Suppression
+keys on `(check, subject)` **exactly**, never on the finding's message text: a
+meaning-preserving reword of a finding must not silently lose its waiver, and a
+substring match over the prose is wrong in a way that is easy to miss, since an
+artifact id can be a prefix of another (`orphan` against `orphan2`).
+
+`--remedy` is where the fix would have to land if there were one: any stage name
+in `paths.STAGES`, plus `outside-the-run` for a corpus that should not have
+carried the input at all, and `none` for *the finding is correct and no artifact
+should change* — an acceptance, not a deferral. Nothing in the pipeline reads
+`remedy` to make a decision; it is the note the next reader weighs, which is why
+a stage renamed later is not rejected on load and is instead marked as unknown
+in `gate-brief`.
+
+**It refuses a finding that is not currently raised** (exit 2, naming the kind
+of subject the check expects). That refusal is the integrity property: no
+pre-emptive waivers for findings nobody has seen. `finding_text` is then copied
+from the matched finding rather than accepted as a flag — a person retyping a
+finding is a person who can paraphrase one.
+
+It bounds the moment a waiver is *written*, and nothing after it: fix the defect
+a waiver answers and the entry stays, with `check-refs` printing no line and
+`gate-brief` still reporting the waiver in force. A waiver that has gone stale is
+removed the same way any other is — by hand.
+
+**It also refuses a `(check, subject)` that is already waived** (exit 2, naming
+the id of the waiver that holds it, so the reader can go to that entry rather
+than search for it). Two entries for one pair can carry contradictory remedies —
+`none` says nothing should change, a stage name says somebody still owes work —
+and, since a waiver is revoked by hand-deleting its entry, deleting the one a
+reader found would leave the finding still suppressed by the survivor. A second
+waiver under the same check for a *different* subject is not a duplicate and is
+appended normally: suppression keys on the pair.
+
+**Only a human runs this.** Gate 0's argument applies unchanged: the party that
+made a judgment must not also ratify it, so neither `rb-orchestrate` — which
+would diagnose and ratify in one move — nor the stage that declined the input,
+which would be vouching for its own refusal, may record a waiver. No skill
+declares `waivers` in `reads` or `writes`, and no stage learns about the
+mechanism at all.
+
+Writes the [`waivers`](artifacts.md#waivers) artifact at the run root and
+appends one line to `decisions.md`, so the prose trail sits in the file a human
+already reads at every gate. Both are append-only through this command; a waiver
+is revoked by **deleting its entry by hand**, which is why ids are minted one
+past the highest number present rather than from the entry count — the gap a
+deletion leaves must not remint an id that was already used. That hand-deletion
+appends nothing, so `decisions.md` goes on carrying the line that granted the
+waiver, and the trail then asserts a waiver the run no longer has: record the
+revocation with [`rubrica decide`](#rubrica-decide) yourself, since nothing else
+will.
+
+Every check runs before either write, so a refusal leaves the run untouched. The
+two writes are ordered, though, `waivers.json` first, and if the `decisions.md`
+append then fails the command exits 2 with a message naming the waiver id and
+saying the waiver stands. **Do not read that exit as "nothing happened":** the
+waiver is live and already suppressing a finding, and undoing it takes the same
+hand-deletion as any other revocation.
+
+```bash
+rubrica waive --run runs/run-20260806-123005 \
+  --check claim-utilisation --subject harness-conftest-py \
+  --remedy none \
+  --reason "out of the target's domain; all seven reconcile passes declined it"
+# wv-0001
 ```
 
 ## Emitting and smoke-testing

@@ -7,6 +7,10 @@ states its schema under `src/rubrica/schema/`, the stage that writes it
 run (`paths.py`), what it is for, and the fields worth knowing before you open
 one. Entries are ordered the way a run produces them, not alphabetically.
 
+`waivers` is the one entry that is neither: it is human-authored like the
+configs, and it lives inside a run like the stage outputs. Its entry sits last,
+before the configs.
+
 See [`docs/concepts/artifact-contract.md`](../concepts/artifact-contract.md)
 for the rule that these files are the only channel between stages, and
 [`docs/concepts/pipeline.md`](../concepts/pipeline.md) for the stage order
@@ -988,6 +992,57 @@ trivial` (the weak baseline passes too much, indicting the suite), `broken_
 labels` (the oracle fails too much, indicting the labels or the verifier —
 never the agent under test — and outranking `degenerate_trivial` when both
 could apply), or `inconclusive` (too few scoreable tasks to say anything).
+
+## `waivers`
+
+- **Schema:** `src/rubrica/schema/waivers-0.1.json`
+- **Written by:** a human, through `rubrica waive` — no stage writes it, and no
+  skill declares it in `reads` or `writes`
+- **Read by:** `check-refs`, through `waivers.load`, which schema-validates it
+  and raises — that is what decides whether a waived finding sets the exit code;
+  and `gate-brief`, which reads the file *directly* and does not validate it, so
+  that a report can never become a second gate
+- **Path:** `waivers.json`, at the run root beside `manifest.json` and
+  `decisions.md`
+
+A human's record that one `check-refs` finding is correct and its remedy is not
+available in the stage the finding names. The finding keeps printing, prefixed
+`[waived] `, and only its contribution to the exit code goes away — the point
+being that the gate stops being permanently dirty without the finding
+disappearing. Suppression keys on `(check, subject)` exactly and never on the
+finding's message text, so a meaning-preserving reword of a finding does not
+lose its waiver.
+
+Written by `rubrica waive` rather than by hand, so that `id`, `recorded_at` and
+the `remedy` choices are minted rather than typed, and so that a finding nobody
+has raised cannot be waived pre-emptively. Append-only through that command; a
+waiver is revoked by deleting its entry by hand.
+
+**It is in `validate.ARTIFACT_SCHEMAS` and deliberately in neither
+`validate.STAGE_ARTIFACTS` nor `validate.CONFIG_KINDS`.** Not in
+`STAGE_ARTIFACTS`, because no stage produces it, so no `validate --stage X` has
+any business hunting for it — registered in `ARTIFACT_SCHEMAS` all the same, so
+that `validate_artifact(path, "waivers")` can check a hand-edited file, which is
+what `waivers.load` does on every read. Not in `CONFIG_KINDS` either, because
+that set is the kinds never joined into a run path, and this one lives inside a
+run.
+
+A malformed or unreadable `waivers.json` is a **usage error (exit 2), not a
+finding**, wherever a check reads it — the same ruling the two configs below
+carry, and for their reason: a person wrote the file, so there is no stage to
+hand a repair prompt to. `gate-brief` is the one reader that does not raise on
+it, and that is not an exception to the ruling but the standing one for a report:
+it renders a line saying the file could not be read and still exits 0.
+
+Fields worth knowing: `remedy` — where the fix would have to land, any stage
+name in `paths.STAGES` plus `outside-the-run` and `none`, where `none` means the
+finding is correct and no artifact should change (an acceptance, not a
+deferral). Nothing in the pipeline reads `remedy` to make a decision, which is
+why a stage renamed after a waiver was written does not invalidate it: the value
+goes stale, `gate-brief` marks it as unknown, and the suppression — keyed on
+`(check, subject)` — is unaffected. `finding_text` is the copy of the finding
+this waiver answers, taken from the finding itself by `rubrica waive`, and it is
+evidence rather than a key.
 
 ## Human-authored configs
 

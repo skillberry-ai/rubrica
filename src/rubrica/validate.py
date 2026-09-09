@@ -104,6 +104,15 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     # `validate --stage X` must never look for them.
     "agents": "agents-0.1.json",
     "gold": "gold-0.1.json",
+    # A fourth category, and deliberately in neither set below. Human-authored
+    # like the config kinds, but it *does* live in a run directory, which is what
+    # CONFIG_KINDS' "never joined into a run path" excludes. No stage produces it,
+    # so it stays out of STAGE_ARTIFACTS and `validate --stage X` never hunts for
+    # it. Registered here so `validate_artifact(path, "waivers")` can check a
+    # hand-edited file. If a second kind ever lands in this category, give it a
+    # named constant -- the comment above CONFIG_KINDS records what restating the
+    # literal cost the last time.
+    "waivers": "waivers-0.1.json",
 }
 
 # Config artifact kinds: human-authored, never joined into a run path, never
