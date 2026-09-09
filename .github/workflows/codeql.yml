@@ -1,0 +1,43 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "27 3 * * 1" # weekly, Monday 03:27 UTC
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # Python only. There is exactly one tracked .js file,
+        # tests/fixtures/corpus-toy/node_modules/dep/index.js, and it is a
+        # deliberate fixture: the survey walker needs a vendored tree to skip.
+        # Analysing it would produce alerts against content written to be toy.
+        language: [python]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          # security-extended, not security-and-quality: the quality half mostly
+          # restated ruff and produced ~20 low-value notes in test files. Lint is
+          # gated separately by `make lint`.
+          queries: security-extended
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
