@@ -31,9 +31,16 @@ original version: `--with langchain` is required in addition to
 imports it directly. Without it the run crashes with `ModuleNotFoundError: No
 module named 'langchain'` before a single prompt is issued.
 
-`capture-reservation-trajectories.py`'s `TOOL_DIR` and `AGENT_SRC` constants
-are absolute paths into this author's `rossoctl` checkout. Anyone else
-re-running the harness must edit both before it will find the target.
+`capture-reservation-trajectories.py` reads its two target paths from the
+environment, defaulting to the absolute paths this capture actually used:
+
+    RUBRICA_ROSSOCTL_TOOL_DIR    -> examples/mcp/reservation_tool
+    RUBRICA_ROSSOCTL_AGENT_SRC   -> examples/a2a/reservation_service/src
+
+Anyone re-running the harness must set both, since the original checkout is not
+part of this repository. Set them rather than editing the script: an edit to the
+source is indistinguishable from a change to the harness, which is exactly what
+this record exists to let a reader rule out.
 
 ## Capture conditions
 

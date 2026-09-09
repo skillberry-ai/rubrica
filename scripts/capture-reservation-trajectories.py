@@ -35,8 +35,27 @@ CLIENT_TRANSPORT = "streamable_http"
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 8765
 
-TOOL_DIR = Path("/home/bnayahu/work/rossoctl/examples/mcp/reservation_tool")
-AGENT_SRC = Path("/home/bnayahu/work/rossoctl/examples/a2a/reservation_service/src")
+# These two paths point into a checkout of the target this fixture was captured
+# against. They are environment-overridable rather than hard-coded because the
+# fixture README used to instruct re-runners to edit this source file by hand,
+# which is a worse contract than a variable: editing source to run a script makes
+# the edit indistinguishable from a change to the script. The defaults are the
+# paths the 2026-08-12 capture actually used, kept verbatim so that record stays
+# reproducible for whoever still has that checkout -- note that
+# /home/bnayahu/work/rossoctl no longer exists, so anyone re-running this must
+# set both.
+TOOL_DIR = Path(
+    os.environ.get(
+        "RUBRICA_ROSSOCTL_TOOL_DIR",
+        "/home/bnayahu/work/rossoctl/examples/mcp/reservation_tool",
+    )
+)
+AGENT_SRC = Path(
+    os.environ.get(
+        "RUBRICA_ROSSOCTL_AGENT_SRC",
+        "/home/bnayahu/work/rossoctl/examples/a2a/reservation_service/src",
+    )
+)
 MODEL = "Azure/gpt-4.1"
 
 
