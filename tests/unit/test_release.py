@@ -474,6 +474,97 @@ def test_an_already_published_tag_resumes_at_the_release_step(fixture_repo):
     assert _git(fixture_repo, "tag", "-l").stdout.split() == ["v0.2.0"]
 
 
+def test_a_hand_pushed_tag_at_head_does_not_resume_at_the_release_step(fixture_repo):
+    """The resume-at-GitHub-release arm needs the same gate as the resume-at-push one,
+    and needs it tested separately.
+
+    A hand-pushed vX.Y.Z sitting at HEAD used to resume straight to "Done." with
+    nothing released -- no version bump, no changelog section, a release page
+    announcing a tag nobody cut. The case above it cannot reach this arm: it leaves
+    the hand-made tag unpushed, so `git ls-remote` comes back empty and the arm is
+    unreachable whatever its condition says. This one pushes the tag, which is what
+    puts the arm in play.
+    """
+    _commit(fixture_repo, "feat: something")
+    _git(fixture_repo, "tag", "-a", "-m", "hand-made tag", "v0.2.0")
+    _git(fixture_repo, "push", "-q", "origin", "v0.2.0")
+    result = _release(fixture_repo, "0.2.0")
+    assert result.returncode != 0
+    assert "already exists locally" in result.stderr
+    assert "Resuming" not in _both(result), "a hand-pushed tag resumed and released nothing"
+    assert "Done." not in result.stdout
+    assert _version(fixture_repo) == "0.1.0"
+    assert "## v0.2.0" not in (fixture_repo / "CHANGELOG.md").read_text()
+
+
+def test_the_push_is_atomic_so_main_and_the_tag_land_together_or_not_at_all(fixture_repo):
+    """An `update` hook rejecting only refs/heads/main is the shape that matters.
+
+    Non-atomically that state left the tag published with no release commit on main
+    -- and the next run then saw the pushed tag, resumed at the GitHub release step
+    and reported success with the remote still behind. Atomic routes the same failure
+    to the resume-at-push arm instead, which is why the second half of this case
+    asserts that a re-run publishes both refs rather than just finishing quietly.
+    """
+    _commit(fixture_repo, "feat: something")
+    origin = _origin(fixture_repo)
+    main_before = _git(origin, "rev-parse", "main").stdout
+    hook = origin / "hooks" / "update"
+    hook.write_text(
+        "#!/bin/sh\n"
+        'case "$1" in\n'
+        "    refs/heads/main) echo 'main rejected by the test hook' >&2; exit 1 ;;\n"
+        "esac\n"
+        "exit 0\n"
+    )
+    hook.chmod(0o755)
+
+    first = _release(fixture_repo, "0.2.0")
+    assert first.returncode != 0
+    assert _git(origin, "tag", "-l", "v0.2.0").stdout.strip() == "", (
+        "the tag was published without its release commit; the push was not atomic"
+    )
+    assert _git(origin, "rev-parse", "main").stdout == main_before
+
+    hook.unlink()
+    second = _release(fixture_repo, "0.2.0")
+    assert second.returncode == 0, second.stderr
+    assert "Resuming at the push" in second.stderr
+    assert _git(origin, "tag", "-l", "v0.2.0").stdout.strip() == "v0.2.0"
+    assert _git(origin, "rev-parse", "main").stdout == (
+        _git(fixture_repo, "rev-parse", "HEAD").stdout
+    ), "the resumed run left the remote behind"
+
+
+def test_a_hand_written_changelog_preamble_survives(fixture_repo):
+    """A first line that is not `# Changelog` used to be discarded unconditionally by
+    `tail -n +2`, which silently threw away whatever a human had written there.
+
+    The script now drops that line only when it is the header it is about to re-emit.
+    Neither parameter of the trailing-newline case can see this: both start with
+    `# Changelog`, so the conditional and the unconditional drop behave identically.
+    """
+    _commit(fixture_repo, "feat: one")
+    assert _release(fixture_repo, "0.1.0").returncode == 0
+    text = (fixture_repo / "CHANGELOG.md").read_text()
+    assert text.startswith("# Changelog\n")
+    (fixture_repo / "CHANGELOG.md").write_text(
+        "Hand-written preamble line\n" + text[len("# Changelog\n") :]
+    )
+    _git(fixture_repo, "add", "-A")
+    _git(fixture_repo, "commit", "-q", "-m", "docs: add a changelog preamble")
+    _git(fixture_repo, "push", "-q", "origin", "main")
+
+    result = _release(fixture_repo, "0.2.0")
+    assert result.returncode == 0, result.stderr
+    text = (fixture_repo / "CHANGELOG.md").read_text()
+    assert "Hand-written preamble line" in text, "the hand-written first line was discarded"
+    assert text.startswith("# Changelog\n"), "the header was not re-emitted"
+    assert text.count("# Changelog\n") == 1, "the header was duplicated"
+    assert "## v0.1.0" in text, "the previous release section was lost"
+    assert text == text.rstrip("\n") + "\n", "exactly one trailing newline"
+
+
 def test_tempfiles_are_cleaned_up(fixture_repo):
     """TMPDIR is redirected at the fixture, so the tempfiles the script owns are
     observable rather than lost among everything else in /tmp."""
