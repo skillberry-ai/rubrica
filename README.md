@@ -71,23 +71,29 @@ the pipeline's whole deterministic half.
 make setup     # create the venv, install runtime + dev deps from uv.lock
 make test      # run the test suite
 make check     # ruff lint + format check, no changes
+make live      # the live dispatch exercises (see below)
 make lint      # ruff check --fix
 make format    # ruff format
+make release   # cut a release from main (see docs/releasing.md)
 make help      # every target, with its one-line description
 ```
 
-The two scripts under `scripts/` are the exception, because they drive a real
+Two scripts under `scripts/` are the exception, because they drive a real
 dispatch rather than the CLI: `dispatch-stage.sh` and `audit-reads.sh` each need
 `jq` on `PATH`, and `dispatch-stage.sh` needs the `claude` CLI as well. Both
 check up front and exit `2` naming the missing tool — a misconfigured
 environment, not a stage defect. See
 [`docs/guides/invoking-rubrica.md`](docs/guides/invoking-rubrica.md).
 
-There is one more target, `make live`, deliberately not part of `make test`:
-it runs behind the `live` pytest marker and the `RUBRICA_LIVE` opt-in,
-asserting against committed recordings of a real dispatch, so running it
-costs nothing. Producing or re-producing one of those recordings is the part
-that dispatches a model and costs money.
+`make live` is deliberately not part of `make test`: it runs behind the `live`
+pytest marker and the `RUBRICA_LIVE` opt-in, asserting against committed
+recordings of a real dispatch, so running it costs nothing. Producing or
+re-producing one of those recordings is the part that dispatches a model and
+costs money.
+
+`make release` is the maintainers' target, and the only one that writes to the
+remote. What it does, what it refuses to do, and how to recover from a partial
+run are in [`docs/releasing.md`](docs/releasing.md).
 
 ## Quickstart
 
