@@ -363,17 +363,49 @@ _TRACKER_CITATION = re.compile(
 # the scan set below, so quoting a citation here would fail the predicate this
 # comment documents.
 #
-# 1-3 digits with hex-digit context excluded on both sides, because the CSS colours
-# in this repository are pure decimal (`#121514`, `#212327`) and a bare hash-digit
-# pattern otherwise matches their leading digits.
-_TRACKER_CITATION_BARE = re.compile(r"(?<![0-9A-Fa-f#])#(\d{1,3})(?![0-9A-Fa-f])")
+# Hex-digit context excluded on both sides, because the CSS colours in this
+# repository are pure decimal (`#121514`, `#212327`) and a bare hash-digit pattern
+# otherwise matches their leading digits. The lookahead is what does that work: it
+# forces the match to consume the whole hex-ish run, so a leading fragment of a
+# colour never matches on its own.
+#
+# The width alternation is `1-5 or 7+`, and the gap at exactly six is the whole
+# reason it is written as an alternation rather than as `\d+`: this tree holds
+# several six-digit pure-decimal colours, and unlike the shorter forms they occur
+# off a declaration line too (`ground="#121514"` in render-readme-diagram.py), so no
+# line-context rule could tell them from a citation. Excluding the width is the only
+# discriminator available. The three-digit form is matched here and filtered by the
+# property-declaration rule in _bare_citations below.
+#
+# It was `1-3` when written, which silently exempted every four-digit citation --
+# the public repository this guard exists for will reach four-digit issue numbers,
+# and neither other predicate sees a bare form, so those citations would have
+# shipped. Widening cost something, and it is worth recording what: **a four-digit
+# run can be a colour after all.** CSS hex comes in three, four, six and eight digit
+# forms, the four and eight digit ones carrying an alpha nibble, and summary_html.py
+# uses two of them. They are filtered by line context, as the three-digit form
+# already was. No eight-digit colour exists here today; if one is added off a
+# declaration line, this comment is where to record the same trade.
+#
+# The residual blind spot is a six-digit bare citation. That trade is deliberate and
+# this repository's numbering is nowhere near it.
+#
+# `&` joins the lookbehind for the same widening: summary_html.py writes its check
+# mark, cross and warning sign as HTML numeric character references, whose numbers
+# are four and five digits. The three-digit cap was concealing that family by
+# accident, and the widening surfaced all five references as citations. An entity
+# always puts `&` immediately before the hash and a citation never does, so the
+# lookbehind separates them exactly -- no line-context filter needed.
+_TRACKER_CITATION_BARE = re.compile(r"(?<![0-9A-Fa-f#&])#(\d{1,5}|\d{7,})(?![0-9A-Fa-f])")
 
-# Three false-positive families, each eyeballed against the tree rather than
-# guessed: `notes#2.md` is a filename this repo uses as a fixture example, a
-# declaration like `color: #000` is a colour and not a reference, and "Success
-# criterion #1" in test_toy_end_to_end.py is a label. Narrow this list only with
-# evidence -- each entry stands for real content that would otherwise fail the
-# gate.
+# The false-positive families, each eyeballed against the tree rather than guessed:
+# `notes#2.md` is a filename this repo uses as a fixture example, a declaration like
+# `color: #000` is a colour and not a reference, "Success criterion #1" in
+# test_toy_end_to_end.py is a label, and an HTML numeric character reference is a
+# glyph -- that last pair, entities and alpha colours, surfaced only when the width
+# cap came off, which is the argument for guarding all of them by test rather than
+# by inspection. Narrow this list only with evidence -- each entry stands for real
+# content that would otherwise fail the gate.
 #
 # Each is quoted above in the form its own filter recognises, which makes this
 # comment a live example of that filter: break the colour rule or the criterion
@@ -395,7 +427,7 @@ def _bare_citations(text: str) -> list[str]:
         line = text[text.rfind("\n", 0, m.start()) + 1 : end if end != -1 else len(text)]
         if any(tok in line for tok in _CITATION_FALSE_POSITIVES):
             continue
-        if re.search(r"(?:color|fill|background|stroke)\s*:", line):
+        if re.search(r"(?:color|fill|background|stroke|border)[a-z-]*\s*:", line):
             continue
         if re.search(r"criterion\s+#", line):
             continue
@@ -493,6 +525,69 @@ def test_no_source_file_cites_the_internal_tracker(src):
         f"{_doc_id(src)} cites the internal tracker: {hits}. "
         "Name the finding and cite docs/design/findings.md instead."
     )
+
+
+# Both directions for the bare-citation predicate, over synthetic text rather than
+# over the tree: the tree is clean, so a tree-scoped assertion can only ever show
+# the predicate going green and would never have shown it going red. CLAUDE.md asks
+# for both directions measured, and this is where the measurement lives.
+#
+# Every sample builds its hash by concatenation. A literal one would make this
+# module fail the two gates above, which scan it -- the same constraint the
+# comment at _TRACKER_CITATION_BARE describes.
+_HASH = "#"
+
+
+@pytest.mark.parametrize("digits", ["3", "19", "118", "1234", "12345"])
+def test_the_bare_citation_predicate_catches_every_issue_number_width(digits):
+    r"""Four digits and up matter: the public repository will reach them, and
+    neither of the other two predicates sees a bare form -- `issues?\s+#?\d+`
+    needs the word issue in front of it and `\(#\d+\)` needs parentheses. A
+    width the guard cannot see is a citation that ships."""
+    text = f"see {_HASH}{digits} for the ruling"
+    assert _bare_citations(text) == [f"{_HASH}{digits}"]
+    assert not _TRACKER_CITATION.findall(text), (
+        "sample reachable by the worded predicate, so it cannot measure the bare one"
+    )
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "  color: #121514;",
+        "  background: #212327",
+        "  fill: #000",
+        "  stroke: #ffffff;",
+        "a fixture path like notes#2.md",
+        "Success criterion #1 holds",
+        # HTML numeric character references, from summary_html.py: a check mark, a
+        # cross and a warning sign. Four and five digits, so widening the predicate
+        # past three exposed them -- the old cap was hiding this family by accident
+        # rather than on purpose, which is why it is guarded here now.
+        "<td>&#10003;</td>",
+        "<span>&#9888;</span>",
+        "&#8884; and &#8886;",
+        # Four-digit hex colours *with alpha*, verbatim from summary_html.py. CSS
+        # accepts 3, 4, 6 and 8 digit forms, the 4 and 8 digit ones carrying an
+        # alpha nibble, so a four-digit run is not the safely-not-a-colour width it
+        # first appears to be. Both sit on `border` declarations, which is why the
+        # property list below has to reach hyphenated border properties.
+        "th, td { padding: .3rem; border-bottom: 1px solid #8884; }",
+        ".spine li { border: 1px solid #8886; border-radius: 3px; }",
+    ],
+)
+def test_the_bare_citation_predicate_still_ignores_its_false_positive_families(line):
+    """The other direction. Each entry stands for real content in the tree, so a
+    widened predicate that reddens one of these has broken the gate rather than
+    tightened it.
+
+    Two of these families were invisible while the width cap was three digits and
+    became reachable the moment it came off, which is the case for keeping them
+    here as samples rather than trusting a reading of the tree: the entity
+    references and the alpha colours were both found by this suite going red, not
+    by anyone noticing them.
+    """
+    assert _bare_citations(line) == []
 
 
 def _renderer() -> ModuleType:
