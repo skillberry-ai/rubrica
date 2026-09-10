@@ -41,14 +41,39 @@ DIAGRAM = DOCS / "concepts" / "pipeline-diagram.html"
 RENDERER = REPO_ROOT / "scripts" / "render-pipeline-diagram.py"
 
 
-# CHANGELOG.md is the one root document these predicates must not read, and the
-# reason is the same one that excludes docs/superpowers/ and tests/fixtures/:
-# it is generated, not written. scripts/release.sh builds each section from
-# Conventional Commit subjects, so a hit there would demand an edit the next
-# release overwrites -- and the subject that produced it is already immutable
-# history in the log. The remedy for a citation reaching the changelog is the
-# commit-subject guard on the code set below, not a predicate over generated
-# prose.
+# CHANGELOG.md is generated, not written: scripts/release.sh builds each section
+# from Conventional Commit subjects since the previous tag. That earns it an
+# exclusion from the two *count* predicates and from nothing else, so this set is
+# subtracted in _user_facing() below and added back in _citation_scanned().
+#
+# The count exclusion is the one docs/superpowers/ gets, on the same argument. A
+# changelog section is a record of what a release contained, so a number written
+# into it was true on its own date, and a predicate that bans a stale count must
+# not fire on a record. A heading counting stages or skills is the same case.
+#
+# A tracker citation is not that case, which is why the citation predicate does
+# read this file. A bare hash-and-number in a changelog line is not a fact that
+# was once true; it is a pointer that resolves to a different, unrelated issue in
+# the public repository -- the defect rewritten out of 128 sites, arriving in a
+# user-facing root document by a route no other predicate covers. Written here
+# without its hash for the reason given at _TRACKER_CITATION_BARE: this module is
+# inside its own code scan set, so quoting the form would fail the predicate this
+# comment documents. Measured -- it did, on the first draft of this comment.
+#
+# What is not checked, stated plainly because the comment this replaces claimed
+# otherwise: nothing in this repository guards the commit subject that would
+# produce such a line. No test or script reads the log for citations, and
+# scripts/check-dco.sh reads `%s` only to print it in a failure message. There is
+# no commit-subject guard, so the predicate over this file is the only thing
+# between a subject written with a hash-number and a released changelog.
+#
+# The remedy for a hit is to edit CHANGELOG.md, and it is durable rather than
+# overwritten -- measured, because the reasoning that excluded this file assumed
+# the opposite. release.sh re-emits everything below line 1 verbatim beneath the
+# new section, so a corrected line survives every later release; a citation
+# corrected after v0.1.0 was still corrected after v0.2.0. The subject in the log
+# stays as written, which is the one thing that cannot be fixed and, once the
+# rendered document is right, does not need to be.
 _GENERATED_ROOT_DOCS = {"CHANGELOG.md"}
 
 
@@ -360,6 +385,22 @@ def _code_files() -> list[Path]:
     return out
 
 
+def _citation_scanned() -> list[Path]:
+    """_user_facing(), plus the generated root documents it subtracts.
+
+    Only the citation predicate uses this. The reasoning is at
+    _GENERATED_ROOT_DOCS: a stale count in a changelog section is a record, a
+    tracker citation there is a broken pointer, so the two predicates want
+    different sets over the same file.
+
+    `is_file()` because the set is a policy, not an inventory -- CHANGELOG.md
+    exists here, but a generated document named before it is written must not
+    fail collection.
+    """
+    extra = [REPO_ROOT / name for name in sorted(_GENERATED_ROOT_DOCS)]
+    return _user_facing() + [path for path in extra if path.is_file()]
+
+
 @pytest.mark.parametrize("doc", _user_facing(), ids=_doc_id)
 def test_no_user_facing_document_carries_a_hand_typed_test_count(doc):
     """The count grows with every capability, so a number typed into prose is
@@ -376,11 +417,15 @@ def test_no_heading_counts_something_that_grows(doc):
     )
 
 
-@pytest.mark.parametrize("doc", _user_facing(), ids=_doc_id)
+@pytest.mark.parametrize("doc", _citation_scanned(), ids=_doc_id)
 def test_no_user_facing_document_cites_the_internal_tracker(doc):
     """A bare hash-number resolves to an unrelated issue in the public repository.
 
     Findings are named and anchored at docs/design/findings.md instead.
+
+    Scanned over _citation_scanned() rather than _user_facing(), so CHANGELOG.md
+    is included although the count predicates above skip it -- see
+    _GENERATED_ROOT_DOCS for why the two sets differ.
     """
     text = _read(doc)
     hits = _TRACKER_CITATION.findall(text) + _bare_citations(text)
