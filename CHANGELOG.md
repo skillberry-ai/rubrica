@@ -1,1 +1,751 @@
 # Changelog
+
+## v0.1.0 — 2026-09-10
+
+### Breaking changes
+
+- Rename the scoring contract and suite to rubrica
+- Move the package from testgen to rubrica
+- Rename the four environment overrides to RUBRICA_*
+- Rename the skill directories from tg-* to rb-*
+- Replace the reconcile stage with a sequence of bounded passes
+- Remove the single triage stage in favour of the staged family
+
+### Features
+
+- Add package scaffolding and run-directory layout
+- Add canonical artifact I/O and the shared Finding type
+- Add schema validation with the claims and world-model schemas
+- Add the scenarios, coverage, and manifest schemas
+- Add the seed, expected, and verdict schemas
+- Add the machine-invariant evaluator
+- Add referential integrity for world model, scenarios, coverage
+- Add seed conformance, the reachability gate, and verdict pairing
+- Add input intake
+- Add dedupe candidate proposal
+- Add the CLI and README
+- Check the manifest-to-claims chain and claim id uniqueness
+- Enforce the manifest's round and scenario limits
+- Scope the oracle to the fact and capabilities its scenario claimed
+- Tie coverage holes to the matrices and tighten the goal rows
+- Let a capability declare how it is invoked
+- Add the generic verifier's parsing and assertion scoring
+- Finish the generic verifier with trajectory scoring and reward
+- Translate an oracle into the scoring contract
+- Write accepted instances out as Harbor task packages
+- Give emit and smoke real layer-1 gates
+- Re-verify that the stored inputs are the bytes the manifest hashed
+- Add the smoke agent roster, its schema, and the preflight
+- Add smoke's two subprocess seams
+- Add smoke's flags, summary and verdict
+- Add smoke_run and the smoke subcommand
+- Add jaccard and gold-task matching for compare-gold
+- Add novelty categorization, the noise caveat, and compare-gold
+- Add diff-runs, per-stage stability across two runs
+- Add sample-for-review, drawn where the blind spot hides
+- Parse and hash a SKILL.md's machine-readable contract
+- Check every skill contract against the code that owns the name
+- Record each stage's model, effort and skill hash, and the decisions log
+- Write tg-extract's SKILL.md, exercise, and structural tests
+- Add tg-reconcile skill, the barrier stage over every claim
+- Add the tg-propose skill for stage 3
+- Add the tg-score skill, the pipeline's second barrier stage
+- Add the tg-instantiate skill, stage 4's per-scenario fan-out
+- Add the tg-challenge skill, stage 5's adversary fan-out
+- Add tg-emit, the thin entry point over the deterministic emitter
+- Add tg-orchestrate, the loop, the gates and the bounded repair
+- Rename the scoring contract and suite to rubrica
+- Add an isolated dispatch harness under scripts/
+- Capture the reservation tool's /tools/list document
+- Capture reservation-service agent trajectories
+- Report claim utilisation and gate the zero case
+- Make a re-seed re-dispatch expressible, with the append as a copy not a rendering
+- Make max_scenarios a ceiling at 128, not an estimate
+- Add survey and triage stages and their two run paths
+- Add the catalogue schema and its layer-1 wiring
+- Walk a corpus and record every exclusion with its reason
+- Explode homogeneous JSON containers into element candidates
+- Digest each candidate, and record which heuristics fired
+- Add rubrica survey -- mint a run and catalogue its corpus
+- Add the corpus fixture and layer 2 over the catalogue
+- Add the triage schema -- dispositions, deficiencies, projections
+- Check the triage record's references, and nothing semantic
+- Add rb-triage, the ninth skill -- rule on every catalogue candidate
+- Split intake into mint and register, and materialise elements
+- Add intake --run, admitting from the triage record
+- Check manifest inputs against the admitted dispositions
+- Add adopt-projection -- satisfy a brief without a new run
+- Compute implied suite size from the world model
+- Add gate-brief, the human surface at all four gates
+- Add set-limit, so a limit change carries its reason
+- Add a second reservation capture closing gaps a run recorded
+- Have rb-extract tie a state observation to its capture instant
+- Resolve cross-file schema refs through a referencing registry
+- Add the reconcile partial artifact kinds and their paths
+- Add reconcile-seal, which assembles the partials and counts the denominator
+- Check the reconcile partials at layer 2
+- Let the README drawing fold a stage family into one line
+- Replace the reconcile stage with a sequence of bounded passes
+- Show the cover and the contradiction tally at gate 1
+- Cut a catalogue into byte-bounded slices, keyed on structure survey already knows
+- Add the staged-triage part schemas, referencing triage's shared definitions
+- Add RunPaths members for the staged-triage artifacts
+- Add rubrica triage-slices, which partitions a catalogue into readable shards
+- Check that the slice plan partitions the catalogue
+- Add rubrica triage-seal, and move adoptions out of the record it owns
+- Check the staged-triage parts, the objective's arithmetic, and the audit's obligations
+- Add rb-triage-objective, the first staged-triage prompt pass
+- Add rb-triage-rule, the staged-triage family's fan-out ruler
+- Add rb-triage-audit, the staged-triage family's self-audit pass
+- Remove the single triage stage in favour of the staged family
+- Give gate 0's brief the slice table, the divergence and the splits
+- Add the message-list shape rule, one home for two callers
+- Digest a chat trajectory's behaviour instead of its shape
+- Classify a chat trajectory as the trace it is
+- Summarise a catalogue's exclusions under a byte budget
+- Carry the catalogue facts rb-triage-objective needs on the plan
+- Lead the run summary with how far the run got
+- Recompute catalogue_facts' derived fields in check_slices
+- Render the manifest's facts and the per-stage record
+- Read intake and triage into the run summary
+- Drop the catalogue from rb-triage-objective's reads
+- Read the world model, utilisation, gaps and contradictions
+- Read the coverage progression, matrix and holes
+- Join each scenario to its verdict and emitted package
+- Tally the challenge, inventory the suite, and flag what looks wrong
+- Render the run summary as one self-contained page
+- Expose the run summary as rubrica run-summary
+- Draw the goal matrix beside the capability matrix in run-summary
+- Add path accessors for the round parts and batches
+- Add the batches, scenarios-part and score-part kinds
+- Require claims on an invariant, outcome class and gap
+- Partition a round's closable holes into byte-bounded batches
+- Require each reconcile pass to account for every input it read
+- Recompute each reconcile pass's input accounting
+- Assemble 02-scenarios.json from the propose and score parts
+- Read the per-pass coverage at the gate that can act on it
+- Compute the coverage matrices in code and compose the report
+- Add propose-batches, propose-seal and score-seal
+- Check the batches and the round parts at layer 2
+- Cut the pipeline over to the five-stage propose/score loop
+- Rewrite rb-propose as a batch member and rb-score as judgments only
+- Resolve a claim id to the place in the target that states it
+- Rank an element by its sources and its disputes, not by derivation
+- Ask the owners what the corpus missed, counting files rather than inputs
+- Put the target's own disagreements to its owners, with both sides quoted
+- Ask the owners what their documents never said
+- Describe the target's operations, data and users in the owner's vocabulary
+- Render the target brief as a page its recipient can answer
+- Add `rubrica target-brief`, and point gate 1 at it
+- Add refs.drivable_cells, the scoring half of the cell set
+- Account for undrivable cells as computed unreachable holes
+- Report an unbound capability at the seal instead of at stage 06
+- List the denominator's excluded capabilities at gate 1
+- Give target-brief a two-palette theme and its table primitives
+- Render "What we read" as a table with a kind chip
+- Give the disagreements an index table and tabulate both sides
+- Render the open questions as a numbered table
+- Tabulate the description and chip what an element rests on
+- Rank the three asks in a table and guard the page against bullets
+- Add the tool claim kind, carrying a tool's input schema verbatim
+- Add the services-part and interface schemas, and the tool-name predicate
+- Add reconcile-services, the pass that groups tools into services
+- Synthesise one OpenAPI document per service, deterministically
+- Check the services part and every synthesised interface
+- Fold the services part into the world model, under an optional key
+- Show each service, its signals and its interface at gate 1
+- **brief,reconcile:** put the read cost of an admit at gate 0, and bound how a pass reads the claims
+- **triage-rule:** separate the target from the harness that runs it
+- **seal,refs:** record a digest per reconcile partial, and re-hash it at gate 1
+- **harness:** derive a stage's write grant from its own contract
+- **waivers:** add the waivers artifact, its schema and its registry
+- **findings:** let a waived finding print without setting the exit code
+- **refs:** let a human's waiver clear the zero-citation finding
+- **cli:** add rubrica waive, which cannot waive an unraised finding
+- **brief:** show the waivers in force at every gate
+- **verdict:** record an understated hop_depth, the harmful direction
+
+### Fixes
+
+- Stop check_verdicts reporting a phantom before challenge has run
+- Refuse a naive datetime in intake rather than guessing its zone
+- Exit 0 for --help instead of reporting a misconfigured harness
+- Flag any non-active instantiated scenario, not only duplicates
+- Report an unsafe instance directory instead of aborting the run
+- Ship the schemas as package data so an installed copy can validate
+- Close the cheap test-coverage and cleanliness gaps
+- Index required manifest and claims keys directly
+- Pin the exact boundary in the max_rounds/max_scenarios ceiling test
+- Add the assertion-level test the capability-scoping guard needs
+- Anchor schema patterns with \A..\Z and constrain created_utc
+- Close the verifier's noqa, coverage, and empty-value gaps
+- Close the trajectory-match vocabulary and reject unnormalized weights
+- Refuse a contract verify.py cannot score instead of inflating it
+- Admit a judged scenario at layer 2 and make emit prune the suite
+- Keep a stage defect out of exit 2 and stop exit 1 meaning nothing
+- Type the fields verify.py scores, so its invariant is true
+- Tie coverage credit to scenario status, so a rejection reopens the cell
+- Refuse an exclusion that names no tool instead of scoring it
+- Name the unparseable artifact instead of blaming its neighbours
+- Refuse a contract the verifier cannot parse, and rule on a non-string result
+- Note dropped tool calls and stop a stale non-string-result note
+- Close the untested guards in smoke's verifier seam
+- Replace verify_package's rmtree clear with a scoped unlink
+- Skip the chmod-based unlink-failure test when running as root
+- Score a timed-out agent on its partial transcript
+- Cross-check the smoke report against the suite it claims to have run
+- Close the two unpinned report-checker findings and the seam's own crashes
+- Make the review-sample fixtures discriminate, not coincide
+- Score the transcript this attempt produced, not a previous one
+- Tell an unreadable suite apart from a suite that found nothing
+- Keep the CLI's exit-1 channel parseable and its handler total
+- Scope the skill contract search to the Contract section, fence-aware
+- Refuse an ambiguous contract block and a mis-encoded SKILL.md
+- Close two review-confirmed gaps in the skill-contract check
+- Guard schemas element types before the set() build in check_contract
+- Close decide's OSError gap, gate a blank model/effort, key the cache
+- Map a permission-denied skills directory to exit 2, not exit 1
+- Prove the unique-form invariant can fail, not just hold
+- Close the TESTGEN_LIVE truthiness gap and cover build_toy_run(upto=...)
+- Forbid the knowledge leak, not only the file leak, in tg-extract
+- Disambiguate invariant vs outcome_class in tg-extract, record exercise round 1
+- Ground the contradiction rationale and oc-detail in claims, not invention
+- File the queue/ticket_id param claims the sweep found missing
+- Correct the hop_depth offloading and cover the absence-cell gap
+- Require discriminating facts to be grounded, not only unique
+- Split discriminating-fact groundedness from uniqueness explicitly
+- Retract tg-propose's field-value groundedness requirement
+- Declare the manifest tg-score and tg-propose already depend on
+- Scope tg-instantiate's self-check to its own slice, and bound four tests
+- Land tg-challenge's pre-registration in notes, and bound three tests
+- Correct tg-emit's account of which siblings scope their self-check
+- Declare the three needed reads, and strengthen nine vacuous assertions
+- Keep the plan's test blocks in step, and rebalance two predicates
+- Forbid an extract sibling read whatever its purpose
+- Guard the contradiction fixture's api.json against reacquired corroboration
+- Restore happy-path returns to the gap fixture's api.json
+- Close three holes in the exit-code contract's 1-vs-2 line
+- Stop diff-runs reading an empty stage map as stage agreement
+- Check the orchestrator's schemas key, which no guard ever reached
+- Rename the second glued-identifier sed casualty in test_smoke_subprocess
+- Clear the residual testgen references the sweep found
+- Add the required --run to every skill's gate command
+- Stop discarding observed tool output as unparseable
+- Replace the vacuous error-response substring test
+- Quantify two instructions that silently dropped evidence
+- Normalise whitespace before matching the two new phrase pins
+- Union contradiction claim refs into utilisation, wire the gate-1 report, document a gate exemption
+- Deny the run's own answer key to a dispatched stage, and move P7-P9 into the spec
+- Never deny a run path check-refs reads -- two wrong denies, one measured
+- Register survey as a code stage, which has no skill
+- Address review of digest.py -- RecursionError, error_markers noise, skeleton truncation
+- Detect duplicates across corpus roots, not only within one
+- Budget the catalogue's bytes, since count does not bound context
+- rb-triage -- name authority, disambiguate a phrase-pin collision, name digest_note
+- Require a needs_projection decline's projection to name that candidate
+- Route container filenames through stored_name, name malformed catalogue entries
+- Catch the --run illegal-parameter check, and a degenerate-catalogue KeyError
+- Leave no half-written 00-inputs behind when admission fails
+- Remove two stage names build_toy_run cannot honestly reach
+- Compute the adopted candidate's digest instead of leaving it empty
+- Reject a second admission and stop two bare indexes from crashing
+- Guard implied_size's reads and gate-brief's sizing arithmetic
+- Sweep the class -- nothing escapes main() on a malformed ingestion artifact
+- Slug an exploded element's candidate_id, and budget it against maxLength
+- Validate set-limit's integers, and derive manifest.stages from STAGES
+- Delete the superseded register() call, and loosen three phrase pins
+- Sync the dev extra instead of relying on --system PATH fallthrough
+- Correct the --extra dev comment to state a measured mechanism
+- Correct the params/fields required-key asymmetry in two docs
+- removing broken trajectories
+- Let trace digest heuristics reach a nested capture envelope
+- Derive gate-brief's accepted gates from the set the code defines
+- **dispatch:** Deny WebSearch so LiteLLM's websearch_interception cannot unset stream
+- Make the partial-schema drift guard and subject_part_ids do what they claim
+- Report what the seal cannot represent, and correct its reference page
+- Stop null impersonating a read failure, and name the right overlap
+- Guard the cover's claim ids, not just the list holding them
+- Keep a contradiction inside the subject that recorded it
+- Correct four sentences that overclaim what the code does
+- Clamp a skeleton's total pointers, since breadth and depth leave the product unbounded
+- Record skeleton_nodes_truncated from the guard, not from final length
+- Refuse at survey a candidate row larger than one slice
+- Refuse a catalogue missing head fields before triage-slices reads them bare
+- Isolate check_slices test mutations to one finding each
+- Cover triage-seal's item-5 refusal branches, and name its layer
+- Bound check_disposition_parts under a broken adoptions file, and correct the toy fixture's weight.bytes
+- Add validate's missing objective branch, and a guard for its class
+- Window the clamp/fact predicate, and correct a wrong step reference
+- Return findings for malformed containers instead of raising past the handler
+- Name the right artifact for non-UTF-8 bytes and a structurally invalid schema
+- Tell the members that their output directory is theirs to Write, not to mkdir
+- Tell the members that their output directory is theirs to Write, not to mkdir
+- Name the disposition and surfaces keys, and document --target-interface
+- Cite the negative that was actually measured for is_message_list
+- Name the consumer that actually branches on kind == "trace"
+- Let extract cite a capture instant stated in prose
+- Pin the prose-instant rule on words a reword survives
+- Pin the three message-list clauses no test could see
+- Bound element_counts by bytes, not only by key count
+- Correct four stated reasons whose own evidence contradicts them
+- Stop exploding a chat trajectory into one candidate per turn
+- Stop reading a field that says no error occurred as an error
+- Scope two file-dependent figures, and stop overclaiming a test's reach
+- Say a truncated role key can have merged two roles, not that it has
+- Count a fan-out stage's per-scenario directories as evidence it ran
+- Check the truncation flag, and stop justifying entries as a copy
+- Guard the run summary's int coercion against a non-finite token
+- Carry the objective pass's narrowed reads into the prose beside it
+- State the shard predicate's radius as a band with a breakable ceiling
+- Guard the run summary's utilisation read and match the gate's predicate
+- Match the shard predicate's prohibition vocabulary on word boundaries
+- Set an unreachable hole apart, and mark what the page cut
+- Keep run-summary at exit 0 when a run's bytes are not text
+- Map an unreadable 02-scenarios/ to exit 2, not a stage defect
+- Digest a source language without a parser as prose, not as a parse failure
+- Reject non-numeric and zero-padded round names, and correct a false claim
+- Make the batch plan per-round, not a singleton
+- Share score-part's rejected_reason enum instead of copying it
+- Count a claim cited on an invariant, outcome class or gap
+- Relate the member budget to the output ceiling, and name the artifact
+- Say only what is true of any drop in the toy's accounting note
+- Refuse the malformed artifacts that produced a plausible wrong number
+- Guard the input accounting's arithmetic against a non-integer count
+- Seal an empty document when every propose member declined its batch
+- Say what an underspecified outcome class cites
+- Refuse a score part that rules on one scenario twice
+- Name the direction check_manifest actually checks
+- Keep the two claim reports at exit 0 on a hand-edited citation
+- Refuse the missing prior coverage document instead of resetting the loop
+- Close the container axis of the same report-contract defect
+- State one ruling once, in the three places that record it
+- Say which of the shapes at summary's guard is not a hole
+- Refuse a malformed hole reason instead of ending the loop
+- Correct a repro condition, an exit code and three scope slips
+- Resolve the holes a scenario declares, not the ids it names
+- Qualify the never-raises promise in the module a reader opens first
+- Restate the malformed-gaps exit code in the words refs.py corrected it to
+- Guard the partial read this branch added, and register what it did not close
+- Retire the last two copies of the claim the review disproved
+- Normalise the negative pins that could not see their own regression
+- Cite the rule rather than the wording, and stop over-widening a pin
+- Declare the output token cap and stop overwriting transcripts
+- Cut the `#` fragment before `_common_prefix` reads a path as components
+- Filter `_common_prefix` on the partitioned base, not the raw entry
+- Derive score's round from the batch plan, not the scenario tags
+- Close the fourth manufactured-outcome site and two copied-enum holes
+- Guard the world-model read, and retire the _strings claim the review disproved
+- Type-door both enum whitelists before the membership test hashes
+- Give the second manifest read its real reason, and drop a fallback live only where it is wrong
+- Stop the owner-facing page reading a filename's own # as our slicer's
+- Stop claiming target-brief is the only report that survives unreadable claims
+- Count only drivable cells in the frozen denominator
+- Compare the coverage matrix against drivable cells, not every cell
+- Give the sliced-path rule one home, and stop two blanks reaching the page
+- State an operation we could not name instead of heading its entry blank
+- Name the undrivable matrix row for what it is, and move its tests home
+- Gloss the idiom the recipient actually meets, above the lines that use it
+- Say what we have on file, not how far the work has got
+- Record the green guard's measured red, and stop three comments describing a matrix that is still wide
+- Say what the pages own numbers actually measure, and guard the sentence that had none
+- Score and propose against drivable cells only
+- Close an undrivable cell in every round, not only round 1
+- Stop four texts giving the wide denominator as their reason
+- Stop the invariant helper crying wolf on a reflow, and drop a comment's dead finding
+- Stop claiming gate 1 is the only report of an unbound capability
+- Drop the exclusivity claim and stop asserting the propose halt
+- Stop three texts asserting a halt nobody has observed
+- Hedge the fourth home of the derived halt, and pin the injection citation
+- Retire the wide denominator's last texts and unrot nine citations
+- State the absent directory with a dash rather than an empty cell
+- Keep the disagreement index scannable and dash the empty quote cell
+- Scope every heading assertion the asks table silently made vacuous
+- Make the dark heading band the most distinct surface again
+- Name tools where rb-extract decides what to claim, and correct four records
+- Escape pointer tokens per RFC 6901, and give three guards teeth
+- Refuse an unrecordable tool name, and sweep three lists this pass falsified
+- Remove the last copy of a dependency the pass does not have
+- Stop the interface gate accusing a run whose target has no tools
+- Show the interface gate as conditional where the command is shown
+- Leave the orphan tool claim to the accounting that already enforces it
+- Name a duplicate service id once, in the file the repair belongs in
+- Report an absent world-model collection as not recorded, never as 0
+- Name the claims file when a tool's payload cannot be a request body
+- Say which passes rb-reconcile-gaps runs after, without falsifying one
+- Abstain from the payload check when a locator resolves to a JSON string
+- Make the dispatch's dollar ceiling opt-in and report the spend instead
+- Probe bwrap before configuring the sandbox, and fall back loudly
+- Let dispatch-stage.sh hand a propose member its batch id
+- Report a registered input whose extract member wrote no claims file
+- Report an active scenario whose instantiate member wrote no directory
+- **rounds:** scope batch ids to their round so round 2 cannot remint round 1's scenario ids
+- **digest:** bound a collected name in characters, and report the cut
+- **digest:** bound _source_digest's four name lists, in entries and in characters
+- **schema:** hold catalogue_facts' request and policy to the catalogue's own definitions
+- **waivers:** name the version key by convention, and make three checks real
+- **waivers:** pin waiver ids to ASCII digits, and validate the file on load
+- **waivers:** make a failed decisions.md append loud, and cover the error path
+- **brief:** render gate 0's waivers under the verdict, and pin A4's waived rule
+- **waivers:** refuse a second waiver for one (check, subject)
+- **summary:** stop run-summary reporting a waived finding as open
+- **reconcile:** route an absent input to refusal, not to a gap
+- **reconcile-gaps:** state the ruling where the pass executes, not only in §5
+- **verdict:** enforce flag exclusivity, and scope the table's absolute
+- **capture:** correct a false measurement about the rossoctl checkout
+- **release:** Reseed CHANGELOG.md in the shape release.sh can extend
+- **release:** Stop the breaking-change footer swallowing its trailers
+
+### Refactoring
+
+- Move the package from testgen to rubrica
+- Rename the four environment overrides to RUBRICA_*
+- Rename the skill directories from tg-* to rb-*
+- Move the trajectory capture harness to scripts/
+- Make src/ target-agnostic, naming no external project
+- Promote triage's element definitions to $defs so part schemas can reference them
+- Give the string-or-empty rule one home, and close the leak test's general case
+- Give the source-index decision one home, and guard three fabricating shapes
+- **capture:** read the rossoctl target paths from the environment
+
+### Documentation
+
+- Add design spec for skill-based test generator
+- Add implementation plan for the contract spine
+- Fix pre-flight defects in the contract-spine plan
+- Drop the last dangling negative_expectations reference
+- Carry the whole-branch review's deferred findings into the spec
+- Plan the contract closure and emit slice
+- Carry the closure-and-emit build's parked findings into the spec
+- Plan the measurement layer
+- Drop a no-op line from a planned test
+- Record the measurement layer in the spec and the README
+- Fix two numeric miscounts in the spec's process-changes section
+- Carry measurement build's parked findings into the spec
+- Plan the skills and orchestration layer
+- Correct three plan defects Task 1's reviews exposed
+- Carry Task 2's findings and two new standing counters into the plan
+- Record the exit-2 OSError rule and Task 3's corrections in the plan
+- Prove every machine form can fail, not just hold
+- Forbid the knowledge leak, not only the file leak
+- Derive tg-propose's status boundary test from the schema enum
+- Record tg-score's live exercise beside the skill
+- Record tg-instantiate's live exercise beside the skill
+- Record tg-challenge's live exercise beside the skill
+- Record the emit and whole-pipeline live exercises
+- Record the skills layer in the README and the design spec
+- Correct four overclaims in the skills-build write-back
+- Move two skills' live results out of a directory scheduled for deletion
+- Reconcile three stage-handoff contradictions between the prompts
+- State toy.py's exclusion rule as the gate enforces it, not one step stronger
+- Make the re-seed obligation meetable on the notices that actually arrive
+- Carry the final review's parked residuals into the spec's §8
+- Add CLAUDE.md with the project's working rules
+- Add the team-facing pipeline overview, current as of the finished build
+- Record the decision to rename test-generator to Rubrica
+- Plan the Rubrica rename, and correct the spec's count of hazards
+- Fix the plan's determinism script -- RunPaths is not a Path
+- Rule on the recordings, and fix the sweep that would have rewritten them
+- Correct the retention comment's premise on the abridged recording quote
+- Say precisely what the retained quotation is -- abridged, not byte-exact
+- Rename the living documents to Rubrica
+- Fix the pipeline overview's stale heading and three spec inaccuracies
+- Replace an estimated occurrence count with a measured one
+- Document the isolated dispatch harness and re-measure the baseline
+- Correct an overstated test claim in the README and point at the harness
+- Design the reservation-service trajectory run
+- Plan the trajectory run, and correct the spec's MLflow facts
+- Drop a dead noqa from the trajectory-run plan
+- Record how the trajectory corpus is staged for intake
+- Design claim utilisation and observable judgment
+- Plan the claim-utilisation and observable-judgment changes
+- Drop a dead noqa from the claim-utilisation plan
+- Record a self-describing-absent error class found in review
+- Retract prediction P3 as invalid, and note it on the ruling it broke
+- Record the sandbox layer engaging, measured against the new deny rule
+- Pre-register P10-P13 for stage 03 score, round 1
+- Score P10-P13 against the stage 03 dispatch, and record its read audit
+- Pre-register P14-P17 for round 2, after raising max_scenarios at gate 2
+- Score P14-P17 -- round 2 converged, all four held
+- Pre-register P18-P20 for stage 04 instantiate
+- Score P18-P20 -- instantiate held on all three, and P20 emphatically
+- Pre-register P21-P24 for stage 05 challenge
+- Score P21-P24 -- challenge found two real seed defects, and gate 3 is blocked
+- Record the repair loop, byte-identical emit, and where the run ends
+- Scope a full parsec run and pre-register its predictions
+- Record the parsec run -- 23 packages, six findings, four of my own errors
+- Design the ingestion and triage phase, sized from the parsec run
+- Split max_scenarios into a ceiling and a sizing report
+- Plan the ingestion and triage build in five phases
+- Record eleven stages, nine skills, seventeen subcommands
+- rb-triage names its schema_version, run_id, and empty required blocks
+- Design for MVP readiness — reposition, retarget, guard
+- Record two runbook claims the spec's inventory missed
+- Implementation plan for MVP readiness
+- Add concepts/pipeline.md, guarded against stage and skill drift
+- Add concepts/artifact-contract.md
+- Define the vocabulary, Harbor first
+- Attribute the gap-blocked halt to the orchestrator, not rb-score
+- Add reference/cli.md, one section per subcommand, guarded
+- Add reference/artifacts.md, one entry per schema kind
+- Move the hand-dispatch runbook into guides/ and de-internalise it
+- Add getting-started.md, every command executed first
+- Fix getting-started's gate-brief exit line and exclusion undercount
+- Add design/rationale.md -- the experiment, moved off the front page
+- Fix rationale's exercise.md and real-target framing after review
+- Add design/limitations.md, carrying every live ruling
+- Add the docs index, and mark superpowers/ as history
+- Rewrite README.md as a front door and delete the overview
+- Fix README's Quickstart PATH caveat and fan-out dispatch claim
+- Rewrite CLAUDE.md, and make the stale counts unrepeatable
+- Name check-refs in pipeline.md's challenge gate
+- Split cli.md's pipeline stages from its measurement tools
+- Reconcile manifest.stages, emit's determinism, and the walkthrough
+- Narrow two artifact-contract claims to what the code supports
+- Correct five counted or stale claims about this repository's own history
+- Correct the run-local deny list, and drop two live spec citations
+- Stop src/ citing a superseded document, and date the NOTICE
+- Draw the pipeline, and guard the drawing against the code
+- Name the two tools the dispatch scripts need and rubrica does not
+- Draw the README's how-it-works for a first-time reader
+- Define the vocabulary survey and triage introduced
+- Record the design that stages reconcile into bounded passes
+- Fold the staged-reconcile passes in the README drawing, not enumerate them
+- Add the implementation plan for staging reconcile
+- add name section to readme
+- simulated lab environment design
+- Stop describing an eleven-stage, nine-skill pipeline
+- Record what staging reconcile costs, and what is still unmeasured
+- Say what the seal reads, and what a fan-out member is handed
+- Record the design that stages triage into a code-sliced fan-out
+- Add the implementation plan for staging triage
+- Record what staging triage costs, and correct the digest entry's arithmetic
+- Correct seven sites the staged-triage family left stale, and guard one
+- Record the vacuous prose predicates, and the entry whose trigger has fired
+- Design the chat-trajectory digest, and correct three claims about #4
+- Plan the chat-trajectory digest implementation
+- Correct two claims about #4 and record what the fix does not reach
+- Past-tense the skeleton measurement the fix superseded
+- Re-record rb-extract's exercise after the prose-instant clause
+- Correct one measurement claim and two gaps in the round-5 record
+- Record the wrapped-trajectory gap, and fix a reversed key sketch
+- Correct a ruling the code now enforces, and record what fired on 200
+- Give every file-dependent figure in the register a stated scope
+- Establish the stripped corpus's source by content, not by its name
+- Attribute the failing-episode count to the right airline file
+- Spec bounding rb-triage-objective with a catalogue projection
+- Spec and plan for a rubrica run-summary HTML report
+- Plan the objective catalogue projection in five tasks
+- Follow the excluded guard into the enumerations that claim to be complete
+- Say which fields, not how many, where round 1 left a count
+- Record that the objective pass reads the plan alone
+- Anchor #3's byte figures to the catalogue they were measured on
+- Carry the narrowed reads into the orchestrator's own prose
+- State the window's edge convention the entry's figures assume
+- Make the entry's last two figures auditable from the page
+- Remove the last catalogue read from the names and the permissions comment
+- Point the plan-size warning at the dial that actually bounds it
+- State the re-run's own candidate count behind its measured rate
+- Correct five drifted details in the limitations register
+- Design the bounded propose/score loop for issue 9
+- Plan the bounded propose/score loop implementation
+- Fix Task 11's probe for a worktree with no runs directory
+- Fold four pre-flight rulings into the plan
+- Fix the plan's EACCES defect and its incomplete test filter
+- Retract a false measured claim from the plan, and close isdigit
+- Sync the plan to the shipped round-name pattern
+- Restore the is_dir() guard the plan snippet had dropped
+- Make the batch plan per-round, not a singleton
+- $ref the rejected_reason enum, and make the batch figure recompute
+- Design forced read coverage for the reconcile passes
+- Plan forced read coverage as seven tasks
+- Relate the byte budget to the token ceiling it respects
+- Close the cap that does not bind, in the plan text too
+- Scope a comment's claim about who iterates world gaps
+- Fix my transcription of the two guard helpers
+- Let who wrote an artifact decide its exit code
+- Give the reconcile passes the prose their accounting needs
+- Refuse two rulings on one scenario within one score part
+- Sync the plan to the split container guards
+- Drop the tally the count-removal introduced
+- Fix two defects that recurred, and refuse a missing prior round
+- Record what forced read coverage did not close
+- Resolve the own-batch check against provenance.hole_refs
+- Say what the cross-kind harvest costs, and where the cost lands
+- State own_kind_total as recomputable, not as a figure that forces a read
+- Fix two stale pointers the cutover itself created
+- Name the source-grep rule instead of restating it, and pin the window row
+- Design target-brief, the run's target description put to its owners
+- Correct what group A can honestly say it read
+- Register what the bounded loop fixed and what stays linear
+- State the batch-local half of the max_scenarios gap
+- Plan the target-brief report as eight independently reviewable tasks
+- Fix the two conflicts the plan's pre-flight scan found
+- Stop Task 1 importing a helper only Tasks 2 onward use
+- Fold Task 1's three review findings back into the plan that specified them
+- Give rb-propose the fan-out warning, and stop two invariants implying a gate
+- Fold Task 2's review into the plan it was implemented from
+- Record why a non-list contradictions value renders as no disagreements
+- Qualify the module's no-identifiers claim to what the tests actually hold
+- Design the drivable coverage denominator
+- Plan the drivable coverage denominator implementation
+- Correct drivable_cells' claim of identity with emit.bindings
+- Scope CLAUDE.md's attribution claim to the part of the page that carries it
+- Park the uninformative resolution sentence, with the number it now measures
+- Record what the drivable denominator cannot express, and correct what the narrowing falsified
+- Leave the design record alone, and keep its three corrections live
+- Design target-brief's tables, theme and recorded-only colour
+- Plan target-brief's tables, theme and colour in six tasks
+- Fold Task 1's slug measurement into the plan it was implemented from
+- Fold Task 2's split collision and blank-cell ruling into the plan
+- Fold the dropped nature column and the opaque surface into spec and plan
+- Design tool-interface discovery and OpenAPI synthesis
+- Split the synthesis stage's failure surface across both exit codes
+- Plan tool-interface discovery and OpenAPI synthesis in seven tasks
+- Record that nothing reads a gate-1 decision about which services to simulate
+- Record extract's four-way spread on trace-sourced tool claims
+- Add the design for restructuring the two walkthrough documents
+- Add the implementation plan for the walkthrough restructure
+- Rename running-a-stage-by-hand.md to invoking-rubrica.md
+- Record the id-naming asymmetry and why neither rename happened
+- Restructure invoking-rubrica.md around the two invocation types
+- Rewrite getting-started.md as the full walkthrough
+- Reindex both walkthrough documents by the questions they now answer
+- Apply the final review's fix wave to both walkthrough documents
+- Plan the fan-out completeness checks for extract and instantiate
+- Correct the rationale for sorting by_id's keys, and complete the fixture
+- Run check-refs at extract's gate, where the missing member is caught
+- Gate extract with check-refs in the walkthrough too, and widen the timing rule
+- Carry the fan-out timing caveat to instantiate, and correct what #19 covered
+- Gate propose with check-refs, which the orchestrator already ran
+- Gate triage-rule with check-refs, the last fan-out without it
+- Design a waiver for a finding whose remedy lives elsewhere
+- Correct which document the waivers kind is required by
+- Plan the finding-waiver implementation
+- Use the house schema_version key in the waivers contract
+- **refs:** name check_all's one deliberate raise, and drop a test's prose match
+- Document rubrica waive and unpark what it now reaches
+- **brief:** retract the gate-0 unreachability claim, and fix three measured numbers
+- Retract the false claims the waiver branch left in tracked prose
+- **specs:** design the open-source readiness preparation and the citation rewrite
+- **specs:** scope in a release process, modelled on the harness with four sibling practices
+- **specs:** correct the citation count to 89, four of them wrapped across lines
+- **plans:** plan the open-source readiness work as twelve tasks in three phases
+- **plans:** strengthen two Task 10 assertions the pre-flight scan found weak
+- **design:** record the findings that closed, as the anchor citations will use
+- re-baseline the citation scope to 118 after #38, #39 and #40 merged
+- **design:** record the two findings the merged work brought into scope
+- correct six line-number references the merge shifted
+- **plans:** scope the do-not-edit rule to records, not to this plan's own files
+- **src:** name the finding each comment cites, not the tracker issue
+- widen the citation pattern to the bare #N form, which undercounted by ten
+- follow the line references my citation rewrite shifted by one
+- **design:** record the colliding batch ids, the fourteenth cited finding
+- **design,reference,guides:** link citations to the finding, not the tracker
+- **design:** correct the read population and trim the batch-ids entry to register
+- correct the code-share figures, which were wrong and self-inconsistent
+- **readme:** list every make target and drop the count that went stale
+- State both credential paths and split the two Write scopings
+- Correct the triage-death count and name the finding at every pointer
+- Drop three counts and one command that no longer describe the tree
+- Reconcile the design's citation figures and record two corrections
+- Stop claiming code scanning and dependency review share triggers
+
+### Tests
+
+- Add mutation-biting test for atomic write cleanup
+- Enumerate the pipeline states as an executable invariant
+- Close five coverage gaps in the emit package tests
+- Pin the tie-break and the not-emitted exclusion in assign_matches
+- Gate the measurement outputs' shared contract and diff-runs' attribution
+- Pin the never-launched discard against a stale transcript that still scores
+- Add the toy world golden fixture
+- Run the toy world end to end, through emit and smoke
+- Catch authoring-level oracle mislabeling missed by check_all
+- Close the seed hole in the each-package-carries-its-own-oracle check
+- Pin every scenario-specific artifact in the emitted package
+- Add the live-exercise harness and the stage runbook
+- Match the denominator's version on a word boundary, not as a substring
+- Assert the roster STAGES demands, now that the last skill has landed
+- Add the negative refusal fixtures for tg-reconcile's refusal conditions
+- Guard both negative fixtures' api.json against structural loss
+- Record both refusal conditions firing on a live tg-reconcile run
+- Guard both negative fixtures' api.json against value loss
+- Make six prompt and refusal predicates fail on the prose they check
+- Guard the RUBRICA_SUITE_DIR override and the recordings' old spelling
+- Guard the trajectory fixture and record its provenance
+- Re-record after the prompt changes, per a documented ruling
+- Pin root_index to the loop that sets it, in both directions
+- Add the two triage refusal fixtures and dispatch coverage
+- Remove a latent phrase-pin collision from a triage skill assertion
+- Give the all-declinable triage fixture its missing over-subtraction guard
+- Reach _schema_registry's own glob-and-read, not just the direct read
+- Correct the second stale registry-globbing claim in a docstring
+- Derive the reconcile partials from the golden world model
+- Pin the fold's four properties against a synthetic reconcile family
+- Add a discriminating root-boundary test and the missing tenth shape
+- Pin the promoted triage defs' closed shape and add missing negative cases
+- Extend the load-bearing-$ref proof to all five part-schema ref sites
+- Make four rb-triage-objective predicates assert claims, not tokens
+- Set a 2x anchor-to-token margin floor for triage-family windows
+- Give build_toy_run the staged-triage checkpoints and a multi-slice fixture
+- Lock all 20 reachable evidence paths and both OSError handlers
+- Pin the flag table's order against a literal, not against itself
+- Pin the toy's read-coverage rows against a hand-written table
+- Derive the minimal accounting row's count instead of asserting it
+- Pin the non-string hole-ref guard and drop a blind assertion
+- Attribute the partition figures to the round each belongs to
+- Bind the three synthetic world builders
+- Stop the seal's neighbour test teaching the wide arithmetic
+- Render the no-contradictions paragraph, which no test reached
+- Drop the three-key gap fixture, which taught a shape the schema rejects
+- Guard the dash that states an absent directory
+- Pin the unrecorded-outcomes sentence and record that _CSS is page content
+- Delimit the $ref needle so it names one definition, not a prefix of one
+- Name the predicate fence-stripping would really break, and widen the prohibition set
+- Cite the band that carries the synthesis prose, and two over-broad comments
+- Guard the rejected exclusion the instantiate completeness clause makes
+- **triage:** scope the three prohibition predicates to a sentence or a list item
+- **reconcile:** pin the audit restriction, and probe the green direction
+- **review:** hold the confidence-band demotion a #37 docstring rests on
+- name the finding each docstring cites, not the tracker issue
+- **docs:** guard against citing the internal tracker, in docs and in code
+- **release:** port the three release cases the first round missed
+- Discover the root user-facing set instead of hand-typing it
+- Check the exit code in the one purely negative notes case
+- Gate the .github YAML that nothing in the repository read
+- **release:** Bound the CHANGELOG seed assertion to the first section
+- **docs:** Scan CHANGELOG.md for citations, and correct the exclusion's reason
+- **docs:** Scope the documentation guards to tracked files
+- **docs:** Catch bare tracker citations wider than three digits
+
+### Build
+
+- Cap ruff, and stop CONTRIBUTING claiming make is CI's entry point
+- Track uv.lock, and install through uv sync everywhere
+- **release:** add the release-tag and release-notes libraries
+- **release:** add scripts/release.sh, a seeded CHANGELOG, and the release docs
+- Adopt pre-commit hooks and a detect-secrets baseline
+
+### CI
+
+- Add CONTRIBUTING and the CI two documents already claimed
+- enforce the DCO sign-off CONTRIBUTING.md already requires
+- publish to PyPI over OIDC, review dependency changes, drop token permissions
+- **dependabot:** Ignore minor/patch for every floating-ref action
+
+### Chores
+
+- Ignore agent harness scratch directories
+- Exclude docs/ from ruff
+- Ignore uv.lock
+- License under Apache-2.0 and fill in package metadata
+- gitignore .vscode
+- typo
+- prepare the repo for its public home
+- Bump actions/dependency-review-action from 4 to 5
+
+### Other
+
+- docs+test: Fix five review findings in the trajectory-run spec and fixture
+- tests: additional trajectories for fixtures
+- revert: Take the unbound-capability finding back out of check-refs
