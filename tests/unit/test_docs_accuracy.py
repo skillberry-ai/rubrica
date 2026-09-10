@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import subprocess
+from functools import cache
 from pathlib import Path
 from types import ModuleType
 
@@ -77,6 +79,47 @@ RENDERER = REPO_ROOT / "scripts" / "render-pipeline-diagram.py"
 _GENERATED_ROOT_DOCS = {"CHANGELOG.md"}
 
 
+@cache
+def _tracked() -> frozenset[Path]:
+    """Every path git tracks, as absolute paths.
+
+    Both discovery helpers below walk the filesystem, and the filesystem is not
+    the repository. Measured: an untracked SCRATCH_NOTE.md dropped at the root
+    reddened the suite, and so did an untracked scratch .py under tests/ -- a
+    reviewer's own working file failing a gate about what this project ships.
+    Nothing about a file nobody has added is this module's business.
+
+    On a tree with no git -- an unpacked sdist, say -- the helpers fall back to
+    the raw filesystem walk. That is the conservative direction on purpose: the
+    fallback scans more files than it should, never fewer, so the failure mode is
+    the spurious hit this change fixes rather than a citation that slips through
+    a guard reporting a clean tree.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "-z"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return frozenset()
+    return frozenset(REPO_ROOT / name for name in out.split("\0") if name)
+
+
+def _keep_tracked(paths: list[Path]) -> list[Path]:
+    """`paths`, minus anything git does not track. Everything, if git said nothing.
+
+    An empty _tracked() means the query failed rather than that the repository is
+    empty -- git prints nothing in both cases and this module cannot run in the
+    second -- so it is read as "unknown" and filters nothing.
+    """
+    tracked = _tracked()
+    if not tracked:
+        return paths
+    return [path for path in paths if path in tracked]
+
+
 def _user_facing() -> list[Path]:
     """Every document a reader with no build context is expected to read.
 
@@ -91,6 +134,8 @@ def _user_facing() -> list[Path]:
     docs/superpowers/ is excluded on purpose. It is recorded history: its counts
     are correct records of what was true on their own date, so a predicate that
     bans a count must not fire on them.
+
+    Discovery is over tracked files, not over the filesystem -- see _tracked().
     """
     at_root = [
         path for path in sorted(REPO_ROOT.glob("*.md")) if path.name not in _GENERATED_ROOT_DOCS
@@ -100,7 +145,8 @@ def _user_facing() -> list[Path]:
         for path in sorted(DOCS.rglob("*.md"))
         if "superpowers" not in path.relative_to(DOCS).parts
     ]
-    return [path for path in at_root if path.is_file()] + under_docs
+    found = [path for path in at_root if path.is_file()] + under_docs
+    return _keep_tracked(found)
 
 
 def _read(path: Path) -> str:
@@ -371,6 +417,9 @@ def _code_files() -> list[Path]:
     project's own rules forbid. Measured at commit 3300022 and again at HEAD: the
     excluded paths carry no citation, so the exclusion costs no coverage today and
     prevents an unfixable failure later.
+
+    Tracked files only, for the reason at _tracked(): an untracked scratch .py
+    under tests/ failed this predicate before the filter existed.
     """
     keep = {".py", ".sh", ".json", ".md"}
     skip = ("fixtures", "node_modules", "__pycache__")
@@ -382,7 +431,7 @@ def _code_files() -> list[Path]:
             if any(part in skip for part in path.relative_to(REPO_ROOT).parts):
                 continue
             out.append(path)
-    return out
+    return _keep_tracked(out)
 
 
 def _citation_scanned() -> list[Path]:
