@@ -610,7 +610,7 @@ def test_a_hand_written_changelog_preamble_survives(fixture_repo):
     ), f"the preamble did not sink past exactly the new section:\n{text}"
 
 
-def test_the_repositorys_own_changelog_is_seeded_with_the_header_and_nothing_else():
+def test_the_repositorys_own_changelog_carries_no_prose_above_the_first_section():
     """The seed shape the insertion above requires, asserted on the real file.
 
     Not a style rule. `release.sh` re-emits everything below line 1 *after* the
@@ -624,10 +624,27 @@ def test_the_repositorys_own_changelog_is_seeded_with_the_header_and_nothing_els
 
     The explanation of the format lives in docs/releasing.md, which is a file the
     insertion cannot move.
+
+    Scoped to the text *above the first section*, and the scope is the whole
+    point: `release.sh` stages and commits this file, so a whole-file equality
+    against the bare header expires at the first release -- red inside the
+    release commit itself, and then on main, on the exact path the seed shape
+    exists to enable. The property survives because it was never about the file
+    being one line; it is about nothing of the project's own standing between
+    the header and the newest section.
+
+    `rstrip` and not an equality, measured on a simulated post-release file:
+    release.sh emits `# Changelog\n\n` ahead of the section it prepends, so the
+    split leaves a trailing blank line and `== "# Changelog\n"` still fails.
+    Blank separators are all that is stripped -- a hand-written preamble line
+    above the first section survives it and fails the assertion, which is the
+    defect this case was written for.
     """
     text = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert text == "# Changelog\n", (
-        f"CHANGELOG.md must be the header alone until release.sh writes a section; found {text!r}"
+    preamble = text.split("## v", 1)[0]
+    assert preamble.rstrip("\n") == "# Changelog", (
+        "CHANGELOG.md must carry the header alone above the first release "
+        f"section, until release.sh writes one; found {preamble!r}"
     )
 
 
