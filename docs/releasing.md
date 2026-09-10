@@ -21,6 +21,33 @@ The re-lock is not a nicety. CI runs `uv sync --locked`, so a bump that left the
 lockfile behind would have the release break the build it had just tagged. The
 check for `uv` happens in preflight, before anything in the worktree is touched.
 
+### What lets that push land, and what it costs
+
+The push goes straight to `main`, which the default-branch ruleset otherwise
+forbids: it requires a pull request, and rulesets grant repository admins **no**
+implicit bypass. The release works because one org team, `kaegis-release`, is the
+ruleset's sole bypass actor. The same team is the sole bypass actor on
+`simulation-harness`, whose `release.sh` pushes the same way — the two projects
+share one release identity rather than each carrying its own exception.
+
+**Membership in that team is the release capability.** Add someone to it only to
+let them cut a release; it is not an access tier.
+
+Two consequences worth stating plainly, because the ruleset reads stronger than it
+is:
+
+- A bypassed push runs **no** required status check, `DCO` included. The release
+  commit still carries its sign-off, but because `release.sh` passes `-S -s`
+  unconditionally — the guarantee comes from the script, not from the branch. If
+  you ever make a release commit by hand, nothing will catch a missing sign-off.
+- Every other admin lost direct write access to `main` when the bypass narrowed
+  from the admin role to this team. That is the point, not a side effect: it took
+  the number of identities that can push past the pull-request rule from five to
+  one.
+
+The ruleset requires `check` alongside `DCO` for everyone not bypassing, so an
+ordinary pull request cannot merge until the gates pass.
+
 Preview without writing anything:
 
 ```sh
@@ -87,6 +114,22 @@ This means the workflow is **inert until a trusted publisher is registered on
 PyPI** for this repository, the workflow filename `publish.yml`, and the `pypi`
 environment. Until then a release cuts a tag and a release page and publishes
 nothing, which fails visibly in the Actions tab rather than silently.
+
+The `pypi` environment restricts **which refs may deploy to it**: one custom
+policy, the tag pattern `v*`. So a release tag publishes and a branch does not,
+which closes the gap that `publish.yml`'s `workflow_dispatch` trigger would
+otherwise leave open — a maintainer could dispatch any ref and publish it.
+
+Do **not** replace that with `protected_branches`. Measured on the v0.1.0
+deployment: the ref a `release: published` run deploys is the **tag**, not a
+branch, so a protected-branches policy admits nothing and blocks releasing while
+looking like hardening.
+
+Approval is a second control and a weaker one: the environment requires a
+reviewer, but `prevent_self_review` is off, so whoever cuts the release can
+approve their own deployment. That is a deliberate ruling for a project with one
+active releaser, and it is the tag policy above that carries the real restriction.
+Revisit it when the release cadence or the team grows.
 
 To build the distributions locally without involving CI: `uv build`.
 
