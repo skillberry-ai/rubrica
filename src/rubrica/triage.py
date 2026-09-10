@@ -34,7 +34,10 @@ from rubrica.refs import UNSET, resolve_pointer
 # necessary and never sufficient. "accepted" is deliberately absent -- a
 # clean run of the four mechanical checks below is not a verdict on whether
 # the file means what the projection asked for.
-ACCEPTANCE_PASS_MESSAGE = (
+# bandit B105 -- not a credential. B105 matches on the *name*, and this one contains
+# "PASS" in the sense of passing a check. Renaming to satisfy a scanner would make
+# the constant read worse, so the annotation stays and the name does not move.
+ACCEPTANCE_PASS_MESSAGE = (  # nosec B105
     "structural acceptance passed; the prose criterion is still a human's to judge"
 )
 

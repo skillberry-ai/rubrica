@@ -1,0 +1,104 @@
+# Deterministic local enforcement, adopted from `simulation-harness`. Install once:
+#   uv run pre-commit install --install-hooks
+#   uv run pre-commit install --hook-type commit-msg
+# Run against everything:
+#   uv run pre-commit run --all-files
+#
+# This is local enforcement, NOT a fourth gate. The three gates stay three --
+# `make test`, `make check`, `rubrica check-skills` -- and nothing here is required
+# to pass for a change to land. CONTRIBUTING.md says the same thing to a reader.
+repos:
+  # The rev must equal the ruff `uv.lock` resolves, and
+  # tests/unit/test_precommit_config.py fails when it does not. `pyproject.toml`
+  # declares a range (`ruff>=0.8,<0.17`), so there is no single version there to
+  # match -- the lock is what `make setup` and CI install.
+  #
+  # This is a test and not just a comment because of a recorded failure in the
+  # sibling project (https://github.com/skillberry-ai/simulation-harness/issues/15):
+  # its hook pinned 0.6.9 against a later project ruff, `ruff-format` rewrote what
+  # `ruff format --check` then rejected, and the two fought over every commit
+  # touching an affected file.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.1
+    hooks:
+      - id: ruff
+        name: ruff (lint + autofix)
+        args: [--fix]
+      - id: ruff-format
+        name: ruff (format)
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # These two rewrite files, so they are the two that must not reach a record.
+      # Measured when this config was adopted: without the exclude, one run edited
+      # three plans under docs/superpowers/ and tests/fixtures/corpus-toy/
+      # generated.txt, which is stored with no trailing newline on purpose because
+      # it is corpus input a digest is taken over. CLAUDE.md and docs/README.md both
+      # say a record is falsified, not corrected, by a later edit.
+      #
+      # Scoped per hook rather than as one top-level `exclude:` deliberately: a
+      # top-level one would also stop detect-secrets reading the fixtures, which is
+      # where a captured credential would actually land. The guard test asserts both
+      # halves -- that these two are excluded, and that detect-secrets is not.
+      - id: end-of-file-fixer
+        exclude: ^(docs/superpowers/|tests/fixtures/)
+      - id: trailing-whitespace
+        exclude: ^(docs/superpowers/|tests/fixtures/)
+      - id: check-yaml
+      - id: check-merge-conflict
+      # Raised from the 500kB default because this tree commits captured
+      # trajectories larger than that on purpose -- trajectories2.json is ~1.1MB --
+      # and the suite depends on them, so the default would block a re-capture of a
+      # fixture rather than catch a mistake. The guard test pins this above the
+      # largest committed fixture, so growing one past the limit fails there.
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+
+  # Lints every tracked shell script, `scripts/lib/` included -- the release
+  # libraries live a directory down, and a single-segment pattern would skip both.
+  # Measured clean across all six scripts when adopted. This is the only tool in
+  # the project that reads shell at all: SECURITY.md records that CodeQL does not,
+  # and `dispatch-stage.sh` is a substantial program that passes credentials.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        args: [--external-sources]
+        files: ^scripts/.*\.sh$
+
+  # Static security analysis over the package. Four LOW findings when adopted, each
+  # annotated at its site with `# nosec` and a reason rather than skipped by id
+  # here: a blanket skip would also hide the next real subprocess finding.
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.10
+    hooks:
+      - id: bandit
+        name: bandit (SAST)
+        args: [-c, pyproject.toml]
+        files: ^src/
+
+  # Conventional Commit subjects, which `scripts/lib/release-notes.sh` reads to
+  # build each CHANGELOG section.
+  #
+  # **Merge commits are NOT exempt, and there is no flag that exempts them.**
+  # Measured 2026-09-10 against v3.4.0 on git 2.43.0: git runs `commit-msg` for a
+  # merge, the hook rejects `Merge branch 'x' into main`, and the hook's only
+  # options are --force-scope, --scopes and --strict (which merely disallows
+  # `fixup!`). So a *local* merge needs `git merge --no-verify`, which was measured
+  # to work. A merge made on GitHub never runs a local hook at all, which is why
+  # the sibling project has not hit this.
+  #
+  # Kept despite that friction: the subject line is the CHANGELOG's input, so a
+  # malformed one is a defect that reaches a release rather than a style nit.
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]

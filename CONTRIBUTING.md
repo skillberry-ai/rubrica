@@ -71,6 +71,61 @@ gates exercise indirectly, since they never touch `live` tests at all.
 call. For that reason `make live` and `RUBRICA_LIVE` never run in CI, and a
 PR should never need them to pass.
 
+## Pre-commit hooks are not one of them either
+
+Optional local enforcement, adopted to match `simulation-harness`. Install once:
+
+```sh
+uv run pre-commit install --install-hooks
+uv run pre-commit install --hook-type commit-msg   # the Conventional Commit check
+uv run pre-commit run --all-files                  # to check the whole tree now
+```
+
+**The hooks are not a fourth gate, and nothing in CI runs them.** The gates stay
+the three above; a change lands or does not on those. What the hooks buy is
+catching locally what the gates would catch later, plus three checks the gates do
+not make at all:
+
+- **shellcheck** over every script in `scripts/`, `scripts/lib/` included. This is
+  the only tool in the project that reads shell — `SECURITY.md` records that CodeQL
+  does not, and `dispatch-stage.sh` passes credentials to a dispatched model.
+- **bandit** over `src/`. The four findings this tree has are annotated at their
+  sites with `# nosec <id>` above a `# bandit <id> --` line giving the reason. Write
+  the reason on its own line: `# nosec` parses everything after the id as more ids,
+  so prose on the directive line makes bandit warn.
+- **detect-secrets** against `.secrets.baseline`. The 50 entries in that baseline
+  are all SHA-256 digests from fixtures and one digest of the empty string — no
+  credential detector fires on this tree. Re-scan with
+  `detect-secrets scan --baseline .secrets.baseline` when you add a fixture.
+
+Two couplings worth knowing before you edit `.pre-commit-config.yaml`:
+
+- The `ruff-pre-commit` rev must equal the ruff `uv.lock` resolves, and
+  `tests/unit/test_precommit_config.py` fails when it does not. A hook on a
+  different ruff reformats what `ruff format --check` then rejects, and the two
+  fight over every commit touching an affected file — that is
+  a recorded failure in the sibling project
+  (<https://github.com/skillberry-ai/simulation-harness/issues/15>), and the
+  test is here so a comment is not the only thing preventing a repeat.
+- `check-added-large-files` is raised to 2048kB because this tree commits captured
+  trajectories above the 500kB default on purpose. The same test pins the limit
+  above the largest committed fixture.
+
+The Conventional Commit hook runs at the `commit-msg` stage, and there is one
+sharp edge worth knowing before it surprises you: **it rejects merge commits, and
+no option exempts them.** Measured against v3.4.0 on git 2.43.0 — git runs
+`commit-msg` for a merge, and the hook's only flags are `--force-scope`,
+`--scopes` and `--strict` (which just disallows `fixup!`). So:
+
+```sh
+git merge --no-verify --no-ff <branch>    # measured to work
+```
+
+A merge performed on GitHub never runs a local hook, so this only bites a merge
+you make yourself. The hook is kept anyway, because a commit subject is the input
+`scripts/lib/release-notes.sh` turns into a CHANGELOG section — a malformed one is
+a defect that reaches a release, not a style nit.
+
 ## Releasing
 
 Releases are cut from `main` with one command:

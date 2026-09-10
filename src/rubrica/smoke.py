@@ -27,7 +27,11 @@ import dataclasses
 import json
 import math
 import shutil
-import subprocess
+
+# bandit B404 -- subprocess is what this module is for: `smoke` runs the emitted
+# suite's agent and verifier as child processes. There is no import-free way to
+# execute a suite, so the finding is the design rather than a defect in it.
+import subprocess  # nosec B404
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -364,7 +368,11 @@ def run_agent(
     argv = substitute(spec.command, task_dir=task_dir, logs_dir=logs_dir, scenario_id=scenario_id)
     stdout_path = logs_dir / "agent-stdout.jsonl"
     try:
-        completed = subprocess.run(
+        # bandit B603 -- argv is a list, never a shell string, so nothing here is
+        # word-split or glob-expanded. Its contents come from the suite's own
+        # `command` spec via substitute(), which the emit schema constrains; a
+        # scenario cannot inject a shell metacharacter that would matter.
+        completed = subprocess.run(  # nosec B603
             list(argv),
             cwd=task_dir,
             capture_output=True,
@@ -451,7 +459,9 @@ def verify_package(
             return None, None, f"could not clear stale {name} from a previous run: {exc}"
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        completed = subprocess.run(
+        # bandit B603 -- as above, and narrower: verifier_argv() builds the list in
+        # this module from paths it was handed, with no caller-supplied string.
+        completed = subprocess.run(  # nosec B603
             verifier_argv(task_dir, agent_logs=agent_logs, out_dir=out_dir),
             capture_output=True,
             text=True,

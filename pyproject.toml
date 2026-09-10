@@ -47,7 +47,7 @@ dependencies = [
 # parses them before they reach GitHub. Uncapped, unlike ruff: it is a parser
 # whose output does not drift the way a formatter's does, and uv.lock pins it for
 # both contributor and CI regardless.
-dev = ["pytest>=8.3", "ruff>=0.8,<0.17", "pyyaml>=6.0"]
+dev = ["pytest>=8.3", "ruff>=0.8,<0.17", "pyyaml>=6.0", "pre-commit>=4.0"]
 
 [project.urls]
 Homepage = "https://github.com/skillberry-ai/rubrica"
@@ -90,3 +90,16 @@ testpaths = ["tests"]
 markers = [
     "live: dispatches a model; skipped unless RUBRICA_LIVE is set (see tests/conftest.py)",
 ]
+
+[tool.bandit]
+# Read by the `bandit` pre-commit hook via `-c pyproject.toml`. The hook already
+# scopes itself to `^src/` with its own `files:` pattern; exclude_dirs is what
+# makes a manual `bandit -c pyproject.toml -r .` agree with it instead of walking
+# the fixtures and the virtualenv.
+#
+# No `skips` list on purpose. The four LOW findings this project has are annotated
+# at their sites with `# nosec <id>` and a reason -- three subprocess findings in
+# smoke.py, which runs the emitted suite, and one B105 in triage.py where the id
+# matched a constant *name* containing "PASS". Skipping those ids globally would
+# also hide the next real subprocess finding, which is the one worth catching.
+exclude_dirs = ["tests", ".venv", "runs"]
