@@ -43,8 +43,23 @@ _release_notes_is_conventional() {
 # _release_notes_breaking_footer <sha> — the prose of a `BREAKING CHANGE:` (or
 # `BREAKING-CHANGE:`) footer, folded onto one line, or empty when there is none.
 # Folding matters because the footer is usually wrapped across several lines but
-# has to become one markdown bullet. Collection stops at the first blank line so
-# that trailers below it (Signed-off-by, Assisted-By) never leak into the notes.
+# has to become one markdown bullet.
+#
+# Collection stops at a blank line *or* at a trailer-shaped line, and the second
+# condition is the load-bearing one: `BREAKING-CHANGE:` — the hyphenated spelling
+# the regex below accepts — is itself a valid git trailer token, so `git commit
+# -s` appends `Signed-off-by:` directly beneath it with no blank line between.
+# On a blank-line-only stop the fold then swallowed that trailer, and the
+# mandated `Assisted-By:` with it, into a bullet that ships in the GitHub Release
+# and in the committed CHANGELOG.md. The token pattern is git's own
+# (`[A-Za-z0-9-]+:` then a space or end of line), so what we stop at is exactly
+# what git would have treated as a trailer when it wrote the message.
+#
+# A wrapped continuation line that happens to open `Word: ...` stops collection
+# too, truncating the prose. That is accepted deliberately: the format itself
+# cannot distinguish the two cases — git would read such a line as a trailer as
+# well — and truncated prose is a far better failure than a committer's name and
+# email leaking into a public changelog.
 _release_notes_breaking_footer() {
     git show -s --format='%B' "$1" | awk '
         !done_one && /^BREAKING[ -]CHANGE:/ {
@@ -53,6 +68,7 @@ _release_notes_breaking_footer() {
         }
         collecting {
             if ($0 ~ /^[[:space:]]*$/) { collecting = 0; done_one = 1; next }
+            if ($0 ~ /^[A-Za-z0-9-]+:([[:space:]]|$)/) { collecting = 0; done_one = 1; next }
             buf = buf " " $0
         }
         END {

@@ -56,11 +56,15 @@ def repo(tmp_path: Path) -> Path:
 _FILE_SEQ = itertools.count()
 
 
-def _commit(repo: Path, subject: str, body: str = "") -> None:
+def _commit(repo: Path, subject: str, body: str = "", signoff: bool = False) -> None:
     (repo / f"f{next(_FILE_SEQ)}.txt").write_text(subject)
     _git(repo, "add", "-A")
     msg = subject if not body else f"{subject}\n\n{body}"
-    _git(repo, "commit", "-q", "-m", msg)
+    # signoff runs the real `git commit -s` rather than appending the trailer to
+    # `body` by hand, because *where* git puts the trailer is the thing under
+    # test: it appends to an existing trailer block without a blank line, and
+    # `BREAKING-CHANGE:` is itself a valid trailer token.
+    _git(repo, "commit", "-q", *(["-s"] if signoff else []), "-m", msg)
 
 
 # --- release-tag.sh ---------------------------------------------------------
@@ -193,6 +197,28 @@ def test_a_breaking_change_footer_wins_over_the_subject(repo):
     assert "### Breaking changes" in out
     # Folded onto one line, and the footer's prose is used, not the subject's.
     assert "- **cli:** pass --explicit to keep the old behaviour." in out
+
+
+def test_a_signed_off_hyphenated_footer_does_not_swallow_its_trailers(repo):
+    """`BREAKING-CHANGE:` is a valid git trailer token, so `git commit -s`
+    appends `Signed-off-by:` directly beneath it with *no* blank line -- the
+    stop condition the blank-line case above relies on never arrives. Written
+    with a real `-s` commit because a hand-built body cannot reach this."""
+    _commit(repo, "chore: base")
+    _commit(
+        repo,
+        "feat(api): require the new field",
+        body="BREAKING-CHANGE: callers must pass the new field.",
+        signoff=True,
+    )
+    # Assert the trailer really is flush against the footer before asserting it
+    # stays out of the notes -- otherwise this passes on a message git spaced
+    # out for us, which is the fixture-cannot-reach weakness it exists to close.
+    msg = _git(repo, "show", "-s", "--format=%B", "HEAD")
+    assert "the new field.\nSigned-off-by:" in msg
+    out = _bash(repo, NOTES_LIB, 'generate_release_notes "HEAD~1..HEAD"').stdout
+    assert "Signed-off-by" not in out
+    assert "- **api:** callers must pass the new field." in out
 
 
 def test_trailers_below_the_footer_do_not_leak_into_the_notes(repo):
