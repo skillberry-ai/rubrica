@@ -596,11 +596,12 @@ def test_gate_one_does_not_raise_on_hand_edited_reconcile_partials(tmp_path):
 
 
 def test_gate_one_reports_read_coverage_per_pass(tmp_path):
-    """Per pass, not per input -- the aggregate above it is what hid issue #6.
+    """Per pass, not per input -- the aggregate above it is what hid the variance.
 
-    Measured on run-20260823-112746: `claim-utilisation` read 33.6% overall while
-    per-kind citation ran 110 of 135 for the pass that had read every claims file
-    and 2 of 38 for the pass that had read three of twenty-three. A per-artifact
+    The read-coverage variance (docs/design/findings.md) was measured on
+    run-20260823-112746: `claim-utilisation` read 33.6% overall while per-kind
+    citation ran 110 of 135 for the pass that had read every claims file and 2 of
+    38 for the pass that had read three of twenty-three. A per-artifact
     number cannot say which pass did the citing, so the brief printed the average
     of a diligent pass and a skimming one.
 
@@ -749,8 +750,9 @@ def test_gate_one_and_utilisation_survive_a_non_string_claim_member(tmp_path, me
     question.
 
     The mangle walks the document the way `refs._claim_refs_in` walks it rather
-    than naming the citation sites: issue #6 added three of them, and a site list
-    here would leave the next one unguarded and this test still green.
+    than naming the citation sites: three of them were added when the
+    read-coverage variance was closed, and a site list here would leave the next
+    one unguarded and this test still green.
     """
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     world = read_json(run.world_model)
@@ -847,8 +849,9 @@ def test_gate_one_and_utilisation_survive_a_malformed_citation_container(tmp_pat
     `AttributeError: 'str' object has no attribute 'get'` out of
     `utilisation._cited_claim_ids`, and one fabricated `[internal]` finding on
     stdout. `capabilities = "nope"` is the pre-existing walk; `gaps = "nope"`,
-    `outcome_classes = "nope"` and `invariants = "nope"` are walks issue #6 added,
-    so half of these are crashes through a path this branch created.
+    `outcome_classes = "nope"` and `invariants = "nope"` are walks added when the
+    read-coverage variance was closed, so half of these are crashes through a path
+    this branch created.
 
     Both commands are reports, and CLAUDE.md's ruling for a report is that it
     always exits clean on a readable run -- there is no findings channel through
@@ -890,12 +893,12 @@ def test_an_unreadable_claims_directory_is_exit_2_from_both_reports(tmp_path):
     """The shape that must **not** be guarded into an exit 0, pinned as a test
     rather than only argued in a docstring.
 
-    The other readable-run shapes in this file assert exit **0** -- issue #6 closed
-    them by widening the world-model containers `utilisation._cited_claim_ids`
-    walks. The report contract violation still open is a hand-edited `01-claims/`
-    document, which takes both reports to exit 1 on a readable run; its shapes are
-    parked in `docs/design/limitations.md` and exercised as `summary.Malformed`
-    markers by
+    The other readable-run shapes in this file assert exit **0** -- closing the
+    read-coverage variance closed them, by widening the world-model containers
+    `utilisation._cited_claim_ids` walks. The report contract violation still open
+    is a hand-edited `01-claims/` document, which takes both reports to exit 1 on a
+    readable run; its shapes are parked in `docs/design/limitations.md` and
+    exercised as `summary.Malformed` markers by
     `tests/unit/test_summary.py::test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run`,
     not here. An unreadable `01-claims/` is a different kind: `paths.list_json`
     raises `UsageError`, `cli.py` maps it to **exit 2** alongside OSError, and the
@@ -1382,11 +1385,12 @@ def test_gate_zero_reports_an_unreadable_dispositions_directory_as_a_broken_run(
 
 # --- Gate 1: the capabilities the denominator excludes ------------------------
 #
-# Issue 17 narrowed `denominator.capability_cells` to the cells a scenario can
-# actually be driven through, and this listing is the last report of an excluded
-# capability a human can still act on -- not the only one. `seal_score` writes an
-# `unreachable` hole per undrivable cell (rounds.py:1343-1361, seal_score's
-# `undrivable`/`injected` block) and `emit` names one capability per instance
+# Closing the undrivable denominator narrowed `denominator.capability_cells` to
+# the cells a scenario can actually be driven through, and this listing is the
+# last report of an excluded capability a human can still act on -- not the only
+# one. `seal_score` writes an `unreachable` hole per undrivable cell
+# (rounds.py:1343-1361, seal_score's `undrivable`/`injected` block) and `emit`
+# names one capability per instance
 # (emit.py:101-108, `to_contract`'s `unbound` closure),
 # but the first is read at gate 2 and the second at stage 06, by which point the
 # loop has already spent its rounds against the narrowed denominator. The spec's

@@ -100,8 +100,9 @@ def classify(path: Path) -> str:
     ):
         return "trace"
     # A conversation is a capture of what the target did, which is what `trace`
-    # means -- and issue #4 measured the cost of it classifying `other`: 200 tau2
-    # trajectory files reached triage as skeleton-only rows. Widening the existing
+    # means -- and the cost of it classifying `other` was measured: 200 tau2
+    # trajectory files reached triage as skeleton-only rows, which is the
+    # chat-trajectory skeletons (docs/design/findings.md). Widening the existing
     # kind rather than adding one, because exactly one consumer distinguishes
     # anything by it -- `digest_for_payload`'s `kind == "trace"` branch, which now
     # dispatches on shape and handles a dict-shaped capture and a message list

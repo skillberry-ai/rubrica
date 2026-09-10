@@ -681,10 +681,11 @@ _TRAJECTORY = [
 
 
 def test_a_chat_trajectory_digests_to_the_facts_a_triage_decision_needs():
-    """Issue #4: 200 such files reached triage as skeleton-only rows carrying no
-    tool names, no request text and no counts. Measured across that corpus, these
-    three fields yield 14 distinct tool names and 68 distinct toolset signatures
-    over 200 files -- the discrimination a near-duplicate ruling reads."""
+    """The chat-trajectory skeletons (docs/design/findings.md): 200 such files
+    reached triage as skeleton-only rows carrying no tool names, no request text
+    and no counts. Measured across that corpus, these three fields yield 14
+    distinct tool names and 68 distinct toolset signatures over 200 files -- the
+    discrimination a near-duplicate ruling reads."""
     result = digest.digest_for_payload(_TRAJECTORY, "trace", body_chars=2000)
     assert result["element_counts"] == {
         "messages": 5,

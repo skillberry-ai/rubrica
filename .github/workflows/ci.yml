@@ -5,14 +5,44 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege at the workflow level rather than per job. Nothing in CI writes
+# to the repository: the gates read the tree, and the DCO job reads history. Set
+# here so a job added later is constrained by default instead of inheriting the
+# repository-wide token permissions.
+permissions:
+  contents: read
+
 jobs:
+  dco:
+    name: DCO
+    runs-on: ubuntu-latest
+    # Only a pull request has a base to diff against; a direct push to main has
+    # no meaningful range to check. This is also why a branch ruleset requiring a
+    # pull request is needed for this job to bind -- without one, a direct push
+    # bypasses the check entirely rather than failing it.
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The check walks the PR's commits, so it needs their history, not just
+          # the tip. Without this the merge-base lookup fails and the script
+          # exits 1 with "cannot resolve base ref".
+          fetch-depth: 0
+
+      - name: Check DCO sign-off
+        run: ./scripts/check-dco.sh "$BASE_SHA" "$HEAD_SHA"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
 

@@ -126,7 +126,8 @@ def test_verdict_notes_may_not_be_empty(tmp_path):
 
 
 def test_the_flags_enum_holds_both_difficulty_directions_and_nothing_else(tmp_path):
-    """Renamed from `..._overstated_is_the_only_flag` (issue #37).
+    """Renamed from `..._overstated_is_the_only_flag` for the unrecordable
+    understatement (docs/design/findings.md).
 
     The old name *was* the specification, and the specification was wrong: an
     overstated difficulty wastes a tool call, an understated one mislabels a
@@ -175,7 +176,7 @@ def test_the_flags_enum_holds_both_difficulty_directions_and_nothing_else(tmp_pa
     assert _findings(tmp_path, "verdict", minimal_verdict(flags=["difficulty_understated"] * 2))
 
 
-# -- world model: claims on the three child element defs (issue #6) ------
+# -- world model: claims on the three child element defs (the read-coverage variance) --
 def _world_with_a_gap() -> dict:
     """The golden world model plus one gap, so all three sites are reachable.
 
@@ -223,7 +224,8 @@ def test_a_world_model_with_claims_on_every_child_element_is_valid(tmp_path):
     ],
 )
 def test_a_child_element_without_claims_is_rejected(tmp_path, pointer):
-    """The three defs that had no `claims` array until issue #6.
+    """The three defs that had no `claims` array until the read-coverage variance
+    was closed.
 
     `capability`, `entity`, `actor` and `goal` have always required one. These
     three did not, and `additionalProperties: false` meant a pass could not

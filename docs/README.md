@@ -39,6 +39,9 @@ Each line names the question that document answers.
   a stage either way, with every flag and environment variable each one takes —
   and how do I dispatch one skill for real against a fresh run, isolate what
   it reads, and check what it did?
+- [`releasing.md`](releasing.md) — How do I cut a numbered release, what does
+  the script do in what order, and what is the one move that recovers each way a
+  release can fail part-way through?
 
 ## Design
 
@@ -46,6 +49,8 @@ Each line names the question that document answers.
   this way, including the choices that cost something and were made anyway?
 - [`design/limitations.md`](design/limitations.md) — What is known to be
   wrong or missing, and what was the ruling that left it that way on purpose?
+- [`design/findings.md`](design/findings.md) — What was found, measured and
+  fixed, and what is the measurement a comment elsewhere is citing?
 
 ## History
 

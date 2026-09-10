@@ -1,4 +1,4 @@
-.PHONY: help setup test live check lint format
+.PHONY: help setup test live check lint format release
 
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -26,3 +26,13 @@ lint: ## Auto-fix lint findings
 
 format: ## Reformat the code
 	uv run ruff format .
+
+# The guard is a recipe line inside a parse-time conditional, so it fires only when
+# this target is actually built -- `make test` with no VERSION set is unaffected.
+# Without it, `make release` would run the script with an empty version, which the
+# script rejects, but only after fetching the remote.
+release: ## Cut a release: make release VERSION=0.2.0
+ifndef VERSION
+	$(error VERSION is required, e.g. make release VERSION=0.1.0)
+endif
+	./scripts/release.sh "$(VERSION)"

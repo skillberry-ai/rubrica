@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import subprocess
+from functools import cache
 from pathlib import Path
 from types import ModuleType
 
@@ -41,20 +43,110 @@ DIAGRAM = DOCS / "concepts" / "pipeline-diagram.html"
 RENDERER = REPO_ROOT / "scripts" / "render-pipeline-diagram.py"
 
 
+# CHANGELOG.md is generated, not written: scripts/release.sh builds each section
+# from Conventional Commit subjects since the previous tag. That earns it an
+# exclusion from the two *count* predicates and from nothing else, so this set is
+# subtracted in _user_facing() below and added back in _citation_scanned().
+#
+# The count exclusion is the one docs/superpowers/ gets, on the same argument. A
+# changelog section is a record of what a release contained, so a number written
+# into it was true on its own date, and a predicate that bans a stale count must
+# not fire on a record. A heading counting stages or skills is the same case.
+#
+# A tracker citation is not that case, which is why the citation predicate does
+# read this file. A bare hash-and-number in a changelog line is not a fact that
+# was once true; it is a pointer that resolves to a different, unrelated issue in
+# the public repository -- the defect rewritten out of 128 sites, arriving in a
+# user-facing root document by a route no other predicate covers. Written here
+# without its hash for the reason given at _TRACKER_CITATION_BARE: this module is
+# inside its own code scan set, so quoting the form would fail the predicate this
+# comment documents. Measured -- it did, on the first draft of this comment.
+#
+# What is not checked, stated plainly because the comment this replaces claimed
+# otherwise: nothing in this repository guards the commit subject that would
+# produce such a line. No test or script reads the log for citations, and
+# scripts/check-dco.sh reads `%s` only to print it in a failure message. There is
+# no commit-subject guard, so the predicate over this file is the only thing
+# between a subject written with a hash-number and a released changelog.
+#
+# The remedy for a hit is to edit CHANGELOG.md, and it is durable rather than
+# overwritten -- measured, because the reasoning that excluded this file assumed
+# the opposite. release.sh re-emits everything below line 1 verbatim beneath the
+# new section, so a corrected line survives every later release; a citation
+# corrected after v0.1.0 was still corrected after v0.2.0. The subject in the log
+# stays as written, which is the one thing that cannot be fixed and, once the
+# rendered document is right, does not need to be.
+_GENERATED_ROOT_DOCS = {"CHANGELOG.md"}
+
+
+@cache
+def _tracked() -> frozenset[Path]:
+    """Every path git tracks, as absolute paths.
+
+    Both discovery helpers below walk the filesystem, and the filesystem is not
+    the repository. Measured: an untracked SCRATCH_NOTE.md dropped at the root
+    reddened the suite, and so did an untracked scratch .py under tests/ -- a
+    reviewer's own working file failing a gate about what this project ships.
+    Nothing about a file nobody has added is this module's business.
+
+    On a tree with no git -- an unpacked sdist, say -- the helpers fall back to
+    the raw filesystem walk. That is the conservative direction on purpose: the
+    fallback scans more files than it should, never fewer, so the failure mode is
+    the spurious hit this change fixes rather than a citation that slips through
+    a guard reporting a clean tree.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "-z"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return frozenset()
+    return frozenset(REPO_ROOT / name for name in out.split("\0") if name)
+
+
+def _keep_tracked(paths: list[Path]) -> list[Path]:
+    """`paths`, minus anything git does not track. Everything, if git said nothing.
+
+    An empty _tracked() means the query failed rather than that the repository is
+    empty -- git prints nothing in both cases and this module cannot run in the
+    second -- so it is read as "unknown" and filters nothing.
+    """
+    tracked = _tracked()
+    if not tracked:
+        return paths
+    return [path for path in paths if path in tracked]
+
+
 def _user_facing() -> list[Path]:
     """Every document a reader with no build context is expected to read.
+
+    The root set is *discovered*, not hand-typed, and that is the fix for a
+    measured hole rather than a tidiness preference: the list used to name
+    README.md, CONTRIBUTING.md and CLAUDE.md, so when SECURITY.md and
+    CODE_OF_CONDUCT.md arrived all three predicates below went green over them.
+    Measured before the change -- an `issue #N` citation appended to either file
+    left the whole module passing. Discovery means the next root-level policy
+    document is covered on the commit that adds it, with no edit here.
 
     docs/superpowers/ is excluded on purpose. It is recorded history: its counts
     are correct records of what was true on their own date, so a predicate that
     bans a count must not fire on them.
+
+    Discovery is over tracked files, not over the filesystem -- see _tracked().
     """
-    fixed = [REPO_ROOT / "README.md", REPO_ROOT / "CONTRIBUTING.md", REPO_ROOT / "CLAUDE.md"]
+    at_root = [
+        path for path in sorted(REPO_ROOT.glob("*.md")) if path.name not in _GENERATED_ROOT_DOCS
+    ]
     under_docs = [
         path
         for path in sorted(DOCS.rglob("*.md"))
         if "superpowers" not in path.relative_to(DOCS).parts
     ]
-    return [path for path in fixed if path.is_file()] + under_docs
+    found = [path for path in at_root if path.is_file()] + under_docs
+    return _keep_tracked(found)
 
 
 def _read(path: Path) -> str:
@@ -193,9 +285,9 @@ _NUMBER = (
 # sense from the closed one: `## The three gates you must pass`, over the three
 # checks CI runs, matches too, and that is semantically the `Two check layers`
 # case rather than a defect. Rewording the heading is the right response to such
-# a hit -- CONTRIBUTING.md's own section is titled `## The gates CI runs` for
-# exactly this reason -- because narrowing the token would cost the predicate the
-# case it exists for. Judge a hit before obeying it.
+# a hit -- CONTRIBUTING.md's own section is titled `## The gates, and the rest of
+# what CI runs` for exactly this reason -- because narrowing the token would cost
+# the predicate the case it exists for. Judge a hit before obeying it.
 _GROWING = r"(?:stages?|skills?|subcommands?|gates?)"
 # `[ \t]` rather than `\s`, twice, and `[^\n]*` rather than `.*`: with `\s+` the
 # pattern spans the newline at the end of a heading and consumes words from the
@@ -238,6 +330,158 @@ def _doc_id(path: Path) -> str:
 _HISTORY_TREE = "superpowers"
 
 
+# Citations of the internal tracker. Issue numbers do not survive the move to the
+# public repository: its own numbering starts from one, so a bare hash-and-number
+# written here resolves to a different, unrelated issue there. That is worse than a
+# dead link -- it is a live link to the wrong thing -- so every citation was
+# rewritten to name its finding and point at docs/design/findings.md.
+#
+# `\s+` rather than a space, and no line anchors, because four citations wrapped
+# across a line break: the word `issue` ended one line and the number began the
+# next, in brief.py, refs.py, rounds.py and utilisation.py. A line-scoped search
+# reports fewer hits than exist, so a line-based guard would have gone green over
+# the exact four it could not see -- a passing gate over the defect it exists for.
+#
+# `PR #N` and `(#N)` are included although the tree carried none of either when
+# this was written: both are pointer forms a future comment would reach for, and
+# the point of a guard is the citation nobody has written yet.
+_TRACKER_CITATION = re.compile(
+    r"\bissues?\s+#?\d+\b|\bPR\s+#\d+\b|\(#\d+\)",
+    re.IGNORECASE,
+)
+
+# The bare form, and it is not optional. Measured over the pre-rewrite tree
+# (commit 3300022, both scan sets): the pattern above found 118 sites and this one
+# ten more -- a lone 19 in refs.py, a 20, two 15s and a 12 across the test tree, a
+# 36 in test_skills_reconcile_family.py, and three 3s and a 4 in limitations.md,
+# each written with a bare hash and no `issue` in front of it. One of those ten,
+# the 20, was the only citation anywhere of a fourteenth issue nobody had noticed
+# was referenced at all. A guard without this half would have gone green over every
+# one of them.
+#
+# Those numbers are written without their hash on purpose: this module is inside
+# the scan set below, so quoting a citation here would fail the predicate this
+# comment documents.
+#
+# Hex-digit context excluded on both sides, because the CSS colours in this
+# repository are pure decimal (`#121514`, `#212327`) and a bare hash-digit pattern
+# otherwise matches their leading digits. The lookahead is what does that work: it
+# forces the match to consume the whole hex-ish run, so a leading fragment of a
+# colour never matches on its own.
+#
+# The width alternation is `1-5 or 7+`, and the gap at exactly six is the whole
+# reason it is written as an alternation rather than as `\d+`: this tree holds
+# several six-digit pure-decimal colours, and unlike the shorter forms they occur
+# off a declaration line too (`ground="#121514"` in render-readme-diagram.py), so no
+# line-context rule could tell them from a citation. Excluding the width is the only
+# discriminator available. The three-digit form is matched here and filtered by the
+# property-declaration rule in _bare_citations below.
+#
+# It was `1-3` when written, which silently exempted every four-digit citation --
+# the public repository this guard exists for will reach four-digit issue numbers,
+# and neither other predicate sees a bare form, so those citations would have
+# shipped. Widening cost something, and it is worth recording what: **a four-digit
+# run can be a colour after all.** CSS hex comes in three, four, six and eight digit
+# forms, the four and eight digit ones carrying an alpha nibble, and summary_html.py
+# uses two of them. They are filtered by line context, as the three-digit form
+# already was. No eight-digit colour exists here today; if one is added off a
+# declaration line, this comment is where to record the same trade.
+#
+# The residual blind spot is a six-digit bare citation. That trade is deliberate and
+# this repository's numbering is nowhere near it.
+#
+# `&` joins the lookbehind for the same widening: summary_html.py writes its check
+# mark, cross and warning sign as HTML numeric character references, whose numbers
+# are four and five digits. The three-digit cap was concealing that family by
+# accident, and the widening surfaced all five references as citations. An entity
+# always puts `&` immediately before the hash and a citation never does, so the
+# lookbehind separates them exactly -- no line-context filter needed.
+_TRACKER_CITATION_BARE = re.compile(r"(?<![0-9A-Fa-f#&])#(\d{1,5}|\d{7,})(?![0-9A-Fa-f])")
+
+# The false-positive families, each eyeballed against the tree rather than guessed:
+# `notes#2.md` is a filename this repo uses as a fixture example, a declaration like
+# `color: #000` is a colour and not a reference, "Success criterion #1" in
+# test_toy_end_to_end.py is a label, and an HTML numeric character reference is a
+# glyph -- that last pair, entities and alpha colours, surfaced only when the width
+# cap came off, which is the argument for guarding all of them by test rather than
+# by inspection. Narrow this list only with evidence -- each entry stands for real
+# content that would otherwise fail the gate.
+#
+# Each is quoted above in the form its own filter recognises, which makes this
+# comment a live example of that filter: break the colour rule or the criterion
+# rule and this file is the first to fail.
+_CITATION_FALSE_POSITIVES = ("notes#", "#2.md")
+
+
+def _bare_citations(text: str) -> list[str]:
+    """Bare hash-number hits, minus the three verified false-positive families.
+
+    Filtered per line rather than per match: all three families are recognisable
+    only from their context -- a bare number is a citation everywhere except beside
+    a filename like `notes#2.md`, and a three-digit one is a colour only where a
+    `color:` property precedes it.
+    """
+    out = []
+    for m in _TRACKER_CITATION_BARE.finditer(text):
+        end = text.find("\n", m.end())
+        line = text[text.rfind("\n", 0, m.start()) + 1 : end if end != -1 else len(text)]
+        if any(tok in line for tok in _CITATION_FALSE_POSITIVES):
+            continue
+        if re.search(r"(?:color|fill|background|stroke|border)[a-z-]*\s*:", line):
+            continue
+        if re.search(r"criterion\s+#", line):
+            continue
+        out.append(m.group(0))
+    return out
+
+
+def _code_files() -> list[Path]:
+    """The source, test and script files the citation guard scans.
+
+    The predicates above run over documentation only. This set exists because 104
+    of the 128 tracker citations lived in code comments and docstrings -- 81% of
+    them -- so a docs-only guard would have reported a clean tree over four fifths
+    of the defect.
+
+    Fixtures and vendored trees are excluded for the same reason docs/superpowers/
+    is: tests/fixtures/ holds committed capture and recording output, a record
+    rather than prose, and a guard that fired on a record would demand an edit the
+    project's own rules forbid. Measured at commit 3300022 and again at HEAD: the
+    excluded paths carry no citation, so the exclusion costs no coverage today and
+    prevents an unfixable failure later.
+
+    Tracked files only, for the reason at _tracked(): an untracked scratch .py
+    under tests/ failed this predicate before the filter existed.
+    """
+    keep = {".py", ".sh", ".json", ".md"}
+    skip = ("fixtures", "node_modules", "__pycache__")
+    out: list[Path] = []
+    for top in ("src", "tests", "scripts"):
+        for path in sorted((REPO_ROOT / top).rglob("*")):
+            if not path.is_file() or path.suffix not in keep:
+                continue
+            if any(part in skip for part in path.relative_to(REPO_ROOT).parts):
+                continue
+            out.append(path)
+    return _keep_tracked(out)
+
+
+def _citation_scanned() -> list[Path]:
+    """_user_facing(), plus the generated root documents it subtracts.
+
+    Only the citation predicate uses this. The reasoning is at
+    _GENERATED_ROOT_DOCS: a stale count in a changelog section is a record, a
+    tracker citation there is a broken pointer, so the two predicates want
+    different sets over the same file.
+
+    `is_file()` because the set is a policy, not an inventory -- CHANGELOG.md
+    exists here, but a generated document named before it is written must not
+    fail collection.
+    """
+    extra = [REPO_ROOT / name for name in sorted(_GENERATED_ROOT_DOCS)]
+    return _user_facing() + [path for path in extra if path.is_file()]
+
+
 @pytest.mark.parametrize("doc", _user_facing(), ids=_doc_id)
 def test_no_user_facing_document_carries_a_hand_typed_test_count(doc):
     """The count grows with every capability, so a number typed into prose is
@@ -252,6 +496,98 @@ def test_no_heading_counts_something_that_grows(doc):
     assert not hits, (
         f"{_doc_id(doc)} has a heading counting stages/skills/subcommands/gates: {hits}"
     )
+
+
+@pytest.mark.parametrize("doc", _citation_scanned(), ids=_doc_id)
+def test_no_user_facing_document_cites_the_internal_tracker(doc):
+    """A bare hash-number resolves to an unrelated issue in the public repository.
+
+    Findings are named and anchored at docs/design/findings.md instead.
+
+    Scanned over _citation_scanned() rather than _user_facing(), so CHANGELOG.md
+    is included although the count predicates above skip it -- see
+    _GENERATED_ROOT_DOCS for why the two sets differ.
+    """
+    text = _read(doc)
+    hits = _TRACKER_CITATION.findall(text) + _bare_citations(text)
+    assert not hits, (
+        f"{_doc_id(doc)} cites the internal tracker: {hits}. "
+        "Name the finding and link docs/design/findings.md instead."
+    )
+
+
+@pytest.mark.parametrize("src", _code_files(), ids=_doc_id)
+def test_no_source_file_cites_the_internal_tracker(src):
+    """The same rule for code. 104 of the 128 citations were here."""
+    text = _read(src)
+    hits = _TRACKER_CITATION.findall(text) + _bare_citations(text)
+    assert not hits, (
+        f"{_doc_id(src)} cites the internal tracker: {hits}. "
+        "Name the finding and cite docs/design/findings.md instead."
+    )
+
+
+# Both directions for the bare-citation predicate, over synthetic text rather than
+# over the tree: the tree is clean, so a tree-scoped assertion can only ever show
+# the predicate going green and would never have shown it going red. CLAUDE.md asks
+# for both directions measured, and this is where the measurement lives.
+#
+# Every sample builds its hash by concatenation. A literal one would make this
+# module fail the two gates above, which scan it -- the same constraint the
+# comment at _TRACKER_CITATION_BARE describes.
+_HASH = "#"
+
+
+@pytest.mark.parametrize("digits", ["3", "19", "118", "1234", "12345"])
+def test_the_bare_citation_predicate_catches_every_issue_number_width(digits):
+    r"""Four digits and up matter: the public repository will reach them, and
+    neither of the other two predicates sees a bare form -- `issues?\s+#?\d+`
+    needs the word issue in front of it and `\(#\d+\)` needs parentheses. A
+    width the guard cannot see is a citation that ships."""
+    text = f"see {_HASH}{digits} for the ruling"
+    assert _bare_citations(text) == [f"{_HASH}{digits}"]
+    assert not _TRACKER_CITATION.findall(text), (
+        "sample reachable by the worded predicate, so it cannot measure the bare one"
+    )
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "  color: #121514;",
+        "  background: #212327",
+        "  fill: #000",
+        "  stroke: #ffffff;",
+        "a fixture path like notes#2.md",
+        "Success criterion #1 holds",
+        # HTML numeric character references, from summary_html.py: a check mark, a
+        # cross and a warning sign. Four and five digits, so widening the predicate
+        # past three exposed them -- the old cap was hiding this family by accident
+        # rather than on purpose, which is why it is guarded here now.
+        "<td>&#10003;</td>",
+        "<span>&#9888;</span>",
+        "&#8884; and &#8886;",
+        # Four-digit hex colours *with alpha*, verbatim from summary_html.py. CSS
+        # accepts 3, 4, 6 and 8 digit forms, the 4 and 8 digit ones carrying an
+        # alpha nibble, so a four-digit run is not the safely-not-a-colour width it
+        # first appears to be. Both sit on `border` declarations, which is why the
+        # property list below has to reach hyphenated border properties.
+        "th, td { padding: .3rem; border-bottom: 1px solid #8884; }",
+        ".spine li { border: 1px solid #8886; border-radius: 3px; }",
+    ],
+)
+def test_the_bare_citation_predicate_still_ignores_its_false_positive_families(line):
+    """The other direction. Each entry stands for real content in the tree, so a
+    widened predicate that reddens one of these has broken the gate rather than
+    tightened it.
+
+    Two of these families were invisible while the width cap was three digits and
+    became reachable the moment it came off, which is the case for keeping them
+    here as samples rather than trusting a reading of the tree: the entity
+    references and the alpha colours were both found by this suite going red, not
+    by anyone noticing them.
+    """
+    assert _bare_citations(line) == []
 
 
 def _renderer() -> ModuleType:

@@ -49,9 +49,10 @@ def minimal_world_model(**over: Any) -> dict[str, Any]:
                 "binding": {"tool": "query_aap2", "fixed_args": {"action": "find_jobs"}},
                 "params": [{"name": "controller", "type": "string", "required": True}],
                 # Every outcome class carries `claims`, which $defs/outcome_class has
-                # required since issue #6. One id, the same the capability cites: this
-                # payload is the smallest thing the schema accepts, and clm-001 is the
-                # only claim minimal_claims declares.
+                # required since the read-coverage variance (docs/design/findings.md) was
+                # closed. One id, the same the capability cites: this payload is the
+                # smallest thing the schema accepts, and clm-001 is the only claim
+                # minimal_claims declares.
                 "outcome_classes": [
                     {
                         "id": "oc-success",
@@ -521,14 +522,15 @@ def minimal_contradictions_part(**over: Any) -> dict[str, Any]:
 def _minimal_inputs_seen(own_kinds: tuple[str, ...]) -> list[dict[str, Any]]:
     """The accounting row for minimal_claims' single artifact, nothing dropped.
 
-    Required on every partial whose pass owns a claim kind since issue #6,
-    where read coverage of 01-claims/ varied 3/23 to 23/23 across byte-identical
-    dispatches. The count is *counted* against minimal_claims rather than passed
-    in as a literal, so it stays honest if that payload's one claim ever changes
-    kind or gains a sibling: today its only claim is of kind `capability`, so
-    capabilities-part reads 1/1/0 and every other owning partial 0/0/0. `note` is absent
-    because nothing is dropped, which is the half of the schema's if/then that
-    keeps a 0/0/0 row cheap enough for the totality rule to be worth having.
+    Required on every partial whose pass owns a claim kind since the
+    read-coverage variance -- read coverage of 01-claims/ varying 3/23 to 23/23
+    across byte-identical dispatches -- was closed. The count is *counted* against
+    minimal_claims rather than passed in as a literal, so it stays honest if that
+    payload's one claim ever changes kind or gains a sibling: today its only claim
+    is of kind `capability`, so capabilities-part reads 1/1/0 and every other
+    owning partial 0/0/0. `note` is absent because nothing is dropped, which is the
+    half of the schema's if/then that keeps a 0/0/0 row cheap enough for the
+    totality rule to be worth having.
 
     `own_kinds` takes the same shape as one entry of refs.PASS_OWN_KINDS -- what
     the pass writing this partial is accountable for -- because that is what

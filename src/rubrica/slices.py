@@ -205,7 +205,7 @@ def candidate_bytes_index(candidates: list[dict]) -> dict[str, int]:
         # `isinstance(True, int)` is True in Python, so a `bytes: true` would
         # otherwise index as the integer 1. The standing guard in this repo,
         # present at the guard clauses in triage.py:456, manifest.py:176,
-        # intake.py:247, seal.py:311.
+        # intake.py:248, seal.py:311.
         and isinstance(b := candidate.get("bytes"), int)
         and not isinstance(b, bool)
     }

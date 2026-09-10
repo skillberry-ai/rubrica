@@ -6,7 +6,11 @@ readme = "README.md"
 requires-python = ">=3.13"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-authors = [{name = "Jonathan Bnayahu", email = "bnayahu@il.ibm.com"}]
+# IBM Corp. rather than an individual, matching NOTICE's `Copyright IBM Corp.
+# 2026` and the sibling project. This is package-metadata hygiene, not privacy:
+# every commit in this repository carries its author's name and address in git's
+# own fields, so the personal identity is public either way.
+authors = [{name = "IBM Corp."}]
 keywords = ["agents", "testing", "test-generation", "llm", "evaluation"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -37,7 +41,19 @@ dependencies = [
 # the belt to that braces: it bounds what `uv lock --upgrade` can pull in, so a
 # formatter bump has to be a deliberate widening of this line rather than a
 # side effect of refreshing the lock.
-dev = ["pytest>=8.3", "ruff>=0.8,<0.17"]
+# pyyaml is a test-only dependency and the reason is a gate, not a convenience:
+# nine tracked files under .github/ are YAML, ruff does not read YAML, and
+# tests/unit/test_github_workflows.py is the only thing in this repository that
+# parses them before they reach GitHub. Uncapped, unlike ruff: it is a parser
+# whose output does not drift the way a formatter's does, and uv.lock pins it for
+# both contributor and CI regardless.
+dev = ["pytest>=8.3", "ruff>=0.8,<0.17", "pyyaml>=6.0"]
+
+[project.urls]
+Homepage = "https://github.com/skillberry-ai/rubrica"
+Repository = "https://github.com/skillberry-ai/rubrica"
+Issues = "https://github.com/skillberry-ai/rubrica/issues"
+Changelog = "https://github.com/skillberry-ai/rubrica/blob/main/CHANGELOG.md"
 
 [project.scripts]
 rubrica = "rubrica.cli:main"

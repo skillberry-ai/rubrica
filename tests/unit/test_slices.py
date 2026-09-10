@@ -454,10 +454,19 @@ def test_an_empty_exclusion_list_produces_the_zero_shape_not_absent_keys():
 def test_the_entry_block_is_bounded_by_bytes_and_says_so_when_it_bit():
     """The budget stops filling before it is exceeded, and records that it did.
 
-    A count cap is what issue #8 is open about: `digest`'s `names` is capped at
-    64 entries and unbounded in characters, so a verbose value makes `survey`
-    exit 2 on a row that used to be small. Paths vary in length far more than
-    tool names do, so this block is bounded in bytes.
+    Bounded in bytes rather than in entries, and the argument for that is a
+    closed finding rather than an open one. `digest`'s `names` carried an entry
+    cap and no character bound, so one verbose value could make `survey` exit 2
+    on a row that used to be small -- the uncapped digest names in
+    `docs/design/findings.md`, fixed by adding `digest._MAX_NAME_CHARS = 128`
+    beside the existing entry cap. Paths vary in length far more than tool names
+    do, so this block took a byte budget from the start and never needed a
+    second cap bolted on.
+
+    What is pinned below is that budget, not the finding: the kept set is the
+    longest prefix under `MAX_EXCLUDED_ENTRY_BYTES`, one more entry would exceed
+    it, `entries_truncated` records that it bit, and `total` still describes all
+    forty.
     """
     many = [_excl("duplicate", path_len=400) for _ in range(40)]
     summary = slices.excluded_summary(many)
@@ -583,7 +592,8 @@ def test_the_written_plan_carries_catalogue_facts_agreeing_with_the_catalogue(tm
 
 
 def test_catalogue_facts_sorts_ahead_of_the_slices_array_on_disk(tmp_path):
-    """The head lands in the first bytes, which is the seek issue #3 filed.
+    """The head lands in the first bytes, which is the seek the untriageable
+    catalogue records.
 
     canonical_bytes sorts keys, so `catalogue_facts` and `run_id` both precede
     `slices`. On the 472,799-byte tau2 catalogue `run_id` sat at byte 470,054

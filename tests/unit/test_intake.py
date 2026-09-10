@@ -368,9 +368,10 @@ def test_whatever_intake_does_mint_validates_as_the_intake_stage(tmp_path, case)
 
 
 def test_classify_recognises_a_chat_trajectory_as_a_trace(tmp_path):
-    """Issue #4: a list of {role, content} messages carries neither `spans` nor
-    `trace_id`, so it classified `other` and got a skeleton digest. It is a
-    capture of what the target did, which is what `trace` means."""
+    """The chat-trajectory skeletons (docs/design/findings.md): a list of
+    {role, content} messages carries neither `spans` nor `trace_id`, so it
+    classified `other` and got a skeleton digest. It is a capture of what the
+    target did, which is what `trace` means."""
     payload = [
         {"role": "system", "content": "You are an airline agent."},
         {"role": "user", "content": "Cancel EHGLP3."},

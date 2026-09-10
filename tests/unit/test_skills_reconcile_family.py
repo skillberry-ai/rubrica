@@ -18,8 +18,9 @@ finds things. Deleting the prose a predicate claims to check finds *vacuity* --
 the failure everybody anticipates, and the one a careful author rarely ships.
 Rewording it meaning-preservingly finds *over-pinning*, and that is the failure
 this repository keeps taking: 399dba5 fixed two phrase pins that broke on an
-innocuous reformat, and issue #36's own round added three more, every one of them
-green under deletion probing first. Two of those three were two-way alternations
+innocuous reformat, and the round that closed the gap about the run
+(docs/design/findings.md) added three more, every one of them green under deletion
+probing first. Two of those three were two-way alternations
 that a single honest reword emptied, and the third -- the §3 restriction below --
 was a window assertion that a *neighbouring sentence* satisfied, so deleting the
 rule it named left it green. The rule that follows: a predicate is not measured
@@ -296,7 +297,8 @@ def test_the_owning_passes_are_exactly_the_ones_with_a_claim_kind():
 def test_the_output_section_states_the_accounting_is_total_over_the_manifest(stage):
     """Totality is the whole instrument, so the prose that describes it must say
     which set it is total over. A pass told only to "record what you read"
-    records what it read, which is the artifact issue #6 already has.
+    records what it read, which is the artifact the read-coverage variance
+    already has.
     """
     output = _flat(stage, "2. Output")
     assert "inputs_seen" in output
@@ -644,7 +646,8 @@ def _missing_input_refusal(stage: str) -> str:
 
 @pytest.mark.parametrize("stage", FAMILY)
 def test_every_pass_refuses_a_missing_input_rather_than_modelling_around_it(stage):
-    """Issue #36: three passes met the same absent partial and two answered one way.
+    """The gap about the run: three passes met the same absent partial and two
+    answered one way.
 
     `reconcile-outcomes` and `reconcile-entities` refused, naming the missing
     `01-capabilities.json`; `reconcile-gaps` recorded the absence in its own
@@ -718,10 +721,10 @@ def test_the_missing_input_refusal_forbids_recording_the_absence_as_output(stage
 
 
 def test_the_missing_input_refusal_is_worded_identically_across_the_family():
-    """Uniformity is the fix, not the wording. Issue #36's second suggestion asks
-    for the rule to live in one place; there is no include mechanism for a
-    SKILL.md, so byte-identity across the family's copies is the enforceable
-    proxy.
+    """Uniformity is the fix, not the wording. The second suggestion recorded
+    under the gap about the run asks for the rule to live in one place; there is no
+    include mechanism for a SKILL.md, so byte-identity across the family's copies
+    is the enforceable proxy.
 
     This is deliberately *not* a phrase pin: it is invariant under any reword
     applied to every member and red only on drift in one, which is the state
@@ -734,9 +737,9 @@ def test_the_missing_input_refusal_is_worded_identically_across_the_family():
 
 
 def test_gaps_routes_an_absent_partial_to_refusal_and_a_wrong_one_to_a_gap():
-    """The ruling issue #36 is really about, and it is a split rather than an
-    addition: the audit's own §5 condition used to say "finds a defect ... record
-    it as a gap", and absence is a defect by any reading. The pass obeyed it. So
+    """The ruling the gap about the run is really about, and it is a split rather
+    than an addition: the audit's own §5 condition used to say "finds a defect ...
+    record it as a gap", and absence is a defect by any reading. The pass obeyed it. So
     the two cases are now two bullets -- wrongness keeps the gap, absence routes
     to the refusal every sibling now carries.
 
@@ -804,8 +807,8 @@ def test_gaps_routes_an_absent_partial_to_refusal_and_a_wrong_one_to_a_gap():
 def test_the_gaps_audit_step_records_what_it_finds_wrong_and_not_what_is_absent():
     """§5 is the exception list; §3 is the procedure the pass executes.
 
-    The whole diagnosis behind issue #36 is that an undifferentiated "record what
-    you find as a gap" is what the pass obeyed -- an absent partial is something
+    The whole diagnosis behind the gap about the run is that an undifferentiated
+    "record what you find as a gap" is what the pass obeyed -- an absent partial is something
     you find. A ruling in §5 that §3 step 3 still contradicts leaves the pass
     holding three statements, two of them inconsistent, and the reading that
     survives is whichever one the procedure states. So the restriction is pinned
@@ -824,11 +827,12 @@ def test_the_gaps_audit_step_records_what_it_finds_wrong_and_not_what_is_absent(
 
     # The audit's product is restricted to what is wrong, and the restriction is
     # scoped to the step's own **bold lead** rather than to the window. Measured:
-    # reverting the lead to the exact pre-#36 "record what you find as a gap"
-    # while keeping the new absence sentence left `"wrong" in opener` green,
-    # because that sentence says "absent rather than wrong" -- so the window
-    # satisfied the predicate with the restriction it names actually gone. The
-    # absence half was guarded and the restriction was not.
+    # reverting the lead to the exact "record what you find as a gap" it carried
+    # before the gap about the run was closed, while keeping the new absence
+    # sentence, left `"wrong" in opener` green, because that sentence says "absent
+    # rather than wrong" -- so the window satisfied the predicate with the
+    # restriction it names actually gone. The absence half was guarded and the
+    # restriction was not.
     #
     # The lead is where the instruction lives, and it is delimited: every §3 step
     # and §5 bullet in this family opens with a bold condition, and `*wrong*`

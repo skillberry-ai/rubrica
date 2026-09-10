@@ -3,11 +3,12 @@
 
 `dispatch-stage.sh` granted `Write(/$RUN/**)` and `Edit(/$RUN/**)`, so a stage
 could write anything anywhere inside the run directory. It was measured doing
-exactly that: the `rb-triage-objective` dispatch documented in issue #12 wrote a
-`compute_weights.py` helper into the run root, which is not an artifact, is not
-cleaned up, is covered by no schema, and leaves `check-refs` at exit 0. The one
-mechanism that looks for unmanaged files keeps `p.name` where `".tmp." in p.name`,
-so a scratch script is a shape it does not cover.
+exactly that: the `rb-triage-objective` dispatch recorded under the digest
+over-read (docs/design/findings.md) wrote a `compute_weights.py` helper into the
+run root, which is not an artifact, is not cleaned up, is covered by no schema,
+and leaves `check-refs` at exit 0. The one mechanism that looks for unmanaged
+files keeps `p.name` where `".tmp." in p.name`, so a scratch script is a shape it
+does not cover.
 
 The ruling was that a stage's `writes` is the whole truth about what appears in
 `$RUN`, and that the sandbox scope rather than prose is what enforces it. This

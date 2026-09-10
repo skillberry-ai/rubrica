@@ -204,14 +204,17 @@ def test_write_is_scoped_to_the_run_and_not_granted_bare(settings):
     The scope is now the stage's own `writes` contract rather than the run
     directory, which closes the second half of the same hole. `Write(/$RUN/**)`
     stopped a dispatch escaping the run and permitted anything inside it -- and one
-    dispatch used that too, putting a `compute_weights.py` helper in the run root
-    (issue #15). Both the blanket grant and the bare one are asserted absent, since
-    either would make the derived list decorative.
+    dispatch used that too, putting a `compute_weights.py` helper in the run root:
+    the unfiltered stray write (docs/design/findings.md). Both the blanket grant and
+    the bare one are asserted absent, since either would make the derived list
+    decorative.
     """
     perms, _, run = settings
     allow = perms["permissions"]["allow"]
     assert "Write" not in allow
-    assert f"Write(/{run}/**)" not in allow, "the run-wide grant is the hole #15 reports"
+    assert f"Write(/{run}/**)" not in allow, (
+        "the run-wide grant is the hole recorded as the unfiltered stray write"
+    )
     assert f"Edit(/{run}/**)" not in allow
     # `propose` writes one scenario part. The fixture's run has no batch plan on
     # disk, so the resolver falls back to the artifact's own directory -- which is
@@ -221,10 +224,11 @@ def test_write_is_scoped_to_the_run_and_not_granted_bare(settings):
 
 
 def test_no_write_grant_reaches_a_scratch_file_at_the_run_root(settings):
-    """The measured defect in #15, stated as the property that refuses it.
+    """The unfiltered stray write's measured defect, stated as the property that refuses it.
 
     `rb-triage-objective`'s contract is `writes = ["objective"]`, and the dispatch
-    documented in #12 also wrote `compute_weights.py` into the run directory. A
+    documented under the digest over-read also wrote `compute_weights.py` into the
+    run directory. A
     scratch script there is not an artifact, is cleaned up by nothing, is covered by
     no schema, and `check-refs` exits 0 with it present -- `summary.orphaned_temp_files`
     keeps `p.name` where `".tmp." in p.name`, so it is a shape that mechanism does not
@@ -907,9 +911,9 @@ def _reported_transcript(proc):
 # real runs: `src/rubrica/summary.py`'s `orphaned_temp_files` docstring records a
 # ceiling killing a reconcile pass mid-write, leaving a
 # `02-scenarios.json.tmp.*` a human had to remove by hand, and the
-# reconcile-subjects dispatch in issue #18 spent its whole ceiling before writing
-# anything. Neither failure is legible from the run afterwards: a killed dispatch
-# and a refusing one both leave no artifact.
+# reconcile-subjects dispatch recorded under the enumeration deadlock spent its
+# whole ceiling before writing anything. Neither failure is legible from the run
+# afterwards: a killed dispatch and a refusing one both leave no artifact.
 #
 # So the default is now no ceiling, and the cost is reported on every dispatch
 # instead. That is strictly more information than a silent default ever gave --
@@ -972,7 +976,8 @@ def test_the_closing_summary_reports_what_the_dispatch_cost(tmp_path):
 
     Both figures are asserted because either alone is misleading: a cost with no
     turn count cannot be compared against another dispatch of the same stage, and
-    issue #18's evidence was exactly the pair (38 turns, $3.72, no artifact).
+    the enumeration deadlock's evidence was exactly the pair (38 turns, $3.72, no
+    artifact).
     """
     run = tmp_path / "run"
     run.mkdir()
@@ -1055,10 +1060,11 @@ def test_a_transcript_truncated_mid_stream_does_not_take_the_exit_code_with_it(t
 # cannot engage, because every Bash command then dies at the bwrap layer, the
 # stage's own `rubrica validate` and `check-refs` included.
 #
-# That third state is what cost issue #18 38 turns and $3.72 for no artifact. It is
-# also invisible: `failIfUnavailable` makes the sandbox loud about not engaging, but
-# the dispatch proceeds anyway and exits 0. So the script probes first and drops the
-# block rather than handing a stage a shell where nothing runs.
+# That third state is what cost the dispatch recorded as the enumeration deadlock
+# 38 turns and $3.72 for no artifact. It is also invisible: `failIfUnavailable`
+# makes the sandbox loud about not engaging, but the dispatch proceeds anyway and
+# exits 0. So the script probes first and drops the block rather than handing a
+# stage a shell where nothing runs.
 #
 # The probe is the `--proc` form on purpose. The same command without `--proc`
 # succeeds on the pod that motivated this, so a smoke test omitting it reports a
@@ -1103,11 +1109,11 @@ def test_a_failed_probe_drops_the_block_instead_of_dispatching_into_a_dead_shell
 def test_the_probe_asks_bwrap_to_mount_proc_which_is_what_discriminates(tmp_path):
     """The fault is invisible to the probe form that omits `--proc`.
 
-    Issue #18 records it: on the pod, `bwrap --unshare-all --dev-bind / / true` exits
-    0 while the same command with `--proc /proc` exits 1, so a smoke test without it
-    reports a working sandbox where there is none. The stub carries that asymmetry,
-    so a probe dropping `--proc` sees success, leaves the block in place, and fails
-    here.
+    Recorded under the enumeration deadlock: on the pod, `bwrap --unshare-all
+    --dev-bind / / true` exits 0 while the same command with `--proc /proc` exits 1,
+    so a smoke test without it reports a working sandbox where there is none. The
+    stub carries that asymmetry, so a probe dropping `--proc` sees success, leaves
+    the block in place, and fails here.
 
     MEASURED: dropping `--proc` from the probe was green against a stub that failed
     unconditionally. That is why the stub imitates the pod instead, and why this test

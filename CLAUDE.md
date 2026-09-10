@@ -28,6 +28,7 @@ make check     # ruff check + ruff format --check, no changes
 make live      # RUBRICA_LIVE=1 pytest -m live  (see "Live tests" below)
 make lint      # ruff check --fix
 make format    # ruff format
+make release VERSION=X.Y.Z   # -> ./scripts/release.sh X.Y.Z (see docs/releasing.md)
 ```
 
 `make test` green, `make check` clean, and `uv run rubrica check-skills` exiting
@@ -37,10 +38,15 @@ used to reconcile it here, commit by commit, was still wrong by 299 when it was
 deleted.
 
 Commands in `README.md` assume the venv is on `PATH`; otherwise prefix `uv run`.
-Four env overrides exist, and each is exercised by tests: `RUBRICA_SCHEMA_DIR`
-(`validate.py`), `RUBRICA_SKILLS_DIR` (`skills.py`), `RUBRICA_SUITE_DIR`
-(`emit.py`), and `RUBRICA_LIVE` (`tests/conftest.py`). Prefer them over editing
-repo files when probing behaviour.
+The env overrides **the package and the suite read** are these, and each is
+exercised by tests: `RUBRICA_SCHEMA_DIR` (`validate.py`), `RUBRICA_SKILLS_DIR`
+(`skills.py`), `RUBRICA_SUITE_DIR` (`emit.py`), and `RUBRICA_LIVE`
+(`tests/conftest.py`). Prefer them over editing repo files when probing
+behaviour. That is a scoped list, not the repository's total: the scripts under
+`scripts/` read many more of their own — `dispatch-stage.sh` alone takes model,
+effort, budget, sandbox, lab-directory and repair-file overrides, and
+`release.sh` takes remote, repo and skip-`gh` ones. Each script documents its own
+where it reads them; do not restate the set here, where a count would go stale.
 
 ## The one architectural rule
 

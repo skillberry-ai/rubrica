@@ -56,7 +56,7 @@ def _common_prefix(files: list[str]) -> str:
     path any owner recognises. What is left is the owner's own tree.
 
     The `#` fragment is cut off before any of that, because `os.path` is
-    component-aware and a JSON pointer starts with `/`: `intake.py:333` writes a
+    component-aware and a JSON pointer starts with `/`: `intake.py:334` writes a
     sliced input's `source_path` as `<container>#<json_pointer>`, so `commonpath`
     over two slices of one capture answers `.../trace.json#` -- measured -- and
     `_shorten` then matches that against nothing and strips nothing. It never
@@ -74,7 +74,7 @@ def _common_prefix(files: list[str]) -> str:
     # what tells the two apart: it is non-empty raw and empty once partitioned, so
     # testing the raw string lets "" into the set anyway. Measured -- filtering
     # first, `["#/0", "/a/b/one.py", "/a/b/two.py"]` returned "" and both absolute
-    # paths rendered whole. `intake.py:333` builds its fragment from a `Path`,
+    # paths rendered whole. `intake.py:334` builds its fragment from a `Path`,
     # which never stringifies empty, so the pipeline cannot produce that shape;
     # a hand-edited manifest can, and it fails open with no marker and no finding.
     # `.strip()`, not truthiness: a `source_path` of `" "` partitions to `" "`,
@@ -124,7 +124,7 @@ def _file_and_piece(path: str) -> tuple[str, str]:
 
     `piece` carries its `#` and is `""` unless the path is sliced, so a caller that
     labels the piece needs no second parse. Only a JSON pointer counts as one:
-    `intake.py:333` writes a sliced input's `source_path` as
+    `intake.py:334` writes a sliced input's `source_path` as
     `<container>#<json_pointer>` and a pointer always begins `/`, so a `#` anywhere
     else belongs to the owner's own filename. Without that clause `notes#2.md` was
     listed as `notes` in the section whose whole ask is "did we read the right
@@ -317,7 +317,7 @@ def provenance(claim_ids, index: dict[str, SourceRef], disputed: frozenset[str])
     show, and losing its dispute marker at the same time would hide the more
     important of the two facts.
 
-    Two slices of one file count as two sources, deliberately. `intake.py:333`
+    Two slices of one file count as two sources, deliberately. `intake.py:334`
     writes a sliced input's `source_path` as `<container>#<json_pointer>`, so
     `files` holds `trace.json#/12` and `trace.json#/41` separately and such an
     element is not `single_source`. That is what "how many sources back this"

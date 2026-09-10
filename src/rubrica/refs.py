@@ -1226,18 +1226,18 @@ def check_manifest(run: RunPaths) -> list[Finding]:
 
     Both directions: every claims file must name a registered input, and every
     registered input must have a claims file. The relation was one-directional
-    until issue #19, on the argument that a registered input with no claims file
-    is the normal state *during* the extract fan-out -- true, but not a state
-    check-refs observes. There is no stage-scoped check-refs; check_all runs
-    every checker the run has inputs for, and the orchestrator dispatches it
-    after a fan-out completes. That is the argument check_disposition_parts,
-    check_contradiction_parts, check_instances, check_verdicts and
-    _scenario_round_findings all make, and until #19 the extract and instantiate
-    fan-outs were the ones making it differently: a member that refused, died or
-    was killed passed both layers at zero findings, then surfaced stages later --
-    here as findings against the reconcile partials that had cited its absent
-    claims, and for instantiate as an emitted suite one test short, which
-    check_instances records.
+    until the silent fan-out gap (docs/design/findings.md) was closed, on the
+    argument that a registered input with no claims file is the normal state
+    *during* the extract fan-out -- true, but not a state check-refs observes.
+    There is no stage-scoped check-refs; check_all runs every checker the run has
+    inputs for, and the orchestrator dispatches it after a fan-out completes. That
+    is the argument check_disposition_parts, check_contradiction_parts,
+    check_instances, check_verdicts and _scenario_round_findings all make, and
+    until that gap was closed the extract and instantiate fan-outs were the ones
+    making it differently: a member that refused, died or was killed passed both
+    layers at zero findings, then surfaced stages later -- here as findings against
+    the reconcile partials that had cited its absent claims, and for instantiate as
+    an emitted suite one test short, which check_instances records.
     """
     manifest = _load(run.manifest)
     if manifest is None:
@@ -1991,9 +1991,10 @@ def check_world_model(run: RunPaths) -> list[Finding]:
                     report(f"/{group}/{i}/claims/{j}", f"no such claim: {claim_id}")
 
     # The three nested citation sites $defs/invariant, $defs/outcome_class and
-    # $defs/gap gained in issue #6, resolved on the same one-directional rule as
-    # every other reference in this module: that the id exists, never that the
-    # claim supports the element. Support is semantic and belongs to gate 1.
+    # $defs/gap gained when the read-coverage variance was closed, resolved on the
+    # same one-directional rule as every other reference in this module: that the
+    # id exists, never that the claim supports the element. Support is semantic and
+    # belongs to gate 1.
     #
     # Without these loops the requirement would be satisfiable with an invented
     # id: `utilisation._cited_claim_ids` counts a child element's claims, so a
@@ -2145,11 +2146,11 @@ PASS_OWN_KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
 def check_input_dispositions(run: RunPaths) -> list[Finding]:
     """Each reconcile pass's accounting of the inputs it read, recomputed.
 
-    Issue #6 measured a pass's read coverage of 01-claims/ varying 3/23 to 23/23
-    across byte-identical dispatches, with claims in files it never opened cited
-    at exactly 0/167. Neither check layer could see it: a skimmed read produces a
-    well-formed partial, and utilisation is a lagging aggregate that averages a
-    diligent pass with a skimming one.
+    A pass's read coverage of 01-claims/ was measured varying 3/23 to 23/23 across
+    byte-identical dispatches, with claims in files it never opened cited at
+    exactly 0/167 -- the read-coverage variance. Neither check layer could see it:
+    a skimmed read produces a well-formed partial, and utilisation is a lagging
+    aggregate that averages a diligent pass with a skimming one.
 
     So every number a row declares is recomputed here -- `own_kind_total` from
     the claims file, `cited` from the part's own citations -- which makes a wrong
@@ -3931,11 +3932,11 @@ def check_instances(run: RunPaths) -> list[Finding]:
 
     Completeness is checked in both directions. The loop below reports an
     instance directory whose scenario was never judged; the clause above it
-    reports an `active` scenario with no instance directory, which until issue
-    #19 nothing reported at all -- and the silence compounded, because
-    check_verdicts and check_suite both derive their populations from what is on
-    disk, so a dropped active scenario reached an emitted suite one test short
-    with no finding anywhere.
+    reports an `active` scenario with no instance directory, which nothing reported
+    at all until the silent fan-out gap was closed -- and the silence compounded,
+    because check_verdicts and check_suite both derive their populations from what
+    is on disk, so a dropped active scenario reached an emitted suite one test
+    short with no finding anywhere.
 
     `rejected` is excluded from the population that must have a directory, and
     the asymmetry is deliberate: challenge marks a scenario `rejected` *after* it
@@ -4114,11 +4115,12 @@ def check_verdicts(run: RunPaths) -> list[Finding]:
         found = verdict.get("minimum_tool_calls_found")
         flags = verdict.get("flags", [])
         if isinstance(claimed, int) and isinstance(found, int):
-            # Both directions since issue #37, and each is required rather than
-            # merely permitted for the same reason: both numbers are already in the
-            # run, the comparison is mechanical, and an adversary that finds the
-            # mismatch and has nowhere structured to record it writes prose no report
-            # reads -- which is exactly what was measured on run-20260907-065438.
+            # Both directions since the unrecordable understatement was closed, and
+            # each is required rather than merely permitted for the same reason: both
+            # numbers are already in the run, the comparison is mechanical, and an
+            # adversary that finds the mismatch and has nowhere structured to record
+            # it writes prose no report reads -- which is exactly what was measured
+            # on run-20260907-065438.
             #
             # Both are repairable stage defects, so a `1` here is the right exit
             # code: the remedy is a flag in this file, which is `rb-challenge`'s own

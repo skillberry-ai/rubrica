@@ -2,11 +2,11 @@
 
 The script exists because `dispatch-stage.sh` granted `Write(/$RUN/**)`, so a
 stage could write anything inside the run -- and one did, putting a
-`compute_weights.py` helper in the run root (issue #15). The ruling was that a
-stage's `writes` is the whole truth about what appears in `$RUN` and that the
-sandbox scope enforces it, so what these tests hold is that the resolution is
-right for every stage the harness dispatches, and that it never widens back to
-the run.
+`compute_weights.py` helper in the run root: the unfiltered stray write
+(docs/design/findings.md). The ruling was that a stage's `writes` is the whole
+truth about what appears in `$RUN` and that the sandbox scope enforces it, so what
+these tests hold is that the resolution is right for every stage the harness
+dispatches, and that it never widens back to the run.
 """
 
 from __future__ import annotations

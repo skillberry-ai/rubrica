@@ -326,10 +326,11 @@ and no dollar ceiling is imposed at all. A ceiling does not slow a dispatch down
 it kills it where it stands, and both times one has been observed doing that here
 it cost more than it saved: `summary.py`'s `orphaned_temp_files` docstring records
 a ceiling killing a reconcile pass mid-write, leaving a `02-scenarios.json.tmp.*`
-that had to be removed by hand, and the `reconcile-subjects` dispatch in issue #18
-spent 38 turns and $3.72 of a $10 ceiling without writing an artifact. Neither is
-visible in the run afterwards, because a killed dispatch and a refusing one leave
-identical evidence: nothing.
+that had to be removed by hand, and the `reconcile-subjects` dispatch recorded
+in [the enumeration deadlock](../design/findings.md#the-enumeration-deadlock)
+spent 38 turns and $3.72 of a $10 ceiling without writing an artifact. Neither
+is visible in the run afterwards, because a killed dispatch and a refusing one
+leave identical evidence: nothing.
 
 What you get instead is the spend on every dispatch. The script's closing summary
 carries a `cost` line naming the dollars, the turns and which ceiling was in force
@@ -495,10 +496,12 @@ the sandbox block, says so on stderr, keeps the probe's output under
 `$RUBRICA_LAB/sandbox-probe-<stage>.txt`, and records `sandbox off -- <reason>` in
 the closing summary. `--proc` is the discriminating part: without it the same
 command succeeds on a pod where the sandbox cannot work, which is how the fault
-behind issue #18 stayed hidden through seven triage transcripts. The state being
-avoided is the middle one — a sandbox configured that cannot engage, where every
-Bash command dies including the `rubrica validate` and `check-refs` a stage is
-ordered to run, and the dispatch still exits 0.
+behind [the enumeration
+deadlock](../design/findings.md#the-enumeration-deadlock) stayed hidden through
+seven triage transcripts. The state being avoided is the middle one — a sandbox
+configured that cannot engage, where every Bash command dies including the
+`rubrica validate` and `check-refs` a stage is ordered to run, and the dispatch
+still exits 0.
 
 Set `RUBRICA_REQUIRE_SANDBOX=1` to refuse (exit 2) instead of falling back. Use it
 for a measured run: dropping the layer changes what the recording is evidence of,

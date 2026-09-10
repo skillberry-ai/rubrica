@@ -180,7 +180,8 @@ def is_message_list(payload: Any) -> bool:
     One home for the shape rule, because `intake.classify` and
     `digest_for_payload` must agree on it: a file classified `trace` for being a
     message list and then digested by the dict producer would fall through to a
-    skeleton, which is exactly the defect issue #4 reported.
+    skeleton, which is exactly the defect recorded as the chat-trajectory
+    skeletons (docs/design/findings.md).
 
     Measured on tau2-bench's 200 chat trajectories, which is what this exists
     for: every file's key intersection is exactly {'role'} -- 895 of 5,182

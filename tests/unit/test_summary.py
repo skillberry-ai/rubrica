@@ -1234,9 +1234,10 @@ def _sealed(run) -> dict:
 def _uncite_trace(sealed: dict) -> None:
     """Drop every clm-trace-* citation from `sealed`, in place, at every site.
 
-    Every site, not just the four top-level groups: since issue #6 the golden
-    fixture cites clm-trace-001 on cap-find-tickets' `oc-none` outcome class,
-    where the evidence for an observed empty return belongs. A stripper that
+    Every site, not just the four top-level groups: since the read-coverage
+    variance (docs/design/findings.md) was closed the golden fixture cites
+    clm-trace-001 on cap-find-tickets' `oc-none` outcome class, where the evidence
+    for an observed empty return belongs. A stripper that
     walked only the parent arrays left it there, so `trace-json` stayed at 1 of 2
     and the `uncited` list this exercises came back empty -- the same
     fixture-cannot-reach shape the docstrings below already name.
@@ -1619,9 +1620,10 @@ def test_gaps_carry_every_field_including_the_blocks_array(tmp_path):
             "why_it_matters": "no scenario on the missing branch has a stated gold answer",
             "blocks": ["propose", "score"],
             # A gap's `claims` cite the evidence that the absence *matters*, which
-            # is what $defs/gap has required since issue #6: clm-notes-004 is the
-            # claim that a missing id is an error at all, so a run with no stated
-            # gold answer for that branch is a hole rather than a non-question.
+            # is what $defs/gap has required since the read-coverage variance was
+            # closed: clm-notes-004 is the claim that a missing id is an error at
+            # all, so a run with no stated gold answer for that branch is a hole
+            # rather than a non-question.
             "claims": ["clm-notes-004"],
         },
         {
@@ -1888,8 +1890,9 @@ def test_contradictions_survives_a_part_that_is_not_readable(tmp_path):
 # guard is in the path the page actually takes. `id` is the parametrisation label
 # and the escape it produced, so a red test names the shape it lost.
 #
-# They split into two sets now, and the split is the ruling issue #6 changed. The
-# `01-claims/` shapes still raise and are still caught in summary.py. The
+# They split into two sets now, and the split is the ruling closing the
+# read-coverage variance changed. The `01-claims/` shapes still raise and are
+# still caught in summary.py. The
 # world-model *container* shapes below no longer raise at all: `claim-utilisation`
 # and `gate-brief` are reports, and a report has no findings channel through which
 # to say "this document is malformed", so `utilisation._cited_claim_ids` was
@@ -1976,8 +1979,9 @@ def test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run(tmp_path,
     of them escaping takes the whole page down.
 
     These are guarded in `summary.py` rather than widened in `utilisation.py`,
-    which was the ruling for all of the measured shapes until issue #6 overturned
-    half of it: the three world-model *container* shapes were widened there,
+    which was the ruling for all of the measured shapes until closing the
+    read-coverage variance overturned half of it: the three world-model
+    *container* shapes were widened there,
     because `claim-utilisation` and `gate-brief` are reports and a raise on a
     readable run breaks the exit-code contract outright -- a report has no findings
     channel to report a malformed document through, where a layer-2 checker at
@@ -1987,8 +1991,9 @@ def test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run(tmp_path,
     and saying otherwise would make this docstring the weaker of two records of one
     ruling: each of them also takes both reports to exit 1 on a readable run, and
     `utilisation.py` states that hole plainly beside the unguarded line. What keeps
-    them here is scope and authorisation -- issue #6 widened the world-model walk
-    and never touched the `01-claims/` path, the overturned ruling was written
+    them here is scope and authorisation -- closing the read-coverage variance
+    widened the world-model walk and never touched the `01-claims/` path, the
+    overturned ruling was written
     specifically about these shapes with this page's marker attached, and only the
     world-model half was ruled in. So for those three this test pins current
     behaviour on a known-wrong thing rather than a settled one, and the ruling that
@@ -2027,7 +2032,8 @@ def test_utilisation_is_a_marker_rather_than_raising_on_a_readable_run(tmp_path,
     ],
 )
 def test_utilisation_renders_over_a_world_model_container_it_could_not_walk(tmp_path, break_it):
-    """The three shapes that were `Malformed` markers here until issue #6.
+    """The three shapes that were `Malformed` markers here until the read-coverage
+    variance was closed.
 
     Each was measured raising `AttributeError: 'str' object has no attribute 'get'`
     out of `_cited_claim_ids`' walk over the world model's element groups, at exit
@@ -2877,7 +2883,8 @@ def test_scenarios_does_not_flag_difficulty_when_calls_match(tmp_path):
 
 
 def test_scenarios_flags_difficulty_understated_when_more_calls_are_needed(tmp_path):
-    """The direction issue #37 measured: a 2-call solve against `hop_depth: 1`.
+    """The direction measured for the unrecordable understatement: a 2-call solve
+    against `hop_depth: 1`.
 
     Consequential in a way the overstated direction is not -- coverage is credited
     per hop depth (`hop_depths_expected` / `hop_depths_present`), so a scenario
@@ -3740,7 +3747,8 @@ def test_flags_do_not_fire_difficulty_overstated_on_an_unedited_run(tmp_path):
 def test_flags_fire_difficulty_understated_and_name_the_scenario(tmp_path):
     """`scn-open` is proposed at `hop_depth: 1` and its verdict finds the same 1
     call; raising the found count to 2 is the minimal edit that makes the column
-    non-uniform, and it is the exact shape issue #37 measured on a real run.
+    non-uniform, and it is the exact shape measured for the unrecordable
+    understatement on a real run.
     """
     from rubrica.artifacts import read_json, write_json
 
@@ -3890,9 +3898,10 @@ def _stray_claims_doc() -> dict:
 # derived from a call to `flags`, for the reason
 # `test_flags_are_unique_and_ordered_stably` records: comparing the call to itself
 # is satisfied by `found[::-1]` and by `sorted(...)`, so the order is only
-# assertable against a literal. One constant rather than three copies because
-# issue #37 added a member and the three copies would have gone out of step -- the
-# count in `test_render_states_every_flag_with_its_threshold` was a bare `7`.
+# assertable against a literal. One constant rather than three copies because a
+# member was added when the unrecordable understatement was closed and the three
+# copies would have gone out of step -- the count in
+# `test_render_states_every_flag_with_its_threshold` was a bare `7`.
 _EVERY_FLAG_ID: tuple[str, ...] = (
     "low-utilisation",
     "uncited-artifacts",
@@ -4697,8 +4706,9 @@ def test_render_states_every_flag_with_its_threshold(tmp_path, monkeypatch):
     # renderer could drop the rule from the flag table -- the black box this test
     # exists to prevent -- and no test in this module would notice. The weakness
     # predates the second flag (it was green for `difficulty-overstated` alone);
-    # issue #37 only doubled it. It is the same substring-of-message shape as the
-    # one `test_render_annotates_both_difficulty_directions_beside_the_call_count`
+    # closing the unrecordable understatement only doubled it. It is the same
+    # substring-of-message shape as the one
+    # `test_render_annotates_both_difficulty_directions_beside_the_call_count`
     # closes, seen from the other side: there the annotation borrowed the flag
     # table's string, here the flag table borrows the annotation's.
     divs = [chunk.split("</div>")[0] for chunk in html.split('<div class="flag">')[1:]]
@@ -4721,9 +4731,10 @@ def test_render_states_every_flag_with_its_threshold(tmp_path, monkeypatch):
 def test_render_annotates_both_difficulty_directions_beside_the_call_count(tmp_path):
     """The scenario table's `(overstated)` / `(understated)` annotation.
 
-    Untested for either direction until issue #37, which is how the one-sided
-    renderer went unnoticed: the flag table above states the rule, and this is
-    where a reader who followed the flag looks for *which* row it was about. Both
+    Untested for either direction until the unrecordable understatement was
+    closed, which is how the one-sided renderer went unnoticed: the flag table
+    above states the rule, and this is where a reader who followed the flag looks
+    for *which* row it was about. Both
     directions in one test, over one run that carries one of each, because the
     property is that the annotation is not one-sided -- and asserting only the new
     direction would leave a renderer free to drop the old one.

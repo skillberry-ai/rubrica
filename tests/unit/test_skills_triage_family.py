@@ -295,7 +295,8 @@ def test_the_objective_pass_declares_its_exact_contract():
     """The brief's contract, verbatim: the plan alone -- never the catalogue,
     the shards, or a per-slice dispositions part. The catalogue left this list
     when 00-slices.json started carrying the facts this pass needs: reading
-    472,799 bytes for the ~21KB it used was the residual half of issue #3.
+    472,799 bytes for the ~21KB it used was the residual half of the untriageable
+    catalogue (docs/design/findings.md).
 
     That the block is bounded by how many candidates a run admitted rather than
     by how large they are is a **code** fact, readable in slices.py and needing
@@ -411,9 +412,9 @@ def test_the_objective_pass_reads_request_before_the_corpus_map():
 
 
 def test_the_objective_pass_names_objective_reviews_three_required_keys():
-    """`surfaces` was the sibling of issue #1's defect, in the same family.
+    """`surfaces` was the sibling of the unnamed disposition key, in the same family.
 
-    Found by the sweep that issue asked for -- each skill's prose against the
+    Found by the sweep that finding asked for -- each skill's prose against the
     keys its declared schemas `require`. `objective-0.1.json` requires
     `objective_review` to carry `declared_objective`, `supported` and
     `surfaces`; this pass names the first two and, before the fix, referred to
@@ -843,14 +844,14 @@ def test_the_rule_pass_does_not_make_framework_source_an_automatic_decline():
 def test_the_rule_pass_names_the_disposition_key_itself():
     """The key holding `admit`/`decline` has to be *named*, not just described.
 
-    Issue #1: the monolithic stage's prose named `candidate_id`, `authority`,
-    `reason`, `reason_code` and `priority` and described this field at length
-    while never once saying what to call it. Three consecutive dispatches at
-    defaults invented `verdict` for it -- not a stale word copied out of the
-    prose, an invention two dispatches arrived at independently. Every entry
-    then failed layer 1, and because `brief.py:502,754` -- the admit filter under
-    `DIVERGENCE_HEADER` and the decline grouping in the gate-0 section -- key off
-    `disposition`,
+    The unnamed disposition key: the monolithic stage's prose named
+    `candidate_id`, `authority`, `reason`, `reason_code` and `priority` and
+    described this field at length while never once saying what to call it. Three
+    consecutive dispatches at defaults invented `verdict` for it -- not a stale
+    word copied out of the prose, an invention two dispatches arrived at
+    independently. Every entry then failed layer 1, and because
+    `brief.py:502,754` -- the admit filter under `DIVERGENCE_HEADER` and the
+    decline grouping in the gate-0 section -- key off `disposition`,
     `gate-brief --gate 0` rendered zero admits and zero declines at exit 0: a
     human handed an empty selection presented as a clean one. The defect
     survived the split into this family, because the paragraph moved verbatim.

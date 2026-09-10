@@ -124,8 +124,9 @@ def test_it_names_every_flag_the_schema_allows():
     flag exists produces a finding on a verdict that is otherwise correct.
 
     Derived from the enum rather than listed, which is why this test is the one
-    that caught `difficulty_understated` (issue #37) the moment the schema gained
-    it: the docstring used to say "the only one today", and the enum is the
+    that caught `difficulty_understated` -- added when the unrecordable
+    understatement (docs/design/findings.md) was closed -- the moment the schema
+    gained it: the docstring used to say "the only one today", and the enum is the
     authority for that claim, not the docstring.
     """
     schema = read_json(schema_dir() / ARTIFACT_SCHEMAS["verdict"])
@@ -231,7 +232,8 @@ def test_the_output_section_names_both_flag_directions_together():
     both names appear in the Method table and in Invariant 4 as well, so a section-2
     field list that had kept saying "the only permitted value" would pass any
     presence check over `body` while telling the adversary the opposite of the
-    schema. Which is what it said before issue #37, when it was true.
+    schema. Which is what it said before the unrecordable understatement was
+    closed, when it was true.
     """
     both = [
         block
@@ -245,7 +247,8 @@ def test_the_output_section_names_both_flag_directions_together():
 
 
 def test_the_method_says_an_understated_hop_depth_does_not_force_a_verdict():
-    """The ruling on issue #37, and it has to be in the prompt with its reason.
+    """The ruling on the unrecordable understatement, and it has to be in the
+    prompt with its reason.
 
     A flag whose remedy is a `hop_depth` edit cannot force a `re-seed`: `hop_depth`
     lives in `02-scenarios.json`, which `rb-propose` owns, `rb-instantiate` cannot
@@ -300,12 +303,12 @@ def test_the_verdict_table_row_for_an_understated_depth_scopes_its_absolute():
 
     Step 4 says "read the verdict off the table", so a bolded absolute in a cell
     outranks a walk-back two blocks below it. The first draft of this row said
-    "**never** a `re-seed`" flat, and issue #37's own measured case is exactly the
-    collision it mishandles: `sc-r1-b01-05` was a legitimate `re-seed` for an
-    undeclared `cap-search-restaurants` *and* had an understated depth. A model
-    treating the cell as governing downgrades a real row-2/3/4 `re-seed` to
-    `accept`, shipping an ambiguous or non-derivable scenario -- strictly worse
-    than the mislabel this issue set out to fix.
+    "**never** a `re-seed`" flat, and the unrecordable understatement's own
+    measured case is exactly the collision it mishandles: `sc-r1-b01-05` was a
+    legitimate `re-seed` for an undeclared `cap-search-restaurants` *and* had an
+    understated depth. A model treating the cell as governing downgrades a real
+    row-2/3/4 `re-seed` to `accept`, shipping an ambiguous or non-derivable scenario
+    -- strictly worse than the mislabel that finding set out to fix.
 
     So: the row must exist (it was reachable by no test at all -- deleting it left
     every predicate in this module green, because the flag name and the ruling both

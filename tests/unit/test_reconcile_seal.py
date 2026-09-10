@@ -482,9 +482,10 @@ def _run_ready_to_seal_with(tmp_path, *, capabilities: list[dict], outcomes: lis
 
 
 def test_the_sealed_denominator_counts_only_drivable_cells(tmp_path):
-    """Issue 17. The denominator is frozen at the seal by design, so a wrong one
-    is not corrected later -- it is scored against for the rest of the run and
-    recorded in every coverage document.
+    """The undrivable denominator (docs/design/findings.md). The denominator is
+    frozen at the seal by design, so a wrong one is not corrected later -- it is
+    scored against for the rest of the run and recorded in every coverage
+    document.
 
     Measured on run-20260827-070444: 24 capabilities, 5 bound, denominator 56
     against 19 drivable cells, and `rubrica check-refs` exited 0 on it.
@@ -519,8 +520,8 @@ def test_the_sealed_denominator_counts_only_drivable_cells(tmp_path):
 def test_check_world_model_agrees_with_the_narrowed_seal(tmp_path):
     """The seal writes this field and check_world_model recomputes it, which makes
     it an identity. Both spellings had to change in one commit or every sealed
-    world model reports a finding against itself -- the hazard issue 17's own
-    suggested patch named and then reintroduced one layer down.
+    world model reports a finding against itself -- the hazard the undrivable
+    denominator's own suggested patch named and then reintroduced one layer down.
     """
     run = _run_ready_to_seal_with(
         tmp_path,

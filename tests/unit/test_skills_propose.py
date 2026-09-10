@@ -314,7 +314,8 @@ def test_the_prefix_and_status_invariants_do_not_lean_on_a_gate_they_lack():
 
 def test_method_states_the_cost_of_understating_a_hop_depth():
     """`hop_depth` is this stage's to get right, and the prose framed only the
-    inflated direction until issue #37 -- the cheap one.
+    inflated direction -- the cheap one -- until the unrecordable understatement
+    (docs/design/findings.md) was closed.
 
     An overstated depth spends a later stage's finding budget. An understated one
     ships: coverage is credited per hop depth, so a scenario tagged shallower than

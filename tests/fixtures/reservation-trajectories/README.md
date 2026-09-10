@@ -31,9 +31,20 @@ original version: `--with langchain` is required in addition to
 imports it directly. Without it the run crashes with `ModuleNotFoundError: No
 module named 'langchain'` before a single prompt is issued.
 
-`capture-reservation-trajectories.py`'s `TOOL_DIR` and `AGENT_SRC` constants
-are absolute paths into this author's `rossoctl` checkout. Anyone else
-re-running the harness must edit both before it will find the target.
+`capture-reservation-trajectories.py` reads its two target paths from the
+environment. The defaults are the paths the 2026-08-12 capture actually used,
+written here relative to the `rossoctl` checkout named in *Capture conditions*
+below; the script's own defaults are those two paths absolute:
+
+    RUBRICA_ROSSOCTL_TOOL_DIR    -> examples/mcp/reservation_tool
+    RUBRICA_ROSSOCTL_AGENT_SRC   -> examples/a2a/reservation_service/src
+
+That checkout is still present on the capture machine and both defaults still
+resolve there, but it is no longer a git checkout, so the commit sha in the table
+below can no longer be verified against it. Anyone re-running the harness
+anywhere else must set both. Set them rather than editing the script: an edit to
+the source is indistinguishable from a change to the harness, which is exactly
+what this record exists to let a reader rule out.
 
 ## Capture conditions
 
