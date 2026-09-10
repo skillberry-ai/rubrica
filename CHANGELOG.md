@@ -521,9 +521,11 @@
 - Record what staging triage costs, and correct the digest entry's arithmetic
 - Correct seven sites the staged-triage family left stale, and guard one
 - Record the vacuous prose predicates, and the entry whose trigger has fired
-- Design the chat-trajectory digest, and correct three claims about #4
+- Design the chat-trajectory digest, and correct three claims about the
+  chat-trajectory skeletons (docs/design/findings.md)
 - Plan the chat-trajectory digest implementation
-- Correct two claims about #4 and record what the fix does not reach
+- Correct two claims about the chat-trajectory skeletons
+  (docs/design/findings.md) and record what the fix does not reach
 - Past-tense the skeleton measurement the fix superseded
 - Re-record rb-extract's exercise after the prose-instant clause
 - Correct one measurement claim and two gaps in the round-5 record
@@ -538,7 +540,7 @@
 - Follow the excluded guard into the enumerations that claim to be complete
 - Say which fields, not how many, where round 1 left a count
 - Record that the objective pass reads the plan alone
-- Anchor #3's byte figures to the catalogue they were measured on
+- Anchor the byte figures to the catalogue they were measured on
 - Carry the narrowed reads into the orchestrator's own prose
 - State the window's edge convention the entry's figures assume
 - Make the entry's last two figures auditable from the page
@@ -546,7 +548,7 @@
 - Point the plan-size warning at the dial that actually bounds it
 - State the re-run's own candidate count behind its measured rate
 - Correct five drifted details in the limitations register
-- Design the bounded propose/score loop for issue 9
+- Design the bounded propose/score loop
 - Plan the bounded propose/score loop implementation
 - Fix Task 11's probe for a worktree with no runs directory
 - Fold four pre-flight rulings into the plan
@@ -615,7 +617,8 @@
 - Correct the rationale for sorting by_id's keys, and complete the fixture
 - Run check-refs at extract's gate, where the missing member is caught
 - Gate extract with check-refs in the walkthrough too, and widen the timing rule
-- Carry the fan-out timing caveat to instantiate, and correct what #19 covered
+- Carry the fan-out timing caveat to instantiate, and correct what a prior
+  change covered
 - Gate propose with check-refs, which the orchestrator already ran
 - Gate triage-rule with check-refs, the last fan-out without it
 - Design a waiver for a finding whose remedy lives elsewhere
@@ -632,7 +635,7 @@
 - **plans:** plan the open-source readiness work as twelve tasks in three phases
 - **plans:** strengthen two Task 10 assertions the pre-flight scan found weak
 - **design:** record the findings that closed, as the anchor citations will use
-- re-baseline the citation scope to 118 after #38, #39 and #40 merged
+- re-baseline the citation scope to 118 after three issues merged
 - **design:** record the two findings the merged work brought into scope
 - correct six line-number references the merge shifted
 - **plans:** scope the do-not-edit rule to records, not to this plan's own files
@@ -706,7 +709,7 @@
 - Guard the rejected exclusion the instantiate completeness clause makes
 - **triage:** scope the three prohibition predicates to a sentence or a list item
 - **reconcile:** pin the audit restriction, and probe the green direction
-- **review:** hold the confidence-band demotion a #37 docstring rests on
+- **review:** hold the confidence-band demotion a docstring rests on
 - name the finding each docstring cites, not the tracker issue
 - **docs:** guard against citing the internal tracker, in docs and in code
 - **release:** port the three release cases the first round missed
