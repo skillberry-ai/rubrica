@@ -48,8 +48,23 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org/) — currently `0.x`, so anything
 may change.
 
-What lands in a section is the Conventional Commit subject as written, so write
-the subject you would want to read there.
+What lands in a section is the Conventional Commit subject as written, with one
+exception: `scripts/lib/release-notes.sh` strips internal tracker citations out of
+every subject, and out of any `BREAKING CHANGE:` footer prose, before it becomes a
+bullet. So write the subject you would want to read there — and write it without a
+tracker pointer, because one will be removed rather than rendered.
+
+The exception is not a style preference. `CHANGELOG.md` is inside the citation
+guard in `tests/unit/test_docs_accuracy.py` on purpose — a stale count in a
+changelog section is a record, but a bare `#N` there is a live link to an
+unrelated issue in the public repository — and commit subjects are immutable, so
+the generator is the only place that can hold the property. Cutting v0.1.0 is what
+measured this: nine citations reached the file from subjects written before the
+tree's citations were rewritten, and the guard failed on `main`.
+
+Deletion can leave a bullet reading clipped, which is the accepted cost. A
+clipped bullet is a cosmetic defect; a pointer that resolves to the wrong issue is
+a factual one.
 
 **There are no `compare` links.** Keep a Changelog pairs each version with a link
 to GitHub's compare view; `scripts/release.sh` generates none, neither an

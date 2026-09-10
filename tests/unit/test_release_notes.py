@@ -233,3 +233,95 @@ def test_trailers_below_the_footer_do_not_leak_into_the_notes(repo):
     out = _bash(repo, NOTES_LIB, 'generate_release_notes "HEAD~1..HEAD"').stdout
     assert "Signed-off-by" not in out
     assert "- **cli:** pass --explicit." in out
+
+
+# --- tracker citations ------------------------------------------------------
+#
+# Added after v0.1.0: the release put nine tracker citations into CHANGELOG.md,
+# carried verbatim out of subjects written before the tree's citations were
+# rewritten, and tests/unit/test_docs_accuracy.py failed on main. Commit history
+# is immutable, so the generator is the only place the fix can live -- and these
+# are the cases that hold it there.
+#
+# Every citation below is *assembled* rather than written out, because this file is
+# itself in that guard's scan set: a literal one here fails
+# test_no_source_file_cites_the_internal_tracker, the very predicate these cases
+# exist to keep satisfied. Measured -- the first draft of this module was written
+# with literals and failed exactly that way. It is the same self-avoidance the
+# guard's own patterns use, where `#?\d+` never matches a real citation either.
+_HASH = "#"
+
+
+def _bare(n: int) -> str:
+    """The bare `hash-number` form."""
+    return f"{_HASH}{n}"
+
+
+def _issue(n: int) -> str:
+    """The spelled `issue N` form the guard also rejects."""
+    return f"issue {n}"
+
+
+def test_a_subject_citing_the_tracker_reaches_no_bullet_with_the_citation(repo):
+    """Every spelling the docs guard recognises, in one range.
+
+    The bare form and the spelled form arrived together in the real failure, so they
+    are asserted together rather than parametrised apart: a scrub that caught only
+    one of them would still have shipped a red main.
+    """
+    pointers = [_bare(4), _issue(9), f"PR {_bare(12)}", f"({_bare(37)})"]
+    _commit(repo, "chore: base")
+    _commit(repo, f"fix(refs): correct three claims about {pointers[0]}")
+    _commit(repo, f"docs: design the bounded loop for {pointers[1]}")
+    _commit(repo, f"feat(cli): land the change from {pointers[2]}")
+    _commit(repo, f"test(brief): pin the demotion {pointers[3]}")
+    out = _bash(repo, NOTES_LIB, 'generate_release_notes "HEAD~4..HEAD"').stdout
+    # The bullets still exist and still carry their scope and substance...
+    assert "- **refs:** correct three claims about" in out
+    assert "- design the bounded loop for" in out
+    assert "- **cli:** land the change from" in out
+    assert "- **brief:** pin the demotion" in out
+    # ...and not one of the four pointers survived.
+    for pointer in pointers:
+        assert pointer not in out, f"{pointer!r} reached the notes"
+
+
+def test_a_breaking_change_footer_citing_the_tracker_is_scrubbed_too(repo):
+    """The footer is body prose, so it bypasses the subject scrub entirely.
+
+    Worth its own case because a BREAKING CHANGE footer is exactly where a commit
+    explains itself by pointing at an issue, and because the breaking section is
+    built from a different code path than the buckets below it.
+    """
+    pointer = _bare(21)
+    _commit(repo, "chore: base")
+    _commit(
+        repo,
+        "feat(api)!: drop the legacy field",
+        body=f"BREAKING CHANGE: callers must migrate, see {pointer} for the\nrationale.",
+    )
+    out = _bash(repo, NOTES_LIB, 'generate_release_notes "HEAD~1..HEAD"').stdout
+    assert "### Breaking changes" in out
+    assert "- **api:** callers must migrate, see for the rationale." in out
+    assert pointer not in out
+
+
+def test_the_scrub_agrees_with_the_docs_guard_that_rejected_the_release(repo):
+    """The claim the scrub's own comment makes, asserted rather than asserted-to.
+
+    The patterns are duplicated across a Python guard and a bash library because one
+    cannot source the other. This case is what makes the duplication safe: it runs
+    the *guard's* regexes over the *generator's* output, so widening one without the
+    other fails here instead of at the next release.
+    """
+    from tests.unit.test_docs_accuracy import _TRACKER_CITATION, _bare_citations
+
+    _commit(repo, "chore: base")
+    _commit(repo, f"fix: correct what {_bare(19)} covered")
+    _commit(repo, f"docs: re-baseline after {_bare(38)}, {_bare(39)} and {_bare(40)} merged")
+    _commit(repo, f"chore: close {_issue(7)} and PR {_bare(8)}")
+    _commit(repo, f"test: anchor {_bare(3)}'s figures to the catalogue")
+    out = _bash(repo, NOTES_LIB, 'generate_release_notes "HEAD~4..HEAD"').stdout
+    assert out.strip(), "no notes generated; the snippet or the range is wrong"
+    hits = _TRACKER_CITATION.findall(out) + _bare_citations(out)
+    assert not hits, f"the generator emitted what the docs guard rejects: {hits}"
