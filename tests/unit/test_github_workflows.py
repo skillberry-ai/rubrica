@@ -123,3 +123,70 @@ def test_every_action_reference_names_a_ref(path: Path):
         if not (_PINNED_USES.match(value) or _LOCAL_USES.match(value))
     ]
     assert not unpinned, f"{_rel(path)} uses an action with no ref: {unpinned}"
+
+
+# A ref is *floating* when it cannot pin a release: a bare major tag (`v7`) or a
+# branch (`release/v1`) both move under the workflow as new versions ship, which is
+# the point of using them. A full semver tag or a 40-character sha does not.
+_EXACT_REF = re.compile(r"^v?\d+\.\d+\.\d+$|^[0-9a-f]{40}$")
+
+
+def _floating_action_repos() -> set[str]:
+    """The `owner/repo` of every workflow action pinned by a floating ref.
+
+    Subpaths are dropped, because Dependabot's `dependency-name` addresses the
+    repository: `github/codeql-action/init@v4` and `.../analyze@v4` are one entry,
+    not two.
+    """
+    repos: set[str] = set()
+    for path in _yaml_files():
+        if path.parent.name != "workflows":
+            continue
+        for value in _uses_values(yaml.safe_load(path.read_text(encoding="utf-8"))):
+            if _LOCAL_USES.match(value) or "@" not in value:
+                continue
+            target, _, ref = value.partition("@")
+            if _EXACT_REF.match(ref):
+                continue
+            repos.add("/".join(target.split("/")[:2]))
+    return repos
+
+
+def _actions_ignore_names() -> set[str]:
+    """`dependency-name`s ignored in dependabot.yml's github-actions block."""
+    config = yaml.safe_load((DOT_GITHUB / "dependabot.yml").read_text(encoding="utf-8"))
+    return {
+        entry["dependency-name"]
+        for update in config["updates"]
+        if update.get("package-ecosystem") == "github-actions"
+        for entry in update.get("ignore", [])
+        if "dependency-name" in entry
+    }
+
+
+def test_the_floating_ref_scan_finds_the_actions_the_tree_actually_uses():
+    """Guards the case below against *fixture-cannot-reach* the same way
+    test_the_scan_set_is_not_empty does: an empty left-hand side makes a subset
+    assertion vacuously true, so a broken parse would read as full coverage."""
+    repos = _floating_action_repos()
+    assert repos, "no floating-ref actions found; the workflow scan or the tree moved"
+    assert "github/codeql-action" in repos, (
+        f"codeql-action is pinned by floating major tag in the tree but not found: {repos}"
+    )
+
+
+def test_every_floating_ref_action_is_ignored_for_minor_and_patch():
+    """The ignore block's stated policy has to cover every action it describes.
+
+    Its comment gives the reason in general terms -- we float the major tag, so a
+    minor/patch PR *narrows* the ref and adds churn -- and that reason applies to
+    every action referenced that way, not to whichever one was listed first. An
+    action pinned `@v7` and absent from the block gets exactly the narrowing PR the
+    comment says the block prevents, on the first weekly run, and nothing in the
+    repository would have reported it.
+    """
+    missing = sorted(_floating_action_repos() - _actions_ignore_names())
+    assert not missing, (
+        "these actions float their major ref but are not ignored for minor/patch "
+        f"in .github/dependabot.yml: {missing}"
+    )

@@ -30,7 +30,33 @@ updates:
       # run time. Dependabot cannot see that and would otherwise open a PR for
       # every patch (v4 -> 4.37.4), which *narrows* the ref and adds churn.
       # Major bumps (v4 -> v5) still come through, since those need a review.
+      #
+      # Every action the workflows reference that way is listed, not just the
+      # first one written down: an omitted entry gets exactly the narrowing PR
+      # this block exists to prevent, on the first weekly run.
+      # tests/unit/test_github_workflows.py fails when the two drift apart, so
+      # add the entry here when you add a floating-ref action to a workflow.
       - dependency-name: github/codeql-action
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
+      - dependency-name: actions/checkout
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
+      - dependency-name: actions/dependency-review-action
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
+      - dependency-name: astral-sh/setup-uv
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
+      # Pinned to the `release/v1` branch rather than a tag, so there is no
+      # semver stream for Dependabot to bump at all. Listed anyway: the entry
+      # costs nothing and keeps the block a complete statement of the policy
+      # rather than one that silently omits the odd case.
+      - dependency-name: pypa/gh-action-pypi-publish
         update-types:
           - version-update:semver-minor
           - version-update:semver-patch
