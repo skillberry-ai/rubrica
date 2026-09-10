@@ -42,8 +42,9 @@ The project's gates are these, in this order:
 there is** — that number has gone stale here before. `.github/workflows/ci.yml`
 carries the gates in its `check` job and a `dco` job beside them, which fails a
 PR whose commits lack a `Signed-off-by` trailer; further workflows in
-`.github/workflows/` run code scanning and dependency review on the same events.
-Read that directory for the current set.
+`.github/workflows/` run code scanning and dependency review, each on its own
+triggers — code scanning also runs on a schedule, dependency review only on a
+pull request. Read that directory for the current set.
 
 A red gate is not mergeable. Run all three locally before opening a PR — these
 `make` targets are the same three checks, in the same order:
