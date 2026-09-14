@@ -101,6 +101,32 @@ it does not feel like one at the time -- it feels like checking.
 
 This pass has **no field in which a partial read can be recorded**: it carries no `inputs_seen`, so nothing downstream can tell that you read half the claims rather than all of them. That is a reason to hold the bound tighter here, not looser -- there is nowhere to confess it later.
 
+**Write your artifact incrementally: open it with a `Write` as soon as you have
+your first gap, not once you have them all, and append the rest with `Edit`. Do
+not compose the whole document in one turn.** This is a budget instruction like
+the one above it, and it bounds the term that one says nothing about -- your
+own output. Measured on a 149-input corpus: `rb-reconcile-entities`, a sibling
+pass in this family, failed twelve consecutive dispatches, every one of them
+ending with no accepted write and no artifact, while the two passes that
+finished had each opened a small file early and appended to it --
+`rb-reconcile-capabilities` with 3 `Write` calls and 23 `Edit`s,
+`rb-reconcile-outcomes` with 3 and 10. Nothing in any skill in this family
+asked them to; both arrived at it on their own. Why those twelve turns died is
+not established, and you should not reason from a guess about it -- the write
+pattern is what was observed, and appending is the cheaper bet either way.
+**This is not licence to skip the document when there is nothing to put in it**
+-- §2 rules on the empty case, and this paragraph is only about the order you
+write in.
+
+The unit of loss is the pass, not the turn. You may not read your own previous
+output, so a dispatch that dies part-way through composing a document leaves
+the next attempt starting exactly where this one did: twelve attempts, no
+partial, nothing to repair. For that same reason, do not reach for a helper or
+generator script to emit the document in one shot -- `Write` is scoped to your
+own artifact, twelve such attempts across those dispatches were denied by the
+permission layer, and `Edit` on the file you have already opened is the path
+that exists.
+
 1. **Record every gap: knowledge about the target that no input contains
    and that reasoning cannot supply.** Give it a `subject`, what is
    `unknown`, `why_it_matters`, and a `blocks` list naming every stage among

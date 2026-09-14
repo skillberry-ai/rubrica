@@ -95,6 +95,41 @@ def _bullet_carrying(stage: str, heading: str, *keys: str) -> str:
     return found[0]
 
 
+def _paragraphs(stage: str, heading: str) -> list[str]:
+    """One entry per blank-line-delimited prose block in a section, each flattened.
+
+    Blocks that open a `- ` bullet or a `N. ` numbered step are dropped: those
+    belong to `_bullets` and to a Method's steps, and folding them in would give
+    `_paragraph_carrying` two kinds of thing to disambiguate between. A step's
+    *continuation* paragraph is not dropped -- it opens with neither marker -- so a
+    locator still has to be distinctive enough to pass the exactly-one check
+    below. That is not slack: `reconcile-gaps` says "you are not editing another
+    pass's artifact" inside one such continuation, which is why the write bound is
+    located on the shape it forbids rather than on the tool names it recommends.
+    """
+    out: list[str] = []
+    for block in re.split(r"\n[ \t]*\n", section_body(_skill(stage), heading)):
+        first = block.strip().split("\n")[0] if block.strip() else ""
+        if not first or first.startswith("- ") or re.match(r"\d+\. ", first):
+            continue
+        out.append(" ".join(block.lower().split()))
+    return out
+
+
+def _paragraph_carrying(stage: str, heading: str, *keys: str) -> str:
+    """The one paragraph in a section carrying any of `keys`, flattened.
+
+    `_bullet_carrying`'s argument, one scope up: a rule that lives in a paragraph
+    has to be asserted against that paragraph, because a section-scoped predicate
+    is satisfied by any sibling paragraph and stays green when the rule is deleted.
+    """
+    found = [para for para in _paragraphs(stage, heading) if any(k in para for k in keys)]
+    assert len(found) == 1, (
+        f"{keys} locates {len(found)} paragraph(s) in {stage}'s {heading}, not one: {found}"
+    )
+    return found[0]
+
+
 def _world_schema():
     return read_json(schema_dir() / ARTIFACT_SCHEMAS["world-model"])
 
@@ -258,6 +293,71 @@ def test_the_reading_bound_carries_the_failure_that_justifies_it(stage):
     assert "prompt is too long" in method, f"{stage}'s Method does not name the failure"
     assert "re-read" in method or "reread" in method, (
         f"{stage}'s Method does not name re-reading as what caused it"
+    )
+
+
+# The shape the write bound forbids, in the two spellings a reword picks between.
+# This is a locator, and pinning it is deliberate rather than incidental: composing
+# the document in one turn is the thing prohibited, so a rewrite that names neither
+# spelling has dropped the rule and should turn these red. What is *not* pinned is
+# any phrasing of the advice -- that is asserted on `Write` and `Edit`, for the
+# reason `offset` and `limit` are asserted above.
+#
+# MEASURED both directions across all eight passes: deleting the paragraph pair
+# turns all sixteen red; replacing it with a full reword -- numerals flipped to
+# digits, "one turn" to "a single turn", the appositive dropped, sentence order
+# changed, the two survivors described rather than tabulated -- leaves all sixteen
+# green.
+ONE_TURN = ("one turn", "single turn")
+
+
+@pytest.mark.parametrize("stage", FAMILY)
+def test_the_method_bounds_how_the_artifact_is_written(stage):
+    """The read bound above has no output half, and the output is the term that
+    killed a pass twelve times.
+
+    On a 149-input corpus `rb-reconcile-entities` failed twelve consecutive
+    dispatches with no accepted write and no artifact, while the two siblings that
+    finished had each opened a small file and appended to it -- 3 `Write` + 23
+    `Edit`, and 3 + 10. **Nothing in any of the eight skills asked them to**:
+    measured across all eight before this predicate was written, `one turn`,
+    `incremental` and `append` occurred in no Method section in the family, so this
+    cannot be satisfied by prose that predates the instruction.
+
+    `Write` and `Edit` are asserted rather than any phrasing of the advice, for the
+    reason `offset` and `limit` are asserted above: a tool name is not prose and a
+    reword does not move it. The paragraph is located on the shape it forbids
+    instead, because `edit` alone matches a `reconcile-gaps` continuation that says
+    the opposite thing.
+    """
+    para = _paragraph_carrying(stage, "3. Method", *ONE_TURN)
+    assert "write" in para and "edit" in para, (
+        f"{stage}'s write bound names no incremental mechanism"
+    )
+
+
+@pytest.mark.parametrize("stage", FAMILY)
+def test_the_writing_bound_carries_the_evidence_that_justifies_it(stage):
+    """The read bound's argument, applied to its sibling: prose buys a probability,
+    and an instruction whose cost is invisible is the first thing a member under
+    pressure drops.
+
+    Both halves of the observation are pinned, because either alone invites the
+    wrong reading. Without the twelve failures the instruction is a style note;
+    without the two passes that finished it is a prohibition with no worked
+    alternative, and a member with no alternative reaches for the generator script
+    the permission layer denied twelve times.
+
+    The numeral alternation is two spellings of one measurement, not two candidate
+    wordings -- which is the distinction CLAUDE.md draws when it calls an
+    alternation of two a hypothesis about which words survive a reword.
+    """
+    para = _paragraph_carrying(stage, "3. Method", *ONE_TURN)
+    assert "twelve" in para or "12" in para, (
+        f"{stage}'s write bound does not say how often the failure was observed"
+    )
+    assert "edit" in para and ("sibling" in para or "reconcile-" in para), (
+        f"{stage}'s write bound names no pass that survived by appending"
     )
 
 
