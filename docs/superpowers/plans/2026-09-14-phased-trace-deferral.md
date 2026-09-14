@@ -151,7 +151,7 @@ spec's design does not.
 | `src/rubrica/schema/slices-0.1.json` | top-level `phase`; per-slice `deferred_candidate_ids`; `bytes` re-described |
 | `src/rubrica/schema/manifest-0.1.json` | top-level `phase` |
 | `src/rubrica/schema/world-model-0.1.json` | top-level `phase` |
-| `src/rubrica/validate.py` | `triage_candidate_kinds()`, `--defer-kind`'s argparse choices |
+| `src/rubrica/validate.py` | `catalogue_candidate_kinds()`, `--defer-kind`'s argparse choices |
 | `src/rubrica/slices.py` | `write_slices(..., phase=)`; subtract defers from shards; skip a fully-deferred shard |
 | `src/rubrica/cli.py` | `--phase`/`--defer-kind` on `triage-slices` |
 | `src/rubrica/refs.py` | `check_triage`'s third branch; `check_slices` clauses 4/5/6; `check_disposition_parts` clauses 1/4; `check_admitted_inputs`' deferred-count clause |
@@ -183,7 +183,7 @@ is the only way to test the checker independently of the writer.
 - Create: `src/rubrica/phase.py`
 - Create: `tests/unit/test_phase.py`
 - Modify: `src/rubrica/schema/triage-0.1.json` (`$defs` at lines 50-100, top-level `properties`)
-- Modify: `src/rubrica/validate.py:192-219` (add `triage_candidate_kinds` beside `manifest_stage_efforts`)
+- Modify: `src/rubrica/validate.py:192-219` (add `catalogue_candidate_kinds` beside `manifest_stage_efforts`)
 - Modify: `src/rubrica/refs.py:1155-1192` (`check_triage`'s disposition branch)
 - Test: `tests/unit/test_refs_triage.py`
 
@@ -196,7 +196,7 @@ is the only way to test the checker independently of the writer.
     artifact that carries one, or `None`.
   - `phase.deferred_kinds(block: dict | None) -> frozenset[str]`
   - `phase.deferred_candidate_ids(candidates: list, block: dict | None) -> frozenset[str]`
-  - `validate.triage_candidate_kinds() -> tuple[str, ...]`
+  - `validate.catalogue_candidate_kinds() -> tuple[str, ...]`
 
 - [ ] **Step 1: Write the failing test for `phase.py`**
 
@@ -468,27 +468,47 @@ And the top-level `properties` gains the optional field (beside `projections`):
     "phase": {"$ref": "#/$defs/phase"}
 ```
 
-- [ ] **Step 6: Add `triage_candidate_kinds()` to `validate.py`**
+- [ ] **Step 6: Add `catalogue_candidate_kinds()` to `validate.py`**
+
+> **Correction, made during execution.** As first written this step read
+> `ARTIFACT_SCHEMAS["triage"]`'s `$defs/kind` and named the function
+> `triage_candidate_kinds`. That was wrong: `--defer-kind` selects *catalogue*
+> candidates by the `kind` that `catalogue-0.1.json` validates, and that file
+> carries its own copy of the enum with nothing pinning the two equal. A kind
+> added to the catalogue's copy alone would hand `--defer-kind` a choice list
+> that rejects it — the "silently defers nothing while the run pays in full"
+> failure this very function's docstring calls the worst available, reached
+> through the restated copy that `derive, do not restate` exists to forbid.
+> The shipped code reads the catalogue schema, `$defs/phase.deferred_kinds`
+> `$ref`s `catalogue-0.1.json#/$defs/kind`, and triage's own `$defs/kind`
+> stays for projections. The code block below shows the corrected form; the
+> ruling is in the ledger.
 
 Insert immediately after `manifest_stage_efforts` (after line 219), mirroring its
 two-function cached shape exactly:
 
 ```python
 @functools.cache
-def _triage_candidate_kinds(schema_root: Path) -> tuple[str, ...]:
-    """The cached half of triage_candidate_kinds, keyed on schema_root.
+def _catalogue_candidate_kinds(schema_root: Path) -> tuple[str, ...]:
+    """The cached half of catalogue_candidate_kinds, keyed on schema_root.
 
     Keyed on the root for _manifest_stage_efforts' reason: a zero-argument
     @functools.cache would pin the first schema the process ever read, and
     parser construction happens on every CLI invocation, so there always is an
     earlier call for a RUBRICA_SCHEMA_DIR override to lose to.
     """
-    schema = read_json(schema_root / ARTIFACT_SCHEMAS["triage"])
+    schema = read_json(schema_root / ARTIFACT_SCHEMAS["catalogue"])
     return tuple(schema["$defs"]["kind"]["enum"])
 
 
-def triage_candidate_kinds() -> tuple[str, ...]:
+def catalogue_candidate_kinds() -> tuple[str, ...]:
     """The candidate kinds a catalogue can carry, read out of the active schema.
+
+    The *catalogue's* copy of the enum, not triage's. Both files carry one and
+    they are byte-identical today, but `--defer-kind` selects catalogue
+    candidates by the `kind` catalogue-0.1.json validates, so that is the copy
+    this must agree with: a kind added there alone would leave this choice list
+    rejecting a kind real candidates carry.
 
     `triage-slices --defer-kind` uses this as its argparse choices, so the CLI
     cannot accept a kind the schema will reject -- and there is no second copy of
@@ -496,7 +516,7 @@ def triage_candidate_kinds() -> tuple[str, ...]:
     that silently deferred nothing, which is the worst available failure: the run
     would cost full price and report a phase.
     """
-    return _triage_candidate_kinds(schema_dir())
+    return _catalogue_candidate_kinds(schema_dir())
 ```
 
 - [ ] **Step 7: Write the failing test for `check_triage`'s third branch**
@@ -725,7 +745,7 @@ throughout, which is what keeps the suite green.
 - Test: `tests/unit/test_refs_slices.py`, `tests/unit/test_refs_triage_parts.py`, `tests/unit/test_cli.py`
 
 **Interfaces:**
-- Consumes: `phase.read`, `phase.deferred_candidate_ids`, `validate.triage_candidate_kinds` (Task 1).
+- Consumes: `phase.read`, `phase.deferred_candidate_ids`, `validate.catalogue_candidate_kinds` (Task 1).
 - Produces:
   - `slices.write_slices(run, *, cap=DEFAULT_SLICE_BYTES, phase_block=None) -> tuple[Path, list[Slice]]`
     — `phase_block` is the `{number, deferred_kinds}` dict or `None`.
@@ -1094,7 +1114,7 @@ In `src/rubrica/cli.py`, replace `p_slices`' single argument:
         action="append",
         default=[],
         metavar="KIND",
-        choices=list(validate.triage_candidate_kinds()),
+        choices=list(validate.catalogue_candidate_kinds()),
     )
 ```
 
@@ -3133,7 +3153,7 @@ says so at the point of use. No other TBDs, no "add appropriate error handling",
   the task that first needs it (2, 4, 5) and reused by name afterwards.
 - `brief.DEFERRED_HEADER`, `summary.Dispositions.defers`/`.defer_count`,
   `target_brief.completeness`/`Completeness.kind_labels`/`.count`,
-  `target_brief_html._completeness_lines`, `validate.triage_candidate_kinds` — each
+  `target_brief_html._completeness_lines`, `validate.catalogue_candidate_kinds` — each
   named once and used consistently.
 - `$defs/phase` lives in `triage-0.1.json` and is `$ref`'d by three other schemas;
   `deferred_count` is optional there so the plan and triage record may omit it while
