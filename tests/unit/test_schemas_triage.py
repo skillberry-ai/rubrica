@@ -344,9 +344,11 @@ def test_a_record_with_no_phase_block_still_validates(tmp_path):
 @pytest.mark.parametrize(
     ("case", "block"),
     [
-        # Held to the catalogue's own kind enum, so a declaration cannot name a
-        # kind no candidate can carry -- the failure the schema exists to stop is
-        # a --defer-kind that silently defers nothing while the run pays in full.
+        # Held to catalogue-0.1.json's own kind enum -- see the test below, which
+        # is what proves it is that file's copy and not this one's restatement --
+        # so a declaration cannot name a kind no candidate can carry. The failure
+        # the constraint exists to stop is a --defer-kind that silently defers
+        # nothing while the run pays in full.
         ("unknown kind", {"number": 1, "deferred_kinds": ["nope"]}),
         # A label, minimum 1: phase 0 is nobody's phase.
         ("number below one", {"number": 0, "deferred_kinds": ["trace"]}),
@@ -369,6 +371,35 @@ def test_a_malformed_phase_block_is_a_finding(tmp_path, case, block):
     assert validate.validate_stage(_write(tmp_path, _with_a_defer(phase=block)), "triage-seal"), (
         f"a phase block with {case} was wrongly accepted"
     )
+
+
+def test_deferred_kinds_is_held_to_the_catalogues_enum_not_this_files_copy(tmp_path, monkeypatch):
+    """Which copy of the `kind` enum the constraint points at, measured.
+
+    The two copies are byte-identical today and nothing pins them equal, so the
+    `unknown kind` row above passes against either -- it cannot tell them apart,
+    and that is the whole of finding 2. This can: it overrides
+    catalogue-0.1.json's enum alone, copies triage-0.1.json across untouched, and
+    declares a phase deferring the sentinel kind. Accepted means the $ref resolved
+    to the catalogue's copy; against the restatement in triage-0.1.json (the shape
+    this shipped with first) the sentinel is not a member and the document is
+    rejected.
+
+    It matters because `--defer-kind` selects *catalogue candidates*: a kind added
+    to the catalogue alone would otherwise be a choice the CLI rejects and a phase
+    block that cannot name it, which is the silent-defer failure the run pays full
+    price for.
+    """
+    for path in validate.schema_dir().glob("*.json"):
+        (tmp_path / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    catalogue_schema = read_json(tmp_path / validate.ARTIFACT_SCHEMAS["catalogue"])
+    catalogue_schema["$defs"]["kind"]["enum"] = ["trace", "haruspicy"]
+    write_json(tmp_path / validate.ARTIFACT_SCHEMAS["catalogue"], catalogue_schema)
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path))
+
+    block = {"number": 1, "deferred_kinds": ["haruspicy"]}
+    run = _write(tmp_path / "run", _with_a_defer(phase=block))
+    assert validate.validate_stage(run, "triage-seal") == []
 
 
 def test_a_defer_carrying_a_declines_reason_code_is_still_layer_1_valid(tmp_path):

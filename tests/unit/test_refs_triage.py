@@ -11,8 +11,10 @@ becomes a human-read report in a later task.
 
 from __future__ import annotations
 
-from rubrica import refs
-from rubrica.artifacts import write_json
+import pytest
+
+from rubrica import phase, refs, validate
+from rubrica.artifacts import read_json, write_json
 from rubrica.paths import RunPaths
 
 
@@ -216,6 +218,62 @@ def test_an_admit_carrying_a_decline_reason_code_is_a_finding(tmp_path):
                 d["reason_code"] = "off_objective"
 
     assert refs.check_triage(_run_with(tmp_path, mutate)) != []
+
+
+# Every code a decline may legitimately carry: the schema's own enum minus the
+# defer code. Read from disk rather than typed out, because a hand-written list
+# here would be a second copy of the enum -- and one that could quietly stop
+# matching it, which is exactly the drift the test below exists to catch. The
+# baseline _run_with record carries the deficiency and the projection that
+# `digest_insufficient` and `needs_projection` each need, so every code in this
+# list really is clean against it.
+_LEGITIMATE_DECLINE_CODES = tuple(
+    code
+    for code in read_json(validate.schema_dir() / validate.ARTIFACT_SCHEMAS["triage"])["$defs"][
+        "decline_reason"
+    ]["enum"]
+    if code != phase.DEFER_REASON_CODE
+)
+
+
+def test_a_decline_may_not_wear_the_defer_reason_code(tmp_path):
+    """The mirror of the defer clause, and the collapse arriving from the other side.
+
+    `deferred_to_phase` shares the decline enum for $ref economy -- `reason_code`
+    is one field with one $ref -- so neither layer 1 nor the part overlay (which
+    restricts `disposition` and `authority`, not `reason_code`) can tell the halves
+    apart. Measured before this clause existed: a decline carrying
+    `deferred_to_phase` was clean at both layers.
+
+    What it would cost: the manifest's `deferred_count` counts `disposition ==
+    "defer"`, so such a record reports zero deferrals while the gate-0 brief files
+    the input under a decline reason code -- on the motivating run, 68 inputs
+    reported as judged useless, which is the misreport `defer` was made a distinct
+    disposition to prevent.
+    """
+
+    def mutate(triage, catalogue):
+        for d in triage["dispositions"]:
+            if d["disposition"] == "decline":
+                d["reason_code"] = phase.DEFER_REASON_CODE
+
+    findings = refs.check_triage(_run_with(tmp_path, mutate))
+    assert len(findings) == 1
+    assert findings[0].pointer == "/dispositions/0/reason_code"
+    assert phase.DEFER_REASON_CODE in findings[0].message
+
+
+@pytest.mark.parametrize("code", _LEGITIMATE_DECLINE_CODES)
+def test_a_decline_carrying_a_real_decline_code_stays_clean(tmp_path, code):
+    """The positive control, without which the clause above is not a guard.
+
+    A check written as "a decline's code must be one of these seven" instead of
+    "must not be the defer code" would also pass the test above, and would then
+    reject the next code added to the enum for no reason. Every legitimate code
+    is asserted clean, including the two whose own clauses fire when the record
+    has nothing pointing at them.
+    """
+    assert refs.check_triage(_run_with(tmp_path, lambda t, c: None, decline_code=code)) == []
 
 
 def test_a_digest_insufficient_decline_with_no_deficiencies_at_all_is_a_finding(tmp_path):

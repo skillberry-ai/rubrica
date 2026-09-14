@@ -51,6 +51,7 @@
   "$defs": {
     "id": {"type": "string", "pattern": "\\A[A-Za-z0-9][A-Za-z0-9._-]*\\Z", "maxLength": 128},
     "kind": {
+      "description": "A restatement of catalogue-0.1.json's own kind enum, and deliberately left in place: a projection's `wanted.kind` and `acceptance.classifies_as` have pointed at it since before phasing, and deduplicating a pre-existing copy is a change to those two fields' contract rather than part of this work -- so it was not missed. `$defs/phase.deferred_kinds` is the one site here that points at the catalogue's copy instead, because it selects catalogue candidates and must agree with the file that validates their `kind`.",
       "enum": ["openapi", "mcp_tool_schema", "entity_schema", "trace",
                "design_doc", "source_code", "other"]
     },
@@ -75,8 +76,8 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": {"$ref": "#/$defs/kind"},
-          "description": "The candidate kinds this phase defers, held to the catalogue's own kind enum so a declaration cannot name a kind no candidate can carry. minItems 1 because a phase deferring nothing is a phase nobody declared, and the absent block already says that."
+          "items": {"$ref": "catalogue-0.1.json#/$defs/kind"},
+          "description": "The candidate kinds this phase defers, held to catalogue-0.1.json's OWN kind enum -- not to this file's copy of it -- because --defer-kind selects catalogue candidates, and it is the catalogue's enum that validates the `kind` each candidate carries. The two copies are byte-identical today and nothing pins them equal, so a kind added to the catalogue's alone would give --defer-kind a choice list that rejects it and a phase block that cannot name it: the run pays in full and silently defers nothing. validate.catalogue_candidate_kinds() reads this same file, so the CLI's choices and this constraint cannot disagree. minItems 1 because a phase deferring nothing is a phase nobody declared, and the absent block already says that."
         },
         "deferred_count": {
           "type": "integer",

@@ -1160,6 +1160,26 @@ def check_triage(run: RunPaths) -> list[Finding]:
         if disposition == "decline":
             if not code:
                 report(f"{pointer}/reason_code", "a decline must carry a reason_code")
+            elif code == phase.DEFER_REASON_CODE:
+                # The mirror of the defer clause below, and not symmetry for its
+                # own sake: this is the collapse the two dispositions were split
+                # to prevent, arriving from the other side. `deferred_to_phase`
+                # shares the decline enum for $ref economy -- `reason_code` is
+                # one field with one $ref -- so layer 1 cannot tell the halves
+                # apart, and this branch is where they were promised separated.
+                #
+                # What a decline wearing the defer code actually does: the
+                # manifest's `deferred_count` counts `disposition == "defer"`,
+                # so it reports zero deferrals, while the gate-0 brief files that
+                # input under a *decline* reason code. On the run that motivated
+                # phasing that is 68 inputs reported as judged useless -- the
+                # exact misreport `defer` was made a distinct value to prevent.
+                report(
+                    f"{pointer}/reason_code",
+                    f"reason_code {phase.DEFER_REASON_CODE!r} belongs to a defer, not a decline; "
+                    "a decline says this input has no evidence value, so wearing the defer code "
+                    "would report the input as judged useless and count it as no deferral at all",
+                )
             elif code == "digest_insufficient" and not deficiency_ids:
                 # Weak by necessity: triage-0.1.json's deficiencies[] has no
                 # candidate-reference field (deficiency_id, subject, statement,
