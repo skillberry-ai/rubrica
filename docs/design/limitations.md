@@ -3771,6 +3771,88 @@ is worth knowing before you propose adding one — a few have since drifted from
   packaging is the other half of "standalone plugin" and no work has been done
   on it.
 
+## What phased deferral accepts
+
+`triage-slices --phase N --defer-kind KIND` defers a whole input kind to a later
+phase instead of dropping it. Five things it does not do, and one thing it is most
+likely to be misread as fixing.
+
+### A synthesised `defer` carries no `priority`
+
+The design expected a deferred candidate to keep its member-assigned rank, so phase 3
+could consume triage's ranking directly instead of recomputing it. Under shard
+subtraction no member ever sees a deferred candidate, so there is no rank to keep, and
+inventing one in code would be a reasoned number presented as an observed one — the
+misattribution this project has already had to retract once.
+
+This is not a regression against the design's own version, which delivers the promise
+for the mixed slices only: on the corpus it was measured against, 15 of 68 deferred
+candidates sat in one mixed slice and the other 53 were in slices no member is
+dispatched for at all.
+
+Parked because phase 3 re-slices the deferred population and dispatches
+`rb-triage-rule` over it, which is the pass whose judgment ought to rank inputs.
+`priority` is optional in `triage-0.1.json` and `seal._member_priority` already sorts
+an absent one at a sentinel rank, so nothing has to tolerate this specially.
+
+### `rb-triage-audit` cannot tell deferred material from absent material
+
+Its `reads` is `objective` and `dispositions_dir`, and the synthesised `defer` rulings
+are in neither: `triage-seal` mints them, which happens after the audit runs. So the
+audit may raise a deficiency — and even propose a projection — for evidence a later
+phase will supply.
+
+The contract is deliberately **not** widened. A proposed `reads` addition has to answer
+"does a deterministic gate already enforce this?", and the honest answer is that no
+gate can: whether a deficiency is explained by a deferral is a semantic judgment, which
+is exactly the hole layer 2 is forbidden to paper over. Widening the audit's reads to
+`slices` was the alternative considered and rejected — it would hand the pass that
+audits the selection a view of the policy that shaped it, which is gate 0's argument
+turned inside out.
+
+Parked because the human at gate 0 reads both surfaces: the audit's deficiencies, and
+the deferred group `gate-brief` renders beside them. That reader is the right party to
+rule that one explains the other, and reversing the deferral costs one re-run of a code
+stage.
+
+### A phase-1 world model is not comparable to a full one
+
+`stability.diff-runs` compares `model`, `effort` and `skill_sha256` through
+`_STAGE_FIELDS` and does not read `phase`, so it will not object to a comparison
+between a phased run and a full one. The `phase` block on the world model is what makes
+that incomparability *detectable* rather than silent — a reader can see it; the tool
+cannot.
+
+Parked rather than fixed: widening `stability.py` is outside the scope of the design
+that introduced the block, and the block is what a later fix would read.
+
+### `deferred_kinds` is a kind-level instrument
+
+So a valuable input is deferred along with the rest of its kind. On the measured
+corpus, phase 1 gives up 23 of 78 goals, 85 of 204 contradictions, 16 of 354
+invariants, 4 of 113 entities and 1 of 32 gaps.
+
+A per-candidate override is deliberately not designed: it would reintroduce exactly
+the per-input judgment the design exists to avoid paying for. The zero that decides
+the trade-off is elsewhere — of the 113 capabilities carrying a tool binding, the ones
+the coverage denominator counts, **none** depended on a trace.
+
+### The cited-share figures are facts about one corpus at one objective
+
+Traces were 78% of that corpus by bytes and 12% cited. A `depth` run, or a target whose
+behaviour is only observable in trajectories, could invert that completely.
+`--defer-kind` is per-run for exactly this reason and has **no default**: a run that
+does not pass it behaves precisely as it did before phasing existed.
+
+### What phase 1 does not fix, and is most likely to be read as fixing
+
+Implied suite size at denominator v1 is 448 capability cells plus 118 hop slots = 566,
+still far above the `max_scenarios` ceiling of 128. The target still needs narrowing or
+the ceiling raising, and phasing does neither. What it changes is the price of
+iterating on that decision.
+
+See also the `max_scenarios` entry above, which this does not close.
+
 ---
 
 ## If you think an entry here is wrong
