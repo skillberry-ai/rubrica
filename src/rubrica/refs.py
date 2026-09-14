@@ -1729,6 +1729,34 @@ def check_admitted_inputs(run: RunPaths) -> list[Finding]:
                 "entered the run from outside the gate",
             )
         )
+
+    # The deferred count, recomputed. It is the only number in the phase block that
+    # intake derives rather than copies, so it is the only one that can be wrong
+    # without the plan being wrong too -- and a world model reporting that 68 inputs
+    # were deferred when the record shows 4 would misstate the analysis to the very
+    # people target-brief is written for.
+    #
+    # Silent when the manifest declares no phase: a run without one has nothing to
+    # recompute, and a clause that fired there would report against every manifest
+    # already on disk.
+    manifest_phase = phase.read(manifest)
+    if manifest_phase is not None:
+        declared = manifest_phase.get("deferred_count")
+        actual = sum(
+            1
+            for entry in _as_list(triage.get("dispositions"))
+            if isinstance(entry, dict) and entry.get("disposition") == phase.DEFER
+        )
+        if declared != actual:
+            out.append(
+                Finding(
+                    run.manifest,
+                    "refs",
+                    "/phase/deferred_count",
+                    f"the manifest declares deferred_count={declared} but {run.triage.name} "
+                    f"carries {actual} defer disposition(s)",
+                )
+            )
     return out
 
 

@@ -9,8 +9,9 @@ spec §7.1's ruling, and every intake --input run's normal state.
 from __future__ import annotations
 
 from rubrica import refs
-from rubrica.artifacts import write_json
+from rubrica.artifacts import read_json, write_json
 from rubrica.paths import RunPaths
+from tests.unit.test_phase_pipeline import phase_run_through_intake
 
 
 def _catalogue(run_id: str) -> dict:
@@ -173,3 +174,21 @@ def test_a_clean_admission_reports_nothing(tmp_path):
     nothing extra is, so there is nothing for either direction to report."""
     run = _run(tmp_path, admit_api_json=True, artifact_ids=["readme-md", "api-json"])
     assert refs.check_admitted_inputs(run) == []
+
+
+def test_a_wrong_deferred_count_in_the_manifest_is_a_finding(tmp_path):
+    """The direction that makes the clause a guard; the clean direction is
+    test_phase_pipeline's check_admitted_inputs assertion over the same run.
+
+    `deferred_count` is the only number in the phase block intake derives rather
+    than copies, so it is the only one that can be wrong while the plan is right --
+    and 68 is the figure from the corpus this design was measured on, which is
+    exactly the misstatement a reader of target-brief would have no way to catch."""
+    run = phase_run_through_intake(tmp_path)
+    manifest = read_json(run.manifest)
+    manifest["phase"]["deferred_count"] = 68
+    write_json(run.manifest, manifest)
+    findings = refs.check_admitted_inputs(run)
+    assert len(findings) == 1
+    assert findings[0].pointer == "/phase/deferred_count"
+    assert findings[0].artifact == run.manifest

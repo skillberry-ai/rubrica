@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 
-from rubrica import cli, phase, refs, seal, slices, validate
+from rubrica import cli, intake, phase, refs, seal, slices, validate
 from rubrica.artifacts import write_json
 from rubrica.paths import RunPaths
 from tests.toy import build_toy_run
@@ -355,3 +355,74 @@ def test_deferred_ids_with_no_phase_block_are_reported_unruled_rather_than_synth
     path, findings = seal.seal(run)
     assert path is None
     assert any("trace-json" in f.message and "no disposition" in f.message for f in findings)
+
+
+def phase_run_through_intake(tmp_path, *, number=1, kinds=("trace",)):
+    """A toy run carried under a phase as far as the manifest.
+
+    Built by re-slicing, re-sealing and re-intaking rather than by threading a
+    phase through build_toy_run: tests/toy.py builds the golden world, and a
+    checkpoint that deferred one of its three inputs would be a second, quietly
+    different golden world for every later test to pick up by accident. It is also
+    the real order an operator declaring a phase at gate 0 goes through.
+
+    The deferred set is read per slice, not once from `slices[0]`: on the toy
+    catalogue there is only one, but keying every part off the first slice's
+    deferral would silently drop the wrong rulings on any corpus with two.
+    """
+    run = build_toy_run(tmp_path, upto="triage-audit")
+    slices.write_slices(run, phase_block={"number": number, "deferred_kinds": list(kinds)})
+    plan = _plan(run)
+    deferred_by_slice = {
+        entry["id"]: set(entry.get("deferred_candidate_ids", ())) for entry in plan["slices"]
+    }
+    assert any(deferred_by_slice.values()), "the fixture must actually defer something"
+    for sid in run.slice_ids_with_parts():
+        part_path = run.disposition_part(sid)
+        part = json.loads(part_path.read_text())
+        deferred = deferred_by_slice.get(sid, set())
+        part["dispositions"] = [
+            d for d in part["dispositions"] if d["candidate_id"] not in deferred
+        ]
+        write_json(part_path, part)
+    _, findings = seal.seal(run)
+    assert findings == [], findings
+    findings = intake.admit_from_triage(run)
+    assert findings == [], findings
+    return run
+
+
+def test_the_manifest_carries_the_phase_and_counts_the_deferrals(tmp_path):
+    """`deferred_count` is added here rather than at the seal because intake is the
+    stage that knows it exactly -- it read the dispositions -- and reconcile-seal
+    reads the manifest and never 00-triage.json, so the count has to travel this
+    way to reach the world model."""
+    run = phase_run_through_intake(tmp_path)
+    manifest = json.loads(run.manifest.read_text())
+    assert manifest["phase"] == {
+        "number": 1,
+        "deferred_kinds": ["trace"],
+        "deferred_count": 1,
+    }
+    # And the deferred input is not registered: `defer` is not `admit`, so intake
+    # does not materialise it and no claims file is ever expected for it.
+    assert all("trace" not in entry["artifact_id"] for entry in manifest["inputs"])
+    # The positive control on that assertion: the run really did register the other
+    # two, so the absence above is the deferral and not an empty inputs array.
+    assert len(manifest["inputs"]) == 2
+    assert validate.validate_stage(run, "intake") == []
+
+
+def test_a_manifest_from_a_phaseless_run_has_no_phase_key(tmp_path):
+    run = build_toy_run(tmp_path, upto="intake")
+    manifest = json.loads(run.manifest.read_text())
+    assert "phase" not in manifest
+
+
+def test_check_refs_is_clean_through_intake_on_a_phase_run(tmp_path):
+    """check_admitted_inputs holds every registered input to an admitted candidate
+    and every admitted candidate to a manifest entry, both directions. A deferred
+    candidate is in neither population, which is the property the design rests on --
+    and this is the assertion that it actually holds rather than being argued."""
+    run = phase_run_through_intake(tmp_path)
+    assert refs.check_admitted_inputs(run) == []
