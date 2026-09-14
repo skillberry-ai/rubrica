@@ -17,8 +17,9 @@ golden world has two.
 from __future__ import annotations
 
 import json
+import shutil
 
-from rubrica import cli, intake, phase, refs, seal, slices, validate
+from rubrica import cli, intake, phase, reconcile, refs, seal, slices, validate
 from rubrica.artifacts import write_json
 from rubrica.paths import RunPaths
 from tests.toy import build_toy_run
@@ -426,3 +427,183 @@ def test_check_refs_is_clean_through_intake_on_a_phase_run(tmp_path):
     and this is the assertion that it actually holds rather than being argued."""
     run = phase_run_through_intake(tmp_path)
     assert refs.check_admitted_inputs(run) == []
+
+
+def _strip_deferred_from_partial(document: dict, *, artifact_ids: set[str], claim_ids: set[str]):
+    """Remove every trace of a deferred input from one reconcile partial.
+
+    Two removals, because a partial records the deferred input twice: as a row in
+    `inputs_seen` (an input the pass read) and as a citation inside whatever it
+    wrote. A phase-1 pass never saw the input, so it would have written neither --
+    and leaving either behind is not a smaller version of the same fixture, it is a
+    partial that claims to have read a file the manifest does not register, which
+    layer 2 correctly reports.
+
+    Removing a citation cannot orphan an element in the toy world: the one trace
+    claim any partial cites, `clm-trace-001`, sits on an outcome class that also
+    cites `clm-api-005`. That is the design's own measurement -- of 943 outcome
+    classes on the corpus this was built for, exactly one was trace-only -- so the
+    fixture reproduces the shape rather than dodging it. An assertion below holds it
+    to that: a claims list this leaves empty would be a fixture defect, not a phase.
+    """
+
+    def walk(node):
+        if isinstance(node, dict):
+            return {
+                key: (
+                    [c for c in value if c not in claim_ids]
+                    if key == "claims" and isinstance(value, list)
+                    else walk(value)
+                )
+                for key, value in node.items()
+            }
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        return node
+
+    seen = document.get("inputs_seen")
+    if isinstance(seen, list):
+        document["inputs_seen"] = [
+            row
+            for row in seen
+            if not (isinstance(row, dict) and row.get("artifact_id") in artifact_ids)
+        ]
+    return walk(document)
+
+
+def phase_run_through_seal(tmp_path, *, number=1, kinds=("trace",)):
+    """A phase run carried to a sealed world model, with the two forensic passes
+    never run.
+
+    The 01 band is copied from the toy's own reconcile checkpoint rather than
+    re-derived: extract and the six kept passes are unaffected by phasing, and
+    rebuilding them here would test tests/toy.py instead of this feature. What the
+    copy must not carry is the deferred input -- the donor admitted `trace-json` and
+    this run did not -- so its claims file is dropped and every partial is stripped
+    of the rows and citations naming it, which is what the pass would have written
+    had it run under the phase.
+
+    01-subjects.json and 01-contradictions/ are simply not copied. A run that
+    skipped those passes and one whose outputs were never brought over are the same
+    run on disk, and their absence is the whole input this fixture exists to give
+    the seal.
+    """
+    run = phase_run_through_intake(tmp_path, number=number, kinds=kinds)
+    registered = {entry["artifact_id"] for entry in json.loads(run.manifest.read_text())["inputs"]}
+    donor = build_toy_run(tmp_path / "donor", upto="reconcile-services")
+
+    deferred_artifacts: set[str] = set()
+    deferred_claims: set[str] = set()
+    run.claims_dir.mkdir(parents=True, exist_ok=True)
+    for source in sorted(donor.claims_dir.glob("*.json")):
+        document = json.loads(source.read_text())
+        if source.stem in registered:
+            shutil.copy2(source, run.claims_dir / source.name)
+            continue
+        deferred_artifacts.add(source.stem)
+        deferred_claims |= {c["id"] for c in document.get("claims", []) if isinstance(c, dict)}
+    assert deferred_artifacts, "the donor must hold a claims file this run defers"
+
+    for attribute in (
+        "capabilities_part",
+        "outcomes_part",
+        "entities_part",
+        "goals_part",
+        "gaps_part",
+        "services_part",
+    ):
+        source = getattr(donor, attribute)
+        destination = getattr(run, attribute)
+        document = _strip_deferred_from_partial(
+            json.loads(source.read_text()),
+            artifact_ids=deferred_artifacts,
+            claim_ids=deferred_claims,
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        write_json(destination, document)
+
+    path, findings = reconcile.seal(run)
+    assert findings == [], findings
+    assert path == run.world_model
+    return run
+
+
+def test_the_world_model_records_its_own_incompleteness(tmp_path):
+    """Load-bearing rather than informational: target_brief and run-summary both read
+    this to say on the page that part of the corpus is unread. Without it a reader is
+    shown a contradiction count with no way to know it is a floor."""
+    run = phase_run_through_seal(tmp_path)
+    world = json.loads(run.world_model.read_text())
+    assert world["phase"] == {
+        "number": 1,
+        "deferred_kinds": ["trace"],
+        "deferred_count": 1,
+    }
+    assert validate.validate_stage(run, "reconcile-seal") == []
+
+
+def test_a_world_model_from_a_phaseless_run_has_no_phase_key(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    assert "phase" not in json.loads(run.world_model.read_text())
+
+
+def test_the_two_forensic_passes_can_be_skipped_entirely(tmp_path):
+    """The saving this whole design is for: subjects and contradict were 91 and 81
+    minutes and $73.40 together, and with traces deferred they would have had roughly
+    half their material.
+
+    Nothing in reconcile.seal or in layer 2 needed a change to allow this -- the seal
+    never reads 01-subjects.json and iterates an absent 01-contradictions/ to nothing,
+    and both layer-2 checkers over them return early on an absent cover. This test is
+    what turns those verified facts into a guard, so a later change that makes either
+    pass required reddens here rather than at a $70 dispatch.
+    """
+    run = phase_run_through_seal(tmp_path)
+    assert not run.subjects.is_file()
+    assert not run.contradictions_dir.exists()
+    world = json.loads(run.world_model.read_text())
+    # `contradictions` is required by world-model-0.1.json, so it must be present
+    # and empty rather than absent -- an empty list is the honest record of a sweep
+    # that did not run, and the phase block above is what says why.
+    assert world["contradictions"] == []
+    assert refs.check_subjects(run) == []
+    assert refs.check_contradiction_parts(run) == []
+    assert refs.check_readable(run) == []
+
+
+def test_layer_two_is_clean_over_a_whole_phase_run(tmp_path):
+    """The end-to-end assertion the four carries exist for: a run declared at
+    triage-slices, sealed at gate 0, intaken, and sealed again into a world model,
+    with every layer-2 checker the run has inputs for run over it at once.
+
+    check_all rather than a list of checkers, because there is no such thing as a
+    stage-scoped check-refs and a hand-picked list is exactly how a checker that
+    started reporting against deferred candidates would go unnoticed."""
+    run = phase_run_through_seal(tmp_path)
+    assert refs.check_all(run) == []
+
+
+def test_the_stripped_partials_leave_no_element_without_a_citation(tmp_path):
+    """A guard on the fixture, not on the feature. `_strip_deferred_from_partial`
+    removes citations, and if it emptied a claims list the run would be testing a
+    world model no pass could have written -- an element citing nothing. It does not,
+    because the one trace claim any toy partial cites shares its outcome class with
+    an api claim, which is the design's own measurement of what a phase-1 model
+    loses. If the toy fixture ever changes so that stops holding, this fails here
+    rather than surfacing as a puzzling finding in an unrelated test."""
+    run = phase_run_through_seal(tmp_path)
+
+    def empty_claims(node, path="") -> list[str]:
+        if isinstance(node, dict):
+            out = []
+            for key, value in node.items():
+                if key == "claims" and isinstance(value, list) and not value:
+                    out.append(path)
+                else:
+                    out.extend(empty_claims(value, f"{path}/{key}"))
+            return out
+        if isinstance(node, list):
+            return [m for i, item in enumerate(node) for m in empty_claims(item, f"{path}/{i}")]
+        return []
+
+    assert empty_claims(json.loads(run.world_model.read_text())) == []
