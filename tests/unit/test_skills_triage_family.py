@@ -1288,3 +1288,22 @@ def test_each_pass_states_its_schema_version_and_where_it_reads_run_id(pass_name
     index = body.find("run_id")
     assert index != -1, "the Output section never names run_id"
     assert source in _window_after(body, index, radius=450)
+
+
+def test_the_objective_pass_is_told_deferred_material_is_not_absent_material():
+    """rb-triage-objective rules whether the declared objective can be met at all,
+    from the corpus map alone. Under a phase that map's slices carry
+    `deferred_candidate_ids`, and a pass that read those as *missing* would either
+    declare a meetable objective unmeetable or, worse, rule it meetable on the
+    strength of material this phase will never read.
+
+    Scoped to Inputs co-occurrence rather than presence anywhere in the file, which is
+    this repo's rule: the contract block already contains the word `slices`, and
+    `phase` on its own would be satisfied by prose about anything else.
+    """
+    section = skills.section_body(_objective(), "1. Inputs").lower()
+    assert "deferred_candidate_ids" in section
+    assert "later phase" in section
+    # The action, not just the condition: a refusal or an instruction whose trigger
+    # has no stated action is decorative by this project's own rule.
+    assert "objective_review.notes" in section
