@@ -299,3 +299,85 @@ def test_a_disposition_with_an_unknown_key_still_fails(tmp_path):
     assert validate.validate_stage(
         _write(tmp_path, _triage(dispositions=dispositions)), "triage-seal"
     )
+
+
+# The disposition a deferred candidate carries, and the block that explains it.
+# Written out here rather than added to _triage()'s baseline: every other test in
+# this module reads that baseline, and a defer in it would silently change what
+# they are each measuring.
+_DEFER = {
+    "candidate_id": "cand-2",
+    "disposition": "defer",
+    "reason_code": "deferred_to_phase",
+    "reason": "trace is deferred to phase 3",
+    "authority": "policy",
+}
+_PHASE = {"number": 1, "deferred_kinds": ["trace"], "deferred_count": 68}
+
+
+def _with_a_defer(**over):
+    """The baseline record plus one defer and a well-formed phase block."""
+    payload = _triage(dispositions=[*_triage()["dispositions"], _DEFER], phase=_PHASE)
+    payload.update(over)
+    return payload
+
+
+def test_a_record_carrying_a_defer_and_a_phase_block_validates(tmp_path):
+    """The positive control the seven negatives below are measured against.
+
+    Without it each of those could be passing because the *record* is malformed
+    for some unrelated reason -- a defer, a policy authority and a phase block are
+    three new shapes at once, and a rejection proves nothing about the block if the
+    document would have been rejected anyway.
+    """
+    assert validate.validate_stage(_write(tmp_path, _with_a_defer()), "triage-seal") == []
+
+
+def test_a_record_with_no_phase_block_still_validates(tmp_path):
+    """Optional, on max_scenario_part_bytes' precedent: making it required would
+    invalidate every record already on disk. Absent means no phase was declared."""
+    payload = _with_a_defer()
+    del payload["phase"]
+    assert validate.validate_stage(_write(tmp_path, payload), "triage-seal") == []
+
+
+@pytest.mark.parametrize(
+    ("case", "block"),
+    [
+        # Held to the catalogue's own kind enum, so a declaration cannot name a
+        # kind no candidate can carry -- the failure the schema exists to stop is
+        # a --defer-kind that silently defers nothing while the run pays in full.
+        ("unknown kind", {"number": 1, "deferred_kinds": ["nope"]}),
+        # A label, minimum 1: phase 0 is nobody's phase.
+        ("number below one", {"number": 0, "deferred_kinds": ["trace"]}),
+        # minItems 1: a phase deferring nothing is what the absent block says.
+        ("no kinds at all", {"number": 1, "deferred_kinds": []}),
+        ("a kind twice", {"number": 1, "deferred_kinds": ["trace", "trace"]}),
+        ("an unknown key", {"number": 1, "deferred_kinds": ["trace"], "extra": 1}),
+        ("no number", {"deferred_kinds": ["trace"]}),
+        ("no kinds key", {"number": 1}),
+    ],
+)
+def test_a_malformed_phase_block_is_a_finding(tmp_path, case, block):
+    """Every constraint the new $def declares actually bites.
+
+    A $def whose constraints were never exercised is the same defect as an
+    unwatched predicate: `uniqueItems`, `minItems`, `minimum` and
+    `additionalProperties` each cost one line to write and none of them announces
+    itself if it is missing.
+    """
+    assert validate.validate_stage(_write(tmp_path, _with_a_defer(phase=block)), "triage-seal"), (
+        f"a phase block with {case} was wrongly accepted"
+    )
+
+
+def test_a_defer_carrying_a_declines_reason_code_is_still_layer_1_valid(tmp_path):
+    """The seam between the layers, stated so a reader does not look for this
+    check in the wrong place. `reason_code` is one field with one $ref, so layer 1
+    cannot tell a defer's half of that enum from a decline's -- which is why
+    refs.check_triage owns it (tests/unit/test_refs_triage.py). Recording the
+    permissiveness here is what stops somebody 'fixing' layer 1 by splitting the
+    $def and breaking every other $ref to it."""
+    payload = _with_a_defer()
+    payload["dispositions"][-1] = _DEFER | {"reason_code": "no_evidence_value"}
+    assert validate.validate_stage(_write(tmp_path, payload), "triage-seal") == []

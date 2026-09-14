@@ -191,6 +191,130 @@ def test_a_part_schema_resolves_its_cross_file_ref_without_network(tmp_path):
     assert validate_artifact(path, "dispositions-part") == []
 
 
+def _part_with(disposition, tmp_path):
+    """A minimal dispositions part whose one ruling is `disposition`."""
+    path = tmp_path / "dispositions-part.json"
+    write_json(path, minimal_dispositions_part(dispositions=[disposition]))
+    return path
+
+
+# A member's own ruling and the two values that are triage-seal's alone. The
+# overlay in dispositions-part-0.1.json restricts the shared $def where the part
+# schema $refs it; these three rows are that overlay measured in both directions.
+_MEMBER_RULING = {
+    "candidate_id": "aap2-api",
+    "disposition": "admit",
+    "reason": "the only surface describing the tool",
+    "authority": "triage",
+}
+_SEAL_ONLY = [
+    (
+        "a defer",
+        _MEMBER_RULING
+        | {"disposition": "defer", "reason_code": "deferred_to_phase", "reason": "phase 1 defers"},
+        "'defer' is not one of ['admit', 'decline']",
+    ),
+    ("a policy authority", _MEMBER_RULING | {"authority": "policy"}, "'policy' is not one of"),
+    ("a human authority", _MEMBER_RULING | {"authority": "human"}, "'human' is not one of"),
+]
+
+
+@pytest.mark.parametrize(
+    ("case", "disposition", "expected"), _SEAL_ONLY, ids=[row[0] for row in _SEAL_ONLY]
+)
+def test_a_dispositions_part_may_not_carry_what_only_the_seal_writes(
+    case, disposition, expected, tmp_path
+):
+    """`defer` and `authority: policy` are triage-seal's, written from the run's
+    own --defer-kind declaration for candidates no member ever saw; `human` is a
+    person's at gate 0.
+
+    Layer 1 owns this because a disposition value is shape. Without the overlay a
+    member could defer a candidate the plan does not defer: that passes
+    refs.check_disposition_parts, passes a conflict check that only sees
+    plan-declared defers, and reaches the sealed record -- dropping the input with
+    no phase recorded anywhere and no reason code, which is the invisible drop
+    rb-triage-rule exists to prevent, and worse than a decline, since a decline
+    must at least carry a code from the decline set.
+
+    The message is asserted, not merely non-emptiness: a part document is rejected
+    by plenty of unrelated constraints, and `'defer' is not one of [...]` is what
+    says the *enum* is what rejected it.
+    """
+    findings = validate_artifact(_part_with(disposition, tmp_path), "dispositions-part")
+    assert findings, f"a part carrying {case} was wrongly accepted"
+    assert any(expected in f.message for f in findings), [f.message for f in findings]
+
+
+@pytest.mark.parametrize("verdict", ["admit", "decline"])
+def test_an_ordinary_member_ruling_still_validates(verdict, tmp_path):
+    """The positive control, without which the three rows above are tautologies.
+
+    Both of a member's own verdicts, including the `reason_code` a decline carries
+    -- the overlay restricts two property *values* and must leave every other field
+    the shared $def allows exactly as it was.
+    """
+    disposition = _MEMBER_RULING | {"disposition": verdict}
+    if verdict == "decline":
+        disposition["reason_code"] = "out_of_scope"
+    assert validate_artifact(_part_with(disposition, tmp_path), "dispositions-part") == []
+
+
+def test_the_overlay_leaves_the_shared_defs_optional_fields_alone(tmp_path):
+    """`priority` lives only in the shared $def, and the overlay names neither it
+    nor `additionalProperties`.
+
+    The direction worth pinning: an overlay written as a *replacement* rather than
+    an allOf branch would reject this document, because a schema listing only
+    `disposition` and `authority` under additionalProperties: false has no room for
+    the other four fields.
+    """
+    disposition = _MEMBER_RULING | {"priority": 1}
+    assert validate_artifact(_part_with(disposition, tmp_path), "dispositions-part") == []
+
+
+def test_the_overlay_does_not_cost_the_shared_defs_additional_properties(tmp_path):
+    """The other half of that: `additionalProperties: false` still bites through
+    the allOf.
+
+    A JSON Schema `additionalProperties` sees only the properties named in *its
+    own* schema object, so an overlay adding property names in a sibling branch is
+    exactly the shape that could have widened the referenced schema's closed set
+    without anybody noticing. Measured rather than reasoned about, because the
+    reasoning goes the wrong way as often as not.
+    """
+    disposition = _MEMBER_RULING | {"unexpected_field": "surprise"}
+    findings = validate_artifact(_part_with(disposition, tmp_path), "dispositions-part")
+    assert findings, "an unknown key in a part's disposition was wrongly accepted"
+    assert any("unexpected_field" in f.message for f in findings), [f.message for f in findings]
+
+
+def test_without_the_overlay_a_deferring_part_would_be_accepted(tmp_path, monkeypatch):
+    """Evidence the overlay is load-bearing, in the module's own stand-in idiom.
+
+    Points `dispositions.items` back at the bare `$ref` it was before -- the exact
+    pre-overlay shape, not a permissive `{"type": "object"}` -- and re-runs the
+    document the first test above rejects. It passes, so that rejection really is
+    the overlay's and not something else in the part schema.
+    """
+    _copy_schemas_to(tmp_path)
+    filename = ARTIFACT_SCHEMAS["dispositions-part"]
+    schema = read_json(tmp_path / filename)
+    schema["properties"]["dispositions"]["items"] = {"$ref": "triage-0.1.json#/$defs/disposition"}
+    write_json(tmp_path / filename, schema)
+
+    deferring = dict(_SEAL_ONLY[0][1])
+    doc_path = tmp_path / "dispositions-part.json"
+    write_json(doc_path, minimal_dispositions_part(dispositions=[deferring]))
+
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path))
+    findings = validate_artifact(doc_path, "dispositions-part")
+    assert findings == [], (
+        "the pre-overlay bare $ref should have accepted a deferring part; got "
+        f"{[f.message for f in findings]}, so the overlay is not what rejects it"
+    )
+
+
 @pytest.mark.parametrize("site", REF_SITES, ids=[s["id"] for s in REF_SITES])
 def test_a_ref_site_rejects_what_its_shared_def_requires(site, tmp_path):
     """The $ref is load-bearing at every site, not merely at dispositions-part's.
