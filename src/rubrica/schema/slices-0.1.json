@@ -14,6 +14,10 @@
       "minimum": 1,
       "description": "The byte budget every slice was packed against. Echoed here (rather than only in the catalogue's policy) so a reader auditing one slice's bytes against the cap does not have to open a second file."
     },
+    "phase": {
+      "$ref": "triage-0.1.json#/$defs/phase",
+      "description": "The run's phase declaration, as `triage-slices --phase N --defer-kind KIND` declared it. This is the FIRST of the four artifacts that carry it, and the only one that carries it by declaration rather than by copy -- triage-seal, intake and reconcile-seal each read it from their predecessor. Absent when no phase was declared, which is what makes a plan for an unphased run byte-identical to one written before this field existed. deferred_count is absent here for the reason $defs/phase gives: the deferred set is enumerated per slice below, and a count beside it would be a second spelling of a length."
+    },
     "catalogue_facts": {
       "description": "Everything rb-triage-objective may know about 00-catalogue.json without opening it, so that pass's reads does not name the catalogue and its dispatch is bounded by max_candidates rather than by corpus size. request and policy are verbatim copies; the other two are derived, and refs.check_slices recomputes both from the catalogue through the same functions that wrote them.",
       "type": "object",
@@ -73,13 +77,20 @@
           "bytes": {
             "type": "integer",
             "minimum": 0,
-            "description": "Total digest bytes of this slice's candidates. refs.check_slices recomputes this from the shard and checks it matches, so a slice cannot silently drift from its own header."
+            "description": "Total digest bytes of the candidates this slice's SHARD carries -- which is the slice's own candidates minus any in deferred_candidate_ids, since a deferred candidate is subtracted from the shard rather than from the partition. refs.check_slices recomputes this from the shard and checks it matches, so a slice cannot silently drift from its own header, and it is the dispatch's actual read cost, which is what cap_bytes is a cap on. Zero for a fully deferred slice, which has no shard at all."
           },
           "candidate_ids": {
             "type": "array",
             "minItems": 1,
             "items": {"$ref": "triage-0.1.json#/$defs/id"},
             "description": "Every candidate this slice owns. A slice with no candidates would have nothing for a dispositions-part member to rule on, so this floor mirrors the outer slices array's."
+          },
+          "deferred_candidate_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"$ref": "triage-0.1.json#/$defs/id"},
+            "description": "The subset of this slice's candidate_ids that the run's declared phase defers, omitted entirely when it is empty. These stay in candidate_ids -- the partition is total and phase-independent, so slice boundaries mean the same thing in phase 1 and phase 3 -- but are absent from the shard, so no rb-triage-rule member ever sees one and no prompt is asked to apply the policy. A slice whose whole candidate_ids set appears here is fully deferred: no shard is written for it and no disposition part is expected, which is where three of eleven dispatches went on the corpus this was measured against. triage-seal synthesises the defer disposition for every id named here, so the candidate is still ruled on the record."
           },
           "provenance": {
             "type": "array",

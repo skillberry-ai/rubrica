@@ -88,7 +88,12 @@ from rubrica.review import DEFAULT_SAMPLE_SIZE, sample_run
 from rubrica.smoke import load_agents, preflight, smoke_run
 from rubrica.stability import diff_runs
 from rubrica.utilisation import claim_utilisation
-from rubrica.validate import UnknownStage, manifest_stage_efforts, validate_stage
+from rubrica.validate import (
+    UnknownStage,
+    catalogue_candidate_kinds,
+    manifest_stage_efforts,
+    validate_stage,
+)
 
 CLEAN, FINDINGS, USAGE = 0, 1, 2
 
@@ -231,6 +236,28 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_slices = parsers["triage-slices"]
     p_slices.add_argument("--run", required=True)
+    # Declared here rather than on `intake`, where the design that motivated this
+    # first put it: paths.STAGES puts triage-slices at index 1 and intake at index
+    # 6, so manifest.json does not exist yet and a consumer cannot read a file five
+    # stages downstream. This is the first stage that needs the declaration, and
+    # putting it here also means there is exactly one declaration site to disagree
+    # with itself -- the block is carried verbatim from the plan through
+    # 00-triage.json and manifest.json to the world model.
+    #
+    # Re-running this command with a different --defer-kind is how a human at gate
+    # 0 reverses the decision, which is affordable precisely because triage-slices
+    # is code.
+    p_slices.add_argument("--phase", type=int, default=None, metavar="N")
+    # choices from the schema, not a literal: a --defer-kind naming a kind no
+    # candidate can carry would defer nothing and still report a phase, so the run
+    # would cost full price and claim a saving.
+    p_slices.add_argument(
+        "--defer-kind",
+        action="append",
+        default=[],
+        metavar="KIND",
+        choices=list(catalogue_candidate_kinds()),
+    )
 
     p_triage_seal = parsers["triage-seal"]
     p_triage_seal.add_argument("--run", required=True)
@@ -603,9 +630,37 @@ def main(argv: list[str] | None = None) -> int:
             # stdout before, from an exit path that assumed a case it did
             # not have.
             run = _run_dir(args.run)
-            _, plan = slices.write_slices(run)
+            # A usage error, exit 2, not a finding: argv is where this came from,
+            # and no stage re-dispatch fixes a flag. argparse cannot express
+            # "these two are required together", so it is checked here.
+            if (args.phase is None) != (not args.defer_kind):
+                raise UsageError(
+                    "--phase and --defer-kind are declared together or not at all: a phase "
+                    "deferring nothing pays full price and reports a saving, and a deferred "
+                    "kind with no phase number has no phase to be deferred to"
+                )
+            phase_block = None
+            if args.phase is not None:
+                # Sorted and de-duplicated so two invocations naming the same kinds
+                # in different order produce byte-identical plans -- the same
+                # determinism argument reconcile-seal and emit rest on.
+                phase_block = {
+                    "number": args.phase,
+                    "deferred_kinds": sorted(set(args.defer_kind)),
+                }
+            _, plan = slices.write_slices(run, phase_block=phase_block)
             for s in plan:
-                size = run.slice_shard(s.id).stat().st_size
+                shard_path = run.slice_shard(s.id)
+                # A fully deferred slice has no shard, so there is no size to
+                # stat: it is reported with its candidate count and a dash where
+                # the bytes go, rather than skipped. Skipping it would make the
+                # eight dispatches an operator sees on stdout indistinguishable
+                # from a plan that only ever had eight slices, which is precisely
+                # the saving they are reading this output to confirm -- and the
+                # bare .stat() this replaces raised FileNotFoundError, which
+                # cli.py's catch-all below turns into an exit-1 [internal] finding
+                # blaming a stage that did exactly what it was told.
+                size = shard_path.stat().st_size if shard_path.is_file() else "-"
                 print(f"{s.id}  {size}  {len(s.candidate_ids)}  {s.label}")
             return CLEAN
 

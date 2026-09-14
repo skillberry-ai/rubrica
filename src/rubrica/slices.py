@@ -44,6 +44,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from rubrica import phase as phase_mod
 from rubrica.artifacts import canonical_bytes, read_json, write_json
 from rubrica.errors import UsageError
 from rubrica.paths import RunPaths, list_json
@@ -610,7 +611,12 @@ def plan_slices(candidates: list[dict], *, cap: int = DEFAULT_SLICE_BYTES) -> li
     return plan
 
 
-def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path, list[Slice]]:
+def write_slices(
+    run: RunPaths,
+    *,
+    cap: int = DEFAULT_SLICE_BYTES,
+    phase_block: dict | None = None,
+) -> tuple[Path, list[Slice]]:
     """Partition the run's catalogue into slices and write the plan plus one shard each.
 
     Several failure modes are refused before planning even starts, all exit 2
@@ -663,6 +669,19 @@ def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path
     Every shard the new plan does not name is deleted, so a slice id that
     existed under the old plan but not the new one does not linger as a
     stale, unreferenced file a later stage could mistakenly read.
+
+    A declared `phase_block` defers every candidate of its `deferred_kinds`, and
+    the subtraction happens *after* planning rather than before it, deliberately.
+    The partition is phase-independent: slice s04 holds the same candidates
+    whether or not traces are deferred, so a human comparing a phase-1 plan
+    against a phase-3 one is comparing the same boundaries, and the slice ids
+    mean one thing rather than two. What the phase changes is the *shards* -- a
+    deferred candidate is absent from the one it would have been dispatched in,
+    so no rb-triage-rule member ever sees it and no prompt is asked to apply a
+    kind-level policy. A slice whose every candidate is deferred gets no shard at
+    all, which is where three of the measured corpus's eleven dispatches went;
+    the stale-shard removal the paragraph above describes is what deletes one
+    left over from a plan minted before the phase was declared.
     """
     catalogue = read_json(run.catalogue)
     # The container door, and the same one seal._payload_keys' docstring
@@ -734,6 +753,10 @@ def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path
     plan = plan_slices(candidates, cap=cap)
 
     candidates_by_id = {c["candidate_id"]: c for c in candidates}
+    # Resolved once from the full catalogue, not per slice: phase.deferred_candidate_ids
+    # is the one place a kind becomes a candidate set, and a second resolution here
+    # would be a second answer to the question the whole module is downstream of.
+    deferred = phase_mod.deferred_candidate_ids(candidates, phase_block)
     document = {
         "schema_version": "0.1",
         "run_id": catalogue["run_id"],
@@ -744,18 +767,43 @@ def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path
                 "id": s.id,
                 "label": s.label,
                 "groups": list(s.groups),
-                "bytes": sum(row_bytes(candidates_by_id[cid]) for cid in s.candidate_ids),
+                "bytes": sum(
+                    row_bytes(candidates_by_id[cid])
+                    for cid in s.candidate_ids
+                    if cid not in deferred
+                ),
                 "candidate_ids": list(s.candidate_ids),
                 "provenance": [dict(p) for p in s.provenance],
+                # Omitted rather than written empty, so a plan for a run that
+                # declared no phase is byte-identical to one written before this
+                # field existed -- the same rule the phase block itself follows.
+                **(
+                    {"deferred_candidate_ids": [c for c in s.candidate_ids if c in deferred]}
+                    if any(c in deferred for c in s.candidate_ids)
+                    else {}
+                ),
             }
             for s in plan
         ],
     }
+    # Beside catalogue_facts rather than folded into it: catalogue_facts is what
+    # rb-triage-objective may know about the catalogue, and the phase is a fact
+    # about the *run*, declared on argv rather than derived from any artifact.
+    if phase_block is not None:
+        document["phase"] = phase_block
     write_json(run.slices, document)
 
     run.slices_dir.mkdir(parents=True, exist_ok=True)
     written_names: set[str] = set()
     for s in plan:
+        kept = [cid for cid in s.candidate_ids if cid not in deferred]
+        # A fully deferred slice gets no shard: there is nothing for a member to
+        # rule, and writing an empty one would put a dispatch on the driver's list
+        # whose whole output would be an empty dispositions array -- which
+        # dispositions-part-0.1.json's minItems: 1 refuses anyway, so the member
+        # could not even produce a valid part.
+        if not kept:
+            continue
         shard = {
             "schema_version": "0.1",
             "run_id": catalogue["run_id"],
@@ -763,7 +811,7 @@ def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path
             "request": catalogue["request"],
             "policy": catalogue["policy"],
             "provenance": [dict(p) for p in s.provenance],
-            "candidates": [candidates_by_id[cid] for cid in s.candidate_ids],
+            "candidates": [candidates_by_id[cid] for cid in kept],
         }
         shard_path = run.slice_shard(s.id)
         write_json(shard_path, shard)
