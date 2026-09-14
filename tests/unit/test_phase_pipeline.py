@@ -607,3 +607,31 @@ def test_the_stripped_partials_leave_no_element_without_a_citation(tmp_path):
         return []
 
     assert empty_claims(json.loads(run.world_model.read_text())) == []
+
+
+def test_the_cli_counts_the_dispatch_not_the_slice_on_a_partly_deferred_slice(tmp_path, capsys):
+    """Both numbers on a row describe the dispatch. Measured before this was fixed: on
+    the toy corpus under `--defer-kind trace` the row read "s01  5106  3" -- the
+    shard's byte size beside the slice's own candidate total -- for a shard carrying
+    two candidates, which is two populations in one row.
+
+    The phaseless line is asserted unchanged in the same test, because "only when they
+    differ" is the whole of the rendering rule, and a test watching one half of it
+    would not notice the other half regressing."""
+    run = build_toy_run(tmp_path, upto="triage-slices")
+    assert cli.main(["triage-slices", "--run", str(run.root)]) == 0
+    plain = capsys.readouterr().out
+    # At the default cap the toy's three candidates share s01, so the phaseless row
+    # carries the bare total.
+    assert plain.split()[2] == "3"
+    assert " of " not in plain
+
+    assert (
+        cli.main(["triage-slices", "--run", str(run.root), "--phase", "1", "--defer-kind", "trace"])
+        == 0
+    )
+    phased = capsys.readouterr().out
+    # One deferred of three, so the row says what the dispatch actually carries.
+    assert "2 of 3" in phased
+    shard = json.loads(run.slice_shard("s01").read_text())
+    assert len(shard["candidates"]) == 2

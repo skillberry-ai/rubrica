@@ -648,7 +648,15 @@ def main(argv: list[str] | None = None) -> int:
                     "number": args.phase,
                     "deferred_kinds": sorted(set(args.defer_kind)),
                 }
-            _, plan = slices.write_slices(run, phase_block=phase_block)
+            plan_path, plan = slices.write_slices(run, phase_block=phase_block)
+            # The plan's own record of what it subtracted from each shard, read back
+            # rather than re-resolved from the catalogue and the phase block: the
+            # writer is the authority on what it actually wrote, which is the same
+            # discipline refs.check_slices' clauses follow.
+            deferred_counts: dict[str, int] = {}
+            if phase_block is not None:
+                for entry in read_json(plan_path).get("slices", []):
+                    deferred_counts[entry["id"]] = len(entry.get("deferred_candidate_ids", ()))
             for s in plan:
                 shard_path = run.slice_shard(s.id)
                 # A fully deferred slice has no shard, so there is no size to
@@ -661,7 +669,16 @@ def main(argv: list[str] | None = None) -> int:
                 # cli.py's catch-all below turns into an exit-1 [internal] finding
                 # blaming a stage that did exactly what it was told.
                 size = shard_path.stat().st_size if shard_path.is_file() else "-"
-                print(f"{s.id}  {size}  {len(s.candidate_ids)}  {s.label}")
+                # The count describes the dispatch, exactly as the size beside it
+                # does. The slice's own total there would put two populations in one
+                # row: measured on the toy corpus under `--defer-kind trace`, the row
+                # read "s01 5106 3" for a shard carrying two candidates. Rendered as
+                # "2 of 3" only when they differ, so a run that declared no phase
+                # prints byte-identically to what it always has.
+                total = len(s.candidate_ids)
+                deferred_here = deferred_counts.get(s.id, 0)
+                count = f"{total - deferred_here} of {total}" if deferred_here else f"{total}"
+                print(f"{s.id}  {size}  {count}  {s.label}")
             return CLEAN
 
         if args.command == "triage-seal":
