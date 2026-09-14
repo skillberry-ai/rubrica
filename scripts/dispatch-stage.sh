@@ -20,6 +20,10 @@
 # Environment:
 #   RUBRICA_LAB          scratch dir for settings and transcripts
 #                        (default ${TMPDIR:-/tmp}/rubrica-lab)
+#   RUBRICA_CC_HOME      parent of the dispatched harness's own CLAUDE_CONFIG_DIR
+#                        (default a sibling of RUBRICA_LAB). It must NOT be inside
+#                        the lab: the lab is a denied path, and a config dir under
+#                        it is the containment hole this default exists to avoid.
 #   RUBRICA_MODEL        model for the dispatch (default sonnet)
 #   RUBRICA_EFFORT       effort for the dispatch (default medium)
 #   RUBRICA_BUDGET       hard dollar ceiling for the dispatch. UNSET BY DEFAULT --
@@ -93,8 +97,119 @@ if [ -n "$SLICE" ]; then
 fi
 
 mkdir -p "$LAB/transcripts"
-export CLAUDE_CONFIG_DIR="$LAB/cc-config"
+# Absolute from here on, because the lab is now a *denied* path in both settings
+# scopes and a deny rule is built by prepending "/" to a path that already starts
+# with one. A relative RUBRICA_LAB would emit `Read(//lab)` and deny nothing.
+LAB=$(cd "$LAB" && pwd)
+
+# One name for this attempt, carried by both records it leaves behind: the
+# transcript, and the harness's own config dir below. Chosen here rather than
+# beside the dispatch so the two cannot be numbered independently and disagree.
+#
+# Never overwrite a prior attempt. MEASURED cost of the previous behaviour:
+# propose round 2's transcript overwrote round 1's on run-20260825-094033,
+# destroying the only per-attempt record of the failure that motivated the
+# bounded-batch change -- and for propose the round is exactly what a reader needs
+# to tell two attempts apart. The script does not know the round and does not need
+# to: "do not destroy the prior attempt" is the whole requirement. The first
+# attempt keeps the unsuffixed name, because that is the path the closing summary
+# prints and audit-reads.sh is pointed at.
+DISPATCH_NAME="$STAGE${SLICE:+-$SLICE}"
+if [ -e "$LAB/transcripts/$DISPATCH_NAME.jsonl" ]; then
+  n=2
+  while [ -e "$LAB/transcripts/$DISPATCH_NAME-$n.jsonl" ]; do
+    n=$((n + 1))
+  done
+  DISPATCH_NAME="$DISPATCH_NAME-$n"
+fi
+TRANSCRIPT="$LAB/transcripts/$DISPATCH_NAME.jsonl"
+
+# ---------------------------------------------------------------------------
+# The harness's own scratch state is an answer key, and it used to live in the lab.
+#
+# MEASURED on run-20260911-120324 (parsec, 149 inputs): an `rb-reconcile-entities`
+# dispatch read `cc-config/projects/.../tool-results/bp3kds71p.txt` -- Claude
+# Code's own tool-result spool -- and the read SUCCEEDED. What came back was a
+# sibling pass's judgment: an `rb-reconcile-contradict` resolution with its
+# rationale. Not adversarial and not prompted; the dispatch was hunting for its own
+# earlier `jq` output after a compaction and followed the spool path.
+#
+# CLAUDE_CONFIG_DIR was "$LAB/cc-config" -- one directory shared by every dispatch
+# of the lab -- so 220 sessions' spools and transcripts accumulated inside the one
+# directory each dispatch's own harness must be able to read: 121 MB, including 67
+# `rb-triage-audit` and 217 `rb-extract` sessions. That defeats the boundary
+# property structurally rather than incidentally, and gate 0 worst of all: its
+# argument is that the party which makes a judgment must not also ratify it, and a
+# later stage reading the audit's session is a route straight around it.
+#
+# So the directory is per attempt and outside the lab. Per attempt rather than per
+# stage for a reason the exit-code contract owns: a repair re-dispatch is handed
+# its gate's findings verbatim and nothing else, and one that could read attempt
+# one's whole session would have the reasoning behind them too.
+#
+# The default is a *sibling* of the lab, and deliberately not "$LAB-cc-config":
+# `sandbox.filesystem.denyRead` matching is prefix-shaped, this project has
+# measured that layer twice with opposite results, and a config dir spelled as the
+# denied lab path plus a suffix would be a bet on how that matching resolves.
+#
+# NOT established, and the reason the deny lists below enumerate siblings rather
+# than denying this parent wholesale: whether a deny covering a dispatch's own
+# config dir would break the dispatch or be overridden by the harness's own grant.
+# Claude Code writes there while `sandbox.filesystem.allowWrite` lists only the
+# run, so it evidently grants itself that access. Neither outcome is measured, so
+# nothing here depends on which it is.
+# ---------------------------------------------------------------------------
+CC_HOME=${RUBRICA_CC_HOME:-$(dirname "$LAB")/cc-config-$(basename "$LAB")}
+mkdir -p "$CC_HOME"
+CC_HOME=$(cd "$CC_HOME" && pwd)
+
+# Three refusals, all `2`, because each describes a misconfigured run rather than a
+# stage defect -- no prompt re-dispatch fixes a lab pointed at the wrong place.
+#
+# The first two put back exactly what this block removes. The third is the one that
+# cost a wrong commit to learn: a denied path inside the run is invisible to the
+# stage's own `check-refs` too, so it does not fail the dispatch, it makes the gate
+# report findings about artifacts it cannot see.
+case "$CC_HOME/" in "$LAB"/*)
+  echo "RUBRICA_CC_HOME is inside the lab: $CC_HOME" >&2
+  echo "  the lab is denied to the dispatch, so its own config dir cannot live there" >&2
+  exit 2 ;;
+esac
+case "$LAB/" in "$CC_HOME"/*)
+  echo "RUBRICA_LAB is inside RUBRICA_CC_HOME: $LAB" >&2
+  echo "  denying the lab would then cover the dispatch's own config dir" >&2
+  exit 2 ;;
+esac
+for scratch in "$LAB" "$CC_HOME"; do
+  case "$scratch/" in "$RUN"/*)
+    echo "scratch directory is inside the run: $scratch" >&2
+    echo "  it is denied to the dispatch, and a denied path inside the run makes" >&2
+    echo "  the stage's own check-refs report findings about what it cannot read" >&2
+    exit 2 ;;
+  esac
+done
+
+export CLAUDE_CONFIG_DIR="$CC_HOME/$DISPATCH_NAME"
 mkdir -p "$CLAUDE_CONFIG_DIR"
+
+# The lab, every *other* attempt's config dir, and the developer's own ~/.claude.
+#
+# Enumerated one at a time, not denied by their parent, for the reason the sibling
+# `rb-*` skills are: `permissions.deny` beats `permissions.allow` unconditionally,
+# so a deny of $CC_HOME could not have this dispatch's own directory re-allowed
+# inside it. Note the residual, which enumeration cannot cover: a sibling created
+# *after* this list is built -- a parallel fan-out member started later -- is not
+# in it. Narrower than a shared directory by 219 sessions on the run above, and not
+# zero.
+#
+# ~/.claude is not part of that leak and is the same class of exposure: it holds
+# the global CLAUDE.md this script's header calls the answer key, and the auth
+# token read out of it above. No skill's `reads` names anything in there.
+HARNESS_DENY=("$LAB" "$HOME/.claude")
+for d in "$CC_HOME"/*; do
+  [ -e "$d" ] || continue                        # no nullglob; an empty CC_HOME leaves the pattern
+  [ "$d" = "$CLAUDE_CONFIG_DIR" ] || HARNESS_DENY+=("$d")
+done
 
 # Auth. An isolated CLAUDE_CONFIG_DIR means the developer's OAuth session is not
 # in scope, so the dispatch needs credentials from the environment. If they are
@@ -166,7 +281,13 @@ export PATH="$REPO/.venv/bin:$PATH"
 export CLAUDE_CODE_MAX_OUTPUT_TOKENS="${CLAUDE_CODE_MAX_OUTPUT_TOKENS:-64000}"
 
 # ---------------------------------------------------------------------------
-# Two enforcement layers, deliberately in two different settings scopes.
+# Two enforcement layers, deliberately in two different settings scopes -- and on
+# any pod that cannot mount `proc` under `bwrap`, ONE, because the probe below
+# drops the sandbox block and RUBRICA_NO_SANDBOX=1 is the normal setting there.
+# So `permissions` has to be correct *alone*: read every deny list here as the
+# whole of the enforcement, not as half of it. The containment hole fixed above
+# was invisible for exactly that reason -- the design described two layers while
+# the run that leaked had one.
 #
 # MEASURED, both directions, on Claude Code 2.1.227: a `sandbox` block in the
 # file passed to --settings silently stops that same file's permissions.deny
@@ -318,13 +439,14 @@ if [ -n "$SANDBOX_OFF_REASON" ]; then
 else
   jq -n --arg repo "$REPO" --arg run "$RUN" --arg skilldir "$SKILL_DIR" \
     --argjson rundeny "$(printf '%s\n' "${RUN_DENY[@]}" | jq -R . | jq -s .)" \
+    --argjson harnessdeny "$(printf '%s\n' "${HARNESS_DENY[@]}" | jq -R . | jq -s .)" \
     '{sandbox: {
         enabled: true,
         autoAllowBashIfSandboxed: true,
         failIfUnavailable: true,
         filesystem: {
           allowRead: [$repo, $run, $skilldir],
-          denyRead: ([$repo + "/docs", $repo + "/tests", $repo + "/src/rubrica/skills"] + $rundeny),
+          denyRead: ([$repo + "/docs", $repo + "/tests", $repo + "/src/rubrica/skills"] + $rundeny + $harnessdeny),
           allowWrite: [$run]
         },
         network: { allowedDomains: [] }
@@ -340,7 +462,8 @@ fi
 # -- the siblings get enumerated one at a time. sandbox.filesystem uses the
 # opposite rule (more specific path wins), which is why the two lists above and
 # below are built differently from the same intent.
-DENY=("$REPO/docs" "$REPO/tests" "$REPO/CLAUDE.md" "$REPO/README.md" "${RUN_DENY[@]}")
+DENY=("$REPO/docs" "$REPO/tests" "$REPO/CLAUDE.md" "$REPO/README.md" "${RUN_DENY[@]}"
+      "${HARNESS_DENY[@]}")
 
 # WebSearch is denied for a reason unrelated to the answer key, and it is not a
 # read path: MEASURED 2026-08-20, a tool named exactly `WebSearch` in the request
@@ -599,23 +722,6 @@ if [ "${RUBRICA_PRINT_SETTINGS:-0}" = "1" ]; then
   echo "$CLAUDE_CONFIG_DIR/settings.json"
   echo "$PROMPT_FILE"
   exit 0
-fi
-
-TRANSCRIPT="$LAB/transcripts/$STAGE${SLICE:+-$SLICE}.jsonl"
-# Never overwrite a prior attempt. MEASURED cost of the previous behaviour:
-# propose round 2's transcript overwrote round 1's on run-20260825-094033,
-# destroying the only per-attempt record of the failure that motivated the
-# bounded-batch change -- and for propose the round is exactly what a reader needs
-# to tell two attempts apart. The script does not know the round and does not need
-# to: "do not destroy the prior attempt" is the whole requirement. The first
-# attempt keeps the unsuffixed name, because that is the path the closing summary
-# prints and audit-reads.sh is pointed at.
-if [ -e "$TRANSCRIPT" ]; then
-  n=2
-  while [ -e "$LAB/transcripts/$STAGE${SLICE:+-$SLICE}-$n.jsonl" ]; do
-    n=$((n + 1))
-  done
-  TRANSCRIPT="$LAB/transcripts/$STAGE${SLICE:+-$SLICE}-$n.jsonl"
 fi
 
 # Stop here with the transcript path chosen and nothing dispatched, for the reason

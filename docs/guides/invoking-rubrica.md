@@ -246,7 +246,8 @@ uv run rubrica check-refs --run "$RUN"                         # then layer 2
 
 | Variable | Default | What it does |
 |---|---|---|
-| `RUBRICA_LAB` | `${TMPDIR:-/tmp}/rubrica-lab` | scratch dir for the settings files, the composed prompt, the sandbox probe log and the transcripts |
+| `RUBRICA_LAB` | `${TMPDIR:-/tmp}/rubrica-lab` | scratch dir for the settings files, the composed prompt, the sandbox probe log and the transcripts. **Denied to the dispatch in both settings scopes**, so nothing a stage reads may live here |
+| `RUBRICA_CC_HOME` | a sibling of `RUBRICA_LAB` | parent of the dispatched harness's own `CLAUDE_CONFIG_DIR`. It must not be inside the lab, and the script exits `2` if it is (§6) |
 | `RUBRICA_MODEL` | `sonnet` | the dispatch's model |
 | `RUBRICA_EFFORT` | `medium` | the dispatch's effort |
 | `RUBRICA_BUDGET` | unset — no ceiling at all | `--max-budget-usd`; see the cost part below for why it has no default |
@@ -423,7 +424,7 @@ outside the scratch directory:
 
 | Mechanism | What it removes |
 |---|---|
-| `CLAUDE_CONFIG_DIR` | own history, transcripts, plugin set |
+| `CLAUDE_CONFIG_DIR` | own history, transcripts, plugin set — and, since it is one directory per dispatch *attempt* outside the lab, every other dispatch's session too (§6) |
 | `--safe-mode` | `CLAUDE.md`, plugins, hooks, custom agents and skills |
 | `--settings` with `permissions.deny` | `docs/`, `tests/`, `CLAUDE.md`, `README.md`, sibling skills |
 | `--settings` with a contract-derived `allow` | every path in `$RUN` that is not one of this stage's declared `writes` |
@@ -456,6 +457,30 @@ collapsed to the run root is refused outright rather than granted.
 
 `--safe-mode` does not remove the *built-in* skills, so the script also passes
 `--disable-slash-commands`.
+
+**The harness's own scratch state is an answer key too, and it used to sit where a
+dispatch could read it.** Measured on `run-20260911-120324`: an
+`rb-reconcile-entities` dispatch read Claude Code's tool-result spool under
+`cc-config/projects/…/tool-results/` and the read succeeded, returning a sibling
+`rb-reconcile-contradict` pass's resolution with its rationale. `CLAUDE_CONFIG_DIR`
+was `$RUBRICA_LAB/cc-config` — one directory shared by every dispatch of the lab —
+so 220 sessions accumulated inside the one directory each dispatch's own harness
+has to be able to read, and no rule anywhere named the lab. Two changes close it,
+and both are needed: the config dir is now one directory **per dispatch attempt**,
+outside the lab, so a dispatch's own harness state holds only its own session; and
+the lab is denied in both settings scopes, which is what covers
+`$RUBRICA_LAB/transcripts/*.jsonl` — the script's own stream-JSON of every prior
+stage, which moving the config dir alone would leave exposed. Sibling attempts'
+config dirs are denied one at a time rather than by their parent, for the reason
+the sibling skills are: `permissions.deny` beats `allow` unconditionally, so a deny
+covering the parent could not re-allow the dispatch's own directory inside it.
+
+Two consequences worth knowing. A sibling config dir created *after* a dispatch's
+settings are written — a parallel fan-out member started later — is not in that
+list, so the enumeration is narrower than the old shared directory rather than
+airtight. And a separate `RUBRICA_LAB` per parallel member is no longer needed to
+avoid clobbering: the settings file, the prompt, the transcript and now the config
+dir are all named per dispatch, so members of one fan-out can share a lab.
 
 **One entry in that deny list is not about the answer key at all.** `WebSearch`
 is denied because of the gateway, not the fixture: measured 2026-08-20, a tool
