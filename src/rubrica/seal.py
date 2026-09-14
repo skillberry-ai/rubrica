@@ -89,6 +89,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from rubrica import phase
 from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths
@@ -371,6 +372,30 @@ def seal(run: RunPaths) -> tuple[Path | None, list[Finding]]:
     slice_candidates: dict[str, set[str]] = {
         s["id"]: set(s["candidate_ids"]) for s in documents["slices"]["slices"]
     }
+    # The run's phase declaration and the candidates it defers, out of the same
+    # `documents["slices"]` the population above is keyed off. Read from there
+    # rather than through a fresh read of 00-slices.json, because that would be a
+    # second door onto one artifact: the read at the top of this function already
+    # reports a malformed plan as a finding through the identical door every other
+    # part uses, and a second read raising UsageError would turn that finding into
+    # an exit 2 -- a stage defect surfacing as the one code the orchestrator cannot
+    # retry.
+    #
+    # A plan with no phase block defers nothing here even if some slice carries
+    # deferred_candidate_ids anyway. Layer 1 cannot catch that combination (both
+    # fields are optional), and reading the ids alone as authority to rule would let
+    # a hand-edited plan mint its own dispositions. Left out of `deferred`, those
+    # candidates fall through to item 2 as unruled, which is a finding a reader can
+    # act on rather than a ruling nobody made.
+    phase_block = phase.read(documents["slices"])
+    deferred: set[str] = set()
+    if phase_block is not None:
+        deferred = {
+            cid
+            for entry in documents["slices"]["slices"]
+            for cid in (entry.get("deferred_candidate_ids") or [])
+            if isinstance(cid, str)
+        }
     for slice_id, part in parts.items():
         allowed = slice_candidates.get(slice_id, set())
         for entry in part["dispositions"]:
@@ -405,6 +430,13 @@ def seal(run: RunPaths) -> tuple[Path | None, list[Finding]]:
 
     population = {cid for candidates in slice_candidates.values() for cid in candidates}
     population |= {a["candidate_id"] for a in documents["adoptions"]["adoptions"]}
+    # A deferred candidate is subtracted from the population no part is expected to
+    # cover, exactly as refs.check_disposition_parts subtracts it from its own
+    # checkable set: the plan declares that no member was dispatched for it, so
+    # "has no disposition in any staged part" is a restatement of the declaration
+    # rather than a defect. Its ruling is synthesised below, after every check that
+    # must see the un-synthesised set has run.
+    population -= deferred
 
     for cid in sorted(population - set(rulings)):
         findings.append(
@@ -413,6 +445,29 @@ def seal(run: RunPaths) -> tuple[Path | None, list[Finding]]:
                 "seal",
                 "",
                 f"candidate {cid!r} has no disposition in any staged part or adoption",
+            )
+        )
+    # A candidate the plan defers that some staged part or adoption also ruled. The
+    # plan says no member was dispatched for it; a part says one was. Refused rather
+    # than resolved by precedence, because either precedence discards a real ruling
+    # silently: preferring the part would ignore a declared deferral and admit an
+    # input the operator excluded, and preferring the plan would throw away a
+    # human's adoption. The finding names the plan, which is the artifact making the
+    # claim that nothing ruled these.
+    #
+    # The realistic way this arises is a plan re-minted under a phase over parts
+    # written before it -- which is exactly what a human reversing a gate-0 decision
+    # does, so the message says what to do about it. Reported here, ahead of the
+    # duplicate check, so one conflict is one finding rather than two.
+    for cid in sorted(deferred & set(rulings)):
+        findings.append(
+            Finding(
+                run.slices,
+                "seal",
+                "",
+                f"candidate {cid!r} is deferred by the plan but also ruled by a staged part or "
+                f"adoption; re-dispatch the slice whose shard changed, or re-mint the plan "
+                f"without deferring {cid!r}",
             )
         )
     for cid in sorted(cid for cid, entries in rulings.items() if len(entries) > 1):
@@ -484,6 +539,55 @@ def seal(run: RunPaths) -> tuple[Path | None, list[Finding]]:
     if findings:
         return None, findings
 
+    # The deferred candidates' own rulings, synthesised from the plan because no
+    # member ever saw them. Gate 0's whole property is that every candidate is a
+    # decision on the record -- a human can only overturn a decision they can see --
+    # and a deferred candidate is the one the property matters most for, since
+    # nothing downstream of intake reads the corpus again.
+    #
+    # Placed after every check above deliberately. Item 4's "no admit anywhere" must
+    # see the un-synthesised set: a run whose only non-declines are defers has
+    # admitted nothing, and folding these in first would hand that check an empty
+    # admitted set dressed as a populated one. A plain assignment is safe here for
+    # the same reason -- a candidate both deferred and ruled by a part was reported
+    # above, and a non-empty findings list has already returned.
+    #
+    # The reason cites the phase and the kinds the phase defers, and it is built
+    # from the phase block rather than from the candidate's own `kind`, which would
+    # mean reading 00-catalogue.json -- a sixth artifact this seal does not
+    # otherwise need, for a fact that is not the ground of the decision anyway.
+    # The deferral is kind-level policy: what a human at gate 0 overturns is the
+    # declaration, so the declaration is what the reason names.
+    #
+    # No `priority`. The design this implements expected a deferred candidate to
+    # keep the one its member assigned, but under shard subtraction no member ranked
+    # it, and inventing a rank in code would be a reasoned number presented as an
+    # observed one. `priority` is optional in triage-0.1.json and _member_priority
+    # sorts an absent one at the lowest-rank sentinel, so nothing has to tolerate
+    # this specially. Phase 3 re-slices the deferred population and dispatches
+    # rb-triage-rule over it, which is the pass whose judgment ought to rank inputs.
+    if deferred:
+        number = phase_block["number"] if phase_block else None
+        kinds = phase.deferred_kinds(phase_block)
+        kinds_text = ", ".join(repr(k) for k in sorted(kinds)) or "no kind it records"
+        for cid in sorted(deferred):
+            rulings[cid] = [
+                (
+                    run.slices,
+                    {
+                        "candidate_id": cid,
+                        "disposition": phase.DEFER,
+                        "reason_code": phase.DEFER_REASON_CODE,
+                        "reason": (
+                            f"phase {number} defers {kinds_text}: this input has evidence value "
+                            "this phase cannot spend, so it is held for a later phase rather "
+                            "than declined"
+                        ),
+                        "authority": phase.POLICY_AUTHORITY,
+                    },
+                )
+            ]
+
     # -- assembly: every candidate below has exactly one ruling (item 2's
     # dupe/missing checks already returned otherwise), so entries[0] is safe.
     surfaces = documents["objective"]["objective_review"]["surfaces"]
@@ -539,5 +643,10 @@ def seal(run: RunPaths) -> tuple[Path | None, list[Finding]]:
         "deficiencies": deficiencies,
         "projections": projections,
     }
+    # Carried verbatim, never recomputed. The plan is where the operator declared it
+    # and this record is what intake reads, so a second derivation here would be a
+    # second answer to a question gate 0 ratifies from the plan.
+    if phase_block is not None:
+        triage_record["phase"] = phase_block
     write_json(run.triage, triage_record)
     return run.triage, []

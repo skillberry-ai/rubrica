@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 
-from rubrica import cli, refs, slices, validate
+from rubrica import cli, phase, refs, seal, slices, validate
 from rubrica.artifacts import write_json
 from rubrica.paths import RunPaths
 from tests.toy import build_toy_run
@@ -230,3 +230,128 @@ def test_layer_one_accepts_a_phase_plan_and_holds_deferred_kinds_to_the_catalogu
     slices.write_slices(run, phase_block={"number": 1, "deferred_kinds": ["traces"]})
     messages = [f.message for f in validate.validate_stage(run, "triage-slices")]
     assert any("'traces' is not one of" in m for m in messages)
+
+
+def _phase_run_ready_to_seal(tmp_path, *, kinds=("trace",)):
+    """A staged run re-sliced under a phase, with the deferred candidate's ruling
+    dropped from the part.
+
+    Both halves are what a real phase run produces and neither is a convenience:
+    the plan is re-minted under the phase, and the member dispatched against the
+    subtracted shard never saw the deferred candidate, so its part cannot rule it.
+    Leaving that ruling in place is a different fixture entirely -- it is the
+    conflict `test_a_part_that_rules_a_deferred_candidate...` below asserts on.
+
+    Staged through `triage-audit` rather than `triage-rule`, because 00-audit.json
+    is a part the seal requires: at the earlier checkpoint every seal below returns
+    "missing artifact" and writes nothing, which would have made the two tests that
+    read the sealed record fail on an absent file and the two that assert a checker
+    is clean pass against one.
+    """
+    run = build_toy_run(tmp_path, upto="triage-audit")
+    slices.write_slices(run, phase_block={"number": 1, "deferred_kinds": list(kinds)})
+    deferred = set(_plan(run)["slices"][0].get("deferred_candidate_ids", ()))
+    assert deferred, "the fixture must actually defer something"
+    part_path = run.disposition_part("s01")
+    part = json.loads(part_path.read_text())
+    part["dispositions"] = [d for d in part["dispositions"] if d["candidate_id"] not in deferred]
+    write_json(part_path, part)
+    return run
+
+
+def test_the_sealed_record_rules_every_deferred_candidate(tmp_path):
+    """Gate 0's property: a candidate the run will never read must still be visible
+    as a decision, because a human can only overturn a decision they can see. No
+    member saw these, so the seal rules them from the plan."""
+    run = _phase_run_ready_to_seal(tmp_path)
+    path, findings = seal.seal(run)
+    assert findings == []
+    assert path == run.triage
+    record = json.loads(run.triage.read_text())
+    deferred = [d for d in record["dispositions"] if d["disposition"] == phase.DEFER]
+    assert [d["candidate_id"] for d in deferred] == ["trace-json"]
+    entry = deferred[0]
+    assert entry["reason_code"] == phase.DEFER_REASON_CODE
+    assert entry["authority"] == phase.POLICY_AUTHORITY
+    # No priority: no member ranked it, and a code-invented rank would be a
+    # reasoned number wearing an observed one's clothes.
+    assert "priority" not in entry
+    # The reason names the kind and the phase, because those are the two facts a
+    # human at gate 0 needs to overturn the deferral.
+    assert "trace" in entry["reason"] and "1" in entry["reason"]
+
+
+def test_the_sealed_record_carries_the_phase_block_verbatim(tmp_path):
+    """Verbatim, and layer 1 accepts it: triage-0.1.json closes the record with
+    additionalProperties false, so a carried block that the schema does not declare
+    would seal cleanly and then fail this stage's own gate."""
+    run = _phase_run_ready_to_seal(tmp_path)
+    seal.seal(run)
+    record = json.loads(run.triage.read_text())
+    assert record["phase"] == {"number": 1, "deferred_kinds": ["trace"]}
+    assert validate.validate_stage(run, "triage-seal") == []
+
+
+def test_a_sealed_record_with_no_phase_carries_neither_the_block_nor_a_defer(tmp_path):
+    """The compatibility control: the golden toy run seals exactly as it did before
+    phasing, and re-sealing it reproduces the same bytes."""
+    run = build_toy_run(tmp_path, upto="triage-audit")
+    before = run.triage.read_text() if run.triage.is_file() else None
+    seal.seal(run)
+    record = json.loads(run.triage.read_text())
+    assert "phase" not in record
+    assert all(d["disposition"] != phase.DEFER for d in record["dispositions"])
+    if before is not None:
+        assert run.triage.read_text() == before
+
+
+def test_a_part_that_rules_a_deferred_candidate_is_a_conflict_the_seal_refuses(tmp_path):
+    """A staged part cannot have been dispatched for a candidate the plan says was
+    never dispatched. Refused rather than resolved by precedence, because either
+    precedence would silently discard a real ruling -- and the finding names the
+    plan, since that is the artifact declaring the candidate deferred."""
+    run = build_toy_run(tmp_path, upto="triage-audit")
+    # The part built before the re-slice still rules trace-json, so this is the
+    # conflict as it would actually arise: a plan re-minted under a phase over parts
+    # written without one.
+    slices.write_slices(run, phase_block={"number": 1, "deferred_kinds": ["trace"]})
+    path, findings = seal.seal(run)
+    assert path is None
+    assert any("trace-json" in f.message for f in findings)
+    assert all(f.artifact == run.slices for f in findings)
+
+
+def test_check_refs_is_clean_over_the_sealed_phase_record(tmp_path):
+    """The end of the chain this task closes: check_triage's "every candidate must
+    be ruled on" clause is satisfied by the synthesised rulings, and its third
+    branch accepts a defer carrying a reason_code without calling it an admit.
+
+    The seal's own findings are asserted empty first, and that line is what stops
+    this passing vacuously: check_triage over an absent 00-triage.json returns
+    nothing at all, so a seal that refused would leave both assertions below true
+    for the wrong reason."""
+    run = _phase_run_ready_to_seal(tmp_path)
+    path, findings = seal.seal(run)
+    assert findings == [] and path == run.triage
+    assert refs.check_triage(run) == []
+    assert refs.check_disposition_parts(run) == []
+
+
+def test_deferred_ids_with_no_phase_block_are_reported_unruled_rather_than_synthesised(tmp_path):
+    """The incoherent plan: a slice declaring deferred_candidate_ids with no phase
+    block at all. Layer 1 cannot catch it -- both fields are optional -- so the seal
+    must not read the deferral as authority to rule. It synthesises nothing, and the
+    candidate falls through to item 2 as unruled, which is the finding a reader can
+    act on. Deleting the ruling too, because a part that still rules it makes the
+    plan's claim moot and tests nothing."""
+    run = build_toy_run(tmp_path, upto="triage-audit")
+    plan = _plan(run)
+    plan["slices"][0]["deferred_candidate_ids"] = ["trace-json"]
+    write_json(run.slices, plan)
+    part_path = run.disposition_part("s01")
+    part = json.loads(part_path.read_text())
+    part["dispositions"] = [d for d in part["dispositions"] if d["candidate_id"] != "trace-json"]
+    write_json(part_path, part)
+    path, findings = seal.seal(run)
+    assert path is None
+    assert any("trace-json" in f.message and "no disposition" in f.message for f in findings)
