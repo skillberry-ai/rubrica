@@ -220,6 +220,31 @@ def manifest_stage_efforts() -> tuple[str, ...]:
 
 
 @functools.cache
+def _triage_candidate_kinds(schema_root: Path) -> tuple[str, ...]:
+    """The cached half of triage_candidate_kinds, keyed on schema_root.
+
+    Keyed on the root for _manifest_stage_efforts' reason: a zero-argument
+    @functools.cache would pin the first schema the process ever read, and
+    parser construction happens on every CLI invocation, so there always is an
+    earlier call for a RUBRICA_SCHEMA_DIR override to lose to.
+    """
+    schema = read_json(schema_root / ARTIFACT_SCHEMAS["triage"])
+    return tuple(schema["$defs"]["kind"]["enum"])
+
+
+def triage_candidate_kinds() -> tuple[str, ...]:
+    """The candidate kinds a catalogue can carry, read out of the active schema.
+
+    `triage-slices --defer-kind` uses this as its argparse choices, so the CLI
+    cannot accept a kind the schema will reject -- and there is no second copy of
+    the enum to keep in step. A hand-typed list here would accept a `--defer-kind`
+    that silently deferred nothing, which is the worst available failure: the run
+    would cost full price and report a phase.
+    """
+    return _triage_candidate_kinds(schema_dir())
+
+
+@functools.cache
 def _schema_registry(schema_root: Path) -> Registry:
     """Every schema in `schema_root`, keyed by filename, for cross-file `$ref`.
 

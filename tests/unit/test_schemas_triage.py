@@ -129,6 +129,13 @@ def test_every_decline_reason_code_the_spec_names_is_accepted(tmp_path):
         "no_evidence_value",
         "digest_insufficient",
         "needs_projection",
+        # A defer's code shares this enum because `reason_code` is one field with
+        # one $ref, but it is never a decline's: refs.check_triage holds each
+        # disposition to its own half of the set. The $defs name stays
+        # `decline_reason` on purpose -- renaming it would move every $ref for no
+        # gain -- so this membership is the one place the widening looks odd, and
+        # the schema's own description is where it is argued.
+        "deferred_to_phase",
     }
 
 
@@ -236,13 +243,22 @@ def test_a_promoted_def_pins_its_required_fields_and_closed_shape(name):
     assert definition["additionalProperties"] is False
 
 
-def test_the_disposition_enum_is_exactly_admit_or_decline():
-    """The field that decides admit-versus-decline is worth pinning to its
-    exact permitted set, not merely confirming an enum exists."""
+def test_the_disposition_enum_is_exactly_admit_decline_or_defer():
+    """The field that decides what a run can ever know is worth pinning to its
+    exact permitted set, not merely confirming an enum exists.
+
+    `defer` joined it as a third value rather than as a decline with a special
+    reason code because the two make opposite promises -- a decline says this
+    input has no evidence value, a defer says it has value this phase cannot
+    spend -- and refs.check_triage now branches three ways on exactly this list.
+    A fourth value appearing here without a branch there is the drift the pin
+    exists to catch.
+    """
     schema = json.loads((validate.schema_dir() / "triage-0.1.json").read_text(encoding="utf-8"))
     assert schema["$defs"]["disposition"]["properties"]["disposition"]["enum"] == [
         "admit",
         "decline",
+        "defer",
     ]
 
 

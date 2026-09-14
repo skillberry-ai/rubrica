@@ -27,6 +27,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from rubrica import phase
 from rubrica.artifacts import ArtifactError, read_json, sha256_of
 from rubrica.findings import Finding
 from rubrica.interfaces import TOOL_NAME
@@ -1155,7 +1156,8 @@ def check_triage(run: RunPaths) -> list[Finding]:
         seen.add(cid_str)
 
         code = entry.get("reason_code")
-        if entry.get("disposition") == "decline":
+        disposition = entry.get("disposition")
+        if disposition == "decline":
             if not code:
                 report(f"{pointer}/reason_code", "a decline must carry a reason_code")
             elif code == "digest_insufficient" and not deficiency_ids:
@@ -1180,6 +1182,28 @@ def check_triage(run: RunPaths) -> list[Finding]:
                     f"{pointer}/reason_code",
                     "a needs_projection decline must be sourced by a projection naming this "
                     "candidate, or its remedy is unstated",
+                )
+        elif disposition == phase.DEFER:
+            # A defer is neither an admit nor a decline, and the branches either
+            # side of this one were each wrong about it. Before this clause
+            # existed a defer took the `else` below, which fabricated
+            # "reason_code names a decline; an admit has none" against a correct
+            # record -- exit 1 naming the wrong defect -- and counted the defer
+            # toward `admits`, masking the empty-admitted-set scoping check
+            # fifty lines down. Sending it to the decline branch instead would
+            # demand one of the decline codes for a ruling that is not one.
+            #
+            # Deliberately *not* also checked here: `admissible is False`. A
+            # container of a deferred kind is never deferred --
+            # phase.deferred_candidate_ids excludes it, so it stays in the shard
+            # for a member to decline -- and a second guard here would report a
+            # shape no writer in this package can produce.
+            if code != phase.DEFER_REASON_CODE:
+                report(
+                    f"{pointer}/reason_code",
+                    f"a defer must carry reason_code {phase.DEFER_REASON_CODE!r}, not {code!r}; "
+                    "a decline says this input has no evidence value and a defer says it has "
+                    "value this phase cannot spend, and only the second is a deferral",
                 )
         else:
             admits += 1

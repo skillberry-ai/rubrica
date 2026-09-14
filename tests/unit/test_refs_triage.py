@@ -127,6 +127,30 @@ def _run_with(tmp_path, mutate, decline_code="out_of_scope"):
     return run
 
 
+def _run_with_triage(tmp_path, *, dispositions, candidates):
+    """A run directory holding only 00-catalogue.json and 00-triage.json.
+
+    check_triage reads exactly those two, so this is the whole fixture it needs --
+    and building it by hand rather than through build_toy_run is what lets a
+    disposition list no writer produces yet be checked at all.
+    """
+    run = RunPaths(tmp_path / "run-20260914-000000")
+    run.root.mkdir(parents=True)
+    write_json(
+        run.catalogue,
+        {
+            "schema_version": "0.1",
+            "run_id": run.root.name,
+            "candidates": [{"candidate_id": cid, "kind": "other"} for cid in candidates],
+        },
+    )
+    write_json(
+        run.triage,
+        {"schema_version": "0.1", "run_id": run.root.name, "dispositions": dispositions},
+    )
+    return run
+
+
 def test_a_clean_record_has_no_findings(tmp_path):
     assert refs.check_triage(_run_with(tmp_path, lambda t, c: None)) == []
 
@@ -316,3 +340,90 @@ def test_check_triage_never_raises_on_a_malformed_document(tmp_path):
         },
     )
     assert isinstance(refs.check_triage(run), list)
+
+
+def test_a_defer_is_neither_an_admit_nor_a_decline(tmp_path):
+    """The branch this repo shipped before `defer` existed was `if decline: ...
+    else: admits += 1`, and both halves of that `else` were wrong about a defer.
+
+    Measured on the record below before the fix: `check-refs` reported
+    "reason_code names a decline; an admit has none" against a correct triage
+    record -- exit 1 naming the wrong defect, the exit-code contract's third rule
+    -- and counted the defer toward `admits`, so a record admitting nothing and
+    deferring everything passed the empty-admitted-set scoping check that exists
+    to catch exactly that.
+    """
+    run = _run_with_triage(
+        tmp_path,
+        dispositions=[
+            {
+                "candidate_id": "src",
+                "disposition": "admit",
+                "reason": "declares the tool surface",
+                "priority": 1,
+                "authority": "triage",
+            },
+            {
+                "candidate_id": "trace-json",
+                "disposition": "defer",
+                "reason_code": "deferred_to_phase",
+                "reason": "trace is deferred in phase 1",
+                "authority": "policy",
+            },
+        ],
+        candidates=["src", "trace-json"],
+    )
+    assert refs.check_triage(run) == []
+
+
+def test_a_defer_without_the_defer_reason_code_is_a_finding(tmp_path):
+    """The other direction, so the clause above is a guard and not a hole. A defer
+    carrying a *decline's* code is the shape that would let a stage smuggle a
+    judgment ("no_evidence_value") in under a policy's label, and the finding names
+    the reason_code pointer rather than the disposition because the code is the
+    field that is wrong."""
+    run = _run_with_triage(
+        tmp_path,
+        dispositions=[
+            {
+                "candidate_id": "src",
+                "disposition": "admit",
+                "reason": "declares the tool surface",
+                "priority": 1,
+                "authority": "triage",
+            },
+            {
+                "candidate_id": "trace-json",
+                "disposition": "defer",
+                "reason_code": "no_evidence_value",
+                "reason": "trace is deferred in phase 1",
+                "authority": "policy",
+            },
+        ],
+        candidates=["src", "trace-json"],
+    )
+    findings = refs.check_triage(run)
+    assert len(findings) == 1
+    assert findings[0].pointer == "/dispositions/1/reason_code"
+    assert "deferred_to_phase" in findings[0].message
+
+
+def test_a_run_that_defers_everything_and_admits_nothing_is_still_a_scoping_failure(tmp_path):
+    """The masked check, unmasked. Before the third branch existed the defer below
+    incremented `admits`, so this record -- which admits not one candidate -- read
+    as clean."""
+    run = _run_with_triage(
+        tmp_path,
+        dispositions=[
+            {
+                "candidate_id": "trace-json",
+                "disposition": "defer",
+                "reason_code": "deferred_to_phase",
+                "reason": "trace is deferred in phase 1",
+                "authority": "policy",
+            },
+        ],
+        candidates=["trace-json"],
+    )
+    messages = [f.message for f in refs.check_triage(run)]
+    assert any("no candidate was admitted" in m for m in messages)

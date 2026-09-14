@@ -903,8 +903,10 @@ def test_the_rule_pass_names_who_writes_the_human_authority():
     """Carried from rb-triage's own module (its `authority` and
     human-authority predicates, which this one predicate replaces). The
     sibling test above pins that this pass writes `authority: "triage"`; what
-    that leaves unpinned is the other enum value. `triage-0.1.json` admits
-    exactly two, and a pass that never learns where `"human"` comes from has
+    that leaves unpinned is the other enum value a *member* could reach for.
+    (`triage-0.1.json` also admits `policy`, which only triage-seal writes for a
+    deferred candidate no member ever saw.) A pass that never learns where
+    `"human"` comes from has
     no reason not to use it for a candidate it feels strongly about -- which
     would forge a gate-0 admission inside the record the gate reads.
 

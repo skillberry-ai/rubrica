@@ -45,7 +45,8 @@
     "projections": {
       "type": "array",
       "items": {"$ref": "#/$defs/projection"}
-    }
+    },
+    "phase": {"$ref": "#/$defs/phase"}
   },
   "$defs": {
     "id": {"type": "string", "pattern": "\\A[A-Za-z0-9][A-Za-z0-9._-]*\\Z", "maxLength": 128},
@@ -54,9 +55,35 @@
                "design_doc", "source_code", "other"]
     },
     "decline_reason": {
+      "description": "Why a candidate was not admitted. Named for the decline case it was built for and deliberately not renamed -- every $ref to it would move for no gain -- but `deferred_to_phase` is a *defer*'s code and never a decline's, and refs.check_triage holds each disposition to its own half of this enum. The two make opposite promises: a decline says this input has no evidence value, a defer says it has value this phase cannot spend, and collapsing them would make triage-seal's counts and the gate-0 brief report that the deferred inputs were judged useless.",
       "enum": ["off_objective", "out_of_scope", "near_duplicate", "superseded",
                "implementation_detail", "no_evidence_value", "digest_insufficient",
-               "needs_projection"]
+               "needs_projection", "deferred_to_phase"]
+    },
+    "phase": {
+      "description": "The run's phase declaration: which numbered phase this is, and which candidate kinds it defers to a later one. Declared once on `triage-slices` and carried verbatim through 00-slices.json, 00-triage.json, manifest.json and 01-world-model.json, so a reader of any of the four learns what the run can never know without opening the other three. Defined here, in the artifact that owns the disposition it drives, and $ref'd by the other three rather than restated: `derive, do not restate` -- a duplicated block that fell behind would let the manifest and the world model disagree about which inputs the run read. Optional in all four documents, on max_scenario_part_bytes' precedent: making it required would invalidate every manifest already on disk, which diff-runs, run-summary and gate-brief all read. Absent means no phase was declared and the run behaves exactly as it did before phasing existed.",
+      "type": "object",
+      "required": ["number", "deferred_kinds"],
+      "additionalProperties": false,
+      "properties": {
+        "number": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Which phase this run is. A label, not an index into anything: phase 1 defers, phase 3 admits what phase 1 deferred, and nothing in the code branches on the number."
+        },
+        "deferred_kinds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/kind"},
+          "description": "The candidate kinds this phase defers, held to the catalogue's own kind enum so a declaration cannot name a kind no candidate can carry. minItems 1 because a phase deferring nothing is a phase nobody declared, and the absent block already says that."
+        },
+        "deferred_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many candidates were actually deferred. Written by `intake` into the manifest and carried into the world model; absent from 00-slices.json and 00-triage.json, where the deferred set is enumerated in full and a count beside it would be a second spelling of a length. refs.check_admitted_inputs recomputes it from 00-triage.json's own defer dispositions, so it is arithmetic a reader can check rather than testimony -- the discipline check_slices' `bytes` clause already holds."
+        }
+      }
     },
     "surface": {
       "type": "object",
@@ -94,11 +121,14 @@
       "additionalProperties": false,
       "properties": {
         "candidate_id": {"$ref": "#/$defs/id"},
-        "disposition": {"enum": ["admit", "decline"]},
+        "disposition": {"enum": ["admit", "decline", "defer"]},
         "reason_code": {"$ref": "#/$defs/decline_reason"},
         "reason": {"type": "string", "minLength": 1},
         "priority": {"type": "integer", "minimum": 1},
-        "authority": {"enum": ["triage", "human"]}
+        "authority": {
+          "description": "Who ruled. `triage` is an rb-triage-rule member's judgment, `human` a person's at gate 0 or through adopt-projection, and `policy` the mechanical consequence of the run's own --defer-kind declaration: triage-seal writes those, and no member ever saw the candidate. Attributing a policy flag to `triage` would credit a prompt with a judgment it never made, and to `human` would claim somebody ruled on each deferred candidate one at a time -- which is exactly what a kind-level instrument exists to avoid paying for.",
+          "enum": ["triage", "human", "policy"]
+        }
       }
     },
     "deficiency": {
