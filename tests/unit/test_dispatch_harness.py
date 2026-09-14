@@ -1316,3 +1316,233 @@ def test_the_closing_summary_records_which_sandbox_the_dispatch_ran_under(tmp_pa
     reported = _summary_field(off, "sandbox")
     assert reported.startswith("off -- ")
     assert reported.count("cannot engage") == 1, f"the reason is repeated: {reported!r}"
+
+
+# ---------------------------------------------------------------------------
+# The harness's own scratch state, and why it is an answer key too.
+#
+# MEASURED on run-20260911-120324 (parsec, 149 inputs): an `rb-reconcile-entities`
+# dispatch read `cc-config/projects/.../tool-results/bp3kds71p.txt` -- Claude
+# Code's own tool-result spool -- and got content back. What it got was a
+# *sibling* pass's judgment: an `rb-reconcile-contradict` resolution, complete
+# with its rationale. The read succeeded rather than being denied and logged.
+#
+# The cause was structural. `CLAUDE_CONFIG_DIR` was `$LAB/cc-config`, one
+# directory shared by every dispatch of the lab, so all 220 sessions' spools and
+# transcripts piled up inside the very directory each dispatch's own harness needs
+# -- 121 MB, including 67 `rb-triage-audit` and 217 `rb-extract` sessions. Gate
+# 0's argument is that the party which makes a judgment must not ratify it; a
+# later stage reading the audit's session is a route straight around that. And no
+# rule anywhere mentioned the lab: the deny list enumerated `docs`, `tests`,
+# `CLAUDE.md`, `README.md`, `decisions.md`, `measurement/` and every sibling
+# `rb-*` skill, while the whole lab sat under a prefix nothing denied.
+#
+# Two properties close it, and they are separate because either alone leaves a
+# hole the other covers:
+#
+#   the config dir is per dispatch, outside the lab   so a dispatch's own harness
+#       state -- the one directory it cannot be denied, since Claude Code writes
+#       there and evidently grants itself the access to do it -- holds nothing but
+#       its own session.
+#   the lab is denied in both scopes                  so `$LAB/transcripts/*.jsonl`,
+#       the script's own tee'd stream-JSON of every prior stage, is covered as
+#       well. Moving the config dir alone leaves that half untouched.
+#
+# Per *attempt*, not merely per stage, for a reason the exit-code contract owns: a
+# repair re-dispatch that could read its own first attempt's session would be a
+# side channel around "the orchestrator may append exactly two things, both
+# verbatim machine text". The suffix is the transcript counter's, so the two
+# records of one attempt carry the same name.
+#
+# Siblings are enumerated one at a time rather than denied wholesale by their
+# parent, which is the pattern the sibling `rb-*` skills already use and for the
+# same reason: `permissions.deny` beats `allow` unconditionally, so a deny of
+# `$CC_HOME` could not have this dispatch's own directory re-allowed inside it.
+# Denying a dispatch its own harness state would either break the run or resolve
+# silently in the harness's favour, and which of those happens is not measured
+# here. Enumerating sidesteps the question instead of betting on it.
+#
+# What these tests do NOT establish, stated because the module's docstring names
+# the weakness: that the rules *bind*. Print mode proves the rule is present in
+# the file the dispatch is given. Only a transcript proves a read was refused, and
+# no dispatch was made for this change.
+# ---------------------------------------------------------------------------
+
+
+def _config_dir(proc):
+    """The dispatch's CLAUDE_CONFIG_DIR, via the second path print mode emits.
+
+    Print mode's second line is `$CLAUDE_CONFIG_DIR/settings.json`, so the parent
+    is the directory itself. Taken from the script's own output rather than
+    rebuilt from the naming rule, for the reason this module's docstring gives.
+    """
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    _, sandbox, _ = proc.stdout.split()
+    return Path(sandbox).parent
+
+
+def test_the_config_dir_is_not_inside_the_lab(tmp_path):
+    """The containment hole itself, as the property that refuses it.
+
+    Asserted on the resolved paths, so a `..` in the default spelling cannot
+    satisfy it by looking different while landing in the same place.
+    """
+    lab = tmp_path / "lab"
+    proc = _dispatch(tmp_path, "propose", str(tmp_path / "run"), RUBRICA_LAB=str(lab))
+    config = _config_dir(proc)
+    assert lab.resolve() not in config.resolve().parents
+    assert config.resolve() != lab.resolve()
+
+
+def test_the_config_dir_is_not_a_prefix_extension_of_the_lab(tmp_path):
+    """A sibling named `$LAB-cc-config` would pass the test above and still be
+    ambiguous in the layer that cannot be checked here.
+
+    `sandbox.filesystem.denyRead` matching is prefix-shaped and this project has
+    measured it twice with opposite results, so a config dir that is the denied
+    lab path plus a suffix is a bet on which way that matching resolves. The
+    default is chosen not to place that bet, and this pins the property rather
+    than the spelling -- any sibling name that is not an extension passes.
+    """
+    lab = tmp_path / "lab"
+    proc = _dispatch(tmp_path, "propose", str(tmp_path / "run"), RUBRICA_LAB=str(lab))
+    config = _config_dir(proc)
+    assert not str(config.resolve()).startswith(str(lab.resolve()))
+
+
+@pytest.mark.parametrize(
+    "leaf",
+    ["", "transcripts"],
+    ids=["the lab root", "the transcripts directory inside it"],
+)
+def test_the_permissions_scope_denies_the_lab(tmp_path, leaf):
+    lab = tmp_path / "lab"
+    perms, _, _ = _paths(
+        _dispatch(tmp_path, "propose", str(tmp_path / "run"), RUBRICA_LAB=str(lab))
+    )
+    target = lab.resolve() / leaf if leaf else lab.resolve()
+    deny = perms["permissions"]["deny"]
+    assert f"Read(/{target})" in deny or f"Read(/{lab.resolve()}/**)" in deny
+
+
+def test_the_sandbox_scope_denies_the_lab(tmp_path):
+    """The second scope exists because the first covers only the file tools: a
+    `python3 -c open(...)` of a transcript goes around `permissions.deny`
+    entirely, and the OS-level layer is what that was measured against."""
+    lab = tmp_path / "lab"
+    _, sandbox, _ = _paths(
+        _dispatch(tmp_path, "propose", str(tmp_path / "run"), RUBRICA_LAB=str(lab))
+    )
+    assert str(lab.resolve()) in sandbox["sandbox"]["filesystem"]["denyRead"]
+
+
+def test_the_lab_deny_does_not_reach_the_dispatchs_own_config_dir(tmp_path):
+    """The over-subtraction direction, and the one that would break every run.
+
+    Claude Code writes its own spool, history and settings under
+    CLAUDE_CONFIG_DIR. A deny that covered it would either kill the dispatch or be
+    overridden by the harness's own grant, and this project has measured neither.
+    """
+    lab = tmp_path / "lab"
+    proc = _dispatch(tmp_path, "propose", str(tmp_path / "run"), RUBRICA_LAB=str(lab))
+    perms, sandbox, _ = _paths(proc)
+    config = _config_dir(proc).resolve()
+    for rule in perms["permissions"]["deny"]:
+        assert rule != f"Read(/{config})"
+        assert rule != f"Read(/{config}/**)"
+    assert str(config) not in sandbox["sandbox"]["filesystem"]["denyRead"]
+
+
+def test_two_stages_do_not_share_a_config_dir(tmp_path):
+    run = tmp_path / "run"
+    run.mkdir()
+    first = _config_dir(_dispatch(tmp_path, "propose", str(run), run=run))
+    second = _config_dir(_dispatch(tmp_path, "score", str(run), run=run))
+    assert first != second
+
+
+def test_two_fan_out_members_do_not_share_a_config_dir(tmp_path):
+    """The slice id has to reach the name: `rb-extract` ran 217 times in the run
+    that motivated this, and a per-stage directory would have pooled all of them."""
+    run = tmp_path / "run"
+    run.mkdir()
+    first = _config_dir(_dispatch(tmp_path, "extract", str(run), "api-json", run=run))
+    second = _config_dir(_dispatch(tmp_path, "extract", str(run), "notes-md", run=run))
+    assert first != second
+
+
+def test_a_re_dispatch_does_not_reuse_the_earlier_attempts_config_dir(tmp_path):
+    """Per attempt, not per stage, and driven end to end because print mode cannot
+    see it: the counter keys off the transcript the previous attempt wrote, and
+    print mode writes none.
+
+    The side channel this refuses is specific. A repair re-dispatch is handed its
+    gate's findings verbatim and nothing else; reading attempt one's whole session
+    would hand it the reasoning behind them too.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run, STUB_ATTEMPT="1")
+    _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run, STUB_ATTEMPT="2")
+    # Read off the disk rather than from a printed path: what matters is that two
+    # directories exist, which is the same thing as neither attempt reusing the
+    # other's.
+    config_home = _config_dir(_dispatch(tmp_path, "score", str(run), run=run)).parent
+    attempts = sorted(p.name for p in config_home.iterdir() if p.name.startswith("propose"))
+    assert len(attempts) == 2, f"config dirs under {config_home}: {attempts}"
+
+
+def test_a_sibling_dispatchs_config_dir_is_denied(tmp_path):
+    """The property the whole entry is about, in the shape the leak took: the
+    directory a *previous* dispatch left behind must be denied to this one, while
+    its own stays reachable."""
+    run = tmp_path / "run"
+    run.mkdir()
+    sibling = _config_dir(_dispatch(tmp_path, "score", str(run), run=run)).resolve()
+    proc = _dispatch(tmp_path, "propose", str(run), run=run)
+    perms, sandbox, _ = _paths(proc)
+    assert _config_dir(proc).resolve() != sibling
+    assert f"Read(/{sibling})" in perms["permissions"]["deny"]
+    assert f"Read(/{sibling}/**)" in perms["permissions"]["deny"]
+    assert str(sibling) in sandbox["sandbox"]["filesystem"]["denyRead"]
+
+
+def test_the_developers_own_claude_home_is_denied(tmp_path):
+    """Not part of the observed leak, and the same class of exposure.
+
+    `$HOME/.claude` holds the global CLAUDE.md this script's header calls the
+    answer key -- "measuring the skill plus a briefing, and the briefing is the
+    answer key" -- and the auth token the script reads out of it before
+    dispatching. Nothing a stage reads is in there.
+    """
+    perms, sandbox, _ = _paths(_dispatch(tmp_path, "propose", str(tmp_path / "run")))
+    home = Path(os.environ["HOME"]) / ".claude"
+    assert f"Read(/{home})" in perms["permissions"]["deny"]
+    assert f"Read(/{home}/**)" in perms["permissions"]["deny"]
+    assert str(home) in sandbox["sandbox"]["filesystem"]["denyRead"]
+
+
+def test_a_config_home_inside_the_lab_is_a_usage_error(tmp_path):
+    """The guard, because the override can put back exactly what was removed."""
+    lab = tmp_path / "lab"
+    proc = _dispatch(
+        tmp_path,
+        "propose",
+        str(tmp_path / "run"),
+        RUBRICA_LAB=str(lab),
+        RUBRICA_CC_HOME=str(lab / "cc-config"),
+    )
+    assert proc.returncode == 2, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+
+
+@pytest.mark.parametrize("var", ["RUBRICA_LAB", "RUBRICA_CC_HOME"])
+def test_scratch_state_inside_the_run_is_a_usage_error(tmp_path, var):
+    """A `2`, and the reason is the one that cost a wrong commit: denying a path
+    inside the run makes the stage's own check-refs fabricate findings about what
+    it cannot see. No prompt re-dispatch fixes a misconfigured lab, so this is not
+    a `1`.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    proc = _dispatch(tmp_path, "propose", str(run), run=run, **{var: str(run / "scratch")})
+    assert proc.returncode == 2, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"

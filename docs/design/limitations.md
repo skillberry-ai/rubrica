@@ -112,6 +112,41 @@ file commands Claude Code parses out of a Bash line, and approval-gating for
 arbitrary execution. The OS-level `denyRead` engaged here too (`Errno 13`), a
 third data point for the two contradictory ones in the harness's own comment.
 
+**One case of that surface was structural rather than incidental, and it is now
+closed — which is why it is recorded here as history rather than as an open
+exposure.** Measured on `run-20260911-120324`: an `rb-reconcile-entities` dispatch
+read Claude Code's own tool-result spool under
+`cc-config/projects/…/tool-results/` and the read *succeeded*, returning a sibling
+`rb-reconcile-contradict` pass's resolution complete with its rationale. Not
+adversarial and not prompted — the dispatch was hunting for its own earlier `jq`
+output after a compaction and followed the spool path. `CLAUDE_CONFIG_DIR` was
+`$RUBRICA_LAB/cc-config`, one directory shared by every dispatch of the lab, so 220
+sessions' spools and transcripts — 121 MB, including 67 `rb-triage-audit` and 217
+`rb-extract` sessions — sat inside the one directory each dispatch's own harness
+must be able to read, under a prefix no rule denied. Gate 0 was the worst of it:
+its argument is that the party which makes a judgment must not also ratify it, and
+a later stage reading the audit's session is a route straight around that.
+
+The fix is two properties, and neither suffices alone: the config dir is one
+directory per dispatch *attempt* outside the lab, so a dispatch's own harness state
+— the one directory it cannot be denied — holds nothing but its own session; and
+the lab is denied in both settings scopes, which is what covers
+`$RUBRICA_LAB/transcripts/*.jsonl`, the script's own stream-JSON of every prior
+stage. Per attempt rather than per stage because a repair re-dispatch is handed its
+gate's findings verbatim and nothing else, and one that could read attempt one's
+session would have the reasoning behind them too.
+
+**Two things about it stay open.** A sibling config dir created *after* a
+dispatch's settings are written — a parallel fan-out member started later — is not
+in that dispatch's enumerated deny list, so the enumeration is narrower than a
+shared directory by 219 sessions rather than airtight; enumeration is what avoids
+betting on whether a deny covering a dispatch's own config dir would break the
+dispatch or be silently overridden by the harness's grant, which is not measured.
+And the fix itself is **not** backed by a transcript: `tests/unit/test_dispatch_harness.py`
+proves the rules are present in the settings file a dispatch is handed, which is
+not the same as proving they bind. By this entry's own standard that makes the
+containment claim an assumption until a dispatch is made against it.
+
 The only instrument that exists is a **transcript audit at dispatch time**:
 `scripts/audit-reads.sh` extracts every path a dispatched stage actually
 touched from the stream-JSON transcript `scripts/dispatch-stage.sh` writes, so
