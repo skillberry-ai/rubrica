@@ -1924,6 +1924,104 @@ one is about **time to first byte**, whether a bounded pass thinks fast enough t
 beat the gateway's ~300 s no-bytes close. This is the **input band**. A fix aimed at
 one does nothing for the other.
 
+### The reconcile family composed its artifact in one turn because nothing told it not to, and why those turns died is not settled
+
+Two things sit in this entry, and they are not the same kind of thing: a change
+that shipped on an observation, and the mechanism behind that observation, which
+is **not** established and must not be repeated as though it were.
+
+**What was observed.** On the 149-input parsec corpus
+(`run-20260911-120324`, `aws/claude-opus-5`, effort `medium`),
+`rb-reconcile-entities` failed twelve completed dispatches in a row and wrote no
+`01-entities.json`. Every one ended
+`{"subtype":"success","is_error":true,"terminal_reason":"api_error","result":"API
+Error: The operation timed out."}`, and the pass cost **$67.92 across those
+twelve** — ten on `aws/claude-opus-5`, one on `aws/claude-opus-4-8` at 1M
+context, one after a probe had measured the gateway healthy. Everything above it
+in the run had passed its gates; because `reconcile-goals` reads `entities_part`
+and `reconcile-gaps` reads all four partials, goals, gaps, services,
+`synthesise-interfaces`, the seal and gate 1 were all blocked behind this one
+pass.
+
+The discriminator across the family is the write pattern, and it is the whole of
+the evidence the change rests on:
+
+| pass | accepted writes | outcome |
+|---|---|---|
+| `reconcile-capabilities` | 3 `Write` + 23 `Edit` | finished |
+| `reconcile-outcomes` | 3 `Write` + 10 `Edit` | finished |
+| `reconcile-entities`, twelve times | none | failed every time |
+
+Both passes that finished had opened a small file early and appended to it, so no
+turn had to compose the whole document. **Nothing in any of the eight skills
+asked them to.** Measured across the family before the change: no Method section
+contained `one turn`, `incremental` or `append`, and the only `Edit` in any of
+them was a prohibition on editing another pass's artifact. The two that survived
+arrived at chunking on their own, and `rb-reconcile-goals` had the identical
+profile with its first dispatch on that corpus still ahead of it.
+
+A corroborating symptom, and the reason the instruction had to offer a path
+rather than only forbid one: every failing attempt tried to write a scratch or
+generator script to emit the document in one shot, and **twelve such writes
+across seven of the attempts were denied** by the stage's own write scope. The
+permission layer was working exactly as designed. The denials are evidence about
+the prompt — a pass reaching for one-shot generation because nothing offered it
+anything else.
+
+**What is not settled.** The write-up that reported this read the fatal 300.4 s
+`assistant -> assistant` gap, whose closing line carries `output_tokens: 0`, as
+the artifact-write turn generating for 300 s and being closed by envoy's idle
+timeout. That is one reading. The other is that a line reporting **zero output
+tokens generated nothing at all**, which makes it a time-to-first-byte stall
+rather than an output overrun — and this gateway is slow on large prompts
+independently of concurrency, at a rate that puts the failing dispatches' 145,013
+peak input tokens close to 300 s on prefill alone. That rate was measured on this
+gateway but **outside this repository**, so it is not re-derivable from this tree
+and is recorded here as the reason the question is open rather than as a finding.
+The two readings are not distinguishable from what survives: the per-attempt
+transcripts were 121 MB under a lab directory and did not survive the next
+cleanup, and the run directory is gone. What would settle it is a per-turn first-byte
+number, which [the entry on the pass split](#the-premise-the-pass-split-rests-on-has-not-been-measured-and-neither-has-the-one-under-the-outcomes-pass)
+already records that nothing here measures, records, extracts or reports.
+
+**What changed anyway, and on what argument.** Each of the eight passes' Method
+sections now carries a write bound beside its read bound: open the artifact with a
+`Write` as soon as the first entry exists, append the rest with `Edit`, do not
+compose the whole document in one turn — with the twelve failures, the two
+survivors' write counts and the denied generator scripts quoted as its
+justification, and with the mechanism explicitly named as unestablished inside the
+prompt itself, so a member cannot reason from a guess this file calls a guess.
+The argument for shipping it under that uncertainty is that appending is the
+cheaper bet under **either** reading and costs a pass nothing it needed: it cannot
+make a stage's judgment less observable, and the alternative on the table was
+leaving `rb-reconcile-goals` to spend the same $67.92 discovering the same thing.
+
+`scripts/dispatch-stage.sh` also announces an errored dispatch now, which is a
+smaller change and a more certain one. A dispatch that dies mid-write reports
+`subtype: "success"` with `is_error: true` **and a cost and a turn count like any
+other result line**, so the closing summary printed an ordinary `$x over n turns`
+and said nothing: for twelve attempts the only thing separating a dead dispatch
+from a live one was whether the artifact was on disk. The new line reports and
+does not decide — the exit code stays the dispatch's, because a `1` or a `2`
+raised there would put a code on the orchestrator's branch that no gate produced.
+
+**What did not change.** Nothing enforces the write pattern, and nothing can:
+an artifact appended over 23 turns is byte-identical to one composed in a single
+turn, so this is the same shape as
+[the entry on read coverage](#rb-reconcile-gaps-read-coverage-cannot-be-forced-by-any-output-shape)
+— the instruction buys a probability and the transcript is the only instrument.
+No cap on output either, for the reason the input band has none: its ceiling
+would be a number justified by one run. And the fix was not measured. Doing that
+costs a real dispatch on a corpus whose partials are large enough to reach the
+defect, and the toy world cannot get near it.
+
+**Adjacent but distinct, again.** This entry is about the shape of a pass's
+**write**. The entry immediately above this one is about the **input band**, and
+the one before that about **time to first byte**. All three can close a dispatch
+at around 300 s, all
+three have been conflated at least once, and a fix aimed at any one of them does
+nothing for the other two.
+
 ### Golden `scn-empty`'s `answer_excludes` marks a correct answer wrong
 
 Measured through the real scorer on the emitted package. The oracle's own

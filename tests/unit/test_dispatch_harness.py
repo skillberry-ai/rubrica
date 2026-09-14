@@ -726,6 +726,16 @@ if [ "${STUB_TRUNCATED:-0}" = "1" ]; then
   # A dispatch killed mid-stream: the last line is half an object. jq cannot
   # parse the file at all, which is a different failure from a missing field.
   printf '%s' "{\\"type\\": \\"result\\", \\"total_cost_"
+elif [ "${STUB_IS_ERROR:-0}" = "1" ]; then
+  # The shape twelve consecutive `rb-reconcile-entities` dispatches ended with on
+  # the parsec run: subtype "success" and is_error true, a terminal_reason, an
+  # `api_error_status` of null, and a cost and turn count like any other result
+  # line. That last part is what made it invisible.
+  printf '{"type": "result", "subtype": "success", "is_error": true, '\\
+'"terminal_reason": "api_error", "api_error_status": null, "error": null, '\\
+'"result": "API Error: The operation timed out.", '\\
+'"total_cost_usd": %s, "num_turns": %s}\\n' \\
+    "${STUB_COST:-1.25}" "${STUB_TURNS:-7}"
 elif [ "${STUB_NO_RESULT:-0}" != "1" ]; then
   printf '{"type": "result", "total_cost_usd": %s, "num_turns": %s}\\n' \\
     "${STUB_COST:-1.25}" "${STUB_TURNS:-7}"
@@ -1025,6 +1035,88 @@ def test_a_dispatch_that_reported_no_cost_says_so_rather_than_printing_null(tmp_
     reported = _summary_field(proc, "cost")
     assert reported, "the summary dropped the cost line entirely"
     assert "null" not in reported
+
+
+def _summary_field_or_none(proc, label):
+    """`_summary_field` for a line that is *supposed* to be absent sometimes.
+
+    Separate from `_summary_field` rather than a flag on it, because every existing
+    caller wants the AssertionError: a missing cost line is a defect, and a helper
+    that returned None there would turn a broken summary into a passing test.
+    """
+    for line in proc.stdout.splitlines():
+        if line.startswith(label):
+            return line[len(label) :].strip()
+    return None
+
+
+def test_a_dispatch_that_reported_an_error_says_so_rather_than_only_its_cost(tmp_path):
+    """The failure this block exists for, and the one the summary could not see.
+
+    On the parsec run `rb-reconcile-entities` failed twelve consecutive dispatches,
+    every one reporting `subtype: "success"` with `is_error: true` and `API Error:
+    The operation timed out.` -- and every one also carrying a cost and a turn
+    count, so the closing summary printed an ordinary `$x over n turns` line and
+    said nothing else. Twelve attempts and $67.92 later, the only thing separating a
+    dead dispatch from a live one was whether the artifact was on disk.
+
+    Asserted against the summary's own labelled line and never against `proc.stdout`,
+    which is the trap this test fell into first: the dispatch runs under `tee`, so
+    the transcript's raw result line is echoed to stdout too, and
+    `"api_error" in proc.stdout` was green before the summary knew anything about
+    errors at all. That is the substring-of-message weakness with the message being
+    the thing under test.
+
+    Three predicates, because each covers a different half-fix: a line that says
+    "error" without the reason sends the reader back to the transcript; one that
+    quotes the prose but drops the machine field cannot be grepped across a run's
+    dispatches; and one that reports the error while swallowing the cost has traded
+    one blind spot for another.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    proc, _ = _dispatch_with_stub_claude(
+        tmp_path, "propose", str(run), run=run, STUB_IS_ERROR="1", STUB_COST="5.31"
+    )
+    assert proc.returncode == 0
+    reported = _summary_field(proc, "dispatch")
+    assert "api_error" in reported, reported
+    assert "operation timed out" in reported, reported
+    assert "5.31" in _summary_field(proc, "cost")
+
+
+def test_a_clean_dispatch_is_not_announced_as_an_error(tmp_path):
+    """The other direction, and it is not ceremony: the whole value of the line above
+    is that it appears only when something went wrong.
+
+    A `select(.is_error == true)` dropped, or inverted into a truthiness test on a
+    field that is simply absent from a clean result line, gives a summary that cries
+    error on every dispatch -- the same blindness as never crying it, reached from
+    the other side.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    clean, _ = _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run)
+    errored, _ = _dispatch_with_stub_claude(
+        tmp_path, "propose", str(run), run=run, STUB_IS_ERROR="1"
+    )
+    assert _summary_field_or_none(errored, "dispatch") is not None
+    assert _summary_field_or_none(clean, "dispatch") is None
+
+
+def test_an_errored_dispatch_still_exits_clean_so_the_gates_decide(tmp_path):
+    """The exit-code contract's, and the reason this block reports rather than judges.
+
+    A dispatch that died mid-write may still have left a good partial, and one that
+    ran clean may still have written nothing. Neither is this script's call: `1`
+    means a stage defect with findings on stdout and `2` means an unreadable run, so
+    an errored dispatch turned into either from here would put a code on the
+    orchestrator's branch that no gate produced.
+    """
+    run = tmp_path / "run"
+    run.mkdir()
+    proc, _ = _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run, STUB_IS_ERROR="1")
+    assert proc.returncode == 0, proc.stderr
 
 
 def test_a_transcript_truncated_mid_stream_does_not_take_the_exit_code_with_it(tmp_path):

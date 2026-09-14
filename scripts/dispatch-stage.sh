@@ -709,6 +709,58 @@ else
   SPENT="$SPENT this dispatch did not finish"
 fi
 
+# The outcome, off that same last result line, and read separately from the spend
+# rather than folded into it: `.result` is a sentence, so a space-separated `read`
+# cannot carry it, and the two answer different questions anyway.
+#
+# MEASURED, and the whole reason this block exists: on the parsec run
+# `rb-reconcile-entities` failed twelve consecutive dispatches, every one of them
+# reporting `subtype: "success"` with `is_error: true`, `terminal_reason:
+# "api_error"` and `API Error: The operation timed out.` -- and every one of them
+# also carrying a cost and a turn count, so the summary below printed a perfectly
+# ordinary line and said nothing. Twelve attempts and $67.92 later, the only thing
+# separating a dead dispatch from a live one was whether the artifact was on disk.
+#
+# The `select` is what makes the line conditional, and dropping it is the mutation
+# that matters: without it jq falls through to the string, the defaults render it as
+# `[unknown] no message`, and the summary announces an error on every dispatch --
+# the same blindness as never announcing one, reached from the other side.
+#
+# What is *not* load-bearing, measured against a clean result line rather than
+# reasoned about: which spelling of the test is used. `select(.is_error)` and
+# `select(.is_error != null)` both drop that line too, because jq renders the absent
+# field as `null` and `null` is falsy. `== true` is kept for saying plainly what it
+# means, not because the looser forms were found to leak.
+#
+# Guarded exactly like the spend read above, for its two measured reasons: `|| true`
+# because a transcript killed mid-stream is unparseable and this script's exit code
+# is the dispatch's, and `// ""` because a result line missing a field must render
+# as nothing rather than as a number-shaped `null`.
+OUTCOME=$(jq -rs 'map(select(type == "object" and .type == "result")) | (last // {})
+                  | select(.is_error == true)
+                  | "[\(.terminal_reason // "unknown")] \(.result // "no message")"' \
+  "$TRANSCRIPT" 2>/dev/null || true)
+
+# It reports; it does not decide, and the exit code stays the dispatch's. A dispatch
+# that died mid-write may still have left a good partial, and one that ran clean may
+# still have written nothing -- so the gates below are what rule on the artifact.
+# Turning this into a `1` or a `2` from here would put a code on the orchestrator's
+# branch that no gate produced, which the exit-code contract forbids outright.
+#
+# Printed above the summary rather than inside it, because a reader who skims one
+# line must not skim this one, and because an empty variable in the heredoc below
+# would leave a blank line on every clean dispatch.
+if [ -n "$OUTCOME" ]; then
+  cat <<EOF
+
+dispatch    ERRORED -- $OUTCOME
+            Check whether the artifact exists before reading this as a stage
+            defect. A dispatch that dies part-way through writing leaves neither
+            an artifact nor a finding, and the gates below cannot tell that from
+            a stage that refused: both leave nothing on disk.
+EOF
+fi
+
 cat <<EOF
 
 transcript  $TRANSCRIPT

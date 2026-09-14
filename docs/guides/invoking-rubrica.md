@@ -309,10 +309,21 @@ motivated the bounded-batch change. The first attempt keeps the unsuffixed name,
 because that is the path the closing summary prints and `audit-reads.sh` is
 pointed at.
 
-That summary is the script's last output and names five things: the
-`transcript` path, the `cost` line below, whether the `sandbox` was `on` or
-`off -- <reason>`, the two `gates` commands to run next (`rubrica validate
---stage <stage>` and `rubrica check-refs`), and the `read audit` invocation.
+That summary is the script's last output. It names the `transcript` path, the
+`cost` line below, whether the `sandbox` was `on` or `off -- <reason>`, the two
+`gates` commands to run next (`rubrica validate --stage <stage>` and `rubrica
+check-refs`), and the `read audit` invocation.
+
+**A `dispatch  ERRORED` banner sits above all of that when the dispatch reported
+an error**, carrying the `terminal_reason` in brackets and the message verbatim.
+It is there because the failure it names is otherwise invisible from the outside:
+a dispatch that dies part-way through writing reports `subtype: "success"` with
+`is_error: true` **and a cost and a turn count like any other**, so on the run
+where `rb-reconcile-entities` failed twelve times in a row the summary printed an
+ordinary `$x over n turns` each time and said nothing. Read the banner as "check
+the artifact", not as a verdict: the exit code is still the dispatch's, and a
+dispatch that errored may have left a good partial while one that ran clean may
+have written nothing. Only the gates below it rule on what is on disk.
 The audit is `./scripts/audit-reads.sh <transcript>`: it prints every file tool
 call and every Bash line the dispatch made, for reading against the stage's
 Contract `reads`. §6 is why that is the only instrument there is, rather than
