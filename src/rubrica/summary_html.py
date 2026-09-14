@@ -514,6 +514,21 @@ def _dispositions(run: RunPaths):
             )
             + "</details>"
         )
+    # Rendered only when there are defers, matching the gate-0 brief: an empty section
+    # on every phaseless run trains a reader to skip the one place it matters. No
+    # `priority` column, because a synthesised defer carries none by design -- and
+    # `authority` earns a column here in a way it does not for the admits, since every
+    # deferred row reads `policy`, which is what tells a reader nobody ruled on these
+    # one at a time.
+    if got.defers:
+        parts.append(
+            f"<details><summary>Deferred to a later phase ({esc(got.defer_count)})</summary>"
+            + _table(
+                ("candidate_id", "authority", "reason"),
+                _disposition_rows(got.defers),
+            )
+            + "</details>"
+        )
     return "\n".join(parts)
 
 
