@@ -27,6 +27,10 @@
     "contradictions": { "type": "array", "items": { "$ref": "#/$defs/contradiction" } },
     "gaps": { "type": "array", "items": { "$ref": "#/$defs/gap" } },
     "services": { "type": "array", "items": { "$ref": "#/$defs/service" } },
+    "phase": {
+      "$ref": "triage-0.1.json#/$defs/phase",
+      "description": "The run's phase declaration, carried verbatim from manifest.json by reconcile-seal. This is the one carry in the chain whose PRESENCE a report reads rather than a stage: target-brief and run-summary both render it, which is what makes the field load-bearing rather than informational -- a phase-1 model showing 85 contradictions without stating that 119 more are unread would misrepresent the analysis to the people target-brief is written for, and until this field existed the tool had no way to say so. Optional and absent on a run that declared no phase, so a full run's world model is byte-identical to one written before this field existed, which is also what leaves both committed live recordings valid without a paid re-record."
+    },
     "denominator": {
       "type": "object",
       "required": ["version", "capability_cells", "goals"],

@@ -23,7 +23,18 @@
     "dispositions": {
       "type": "array",
       "minItems": 1,
-      "items": {"$ref": "triage-0.1.json#/$defs/disposition"}
+      "items": {
+        "allOf": [
+          {"$ref": "triage-0.1.json#/$defs/disposition"},
+          {
+            "description": "A member rules admit or decline and signs `triage`; `defer` and `authority: policy` are triage-seal's alone, written from the run's own --defer-kind declaration for candidates no member ever saw. The restriction is an overlay here rather than a narrowing of the shared $def because adoptions-0.1.json needs `human` and the sealed record needs all three disposition values -- narrowing the def would break gate-0 adoptions. It restricts existing property names only, so the referenced schema's additionalProperties: false still applies unchanged. Without it a member could defer a candidate the plan does not defer: that passes refs.check_disposition_parts, passes a conflict check that only sees plan-declared defers, and reaches the sealed record, dropping the input with no phase recorded anywhere and no reason code -- the invisible drop rb-triage-rule exists to prevent, and worse than a decline, which must at least carry a code from the decline set.",
+            "properties": {
+              "disposition": {"enum": ["admit", "decline"]},
+              "authority": {"enum": ["triage"]}
+            }
+          }
+        ]
+      }
     },
     "observed_surfaces": {
       "type": "array",

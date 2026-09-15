@@ -14,9 +14,10 @@ import re
 
 import pytest
 
-from rubrica import cli, summary
+from rubrica import cli, summary, summary_html
 from rubrica.paths import STAGES, RunPaths
 from tests.toy import build_toy_run
+from tests.unit.test_phase_pipeline import phase_run_through_intake
 
 # The stages each fixture level reaches, as *exact* sets rather than a handful of
 # spot checks. Exact-set equality is what makes these locks: asserting only that
@@ -5459,3 +5460,33 @@ def test_clipped_marks_one_character_past_the_boundary_and_not_the_boundary(tmp_
     assert "&hellip;" not in summary_html._clipped(exact), "a cell that fits is not clipped"
     assert summary_html._clipped(exact) == exact
     assert "&hellip;" in summary_html._clipped(over)
+
+
+def test_the_disposition_bucket_counts_defers_separately(tmp_path):
+    """summary.dispositions bucketed on `if admit ... elif decline ...` with no else,
+    so a defer fell out of both and 68 inputs would have been absent from the page
+    with nothing saying so."""
+    run = phase_run_through_intake(tmp_path)
+    got = summary.dispositions(run)
+    assert got.defer_count == 1
+    assert [d["candidate_id"] for d in got.defers] == ["trace-json"]
+    # Neither of the other two buckets absorbed it.
+    assert all(d["candidate_id"] != "trace-json" for d in got.admits)
+    assert all(
+        d["candidate_id"] != "trace-json"
+        for group in got.declines_by_reason.values()
+        for d in group
+    )
+    # And the counts the page prints stay the counts of their own buckets.
+    assert got.admit_count == 2
+
+
+def test_the_page_renders_the_deferred_table_only_when_there_are_defers(tmp_path):
+    run = phase_run_through_intake(tmp_path)
+    page = summary_html.render(run)
+    assert "Deferred to a later phase" in page
+    assert "trace-json" in page
+    # The negative control is the *section*, not the id: a phaseless run has no
+    # deferred block at all rather than an empty one.
+    plain = build_toy_run(tmp_path / "plain", upto="intake")
+    assert "Deferred to a later phase" not in summary_html.render(plain)

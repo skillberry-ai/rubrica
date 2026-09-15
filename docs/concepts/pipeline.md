@@ -32,8 +32,8 @@ contract, not a diagram convention.
 | — | `triage-seal` | code — assembles the triage record from the staged parts | `00-objective.json`, `00-slices.json`, `00-dispositions/<slice>.json`, `00-audit.json`, `00-adoptions.json` (optional) | `00-triage.json` | validate · human gate 0 |
 | `00` | `intake` | code | the input files you name, plus target name, interface, limits — or, on the survey path, an already-admitted `00-triage.json` | `manifest.json`, `00-inputs/<stored_as>` | validate |
 | `01a` | `extract` | `rb-extract` — fan-out, one per input | the manifest, and its own one file under `00-inputs/` — never a sibling's | `01-claims/<artifact-id>.json` | validate · check-refs |
-| `01b` | `reconcile-subjects` | `rb-reconcile-subjects` — barrier | the manifest and every claims file | `01-subjects.json` | validate · check-refs |
-| `01c` | `reconcile-contradict` | `rb-reconcile-contradict` — fan-out, one per subject | the manifest, every claims file, `01-subjects.json` | `01-contradictions/<subject-id>.json` | validate · check-refs |
+| `01b` | `reconcile-subjects` | `rb-reconcile-subjects` — barrier; **not dispatched under a declared phase** | the manifest and every claims file | `01-subjects.json` | validate · check-refs |
+| `01c` | `reconcile-contradict` | `rb-reconcile-contradict` — fan-out, one per subject; **not dispatched under a declared phase** | the manifest, every claims file, `01-subjects.json` | `01-contradictions/<subject-id>.json` | validate · check-refs |
 | `01d` | `reconcile-capabilities` | `rb-reconcile-capabilities` | the manifest, every claims file, `01-contradictions/` | `01-capabilities.json` | validate · check-refs |
 | `01e` | `reconcile-outcomes` | `rb-reconcile-outcomes` | `01d`'s reads, plus `01-capabilities.json` | `01-outcomes.json` | validate · check-refs |
 | `01f` | `reconcile-entities` | `rb-reconcile-entities` | `01d`'s reads, plus `01-capabilities.json` — **not** `01-outcomes.json` | `01-entities.json` | validate · check-refs |
@@ -63,6 +63,36 @@ the pass that assembles the record the rest of the family produces in parts —
 yet. `intake --input` still works
 unchanged for anyone who would rather hand-pick the inputs directly, with no
 corpus, no catalogue, no triage record, no slices, and no gate 0.
+
+### A third disposition: `defer`
+
+A candidate is `admit`, `decline` or `defer`, and the third makes a different promise
+from the second. A decline says this input has no evidence value. A defer says it has
+value **this phase cannot spend**, and a later phase admits it — so collapsing the two
+would tell an operator that the deferred inputs were judged useless, which on the
+corpus this was built for would have been 68 of 149.
+
+The declaration is one operator flag on `triage-slices` — `--phase N --defer-kind
+KIND`, together or not at all — and it is mechanical from there down. Candidates of a
+deferred kind stay in their slice's `candidate_ids` and are subtracted from its shard,
+so **no `rb-triage-rule` member ever sees one** and no prompt is asked to apply the
+policy; a slice whose every candidate is deferred is never dispatched at all.
+`triage-seal` synthesises the `defer` ruling for each from the plan, with
+`authority: policy` and no `priority` — no member ranked it, and a code-invented rank
+would be a reasoned number presented as an observed one — so every catalogue candidate
+is still a decision on the record, which is the property gate 0 rests on. The
+`{number, deferred_kinds}` block is then carried verbatim into `00-triage.json`,
+`manifest.json` and `01-world-model.json`.
+
+Under a declared phase, `rb-orchestrate` does not dispatch `reconcile-subjects` or
+`reconcile-contradict`: they are the forensic half of the world model and the two
+slowest passes in the run, and `reconcile-seal` assembles a complete world model
+without them — it never reads `01-subjects.json` and iterates an absent
+`01-contradictions/` to an empty `contradictions` list. `check-refs` is clean over
+that run, so **their absence is not a finding**, exactly as the code stages' missing
+`manifest.stages` entries are not. The world model's own `phase` block is what keeps
+the resulting incompleteness legible rather than silent: `gate-brief`, `run-summary`
+and `target-brief` all read it and say so.
 
 ### Reconcile is one logical step, engineered as substeps
 

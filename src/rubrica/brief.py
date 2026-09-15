@@ -138,6 +138,7 @@ from __future__ import annotations
 
 import textwrap
 
+from rubrica import phase
 from rubrica.artifacts import read_json
 from rubrica.errors import UsageError
 from rubrica.intake import admit_sort_key
@@ -161,7 +162,7 @@ from rubrica.paths import STAGES, RunPaths, is_safe_segment, list_json
 # gate's reading surface and the field it is describing come to disagree about what
 # a cell is. Both index unguarded (`cap["id"]`, `oc["id"]`), which is why
 # `_cell_counts` below wraps them rather than calling them straight.
-from rubrica.refs import PASS_OWN_KINDS, _as_list, _cells, drivable_cells
+from rubrica.refs import PASS_OWN_KINDS, _and_join, _as_list, _cells, drivable_cells
 from rubrica.sizing import implied_size
 from rubrica.utilisation import claim_utilisation
 
@@ -180,6 +181,11 @@ DIVERGENCE_HEADER = "Surface divergence (predicted vs observed)"
 SLICES_HEADER = "Slices the triage family read"
 SPLIT_HEADER = "Groups split across more than one slice"
 READ_COST_HEADER = "Read cost of these admits"
+# Gate 0's deferred group. Named here with its siblings for the reason the comment
+# above them gives: it is the anchor a reader and a test both scope to, and a
+# rewording landing in only one of two places would silently unscope an assertion to
+# the whole document.
+DEFERRED_HEADER = "Deferred to a later phase"
 
 # Every reconcile pass reads ALL of 01-claims/ -- the family is split on output, not
 # on claims, which is what keeps the barrier property and is why a claims-level
@@ -1272,6 +1278,53 @@ def _gate_0(run: RunPaths) -> str:
         lines.append("  (none)")
     lines.append("")
 
+    # The third disposition, in a group of its own. Collapsing it into the declines
+    # above would tell the operator that 68 inputs were judged useless, which is the
+    # claim the separate disposition exists to avoid making; rendering nothing -- what
+    # this report did before -- tells them nothing at all, which is worse.
+    #
+    # Rendered only when the record actually defers something. A header with an empty
+    # body on every phaseless run trains a reader to skip it, which is how the one run
+    # that does defer something gets skipped too.
+    defers = [d for d in dispositions if d.get("disposition") == phase.DEFER]
+    if defers:
+        block = phase.read(triage)
+        number = block.get("number") if block else None
+        kinds = sorted(phase.deferred_kinds(block))
+        lines.append(DEFERRED_HEADER)
+        # The declaration first, then the candidates it caught. A reader deciding
+        # whether to overturn the deferral needs the flag, not 68 rows: the rows are
+        # the consequence, and the two facts that make it reversible are the kind list
+        # and the phase number.
+        #
+        # An f-string on the number rather than a format that assumes an int, for gate
+        # 0's own reason: this block is read from a hand-editable record *without*
+        # validating it, so a number that is not one renders as itself rather than
+        # raising out of a report whose whole ruling is that it exits 0.
+        lines.append(
+            f"  declared: phase {number}, deferring "
+            f"{_and_join(kinds) if kinds else '(no kind recorded)'}"
+        )
+        lines.append(
+            f"  {len(defers)} candidate(s) held for a later phase, not declined: these carry "
+            "evidence value this phase cannot spend, and nothing downstream of intake will "
+            "read them."
+        )
+        for d in defers:
+            # candidates.get(...) raises TypeError on an unhashable candidate_id, so
+            # the lookup is gated on the key being the string the schema requires --
+            # the same guard the declines loop above carries, for the same hand-edit.
+            cid = d.get("candidate_id")
+            candidate = candidates.get(cid) if isinstance(cid, str) else None
+            raw = candidate.get("bytes") if candidate is not None else None
+            bytes_note = (
+                f" ({raw} bytes)" if isinstance(raw, int) and not isinstance(raw, bool) else ""
+            )
+            lines.append(
+                f"  - {cid if cid is not None else '?'}{bytes_note}: {d.get('reason', '')}"
+            )
+        lines.append("")
+
     deficiencies = _dicts(triage.get("deficiencies"))
     projections_by_closes: dict[str, list[dict]] = {}
     for projection in _dicts(triage.get("projections")):
@@ -1313,6 +1366,26 @@ def _gate_0(run: RunPaths) -> str:
 def _gate_1(run: RunPaths) -> str:
     lines = [f"GATE 1 -- {run.root}", ""]
     lines.extend(_waiver_lines(run))
+
+    # Gates 1 through 3 review a judgment made from evidence already in the run, and a
+    # reader ratifying this one needs to know the evidence was bounded by declaration
+    # rather than by what the corpus held. Without this the contradiction tally below
+    # reads as a count when it is a floor.
+    #
+    # Read from the world model, which is the artifact this gate is about, and read
+    # through _quietly for every other read on this page's reason: a report is never a
+    # gate, so an unreadable or hand-edited model renders as this block's absence.
+    phase_block = phase.read(_mapping(_quietly(run.world_model)))
+    if phase_block is not None:
+        deferred_kinds = sorted(phase.deferred_kinds(phase_block))
+        lines.append(
+            f"This run declared phase {phase_block.get('number')} and deferred "
+            f"{_and_join(deferred_kinds) if deferred_kinds else '(no kind recorded)'}: "
+            f"{phase_block.get('deferred_count')} admitted-eligible candidate(s) were never "
+            "extracted, so every tally below is a floor rather than a count. The "
+            "contradiction sweep and the subject cover were not run at all."
+        )
+        lines.append("")
 
     # The reconcile sweep, read before anything derived from it. Cross-pass
     # incoherence -- a later pass modelling what rb-reconcile-contradict recorded

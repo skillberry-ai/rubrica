@@ -570,6 +570,32 @@ rather than by corpus size. `canonical_bytes` sorts keys, so the block and
 
 Required: `--run RUN`.
 
+Optional: `--phase N` and `--defer-kind KIND` (repeatable), which declare that this
+run defers every candidate of the named kinds to a later phase. **They are declared
+together or not at all** — a phase deferring nothing pays full price and reports a
+saving, and a deferred kind with no phase number has no phase to be deferred to — and
+either half alone is exit 2, since argv is where it came from and no stage re-dispatch
+fixes a flag. `KIND` is checked against the catalogue's own kind enum
+(`catalogue-0.1.json`'s `$defs/kind`, read at parser-build time), so an unknown one is
+exit 2 as well: a `--defer-kind` naming a kind no candidate can carry would defer
+nothing while the run still reported a phase.
+
+Deferred candidates stay in their slice's `candidate_ids` — the partition is
+phase-independent, so a slice id means the same thing in phase 1 and phase 3 — and are
+named in that slice's `deferred_candidate_ids` and subtracted from its shard. No
+`rb-triage-rule` member is ever handed one, so no prompt applies the policy, and a
+slice whose every candidate is deferred gets no shard at all and is never dispatched.
+`triage-seal` synthesises a `defer` disposition for each, so every catalogue candidate
+is still ruled on the record.
+
+The `{number, deferred_kinds}` block is declared here and carried verbatim into
+`00-triage.json` (by `triage-seal`), `manifest.json` (by `intake`, which adds
+`deferred_count`) and `01-world-model.json` (by `reconcile-seal`). It is declared here
+rather than on `intake` because `intake` mints `manifest.json` five stages later, and
+one declaration site is what stops two from disagreeing about what the run can know.
+Re-running this command with different flags — or none — is how a human reverses a
+gate-0 deferral, which is affordable precisely because this stage is code.
+
 Reports no findings, so it never exits 1: a catalogue with no admissible
 candidates, one that cannot be read at all, or one missing `run_id`,
 `request`, `policy`, `excluded`, or a candidate's `candidate_id` — every field
@@ -583,11 +609,20 @@ longer names, so a human adopting a projection at gate 0 can re-mint the
 plan safely.
 
 Prints one line per slice — id, byte size, candidate count, label — then
-exits 0.
+exits 0. Both numbers describe the **dispatch**, not the slice: a fully deferred slice
+prints `-` where its byte size would be, because it has no shard to measure, and a
+partly deferred one prints its count as `2 of 3`. It is still listed rather than
+omitted, since the count of lines is what an operator reads to confirm how many
+dispatches the declaration actually saved. A run that declared no phase prints exactly
+as it always has.
 
 ```bash
 rubrica triage-slices --run runs/run-20260806-123005
 # s01  61234  42  corpus:0:src/handlers (42 candidates)
+
+rubrica triage-slices --run runs/run-20260806-123005 --phase 1 --defer-kind trace
+# s01  48120  37 of 42  corpus:0:src/handlers (42 candidates)
+# s02  -      0 of 15   corpus:0 kind=trace [t-00..t-14]
 ```
 
 ### `rubrica triage-seal`

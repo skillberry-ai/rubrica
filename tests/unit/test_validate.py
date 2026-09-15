@@ -453,8 +453,14 @@ def test_validate_stage_walks_every_disposition_part(tmp_path):
     bad["dispositions"][0]["authority"] = "not-a-real-authority"
     write_json(run.disposition_part("s02"), bad)
     findings = validate_stage(run, "triage-rule")
-    assert len(findings) == 1
-    assert findings[0].artifact == run.disposition_part("s02")
+    # Every finding names the bad part and none names the good one -- which is the
+    # claim here, deliberately asserted as a set of artifacts rather than as a
+    # count. The count is a property of the sample defect, not of the walk:
+    # `not-a-real-authority` violates two enums at once now that
+    # dispositions-part-0.1.json overlays the shared $def's authority set with the
+    # single value a fan-out member may sign, and a count assertion made this test
+    # fail for a reason that had nothing to do with walking the directory.
+    assert {f.artifact for f in findings} == {run.disposition_part("s02")}
 
 
 def test_validate_stage_reports_a_stage_that_produced_nothing(tmp_path):
@@ -773,6 +779,57 @@ def test_manifest_stage_efforts_tracks_a_schema_override(tmp_path, monkeypatch):
     write_json(tmp_path / ARTIFACT_SCHEMAS["manifest"], original)
     monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path))
     assert manifest_stage_efforts() == ("low", "ludicrous")
+
+
+def test_catalogue_candidate_kinds_is_the_catalogue_schemas_own_enum():
+    """`triage-slices --defer-kind` takes its argparse choices from this, so the
+    CLI cannot accept a kind the schema will reject.
+
+    Asserted against the enum read from the schema on disk rather than a
+    hand-typed tuple: a literal here would *be* the second copy of the enum this
+    function exists to remove, and it would pass just as happily if the function
+    returned a stale list.
+
+    Read from the **catalogue** schema, which is the point of the function's name:
+    `--defer-kind` selects catalogue candidates, so the enum that matters is the
+    one validating the `kind` each candidate carries. triage-0.1.json restates that
+    enum for its projection fields; the two are byte-identical today, which is
+    exactly why this test names its file explicitly -- against the restatement it
+    would pass either way and prove nothing.
+    """
+    from rubrica.artifacts import read_json
+    from rubrica.validate import ARTIFACT_SCHEMAS, catalogue_candidate_kinds, schema_dir
+
+    schema = read_json(schema_dir() / ARTIFACT_SCHEMAS["catalogue"])
+    assert catalogue_candidate_kinds() == tuple(schema["$defs"]["kind"]["enum"])
+    # Order too, not just membership: argparse renders choices in the order it is
+    # given them, and a set comparison would let the help text reshuffle silently.
+    assert list(catalogue_candidate_kinds()) == schema["$defs"]["kind"]["enum"]
+
+
+def test_catalogue_candidate_kinds_tracks_a_schema_override(tmp_path, monkeypatch):
+    """The cache-key behaviour its docstring claims, measured.
+
+    Same argument as manifest_stage_efforts' override test above: without this,
+    the caching could be hiding a read that happens once against the shipped
+    schema and never again -- and the sentinel below is a kind no shipped
+    catalogue can carry, so it can only have come from the override.
+
+    It also pins *which* schema is read, in the one direction that can tell the two
+    copies apart: only catalogue-0.1.json is overridden here, and triage-0.1.json
+    is copied across unchanged, so a function reading triage's restatement would
+    return the shipped seven and fail.
+    """
+    from rubrica.artifacts import read_json
+    from rubrica.validate import ARTIFACT_SCHEMAS, catalogue_candidate_kinds, schema_dir
+
+    for name in (ARTIFACT_SCHEMAS["catalogue"], ARTIFACT_SCHEMAS["triage"]):
+        write_json(tmp_path / name, read_json(schema_dir() / name))
+    overridden = read_json(tmp_path / ARTIFACT_SCHEMAS["catalogue"])
+    overridden["$defs"]["kind"]["enum"] = ["trace", "haruspicy"]
+    write_json(tmp_path / ARTIFACT_SCHEMAS["catalogue"], overridden)
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path))
+    assert catalogue_candidate_kinds() == ("trace", "haruspicy")
 
 
 def test_a_structurally_invalid_schema_is_a_usage_error_not_a_finding(tmp_path, monkeypatch):
