@@ -3774,7 +3774,7 @@ is worth knowing before you propose adding one — a few have since drifted from
 ## What phased deferral accepts
 
 `triage-slices --phase N --defer-kind KIND` defers a whole input kind to a later
-phase instead of dropping it. Five things it does not do, and one thing it is most
+phase instead of dropping it. Six things it does not do, and one thing it is most
 likely to be misread as fixing.
 
 ### A synthesised `defer` carries no `priority`
@@ -3814,6 +3814,35 @@ Parked because the human at gate 0 reads both surfaces: the audit's deficiencies
 the deferred group `gate-brief` renders beside them. That reader is the right party to
 rule that one explains the other, and reversing the deferral costs one re-run of a code
 stage.
+
+### Under a phase, no pass is accountable for finding a contradiction
+
+`rb-orchestrate` skips `reconcile-subjects` and `reconcile-contradict` under a phase,
+and that sweep was the only pass whose job was to find disagreements between claims
+and rule on each one with a `rationale`. Skipping it does not make the admitted inputs
+agree: a spec and a source file can still contradict each other with every trace
+deferred. The six passes after the skip were first left reading the absent
+`01-contradictions/` as a missing input, which they refuse over, so no phased run could
+reach gate 1. Measured on one real phased run (`run-20261005-113420`, reservation-service
+corpus): three dispatches of `rb-reconcile-capabilities`, three refusals, each one
+citing that condition.
+
+Each of those passes now carries a §5 condition, placed ahead of the shared
+missing-input one, that exempts exactly the two skipped files under a `phase` block.
+Its §1 makes any disagreement the pass can see, with nothing on disk resolving it,
+count as one recorded `unresolved`, and `rb-reconcile-gaps` records each such
+disagreement as a gap citing both claims. What that gives up is coverage, not
+honesty. A disagreement is caught only if the pass whose output it touches happens to
+notice it while doing other work, and only `reconcile-gaps` records one, so the world
+model's `contradictions` list is empty by construction, and gate 1's contradiction
+tally is a floor of zero rather than a measurement. The `phase` block on the world
+model is what tells a reader so.
+
+Parked because the alternatives are worse. An empty `01-contradictions/` written by
+code would state that a sweep ran and found nothing, which is false. Dispatching the
+sweep again gives up the saving that is the reason the phase skips it. **No dispatch
+under a phase has yet been observed to follow the exemption**: the unit tests hold
+the prose, not the behaviour, and the record of that dispatch is still owed.
 
 ### A phase-1 world model is not comparable to a full one
 
