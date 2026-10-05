@@ -1016,11 +1016,26 @@ def _slice_lines(run: RunPaths) -> list[str]:
         slice_id = entry.get("id")
         slice_id = slice_id if isinstance(slice_id, str) else "?"
         candidate_count = len(_strings(entry.get("candidate_ids")))
-        table.append(
-            f"  {slice_id}: {candidate_count} candidate"
-            f"{'s' if candidate_count != 1 else ''}, {entry.get('bytes', '?')} bytes"
-            f" -- {entry.get('label', '')}"
-        )
+        deferred_count = len(_strings(entry.get("deferred_candidate_ids")))
+        # The count describes the dispatch, as `triage-slices`' own row does.
+        # Measured on run-20261005-113420: this row read "41 candidates" for a
+        # member dispatched 14 while the CLI row for the same slice read "14 of
+        # 41". `bytes` is the slice's own figure, summed before subtraction, and
+        # is labelled as such rather than recomputed: recomputing it would need
+        # the catalogue, and a figure the plan did not write is not this table's
+        # to state. A slice with nothing deferred renders exactly as it did.
+        if deferred_count:
+            size = (
+                f"{candidate_count - deferred_count} of {candidate_count} candidates "
+                f"dispatched ({deferred_count} deferred), "
+                f"{entry.get('bytes', '?')} bytes before deferral"
+            )
+        else:
+            size = (
+                f"{candidate_count} candidate{'s' if candidate_count != 1 else ''}, "
+                f"{entry.get('bytes', '?')} bytes"
+            )
+        table.append(f"  {slice_id}: {size} -- {entry.get('label', '')}")
     if not run.slices.is_file():
         table.append(
             "  (00-slices.json is absent -- `triage-slices` has not run for this run, or the "

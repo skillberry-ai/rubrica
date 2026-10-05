@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import shutil
 
-from rubrica import cli, intake, phase, reconcile, refs, seal, slices, validate
+from rubrica import brief, cli, intake, phase, reconcile, refs, seal, slices, validate
 from rubrica.artifacts import write_json
 from rubrica.paths import RunPaths
 from tests.toy import build_toy_run
@@ -635,3 +635,30 @@ def test_the_cli_counts_the_dispatch_not_the_slice_on_a_partly_deferred_slice(tm
     assert "2 of 3" in phased
     shard = json.loads(run.slice_shard("s01").read_text())
     assert len(shard["candidates"]) == 2
+
+
+def test_the_gate_zero_slice_table_counts_the_dispatch_on_a_partly_deferred_slice(tmp_path):
+    """The `triage-slices` row's rule, held on the gate-0 brief's slice table too.
+
+    Measured on a real phased run (run-20261005-113420): the brief read "s01: 41
+    candidates, 17599 bytes" for a member dispatched 14, while the CLI row for the
+    same slice read "14 of 41". The byte figure is the slice's own, before
+    subtraction, and the row now says so rather than presenting it as the size of
+    what was dispatched. The phaseless row is asserted unchanged in the same test,
+    for the reason the CLI test gives: "only when they differ" is the whole rule."""
+    plain_run = build_toy_run(tmp_path / "plain", upto="triage-slices")
+    # The renderer rather than the whole brief: gate 0 renders the slice table
+    # only once the triage family has sealed, and a run sealed before it was
+    # re-sliced under a phase is not a state any operator reaches.
+    (plain_row,) = [
+        line for line in brief._slice_lines(plain_run) if line.strip().startswith("s01:")
+    ]
+    assert plain_row.strip().startswith("s01: 3 candidates, ")
+    assert " of " not in plain_row and "deferred" not in plain_row
+
+    run = phase_run(tmp_path / "phased")
+    (row,) = [line for line in brief._slice_lines(run) if line.strip().startswith("s01:")]
+    # One trace deferred of the toy's three, so two were dispatched.
+    assert "2 of 3 candidates dispatched" in row, row
+    assert "1 deferred" in row, row
+    assert "before deferral" in row, row

@@ -748,7 +748,9 @@ or added), then admits by priority, **the read cost of those admits**, declines
 grouped by reason code, and every
 open deficiency beside the projection that would close it — and last, the
 mechanics of how the fan-out read the corpus: the slice table (candidates and
-bytes per slice) and every group `triage-slices` split across more than one
+bytes per slice -- under a phase, a slice with deferred candidates reads `N of M
+candidates dispatched`, with its bytes marked as the slice's own, before
+deferral) and every group `triage-slices` split across more than one
 slice. That final summary is where the near-duplicate residue lives, and gate 0
 is the only place a human can act on it.
 
