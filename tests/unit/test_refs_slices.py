@@ -381,3 +381,38 @@ def test_a_catalogue_whose_candidates_are_not_an_array_reports_no_bytes_findings
     write_json(run.catalogue, catalogue)
     findings = check_slices(run)
     assert [f for f in findings if "candidate_bytes" in f.pointer] == []
+
+
+def test_a_deferred_id_outside_the_slice_is_a_finding(tmp_path):
+    """The plan's new field is held to the same resolution every other id in it
+    is. Measured in both directions: the clean case is test_phase_pipeline's
+    check_slices assertion, and this is the shape that would subtract a row from
+    the wrong shard and make check 6 blame the shard for it. Nothing else trips --
+    a stray id leaves candidate_ids, the shard and bytes all internally
+    consistent, which is exactly why check 10 has to exist to see it."""
+    run = _toy_run(tmp_path)
+    write_slices(run)
+    plan = read_json(run.slices)
+    plan["slices"][0]["deferred_candidate_ids"] = ["no-such-candidate"]
+    write_json(run.slices, plan)
+    findings = check_slices(run)
+    assert len(findings) == 1
+    assert "is not one of its candidate_ids" in findings[0].message
+
+
+def test_a_missing_shard_is_still_a_finding_when_the_slice_is_only_partly_deferred(tmp_path):
+    """The exemption in check 4 is exactly one slice shape wide. A slice with one
+    undeferred candidate left still owes a shard, and deleting it must still be
+    reported -- otherwise `deferred_candidate_ids` becomes a way to make any
+    missing shard disappear.
+
+    At the default cap the toy fixture's three candidates share one slice, so
+    deferring `trace` leaves s01 partly deferred; _sliced_run's cap=2500 would
+    give each candidate a slice of its own and make the trace one *fully*
+    deferred, which is the other branch."""
+    run = _toy_run(tmp_path)
+    write_slices(run, phase_block={"number": 1, "deferred_kinds": ["trace"]})
+    run.slice_shard("s01").unlink()
+    findings = check_slices(run)
+    assert len(findings) == 1
+    assert "has no shard on disk" in findings[0].message

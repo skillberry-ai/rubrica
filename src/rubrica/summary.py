@@ -37,6 +37,7 @@ from pathlib import Path
 # local copy would be a second spelling of a guard whose whole point is that
 # there is one, and half a module's worth of inconsistent isinstance checks is
 # the defect `_mapping` exists to have fixed.
+from rubrica import phase
 from rubrica.brief import _dicts, _mapping, _quietly, _strings
 
 # The one sort in this module that is not local to it. `dispositions` lists the
@@ -546,6 +547,14 @@ class Dispositions:
     declines_by_reason: dict[str, list[dict]]
     admit_count: int
     decline_count: int
+    # A third bucket rather than a third reason-code group under the declines. The
+    # loop in dispositions() was `if admit ... elif decline ...` with no else, so a
+    # defer fell out of both and every deferred input was absent from the page -- 68
+    # of 149 inputs on the corpus this was measured against, vanishing with nothing
+    # saying so. Filing them under a decline code instead would report them as judged
+    # useless, which is the claim the separate disposition exists to avoid making.
+    defers: list[dict]
+    defer_count: int
 
 
 def dispositions(run: RunPaths) -> Dispositions | Marker:
@@ -560,6 +569,7 @@ def dispositions(run: RunPaths) -> Dispositions | Marker:
         return _absent_or_malformed(run.triage, "00-triage.json", "nothing could be read from it")
     admits: list[dict] = []
     declines: dict[str, list[dict]] = {}
+    defers: list[dict] = []
     for member in _dicts(payload.get("dispositions")):
         if member.get("disposition") == "admit":
             admits.append(member)
@@ -573,11 +583,18 @@ def dispositions(run: RunPaths) -> Dispositions | Marker:
             # is grouped on and then sorted: a non-string code both risks being
             # unhashable and would make the sort compare str to int.
             declines.setdefault(str(code) if code else "?", []).append(member)
+        elif member.get("disposition") == phase.DEFER:
+            defers.append(member)
     # No try/except around this sort, deliberately. admit_sort_key is documented
     # total and coerces every value precisely so it cannot raise -- a non-integer
     # priority sorts as if absent and the id goes through repr(). Guarding it here
     # would assert a failure mode its docstring says it removed.
     admits.sort(key=admit_sort_key)
+    # Sorted for the declines groups' reason: two runs of the same pipeline must
+    # render the same table for the page to be diffable. admit_sort_key is total and
+    # coerces an absent `priority` to its sentinel, which is what every synthesised
+    # defer ruling carries -- triage-seal assigns none, because no member ranked it.
+    defers.sort(key=admit_sort_key)
     return Dispositions(
         admits=admits,
         # Sorted rather than insertion-ordered: insertion order is whatever the
@@ -586,6 +603,8 @@ def dispositions(run: RunPaths) -> Dispositions | Marker:
         declines_by_reason=dict(sorted(declines.items())),
         admit_count=len(admits),
         decline_count=sum(len(v) for v in declines.values()),
+        defers=defers,
+        defer_count=len(defers),
     )
 
 

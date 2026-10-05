@@ -14,6 +14,7 @@ import pytest
 from rubrica import cli, reconcile, refs, validate
 from rubrica.artifacts import read_json, sha256_of, write_json
 from tests.toy import build_toy_run, split_world_model, toy_world_model
+from tests.unit.test_phase_pipeline import phase_run_through_seal
 
 
 def _write_parts(run, parts: dict) -> None:
@@ -928,3 +929,18 @@ def test_a_malformed_partial_is_a_finding_naming_that_partial(tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 1
     assert "01-entities.json" in out
+
+
+def test_two_seals_of_the_same_phase_partials_are_byte_identical(tmp_path):
+    """reconcile-seal is code for one reason: two runs with identical partials must
+    produce a byte-identical world model, or variance can no longer be attributed to
+    a stage. The phase block is a verbatim carry, so it cannot weaken that -- and
+    this is where "cannot" is measured rather than argued."""
+    run = phase_run_through_seal(tmp_path)
+    first = run.world_model.read_bytes()
+    assert b'"phase"' in first  # the guarantee is only interesting if the block is there
+    run.world_model.unlink()
+    path, findings = reconcile.seal(run)
+    assert findings == []
+    assert path == run.world_model
+    assert run.world_model.read_bytes() == first

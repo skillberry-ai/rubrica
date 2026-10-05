@@ -50,9 +50,11 @@ admissible and still be declined).
 - **Read by:** `intake` (the `--run` path)
 - **Path:** `00-triage.json`
 
-One disposition per catalogued candidate — `admit` or `decline`, each with a
-`reason` and an `authority` (`triage` or `human`, so an override at gate 0 is
-distinguishable from triage's own ruling) — plus `objective_review` (whether
+One disposition per catalogued candidate — `admit`, `decline` or `defer`, each with a
+`reason` and an `authority` (`triage`, `human`, or `policy` for a ruling
+`triage-seal` synthesised from the run's own phase declaration, so an override at gate
+0 is distinguishable from triage's own ruling and both are distinguishable from a
+mechanical consequence nobody ruled on one at a time) — plus `objective_review` (whether
 the corpus actually supports the survey's declared `breadth`/`depth`
 objective), `deficiencies` (named gaps in the corpus itself), and
 `projections` (proposed manufactured artifacts closing a deficiency, each with
@@ -74,6 +76,27 @@ free text); `projections[].closes` (the `deficiency_id`s a projection is
 supposed to resolve — `adopt-projection` checks structural acceptance against
 this, never the prose criterion, which stays a human's call).
 
+### The `phase` block, on four artifacts
+
+`triage-0.1.json`'s `$defs/phase` defines one optional block that four artifacts
+carry, each `$ref`ing that definition rather than restating it: `slices` (declared
+there by `triage-slices --phase N --defer-kind KIND`), `triage` (carried by
+`triage-seal`), `manifest` (carried by `intake`) and `world-model` (carried by
+`reconcile-seal`). Every carry is verbatim — the declaration was ratified at gate 0,
+and a re-derivation downstream would be a second answer to a settled question.
+
+`number` and `deferred_kinds` appear on all four. `deferred_count` appears only on
+`manifest` and `world-model`: the first two enumerate the deferred set in full — as
+each slice's `deferred_candidate_ids` and as the `defer` dispositions themselves — so a
+count beside it would be a second spelling of a length. `intake` adds the number
+because it is the stage that knows it exactly, having just read the dispositions, and
+because `reconcile-seal` reads the manifest and never `00-triage.json`.
+`refs.check_admitted_inputs` recomputes it against the record's own defers, so it is
+arithmetic a reader can check rather than testimony.
+
+Absent on every artifact of a run that declared no phase, which is what makes such a
+run's files indistinguishable from ones written before the field existed.
+
 ## `slices`
 
 - **Schema:** `src/rubrica/schema/slices-0.1.json`
@@ -90,7 +113,11 @@ single dispatch can hold one slice whole: the fix for a real 595KB/351
 candidate catalogue that killed three dispatches before this module existed,
 one in context compaction and one by exhausting its whole dollar budget.
 `00-slices.json` is the plan — one entry per slice, its `groups`,
-`candidate_ids`, and `provenance` — and is schema-validated. The shard at
+`candidate_ids`, and `provenance` — and is schema-validated. Under a declared `phase`
+each entry may also carry `deferred_candidate_ids`, the subset of its own
+`candidate_ids` the phase defers: those stay in the partition and are subtracted from
+the shard, so the entry's `bytes` is the shard's undeferred sum and a slice whose whole
+set is deferred has no shard at all. The shard at
 `00-slices/<id>.json` is not: instead it carries the run's `request` and
 `policy` verbatim alongside that slice's own full candidate records, so a
 member's entire input is one `Read` under the harness's 256KB refusal, with
@@ -223,7 +250,9 @@ The run's identity: `run_id`, `target` (name and interface), the registered
 `inputs` (each with its `artifact_id`, `source_path`, `stored_as` name,
 `sha256`, `kind`, and `bytes`), the current `limits` (`max_rounds`,
 `max_scenarios`, and the optional `max_scenario_part_bytes` — absent means
-`rounds.DEFAULT_SCENARIO_PART_BYTES`), and `stages` — one entry per stage that
+`rounds.DEFAULT_SCENARIO_PART_BYTES`), the optional `phase` block
+([above](#the-phase-block-on-four-artifacts)) with the `deferred_count` `intake` adds,
+and `stages` — one entry per stage that
 has actually run,
 recording the `model`, `effort`, and `skill_sha256` `record-stage` computed
 from the skill file used. `stages` gains one entry per prompt stage
@@ -672,7 +701,14 @@ produced: `capabilities`, `entities`, `actors`, `goals`, recorded
 resolved), recorded `gaps` (things no input says anything about, each naming
 which later stages it `blocks`), an optional `services` (the tool groupings a
 simulator would stand in for, present only when `01-services.json` was written),
-and a `denominator` frozen at a `version` for the rest of the run. Every element
+and a `denominator` frozen at a `version` for the rest of the run. It also carries the
+optional `phase` block ([above](#the-phase-block-on-four-artifacts)), and this is the
+one of the four carries whose *presence* a report reads rather than a stage:
+`target-brief` and `run-summary` both render it, because a model showing a reader 85
+contradictions without stating that 119 more went unread misrepresents the analysis.
+Under a declared phase `contradictions` is present and empty rather than absent — an
+empty list is the honest record of a sweep that did not run, and the `phase` block is
+what says why. Every element
 carries a `claims` array of the claim ids
 that support it — **including the nested ones**: an outcome class, an invariant
 and a gap each require their own non-empty array, and until [the read-coverage

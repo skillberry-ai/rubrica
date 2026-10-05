@@ -95,6 +95,25 @@ answers the objective. This pass's `supported` verdict inherits that
 blindness; §2's `predicted_surface_count` exists in part to give the members
 that *do* read digests something concrete to check your map against.
 
+**A slice entry may carry `deferred_candidate_ids`, and the plan may carry a
+`phase` block naming the kinds this run defers.** Those candidates are held for a
+later phase, **not** missing: they were catalogued, they are recorded in the plan,
+and a later run admits them. They are absent from the shards, so no member will
+rule on them and nothing this run produces will cite them.
+
+That distinction changes your ruling in one direction only. Judge whether the
+objective can be met **by the material this phase will actually read** -- the
+candidates in each slice's `candidate_ids` that its `deferred_candidate_ids` does
+not name. Do not rule an objective unmeetable on the ground that deferred material
+is missing, and do not rule it meetable on the strength of material this phase will
+never open. Their `bytes` is already the undeferred sum, so the weight arithmetic
+in §2 needs no adjustment for them.
+
+If the objective can only be met with the deferred kinds, say exactly that in
+`objective_review.notes` and rule `supported` accordingly: that note is the finding
+a human at gate 0 needs in order to reverse the deferral, and reversing it costs one
+re-run of a code stage.
+
 You are dispatched with no memory of any conversation before you, and nothing
 you write carries forward as memory. What you need is in this one file.
 

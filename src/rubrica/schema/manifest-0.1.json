@@ -114,6 +114,10 @@
         }
       }
     },
+    "phase": {
+      "$ref": "triage-0.1.json#/$defs/phase",
+      "description": "The run's phase declaration, carried from 00-triage.json by intake -- `number` and `deferred_kinds` verbatim, since gate 0 ratified them, plus the `deferred_count` intake adds because it is the stage that knows it exactly and reconcile-seal reads this file and never 00-triage.json. Optional on max_scenario_part_bytes' precedent: requiring it would invalidate every manifest already on disk, which diff-runs, run-summary and gate-brief all read. Absent means no phase was declared and every stage below behaves exactly as it did before phasing."
+    },
     "limits": {
       "type": "object",
       "required": ["max_rounds", "max_scenarios"],

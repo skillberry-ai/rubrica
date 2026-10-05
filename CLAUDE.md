@@ -155,6 +155,21 @@ pure function of the parts and the rulings, so the second run is what folds this
 round's rulings in before `score-seal` reads the document for what each live
 scenario credits.
 
+A run may declare a phase — `triage-slices --phase N --defer-kind KIND` — which
+defers every candidate of the named kinds to a later run instead of declining them.
+It is mechanical the whole way down: a deferred candidate is subtracted from its
+slice's shard, so **`rb-triage-rule` has no phase branch and needs none**, and a slice
+whose every candidate is deferred is never dispatched. `triage-seal` synthesises the
+`defer` ruling for each from the plan, with `authority: policy` and no `priority`, so
+every catalogue candidate is still a decision on the record. The block is then carried
+verbatim into `00-triage.json`, `manifest.json` and `01-world-model.json` — four
+artifacts, one declaration site.
+
+Under a declared phase `rb-orchestrate` does not dispatch `reconcile-subjects` or
+`reconcile-contradict`. `reconcile-seal` assembles a complete world model without
+them, and `check-refs` is clean over the result, so **their absence is not a finding**
+— the same ruling the code stages' missing `manifest.stages` entries carry.
+
 **Gate 0 is different in kind from the others.** Gates 1 through 3 review a
 judgment made from evidence already in the run; a human overturning one of them
 corrects an inference about the target. Gate 0 decides what the run can ever
@@ -265,6 +280,15 @@ are judgments rather than list entries:
   directory: a partial write, or a document left over from a superseded grouping,
   makes a later check report against a service whose only problem is a malformed
   sibling.
+- `triage-slices` takes `--phase` and `--defer-kind` **together or not at all** (either
+  half alone is a `2`), and they are declared there rather than on `intake` because
+  `paths.STAGES` puts `triage-slices` at index 1 and `intake` at index 6: `manifest.json`
+  does not exist yet, so a consumer cannot read a file five stages downstream. One
+  declaration site is also what stops two from disagreeing about what the run can ever
+  know. `--defer-kind`'s choices are read from `catalogue-0.1.json`'s own `$defs/kind`,
+  because a hand-typed list would accept a kind that silently deferred nothing while the
+  run still reported a phase. Re-running the command is how a human reverses a gate-0
+  deferral, which is affordable precisely because the stage is code.
 - `dedupe-candidates` proposes pairs and never decides.
 - `record-stage` hashes the skill file the run actually used, so a digest that no
   longer matches the file on disk means the file changed after the run — that is
@@ -275,12 +299,15 @@ are judgments rather than list entries:
   finding it shares its arithmetic with lives in `check-refs`, never here.
   `gate-brief` composes what already exists into the reading surface at each
   human gate: at gate 0 the objective verdict, the predicted-vs-observed surface
-  divergence, the read cost of the admits, grouped declines, the slice table and
+  divergence, the read cost of the admits, grouped declines, the deferrals as a group
+  of their own — the declaration first, then the candidates it caught, and only when
+  the record defers something — the slice table and
   every group the slicer split across more than one slice; the reconcile sweep
   plus per-input utilisation,
   per-pass read coverage, the capabilities the coverage denominator excludes,
   implied size and one block per service at gate 1; the coverage matrix at gate 2;
-  the verdict tally at gate 3.
+  the verdict tally at gate 3. Under a declared phase gate 1 leads with the run's own
+  incompleteness, because every tally under it is then a floor rather than a count.
   Gate 1's sweep is an **aggregate, not a per-subject tally** — how many subjects
   cover how many claims, how many subjects were swept, how many contradictions
   were recorded, and, only when any were, the tally by `resolution` with
@@ -291,6 +318,11 @@ are judgments rather than list entries:
   reader correcting a grouping edits the file `synthesise-interfaces` re-derives
   from; **nothing in the run reads a decision about those services**, and the block
   says so rather than letting a recorded selection read as a narrowing.
+  `target-brief` also states what the run did **not** read, above the collapsed
+  description, and that sentence is held to the page's vocabulary rule twice over: it
+  carries neither the stage, gate and artifact words nor `phase`, `defer` or the raw
+  kind names, because an owner asked to correct a description of their own system
+  should not have to learn our schedule to do it.
   `target-brief` is a report too, and the one written for somebody outside the
   project: it renders a run's description of the *target* — not of the run — for the
   people who own that target, asking them to correct it. Three ranked asks lead, and

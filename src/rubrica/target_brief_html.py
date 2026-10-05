@@ -49,6 +49,7 @@ from __future__ import annotations
 from rubrica import target_brief
 from rubrica.paths import RunPaths
 from rubrica.summary import Malformed, Marker, esc
+from rubrica.target_brief import _KIND_LABELS
 
 # Wider measure than `summary_html` for the reason it always had -- this is read as
 # prose by somebody deciding whether it is true -- and wider again than the 46rem it
@@ -262,29 +263,6 @@ _LEGEND = (
     "thing. Neither means the behaviour is missing from your system.</p>"
 )
 
-# `kind` -> the words an owner reads, for all seven values of the schema's shared
-# `$defs/kind` enum (`catalogue-0.1.json`, `triage-0.1.json` and `manifest-0.1.json`
-# each spell the same seven). All seven rather than the ones runs have produced,
-# because the table is what stops a token shipping and a kind nobody has seen yet
-# is exactly the one nobody would notice shipping raw.
-#
-# Read through `.get(kind, kind)`, for `_OUTCOME_LABELS`' reason: an off-schema
-# kind ships as its own token rather than as a label we invented for it.
-#
-# No label names the format the way the enum does -- "HTTP API description" rather
-# than "OpenAPI", "Recorded interactions" rather than "trace" -- because the
-# recipient is being asked whether we read the right things about their system, and
-# the kinds are our filing categories over their files.
-_KIND_LABELS = {
-    "openapi": "HTTP API description",
-    "mcp_tool_schema": "MCP tool definitions",
-    "entity_schema": "Data model definitions",
-    "trace": "Recorded interactions",
-    "design_doc": "Written documentation",
-    "source_code": "Source code",
-    "other": "Other material",
-}
-
 # The sentence that stands in for a section's body when the run-level banner has
 # already stated the fact. Five sections carry the identical marker when one file
 # is unreadable -- `disputes`, `open_questions`, `operations`, `data_types` and
@@ -293,6 +271,62 @@ _KIND_LABELS = {
 # is missing. The heading and a line stay, which is the guarantee that matters: a
 # section that disappears is indistinguishable from one this renderer forgot.
 _SEE_BANNER = "see the note at the top of this page"
+
+
+def _completeness_lines(completeness) -> list[str]:
+    """The sentence that says what we did not read, or nothing at all.
+
+    Its own function so a test can scope to the sentence rather than diffing a whole
+    page, and so the wording sits in one place: every word here is checked against
+    this project's own vocabulary, because a recipient reading about our process has
+    been handed the wrong question. `phase`, `defer` and the raw kind names are
+    excluded along with the stage, gate and artifact words the whole-page test already
+    bans -- an owner asked to correct a description of their own system should not
+    have to learn our schedule to do it.
+
+    Placed above the collapsed description rather than inside it, because it changes
+    how every number below should be read, and a caveat a reader has to expand to find
+    is a caveat for the reader who already knew.
+    """
+    if completeness is None:
+        return []
+    # Lower-cased because the label sits mid-sentence here, where "this system's
+    # Recorded interactions" reads as a proper noun for something the owner has never
+    # named that way. The capitalised form still heads the section that lists what we
+    # did read, which is where a label belongs as a label.
+    what = _join(list(completeness.kind_labels)).lower()
+    # A count of 0 means we could not read the number, not that nothing was set aside
+    # -- `completeness` is None in that second case -- so the clause is dropped rather
+    # than printed as zero. Agreement is spelled out rather than left as "file(s)",
+    # which is a form nobody writes in prose a stranger is being asked to correct.
+    how_many = ""
+    if completeness.count == 1:
+        how_many = " There is one such file."
+    elif completeness.count:
+        how_many = f" There are {esc(completeness.count)} such files."
+    return [
+        '<p class="completeness">',
+        f"We have not read this system's {esc(what)} yet.{how_many} Everything below "
+        "comes from its written material and its code, so where those disagree we have "
+        "said so &mdash; but anything only visible in how the system actually behaves "
+        "is not yet part of this description.",
+        "</p>",
+    ]
+
+
+def _join(items: list[str]) -> str:
+    """ "a and b" for two, "a, b, and c" for more -- never a bare comma list.
+
+    Local rather than refs._and_join, which is the same shape: that one is called on
+    findings, and this page's rule is that nothing reaches it through a module whose
+    vocabulary is this project's. Sharing the helper would be harmless today and is
+    exactly the edge a later reword walks off.
+    """
+    if len(items) <= 1:
+        return items[0] if items else ""
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
 
 
 def _kind(kind: str) -> str:
@@ -1185,6 +1219,9 @@ def render(run: RunPaths) -> str:
         "not, we would rather hear it now than build on it.</p>",
         _description_banner(head),
         _sources_banner(run),
+        # Above the collapsed description and above the three asks, because it changes
+        # how every number below it should be read.
+        *_completeness_lines(target_brief.completeness(run)),
         f"<p>{esc(notes)}</p>" if notes else "",
         "<h2>What we most need from you</h2>",
         # The draft left this heading with nothing under it, and on all three
