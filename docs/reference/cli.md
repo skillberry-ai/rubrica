@@ -897,12 +897,26 @@ rubrica claim-utilisation --run runs/run-20260806-123005
 
 ### `rubrica run-summary`
 
-Renders one run directory as a single self-contained HTML page: the stage spine,
-the manifest's inputs and per-stage record, the objective verdict and grouped
-dispositions, world-model counts and claim utilisation, the coverage
-progression with both of `latest.json`'s matrices &mdash; capability cells, and
-goals by hop depth &mdash; one line per scenario joined to its verdict and
-emitted package, and the rule-based flags.
+Renders one run directory as a single self-contained HTML page — the whole-run
+view for anyone not driving the run from the console. It opens with an **at a
+glance** block that answers the questions a teammate opening the run asks first:
+the last stage that produced output and the next one, whether the suite works
+(the smoke verdict in words, mean reward per agent, and how many results the
+reference agent did not pass), how many scenarios were judged and emitted, the
+last coverage verdict with cells and goals covered, and the world-model counts
+with claim utilisation. The rule-based flags follow, open.
+
+Every other section is collapsed under its heading and a one-line count, and
+holds the full detail: the smoke result (verdict, mean reward per role, the
+agents, the tasks the reference agent did not pass, and every task's rewards);
+the challenge tally and emitted packages; one line per scenario joined to its
+verdict and package; the coverage progression with both of `latest.json`'s
+matrices &mdash; capability cells, and goals by hop depth; world-model counts;
+claim utilisation; gaps; contradictions; the manifest's inputs; the objective
+verdict; grouped dispositions; deficiencies; `decisions.md`; the run record
+(limits and the per-stage model, effort and skill hash); the stage spine; and a
+glossary of the project's terms. A section whose artifact is present but
+unreadable renders open, so a defect is never behind a click.
 
 Required: `--run RUN`. Optional: `-o PATH` / `--output PATH` — where to write
 the page, defaulting to `<run>/run-summary.html`.
@@ -923,6 +937,13 @@ array counts `0`, while one whose key the document does not carry at all renders
 conforming sealed model omits — an empty array there says a pass looked and found no
 tools, and an absent key says no pass ran. The output is derived rather than
 an artifact: no schema, outside the numbered contract, and read by no stage.
+
+The flags lead with the run's result. `smoke-not-healthy` fires when the smoke
+verdict is anything but `healthy`, and `oracle-failures` when the report counts
+any result the reference agent did not pass, naming those tasks — each a
+comparison of fields the report already holds. `coverage-halted` words its
+headline by verdict, so a last verdict of `continue` reads as a round loop
+stopped before coverage converged rather than as a halt.
 
 Its flags read the waivers too. An input whose claims nothing cites raises the
 `uncited-artifacts` flag, and a [waiver](#rubrica-waive) for it takes it out of
