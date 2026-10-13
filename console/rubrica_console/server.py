@@ -440,14 +440,22 @@ class Handler(BaseHTTPRequestHandler):
         itself and also drops VCS, vendored, lock and gitignored files.
         """
         root = self.root.resolve()
+        root_str = str(root)
+        # The separator is part of the prefix, so `/home/al` does not admit `/home/alex`.
+        root_prefix = root_str.rstrip(os.sep) + os.sep
 
         def inside(raw) -> Path:
+            # Resolved as a string and checked before any Path is built, and the
+            # resolved path is what is returned: checking `Path(raw).resolve()` but
+            # returning the unresolved `Path(raw)` left what was checked and what was
+            # walked as two different values, and CodeQL's py/path-injection flagged
+            # it (it recognises a realpath-then-prefix guard, not `is_relative_to`).
             if not isinstance(raw, str) or not raw:
                 raise ConsoleError("a selected path must be a non-empty string")
-            path = Path(raw).expanduser()
-            if not path.resolve().is_relative_to(root):
+            resolved = os.path.realpath(os.path.expanduser(raw))
+            if resolved != root_str and not resolved.startswith(root_prefix):
                 raise ConsoleError(f"the picker is limited to {root}")
-            return path
+            return Path(resolved)
 
         secret = self.console.credentials.path.expanduser().resolve()
         include = [inside(p) for p in body.get("include") or []]

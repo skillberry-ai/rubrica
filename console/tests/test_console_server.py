@@ -382,6 +382,29 @@ def test_expansion_never_leaves_the_root(console, tree, tmp_path):
     assert not any("secret" in p for p in data["files"])
 
 
+def test_expansion_refuses_a_sibling_whose_name_starts_like_the_root(console, tree):
+    """The prefix check carries the separator: `<root>-evil` is not under `<root>`."""
+    sibling = tree.parent / (tree.name + "-evil")
+    sibling.mkdir()
+    (sibling / "x.txt").write_text("x")
+    with _serving(console, root=tree) as port:
+        status, data = _expand(port, [str(sibling)])
+    assert status == 409 and "limited to" in data["error"]
+
+
+def test_expansion_refuses_a_dot_dot_escape_and_a_symlink_pointing_out(console, tree, tmp_path):
+    outside = tmp_path / "out2"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("s")
+    (tree / "door").symlink_to(outside)
+    with _serving(console, root=tree) as port:
+        status, data = _expand(port, [str(tree / "src" / ".." / ".." / "out2")])
+        assert status == 409 and "limited to" in data["error"]
+        # Named through a link inside the root, the target is still outside it.
+        status, data = _expand(port, [str(tree / "door")])
+    assert status == 409 and "limited to" in data["error"]
+
+
 def test_expansion_needs_the_token(console, tree):
     with _serving(console, root=tree) as port:
         status, _ = _expand(port, [str(tree)], token="wrong")
