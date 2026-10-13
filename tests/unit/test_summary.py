@@ -3364,24 +3364,167 @@ def test_challenge_before_the_stage_is_absent(tmp_path):
     assert got.what == "05-verdicts/"
 
 
-def test_challenge_carries_the_smoke_report_when_one_was_written(tmp_path):
-    """`smoke` is the report document, or None -- not a boolean.
+def _smoke_report(**over) -> dict:
+    """A report-0.1.json-shaped smoke report over two of the toy's scenarios.
 
-    `build_toy_run` never writes `07-report.json` even at its last checkpoint, so
-    both halves are asserted here: None before smoke ran, and the document's own
-    fields after, since a `bool(path.exists())` would satisfy the second half
-    alone.
+    Hand-built rather than produced by `smoke_run`, which launches agents: the
+    builder under test reads a document, and what wrote it is not its concern.
+    `scn-open` is a task the oracle passes, `scn-blocked` one it fails.
     """
+    doc = {
+        "schema_version": "0.1",
+        "run_id": "run-toy",
+        "agents": [
+            {"role": "weak_baseline", "model": "no-tools-stub", "notes": "no tools"},
+            {"role": "oracle", "model": "golden-replay"},
+        ],
+        "tasks": [
+            {
+                "scenario_id": "scn-open",
+                "results": [
+                    {"role": "weak_baseline", "scored": True, "reward": 0.0},
+                    {"role": "oracle", "scored": True, "reward": 1.0},
+                ],
+                "all_pass": False,
+                "all_fail": False,
+            },
+            {
+                "scenario_id": "scn-blocked",
+                "results": [
+                    {"role": "weak_baseline", "scored": True, "reward": 0.0},
+                    {"role": "oracle", "scored": True, "reward": 0.5},
+                ],
+                "all_pass": False,
+                "all_fail": False,
+            },
+        ],
+        "summary": {
+            "mean_reward_by_role": {"weak_baseline": 0.0, "oracle": 0.75},
+            "all_pass_tasks": 0,
+            "all_fail_tasks": 0,
+            "oracle_failures": 1,
+            "unscoreable": 0,
+        },
+        "verdict": "healthy",
+    }
+    doc.update(over)
+    return doc
+
+
+def test_smoke_before_the_stage_is_absent(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    got = summary.smoke(run)
+    assert isinstance(got, summary.Absent)
+    assert got.what == "07-report.json"
+
+
+def test_smoke_reads_the_verdict_means_and_the_failing_tasks(tmp_path):
     from rubrica.artifacts import write_json
 
     run = build_toy_run(tmp_path / "runs", upto="challenge")
-    assert summary.challenge(run).smoke is None
-    write_json(run.report, {"schema_version": "0.1", "checked": 4, "failures": []})
-    assert summary.challenge(run).smoke == {
-        "schema_version": "0.1",
-        "checked": 4,
-        "failures": [],
-    }
+    write_json(run.report, _smoke_report())
+    got = summary.smoke(run)
+    assert isinstance(got, summary.Smoke)
+    assert got.verdict == "healthy"
+    assert got.mean_reward == {"weak_baseline": 0.0, "oracle": 0.75}
+    assert got.oracle_failures == 1
+    assert [a.role for a in got.agents] == ["weak_baseline", "oracle"]
+    # Both directions of the per-task rule, so a builder that marked every task
+    # failed, or none, is caught: the count alone is satisfied by either.
+    assert [t.scenario_id for t in got.tasks if t.oracle_failed] == ["scn-blocked"]
+    assert got.tasks[0].rewards == {"weak_baseline": 0.0, "oracle": 1.0}
+
+
+def test_smoke_counts_an_unscored_oracle_as_a_failure(tmp_path):
+    """`smoke.summarize`'s rule: an unscoreable oracle is an oracle failure."""
+    from rubrica.artifacts import write_json
+
+    doc = _smoke_report()
+    # The reward is kept: with it dropped, the not-a-number rule catches the task
+    # too, and the `scored` half of the rule was measured surviving its deletion.
+    doc["tasks"][0]["results"][1] = {"role": "oracle", "scored": False, "reward": 1.0}
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    write_json(run.report, doc)
+    got = summary.smoke(run)
+    assert got.tasks[0].oracle_failed
+    assert got.tasks[0].rewards["oracle"] is None
+
+
+def test_smoke_on_an_unreadable_report_is_malformed_not_absent(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    run.report.write_text("{not json", encoding="utf-8")
+    got = summary.smoke(run)
+    assert isinstance(got, summary.Malformed)
+    assert got.what == "07-report.json"
+
+
+def test_smoke_tolerates_wrong_shapes_inside_a_readable_report(tmp_path):
+    """A hand-edited report is still a report: no field shape may raise."""
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    write_json(
+        run.report,
+        _smoke_report(summary="nope", tasks="nope", agents=[1, "x"], verdict=None),
+    )
+    got = summary.smoke(run)
+    assert isinstance(got, summary.Smoke)
+    assert got.tasks == [] and got.agents == [] and got.mean_reward == {}
+    html = summary.run_summary(run)
+    assert "<h2>Smoke result</h2>" in html
+
+
+def test_render_shows_the_smoke_result_as_tables_not_a_python_dump(tmp_path):
+    """The defect this section replaced: `str()` of nested dicts on the page."""
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    write_json(run.report, _smoke_report())
+    html = summary.run_summary(run)
+    assert "{'" not in html and "[{" not in html
+    assert "reference agent (given the answer)" in html
+    assert '<a href="06-suite/scn-blocked/">scn-blocked</a>' in html
+    # And the answer block carries the verdict, ahead of every section.
+    glance = html[html.index('<div class="glance">') : html.index('<details class="sec"')]
+    assert "healthy" in glance
+    assert "1 result(s) where the reference agent did not pass" in glance
+
+
+def test_flags_fire_smoke_not_healthy_and_oracle_failures(tmp_path):
+    from rubrica.artifacts import write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    write_json(run.report, _smoke_report(verdict="broken_labels"))
+    fired = {f.id_: f for f in summary.flags(run)}
+    assert "broken_labels" in fired["smoke-not-healthy"].headline
+    assert "answer labels" in fired["smoke-not-healthy"].detail
+    assert fired["oracle-failures"].detail.startswith("scn-blocked -- ")
+
+
+def test_flags_do_not_fire_smoke_flags_on_a_healthy_clean_report(tmp_path):
+    from rubrica.artifacts import write_json
+
+    doc = _smoke_report()
+    doc["summary"]["oracle_failures"] = 0
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    write_json(run.report, doc)
+    ids = {f.id_ for f in summary.flags(run)}
+    assert "smoke-not-healthy" not in ids
+    assert "oracle-failures" not in ids
+    # And with no report at all: a run that has not smoked has no smoke verdict.
+    run.report.unlink()
+    ids = {f.id_ for f in summary.flags(run)}
+    assert not ids & {"smoke-not-healthy", "oracle-failures"}
+
+
+def test_flags_do_not_fire_smoke_not_healthy_on_an_unrecorded_verdict(tmp_path):
+    from rubrica.artifacts import write_json
+
+    doc = _smoke_report()
+    del doc["verdict"]
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    write_json(run.report, doc)
+    assert "smoke-not-healthy" not in {f.id_ for f in summary.flags(run)}
 
 
 def test_challenge_on_an_unreadable_verdicts_dir_is_malformed_not_absent(tmp_path):
@@ -3677,6 +3820,30 @@ def test_flags_fire_coverage_halted(tmp_path):
     assert "halted_no_progress" in fired["coverage-halted"].headline
 
 
+@pytest.mark.parametrize(
+    ("verdict", "words"),
+    [
+        ("continue", "Round loop stopped before coverage converged"),
+        ("halted_no_progress", "the last round added no coverage"),
+        ("halted_round_cap", "the round limit was reached"),
+    ],
+)
+def test_coverage_halted_says_what_the_verdict_means(tmp_path, verdict, words):
+    """`continue` is not a halt: the loop had room and somebody stopped it.
+
+    Measured on an autotrade run, the flag read "Coverage ended continue".
+    """
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
+    doc = read_json(run.coverage_latest)
+    doc["verdict"] = verdict
+    write_json(run.coverage_latest, doc)
+    headline = {f.id_: f for f in summary.flags(run)}["coverage-halted"].headline
+    assert words in headline
+    assert verdict in headline, "the verdict word stays findable in the document"
+
+
 def test_flags_do_not_fire_coverage_halted_on_converged(tmp_path):
     from rubrica.artifacts import read_json
 
@@ -3903,6 +4070,8 @@ def _stray_claims_doc() -> dict:
 # copies would have gone out of step -- the count in
 # `test_render_states_every_flag_with_its_threshold` was a bare `7`.
 _EVERY_FLAG_ID: tuple[str, ...] = (
+    "smoke-not-healthy",
+    "oracle-failures",
     "low-utilisation",
     "uncited-artifacts",
     "unresolved-contradictions",
@@ -3953,6 +4122,8 @@ def _run_with_every_flag(tmp_path, monkeypatch) -> RunPaths:
     understated["minimum_tool_calls_found"] = 2
     write_json(run.verdict("scn-open"), understated)
     (run.root / "01-goals.json.tmp.5.abc").write_text("{}", encoding="utf-8")
+    # smoke-not-healthy and oracle-failures: one report does both.
+    write_json(run.report, _smoke_report(verdict="degenerate_trivial"))
     # stage-record-incomplete needs no edit: build_toy_run mints an empty
     # manifest.stages.
     return run
@@ -4127,6 +4298,28 @@ def test_render_states_an_absence_rather_than_omitting_the_section(tmp_path):
     # the heading and nothing else, so the absence under it is pinned too: the
     # section's whole content on this run is the stated absence.
     assert "Not present: 02-scenarios.json" in html
+
+
+def test_render_opens_a_malformed_section_and_leaves_an_absent_one_closed(tmp_path):
+    """An unreadable artifact must not sit behind a click; a missing one may."""
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    run.report.write_text("{not json", encoding="utf-8")
+    html = summary.run_summary(run)
+    assert '<details class="sec" open><summary><h2>Smoke result</h2>' in html
+    run.report.unlink()
+    html = summary.run_summary(run)
+    assert '<details class="sec"><summary><h2>Smoke result</h2>' in html
+
+
+def test_render_leads_with_an_answer_block_on_a_partial_run(tmp_path):
+    """How far a run got is the first thing on the page, ahead of every section."""
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+    html = summary.run_summary(run)
+    glance = html[html.index('<div class="glance">') : html.index('<details class="sec"')]
+    assert "<b>extract</b>" in glance
+    assert "next stage: reconcile-subjects" in glance
+    assert "not smoke-tested yet" in glance
+    assert "not reached yet" in glance
 
 
 def test_render_on_an_empty_directory_still_produces_a_page(tmp_path):
@@ -4600,7 +4793,7 @@ def test_render_names_every_round_with_its_verdict_and_cells(tmp_path):
     run = build_toy_run(tmp_path / "runs", upto="challenge")
     got = summary.coverage(run)
     html = summary.run_summary(run)
-    assert f"Coverage ended <b>{got.terminal_verdict}</b>" in html
+    assert f"Last coverage verdict: <b>{got.terminal_verdict}</b>" in html
     for row in got.rounds:
         # The two cells asserted as an adjacent pair, not one at a time. Measured:
         # the toy run has covered == total == 4, so dropping the numeric class from
@@ -5389,7 +5582,7 @@ def test_render_heads_the_holes_column_ref_because_a_hole_can_name_a_goal(tmp_pa
     assert "goal:goal-refund" in html
     # The heading count and the matrix count are over different sets, and the page
     # has to say so where a reader compares them.
-    assert "over different sets and need not agree" in html
+    assert "need not match the cell count above" in html
 
 
 def test_render_labels_which_denominator_the_coverage_prose_means(tmp_path):
@@ -5404,7 +5597,7 @@ def test_render_labels_which_denominator_the_coverage_prose_means(tmp_path):
     # "sizing denominator" in html` stayed green with the prose reverted, because
     # the note alone satisfied it.
     assert ", sizing denominator " in html
-    assert "expected hop-depth slots, less blocked cells" in html
+    assert "expected hop-depth slots, minus blocked cells" in html
     # The world model's own record is still rendered under its own name, so the two
     # senses are distinguishable rather than merged.
     assert "<h3>Denominator</h3>" in html

@@ -36,33 +36,71 @@ docstring wrong.
 from __future__ import annotations
 
 from rubrica import summary
-from rubrica.paths import RunPaths
+from rubrica.paths import RunPaths, is_safe_segment
 from rubrica.summary import Malformed, Marker, esc
 
 _CSS = """
-:root { color-scheme: light dark; }
-body { font: 14px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 1200px;
-       padding: 2rem; }
-h1 { font-size: 1.5rem; } h2 { font-size: 1.1rem; margin-top: 2.5rem;
-     border-bottom: 1px solid currentColor; padding-bottom: .25rem; }
+/* The palette is target-brief's (`target_brief_html._CSS`), whose light and dark
+   values were measured for contrast there; reusing it keeps the two pages a
+   reader may open side by side looking like one project. */
+:root {
+  color-scheme: light dark;
+  --bg: #fbfaf8; --fg: #1c1c1a; --muted: #5d5c58; --rule: #dedcd6;
+  --surface: #f1efe9; --zebra: #f7f6f2;
+  --attn-bg: #fdf1da; --attn-fg: #7a4a05; --attn-line: #d59a1f;
+  --ok-bg: #e3f1e6; --no-bg: #f8e4dc; --off-bg: #ece3f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16171a; --fg: #e7e6e2; --muted: #a3a19b; --rule: #33353a;
+    --surface: #212327; --zebra: #1c1e21;
+    --attn-bg: #3a2c10; --attn-fg: #f0c675; --attn-line: #8a6a20;
+    --ok-bg: #1d3324; --no-bg: #3b2219; --off-bg: #2c2238;
+  }
+}
+body { font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+       margin: 0 auto; max-width: 75rem; padding: 2rem 1.5rem 5rem;
+       background: var(--bg); color: var(--fg); }
+a { color: inherit; }
+h1 { font-size: 1.6rem; margin-bottom: .2rem; }
+h2 { font-size: 1.1rem; margin: 0; display: inline; }
 h3 { font-size: .95rem; margin: 1.4rem 0 .3rem; }
-table { border-collapse: collapse; width: 100%; font-size: 13px; }
-th, td { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid #8884; }
-th { cursor: pointer; user-select: none; white-space: nowrap; }
+.meta { color: var(--muted); font-size: .9rem; margin-top: 0; }
+/* Every section is a `<details>`: the heading stays visible and the body is one
+   click away, so a 300-row table no longer pushes the rest of the page out of
+   reach. */
+details.sec { border: 1px solid var(--rule); border-radius: 6px; margin: .8rem 0;
+              padding: .5rem .9rem; }
+details.sec > summary { cursor: pointer; padding: .2rem 0; }
+details.sec > summary .line { color: var(--muted); font-size: .9rem; margin-left: .6rem; }
+details.sec[open] > summary { border-bottom: 1px solid var(--rule); margin-bottom: .6rem;
+                              padding-bottom: .5rem; }
+.glance { border-left: 4px solid var(--attn-line); background: var(--surface);
+          padding: .8rem 1.1rem; border-radius: 0 6px 6px 0; margin: 1.2rem 0; }
+.glance dl { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1.2rem;
+             margin: 0; }
+.glance dt { font-weight: 600; } .glance dd { margin: 0; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; margin: .4rem 0; }
+th, td { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid var(--rule); }
+th { background: var(--surface); white-space: nowrap; }
+table.sortable th { cursor: pointer; user-select: none; }
+tbody tr:nth-child(even) { background: var(--zebra); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-.absent { opacity: .65; font-style: italic; }
+.absent { color: var(--muted); font-style: italic; }
 /* An artifact that is there and unreadable is a defect in the run, not a stage
    that has not happened yet -- so it carries the flag rule's weight rather than
    absence's grey, and says so in words either way. */
-.malformed { border-left: 3px solid #c60; padding-left: .5rem; font-style: italic; }
-.note { opacity: .7; font-size: 12px; }
-.flag { border-left: 3px solid #c60; padding: .4rem .75rem; margin: .4rem 0; }
-.flag .thr { opacity: .7; font-size: 12px; }
+.malformed { border-left: 3px solid var(--attn-line); padding-left: .5rem;
+             font-style: italic; }
+.note { color: var(--muted); font-size: 12.5px; }
+.flag { border-left: 3px solid var(--attn-line); background: var(--attn-bg);
+        padding: .4rem .75rem; margin: .4rem 0; border-radius: 0 4px 4px 0; }
+.flag .thr { color: var(--muted); font-size: 12px; }
 .spine { display: flex; flex-wrap: wrap; gap: .3rem; list-style: none; padding: 0; }
-.spine li { padding: .15rem .5rem; border: 1px solid #8886; border-radius: 3px;
+.spine li { padding: .15rem .5rem; border: 1px solid var(--rule); border-radius: 3px;
             font-size: 12px; }
 .spine li.yes { font-weight: 600; } .spine li.no { opacity: .45; }
-.cell.yes { background: #2a72; } .cell.no { background: #c602; }
+.cell.yes { background: var(--ok-bg); } .cell.no { background: var(--no-bg); }
 .matrix td.cell { white-space: nowrap; font-size: 12px; }
 /* The goal grid's four states. `yes` and `no` reuse the cell matrix's tints --
    same question, same answer -- and the two extra ones are what a goal-by-depth
@@ -70,8 +108,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
    asked for, and a depth that is simply not this goal's business. Each also
    carries a mark and a title, per the `.hole-reason` rule below: colour alone
    never carries a distinction on this page. */
-.gcell.yes { background: #2a72; } .gcell.no { background: #c602; }
-.gcell.off { background: #85f3; } .gcell.na { opacity: .35; }
+.gcell.yes { background: var(--ok-bg); } .gcell.no { background: var(--no-bg); }
+.gcell.off { background: var(--off-bg); } .gcell.na { opacity: .35; }
 .matrix td.gcell, .matrix th.gcell { white-space: nowrap; font-size: 12px;
     text-align: center; font-variant-numeric: tabular-nums; }
 .scroll { overflow-x: auto; }
@@ -79,12 +117,14 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* An unreachable hole is a closed question; every other reason is an open one a
    human at gate 2 may still act on. Weight and a rule carry it, never colour
    alone -- each row also says which in words. */
-.hole-reason.open { font-weight: 600; border-left: 3px solid #c60; }
+.hole-reason.open { font-weight: 600; border-left: 3px solid var(--attn-line); }
 .hole-reason.closed { opacity: .6; }
 .hole-reason .qkind { font-size: 11px; opacity: .7; font-weight: 400; }
 .clip { opacity: .6; }
 details summary { cursor: pointer; }
 pre { white-space: pre-wrap; font-size: 12px; }
+dl.glossary dt { font-weight: 600; margin-top: .5rem; }
+dl.glossary dd { margin: .1rem 0 0 1.2rem; }
 """
 
 # Sorting and filtering only. No fetch, no external library: the page must work
@@ -280,23 +320,50 @@ def _marker(body: Marker) -> str:
     return f'<p class="absent">Not present: {esc(body.what)}{tail}</p>'
 
 
-def _section(heading: str, body) -> str:
-    """One section, with its heading always present.
+def _section(heading: str, body, line: str = "", *, open_: bool = False) -> str:
+    """One section, collapsed under its heading and a one-line count.
 
     A marker renders as a stated absence naming what was looked for, never as a
     skipped section: on a run that stopped at extract, "no 01-world-model.json" is
     the most informative thing the world model section can say, and a section that
     disappears is indistinguishable from one this renderer forgot.
+
+    **Collapsed by default, and opened for a `Malformed` body.** The page holds
+    every row a run has -- 341 scenario rows and a 324-cell matrix on the one
+    autotrade run that reached a suite -- so open sections put the result a reader
+    came for a megabyte down. `line` is what stays visible when it is closed. An
+    unreadable artifact is the one body that must not sit behind a click: it is a
+    defect in the run, and a closed section that hides one reads as a clean one.
     """
     inner = _marker(body) if isinstance(body, Marker) else body
-    return f"<h2>{esc(heading)}</h2>\n{inner}\n"
+    is_open = open_ or isinstance(body, Malformed)
+    tail = f'<span class="line">{esc(line)}</span>' if line else ""
+    return (
+        f'<details class="sec"{" open" if is_open else ""}>'
+        f"<summary><h2>{esc(heading)}</h2>{tail}</summary>\n{inner}\n</details>\n"
+    )
+
+
+def _line(got, describe) -> str:
+    """The closed section's one line: `describe(got)`, or what the marker says.
+
+    Absence and malformation are worded here as they are inside the section, so
+    the closed heading cannot claim less than the open body states.
+    """
+    if isinstance(got, Malformed):
+        return "present but unreadable"
+    if isinstance(got, Marker):
+        return "not present"
+    return describe(got)
 
 
 def _spine(run: RunPaths) -> str:
     """Every stage, marked produced or absent, and the tally under it.
 
-    Leads the page because "how far did this get" is the first thing a reader of a
-    partial run needs, and 10 of the 11 runs measured at design time were partial.
+    The answer block at the top of the page states the same fact in one line --
+    the last stage produced and the next -- because "how far did this get" is the
+    first thing a reader of a partial run needs, and 10 of the 11 runs measured at
+    design time were partial. This is the full spine behind that line.
     """
     rows = summary.stage_spine(run)
     items = "".join(
@@ -312,8 +379,8 @@ def _spine(run: RunPaths) -> str:
         # two tests disagreeing about one artifact on purpose, and a reader who is
         # not told that reads it as a rendering bug.
         '<p class="note">Produced means the stage\'s artifact exists. Whether it '
-        "can be read is each section's own answer below, which is why a bolded "
-        "stage can sit above a section reporting an unreadable artifact.</p>"
+        "can be read is shown in that artifact's own section, so a stage can be "
+        "bold here while its section says the file is unreadable.</p>"
     )
 
 
@@ -343,8 +410,9 @@ def _header(run: RunPaths):
         parts.append("<h3>Stage records</h3>")
         parts.append(_table(("stage", "model", "effort", "skill sha256"), rows))
         parts.append(
-            '<p class="note">Which model at which effort ran against which skill hash '
-            "-- the only thing on this page that says whether two runs are comparable.</p>"
+            '<p class="note">Which model, at which effort, ran each prompt stage, and '
+            "a hash of the skill file it used. Compare these to tell whether two runs "
+            "are comparable.</p>"
         )
     else:
         parts.append(
@@ -418,8 +486,8 @@ def _inputs(run: RunPaths):
         )
     )
     parts.append(
-        '<p class="note">In the manifest\'s own order, which on a run that came '
-        "through triage is the priority order intake materialised.</p>"
+        '<p class="note">In the manifest\'s order. On a run that went through '
+        "triage this is the priority order triage gave them.</p>"
     )
     return "\n".join(parts)
 
@@ -437,8 +505,9 @@ def _objective(run: RunPaths):
         f"<p><b>Supported:</b> {_val(got.supported)}"
         f" &middot; <b>predicted surfaces:</b> {_val(got.predicted_count)}"
         f" &middot; <b>observed surfaces:</b> {esc(len(got.surfaces))}</p>",
-        '<p class="note">The predicted count against the observed one is the '
-        "surface-divergence surface a human reads at gate 0.</p>",
+        '<p class="note">Predicted is how many surfaces (areas of the target) the '
+        "objective pass expected; observed is how many it found evidence for. A "
+        "large difference is worth a look.</p>",
     ]
     if not got.surfaces:
         parts.append('<p class="absent">The objective pass recorded no surface.</p>')
@@ -530,7 +599,7 @@ def _deficiencies(run: RunPaths) -> str:
         return (
             '<p class="absent">No deficiency was recorded. A run with neither '
             "00-triage.json nor 00-audit.json and a run whose audit recorded none "
-            "read the same here; the pipeline progress above says which.</p>"
+            "read the same here; the Pipeline progress section says which.</p>"
         )
     rows = [
         "<tr>"
@@ -572,9 +641,9 @@ def _world_model(run: RunPaths):
             _kv_table(sorted(got.target.items())),
             "<h3>Denominator</h3>",
             _kv_table(sorted(got.denominator.items())),
-            '<p class="note">The contradictions count above is the sealed one. The '
-            "Contradictions section below tallies the fan-out parts instead: they are "
-            "two facts, and a divergence between them is a finding about the run.</p>",
+            '<p class="note">The contradictions count here is what the sealed world '
+            "model kept. The Contradictions section counts what the per-subject passes "
+            "recorded. If the two differ, read both.</p>",
         ]
     )
 
@@ -662,8 +731,8 @@ def _contradictions(run: RunPaths):
             f"<p>{esc(got.total)} contradiction(s) recorded across "
             f"{esc(got.parts_swept)} subject part(s).</p>",
             f"<table><tbody>{rows}</tbody></table>",
-            '<p class="note">A tally, not a substitute for opening the parts: a '
-            "non-zero unresolved is the cheapest signal that one is worth reading.</p>",
+            '<p class="note">A count only. Any unresolved contradiction is worth '
+            "opening in 01-contradictions/.</p>",
         ]
     )
 
@@ -803,7 +872,13 @@ def _coverage(run: RunPaths):
         for row in got.rounds
     ]
     parts = [
-        f"<p>Coverage ended <b>{_val(got.terminal_verdict)}</b>, per 03-coverage/latest.json.</p>",
+        f"<p>Last coverage verdict: <b>{_val(got.terminal_verdict)}</b>"
+        + (
+            f" &mdash; {esc(_COVERAGE_MEANING[got.terminal_verdict])}"
+            if got.terminal_verdict in _COVERAGE_MEANING
+            else ""
+        )
+        + " (from 03-coverage/latest.json).</p>",
         _table(
             (
                 "round",
@@ -833,9 +908,8 @@ def _coverage(run: RunPaths):
         # differ without either being wrong -- `holes that round` is each round
         # document's own array, the list below is `latest.json`'s. Said here so a
         # reader cannot take the difference for an arithmetic error.
-        '<p class="note">"holes that round" counts each round document\'s own '
-        "holes[]; the list further down is latest.json's, so the two can differ "
-        "without either being wrong.</p>",
+        '<p class="note">"Holes that round" is each round\'s own count. The list '
+        "at the bottom is from the latest document, so the two can differ.</p>",
     ]
     if got.implied is not None:
         parts.append(
@@ -854,9 +928,9 @@ def _coverage(run: RunPaths):
         # 127 here against 148 cells and 22 goals there.
         parts.append(
             '<p class="note">The sizing denominator is capability cells plus '
-            "expected hop-depth slots, less blocked cells &mdash; not the world "
-            'model\'s own <span class="mono">denominator</span> record above, '
-            "which counts cells and goals.</p>"
+            "expected hop-depth slots, minus blocked cells. It is not the world "
+            'model\'s <span class="mono">denominator</span> record, which counts '
+            "cells and goals.</p>"
         )
     else:
         # One line for three facts -- no world model yet, a world model
@@ -898,8 +972,8 @@ def _coverage(run: RunPaths):
     # caveat above this table is about a different discrepancy entirely (per-round
     # holes against latest.json's).
     parts.append(
-        '<p class="note">A hole names a capability cell or a goal, so this count '
-        "and the cell count above are over different sets and need not agree.</p>"
+        '<p class="note">A hole is a capability cell or a goal no scenario covers '
+        "yet, so this count need not match the cell count above.</p>"
     )
     if got.holes:
         hole_rows = [
@@ -1026,11 +1100,9 @@ def _scenarios(run: RunPaths):
                 num=("min tool calls",),
             )
             + "</div>",
-            '<p class="note">The discriminating fact is on the title cell and the '
-            "verdict notes are on the verdict cell: both are paragraphs, and a column "
-            "of paragraphs makes one row taller than the rest of the page. Each row "
-            "links to what it has on disk: the id to its verdict, the instance cell "
-            "to 04-instances/, the package cell to 06-suite/.</p>",
+            '<p class="note">Hover a title for the fact the scenario turns on, and a '
+            "verdict for the challenger's notes. The id links to its verdict, the "
+            "instance cell to 04-instances/, the package cell to 06-suite/.</p>",
         ]
     )
 
@@ -1047,10 +1119,9 @@ def _challenge(run: RunPaths):
         f"<p>{esc(got.judged)} scenario(s) judged, {esc(got.packages)} package(s) "
         "in 06-suite/.</p>",
         f"<table><tbody>{tallies}</tbody></table>",
-        '<p class="note">The two counts diverge for real reasons -- a re-seeded '
-        "scenario is judged and never emitted, one whose record disappeared between "
-        "the stages is emitted and pruned -- so they are read from separate "
-        "directories rather than one from the other.</p>",
+        '<p class="note">Judged and emitted can differ: a re-seeded or rejected '
+        "scenario is judged but not emitted. The two counts are read from "
+        "05-verdicts/ and 06-suite/ separately, so a difference shows.</p>",
     ]
     if got.incomplete_packages:
         parts.append(
@@ -1058,12 +1129,305 @@ def _challenge(run: RunPaths):
             f'<span class="mono">{esc(", ".join(got.incomplete_packages))}</span> '
             "&mdash; emit began these and did not finish them.</p>"
         )
-    if got.smoke is not None:
-        parts.append("<h3>Smoke report</h3>")
-        parts.append(_kv_table(sorted(got.smoke.items(), key=lambda pair: str(pair[0]))))
-    else:
-        parts.append('<p class="absent">No smoke report (07-report.json).</p>')
     return "\n".join(parts)
+
+
+# Plain names for the three smoke roles, keyed by report-0.1.json's role enum. The
+# role word is printed beside its name so a reader can find it in the report.
+_ROLE_NAMES = {
+    "weak_baseline": "do-nothing baseline",
+    "under_test": "agent under test",
+    "oracle": "reference agent (given the answer)",
+}
+_ROLE_ORDER = ("weak_baseline", "under_test", "oracle")
+
+# One sentence per coverage verdict. `converged` is here and not in
+# `summary.COVERAGE_STOPPED`, which words only the verdicts that raise a flag.
+_COVERAGE_MEANING = {
+    "converged": "no hole a further round could close remains",
+    "continue": "holes a further round could close remain; the loop was stopped here",
+    "halted_no_progress": "the last round added no coverage, so the loop stopped",
+    "halted_round_cap": "the round limit was reached",
+}
+
+
+def _role(role: str) -> str:
+    name = _ROLE_NAMES.get(role)
+    if not name:
+        return _val(role)
+    return f'{esc(name)} <span class="mono">({esc(role)})</span>'
+
+
+def _roles(seen) -> list[str]:
+    """The declared roles first in a fixed order, then any others sorted.
+
+    A fixed order so two reports of the same roster render the same columns, and
+    the others kept rather than dropped: a hand-edited role is still a row.
+    """
+    seen = set(seen)
+    return [r for r in _ROLE_ORDER if r in seen] + sorted(seen - set(_ROLE_ORDER))
+
+
+def _task_link(scenario_id: str) -> str:
+    # `is_safe_segment` for `_scenarios`' reason: an id like `../../etc` must never
+    # reach an href.
+    if is_safe_segment(scenario_id):
+        return f'<a href="06-suite/{esc(scenario_id)}/">{esc(scenario_id)}</a>'
+    return _val(scenario_id)
+
+
+def _reward_cell(task, role: str) -> str:
+    """One task's reward for one role: a number, `not scored`, or not recorded.
+
+    Three states, because the report draws all three: a role with no result for
+    the task, a result that was not scored, and a score.
+    """
+    if role not in task.rewards:
+        return f'<td class="num">{_NOT_RECORDED}</td>'
+    value = task.rewards[role]
+    if value is None:
+        return '<td class="num"><span class="absent">not scored</span></td>'
+    return f'<td class="num">{_pct(value)}</td>'
+
+
+def _smoke(run: RunPaths):
+    """The smoke report: verdict, means per role, the tasks behind the counts."""
+    got = summary.smoke(run)
+    if isinstance(got, Marker):
+        return got
+    meaning = summary.SMOKE_VERDICT_MEANINGS.get(got.verdict, "")
+    parts = [
+        f"<p>Verdict: <b>{_val(got.verdict)}</b>"
+        + (f" &mdash; {esc(meaning)}" if meaning else "")
+        + ".</p>",
+        '<p class="note">The suite was run by up to three agents. The reference agent '
+        "is handed the answer, so it should pass nearly every task; the do-nothing "
+        "baseline should fail nearly every task. A reward is 0 to 1.</p>",
+    ]
+    if got.mean_reward:
+        rows = [
+            f'<tr><td>{_role(role)}</td><td class="num">{_pct(got.mean_reward[role])}</td></tr>'
+            for role in _roles(got.mean_reward)
+        ]
+        parts.append(_table(("agent", "mean reward"), rows, num=("mean reward",)))
+    else:
+        parts.append('<p class="absent">The report records no mean reward.</p>')
+    parts.append(
+        _kv_table(
+            (
+                ("tasks every agent passed", got.all_pass_tasks),
+                ("tasks every agent failed", got.all_fail_tasks),
+                ("results where the reference agent did not pass", got.oracle_failures),
+                ("results that could not be scored", got.unscoreable),
+            )
+        )
+    )
+    if got.agents:
+        parts.append("<h3>Agents</h3>")
+        parts.append(
+            _table(
+                ("role", "model", "notes"),
+                [
+                    f'<tr><td>{_role(a.role)}</td><td class="mono">{_val(a.model)}</td>'
+                    f"<td>{_val(a.notes)}</td></tr>"
+                    for a in got.agents
+                ],
+            )
+        )
+    failed = [task.scenario_id for task in got.tasks if task.oracle_failed]
+    if failed:
+        parts.append(f"<h3>Tasks the reference agent did not pass ({esc(len(failed))})</h3>")
+        parts.append(
+            '<p class="note">An agent given the answer still failed these, so the '
+            "answer label or the verifier is the first suspect, not the agent.</p>"
+        )
+        parts.append("<p>" + ", ".join(_task_link(sid) for sid in failed) + "</p>")
+    if got.tasks:
+        roles = _roles(role for task in got.tasks for role in task.rewards)
+        rows = []
+        for task in got.tasks:
+            cells = "".join(_reward_cell(task, role) for role in roles)
+            rows.append(
+                f'<tr><td class="mono">{_task_link(task.scenario_id)}</td>{cells}'
+                f"<td>{_val(task.all_pass)}</td><td>{_val(task.all_fail)}</td>"
+                f"<td>{_val(task.oracle_failed)}</td></tr>"
+            )
+        parts.append(
+            f"<details><summary>Every task ({esc(len(got.tasks))})</summary>"
+            + '<div class="scroll">'
+            + _table(
+                (
+                    "task",
+                    *(_ROLE_NAMES.get(role, role) for role in roles),
+                    "every agent passed",
+                    "every agent failed",
+                    "reference agent failed",
+                ),
+                rows,
+                num=tuple(_ROLE_NAMES.get(role, role) for role in roles),
+            )
+            + "</div></details>"
+        )
+    else:
+        parts.append('<p class="absent">The report lists no task.</p>')
+    return "\n".join(parts)
+
+
+def _not_yet(marker: Marker) -> str:
+    """A marker in the answer block: a stage not reached, or an unreadable artifact."""
+    if isinstance(marker, Malformed):
+        return f'<span class="malformed">{esc(marker.what)} is present but unreadable</span>'
+    return '<span class="absent">not reached yet</span>'
+
+
+def _glance(run: RunPaths) -> str:
+    """The answer block: how far the run got, whether the suite works, what to check.
+
+    Composed only from the builders the sections below render, so it cannot say
+    something a section contradicts -- it is the first line of each, put together.
+    """
+    items: list[tuple[str, str]] = []
+
+    spine = summary.stage_spine(run)
+    produced = [row.name for row in spine if row.produced]
+    if produced:
+        last = produced[-1]
+        names = [row.name for row in spine]
+        later = names[names.index(last) + 1 :]
+        reach = (
+            f"<b>{esc(last)}</b> ({esc(len(produced))} of {esc(len(spine))} stages produced output)"
+        )
+        if later:
+            reach += f"; next stage: {esc(later[0])}"
+        else:
+            reach += "; that is the last stage"
+    else:
+        reach = '<span class="absent">nothing produced yet</span>'
+    items.append(("Reached", reach))
+
+    sm = summary.smoke(run)
+    ch = summary.challenge(run)
+    if isinstance(sm, summary.Smoke):
+        meaning = summary.SMOKE_VERDICT_MEANINGS.get(sm.verdict, "")
+        line = f"<b>{_val(sm.verdict)}</b>" + (f" &mdash; {esc(meaning)}" if meaning else "")
+        means = [
+            f"{esc(_ROLE_NAMES.get(role, role))} {_pct(sm.mean_reward[role])}"
+            for role in _roles(sm.mean_reward)
+        ]
+        if means:
+            line += "<br>Mean reward: " + " &middot; ".join(means)
+        if summary._as_int(sm.oracle_failures):
+            line += (
+                f"<br>{esc(sm.oracle_failures)} result(s) where the reference agent did not pass"
+            )
+        items.append(("Suite works?", line))
+    elif isinstance(sm, Malformed):
+        items.append(("Suite works?", '<span class="malformed">smoke report unreadable</span>'))
+    else:
+        items.append(
+            ("Suite works?", '<span class="absent">not smoke-tested yet (no 07-report.json)</span>')
+        )
+    if isinstance(ch, summary.Challenge):
+        tally = ", ".join(f"{esc(k)} {esc(v)}" for k, v in ch.tallies.items())
+        items.append(
+            (
+                "Suite",
+                f"{esc(ch.judged)} scenario(s) judged ({tally}); "
+                f"{esc(ch.packages)} task package(s) emitted",
+            )
+        )
+    else:
+        scn = summary.scenarios(run)
+        if isinstance(scn, list):
+            items.append(("Suite", f"{esc(len(scn))} scenario(s) proposed, none judged yet"))
+        else:
+            items.append(("Suite", '<span class="absent">no scenarios yet</span>'))
+
+    cov = summary.coverage(run)
+    if isinstance(cov, summary.Coverage):
+        line = f"last verdict <b>{_val(cov.terminal_verdict)}</b>"
+        if cov.terminal_verdict in _COVERAGE_MEANING:
+            line += f" &mdash; {esc(_COVERAGE_MEANING[cov.terminal_verdict])}"
+        if cov.rounds:
+            row = cov.rounds[-1]
+            line += (
+                f"<br>{esc(row.cells_covered)} of {esc(row.cells_total)} capability cells "
+                f"and {esc(row.goals_covered)} of {esc(row.goals_total)} goals covered "
+                f"after {esc(len(cov.rounds))} round(s)"
+            )
+        items.append(("Coverage", line))
+    else:
+        items.append(("Coverage", _not_yet(cov)))
+
+    wm = summary.world_model(run)
+    if isinstance(wm, summary.WorldModel):
+        counts = ", ".join(
+            f"{esc(count)} {esc(kind)}" for kind, count in wm.counts.items() if count is not None
+        )
+        util = summary.utilisation(run)
+        if isinstance(util, summary.Utilisation) and util.pct is not None:
+            counts += f"<br>{esc(f'{util.pct:.1f}')}% of extracted claims used"
+        items.append(("World model", counts))
+    else:
+        items.append(("World model", _not_yet(wm)))
+
+    fired = summary.flags(run)
+    items.append(
+        (
+            "To check",
+            f"<b>{esc(len(fired))} flag(s)</b>, listed below" if fired else "nothing flagged",
+        )
+    )
+    body = "".join(f"<dt>{esc(label)}</dt><dd>{value}</dd>" for label, value in items)
+    return f'<div class="glance"><dl>{body}</dl></div>'
+
+
+# The terms this page uses without stopping to define them. A list rather than
+# inline explanations, so a reader who knows them is not slowed down.
+_GLOSSARY = (
+    ("claim", "One fact pulled out of one input file by the extract stage."),
+    (
+        "world model",
+        "The run's description of the target: what it can do (capabilities), what "
+        "data it holds (entities), who uses it (actors) and what they want (goals), "
+        "plus the gaps the inputs left open.",
+    ),
+    (
+        "capability cell",
+        "One capability paired with one way it can turn out (an outcome class), such "
+        "as success or a specific error. Coverage counts these.",
+    ),
+    ("hop depth", "How many tool calls a scenario should need, at least."),
+    (
+        "hole",
+        "A cell or goal no scenario covers yet. An open hole could still be filled; "
+        "a closed one (unreachable) never can.",
+    ),
+    ("round", "One pass of propose then score. A run repeats rounds up to max_rounds."),
+    (
+        "re-seed",
+        "A challenge verdict sending a scenario back to be instantiated again, once.",
+    ),
+    (
+        "oracle / reference agent",
+        "In smoke, an agent handed the answer. If it fails, the test is broken, not the agent.",
+    ),
+    (
+        "gate",
+        "A point where a person reviews the run before it continues: gate 0 after "
+        "triage, 1 after the world model, 2 after coverage, 3 after challenge.",
+    ),
+    (
+        "waived",
+        "A finding a person ruled correct but not fixable where it was raised. It "
+        "still shows, marked waived.",
+    ),
+)
+
+
+def _glossary() -> str:
+    body = "".join(f"<dt>{esc(term)}</dt><dd>{esc(text)}</dd>" for term, text in _GLOSSARY)
+    return f'<dl class="glossary">{body}</dl>'
 
 
 def _decisions(run: RunPaths):
@@ -1107,37 +1471,142 @@ def _decisions(run: RunPaths):
     return f"<pre>{esc(text)}</pre>"
 
 
+def _section_lines(run: RunPaths) -> dict[str, str]:
+    """The one line each closed section shows, from the same builders it renders.
+
+    Computed apart from the section bodies so that each body keeps one builder call
+    and one job; the cost is a second read of a few documents, on a page nobody
+    renders in a loop.
+    """
+
+    def counts(wm) -> str:
+        shown = [
+            f"{count} {kind}"
+            for kind, count in wm.counts.items()
+            if kind in ("capabilities", "goals", "gaps") and count is not None
+        ]
+        return ", ".join(shown)
+
+    def coverage(cov) -> str:
+        line = f"last verdict {cov.terminal_verdict or 'not recorded'}"
+        if cov.rounds:
+            row = cov.rounds[-1]
+            line += (
+                f", {row.cells_covered} of {row.cells_total} cells, "
+                f"{row.goals_covered} of {row.goals_total} goals"
+            )
+        return line
+
+    def utilisation(util) -> str:
+        if util.pct is None:
+            return "no claim to cite"
+        return f"{util.pct:.1f}% of {util.total} claims cited"
+
+    def contradictions(cons) -> str:
+        unresolved = cons.by_resolution.get("unresolved", 0)
+        return f"{cons.total} recorded, {unresolved} unresolved"
+
+    def inputs(got) -> str:
+        return f"{len(got.rows)} input(s), {got.total_bytes:,} bytes"
+
+    spine = summary.stage_spine(run)
+    produced = sum(1 for row in spine if row.produced)
+    deficiencies = summary.deficiencies(run)
+    open_deficiencies = sum(1 for item in deficiencies if not item.closed_by)
+    head = summary.header(run)
+    scn = summary.scenarios(run)
+    fired = summary.flags(run)
+    return {
+        "Flags": f"{len(fired)} to check" if fired else "none fired",
+        "Smoke result": _line(
+            summary.smoke(run),
+            lambda sm: f"verdict {sm.verdict or 'not recorded'}, {len(sm.tasks)} task(s)",
+        ),
+        "Challenge and emitted suite": _line(
+            summary.challenge(run), lambda ch: f"{ch.judged} judged, {ch.packages} emitted"
+        ),
+        "Scenarios": _line(scn, lambda rows: f"{len(rows)} proposed"),
+        "Coverage": _line(summary.coverage(run), coverage),
+        "World model": _line(summary.world_model(run), counts),
+        "Claim utilisation": _line(summary.utilisation(run), utilisation),
+        "Gaps": f"{len(summary.gaps(run))} recorded",
+        "Contradictions": _line(summary.contradictions(run), contradictions),
+        "Inputs": _line(summary.inputs(run), inputs),
+        "Objective": _line(summary.objective(run), lambda ob: f"supported: {_plain(ob.supported)}"),
+        "Dispositions": _line(
+            summary.dispositions(run),
+            lambda d: f"{d.admit_count} admitted, {d.decline_count} declined",
+        ),
+        "Deficiencies": f"{len(deficiencies)} recorded, {open_deficiencies} open",
+        "Run record": _line(head, lambda h: f"{len(h.stages)} prompt stage record(s)"),
+        "Pipeline progress": f"{produced} of {len(spine)} stages produced output",
+        "Decisions": "the run's decision log, decisions.md",
+        "Glossary": "what the terms on this page mean",
+    }
+
+
+def _plain(value) -> str:
+    """`_val`'s yes/no spelling as plain text, for a line that is escaped later."""
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return "not recorded" if value in (None, "") else str(value)
+
+
 def render(run: RunPaths) -> str:
-    """The whole page, as one string."""
+    """The whole page, as one string.
+
+    Ordered by the questions a teammate opening a run asks, not by the pipeline:
+    did it work, what did it produce, what went in, how was it run. The answer
+    block and the flags are open; every other section is collapsed under its
+    heading and one line.
+    """
+    lines = _section_lines(run)
+
+    def section(heading: str, body, *, open_: bool = False) -> str:
+        return _section(heading, body, lines.get(heading, ""), open_=open_)
+
+    head = summary.header(run)
+    identity = (
+        f'<p class="meta">created {esc(head.created_utc or "at an unrecorded time")}</p>'
+        if isinstance(head, summary.Header)
+        else ""
+    )
     parts = [
         "<!doctype html>",
         '<html lang="en"><head><meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
         f"<title>{esc(run.root.name)} — rubrica run summary</title>",
         f"<style>{_CSS}</style></head><body>",
         f"<h1>{esc(run.root.name)}</h1>",
-        # Stated once, at the top, because it is a property of the whole page and
-        # of one flag: every link below is relative to the run directory, which is
+        identity,
+        _glance(run),
+        section("Flags", _flags(run), open_=True),
+        section("Smoke result", _smoke(run)),
+        section("Challenge and emitted suite", _challenge(run)),
+        section("Scenarios", _scenarios(run)),
+        section("Coverage", _coverage(run)),
+        section("World model", _world_model(run)),
+        section("Claim utilisation", _utilisation(run)),
+        section("Gaps", _gaps(run)),
+        section("Contradictions", _contradictions(run)),
+        section("Inputs", _inputs(run)),
+        section("Objective", _objective(run)),
+        section("Dispositions", _dispositions(run)),
+        section("Deficiencies", _deficiencies(run)),
+        section("Decisions", _decisions(run)),
+        section("Run record", _header(run)),
+        section("Pipeline progress", _spine(run)),
+        section("Glossary", _glossary()),
+        # Stated once, at the foot, because it is a property of the whole page and
+        # of one flag: every link is relative to the run directory, which is
         # correct for the default destination and dead for every `-o` outside it --
         # and `-o` is exactly the flag an operator reaches for on a read-only run.
         '<p class="note">Artifact links are relative to the run directory, so they '
-        "resolve only while this page sits inside it: written elsewhere with "
-        '<span class="mono">-o</span>, the page still reads and its links do not '
-        "resolve.</p>",
-        _section("Pipeline progress", _spine(run)),
-        _section("Run header", _header(run)),
-        _section("Flags", _flags(run)),
-        _section("Inputs", _inputs(run)),
-        _section("Objective", _objective(run)),
-        _section("Dispositions", _dispositions(run)),
-        _section("Deficiencies", _deficiencies(run)),
-        _section("World model", _world_model(run)),
-        _section("Claim utilisation", _utilisation(run)),
-        _section("Gaps", _gaps(run)),
-        _section("Contradictions", _contradictions(run)),
-        _section("Coverage", _coverage(run)),
-        _section("Scenarios", _scenarios(run)),
-        _section("Challenge and emitted suite", _challenge(run)),
-        _section("Decisions", _decisions(run)),
+        "work only while this page sits inside it. Written elsewhere with "
+        '<span class="mono">-o</span>, the page still reads but its links do not '
+        "open.</p>",
         f"<script>{_JS}</script>",
         "</body></html>",
     ]

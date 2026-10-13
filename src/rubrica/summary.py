@@ -11,9 +11,9 @@ had a world model, and 6 held nothing past intake. A summary that rendered only
 complete runs would have been useless for 10 of the 11, so every section returns
 a marker rather than raising when it cannot build a body -- `Absent` when the
 artifact is not there and `Malformed` when it is there and unreadable, which the
-spine's existence test makes two different facts -- and the stage spine leads the
-page because "how far did this get" is the first thing a reader of a partial run
-needs.
+spine's existence test makes two different facts -- and "how far did this get" is
+the first line of the page's answer block, because it is the first thing a reader
+of a partial run needs.
 
 `run_summary` never raises on a readable run's *content*, and the command always
 exits 0 -- `claim_utilisation`'s ruling, restated for the same reason: a report
@@ -54,6 +54,12 @@ from rubrica.paths import STAGES, RunPaths, is_safe_segment, list_json
 # would come to disagree about one run. It is not total -- see `coverage`'s
 # docstring for the shape measured escaping it, and the guard at its call site.
 from rubrica.sizing import implied_size
+
+# The one definition of "the oracle passed this task", imported for
+# `claim_utilisation`'s reason below: `smoke.summarize` counts oracle failures with
+# it, and a second spelling here would let the page name a different set of tasks
+# from the count the report carries.
+from rubrica.smoke import PASS_THRESHOLD
 
 # The one place utilisation is computed in this build, imported rather than
 # re-derived: `refs.check_claim_utilisation` and the `claim-utilisation`
@@ -1442,11 +1448,6 @@ class Challenge:
     judged: int
     packages: int
     incomplete_packages: list[str]
-    # The smoke report as it stands on disk, or None. A document rather than a
-    # boolean, for `SUITE_FILES`' reason one section up: "smoke ran" and "smoke
-    # ran and found nothing" are different facts, and a flag cannot draw that
-    # line.
-    smoke: dict | None
 
 
 def challenge(run: RunPaths) -> Challenge | Marker:
@@ -1511,7 +1512,128 @@ def challenge(run: RunPaths) -> Challenge | Marker:
         judged=len(verdict_paths),
         packages=len(package_ids),
         incomplete_packages=incomplete,
-        smoke=_mapping(_quietly(run.report)) or None,
+    )
+
+
+# What each smoke verdict means, in a sentence a teammate can act on. Worded from
+# report-0.1.json's own `verdict` description rather than from
+# `smoke._VERDICT_MESSAGES`, which are remediation advice with format placeholders:
+# this page says what the verdict *is*, and the stage that wrote it says what to do.
+SMOKE_VERDICT_MEANINGS = {
+    "healthy": "a real spread: the reference agent passes and the do-nothing baseline fails",
+    "degenerate_trivial": "the do-nothing baseline passes too much, so the suite is not "
+    "testing anything",
+    "broken_labels": "the reference agent fails too much, which points at the answer "
+    "labels or the verifier rather than at any agent",
+    "inconclusive": "too few tasks were scored by every role to say",
+}
+
+
+@dataclass(frozen=True)
+class SmokeAgent:
+    role: str
+    model: str
+    notes: str
+
+
+@dataclass(frozen=True)
+class SmokeTask:
+    scenario_id: str
+    # Role to reward as the report wrote it, or None for a result that was not
+    # scored. `object` for `RoundRow.pct`'s reason: a hand-edited reward renders as
+    # what it is rather than as a number the report never held.
+    rewards: dict[str, object]
+    all_pass: object
+    all_fail: object
+    # The per-task half of `summary.oracle_failures`, by `smoke.summarize`'s own
+    # rule: an oracle result that was not scored, or scored below
+    # `smoke.PASS_THRESHOLD`. The report carries only the count; this is what lets
+    # the page name the tasks behind it.
+    oracle_failed: bool
+
+
+@dataclass(frozen=True)
+class Smoke:
+    verdict: str
+    # Role to mean reward, as written. A role the report omits was never measured
+    # (`smoke.mean_reward_by_role` drops it rather than writing 0.0), so it is
+    # absent here too rather than defaulted.
+    mean_reward: dict[str, object]
+    all_pass_tasks: object
+    all_fail_tasks: object
+    oracle_failures: object
+    unscoreable: object
+    agents: list[SmokeAgent]
+    tasks: list[SmokeTask]
+
+
+def _oracle_failed(results: list[dict]) -> bool:
+    """`smoke.summarize`'s oracle-failure rule, over one task's results.
+
+    Tolerant where `summarize` is not, because this reads a report layer 1 may not
+    have gated: a reward that is not a number counts as a failure, which is the
+    reading `summarize` gives an unscoreable oracle. A task with no oracle result at
+    all is not a failure -- the oracle never ran on it, and the report's
+    `unscoreable` count is where that shows.
+    """
+    for result in results:
+        if result.get("role") != "oracle":
+            continue
+        reward = result.get("reward")
+        if not result.get("scored") or isinstance(reward, bool):
+            return True
+        if not isinstance(reward, (int, float)) or not reward >= PASS_THRESHOLD:
+            return True
+    return False
+
+
+def smoke(run: RunPaths) -> Smoke | Marker:
+    """The smoke report as a reader needs it: verdict, means per role, and tasks.
+
+    Its own builder rather than a raw document carried on `Challenge`, which is how
+    it used to reach the page: as `str()` of nested dicts, so the one result that
+    says whether the suite is worth running read as Python's repr of a list. Every
+    field is read by name with the module's shape guards, for the reason the other
+    builders use them: a report from a hand-edited or older run is still a report.
+    """
+    payload = _mapping(_quietly(run.report))
+    if not payload:
+        return _absent_or_malformed(run.report, "07-report.json", "nothing could be read from it")
+    block = _mapping(payload.get("summary"))
+    agents = [
+        SmokeAgent(
+            role=str(member.get("role", "")),
+            model=str(member.get("model", "")),
+            notes=str(member.get("notes", "")),
+        )
+        for member in _dicts(payload.get("agents"))
+    ]
+    tasks = []
+    for member in _dicts(payload.get("tasks")):
+        results = _dicts(member.get("results"))
+        tasks.append(
+            SmokeTask(
+                scenario_id=str(member.get("scenario_id", "")),
+                rewards={
+                    str(result.get("role", "")): (
+                        result.get("reward") if result.get("scored") else None
+                    )
+                    for result in results
+                },
+                all_pass=member.get("all_pass"),
+                all_fail=member.get("all_fail"),
+                oracle_failed=_oracle_failed(results),
+            )
+        )
+    return Smoke(
+        verdict=str(payload.get("verdict", "")),
+        mean_reward=dict(_mapping(block.get("mean_reward_by_role"))),
+        all_pass_tasks=block.get("all_pass_tasks"),
+        all_fail_tasks=block.get("all_fail_tasks"),
+        oracle_failures=block.get("oracle_failures"),
+        unscoreable=block.get("unscoreable"),
+        agents=agents,
+        tasks=tasks,
     )
 
 
@@ -1537,6 +1659,20 @@ def orphaned_temp_files(run: RunPaths) -> list[str]:
         return sorted(p.name for p in run.root.iterdir() if ".tmp." in p.name)
     except OSError:
         return []
+
+
+# How each non-converged coverage verdict reads as a headline. One table, used by
+# the flag and by the page's summary line, because the raw word read wrong in
+# both: `continue` is the verdict of a round that left room for another, so a run
+# whose last coverage document says `continue` is one whose loop somebody stopped
+# -- and "Coverage ended continue" said neither that nor that it is not a halt.
+# Meanings are rb-score's, from its Method section. Each keeps the verdict word so
+# a reader can find it in the document.
+COVERAGE_STOPPED = {
+    "continue": "Round loop stopped before coverage converged (last verdict: continue)",
+    "halted_no_progress": "Coverage halted: the last round added no coverage (halted_no_progress)",
+    "halted_round_cap": "Coverage halted: the round limit was reached (halted_round_cap)",
+}
 
 
 @dataclass(frozen=True)
@@ -1575,6 +1711,45 @@ def flags(run: RunPaths) -> list[Flag]:
     case.
     """
     found: list[Flag] = []
+
+    # The smoke flags lead because they are the run's result: every other flag is
+    # about how the suite was built, these two are about whether it works. Both
+    # read fields the report already holds -- the verdict against the one value
+    # that means "fine", and a count against zero -- so neither is a new dial.
+    sm = smoke(run)
+    if isinstance(sm, Smoke):
+        # `sm.verdict and`: a report with no verdict leaves `""`, the blank-label
+        # shape `coverage-halted` rules out below, and it is a smoke-stage defect
+        # for `validate` to name rather than a verdict to report.
+        if sm.verdict and sm.verdict != "healthy":
+            found.append(
+                Flag(
+                    id_="smoke-not-healthy",
+                    headline=f"Smoke verdict: {sm.verdict}",
+                    threshold="smoke verdict is not healthy",
+                    detail=SMOKE_VERDICT_MEANINGS.get(
+                        sm.verdict, "not a verdict report-0.1.json defines"
+                    ),
+                )
+            )
+        failures = _as_int(sm.oracle_failures)
+        if failures > 0:
+            named = [t.scenario_id for t in sm.tasks if t.oracle_failed]
+            # Capped, because this line sits in the list a reader scans first and a
+            # broken-labels run can name every task in the suite; the Smoke section
+            # lists them all.
+            more = f" and {len(named) - 20} more" if len(named) > 20 else ""
+            shown = ", ".join(named[:20]) + more
+            found.append(
+                Flag(
+                    id_="oracle-failures",
+                    headline=f"{failures} task(s) the reference agent did not pass",
+                    threshold="smoke summary.oracle_failures above 0",
+                    detail=(shown or "the report names no task")
+                    + " -- check those tasks' answer labels and verifier before "
+                    "trusting their scores",
+                )
+            )
 
     util = utilisation(run)
     if isinstance(util, Utilisation) and util.pct is not None:
@@ -1645,7 +1820,9 @@ def flags(run: RunPaths) -> list[Flag]:
         found.append(
             Flag(
                 id_="coverage-halted",
-                headline=f"Coverage ended {cov.terminal_verdict}",
+                headline=COVERAGE_STOPPED.get(
+                    cov.terminal_verdict, f"Coverage ended {cov.terminal_verdict}"
+                ),
                 threshold="terminal verdict is not converged",
                 detail=f"{len(cov.holes)} open hole(s) at the last round",
             )

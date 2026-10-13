@@ -82,7 +82,7 @@ repos:
       - id: bandit
         name: bandit (SAST)
         args: [-c, pyproject.toml]
-        files: ^src/
+        files: ^(src|console/rubrica_console)/
 
   # Conventional Commit subjects, which `scripts/lib/release-notes.sh` reads to
   # build each CHANGELOG section.

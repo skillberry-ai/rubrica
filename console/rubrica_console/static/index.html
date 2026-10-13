@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="rubrica-token" content="__RUBRICA_TOKEN__">
+<title>rubrica console</title>
+<!-- The header's logo square, inline so the server needs no extra route. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%233b5bdb'/%3E%3Cstop offset='1' stop-color='%237048e8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Ctext x='16' y='22.5' text-anchor='middle' font-family='system-ui,sans-serif' font-size='20' font-weight='700' fill='%23fff'%3Er%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/"><span class="logo">r</span>rubrica <span class="sub">console</span></a>
+  <nav class="nav"><a href="#/" id="nav-runs">Runs</a><a href="#/settings" id="nav-settings">Settings</a></nav>
+  <div id="top-run"></div>
+  <div class="spacer"></div>
+  <div id="top-status"></div>
+</header>
+<main id="app"><p class="muted pad">Loading…</p></main>
+<div id="modal" class="modal" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true">
+    <div class="modal-head"><h2 id="modal-title"></h2><button class="ghost" id="modal-close" aria-label="Close">✕</button></div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+<div id="toast" class="toast" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
