@@ -440,9 +440,8 @@ class Handler(BaseHTTPRequestHandler):
         itself and also drops VCS, vendored, lock and gitignored files.
         """
         root = self.root.resolve()
-        root_str = str(root)
         # The separator is part of the prefix, so `/home/al` does not admit `/home/alex`.
-        root_prefix = root_str.rstrip(os.sep) + os.sep
+        root_prefix = str(root).rstrip(os.sep) + os.sep
 
         def inside(raw) -> Path:
             # Resolved as a string and checked before any Path is built, and the
@@ -453,7 +452,11 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(raw, str) or not raw:
                 raise ConsoleError("a selected path must be a non-empty string")
             resolved = os.path.realpath(os.path.expanduser(raw))
-            if resolved != root_str and not resolved.startswith(root_prefix):
+            # One `startswith` on the separator-terminated form, rather than
+            # `== root or startswith(root + sep)`: it admits the root itself, refuses
+            # a sibling like `<root>-evil`, and is the single-call guard shape CodeQL
+            # treats as a sanitizer -- the two-condition form was still flagged.
+            if not (resolved.rstrip(os.sep) + os.sep).startswith(root_prefix):
                 raise ConsoleError(f"the picker is limited to {root}")
             return Path(resolved)
 
