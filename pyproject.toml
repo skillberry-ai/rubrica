@@ -57,20 +57,33 @@ Changelog = "https://github.com/skillberry-ai/rubrica/blob/main/CHANGELOG.md"
 
 [project.scripts]
 rubrica = "rubrica.cli:main"
+# The browser console. Its code lives in console/, outside the core package: it
+# drives the pipeline only through the `rubrica` CLI and scripts/dispatch-stage.sh,
+# and nothing under src/ imports it.
+rubrica-console = "rubrica_console.cli:main"
 
 [build-system]
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+# Two roots in one distribution: the core in src/, the console in console/. One
+# `make setup` installs both, and console/tests is not a package so it is not found.
+where = ["src", "console"]
+include = ["rubrica*", "rubrica_console*"]
 
 # The schemas are the contract, so they ship with the package: without this a
 # wheel installs code that cannot validate anything. The skills are the
 # pipeline's producers, and for the same reason: an installed copy that can
 # validate and emit but cannot find its own skills is a copy that cannot run.
 [tool.setuptools.package-data]
-rubrica = ["schema/*.json", "suite/*.py", "suite/*.sh", "skills/*/SKILL.md"]
+rubrica = [
+    "schema/*.json",
+    "suite/*.py",
+    "suite/*.sh",
+    "skills/*/SKILL.md",
+]
+rubrica_console = ["static/*"]
 
 [tool.ruff]
 line-length = 100
@@ -86,14 +99,17 @@ extend-exclude = ["docs"]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "console/tests"]
+# The console's tests build runs with tests/toy.py; the repository root on the path
+# is what lets them import it from outside tests/.
+pythonpath = ["."]
 markers = [
     "live: dispatches a model; skipped unless RUBRICA_LIVE is set (see tests/conftest.py)",
 ]
 
 [tool.bandit]
 # Read by the `bandit` pre-commit hook via `-c pyproject.toml`. The hook already
-# scopes itself to `^src/` with its own `files:` pattern; exclude_dirs is what
+# scopes itself to `^(src|console/rubrica_console)/` with its own `files:` pattern; exclude_dirs is what
 # makes a manual `bandit -c pyproject.toml -r .` agree with it instead of walking
 # the fixtures and the virtualenv.
 #

@@ -603,6 +603,21 @@ could therefore neither read nor hand out the skills it exists to dispatch.
 Guide §4 and §6 are the mechanics of that isolation and what only looks
 enforced.
 
+## The same run from a browser
+
+Everything above can also be driven from a local web page:
+
+```bash
+uv run rubrica-console --runs-dir runs
+```
+
+It shows every step of every run with its status, runs a step or a whole stretch
+up to the next gate, shows each dispatch's progress and cost as it happens, and
+holds the gates with a note that lands in `decisions.md`. It runs the same
+commands this page does, in the same order.
+[`docs/guides/console.md`](guides/console.md) is its guide. A run driven this way
+does not exercise `rb-orchestrate`.
+
 ## Where to go next
 
 - [`docs/guides/invoking-rubrica.md`](guides/invoking-rubrica.md) — the

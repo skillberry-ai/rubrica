@@ -2105,6 +2105,38 @@ tested. There is behavioural evidence that it can — an orchestrator handed
 that the flag skips *human review* and a blocking gap is not a human gate, a
 distinction that lives in one sentence of prose and had no other instrument.
 
+### A console-driven run does not exercise `rb-orchestrate`
+
+`rubrica-console` drives a run by following `rb-orchestrate`'s walk in code:
+`console/rubrica_console/pipeline.py` lays out the steps, and `jobs.py` runs them —
+the same order, the same gate after each stage, one repair, the three-dispatch cap,
+re-seed once, rejects through `rb-score`. Two things follow.
+
+**A run driven from the console is not evidence about the skill.** Whether a
+prompt can hold the walk — remember the barrier rule, take the `halted_*` branch
+the right way, decline to overrule a blocking gap — is part of what this project
+tests, and the console answers none of it. Nothing in a run's artifacts says which
+of the two drove it except the `(console)` suffix on the decisions the console
+records, so a reader comparing runs has to look there.
+
+**The walk now lives in two places, and nothing keeps them in step.** A change to
+`rb-orchestrate`'s prose — a new branch, a reordered pass — does not reach the
+console, and no test compares them, because one is prose and the other is code.
+Each step in `pipeline.py` names the section of the walk it follows, so the line to
+change can be found, but finding it is a human's job.
+
+There is also a fact the console keeps that the run does not: which scenarios
+already had their one re-seed, in its ledger under `--lab`. Lose the lab directory
+and the next follow-up re-seeds them again. `rb-orchestrate` has the same gap — it
+tracks the budget in its own context — so this is not new, only moved.
+
+Accepted because the console exists to *operate* the pipeline rather than to
+measure the orchestrator, and the hand-driven shell helpers it replaces had all
+three properties already, with less of the walk written down. Re-open it if the
+console becomes the usual way runs are made: at that point the skill is no longer
+exercised by default, and the experiment's orchestrator half needs runs made the
+other way on purpose.
+
 ### `objective_review` is prose a model writes about its own compliance
 
 `rb-triage-objective` writes an `objective_review` block asserting whether the
