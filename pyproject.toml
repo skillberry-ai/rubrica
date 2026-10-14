@@ -47,7 +47,7 @@ dependencies = [
 # parses them before they reach GitHub. Uncapped, unlike ruff: it is a parser
 # whose output does not drift the way a formatter's does, and uv.lock pins it for
 # both contributor and CI regardless.
-dev = ["pytest>=8.3", "ruff>=0.8,<0.17", "pyyaml>=6.0", "pre-commit>=4.0"]
+dev = ["pytest>=8.3", "ruff>=0.8,<0.18", "pyyaml>=6.0", "pre-commit>=4.0"]
 
 [project.urls]
 Homepage = "https://github.com/skillberry-ai/rubrica"
