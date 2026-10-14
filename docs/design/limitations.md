@@ -2921,6 +2921,40 @@ net — which means giving the three a finding-shaped exit for genuine usage err
 too, a wider change than this entry's cost justifies. The first trigger, a
 fourth block, has not fired: there are still three.
 
+### A gate-0 override is a ruling the triage family never sees, and only gate 0 has one
+
+`rubrica overrule` lets a human replace triage's disposition for a candidate at
+gate 0, recorded in `00-adoptions.json`'s `overrides` and applied by
+`triage-seal`. Three edges follow from where it sits, and each is deliberate.
+
+**It exists before `intake` only.** Once the manifest is minted its inputs are
+materialised from the sealed admits and `refs.check_admitted_inputs` holds the
+two together, so `overrule` refuses (exit 2) rather than let the run disagree
+with itself. A ruling that late means a new run from the same corpus.
+
+**Nothing in the triage family re-reads it.** `rb-triage-audit` ruled on the
+parts as triage wrote them, so a declined candidate a human then admits still
+has whatever deficiency the audit raised about its absence, and the gate-0
+divergence still counts surfaces from triage's own admits. That is the price of
+keeping the parts unedited — the property that lets a reader set the model's
+judgment beside the human's — and the reason a human decline cannot carry
+`needs_projection` or `digest_insufficient`: both claim something about an audit
+that never saw the override. Re-dispatching the audit after an override would
+hand a stage a human's ruling as input, which is the gate-0 argument run
+backwards.
+
+**Gates 1 to 3 have no equivalent yet.** Gate 1 is corrected by the hand-edit
+`reconcile-seal` already invites; gates 2 and 3 offer approval, feedback that
+reaches `decisions.md` (which no stage reads), `set-limit` and `waive`, and no
+structured way to drop a scenario or overturn a verdict. `gate-brief --format
+json` is built for gate 0 only and refuses the others at exit 2.
+
+What `gate-brief --format json` puts under `needs_you` is chosen by fixed rules
+over fields on disk, never by a model, and those rules are editorial: a decline
+always appears, a large admit only past the first few, and nothing ranks how
+much each matters. A human who reads only the cards has read what the rules
+chose, which is why the full file list sits beneath them.
+
 ### The catch-all blames the artifact, and names the wrong run for `diff-runs`
 
 Two facets of the same handler, both live.

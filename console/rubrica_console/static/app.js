@@ -1072,6 +1072,14 @@ function briefLine(line) {
 }
 
 function gatePanel(step, busy) {
+  // Gate 0 has a structured brief: cards for what needs a human, a checkbox per
+  // file, and the rulings sent as `rubrica overrule`. Every other gate (and gate
+  // 0 before triage is sealed) keeps the sectioned text brief.
+  if (step.gate === 0) return gate0Panel(step, busy);
+  return briefPanel(step, busy);
+}
+
+function briefPanel(step, busy) {
   const out = [];
   const g = step.gate;
   const key = `rubrica-gate|${RUN.name}|${g}`;
@@ -1174,6 +1182,309 @@ function gatePanel(step, busy) {
       h("button", { disabled: busy, onclick: () => { const v = {}; for (const k in lim) if (lim[k].value) v[k] = Number(lim[k].value); postAction("set-limit", { limits: v, reason: why.value }, "Limit changed"); } }, "Set limit")));
   }
   return out;
+}
+
+// -- gate 0: interactive ----------------------------------------------------
+//
+// The page never writes a run file. Each change becomes a `rubrica overrule`
+// call on the server, then `triage-seal` and the checks re-run, so what the page
+// shows after a save is what the run will actually admit. Pending changes live
+// in this browser's draft until saved, so a poll cannot wipe them.
+
+const GATE0_KINDS = {
+  objective: "Objective",
+  missing_surface: "Missing surface",
+  decline: "Declined file",
+  gap: "Gap",
+  large_admit: "Large admit",
+  split_group: "Split folder",
+};
+
+function gate0Panel(step, busy) {
+  const box = h("div", {}, h("p", { class: "muted" }, "Loading gate 0…"));
+  api(`/api/runs/${encodeURIComponent(RUN.name)}/gate/0`).then((r) => {
+    if (!r.data || !r.data.sealed) return put(box, ...briefPanel(step, busy));
+    put(box, ...gate0View(step, busy, r));
+  }).catch((e) => put(box, h("div", { class: "banner err" }, e.message)));
+  return [box];
+}
+
+function gate0View(step, busy, r) {
+  const d = r.data;
+  const ready = step.status === "ready" && !d.locked;
+  const key = `rubrica-gate0|${RUN.name}`;
+  let draft = {};
+  try { draft = JSON.parse(localStorage.getItem(key) || "{}") || {}; } catch (_) { draft = {}; }
+  draft.changes = draft.changes || {};
+  draft.comments = draft.comments || {};
+  const save = () => { try { localStorage.setItem(key, JSON.stringify(draft)); } catch (_) {} };
+  const files = new Map(d.files.map((f) => [f.candidate_id, f]));
+  // A draft from before the last save may name a change the run already holds.
+  for (const cid of Object.keys(draft.changes)) if (!files.has(cid)) delete draft.changes[cid];
+
+  const target = (f) => {
+    const c = draft.changes[f.candidate_id];
+    if (!c) return f.decision;
+    return c.action === "clear" ? f.triage_decision : c.action;
+  };
+  // Choosing a decision: back to what the run holds drops the change; back to
+  // triage's own after a human override is a `clear`.
+  const setChoice = (f, want) => {
+    if (want === f.decision) delete draft.changes[f.candidate_id];
+    else if (f.authority === "human" && want === f.triage_decision) draft.changes[f.candidate_id] = { action: "clear", reason: (draft.changes[f.candidate_id] || {}).reason || "" };
+    else draft.changes[f.candidate_id] = { ...(draft.changes[f.candidate_id] || {}), action: want };
+  };
+  const choose = (f, want) => { setChoice(f, want); save(); repaint(); };
+  const sizeOf = (f) => (f.bytes == null ? "?" : size(f.bytes));
+  const who = (f) => (f.authority === "human" ? h("span", { class: "g0-who human", title: `triage said ${f.triage_decision}` }, "you") : h("span", { class: "g0-who" }, "triage"));
+
+  const summaryBox = h("div", {});
+  const needsBox = h("div", { class: "g0-cards" });
+  const filesBox = h("div", {});
+  const overridesBox = h("div", {});
+  const actionsBox = h("div", {});
+  let filter = "";
+  let filesOpen = false;
+
+  // A file's decision control: two buttons, plus a reason code and a reason
+  // when it differs from what the run holds.
+  const control = (f) => {
+    const t = target(f);
+    const changed = !!draft.changes[f.candidate_id];
+    const c = draft.changes[f.candidate_id] || {};
+    const seg = h("div", { class: "seg small" },
+      h("button", { class: t === "admit" ? "on" : "", disabled: !ready, onclick: () => choose(f, "admit") }, "Admit"),
+      h("button", { class: t === "decline" ? "on" : "", disabled: !ready, onclick: () => choose(f, "decline") }, "Decline"));
+    if (!changed || !ready) return h("div", { class: "g0-control" }, seg);
+    const code = t === "decline" && c.action !== "clear"
+      ? h("select", { onchange: (e) => { c.reason_code = e.target.value; draft.changes[f.candidate_id] = c; save(); paintPending(); } },
+          h("option", { value: "" }, "why declined…"),
+          ...d.decline_codes.map((k) => h("option", { value: k, selected: c.reason_code === k ? true : null }, k.replaceAll("_", " "))))
+      : null;
+    const reason = h("input", { class: "g0-reason", placeholder: "Your reason (required)", value: c.reason || "",
+      oninput: (e) => { c.reason = e.target.value; draft.changes[f.candidate_id] = c; save(); paintPending(); } });
+    return h("div", { class: "g0-control" }, seg, code, reason);
+  };
+
+  const paintSummary = () => {
+    const s = d.summary;
+    const pending = Object.keys(draft.changes).length;
+    put(summaryBox, h("div", { class: `g0-summary ${s.supported ? "" : "warn"}` },
+      h("div", {}, h("div", { class: "v" }, s.supported ? "supported" : "NOT supported"), h("div", { class: "l" }, `objective: ${s.objective || "?"}`)),
+      h("div", {}, h("div", { class: "v" }, `${s.admitted}`), h("div", { class: "l" }, `admitted · ${size(s.admitted_bytes)}`)),
+      h("div", {}, h("div", { class: "v" }, `${s.declined}`), h("div", { class: "l" }, "declined")),
+      h("div", {}, h("div", { class: "v" }, `${s.gaps_open}/${s.gaps_total}`), h("div", { class: "l" }, "gaps open")),
+      h("div", {}, h("div", { class: "v" }, `${s.overridden}`), h("div", { class: "l" }, "your rulings")),
+      pending ? h("div", {}, h("div", { class: "v pend" }, `${pending}`), h("div", { class: "l" }, "unsaved changes")) : null),
+      d.locked ? h("p", { class: "banner" }, "Gate 0 is approved: intake has admitted these files, so they can no longer be changed in this run.") : null);
+  };
+
+  const card = (n) => {
+    const f = n.candidate_id ? files.get(n.candidate_id) : null;
+    const changed = f && draft.changes[f.candidate_id];
+    const comment = h("textarea", { class: "sec-comment", placeholder: "Your comment (goes into your review note)", value: draft.comments[n.title] || "",
+      oninput: (e) => { draft.comments[n.title] = e.target.value; save(); } });
+    comment.hidden = !(draft.comments[n.title] || "").trim();
+    const extra = [];
+    if (n.kind === "gap") {
+      if (n.wanted) extra.push(h("div", { class: "g0-wanted" }, h("b", {}, "Suggested fix: "), n.wanted));
+      if (n.projection_id) {
+        extra.push(h("div", { class: "muted small" }, "To supply it, write the file and run:"),
+          h("code", { class: "g0-cmd" }, `rubrica adopt-projection --run ${d.run} --projection ${n.projection_id} --file <path>`));
+      }
+      extra.push(h("div", { class: "muted small" }, "Or accept the gap, and say so in a comment."));
+    }
+    if (n.kind === "split_group") extra.push(h("div", { class: "muted small" }, `Slices: ${(n.slices || []).join(", ")}. Check its files in “All files” below.`));
+    if (n.recommended) extra.push(h("div", { class: "g0-wanted" }, h("b", {}, "Recommended objective: "), `${n.recommended.objective} — ${n.recommended.reason}`));
+    return h("div", { class: `g0-card k-${n.kind} ${changed ? "changed" : ""}` },
+      h("div", { class: "g0-card-head" }, h("span", { class: "chip-k" }, GATE0_KINDS[n.kind] || n.kind),
+        h("span", { class: "g0-title" }, n.title), f ? who(f) : null, h("span", { class: "spacer" }),
+        f ? h("span", { class: "muted small" }, sizeOf(f)) : null,
+        ready ? h("button", { class: "small ghost", onclick: () => { comment.hidden = !comment.hidden; if (!comment.hidden) comment.focus(); } }, "💬") : null),
+      n.detail ? h("details", { class: "g0-more" }, h("summary", {}, n.detail.length > 140 ? `${n.detail.slice(0, 140)}…` : n.detail),
+        n.detail.length > 140 ? h("div", {}, n.detail) : null) : null,
+      ...extra,
+      f ? control(f) : null,
+      ready ? comment : null);
+  };
+
+  // Declines sharing one reason code fold into a single card once there are
+  // more than DECLINE_GROUP of them: seven near-duplicates are one question
+  // ("were these really duplicates?"), not seven.
+  const DECLINE_GROUP = 3;
+  const paintNeeds = () => {
+    if (!d.needs_you.length) {
+      return put(needsBox, h("p", { class: "muted" }, "Nothing here needs you: no declines, no open gaps, no missing surfaces. Check the file list below if you want to, then approve."));
+    }
+    const byCode = new Map();
+    for (const n of d.needs_you) {
+      if (n.kind !== "decline") continue;
+      const code = (files.get(n.candidate_id) || {}).reason_code || "?";
+      if (!byCode.has(code)) byCode.set(code, []);
+      byCode.get(code).push(n);
+    }
+    const shown = new Set();
+    const out = [];
+    for (const n of d.needs_you) {
+      if (n.kind !== "decline") { out.push(card(n)); continue; }
+      const code = (files.get(n.candidate_id) || {}).reason_code || "?";
+      const group = byCode.get(code);
+      if (group.length <= DECLINE_GROUP) { out.push(card(n)); continue; }
+      if (shown.has(code)) continue;
+      shown.add(code);
+      const changed = group.filter((g) => draft.changes[g.candidate_id]).length;
+      out.push(h("details", { class: `g0-card g0-group k-decline ${changed ? "changed" : ""}`, open: changed ? true : null },
+        h("summary", { class: "g0-card-head" }, h("span", { class: "chip-k" }, "Declined files"),
+          h("span", { class: "g0-title" }, `${group.length} declined as ${code.replaceAll("_", " ")}`),
+          h("span", { class: "spacer" }), changed ? h("span", { class: "g0-pending" }, `${changed} changed`) : h("span", { class: "muted small" }, "open to review each")),
+        h("div", { class: "g0-cards" }, ...group.map(card))));
+    }
+    put(needsBox, out);
+  };
+
+  const paintFiles = () => {
+    const folders = new Map();
+    for (const f of d.files) {
+      if (filter && !`${f.candidate_id} ${f.path || ""} ${f.folder}`.toLowerCase().includes(filter)) continue;
+      if (!folders.has(f.folder)) folders.set(f.folder, []);
+      folders.get(f.folder).push(f);
+    }
+    const rows = [];
+    for (const [folder, list] of folders) {
+      const admitted = list.filter((f) => target(f) === "admit").length;
+      const box = h("input", { type: "checkbox", disabled: !ready, title: "Admit or decline every file in this folder" });
+      box.checked = admitted === list.length;
+      box.indeterminate = admitted > 0 && admitted < list.length;
+      // One repaint for the folder, not one per file: a folder can hold a hundred.
+      box.onchange = () => {
+        for (const f of list) if (f.admissible || !box.checked) setChoice(f, box.checked ? "admit" : "decline");
+        save(); repaint();
+      };
+      rows.push(h("div", { class: "g0-folder" }, h("label", { class: "pick-box" }, box), h("b", { class: "mono" }, folder),
+        h("span", { class: "muted small" }, `${admitted}/${list.length} admitted · ${size(list.reduce((a, f) => a + (f.bytes || 0), 0))}`)));
+      for (const f of list) {
+        const t = target(f);
+        const fb = h("input", { type: "checkbox", disabled: !ready || (!f.admissible && t !== "admit") });
+        fb.checked = t === "admit";
+        fb.onchange = () => choose(f, fb.checked ? "admit" : "decline");
+        const changed = !!draft.changes[f.candidate_id];
+        rows.push(h("div", { class: `g0-file ${changed ? "changed" : ""} ${t === "admit" ? "" : "out"}` },
+          h("label", { class: "pick-box" }, fb),
+          h("details", {}, h("summary", {}, h("span", { class: "mono" }, f.candidate_id), " ", who(f),
+            f.reason_code ? h("span", { class: "muted small" }, ` ${f.reason_code}`) : null),
+            h("div", { class: "small" }, f.path ? h("div", { class: "mono muted" }, f.path) : null,
+              h("div", {}, h("b", {}, "Triage: "), `${f.triage_decision || "?"} — ${f.triage_reason || ""}`),
+              f.authority === "human" ? h("div", {}, h("b", {}, "You: "), `${f.decision} — ${f.reason || ""}`) : null)),
+          h("span", { class: "muted small" }, sizeOf(f)),
+          changed ? control(f) : null));
+      }
+    }
+    const search = h("input", { class: "small sec-filter", placeholder: "Filter files", value: filter,
+      oninput: (e) => { filter = e.target.value.trim().toLowerCase(); paintFiles(); const el = filesBox.querySelector(".sec-filter"); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } } });
+    const sec = h("details", { class: "sec", open: filesOpen ? true : null, ontoggle: (e) => { filesOpen = e.target.open; } },
+      h("summary", {}, h("span", { class: "sec-title" }, "All files"), h("span", { class: "n" }, String(d.files.length)),
+        h("span", { class: "muted small" }, "checked = the run reads it")),
+      h("div", { class: "sec-tools" }, search),
+      h("div", { class: "sec-body g0-files" }, rows.length ? rows : h("div", { class: "bl none" }, "No file matches.")));
+    put(filesBox, sec);
+  };
+
+  const paintOverrides = () => {
+    put(overridesBox, d.overrides.length
+      ? h("details", { class: "subform" }, h("summary", {}, `Your rulings in force (${d.overrides.length})`),
+          ...d.overrides.map((o) => h("div", { class: "row g0-ovr" },
+            h("span", { class: "mono" }, o.candidate_id), h("span", {}, `${o.replaces} → ${o.disposition.disposition}`),
+            h("span", { class: "muted small" }, o.disposition.reason), h("span", { class: "spacer" }),
+            ready ? h("button", { class: "small", onclick: () => { const f = files.get(o.candidate_id); if (f) choose(f, f.triage_decision); } }, "Undo") : null)))
+      : null);
+  };
+
+  const note = h("textarea", { placeholder: "Overall: what you checked, and whether the chosen files are right.", value: draft.note || "",
+    oninput: (e) => { draft.note = e.target.value; save(); } });
+  const shared = h("input", { placeholder: "One reason for every change that has none of its own", value: draft.shared || "",
+    oninput: (e) => { draft.shared = e.target.value; save(); paintPending(); } });
+  // Updated in place as reasons are typed; repainting the whole action bar
+  // would replace the input the human is typing in.
+  const pendingBox = h("div", { class: "g0-pending" });
+  const paintPending = () => {
+    const n = Object.keys(draft.changes).length;
+    const { problems } = collect();
+    put(pendingBox, n ? `${n} unsaved change(s)` : null,
+      problems.length ? h("span", { class: "warn" }, ` — ${problems.length} still need a reason or a decline code`) : null);
+  };
+  const compose = () => [
+    (draft.note || "").trim(),
+    ...Object.entries(draft.comments).filter(([, c]) => c && c.trim()).map(([t, c]) => `on "${t}": ${c.trim()}`),
+  ].filter(Boolean).join(" | ");
+  const collect = () => {
+    const out = [], problems = [];
+    for (const [cid, c] of Object.entries(draft.changes)) {
+      const reason = (c.reason || "").trim() || (draft.shared || "").trim();
+      if (!reason) problems.push(`${cid}: needs a reason`);
+      if (c.action === "decline" && !c.reason_code) problems.push(`${cid}: choose why it is declined`);
+      out.push({ candidate: cid, action: c.action, reason_code: c.action === "decline" ? c.reason_code : undefined, reason });
+    }
+    return { changes: out, problems };
+  };
+  const send = async (approve) => {
+    const { changes, problems } = collect();
+    if (problems.length) return toast(problems.join("; "), true);
+    const text = compose();
+    if (approve && !text) return toast("Write an overall note first: approving records it in decisions.md.", true);
+    if (!changes.length && !text) return toast("Nothing to save yet.", true);
+    if (approve) {
+      const ok = await confirmDialog("Approve gate 0", [
+        changes.length ? `${changes.length} change(s) will be applied first, then the run admits what is checked.` : "The run admits what triage chose.",
+        "After this, the file selection is fixed for this run.",
+      ], "Approve");
+      if (!ok) return;
+    }
+    // The panel is rebuilt only while focus is outside it (so a poll never wipes
+    // typing); the clicked button would otherwise keep the saved page stale.
+    if (document.activeElement) document.activeElement.blur();
+    const job = await postAction("gates/0/changes", { changes, note: text, approve }, approve ? "Gate 0 approved" : "Saved — gate 0 is still open");
+    if (job && job.status === "succeeded") { try { localStorage.removeItem(key); } catch (_) {} RUN.staticFor = null; refreshRun(); }
+  };
+  const paintActions = () => {
+    if (!ready) return put(actionsBox, null);
+    const n = Object.keys(draft.changes).length;
+    paintPending();
+    put(actionsBox, h("div", { class: "actions feedback", style: "flex-direction:column;align-items:stretch" },
+      h("strong", {}, "Your review"),
+      n ? pendingBox : null,
+      n ? shared : null,
+      note,
+      h("div", { class: "row" },
+        h("button", { class: "primary", disabled: busy, onclick: () => send(true) }, n ? `✓ Approve with ${n} change(s)` : "✓ Approve gate 0"),
+        h("button", { disabled: busy, onclick: () => send(false) }, n ? "Save changes, don't approve yet" : "Record feedback, don't approve yet"),
+        n ? h("button", { class: "ghost", disabled: busy, onclick: () => { draft.changes = {}; save(); repaint(); } }, "Discard changes") : null),
+      h("p", { class: "hint", style: "margin:0" },
+        "Each change is recorded with `rubrica overrule` (your reason goes into the record and decisions.md), then the triage record is re-sealed. ",
+        "Approving then admits the checked files (rubrica intake). Triage's own decisions stay on disk beside yours.")));
+  };
+
+  function repaint() { paintSummary(); paintNeeds(); paintFiles(); paintOverrides(); paintActions(); }
+  repaint();
+
+  const sections = parseBrief(r.text);
+  const full = h("details", { class: "subform" }, h("summary", {}, "Full text report"),
+    h("div", { class: "sec-body" }, ...sections.flatMap((sec) => [h("div", { class: "bl" }, h("b", {}, sec.title)), ...sec.lines.map(briefLine)])));
+  return [
+    h("div", { class: "row", style: "margin-top:18px" }, h("h3", { style: "margin:0" }, "Gate 0: what the run may read"), h("span", { class: "spacer" }),
+      h("a", { class: "button small", href: `/runs/${encodeURIComponent(RUN.name)}/gate/0`, target: "_blank" }, "Plain text ↗"),
+      h("a", { class: "button small", href: `/runs/${encodeURIComponent(RUN.name)}/`, target: "_blank" }, "Run summary ↗")),
+    summaryBox,
+    h("h4", { class: "g0-h" }, d.locked ? `What was up for review (${d.needs_you.length})` : `Needs you (${d.needs_you.length})`),
+    needsBox,
+    filesBox,
+    overridesBox,
+    r.history && r.history.length
+      ? h("details", { class: "subform" }, h("summary", {}, `Earlier notes on this gate (${r.history.length})`),
+          h("div", { class: "cmds" }, ...r.history.map((l) => h("div", {}, l))))
+      : null,
+    full,
+    actionsBox,
+  ];
 }
 
 function dynamicDetail(step) {

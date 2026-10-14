@@ -36,6 +36,34 @@
           }
         }
       }
+    },
+    "overrides": {
+      "description": "Human gate-0 rulings that replace triage's own disposition for a candidate a staged part already rules on, written by `rubrica overrule`. Optional: a file written before it existed, or by adopt-projection alone, carries none. triage-seal applies each one in place of the part's disposition, so the assembled 00-triage.json carries the human's ruling with authority 'human' while the part keeps triage's -- both stay on disk. A decline here must carry a reason_code that needs no 00-audit.json reference (seal.HUMAN_DECLINE_CODES); an admit must carry none.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "disposition", "replaces", "recorded_at"],
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {
+            "$ref": "triage-0.1.json#/$defs/id",
+            "description": "The candidate whose triage disposition this replaces -- the same id disposition.candidate_id names."
+          },
+          "disposition": {
+            "$ref": "triage-0.1.json#/$defs/disposition",
+            "description": "The human's disposition, authority 'human'; its reason is the human's own words."
+          },
+          "replaces": {
+            "enum": ["admit", "decline"],
+            "description": "What triage's part said when this override was written. For a reader only: the seal reads the part itself, never this field."
+          },
+          "recorded_at": {
+            "type": "string",
+            "minLength": 1,
+            "description": "When the override was written, in decisions.md's UTC stamp format."
+          }
+        }
+      }
     }
   }
 }

@@ -151,7 +151,27 @@ fix a harness or filesystem problem.
 
 ## Gates
 
-A gate shows its `gate-brief` split into sections, one card each. A long section
+**Gate 0** has its own page, drawn from `gate-brief --gate 0 --format json`:
+
+- A summary strip: whether the objective is supported, how many files are
+  admitted and their size, the declines, the open gaps, and your rulings.
+- **Needs you**: one card for each thing that needs a human — a declined file
+  (declines that share a reason fold into one card when there are more than
+  three), a gap whose suggested fix was not supplied (with the
+  `adopt-projection` command to supply it), the largest admits, an unsupported
+  objective, a predicted surface nothing confirmed, a folder split across slices.
+  A file's card has **Admit / Decline**; a change asks for your reason, and a
+  decline for its reason code. Every card has a 💬 comment box.
+- **All files**, closed by default: every file by folder, a checkbox each
+  (checked means the run reads it) and one per folder, with triage's reason and
+  yours on expand.
+- **Save changes** records each change with `rubrica overrule`, re-runs
+  `triage-seal`, `validate` and `check-refs`, and leaves the gate open.
+  **Approve with N changes** does the same and then approves. Your rulings in
+  force are listed with **Undo**. Triage's own decisions stay on disk beside
+  yours, and once gate 0 is approved the page is read-only.
+
+The other gates show their `gate-brief` split into sections, one card each. A long section
 shows its first lines and can be filtered, and lines of the form `name: 12/40 ...`
 get a bar. Each section has a **Comment** button. Your comments and an overall
 note are kept as a draft in your browser until you send them, and are joined into

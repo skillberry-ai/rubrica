@@ -162,6 +162,10 @@ from rubrica.paths import STAGES, RunPaths, is_safe_segment, list_json
 # a cell is. Both index unguarded (`cap["id"]`, `oc["id"]`), which is why
 # `_cell_counts` below wraps them rather than calling them straight.
 from rubrica.refs import PASS_OWN_KINDS, _as_list, _cells, drivable_cells
+
+# The decline codes a human override may use, by import rather than by value,
+# so `gate_data` cannot offer a code the seal would refuse.
+from rubrica.seal import HUMAN_DECLINE_CODES
 from rubrica.sizing import implied_size
 from rubrica.utilisation import claim_utilisation
 
@@ -894,19 +898,12 @@ def _disposition_parts(run: RunPaths) -> tuple[list[dict], list[str]]:
     return parts, unreadable
 
 
-def _divergence_lines(run: RunPaths) -> list[str]:
-    """Section 4.1's predicted-vs-observed surface divergence.
+def _divergence(run: RunPaths) -> dict:
+    """The arithmetic `_divergence_lines` renders, as data -- see that function for why.
 
-    The observed total is computed the way `rb-triage-audit`'s Method computes
-    it -- every predicted surface with at least one admitted candidate anywhere
-    in the parts, plus every distinct `observed_surfaces` entry any part
-    reported. Deliberately not a simpler count: a human reading a shortfall
-    here and then reading the audit's deficiencies must see the same
-    arithmetic, and two definitions of "observed" in one gate's reading surface
-    would make the brief and the record it summarises disagree about a number
-    that is supposed to be the same number.
+    One computation for the text brief and for `gate_data`, so the two surfaces
+    a human can read gate 0 through cannot disagree about a shortfall.
     """
-    lines = [DIVERGENCE_HEADER]
     objective = _mapping(_quietly(run.objective))
     parts, unreadable_parts = _disposition_parts(run)
 
@@ -950,6 +947,39 @@ def _divergence_lines(run: RunPaths) -> list[str]:
     # value is what lets a human see them disagree.
     shown = predicted_count if isinstance(predicted_count, int) else "?"
     observed = len(confirmed) + len(surplus)
+    return {
+        "objective": objective,
+        "parts": parts,
+        "unreadable_parts": unreadable_parts,
+        "unconfirmed": unconfirmed,
+        "surplus": surplus,
+        "shown": shown,
+        "observed": observed,
+    }
+
+
+def _divergence_lines(run: RunPaths) -> list[str]:
+    """Section 4.1's predicted-vs-observed surface divergence.
+
+    The observed total is computed the way `rb-triage-audit`'s Method computes
+    it -- every predicted surface with at least one admitted candidate anywhere
+    in the parts, plus every distinct `observed_surfaces` entry any part
+    reported. Deliberately not a simpler count: a human reading a shortfall
+    here and then reading the audit's deficiencies must see the same
+    arithmetic, and two definitions of "observed" in one gate's reading surface
+    would make the brief and the record it summarises disagree about a number
+    that is supposed to be the same number.
+    """
+    lines = [DIVERGENCE_HEADER]
+    d = _divergence(run)
+    objective, parts, unreadable_parts = d["objective"], d["parts"], d["unreadable_parts"]
+    unconfirmed, surplus, shown, observed = (
+        d["unconfirmed"],
+        d["surplus"],
+        d["shown"],
+        d["observed"],
+    )
+
     lines.append(f"  predicted by the objective pass from the corpus map: {shown}")
     lines.append(
         f"  observed by the fan-out across {len(parts)} disposition "
@@ -994,6 +1024,37 @@ def _divergence_lines(run: RunPaths) -> list[str]:
     return lines
 
 
+def _split_groups(entries: list[dict]) -> tuple[dict[str, set[str]], dict[str, object]]:
+    """Every catalogue group the slicer split, with the slices holding it and its size.
+
+    Shared by the text brief and `gate_data` for `_divergence`'s reason.
+    """
+    # Every group with a member outside the slice being read, and every slice
+    # that holds part of it. Accumulated across the whole plan rather than
+    # reported per slice: "held by 4 slices" is the fact a human acts on, and
+    # a per-slice rendering would state it four times, once from each side.
+    holders: dict[str, set[str]] = {}
+    totals: dict[str, object] = {}
+    for entry in entries:
+        slice_id = entry.get("id")
+        for provenance in _dicts(entry.get("provenance")):
+            others = _strings(provenance.get("other_slices"))
+            if not others:
+                continue
+            group = provenance.get("group")
+            # str() on the key for the reason gate 0's reason_code key is
+            # coerced: this is grouped on and then sorted, and a non-string one
+            # both risks being unhashable and makes the sort compare str to int.
+            group = str(group) if group else "?"
+            held = holders.setdefault(group, set())
+            if isinstance(slice_id, str):
+                held.add(slice_id)
+            held.update(others)
+            totals.setdefault(group, provenance.get("in_group_total"))
+
+    return holders, totals
+
+
 def _slice_lines(run: RunPaths) -> list[str]:
     """The slice table and the split-group summary, from `00-slices.json`.
 
@@ -1026,28 +1087,7 @@ def _slice_lines(run: RunPaths) -> list[str]:
             "`rubrica validate --stage triage-slices` names the defect)"
         )
 
-    # Every group with a member outside the slice being read, and every slice
-    # that holds part of it. Accumulated across the whole plan rather than
-    # reported per slice: "held by 4 slices" is the fact a human acts on, and
-    # a per-slice rendering would state it four times, once from each side.
-    holders: dict[str, set[str]] = {}
-    totals: dict[str, object] = {}
-    for entry in entries:
-        slice_id = entry.get("id")
-        for provenance in _dicts(entry.get("provenance")):
-            others = _strings(provenance.get("other_slices"))
-            if not others:
-                continue
-            group = provenance.get("group")
-            # str() on the key for the reason gate 0's reason_code key is
-            # coerced: this is grouped on and then sorted, and a non-string one
-            # both risks being unhashable and makes the sort compare str to int.
-            group = str(group) if group else "?"
-            held = holders.setdefault(group, set())
-            if isinstance(slice_id, str):
-                held.add(slice_id)
-            held.update(others)
-            totals.setdefault(group, provenance.get("in_group_total"))
+    holders, totals = _split_groups(entries)
 
     split = [f"{SPLIT_HEADER} ({len(holders)})"]
     if holders:
@@ -1130,6 +1170,23 @@ def _read_cost_lines(admits: list[dict], candidates: dict[str, dict]) -> list[st
         "  and they are a proxy rather than a prediction of what each pass will read.",
     ]
     return lines
+
+
+def _size_note(disposition: dict, candidates: dict[str, dict]) -> str:
+    """`, N bytes` for a disposition whose candidate the catalogue knows, else nothing.
+
+    `candidates.get(...)` raises TypeError on an unhashable candidate_id, so the
+    lookup is gated on the key being the string the schema requires; a
+    non-string one simply renders without its byte count.
+    """
+    cid = disposition.get("candidate_id")
+    candidate = candidates.get(cid) if isinstance(cid, str) else None
+    return f", {candidate.get('bytes', '?')} bytes" if candidate is not None else ""
+
+
+def _human_note(disposition: dict) -> str:
+    """Marks a ruling a human made, so it never reads as triage's own."""
+    return " (human ruling)" if disposition.get("authority") == "human" else ""
 
 
 def _gate_0(run: RunPaths) -> str:
@@ -1229,7 +1286,10 @@ def _gate_0(run: RunPaths) -> str:
         for d in admits:
             priority = d.get("priority")
             marker = f"[{priority}]" if priority is not None else "-"
-            lines.append(f"  {marker} {d.get('candidate_id', '?')}: {d.get('reason', '')}")
+            lines.append(
+                f"  {marker} {d.get('candidate_id', '?')}{_size_note(d, candidates)}"
+                f"{_human_note(d)}: {d.get('reason', '')}"
+            )
     else:
         lines.append("  (none)")
     lines.append("")
@@ -1256,17 +1316,9 @@ def _gate_0(run: RunPaths) -> str:
             entries = declines_by_code[code]
             lines.append(f"  {code} ({len(entries)}):")
             for d in entries:
-                bytes_note = ""
-                # `candidates.get(...)` raises TypeError on an unhashable
-                # candidate_id, so the lookup is gated on the key being the
-                # string the schema requires; a non-string one simply renders
-                # without its byte count.
-                cid = d.get("candidate_id")
-                candidate = candidates.get(cid) if isinstance(cid, str) else None
-                if candidate is not None:
-                    bytes_note = f", {candidate.get('bytes', '?')} bytes"
                 lines.append(
-                    f"    - {d.get('candidate_id', '?')}{bytes_note}: {d.get('reason', '')}"
+                    f"    - {d.get('candidate_id', '?')}{_size_note(d, candidates)}"
+                    f"{_human_note(d)}: {d.get('reason', '')}"
                 )
     else:
         lines.append("  (none)")
@@ -1289,7 +1341,19 @@ def _gate_0(run: RunPaths) -> str:
         for deficiency in deficiencies:
             deficiency_id = deficiency.get("deficiency_id", "?")
             closed_by = deficiency.get("closed_by")
-            status = f"closed by {closed_by}" if closed_by else "OPEN"
+            # "closed by" only once the projection was actually supplied: a
+            # projection is a work order, and the old label read as done on a
+            # run where all four gaps were still open.
+            supplied = any(
+                p.get("projection_id") == closed_by and p.get("satisfied_by")
+                for p in _dicts(triage.get("projections"))
+            )
+            if closed_by and supplied:
+                status = f"closed by {closed_by}"
+            elif closed_by:
+                status = f"OPEN: fix suggested by {closed_by}, not supplied"
+            else:
+                status = "OPEN"
             lines.append(f"  {deficiency_id} [{status}]: {deficiency.get('statement', '')}")
             for projection in projections_by_closes.get(deficiency_id, []):
                 projection_id = projection.get("projection_id", "?")
@@ -1602,3 +1666,248 @@ def _gate_3(run: RunPaths) -> str:
         lines.append("  (none)")
 
     return "\n".join(lines) + "\n"
+
+
+# -- gate 0 as data ----------------------------------------------------------
+#
+# What `gate_brief` renders as text, shaped for a page a human acts on: a short
+# summary, the few items that need a human (`needs_you`), every candidate with
+# its triage and effective disposition (`files`), and the overrides in force.
+# The text brief stays the reading surface of record; this is the same facts,
+# computed by the same helpers, so the two cannot disagree.
+#
+# `needs_you` is chosen by fixed rules over fields already on disk, never by a
+# model. A model choosing what a human reviews would be a model steering its
+# own review -- the reason triage does not hold gate 0 at all.
+
+GATE_DATA_GATES = (0,)
+
+# How many of the largest admits `needs_you` lists. Not a threshold on size --
+# this report still refuses to say what is "too big" (see `_read_cost_lines`) --
+# just how many the reader is shown before the full file list.
+LARGEST_ADMITS_SHOWN = 5
+
+
+def gate_data(run: RunPaths, gate: int) -> dict:
+    """The facts at one gate as a JSON-ready dict. Gate 0 only, for now."""
+    if gate not in GATE_DATA_GATES:
+        raise UsageError(
+            f"gate {gate} has no structured brief yet; it is built for gates {GATE_DATA_GATES}"
+        )
+    return _gate_0_data(run)
+
+
+def _folder(candidate: dict, candidates: dict[str, dict]) -> str:
+    """The folder a candidate reads as -- a container element under its container's file."""
+    container = _mapping(candidate.get("container"))
+    if container:
+        parent = candidates.get(container.get("candidate_id"), {})
+        path = parent.get("path")
+        return f"{path} (elements)" if isinstance(path, str) else "(container elements)"
+    if candidate.get("origin") == "projection":
+        return "(adopted projections)"
+    path = candidate.get("path")
+    if not isinstance(path, str) or "/" not in path:
+        return "."
+    return path.rsplit("/", 1)[0]
+
+
+def _gate_0_data(run: RunPaths) -> dict:
+    # The adoptions file is read tolerantly, like waivers here: a report never
+    # gates, and `overrule` / `triage-seal` are what refuse a malformed one.
+    adoptions = _mapping(_quietly(run.adoptions))
+    overrides = _dicts(adoptions.get("overrides"))
+    data: dict = {
+        "gate": 0,
+        "run": str(run.root),
+        # Past gate 0 the record is frozen: `overrule` refuses once intake has
+        # minted the manifest, so a page must not offer controls that will fail.
+        "locked": run.manifest.exists(),
+        "sealed": run.triage.is_file(),
+        "has_catalogue": run.catalogue.is_file(),
+        "decline_codes": list(HUMAN_DECLINE_CODES),
+        "overrides": overrides,
+        "summary": {},
+        "needs_you": [],
+        "files": [],
+    }
+    if not data["sealed"]:
+        return data
+
+    triage = _mapping(_quietly(run.triage))
+    catalogue = _mapping(_quietly(run.catalogue))
+    candidates = {
+        c["candidate_id"]: c
+        for c in _dicts(catalogue.get("candidates"))
+        if isinstance(c.get("candidate_id"), str)
+    }
+    divergence = _divergence(run)
+
+    # Triage's own ruling per candidate, from the parts -- never the sealed
+    # record, which already carries any override.
+    triage_ruling: dict[str, dict] = {}
+    for part in divergence["parts"]:
+        for entry in _dicts(part.get("dispositions")):
+            if isinstance(entry.get("candidate_id"), str):
+                triage_ruling[entry["candidate_id"]] = entry
+
+    sealed: dict[str, dict] = {}
+    for entry in _dicts(triage.get("dispositions")):
+        if isinstance(entry.get("candidate_id"), str):
+            sealed[entry["candidate_id"]] = entry
+
+    def _bytes(cid: str) -> int | None:
+        value = candidates.get(cid, {}).get("bytes")
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    files = []
+    for cid in sorted(set(sealed) | set(candidates)):
+        candidate = candidates.get(cid, {})
+        effective = sealed.get(cid, {})
+        own = triage_ruling.get(cid, {})
+        files.append(
+            {
+                "candidate_id": cid,
+                "folder": _folder(candidate, candidates),
+                "path": candidate.get("path"),
+                "bytes": _bytes(cid),
+                "admissible": candidate.get("admissible") is not False,
+                "decision": effective.get("disposition"),
+                "authority": effective.get("authority"),
+                "reason": effective.get("reason"),
+                "reason_code": effective.get("reason_code"),
+                "priority": effective.get("priority"),
+                "triage_decision": own.get("disposition"),
+                "triage_reason": own.get("reason"),
+                "triage_reason_code": own.get("reason_code"),
+            }
+        )
+    files.sort(key=lambda f: (f["folder"], f["candidate_id"]))
+    data["files"] = files
+
+    admits = [f for f in files if f["decision"] == "admit"]
+    declines = [f for f in files if f["decision"] == "decline"]
+    review = _mapping(triage.get("objective_review"))
+    deficiencies = _dicts(triage.get("deficiencies"))
+    projections = _dicts(triage.get("projections"))
+    by_id = {p.get("projection_id"): p for p in projections}
+
+    def _gap_open(deficiency: dict) -> bool:
+        closed_by = deficiency.get("closed_by")
+        if not closed_by:
+            return True
+        # "closed by" a projection nobody has supplied is still open: the
+        # projection is a work order, and only `satisfied_by` says it was done.
+        return not _mapping(by_id.get(closed_by)).get("satisfied_by")
+
+    open_gaps = [d for d in deficiencies if _gap_open(d)]
+    recommended = _mapping(review.get("recommended_objective"))
+    data["summary"] = {
+        "objective": review.get("declared_objective"),
+        "supported": bool(review.get("supported")),
+        "notes": review.get("notes"),
+        "recommended_objective": recommended or None,
+        "admitted": len(admits),
+        "admitted_bytes": sum(f["bytes"] or 0 for f in admits),
+        "declined": len(declines),
+        "gaps_open": len(open_gaps),
+        "gaps_total": len(deficiencies),
+        "overridden": sum(1 for f in files if f["authority"] == "human"),
+        "predicted_surfaces": divergence["shown"],
+        "observed_surfaces": divergence["observed"],
+    }
+
+    needs: list[dict] = []
+    if not data["summary"]["supported"]:
+        needs.append(
+            {
+                "id": "objective",
+                "kind": "objective",
+                "title": "Triage says the files found do not support the objective "
+                f"{review.get('declared_objective', '?')!r}",
+                "detail": review.get("notes") or "",
+                "recommended": recommended or None,
+            }
+        )
+    for name in divergence["unconfirmed"]:
+        needs.append(
+            {
+                "id": f"surface:{name}",
+                "kind": "missing_surface",
+                "title": f"Expected surface {name!r} has no admitted file",
+                "detail": "The objective pass predicted it from the corpus map, and no slice "
+                "admitted anything that shows it. Admit a file below that covers it, or accept "
+                "the loss.",
+            }
+        )
+    # Declines first, digest_insufficient leading: those are triage saying it
+    # could not judge, which is exactly where a human's look is worth most.
+    for f in sorted(
+        declines, key=lambda f: (f["reason_code"] != "digest_insufficient", f["candidate_id"])
+    ):
+        needs.append(
+            {
+                "id": f"file:{f['candidate_id']}",
+                "kind": "decline",
+                "candidate_id": f["candidate_id"],
+                "title": f"Declined: {f['candidate_id']} ({f['reason_code'] or '?'})",
+                "detail": f["reason"] or "",
+            }
+        )
+    for deficiency in open_gaps:
+        projection = _mapping(by_id.get(deficiency.get("closed_by")))
+        if not projection:
+            projection = next(
+                (
+                    p
+                    for p in projections
+                    if deficiency.get("deficiency_id") in _strings(p.get("closes"))
+                ),
+                {},
+            )
+        needs.append(
+            {
+                "id": f"gap:{deficiency.get('deficiency_id', '?')}",
+                "kind": "gap",
+                "deficiency_id": deficiency.get("deficiency_id"),
+                "title": f"Gap {deficiency.get('deficiency_id', '?')}: fix suggested, not supplied"
+                if projection
+                else f"Gap {deficiency.get('deficiency_id', '?')}: no fix suggested",
+                "detail": deficiency.get("statement") or "",
+                "projection_id": projection.get("projection_id"),
+                "wanted": _mapping(projection.get("wanted")).get("statement"),
+            }
+        )
+    largest = sorted(
+        (f for f in admits if f["bytes"] is not None),
+        key=lambda f: (-f["bytes"], f["candidate_id"]),
+    )[:LARGEST_ADMITS_SHOWN]
+    # Only when the cards would be a selection: with this few admits every one
+    # is already in plain view in `files`, and a card per file is noise.
+    if len(admits) <= LARGEST_ADMITS_SHOWN:
+        largest = []
+    for f in largest:
+        needs.append(
+            {
+                "id": f"file:{f['candidate_id']}",
+                "kind": "large_admit",
+                "candidate_id": f["candidate_id"],
+                "title": f"Large admit: {f['candidate_id']}",
+                "detail": f["reason"] or "",
+            }
+        )
+    holders, totals = _split_groups(_dicts(_mapping(_quietly(run.slices)).get("slices")))
+    for group in sorted(holders):
+        needs.append(
+            {
+                "id": f"split:{group}",
+                "kind": "split_group",
+                "title": f"Folder {group!r} was split across {len(holders[group])} slices",
+                "detail": "No triage member saw the whole folder, so a near-duplicate across "
+                "the split could be admitted twice or declined against a sibling it never saw.",
+                "slices": sorted(holders[group]),
+                "size": totals.get(group),
+            }
+        )
+    data["needs_you"] = needs
+    return data

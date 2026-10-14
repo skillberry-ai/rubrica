@@ -39,6 +39,17 @@ represent what it was handed, and the list is exactly five items long:
    against, now read from a different artifact because the sealed record
    does not exist yet.
 
+A sixth class sits beside those five rather than among them, because it is
+not a defect of anything triage wrote: a human **override** in
+00-adoptions.json's optional `overrides` list that cannot be applied -- it
+names a candidate no part rules on, or one an adoption already admitted, or
+it is the second override of one candidate, or its decline carries a code
+that would point at an audit no pass ever ran against it. An override that
+can be applied replaces the triage part's disposition for its candidate in
+the assembled record, carrying `authority: "human"`; the part itself is
+never rewritten, so a reader can always set what triage said beside what the
+human said.
+
 It writes nothing at all when it reports any of them. A half-assembled
 record would be worse than none: it would clear layer 1 for the fields it did
 manage to fill, and read as a complete triage decision to a human at gate 0.
@@ -230,6 +241,26 @@ _NESTED_READS: dict[str, dict] = {
     "dispositions_part": {"dispositions": {_EACH: {"candidate_id": None}}},
 }
 
+# `overrides` is optional in adoptions-0.1.json -- a file written before it
+# existed, or by `adopt-projection` alone, carries none -- so it cannot sit in
+# _NESTED_READS["adoptions"], where every key listed is a key that must be
+# present. It is shape-checked through the same walk, but only when present.
+_OVERRIDE_SHAPE: dict = {_EACH: {"candidate_id": None, "disposition": {"candidate_id": None}}}
+
+# The decline codes a human override may carry. The other two,
+# `digest_insufficient` and `needs_projection`, are claims about 00-audit.json
+# (a deficiency noted, a projection sourcing the candidate) that a human ruling
+# made after the audit cannot honestly make: no audit pass ever saw the
+# override, so the reference the code promises would point at nothing.
+HUMAN_DECLINE_CODES: tuple[str, ...] = (
+    "off_objective",
+    "out_of_scope",
+    "near_duplicate",
+    "superseded",
+    "implementation_detail",
+    "no_evidence_value",
+)
+
 
 def _nested_shape(
     path: Path, document: object, spec: dict, pointer: str, out: list[Finding]
@@ -340,6 +371,13 @@ def seal(run: RunPaths) -> tuple[Path | None, list[Finding]]:
         )
     else:
         adoptions_document = {"adoptions": []}
+    if adoptions_document is not None and "overrides" in adoptions_document:
+        before = len(findings)
+        _nested_shape(
+            run.adoptions, adoptions_document["overrides"], _OVERRIDE_SHAPE, "/overrides", findings
+        )
+        if len(findings) > before:
+            adoptions_document = None
     if adoptions_document is not None:
         documents["adoptions"] = adoptions_document
 
@@ -464,6 +502,54 @@ def seal(run: RunPaths) -> tuple[Path | None, list[Finding]]:
                     f"{run.audit.name} sourcing it",
                 )
             )
+
+    # -- human overrides: a gate-0 ruling that replaces triage's disposition
+    # for one candidate, read from the same human-authored file adoptions live
+    # in. Applied *after* items 2 and 5, which therefore still judge the staged
+    # parts exactly as triage wrote them -- the parts are never edited, so what
+    # triage decided stays on disk beside what the human decided -- and *before*
+    # item 4, because an empty admitted set is a scoping failure whoever caused
+    # it. An override is not a second disposition in item 2's sense: it is the
+    # same candidate's one disposition, with a different author.
+    adopted = {a["candidate_id"] for a in documents["adoptions"]["adoptions"]}
+    overridden: set[str] = set()
+    for index, override in enumerate(documents["adoptions"].get("overrides", [])):
+        pointer = f"/overrides/{index}"
+        cid = override["candidate_id"]
+        disposition = override["disposition"]
+        problem = None
+        if disposition["candidate_id"] != cid:
+            problem = (
+                f"override names candidate {cid!r} but its disposition names "
+                f"{disposition['candidate_id']!r}"
+            )
+        elif cid in adopted:
+            problem = (
+                f"candidate {cid!r} was admitted by an adoption, which is already a "
+                "human ruling; change the adoption rather than overriding it"
+            )
+        elif cid not in rulings:
+            problem = f"override names candidate {cid!r}, which no staged part rules on"
+        elif cid in overridden:
+            problem = f"candidate {cid!r} has more than one override"
+        elif disposition.get("authority") != "human":
+            problem = f"the override of {cid!r} does not carry authority 'human'"
+        elif disposition.get("disposition") == "admit" and "reason_code" in disposition:
+            problem = f"the override admitting {cid!r} carries a decline reason_code"
+        elif (
+            disposition.get("disposition") == "decline"
+            and disposition.get("reason_code") not in HUMAN_DECLINE_CODES
+        ):
+            problem = (
+                f"the override declining {cid!r} needs a reason_code from "
+                f"{', '.join(HUMAN_DECLINE_CODES)}"
+            )
+        if problem is not None:
+            findings.append(Finding(run.adoptions, "seal", pointer, problem))
+            continue
+        overridden.add(cid)
+        if len(rulings[cid]) == 1:
+            rulings[cid] = [(run.adoptions, disposition)]
 
     # -- item 4: spec 10.2's inversion. A single part may legitimately admit
     # nothing at all; only the union across every part and every adoption

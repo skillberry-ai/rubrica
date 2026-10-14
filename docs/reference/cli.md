@@ -703,6 +703,14 @@ sweep, the capabilities the coverage denominator excludes, claim utilisation per
 input, read coverage per reconcile pass, the implied suite size and one block per
 service at gate 1; the coverage matrix at gate 2; the verdict tally at gate 3.
 
+`--format json` (gate 0 only; any other gate is an exit 2) prints the same facts
+as data for a page a human acts on: a `summary`, the items that need a human
+(`needs_you`, chosen by fixed rules — every decline, each gap whose suggested fix
+was not supplied, the largest admits, an unsupported objective, predicted surfaces
+nothing confirmed, folders split across slices), every candidate with its
+effective and triage disposition (`files`), and the human `overrides` in force.
+The browser console's gate 0 page is drawn from it. Text stays the default.
+
 Gate 0 renders more than the others because it is the one gate held before any
 downstream stage has read the corpus: the objective verdict, then the waivers in
 force on a run that carries any (see below — this is the one gate that renders
@@ -710,8 +718,11 @@ them *under* the verdict), then the
 predicted-vs-observed surface divergence (`00-objective.json`'s
 `predicted_surface_count` against the surfaces the disposition parts confirmed
 or added), then admits by priority, **the read cost of those admits**, declines
-grouped by reason code, and every
-open deficiency beside the projection that would close it — and last, the
+grouped by reason code (every admit and decline with its source size, and a
+human ruling marked as one), and every
+open deficiency beside the projection that would close it — a deficiency whose
+projection was never supplied reads `OPEN: fix suggested by <id>, not supplied`,
+not "closed" — and last, the
 mechanics of how the fan-out read the corpus: the slice table (candidates and
 bytes per slice) and every group `triage-slices` split across more than one
 slice. That final summary is where the near-duplicate residue lives, and gate 0
@@ -1141,6 +1152,51 @@ gated. Neither is left to a human to remember, either: `rb-emit` is dispatched
 as stage 6 and invokes `rubrica emit`, and `rb-orchestrate`'s own `invokes`
 list names both commands — it runs `rubrica smoke` itself, since there is no
 `rb-smoke` skill.
+
+### `rubrica overrule`
+
+Records a human's **gate-0 ruling on one or more candidates**, replacing
+triage's own disposition: admit a file triage declined, or decline one it
+admitted. This is how the design's promise that gate 0 "is overrulable one
+candidate at a time" is kept; before it existed, a hand-edit of
+`00-triage.json` was erased by the next `triage-seal`.
+
+```
+rubrica overrule --run RUN --candidate ID [--candidate ID ...] --admit --reason TEXT
+rubrica overrule --run RUN --candidate ID [...] --decline --reason-code CODE --reason TEXT
+rubrica overrule --run RUN --candidate ID [...] --clear --reason TEXT
+```
+
+Prints one line per candidate (`trace-json: decline -> admit`), and on stderr a
+reminder to run `rubrica triage-seal`, which is what applies the ruling. It does
+not seal itself, for `adopt-projection`'s reason: one code path builds
+`00-triage.json`.
+
+- The ruling is written to the `overrides` list of
+  [`00-adoptions.json`](artifacts.md#triage), the human-authored file the seal
+  already folds in. Triage's own parts under `00-dispositions/` are **never
+  touched**, so what triage decided and what the human decided both stay on disk.
+  The sealed record carries the human's disposition with `authority: "human"`.
+- Each ruling is also appended to `decisions.md` as
+  `overrule at gate 0: <id>: <was> -> <now> -- <reason>`, worded so the console
+  never reads it as the gate's approval.
+- `--decline` needs `--reason-code`, one of the codes that point at nothing in
+  `00-audit.json` (`seal.HUMAN_DECLINE_CODES`). `needs_projection` and
+  `digest_insufficient` are refused: both are claims about an audit that never saw
+  the override.
+- `--clear` removes a human override and restores triage's decision.
+- Several `--candidate` values with one action and one reason are one
+  all-or-nothing write, which is how a whole folder is declined.
+
+Exit `2`, writing nothing, for every request that cannot be a ruling: the
+manifest already exists (gate 0 has been approved, so `intake` has materialised
+the admits and changing them would make the run disagree with itself — rule
+differently in a new run); a candidate no triage part rules on, or one admitted by
+an adoption (already a human ruling); a decision triage already made; a second
+override of one candidate; an admit of an `admissible: false` candidate; a blank
+or multi-line reason; and a malformed `00-adoptions.json`, which a person wrote,
+so there is no stage to hand a repair prompt to. Only a human runs this, for
+`waive`'s reason.
 
 ### `rubrica emit`
 

@@ -288,10 +288,13 @@ class Handler(BaseHTTPRequestHandler):
             return {"steps": [s.as_dict() for s in c.preview_to_gate(seg[1])]}
         if len(seg) == 4 and seg[0] == "runs" and seg[2] == "gate":
             gate = self._gate_number(seg[3])
-            return {
-                "text": brief.gate_brief(c.run_paths(seg[1]), gate),
-                "history": c.gate_history(seg[1], gate),
-            }
+            run = c.run_paths(seg[1])
+            reply = {"text": brief.gate_brief(run, gate), "history": c.gate_history(seg[1], gate)}
+            # The structured brief, where one is built: what the page draws its
+            # cards and checkboxes from. Gates without one keep the text sections.
+            if gate in brief.GATE_DATA_GATES:
+                reply["data"] = brief.gate_data(run, gate)
+            return reply
         if len(seg) == 2 and seg[0] == "jobs":
             return c.job(seg[1]).as_dict()
         if len(seg) == 3 and seg[0] == "jobs" and seg[2] == "log":
@@ -633,6 +636,13 @@ class Handler(BaseHTTPRequestHandler):
             job = c.run_to_gate(name, _opts(c, body))
         elif len(action) == 3 and action[0] == "gates" and action[2] == "approve":
             job = c.approve_gate(name, self._gate_number(action[1]), body.get("note", ""))
+        elif action == ["gates", "0", "changes"]:
+            job = c.gate0_changes(
+                name,
+                body.get("changes") or [],
+                body.get("note", ""),
+                approve=bool(body.get("approve")),
+            )
         elif len(action) == 3 and action[0] == "gates" and action[2] == "feedback":
             job = c.gate_feedback(name, self._gate_number(action[1]), body.get("note", ""))
         elif action == ["stop-rounds"]:

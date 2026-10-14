@@ -68,6 +68,18 @@ from the same parts. `adopt-projection` no longer writes here at all — it
 appends to `00-adoptions.json` instead, because editing this record directly
 would be erased the next time `triage-seal` runs.
 
+`00-adoptions.json` (`adoptions-0.1.json`) is the human-authored part, and it
+holds two lists. `adoptions` are manufactured projections a human admitted.
+`overrides`, optional, are a human's gate-0 rulings replacing triage's
+disposition for a candidate a part already rules on, written by
+[`rubrica overrule`](cli.md#rubrica-overrule): each carries the human's
+`disposition` (`authority: "human"`), what triage said (`replaces`, for a reader)
+and `recorded_at`. The seal applies an override in place of the part's ruling
+and refuses, at exit 1 against this file, one it cannot apply — a candidate no
+part rules on, one an adoption admitted, a second override of one candidate, or
+a decline code that would point at an audit no pass ran against it. The part
+itself is never rewritten.
+
 Fields worth knowing: `dispositions[].reason_code` (`off_objective`,
 `near_duplicate`, `needs_projection`, and five more — a fixed vocabulary, not
 free text); `projections[].closes` (the `deficiency_id`s a projection is

@@ -137,10 +137,12 @@ one disposition per catalogued candidate, including containers marked
 with nothing but declines is precisely what a human needs to see at gate 0.
 
 `authority` is `triage` for everything the skill wrote, and `human` for a gate-0
-override — written by a person, or by `rubrica adopt-projection` when a
-manufactured projection is admitted. Both edit that same record rather than
-starting a new run, so `authority` is the only field that tells which admissions
-the stage authored from which a human made at the gate.
+ruling — `rubrica overrule` replacing triage's disposition for a candidate, or
+`rubrica adopt-projection` admitting a manufactured projection. Both write
+`00-adoptions.json`, which `triage-seal` folds into this record, rather than
+editing it or starting a new run; triage's own parts are left as they were, so
+`authority` tells which dispositions the stage authored from which a human made
+at the gate, and the part beside it says what triage had decided.
 
 ## distractor
 

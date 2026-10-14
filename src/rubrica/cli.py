@@ -63,6 +63,7 @@ from pathlib import Path
 from rubrica import (
     brief,
     interfaces,
+    overrides,
     reconcile,
     refs,
     rounds,
@@ -125,6 +126,7 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("record-stage", "record a stage's model, effort, and skill hash in the manifest"),
     ("decide", "append one orchestrator decision to the run's decisions.md"),
     ("waive", "record a human's waiver of one finding whose remedy lives elsewhere"),
+    ("overrule", "record a human's gate-0 ruling replacing triage's on one or more candidates"),
     ("claim-utilisation", "per-artifact share of claims the world model cites"),
     ("gate-brief", "compose the existing reports into the human surface at one gate"),
     ("run-summary", "render one run as a single self-contained HTML page"),
@@ -325,6 +327,21 @@ def _build_parser() -> argparse.ArgumentParser:
     p_waive.add_argument("--remedy", required=True, choices=waivers.remedy_choices())
     p_waive.add_argument("--reason", required=True)
 
+    p_overrule = parsers["overrule"]
+    p_overrule.add_argument("--run", required=True)
+    p_overrule.add_argument("--candidate", required=True, action="append", metavar="ID")
+    p_overrule_action = p_overrule.add_mutually_exclusive_group(required=True)
+    p_overrule_action.add_argument("--admit", dest="action", action="store_const", const="admit")
+    p_overrule_action.add_argument(
+        "--decline", dest="action", action="store_const", const="decline"
+    )
+    p_overrule_action.add_argument("--clear", action="store_true")
+    # Choices read from seal.HUMAN_DECLINE_CODES, the set the seal itself
+    # enforces, rather than restated -- see that constant for why two codes are
+    # absent.
+    p_overrule.add_argument("--reason-code", choices=list(seal.HUMAN_DECLINE_CODES))
+    p_overrule.add_argument("--reason", required=True)
+
     p_utilisation = parsers["claim-utilisation"]
     p_utilisation.add_argument("--run", required=True)
 
@@ -334,6 +351,9 @@ def _build_parser() -> argparse.ArgumentParser:
     # and a second spelling of the gate set is a thing to forget. Gate 0 was added
     # after the other three, which is the update this would have missed.
     p_brief.add_argument("--gate", required=True, type=int, choices=brief.GATES)
+    # json is the same facts shaped for a page a human acts on (brief.gate_data);
+    # text stays the default and the reading surface of record.
+    p_brief.add_argument("--format", choices=("text", "json"), default="text")
 
     p_summary = parsers["run-summary"]
     p_summary.add_argument("--run", required=True)
@@ -774,6 +794,12 @@ def main(argv: list[str] | None = None) -> int:
             # --gate's argparse choices are brief.GATES, so anything outside the
             # set is already rejected before this line is reached, on the same
             # SystemExit(2) path every other bad argument takes.
+            if args.format == "json":
+                # A gate with no structured brief yet is a UsageError, so exit 2
+                # through the shared handler, never an empty-stdout 1.
+                data = brief.gate_data(_run_dir(args.run), args.gate)
+                print(json.dumps(data, indent=2, sort_keys=True))
+                return CLEAN
             print(brief.gate_brief(_run_dir(args.run), args.gate))
             return CLEAN
 
@@ -955,6 +981,27 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"error: {exc}", file=sys.stderr)
                 return USAGE
             print(waiver_id)
+            return CLEAN
+        if args.command == "overrule":
+            run = _run_dir(args.run)
+            # (UsageError, OSError) for attribution, as decide and waive above:
+            # every refusal here is about what a human asked for or a file a
+            # human wrote, so none of them is a stage defect and none is a `1`.
+            try:
+                lines = overrides.overrule(
+                    run,
+                    args.candidate,
+                    action=args.action,
+                    reason=args.reason,
+                    reason_code=args.reason_code,
+                    clear=args.clear,
+                )
+            except (UsageError, OSError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return USAGE
+            for line in lines:
+                print(line)
+            print(f"now run `rubrica triage-seal --run {run.root}` to apply it", file=sys.stderr)
             return CLEAN
     except (OSError, UsageError, ArtifactError, UnknownStage) as exc:
         # A run directory that cannot be read, an artifact that is absent or is

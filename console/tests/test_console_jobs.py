@@ -406,6 +406,88 @@ def test_gate_0_approval_admits_the_inputs_and_records_the_triage_passes(tmp_pat
     assert "human gate 0 (console)" in run.decisions.read_text()
 
 
+def test_gate_0_changes_overrule_reseal_and_leave_the_gate_open(tmp_path, fake):
+    run = build_toy_run(tmp_path / "runs", upto="triage-seal")
+    console = _console(tmp_path, run.root.parent, fake)
+    name = run.root.name
+    parts = {p.name: p.read_bytes() for p in run.dispositions_dir.iterdir()}
+    change = {
+        "candidate": "notes-md",
+        "action": "decline",
+        "reason_code": "no_evidence_value",
+        "reason": "prose restating the api",
+    }
+    job = console.gate0_changes(name, [change], "looked at the declines")
+    assert job.status == SUCCEEDED, (job.message, [(e.label, e.exit) for e in job.entries])
+    assert [e.label for e in job.entries] == [
+        "overrule",
+        "triage-seal",
+        "validate",
+        "check-refs",
+        "decide",
+    ]
+    sealed = {d["candidate_id"]: d for d in json.loads(run.triage.read_text())["dispositions"]}
+    assert (sealed["notes-md"]["disposition"], sealed["notes-md"]["authority"]) == (
+        "decline",
+        "human",
+    )
+    assert {p.name: p.read_bytes() for p in run.dispositions_dir.iterdir()} == parts
+    assert not run.manifest.exists()
+    gate = pipeline.find(console.steps(name), "gate-0")
+    assert gate.status == pipeline.READY
+    decisions = run.decisions.read_text()
+    assert "overrule at gate 0: notes-md: admit -> decline" in decisions
+    assert "feedback on gate 0, not approved: looked at the declines" in decisions
+
+
+def test_gate_0_approve_with_changes_admits_what_the_human_ruled(tmp_path, fake):
+    run = build_toy_run(tmp_path / "runs", upto="triage-seal")
+    console = _console(tmp_path, run.root.parent, fake)
+    change = {
+        "candidate": "notes-md",
+        "action": "decline",
+        "reason_code": "superseded",
+        "reason": "r",
+    }
+    job = console.gate0_changes(run.root.name, [change], "approved with one decline", approve=True)
+    assert job.status == SUCCEEDED, (job.message, [(e.label, e.exit) for e in job.entries])
+    inputs = {i["artifact_id"] for i in json.loads(run.manifest.read_text())["inputs"]}
+    assert "notes-md" not in inputs and inputs
+    assert "human gate 0 (console): approved with one decline" in run.decisions.read_text()
+
+
+def test_a_refused_gate_0_change_says_why_and_changes_nothing(tmp_path, fake):
+    run = build_toy_run(tmp_path / "runs", upto="triage-seal")
+    console = _console(tmp_path, run.root.parent, fake)
+    before = run.triage.read_bytes()
+    job = console.gate0_changes(
+        run.root.name, [{"candidate": "notes-md", "action": "admit", "reason": "r"}]
+    )
+    assert job.status != SUCCEEDED
+    assert "triage already decided admit" in job.message
+    assert run.triage.read_bytes() == before
+    assert not run.adoptions.exists()
+
+
+@pytest.mark.parametrize(
+    ("changes", "note", "message"),
+    [
+        ([], "", "nothing to save"),
+        ([{"candidate": "notes-md", "action": "decline", "reason": ""}], "", "reason is required"),
+        (
+            [{"candidate": "notes-md", "action": "drop", "reason": "r"}],
+            "",
+            "admit, decline or clear",
+        ),
+    ],
+)
+def test_gate_0_changes_refuse_an_incomplete_request(tmp_path, fake, changes, note, message):
+    run = build_toy_run(tmp_path / "runs", upto="triage-seal")
+    console = _console(tmp_path, run.root.parent, fake)
+    with pytest.raises(ConsoleError, match=message):
+        console.gate0_changes(run.root.name, changes, note)
+
+
 def test_smoke_never_runs_without_a_roster(tmp_path, fake):
     run = build_toy_run(tmp_path / "runs")
     console = _console(tmp_path, run.root.parent, fake)

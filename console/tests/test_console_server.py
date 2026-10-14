@@ -254,6 +254,40 @@ def test_each_gate_page_carries_gate_brief_text(console, run, gate):
     assert json.loads(api[2])["text"] == text
 
 
+def test_only_gate_0_carries_structured_data(console, run):
+    with _serving(console) as port:
+        replies = {
+            gate: json.loads(_req(port, "GET", f"/api/runs/{run.root.name}/gate/{gate}")[2])
+            for gate in brief.GATES
+        }
+    assert replies[0]["data"] == brief.gate_data(run, 0)
+    assert all("data" not in replies[gate] for gate in brief.GATES if gate != 0)
+
+
+def test_gate_0_changes_over_http_overrule_and_reseal(tmp_path):
+    staged = build_toy_run(tmp_path / "staged", upto="triage-seal")
+    console = Console(staged.root.parent, tmp_path / "lab", dispatch_script=tmp_path / "none.sh")
+    change = {
+        "candidate": "notes-md",
+        "action": "decline",
+        "reason_code": "superseded",
+        "reason": "the api file says it all",
+    }
+    with _serving(console) as port:
+        status, _, body = _req(
+            port, "POST", f"/api/runs/{staged.root.name}/gates/0/changes", {"changes": [change]}
+        )
+        data = json.loads(_req(port, "GET", f"/api/runs/{staged.root.name}/gate/0")[2])["data"]
+    assert status == 200, body
+    assert json.loads(body)["status"] == "succeeded"
+    notes = next(f for f in data["files"] if f["candidate_id"] == "notes-md")
+    assert (notes["decision"], notes["triage_decision"], notes["authority"]) == (
+        "decline",
+        "admit",
+        "human",
+    )
+
+
 def test_a_run_file_is_served_as_is(console, run):
     with _serving(console) as port:
         status, content_type, body = _req(

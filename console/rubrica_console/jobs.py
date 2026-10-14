@@ -57,6 +57,23 @@ QUEUED, RUNNING, SUCCEEDED, FAILED, HALTED, CANCELLED, INTERRUPTED = (
 _ACTIVE = (QUEUED, RUNNING)
 
 
+def _error_line(log: str | None) -> str:
+    """` -- <the command's own error: line>`, so a refusal says why on the page.
+
+    A human action that exits 2 is usually a request the CLI refused for a stated
+    reason (an override of a file triage already admits, say); that reason is on
+    the command's stderr, which only the log keeps.
+    """
+    try:
+        text = Path(log).read_text(encoding="utf-8") if log else ""
+    except OSError:
+        return ""
+    for line in text.splitlines():
+        if line.startswith("error: "):
+            return f" -- {line[len('error: ') :]}"
+    return ""
+
+
 class ConsoleError(Exception):
     """A request the console refuses: shown to the human, never a crash."""
 
@@ -766,7 +783,7 @@ class Console:
         raise _Stop(
             HALTED,
             f"{label} exited {code}: the run or harness needs a human, "
-            "and a re-dispatch cannot help",
+            f"and a re-dispatch cannot help{_error_line(entry.log)}",
         )
 
     def _dispatch_members(
@@ -932,14 +949,19 @@ class Console:
             raise ConsoleError("a note is required: it is what decisions.md records")
         return text
 
-    def approve_gate(self, name: str, gate: int, note: str) -> Job:
-        text = self._note(note)
-        all_steps = self.steps(name)
-        step = pipeline.find(all_steps, f"gate-{gate}")
+    def _ready_gate(self, name: str, gate: int) -> None:
+        step = pipeline.find(self.steps(name), f"gate-{gate}")
         if step is None:
             raise ConsoleError(f"this run has no gate {gate}")
         if step.status != pipeline.READY:
             raise ConsoleError(f"gate {gate} is not the next thing to do in this run")
+
+    def approve_gate(self, name: str, gate: int, note: str) -> Job:
+        text = self._note(note)
+        self._ready_gate(name, gate)
+        return self._human(name, f"Approve gate {gate}", self._approve_commands(name, gate, text))
+
+    def _approve_commands(self, name: str, gate: int, text: str) -> list[list[str]]:
         run = self.run_paths(name)
         rid = ["--run", str(run.root)]
         commands: list[list[str]] = []
@@ -967,7 +989,69 @@ class Console:
                         ]
                     )
         commands.append(["decide", *rid, "--note", f"human gate {gate} (console): {text}"])
-        return self._human(name, f"Approve gate {gate}", commands)
+        return commands
+
+    def gate0_changes(
+        self, name: str, changes: list, note: str = "", *, approve: bool = False
+    ) -> Job:
+        """A human's gate-0 rulings from the page: overrule, re-seal, re-check, then maybe approve.
+
+        Every change becomes a `rubrica overrule` call -- the console never writes
+        a run file itself -- grouped so one action with one reason is one call, and
+        the record is then re-sealed and re-checked so the page shows what the run
+        will actually admit. Gate 0 stays open after a save: its state is
+        manifest.json, which only the approval's `intake` writes.
+        """
+        self._ready_gate(name, 0)
+        if not isinstance(changes, list):
+            raise ConsoleError("changes must be a list")
+        text = " ".join((note or "").split())
+        if approve and not text:
+            raise ConsoleError("a note is required to approve: it is what decisions.md records")
+        if not changes and not approve and not text:
+            raise ConsoleError("nothing to save: no file was changed and no note was written")
+        run = self.run_paths(name)
+        rid = ["--run", str(run.root)]
+        batches: dict[tuple[str, str, str], list[str]] = {}
+        for change in changes:
+            if not isinstance(change, dict):
+                raise ConsoleError("each change must be an object")
+            candidate = change.get("candidate")
+            action = change.get("action")
+            code = change.get("reason_code") or ""
+            reason = " ".join(str(change.get("reason") or "").split())
+            if not isinstance(candidate, str) or not candidate:
+                raise ConsoleError("each change names a candidate")
+            if action not in ("admit", "decline", "clear"):
+                raise ConsoleError(f"{candidate}: the action must be admit, decline or clear")
+            if not reason:
+                raise ConsoleError(f"{candidate}: a reason is required for every change")
+            batches.setdefault((action, code, reason), []).append(candidate)
+        commands: list[list[str]] = []
+        for (action, code, reason), candidates in batches.items():
+            args = ["overrule", *rid]
+            for candidate in candidates:
+                args += ["--candidate", candidate]
+            args.append(f"--{action}")
+            if code:
+                args += ["--reason-code", code]
+            commands.append([*args, "--reason", reason])
+        if commands:
+            commands += [
+                ["triage-seal", *rid],
+                ["validate", "--stage", "triage-seal", *rid],
+                ["check-refs", *rid],
+            ]
+        if approve:
+            commands += self._approve_commands(name, 0, text)
+            title = f"Approve gate 0 with {len(changes)} change(s)"
+        else:
+            if text:
+                commands.append(
+                    ["decide", *rid, "--note", f"console: feedback on gate 0, not approved: {text}"]
+                )
+            title = f"Save {len(changes)} gate 0 change(s)"
+        return self._human(name, title, commands)
 
     def gate_feedback(self, name: str, gate: int, note: str) -> Job:
         """Record a human's comments on a gate without approving it.
