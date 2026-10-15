@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from rubrica import refs
 from rubrica.artifacts import read_json, write_json
+from rubrica.slices import write_slices
+from tests.toy import build_toy_run
 from tests.unit.test_seal import _staged_run
 
 # ---------------------------------------------------------------------------
@@ -343,3 +345,30 @@ def test_an_absent_dispositions_dir_skips_decline_checks_but_not_closes(tmp_path
     findings = refs.check_audit(run)
     assert len(findings) == 1
     assert "no such deficiency" in findings[0].message
+
+
+def test_a_deferred_candidate_is_not_reported_as_uncovered_by_the_staged_parts(tmp_path):
+    """Clause 4's population. Before the exemption, every deferred candidate was
+    reported as "has no disposition in any staged part or adoption" -- a finding
+    naming 00-dispositions/ for a decision recorded in 00-slices.json, which is the
+    wrong-artifact failure the module docstring's 01-claims/ incident is about.
+
+    The deferred candidate's own ruling is dropped from the part before the
+    assertion, and that step is what makes the test a test: a member handed the
+    phase's shard never saw the candidate, so a part that still rules it is not a
+    phase run's part at all -- and clause 4 only ever reports a candidate NO part
+    rules, so leaving the toy fixture's ruling in place would have made the
+    assertion below pass with the exemption reverted. Measured both ways."""
+    run = build_toy_run(tmp_path, upto="triage-rule")
+    write_slices(run, phase_block={"number": 1, "deferred_kinds": ["trace"]})
+    part_path = run.disposition_part("s01")
+    part = read_json(part_path)
+    part["dispositions"] = [d for d in part["dispositions"] if d["candidate_id"] != "trace-json"]
+    write_json(part_path, part)
+    assert refs.check_disposition_parts(run) == []
+    # The positive control: an undeferred candidate removed from its part IS still
+    # reported, so the exemption is scoped to the declaration and not to the clause.
+    part["dispositions"] = [d for d in part["dispositions"] if d["candidate_id"] != "notes-md"]
+    write_json(part_path, part)
+    messages = [f.message for f in refs.check_disposition_parts(run)]
+    assert any("notes-md" in m and "no disposition" in m for m in messages)

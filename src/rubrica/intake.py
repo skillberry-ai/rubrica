@@ -18,6 +18,7 @@ import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
+from rubrica import phase as phase_mod
 from rubrica.artifacts import ArtifactError, canonical_bytes, read_json, sha256_of, write_json
 from rubrica.digest import is_message_list
 from rubrica.errors import UsageError
@@ -210,20 +211,61 @@ def register(
     max_rounds: int,
     max_scenarios: int,
     created: datetime,
+    phase: dict | None = None,
 ) -> None:
-    """Write manifest.json from already-built input entries."""
-    write_json(
-        run.manifest,
-        {
-            "schema_version": "0.1",
-            "run_id": run.root.name,
-            "created_utc": utc_stamp(created),
-            "target": {"name": target_name, "interface": target_interface},
-            "inputs": entries,
-            "stages": {},
-            "limits": {"max_rounds": max_rounds, "max_scenarios": max_scenarios},
-        },
-    )
+    """Write manifest.json from already-built input entries.
+
+    `phase` is the run's phase block or None, and it arrives as an argument rather
+    than being patched in by the caller afterwards: a second write to one artifact
+    is a second chance for a run to end up holding a manifest nobody wrote in full,
+    and this function exists precisely so the two intake paths cannot drift. Only
+    the triage path can supply one -- `intake --input` slices nothing, so no
+    candidate could have been deferred -- and omitted means the key is absent, not
+    null, so a manifest from a run that declared no phase is indistinguishable from
+    one written before the field existed.
+    """
+    document = {
+        "schema_version": "0.1",
+        "run_id": run.root.name,
+        "created_utc": utc_stamp(created),
+        "target": {"name": target_name, "interface": target_interface},
+        "inputs": entries,
+        "stages": {},
+        "limits": {"max_rounds": max_rounds, "max_scenarios": max_scenarios},
+    }
+    if phase is not None:
+        document["phase"] = phase
+    write_json(run.manifest, document)
+
+
+def _phase_for_manifest(triage: dict) -> dict | None:
+    """The manifest's phase block, from the sealed triage record, or None.
+
+    `number` and `deferred_kinds` are copied verbatim -- gate 0 ratified them, and a
+    re-derivation here would be a second answer to a settled question.
+    `deferred_count` is added because intake is the stage that knows it exactly, it
+    having just read the dispositions, and because reconcile-seal reads the manifest
+    and never 00-triage.json: the count has no other route to the world model that
+    reports it.
+
+    Counted from the record's own `defer` dispositions rather than from the plan, so
+    the number describes what was actually sealed rather than what was intended.
+    refs.check_admitted_inputs recomputes it, which makes it arithmetic a reader can
+    check rather than testimony -- check_slices' `bytes` discipline, two artifacts
+    later.
+    """
+    block = phase_mod.read(triage)
+    if block is None:
+        return None
+    return {
+        "number": block.get("number"),
+        "deferred_kinds": list(block.get("deferred_kinds") or []),
+        "deferred_count": sum(
+            1
+            for d in triage.get("dispositions") or []
+            if isinstance(d, dict) and d.get("disposition") == phase_mod.DEFER
+        ),
+    }
 
 
 def _resolvable_root_index(root_index, roots) -> bool:
@@ -698,6 +740,7 @@ def admit_from_triage(run: RunPaths) -> list[Finding]:
             max_rounds=registration["max_rounds"],
             max_scenarios=registration["max_scenarios"],
             created=registration["created"],
+            phase=_phase_for_manifest(triage),
         )
     except Exception:
         # A source file can vanish between survey and intake -- deleted,

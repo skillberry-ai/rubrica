@@ -692,3 +692,28 @@ def test_b3_invokes_the_seal_as_code_and_reserves_the_denominator_flag():
         b3,
         re.I | re.S,
     ), "B3 must tie --denominator-version to a decision recorded in decisions.md"
+
+
+def test_the_orchestrator_is_told_which_passes_a_phase_skips():
+    """rb-orchestrate dispatches extract through emit and is the only party that can
+    decline to dispatch a pass. The two it must skip are named in its Method section
+    beside the manifest field that says so -- and beside the instruction not to record
+    a stages entry for either, because a pass that never ran has no digest to hash."""
+    section = section_body(load(SKILL), METHOD).lower()
+    assert "phase" in section
+    assert "reconcile-subjects" in section and "reconcile-contradict" in section
+    assert "manifest.stages" in section
+
+
+def test_the_orchestrator_refuses_to_declare_a_phase_itself():
+    """Gate 0's argument, one stage further out. The party that selects the inputs
+    must not also ratify the selection, and rb-orchestrate holds gates 1 through 3 --
+    so an orchestrator that could declare a deferral would be narrowing the run's
+    evidence and then reviewing the result of its own narrowing.
+
+    The refusal names where the decision does live, which is what keeps it an
+    instruction rather than a prohibition with no action attached."""
+    section = section_body(load(SKILL), "5. Refusal conditions").lower()
+    assert "defer" in section
+    assert "triage-slices" in section
+    assert "--defer-kind" in section

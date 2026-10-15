@@ -129,6 +129,13 @@ def test_every_decline_reason_code_the_spec_names_is_accepted(tmp_path):
         "no_evidence_value",
         "digest_insufficient",
         "needs_projection",
+        # A defer's code shares this enum because `reason_code` is one field with
+        # one $ref, but it is never a decline's: refs.check_triage holds each
+        # disposition to its own half of the set. The $defs name stays
+        # `decline_reason` on purpose -- renaming it would move every $ref for no
+        # gain -- so this membership is the one place the widening looks odd, and
+        # the schema's own description is where it is argued.
+        "deferred_to_phase",
     }
 
 
@@ -236,13 +243,22 @@ def test_a_promoted_def_pins_its_required_fields_and_closed_shape(name):
     assert definition["additionalProperties"] is False
 
 
-def test_the_disposition_enum_is_exactly_admit_or_decline():
-    """The field that decides admit-versus-decline is worth pinning to its
-    exact permitted set, not merely confirming an enum exists."""
+def test_the_disposition_enum_is_exactly_admit_decline_or_defer():
+    """The field that decides what a run can ever know is worth pinning to its
+    exact permitted set, not merely confirming an enum exists.
+
+    `defer` joined it as a third value rather than as a decline with a special
+    reason code because the two make opposite promises -- a decline says this
+    input has no evidence value, a defer says it has value this phase cannot
+    spend -- and refs.check_triage now branches three ways on exactly this list.
+    A fourth value appearing here without a branch there is the drift the pin
+    exists to catch.
+    """
     schema = json.loads((validate.schema_dir() / "triage-0.1.json").read_text(encoding="utf-8"))
     assert schema["$defs"]["disposition"]["properties"]["disposition"]["enum"] == [
         "admit",
         "decline",
+        "defer",
     ]
 
 
@@ -283,3 +299,116 @@ def test_a_disposition_with_an_unknown_key_still_fails(tmp_path):
     assert validate.validate_stage(
         _write(tmp_path, _triage(dispositions=dispositions)), "triage-seal"
     )
+
+
+# The disposition a deferred candidate carries, and the block that explains it.
+# Written out here rather than added to _triage()'s baseline: every other test in
+# this module reads that baseline, and a defer in it would silently change what
+# they are each measuring.
+_DEFER = {
+    "candidate_id": "cand-2",
+    "disposition": "defer",
+    "reason_code": "deferred_to_phase",
+    "reason": "trace is deferred to phase 3",
+    "authority": "policy",
+}
+_PHASE = {"number": 1, "deferred_kinds": ["trace"], "deferred_count": 68}
+
+
+def _with_a_defer(**over):
+    """The baseline record plus one defer and a well-formed phase block."""
+    payload = _triage(dispositions=[*_triage()["dispositions"], _DEFER], phase=_PHASE)
+    payload.update(over)
+    return payload
+
+
+def test_a_record_carrying_a_defer_and_a_phase_block_validates(tmp_path):
+    """The positive control the seven negatives below are measured against.
+
+    Without it each of those could be passing because the *record* is malformed
+    for some unrelated reason -- a defer, a policy authority and a phase block are
+    three new shapes at once, and a rejection proves nothing about the block if the
+    document would have been rejected anyway.
+    """
+    assert validate.validate_stage(_write(tmp_path, _with_a_defer()), "triage-seal") == []
+
+
+def test_a_record_with_no_phase_block_still_validates(tmp_path):
+    """Optional, on max_scenario_part_bytes' precedent: making it required would
+    invalidate every record already on disk. Absent means no phase was declared."""
+    payload = _with_a_defer()
+    del payload["phase"]
+    assert validate.validate_stage(_write(tmp_path, payload), "triage-seal") == []
+
+
+@pytest.mark.parametrize(
+    ("case", "block"),
+    [
+        # Held to catalogue-0.1.json's own kind enum -- see the test below, which
+        # is what proves it is that file's copy and not this one's restatement --
+        # so a declaration cannot name a kind no candidate can carry. The failure
+        # the constraint exists to stop is a --defer-kind that silently defers
+        # nothing while the run pays in full.
+        ("unknown kind", {"number": 1, "deferred_kinds": ["nope"]}),
+        # A label, minimum 1: phase 0 is nobody's phase.
+        ("number below one", {"number": 0, "deferred_kinds": ["trace"]}),
+        # minItems 1: a phase deferring nothing is what the absent block says.
+        ("no kinds at all", {"number": 1, "deferred_kinds": []}),
+        ("a kind twice", {"number": 1, "deferred_kinds": ["trace", "trace"]}),
+        ("an unknown key", {"number": 1, "deferred_kinds": ["trace"], "extra": 1}),
+        ("no number", {"deferred_kinds": ["trace"]}),
+        ("no kinds key", {"number": 1}),
+    ],
+)
+def test_a_malformed_phase_block_is_a_finding(tmp_path, case, block):
+    """Every constraint the new $def declares actually bites.
+
+    A $def whose constraints were never exercised is the same defect as an
+    unwatched predicate: `uniqueItems`, `minItems`, `minimum` and
+    `additionalProperties` each cost one line to write and none of them announces
+    itself if it is missing.
+    """
+    assert validate.validate_stage(_write(tmp_path, _with_a_defer(phase=block)), "triage-seal"), (
+        f"a phase block with {case} was wrongly accepted"
+    )
+
+
+def test_deferred_kinds_is_held_to_the_catalogues_enum_not_this_files_copy(tmp_path, monkeypatch):
+    """Which copy of the `kind` enum the constraint points at, measured.
+
+    The two copies are byte-identical today and nothing pins them equal, so the
+    `unknown kind` row above passes against either -- it cannot tell them apart,
+    and that is the whole of finding 2. This can: it overrides
+    catalogue-0.1.json's enum alone, copies triage-0.1.json across untouched, and
+    declares a phase deferring the sentinel kind. Accepted means the $ref resolved
+    to the catalogue's copy; against the restatement in triage-0.1.json (the shape
+    this shipped with first) the sentinel is not a member and the document is
+    rejected.
+
+    It matters because `--defer-kind` selects *catalogue candidates*: a kind added
+    to the catalogue alone would otherwise be a choice the CLI rejects and a phase
+    block that cannot name it, which is the silent-defer failure the run pays full
+    price for.
+    """
+    for path in validate.schema_dir().glob("*.json"):
+        (tmp_path / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    catalogue_schema = read_json(tmp_path / validate.ARTIFACT_SCHEMAS["catalogue"])
+    catalogue_schema["$defs"]["kind"]["enum"] = ["trace", "haruspicy"]
+    write_json(tmp_path / validate.ARTIFACT_SCHEMAS["catalogue"], catalogue_schema)
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(tmp_path))
+
+    block = {"number": 1, "deferred_kinds": ["haruspicy"]}
+    run = _write(tmp_path / "run", _with_a_defer(phase=block))
+    assert validate.validate_stage(run, "triage-seal") == []
+
+
+def test_a_defer_carrying_a_declines_reason_code_is_still_layer_1_valid(tmp_path):
+    """The seam between the layers, stated so a reader does not look for this
+    check in the wrong place. `reason_code` is one field with one $ref, so layer 1
+    cannot tell a defer's half of that enum from a decline's -- which is why
+    refs.check_triage owns it (tests/unit/test_refs_triage.py). Recording the
+    permissiveness here is what stops somebody 'fixing' layer 1 by splitting the
+    $def and breaking every other $ref to it."""
+    payload = _with_a_defer()
+    payload["dispositions"][-1] = _DEFER | {"reason_code": "no_evidence_value"}
+    assert validate.validate_stage(_write(tmp_path, payload), "triage-seal") == []

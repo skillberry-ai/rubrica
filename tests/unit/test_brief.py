@@ -20,6 +20,7 @@ from rubrica.paths import RunPaths, list_json
 from rubrica.utilisation import claim_utilisation
 from rubrica.validate import validate_artifact
 from tests.toy import build_toy_catalogue_and_triage, build_toy_run
+from tests.unit.test_phase_pipeline import phase_run_through_intake, phase_run_through_seal
 
 CORPUS = Path(__file__).parent.parent / "fixtures" / "corpus-toy"
 
@@ -2190,3 +2191,63 @@ def test_no_line_in_the_services_section_runs_past_a_terminal_width(tmp_path):
     kind_at = next(i for i, row in enumerate(rows) if row.startswith("    signal: "))
     assert "ticket_client_configuration.py:118" in rows[kind_at + 1], rows[kind_at : kind_at + 2]
     assert rows[kind_at + 1].startswith("      "), rows[kind_at + 1]
+
+
+def test_gate_0_reports_the_deferrals_as_their_own_group(tmp_path):
+    """The design's own argument, applied to the surface that carries it: collapsing
+    defer into decline would tell the operator 68 inputs were judged useless, and
+    showing neither tells them nothing at all. The group is separate from the
+    declines and says which phase and which kinds."""
+    run = phase_run_through_intake(tmp_path)
+    page = brief.gate_brief(run, 0)
+    assert brief.DEFERRED_HEADER in page
+    section = page[page.index(brief.DEFERRED_HEADER) :]
+    assert "trace-json" in section
+    # The two facts a human needs in order to overturn the deferral, on the page.
+    assert "trace" in section and "phase 1" in section
+    # And it is not filed under a decline reason code, which is what the design
+    # forbids: the deferred candidate must not appear in the declines group.
+    declines = page[page.index("Declines, by reason code") : page.index(brief.DEFERRED_HEADER)]
+    assert "trace-json" not in declines
+
+
+def test_gate_0_omits_the_deferred_group_when_nothing_was_deferred(tmp_path):
+    """The negative control. A header with an empty body on every phaseless run
+    would train a reader to skip it, which is how the one run that does defer
+    something gets skipped too."""
+    run = build_toy_run(tmp_path, upto="intake")
+    assert brief.DEFERRED_HEADER not in brief.gate_brief(run, 0)
+
+
+def test_gate_1_says_the_world_model_is_incomplete_by_declaration(tmp_path):
+    """Gate 1 reviews an inference about the target, and a reader ratifying a
+    contradiction tally needs to know it is a floor rather than a count."""
+    run = phase_run_through_seal(tmp_path)
+    page = brief.gate_brief(run, 1)
+    assert "phase 1" in page
+    assert "trace" in page
+    assert "floor rather than a count" in page
+
+
+def test_gate_1_omits_the_incompleteness_note_on_a_phaseless_run(tmp_path):
+    """The other direction, and the one that makes the note mean something: a full
+    run's gate 1 must not tell a reader its tallies are floors."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    assert "floor rather than a count" not in brief.gate_brief(run, 1)
+
+
+@pytest.mark.parametrize("bad", ["one", ["trace"], 7, None])
+def test_gate_brief_still_exits_zero_on_a_malformed_phase_block(tmp_path, bad):
+    """A report is never a gate. Gate 0 explicitly invites a hand-edited record, so a
+    phase block that is not an object must render as its own absence rather than
+    raising -- and every shape a hand-edit produces is checked, not just a string."""
+    run = phase_run_through_intake(tmp_path)
+    triage = read_json(run.triage)
+    triage["phase"] = bad
+    write_json(run.triage, triage)
+    page = brief.gate_brief(run, 0)
+    assert isinstance(page, str) and page
+    # The defers are still listed -- they are dispositions, not a function of the
+    # block -- and the declaration line degrades to what it could actually read.
+    assert brief.DEFERRED_HEADER in page
+    assert "(no kind recorded)" in page[page.index(brief.DEFERRED_HEADER) :]

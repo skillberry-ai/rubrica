@@ -34,8 +34,9 @@ import shutil
 
 import pytest
 
-from rubrica import target_brief_html
+from rubrica import target_brief, target_brief_html
 from tests.toy import build_toy_run
+from tests.unit.test_phase_pipeline import phase_run_through_seal
 
 
 def test_page_is_self_contained_and_carries_no_script(tmp_path):
@@ -1580,3 +1581,64 @@ def test_every_table_on_the_page_has_a_header_row(tmp_path):
     page = target_brief_html.render(run)
     assert page.count("<table") == page.count("<thead>")
     assert page.count("<table") >= 6
+
+
+def test_the_page_states_what_was_not_read_when_the_run_deferred_something(tmp_path):
+    """The spec's own case: showing an owner a disagreement count without saying that
+    a whole class of material went unread misrepresents the analysis. The sentence
+    leads the page rather than sitting in the collapsed description, because it
+    changes how every number below it should be read.
+
+    The label is asserted lower-cased because that is how it reads mid-sentence --
+    "this system's Recorded interactions" would name a proper noun the owner has never
+    seen -- while the capitalised form still heads the section listing what we did
+    read."""
+    run = phase_run_through_seal(tmp_path)
+    page = target_brief_html.render(run)
+    assert "recorded interactions" in page
+    assert "have not read" in page
+    # Above the collapsed description, so it is not something a reader has to expand
+    # to find, and above the three asks it qualifies.
+    assert page.index("have not read") < page.index("<details")
+    assert page.index("have not read") < page.index("What we most need from you")
+
+
+def test_the_page_says_nothing_about_completeness_on_a_full_run(tmp_path):
+    """The negative control. A page that always carried a caveat would make the
+    caveat invisible on the run that needs it."""
+    page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
+    assert "have not read" not in page
+
+
+def test_the_completeness_sentence_carries_none_of_this_projects_vocabulary(tmp_path):
+    """The constraint that makes this disclosure different from every other line added
+    for phasing. The existing whole-page test measures the renderer's chrome on a
+    corpus whose prose carries none of the banned words; this one is scoped to the new
+    sentence, so a reword that reintroduces `trace` or `world model` reddens here with
+    the offending word named rather than somewhere in a whole-page comparison.
+
+    `phase` is deliberately in the list and deliberately absent from the sentence: it
+    is this project's word for its own process, and an owner reading "phase 1" has been
+    handed a question about our schedule instead of about their system."""
+    run = phase_run_through_seal(tmp_path)
+    sentence = target_brief_html._completeness_lines(target_brief.completeness(run))
+    assert sentence, "the fixture must produce a disclosure for this to be a test"
+    text = " ".join(sentence).lower()
+    for word in (
+        "reconcile",
+        "extract",
+        "triage",
+        "world model",
+        "claim",
+        "artifact",
+        "gate",
+        "manifest",
+        "rubrica",
+        "scenario",
+        "phase",
+        "defer",
+        "trace",
+        "corpus",
+        "input",
+    ):
+        assert word not in text, word
