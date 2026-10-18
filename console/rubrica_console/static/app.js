@@ -971,7 +971,13 @@ function renderDetail() {
     RUN.staticFor = sig;
     put(stat, ...staticDetail(step));
   }
-  put($("#detail-dynamic"), ...dynamicDetail(step));
+  // The dynamic half is rebuilt on every poll; without this, a section the reader
+  // opened or closed snapped back every 1.5 s, so a running job's table could not
+  // be watched.
+  const dyn = $("#detail-dynamic");
+  const was = new Map([...dyn.querySelectorAll("details[data-key]")].map((el) => [el.dataset.key, el.open]));
+  put(dyn, ...dynamicDetail(step));
+  for (const el of dyn.querySelectorAll("details[data-key]")) if (was.has(el.dataset.key)) el.open = was.get(el.dataset.key);
 }
 
 function staticDetail(step) {
@@ -1493,15 +1499,20 @@ function dynamicDetail(step) {
   const jobs = d.jobs.filter((j) => j.step === step.id || (j.chain && j.entries.some((e) => e.label === `step: ${step.title}`)));
   const active = d.active;
   if (step.members_total) {
-    // One square per member: green on disk, amber dispatching now, red failed.
-    const live = active ? Object.fromEntries(active.members.map((m) => [m.id.split(":").pop(), m.status])) : {};
+    // One square per member: green done, light green half-way, amber dispatching
+    // now, red failed.
+    const live = step.kind === "followup" ? followupLive(step, active) : fanoutLive(active);
     const done = new Set(step.members_done);
     const all = [...step.members_done, ...step.members_todo];
+    const cls = (m) => (done.has(m) || live[m] === "succeeded" ? "ok" : live[m] === "running" ? "run"
+      : live[m] === "halted" ? "bad" : live[m] === "part" ? "part" : "");
+    const finished = all.filter((m) => cls(m) === "ok").length;
     out.push(h("div", { class: "panel" }, h("div", { class: "section-head" }, h("h2", {}, "Members"), h("span", { class: "spacer" }),
-        h("span", { class: "muted" }, `${step.members_done.length} of ${step.members_total} on disk`)),
-      h("div", { class: "members-grid" }, ...all.map((m) => h("span", {
-        class: done.has(m) ? "ok" : live[m] === "running" ? "run" : live[m] === "halted" ? "bad" : "", title: m }))),
-      step.members_todo.length ? h("details", { style: "margin-top:10px" }, h("summary", {}, `${step.members_todo.length} still to do`),
+        h("span", { class: "muted" }, step.kind === "followup"
+          ? `${finished} of ${step.members_total} done`
+          : `${step.members_done.length} of ${step.members_total} on disk`)),
+      h("div", { class: "members-grid" }, ...all.map((m) => h("span", { class: cls(m), title: `${m} — ${live[m] || "waiting"}` }))),
+      step.members_todo.length ? h("details", { "data-key": "todo", style: "margin-top:10px" }, h("summary", {}, `${step.members_todo.length} still to do`),
         h("div", { class: "mono muted", style: "overflow-wrap:anywhere" }, step.members_todo.join("  "))) : null));
   }
   const shown = active && (active.step === step.id || active.chain) ? [active, ...jobs.filter((j) => j.id !== active.id)] : jobs;
@@ -1514,10 +1525,41 @@ function dynamicDetail(step) {
   return out;
 }
 
+// A fan-out's member ids are `stage:id`; one square per id.
+function fanoutLive(active) {
+  return active ? Object.fromEntries(active.members.map((m) => [m.id.split(":").pop(), m.status])) : {};
+}
+
+// The follow-up's members are scenario ids, but its dispatches are not: a re-seed
+// is `instantiate:id` then `challenge:id`, and every reject shares the one `score`
+// dispatch. Keying on the id alone let the later, still-queued challenge hide the
+// finished instantiate, and never coloured a reject at all.
+function followupLive(step, active) {
+  if (!active) return {};
+  const by = Object.fromEntries(active.members.map((m) => [m.id, m.status]));
+  const live = {};
+  for (const s of step.members_todo) {
+    const score = by.score;
+    const inst = by[`instantiate:${s}`];
+    const chal = by[`challenge:${s}`];
+    if (!inst && !chal) { if (score) live[s] = score; continue; }
+    if (inst === "halted" || chal === "halted") live[s] = "halted";
+    else if (inst === "running" || chal === "running") live[s] = "running";
+    else if (chal === "succeeded") live[s] = "succeeded";
+    else if (inst === "succeeded") live[s] = "part";
+  }
+  return live;
+}
+
+// Running first, then failed, then waiting, then finished: in a fan-out of a
+// hundred the dispatches doing something now were at the bottom of the table.
+const MEMBER_ORDER = { running: 0, halted: 1, queued: 2, cancelled: 3, succeeded: 4 };
+
 function jobPanel(job) {
   const rows = job.entries.map((e, i) => h("tr", {}, h("td", { class: "mono truncate", title: e.label }, e.label), h("td", {}, pill(e.status)), h("td", {}, e.exit ?? ""),
     h("td", {}, e.log ? h("button", { class: "ghost small", onclick: () => showLog(job, { entry: i }, e.label) }, "log") : null)));
-  const members = job.members.map((m) => h("tr", {}, h("td", { class: "mono truncate", title: m.id }, m.id), h("td", {}, pill(m.status)),
+  const ordered = [...job.members].sort((a, b) => (MEMBER_ORDER[a.status] ?? 2) - (MEMBER_ORDER[b.status] ?? 2));
+  const members = ordered.map((m) => h("tr", {}, h("td", { class: "mono truncate", title: m.id }, m.id), h("td", {}, pill(m.status)),
     h("td", {}, m.turns || ""), h("td", {}, m.cost != null ? money(m.cost) : ""),
     h("td", { class: `truncate ${m.error ? "s-failed" : "mono muted"}`, title: m.error || m.last || "" }, m.error || m.last || ""),
     h("td", {}, h("button", { class: "ghost small", onclick: () => showLog(job, { member: m.id }, m.id) }, "log"))));
@@ -1532,12 +1574,12 @@ function jobPanel(job) {
       job.members.length ? h("div", {}, h("span", { class: "v" }, `${okN}/${job.members.length}`), h("span", { class: "l" }, "dispatches ok")) : null,
       job.model ? h("div", {}, h("span", { class: "v mono" }, job.model), h("span", { class: "l" }, job.effort)) : null),
     job.message ? h("p", { class: `msg ${bad ? "bad" : "muted"}` }, job.message) : null,
-    job.findings && job.findings.length && job.status !== "succeeded" ? h("details", { open: true, style: "margin-top:8px" }, h("summary", {}, `Findings (${job.findings_total})`),
+    job.findings && job.findings.length && job.status !== "succeeded" ? h("details", { "data-key": `${job.id}:findings`, open: true, style: "margin-top:8px" }, h("summary", {}, `Findings (${job.findings_total})`),
       h("pre", { class: "box", style: "margin-top:6px" }, job.findings.join("\n") + (job.findings_total > job.findings.length ? `\n… ${job.findings_total - job.findings.length} more` : ""))) : null,
-    members.length ? h("details", { open: job.status === "running" || (members.length <= 6 && bad), style: "margin-top:8px" }, h("summary", {}, `${members.length} dispatch(es)`),
+    members.length ? h("details", { "data-key": `${job.id}:members`, open: job.status === "running" || (members.length <= 6 && bad), style: "margin-top:8px" }, h("summary", {}, `${members.length} dispatch(es)`),
       h("table", {}, h("colgroup", {}, h("col", { style: "width:26%" }), h("col", { style: "width:110px" }), h("col", { style: "width:60px" }), h("col", { style: "width:70px" }), h("col"), h("col", { style: "width:56px" })),
         h("thead", {}, h("tr", {}, h("th", {}, "Member"), h("th", {}, "Status"), h("th", {}, "Turns"), h("th", {}, "Cost"), h("th", {}, "Doing"), h("th", {}))), h("tbody", {}, members))) : null,
-    rows.length ? h("details", { open: bad, style: "margin-top:4px" }, h("summary", {}, `${rows.length} command(s)`),
+    rows.length ? h("details", { "data-key": `${job.id}:commands`, open: bad, style: "margin-top:4px" }, h("summary", {}, `${rows.length} command(s)`),
       h("table", {}, h("colgroup", {}, h("col"), h("col", { style: "width:110px" }), h("col", { style: "width:50px" }), h("col", { style: "width:56px" })),
         h("thead", {}, h("tr", {}, h("th", {}, "Command"), h("th", {}, "Result"), h("th", {}, "Exit"), h("th", {}))), h("tbody", {}, rows))) : null);
 }

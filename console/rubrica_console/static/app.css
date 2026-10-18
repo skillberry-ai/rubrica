@@ -285,6 +285,7 @@ pre.box, .box { background: var(--panel-2); border: 1px solid var(--line); borde
 .members-grid { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
 .members-grid span { width: 12px; height: 12px; border-radius: 3px; background: var(--line); }
 .members-grid span.ok { background: var(--done); }
+.members-grid span.part { background: var(--done); opacity: .45; }
 .members-grid span.run { background: var(--running); animation: pulse 1s infinite alternate; }
 .members-grid span.bad { background: var(--failed); }
 @keyframes pulse { from { opacity: 1 } to { opacity: .35 } }
