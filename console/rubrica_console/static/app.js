@@ -847,7 +847,7 @@ function renderNext() {
       h("div", { class: "t truncate" }, nxt.title),
       h("div", { class: "d" }, failed ? "A check reported findings: repair, accept or re-run them."
         : cut ? `${cut === 1 && !nxt.unfinished[0] ? "Its dispatch" : `${cut} dispatch(es)`} did not finish, probably a lost connection. Resume runs only ${cut === 1 ? "that one" : "those"}.`
-        : gate ? "Read the brief, then approve with a note."
+        : gate ? "Read the brief, then approve (a note is optional)."
         : needsInput ? "Needs an agents roster file — choose one on the step."
         : nxt.calls_model ? "Calls a model." : "Code only — no model.")),
     h("button", { class: needsInput ? "primary big" : "", onclick: goto(nxt.id) }, gate || failed || needsInput ? "Open" : "Details"),
@@ -1170,7 +1170,9 @@ function briefPanel(step, busy) {
     ].filter(Boolean).join(" | ");
     const send = async (path, okMsg) => {
       const text = compose();
-      if (!text) return toast("Write an overall note or a section comment first.", true);
+      // Approving needs no prose (the console records that it was approved here);
+      // feedback with nothing in it says nothing.
+      if (!text && !path.endsWith("/approve")) return toast("Write a note or a section comment first.", true);
       const job = await postAction(path, { note: text }, okMsg);
       if (job && job.status === "succeeded") { try { localStorage.removeItem(key); } catch (_) {} }
     };
@@ -1201,6 +1203,61 @@ function briefPanel(step, busy) {
   }
   return out;
 }
+
+// -- shared by the interactive gates -------------------------------------------
+//
+// The person at a gate decides only what they want to. Anything left alone stays
+// as the stage decided; a reason is welcome and never demanded (the console then
+// records "no reason given"); a card can be ticked "looks right" without
+// changing it, and those ticks go into the review note.
+
+// An optional reason: a text box plus one-click suggestions.
+function reasonField(value, set, presets = []) {
+  const input = h("input", { class: "g0-reason", placeholder: "Why? (optional)", value: value || "",
+    oninput: (e) => set(e.target.value) });
+  return h("span", { class: "g-reason" }, input,
+    ...presets.map((text) => h("button", { class: "small ghost g-chip", title: "Use this reason",
+      onclick: () => { input.value = text; set(text); } }, text)));
+}
+
+// The "you don't have to decide everything" line every interactive gate leads with.
+function gateIntro(what) {
+  return h("p", { class: "g-intro" },
+    h("b", {}, "You only need to change what looks wrong. "),
+    `Anything you leave alone stays as ${what} decided. Reasons are optional, and “Looks right” records that you checked a card without changing it.`);
+}
+
+// "Looks right" toggle for one card; `ok` is the draft's set of ticked card ids.
+function okToggle(ok, id, onChange) {
+  const on = !!ok[id];
+  return h("button", { class: `small g-ok ${on ? "on" : ""}`, title: "Record that you checked this and agree",
+    onclick: () => { if (on) delete ok[id]; else ok[id] = true; onChange(); } }, on ? "✓ Looks right" : "Looks right");
+}
+
+// The ticked cards, as one clause for the review note.
+function okClause(ok) {
+  const ids = Object.keys(ok);
+  if (!ids.length) return "";
+  const shown = ids.slice(0, 12).join(", ");
+  return `checked and agreed: ${shown}${ids.length > 12 ? ` and ${ids.length - 12} more` : ""}`;
+}
+
+// The first few cards, and a button for the rest.
+const CARDS_SHOWN = 6;
+function someCards(cards, state, repaint) {
+  if (state.all || cards.length <= CARDS_SHOWN + 2) return cards;
+  return [...cards.slice(0, CARDS_SHOWN),
+    h("button", { class: "small", onclick: () => { state.all = true; repaint(); } }, `Show ${cards.length - CARDS_SHOWN} more`)];
+}
+
+const DECLINE_TEXT = {
+  off_objective: "not what this run is about",
+  out_of_scope: "outside the target",
+  near_duplicate: "a near-duplicate of another file",
+  superseded: "superseded by another file",
+  implementation_detail: "an implementation detail",
+  no_evidence_value: "doesn't help the tests",
+};
 
 // -- gate 0: interactive ----------------------------------------------------
 //
@@ -1235,6 +1292,8 @@ function gate0View(step, busy, r) {
   try { draft = JSON.parse(localStorage.getItem(key) || "{}") || {}; } catch (_) { draft = {}; }
   draft.changes = draft.changes || {};
   draft.comments = draft.comments || {};
+  draft.ok = draft.ok || {};
+  const cardsState = { all: false };
   const save = () => { try { localStorage.setItem(key, JSON.stringify(draft)); } catch (_) {} };
   const files = new Map(d.files.map((f) => [f.candidate_id, f]));
   // A draft from before the last save may name a change the run already holds.
@@ -1274,13 +1333,14 @@ function gate0View(step, busy, r) {
       h("button", { class: t === "admit" ? "on" : "", disabled: !ready, onclick: () => choose(f, "admit") }, "Admit"),
       h("button", { class: t === "decline" ? "on" : "", disabled: !ready, onclick: () => choose(f, "decline") }, "Decline"));
     if (!changed || !ready) return h("div", { class: "g0-control" }, seg);
+    // A decline is pre-classified with the most general code; the person can change it.
+    if (t === "decline" && c.action !== "clear" && !c.reason_code) { c.reason_code = "no_evidence_value"; draft.changes[f.candidate_id] = c; save(); }
     const code = t === "decline" && c.action !== "clear"
-      ? h("select", { onchange: (e) => { c.reason_code = e.target.value; draft.changes[f.candidate_id] = c; save(); paintPending(); } },
-          h("option", { value: "" }, "why declined…"),
-          ...d.decline_codes.map((k) => h("option", { value: k, selected: c.reason_code === k ? true : null }, k.replaceAll("_", " "))))
+      ? h("select", { title: "Why it is declined", onchange: (e) => { c.reason_code = e.target.value; draft.changes[f.candidate_id] = c; save(); paintPending(); } },
+          ...d.decline_codes.map((k) => h("option", { value: k, selected: c.reason_code === k ? true : null }, DECLINE_TEXT[k] || k.replaceAll("_", " "))))
       : null;
-    const reason = h("input", { class: "g0-reason", placeholder: "Your reason (required)", value: c.reason || "",
-      oninput: (e) => { c.reason = e.target.value; draft.changes[f.candidate_id] = c; save(); paintPending(); } });
+    const presets = t === "admit" ? ["needed for the tests", "triage misjudged it"] : ["not part of the target", "too big for what it adds"];
+    const reason = reasonField(c.reason, (v) => { c.reason = v; draft.changes[f.candidate_id] = c; save(); paintPending(); }, presets);
     return h("div", { class: "g0-control" }, seg, code, reason);
   };
 
@@ -1318,7 +1378,8 @@ function gate0View(step, busy, r) {
       h("div", { class: "g0-card-head" }, h("span", { class: "chip-k" }, GATE0_KINDS[n.kind] || n.kind),
         h("span", { class: "g0-title" }, n.title), f ? who(f) : null, h("span", { class: "spacer" }),
         f ? h("span", { class: "muted small" }, sizeOf(f)) : null,
-        ready ? h("button", { class: "small ghost", onclick: () => { comment.hidden = !comment.hidden; if (!comment.hidden) comment.focus(); } }, "💬") : null),
+        ready && !changed ? okToggle(draft.ok, n.candidate_id || n.id, () => { save(); repaint(); }) : null,
+        ready ? h("button", { class: "small ghost", title: "Add a comment", onclick: () => { comment.hidden = !comment.hidden; if (!comment.hidden) comment.focus(); } }, "💬") : null),
       n.detail ? h("details", { class: "g0-more" }, h("summary", {}, n.detail.length > 140 ? `${n.detail.slice(0, 140)}…` : n.detail),
         n.detail.length > 140 ? h("div", {}, n.detail) : null) : null,
       ...extra,
@@ -1342,7 +1403,7 @@ function gate0View(step, busy, r) {
       byCode.get(code).push(n);
     }
     const shown = new Set();
-    const out = [];
+    let out = [];
     for (const n of d.needs_you) {
       if (n.kind !== "decline") { out.push(card(n)); continue; }
       const code = (files.get(n.candidate_id) || {}).reason_code || "?";
@@ -1357,7 +1418,7 @@ function gate0View(step, busy, r) {
           h("span", { class: "spacer" }), changed ? h("span", { class: "g0-pending" }, `${changed} changed`) : h("span", { class: "muted small" }, "open to review each")),
         h("div", { class: "g0-cards" }, ...group.map(card))));
     }
-    put(needsBox, out);
+    put(needsBox, someCards(out, cardsState, paintNeeds));
   };
 
   const paintFiles = () => {
@@ -1417,9 +1478,9 @@ function gate0View(step, busy, r) {
       : null);
   };
 
-  const note = h("textarea", { placeholder: "Overall: what you checked, and whether the chosen files are right.", value: draft.note || "",
+  const note = h("textarea", { placeholder: "Anything to add? (optional)", value: draft.note || "",
     oninput: (e) => { draft.note = e.target.value; save(); } });
-  const shared = h("input", { placeholder: "One reason for every change that has none of its own", value: draft.shared || "",
+  const shared = h("input", { placeholder: "One reason for every change that has none of its own (optional)", value: draft.shared || "",
     oninput: (e) => { draft.shared = e.target.value; save(); paintPending(); } });
   // Updated in place as reasons are typed; repainting the whole action bar
   // would replace the input the human is typing in.
@@ -1427,19 +1488,19 @@ function gate0View(step, busy, r) {
   const paintPending = () => {
     const n = Object.keys(draft.changes).length;
     const { problems } = collect();
-    put(pendingBox, n ? `${n} unsaved change(s)` : null,
-      problems.length ? h("span", { class: "warn" }, ` — ${problems.length} still need a reason or a decline code`) : null);
+    const okN = Object.keys(draft.ok).length;
+    put(pendingBox, n ? `${n} unsaved change(s)` : null, okN ? h("span", { class: "muted" }, `${n ? " · " : ""}${okN} marked looks right`) : null,
+      problems.length ? h("span", { class: "warn" }, ` — ${problems.join("; ")}`) : null);
   };
   const compose = () => [
     (draft.note || "").trim(),
     ...Object.entries(draft.comments).filter(([, c]) => c && c.trim()).map(([t, c]) => `on "${t}": ${c.trim()}`),
+    okClause(draft.ok),
   ].filter(Boolean).join(" | ");
   const collect = () => {
     const out = [], problems = [];
     for (const [cid, c] of Object.entries(draft.changes)) {
       const reason = (c.reason || "").trim() || (draft.shared || "").trim();
-      if (!reason) problems.push(`${cid}: needs a reason`);
-      if (c.action === "decline" && !c.reason_code) problems.push(`${cid}: choose why it is declined`);
       out.push({ candidate: cid, action: c.action, reason_code: c.action === "decline" ? c.reason_code : undefined, reason });
     }
     return { changes: out, problems };
@@ -1448,8 +1509,7 @@ function gate0View(step, busy, r) {
     const { changes, problems } = collect();
     if (problems.length) return toast(problems.join("; "), true);
     const text = compose();
-    if (approve && !text) return toast("Write an overall note first: approving records it in decisions.md.", true);
-    if (!changes.length && !text) return toast("Nothing to save yet.", true);
+    if (!approve && !changes.length && !text) return toast("Nothing to save yet.", true);
     if (approve) {
       const ok = await confirmDialog("Approve gate 0", [
         changes.length ? `${changes.length} change(s) will be applied first, then the run admits what is checked.` : "The run admits what triage chose.",
@@ -1469,7 +1529,7 @@ function gate0View(step, busy, r) {
     paintPending();
     put(actionsBox, h("div", { class: "actions feedback", style: "flex-direction:column;align-items:stretch" },
       h("strong", {}, "Your review"),
-      n ? pendingBox : null,
+      pendingBox,
       n ? shared : null,
       note,
       h("div", { class: "row" },
@@ -1492,7 +1552,8 @@ function gate0View(step, busy, r) {
       h("a", { class: "button small", href: `/runs/${encodeURIComponent(RUN.name)}/gate/0`, target: "_blank" }, "Plain text ↗"),
       h("a", { class: "button small", href: `/runs/${encodeURIComponent(RUN.name)}/`, target: "_blank" }, "Run summary ↗")),
     summaryBox,
-    h("h4", { class: "g0-h" }, d.locked ? `What was up for review (${d.needs_you.length})` : `Needs you (${d.needs_you.length})`),
+    ready ? gateIntro("triage") : null,
+    h("h4", { class: "g0-h" }, d.locked ? `What was up for review (${d.needs_you.length})` : `Worth a look (${d.needs_you.length})`),
     needsBox,
     filesBox,
     overridesBox,

@@ -166,6 +166,18 @@ fix a harness or filesystem problem.
 
 ## Gates
 
+Approving a gate needs no note; with none, `decisions.md` records that it was
+approved in the console.
+
+The gate 0 page is built so that **you only change what looks
+wrong**: anything you leave alone stays as the stage decided. A reason is
+optional on every change — type one, click a suggested one, or leave it blank,
+and the record says "no reason given (console)". A decline you don't classify
+gets the code for "doesn't help the tests". **Looks right** on a
+card records that you checked it and agree, without changing anything, and those
+ticks go into your approval line. The page shows the first few cards and the
+rest behind **Show more**.
+
 **Gate 0** has its own page, drawn from `gate-brief --gate 0 --format json`:
 
 - A summary strip: whether the objective is supported, how many files are
@@ -175,8 +187,8 @@ fix a harness or filesystem problem.
   three), a gap whose suggested fix was not supplied (with the
   `adopt-projection` command to supply it), the largest admits, an unsupported
   objective, a predicted surface nothing confirmed, a folder split across slices.
-  A file's card has **Admit / Decline**; a change asks for your reason, and a
-  decline for its reason code. Every card has a 💬 comment box.
+  A file's card has **Admit / Decline**, an optional reason and, for a decline,
+  a reason code you can change. Every card has a 💬 comment box.
 - **All files**, closed by default: every file by folder, a checkbox each
   (checked means the run reads it) and one per folder, with triage's reason and
   yours on expand.

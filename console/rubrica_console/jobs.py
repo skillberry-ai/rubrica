@@ -41,6 +41,12 @@ from rubrica_console import credentials as credentials_mod
 from rubrica_console import dispatch, pipeline
 
 CLEAN, FINDINGS, USAGE = 0, 1, 2
+# What a human change carries when the human gave no reason. Recorded as written,
+# so the record says plainly that none was given rather than inventing one.
+NO_REASON = "no reason given (console)"
+# The decline code an unclassified decline from the page gets: the most general
+# of the codes a human override may use (seal.HUMAN_DECLINE_CODES).
+DEFAULT_DECLINE_CODE = "no_evidence_value"
 # How many dispatches of one fan-out must all fail, spending nothing, before the
 # rest are cancelled. Three is the dispatch cap: one full wave.
 _FAIL_FAST_AFTER = 3
@@ -1003,6 +1009,26 @@ class Console:
             raise ConsoleError("a note is required: it is what decisions.md records")
         return text
 
+    @staticmethod
+    def _approval_note(note: str, changes: int = 0) -> str:
+        """The human's note, or a plain default: approving must not demand prose.
+
+        Doing nothing is a valid ruling at a gate -- it accepts what the stage
+        decided -- so the console records that it was approved here, and how many
+        changes went with it, rather than refusing until someone types a sentence.
+        """
+        text = " ".join((note or "").split())
+        if text:
+            return text
+        return "approved in the console" + (
+            f" with {changes} change(s)" if changes else ", as decided"
+        )
+
+    @staticmethod
+    def _reason(raw: object) -> str:
+        """The human's reason, or NO_REASON: a change without one is still a change."""
+        return " ".join(str(raw or "").split()) or NO_REASON
+
     def _ready_gate(self, name: str, gate: int) -> None:
         step = pipeline.find(self.steps(name), f"gate-{gate}")
         if step is None:
@@ -1011,7 +1037,7 @@ class Console:
             raise ConsoleError(f"gate {gate} is not the next thing to do in this run")
 
     def approve_gate(self, name: str, gate: int, note: str) -> Job:
-        text = self._note(note)
+        text = self._approval_note(note)
         self._ready_gate(name, gate)
         return self._human(name, f"Approve gate {gate}", self._approve_commands(name, gate, text))
 
@@ -1060,8 +1086,6 @@ class Console:
         if not isinstance(changes, list):
             raise ConsoleError("changes must be a list")
         text = " ".join((note or "").split())
-        if approve and not text:
-            raise ConsoleError("a note is required to approve: it is what decisions.md records")
         if not changes and not approve and not text:
             raise ConsoleError("nothing to save: no file was changed and no note was written")
         run = self.run_paths(name)
@@ -1072,14 +1096,17 @@ class Console:
                 raise ConsoleError("each change must be an object")
             candidate = change.get("candidate")
             action = change.get("action")
-            code = change.get("reason_code") or ""
-            reason = " ".join(str(change.get("reason") or "").split())
+            # A decline the human did not classify gets the most general code
+            # rather than a refusal: "this does not help the tests" is what an
+            # unexplained decline says.
+            code = change.get("reason_code") or (
+                DEFAULT_DECLINE_CODE if action == "decline" else ""
+            )
+            reason = self._reason(change.get("reason"))
             if not isinstance(candidate, str) or not candidate:
                 raise ConsoleError("each change names a candidate")
             if action not in ("admit", "decline", "clear"):
                 raise ConsoleError(f"{candidate}: the action must be admit, decline or clear")
-            if not reason:
-                raise ConsoleError(f"{candidate}: a reason is required for every change")
             batches.setdefault((action, code, reason), []).append(candidate)
         commands: list[list[str]] = []
         for (action, code, reason), candidates in batches.items():
@@ -1097,7 +1124,7 @@ class Console:
                 ["check-refs", *rid],
             ]
         if approve:
-            commands += self._approve_commands(name, 0, text)
+            commands += self._approve_commands(name, 0, self._approval_note(text, len(changes)))
             title = f"Approve gate 0 with {len(changes)} change(s)"
         else:
             if text:

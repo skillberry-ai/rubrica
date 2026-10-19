@@ -385,14 +385,12 @@ def test_one_job_at_a_time_per_run(tmp_path, fake, intake_run, monkeypatch):
     console.wait(job.id, timeout=20)
 
 
-def test_a_gate_cannot_be_run_only_approved_with_a_note(tmp_path, fake):
+def test_a_gate_cannot_be_run_only_approved(tmp_path, fake):
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     console = _console(tmp_path, run.root.parent, fake)
     name = run.root.name
     with pytest.raises(ConsoleError, match="held by a human"):
         console.run_step(name, "gate-1", OPTS)
-    with pytest.raises(ConsoleError, match="note is required"):
-        console.approve_gate(name, 1, "")
     job = console.approve_gate(name, 1, "world model reads right")
     assert job.status == SUCCEEDED, job.message
     assert "human gate 1 (console): world model reads right" in run.decisions.read_text()
@@ -478,7 +476,6 @@ def test_a_refused_gate_0_change_says_why_and_changes_nothing(tmp_path, fake):
     ("changes", "note", "message"),
     [
         ([], "", "nothing to save"),
-        ([{"candidate": "notes-md", "action": "decline", "reason": ""}], "", "reason is required"),
         (
             [{"candidate": "notes-md", "action": "drop", "reason": "r"}],
             "",
@@ -491,6 +488,34 @@ def test_gate_0_changes_refuse_an_incomplete_request(tmp_path, fake, changes, no
     console = _console(tmp_path, run.root.parent, fake)
     with pytest.raises(ConsoleError, match=message):
         console.gate0_changes(run.root.name, changes, note)
+
+
+def test_approving_needs_no_note_and_says_so_in_the_record(tmp_path, fake):
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    console = _console(tmp_path, run.root.parent, fake)
+    job = console.approve_gate(run.root.name, 1, "   ")
+    assert job.status == SUCCEEDED, job.message
+    assert (
+        "human gate 1 (console): approved in the console, as decided" in run.decisions.read_text()
+    )
+
+
+
+def test_a_change_with_no_reason_or_code_is_recorded_as_such(tmp_path, fake):
+    run = build_toy_run(tmp_path / "runs", upto="triage-seal")
+    console = _console(tmp_path, run.root.parent, fake)
+    job = console.gate0_changes(
+        run.root.name, [{"candidate": "notes-md", "action": "decline"}], approve=True
+    )
+    assert job.status == SUCCEEDED, (job.message, [(e.label, e.exit) for e in job.entries])
+    override = json.loads(run.adoptions.read_text())["overrides"][0]["disposition"]
+    assert override["reason"] == "no reason given (console)"
+    assert override["reason_code"] == "no_evidence_value"
+    assert "approved in the console with 1 change(s)" in run.decisions.read_text()
+
+
+# -- a lost connection is an interruption, not a failure ---------------------------
+
 
 
 def _ledger(console, name):

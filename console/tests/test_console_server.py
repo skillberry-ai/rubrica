@@ -123,7 +123,8 @@ def test_gate_approval_over_http_records_the_note(console, run):
 
 def test_a_refused_action_is_a_409_with_the_reason(console, run):
     with _serving(console) as port:
-        status, _, body = _req(port, "POST", f"/api/runs/{run.root.name}/gates/3/approve", {})
+        # Feedback with no text says nothing, so it is refused; approval is not.
+        status, _, body = _req(port, "POST", f"/api/runs/{run.root.name}/gates/3/feedback", {})
     assert status == 409
     assert b"note is required" in body
 

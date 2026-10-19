@@ -428,3 +428,12 @@ span.small, div.small, .g0-files .small { font-size: 12.5px; }
 .g0-group > summary::-webkit-details-marker { display: none; }
 .g0-group[open] > summary { margin-bottom: 8px; }
 .g0-group .g0-cards { margin-bottom: 0; }
+
+/* -- shared by the interactive gates ------------------------------------------- */
+.g-intro { margin: 10px 0 4px; padding: 9px 12px; border-radius: 8px; background: var(--done-soft);
+  border: 1px solid color-mix(in srgb, var(--done) 30%, var(--line)); font-size: 13px; }
+.g-reason { display: inline-flex; flex: 1; gap: 4px; flex-wrap: wrap; align-items: center; min-width: 220px; }
+.g-reason .g0-reason { flex: 1; min-width: 180px; }
+.g-chip { font-size: 11.5px; height: 22px; padding: 0 7px; border: 1px dashed var(--line); }
+.g-ok { white-space: nowrap; }
+.g-ok.on { background: var(--done-soft); color: var(--done); border-color: color-mix(in srgb, var(--done) 40%, var(--line)); }
