@@ -703,13 +703,20 @@ sweep, the capabilities the coverage denominator excludes, claim utilisation per
 input, read coverage per reconcile pass, the implied suite size and one block per
 service at gate 1; the coverage matrix at gate 2; the verdict tally at gate 3.
 
-`--format json` (gate 0 only; any other gate is an exit 2) prints the same facts
+`--format json` (gates 0 and 1; gates 2 and 3 are an exit 2) prints the same facts
 as data for a page a human acts on: a `summary`, the items that need a human
 (`needs_you`, chosen by fixed rules — every decline, each gap whose suggested fix
 was not supplied, the largest admits, an unsupported objective, predicted surfaces
 nothing confirmed, folders split across slices), every candidate with its
 effective and triage disposition (`files`), and the human `overrides` in force.
-The browser console's gate 0 page is drawn from it. Text stays the default.
+At gate 1 it carries each contradiction with its two claims' text, each gap,
+each capability with its binding, the services after any regrouping, the
+inputs' claim use, the rulings in force and which contradiction rulings the
+passes have not yet re-modelled (`unapplied`); `needs_you` there lists every
+contradiction (unresolved first), every gap, every capability with no tool
+binding, services whose tools' schemas disagree or whose grouping has no shared
+evidence, and inputs no pass cited. The browser console's gate 0 and gate 1
+pages are drawn from it. Text stays the default.
 
 Gate 0 renders more than the others because it is the one gate held before any
 downstream stage has read the corpus: the objective verdict, then the waivers in

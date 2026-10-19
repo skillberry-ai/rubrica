@@ -254,14 +254,17 @@ def test_each_gate_page_carries_gate_brief_text(console, run, gate):
     assert json.loads(api[2])["text"] == text
 
 
-def test_only_gate_0_carries_structured_data(console, run):
+def test_the_gates_with_a_structured_brief_carry_its_data(console, run):
     with _serving(console) as port:
         replies = {
             gate: json.loads(_req(port, "GET", f"/api/runs/{run.root.name}/gate/{gate}")[2])
             for gate in brief.GATES
         }
-    assert replies[0]["data"] == brief.gate_data(run, 0)
-    assert all("data" not in replies[gate] for gate in brief.GATES if gate != 0)
+    for gate in brief.GATES:
+        if gate in brief.GATE_DATA_GATES:
+            assert replies[gate]["data"] == brief.gate_data(run, gate)
+        else:
+            assert "data" not in replies[gate]
 
 
 def test_gate_0_changes_over_http_overrule_and_reseal(tmp_path):

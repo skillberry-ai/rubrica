@@ -1745,7 +1745,7 @@ def _gate_3(run: RunPaths) -> str:
 # model. A model choosing what a human reviews would be a model steering its
 # own review -- the reason triage does not hold gate 0 at all.
 
-GATE_DATA_GATES = (0,)
+GATE_DATA_GATES = (0, 1)
 
 # How many of the largest admits `needs_you` lists. Not a threshold on size --
 # this report still refuses to say what is "too big" (see `_read_cost_lines`) --
@@ -1759,7 +1759,7 @@ def gate_data(run: RunPaths, gate: int) -> dict:
         raise UsageError(
             f"gate {gate} has no structured brief yet; it is built for gates {GATE_DATA_GATES}"
         )
-    return _gate_0_data(run)
+    return _gate_0_data(run) if gate == 0 else _gate_1_data(run)
 
 
 def _folder(candidate: dict, candidates: dict[str, dict]) -> str:
@@ -1974,5 +1974,267 @@ def _gate_0_data(run: RunPaths) -> dict:
                 "size": totals.get(group),
             }
         )
+    data["needs_you"] = needs
+    return data
+
+
+# -- gate 1 as data ----------------------------------------------------------
+#
+# What a human at gate 1 can rule on, each item beside what the pass wrote and
+# what is in force once the rulings in 01-rulings.json are applied -- computed by
+# rulings.py's own apply_* functions, so this page and the seal cannot disagree.
+
+
+def _claim_index(run: RunPaths) -> dict[str, dict]:
+    """Claim id -> {statement, artifact_id, confidence}, for showing a claim beside its id."""
+    index: dict[str, dict] = {}
+    for path in list_json(run.claims_dir):
+        document = _mapping(_quietly(path))
+        for claim in _dicts(document.get("claims")):
+            if isinstance(claim.get("id"), str):
+                index[claim["id"]] = {
+                    "id": claim["id"],
+                    "statement": claim.get("statement"),
+                    "artifact_id": path.stem,
+                    "confidence": claim.get("confidence"),
+                }
+    return index
+
+
+def _stamp(text: object) -> float | None:
+    """A decisions.md-style UTC stamp as epoch seconds -- UTC, never local time."""
+    from datetime import UTC, datetime
+
+    try:
+        return datetime.strptime(str(text), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).timestamp()
+    except ValueError:
+        return None
+
+
+def _gate_1_data(run: RunPaths) -> dict:
+    human = rulings.load(run)
+    data: dict = {
+        "gate": 1,
+        "run": str(run.root),
+        # Rulings are refused once propose has read the world model, so the page
+        # must not offer controls that would fail.
+        "locked": run.batches_dir.exists(),
+        "sealed": run.world_model.is_file(),
+        "resolutions": list(rulings.RESOLUTIONS),
+        "blockable": list(rulings.BLOCKABLE),
+        "contradiction_readers": list(rulings.CONTRADICTION_READERS),
+        "rulings": {k: _dicts(human.get(k)) for k in rulings.KINDS},
+        "summary": {},
+        "needs_you": [],
+        "contradictions": [],
+        "gaps": [],
+        "capabilities": [],
+        "services": [],
+        "tools": [],
+        "inputs": [],
+        "unapplied": [],
+    }
+    if not data["sealed"]:
+        return data
+    claims = _claim_index(run)
+
+    # Contradictions, from the parts (the pass's resolution) with the ruled one.
+    ruled_c = {e.get("id"): e for e in data["rulings"]["contradictions"]}
+    contradictions = []
+    for path in list_json(run.contradictions_dir):
+        part = _mapping(_quietly(path))
+        for c in _dicts(part.get("contradictions")):
+            ruling = ruled_c.get(c.get("id"))
+            contradictions.append(
+                {
+                    "id": c.get("id"),
+                    "subject_id": part.get("subject_id"),
+                    "nature": c.get("nature"),
+                    "rationale": c.get("rationale"),
+                    "model_resolution": c.get("resolution"),
+                    "resolution": ruling.get("resolution") if ruling else c.get("resolution"),
+                    "ruled": bool(ruling),
+                    "claim_a": claims.get(c.get("claim_a"), {"id": c.get("claim_a")}),
+                    "claim_b": claims.get(c.get("claim_b"), {"id": c.get("claim_b")}),
+                }
+            )
+    data["contradictions"] = contradictions
+
+    # A contradiction ruling reaches the world model only once the passes that
+    # model it have re-run. It is "unapplied" while any of their partials is older
+    # than the ruling -- a file-time comparison, the console's own staleness test.
+    readers = [
+        run.capabilities_part,
+        run.outcomes_part,
+        run.entities_part,
+        run.goals_part,
+        run.gaps_part,
+        run.services_part,
+    ]
+    for entry in data["rulings"]["contradictions"]:
+        when = _stamp(entry.get("recorded_at"))
+        stale = [
+            p.name for p in readers if p.is_file() and when is not None and p.stat().st_mtime < when
+        ]
+        if stale:
+            data["unapplied"].append({"id": entry.get("id"), "parts_older": stale})
+
+    gaps_part = _dicts(_mapping(_quietly(run.gaps_part)).get("gaps"))
+    accepted = rulings.accepted_gaps(human)
+    ruled_g = {e.get("id"): e for e in data["rulings"]["gaps"]}
+    data["gaps"] = [
+        {
+            "id": g.get("id"),
+            "subject": g.get("subject"),
+            "unknown": g.get("unknown"),
+            "why_it_matters": g.get("why_it_matters"),
+            "suggested_input": g.get("suggested_input"),
+            "model_blocks": _strings(g.get("blocks")),
+            "blocks": _strings((ruled_g.get(g.get("id")) or {}).get("blocks"))
+            or _strings(g.get("blocks")),
+            "accepted": g.get("id") in accepted,
+            "ruled": g.get("id") in ruled_g,
+        }
+        for g in gaps_part
+    ]
+
+    services_doc = _mapping(_quietly(run.services_part))
+    model_services = _dicts(services_doc.get("services")) if services_doc else None
+    effective, _ = rulings.effective_services(run, model_services, human)
+    tools = sorted(rulings.declared_tools(effective) or [])
+    data["tools"] = tools
+    data["services"] = [
+        {
+            "id": s.get("id"),
+            "statement": s.get("statement"),
+            "grouping_evidence": _strings(s.get("grouping_evidence")),
+            "tools": [
+                {"name": t.get("name"), "schema_disagreement": t.get("schema_disagreement")}
+                for t in _dicts(s.get("tools"))
+            ],
+            "interface": (run.interfaces_dir / f"{s.get('id')}.json").is_file(),
+        }
+        for s in _dicts(effective or [])
+    ]
+
+    world = _mapping(_quietly(run.world_model))
+    sealed_caps = {c.get("id"): c for c in _dicts(world.get("capabilities"))}
+    ruled_k = {e.get("id"): e for e in data["rulings"]["capabilities"]}
+    caps = []
+    for c in _dicts(_mapping(_quietly(run.capabilities_part)).get("capabilities")):
+        cid = c.get("id")
+        effective_binding = _mapping(sealed_caps.get(cid, {}).get("binding")) or _mapping(
+            c.get("binding")
+        )
+        ruling = ruled_k.get(cid) or {}
+        if ruling.get("ruling") == "bind":
+            effective_binding = _mapping(ruling.get("binding"))
+        caps.append(
+            {
+                "id": cid,
+                "operation": c.get("operation"),
+                "model_binding": _mapping(c.get("binding")) or None,
+                "binding": effective_binding or None,
+                "accepted_unbound": ruling.get("ruling") == "accept_unbound",
+                "ruled": bool(ruling),
+                "outcome_classes": len(_dicts(sealed_caps.get(cid, {}).get("outcome_classes"))),
+                "sources": sorted(
+                    {claims.get(k, {}).get("artifact_id", "?") for k in _strings(c.get("claims"))}
+                ),
+            }
+        )
+    data["capabilities"] = caps
+
+    try:
+        data["inputs"] = _dicts(claim_utilisation(run).get("artifacts"))
+    except (UsageError, OSError):
+        data["inputs"] = []
+
+    by_resolution: dict[str, int] = {}
+    for c in contradictions:
+        by_resolution[c["resolution"]] = by_resolution.get(c["resolution"], 0) + 1
+    blocking = [g for g in data["gaps"] if g["blocks"] and not g["accepted"]]
+    data["summary"] = {
+        "capabilities": len(caps),
+        "drivable": sum(1 for c in caps if (c["binding"] or {}).get("tool")),
+        "capability_cells": _mapping(world.get("denominator")).get("capability_cells"),
+        "contradictions": len(contradictions),
+        "by_resolution": by_resolution,
+        "gaps": len(data["gaps"]),
+        "gaps_blocking": len(blocking),
+        "services": len(data["services"]),
+        "rulings": sum(len(v) for v in data["rulings"].values()),
+        "unapplied": len(data["unapplied"]),
+    }
+
+    needs: list[dict] = []
+    order = {"unresolved": 0, "both_possible": 1, "preferred_a": 2, "preferred_b": 2}
+    for c in sorted(
+        contradictions, key=lambda c: (order.get(c["model_resolution"], 3), str(c["id"]))
+    ):
+        needs.append(
+            {
+                "id": f"contradiction:{c['id']}",
+                "kind": "contradiction",
+                "ref": c["id"],
+                "title": f"Contradiction {c['id']}: {c['resolution'].replace('_', ' ')}",
+                "detail": c["nature"] or "",
+            }
+        )
+    for g in data["gaps"]:
+        state = "accepted" if g["accepted"] else ("blocks " + ", ".join(g["blocks"]))
+        needs.append(
+            {
+                "id": f"gap:{g['id']}",
+                "kind": "gap",
+                "ref": g["id"],
+                "title": f"Gap {g['id']} ({state}): {g['unknown'] or ''}",
+                "detail": g["why_it_matters"] or "",
+            }
+        )
+    for c in caps:
+        if (c["binding"] or {}).get("tool"):
+            continue
+        needs.append(
+            {
+                "id": f"capability:{c['id']}",
+                "kind": "unbound_capability",
+                "ref": c["id"],
+                "title": f"Not testable: {c['id']}"
+                + (" (accepted)" if c["accepted_unbound"] else " has no tool binding"),
+                "detail": c["operation"] or "",
+            }
+        )
+    for s in data["services"]:
+        disagreements = [t for t in s["tools"] if t["schema_disagreement"]]
+        weak = not s["grouping_evidence"] or s["grouping_evidence"] == ["sole_service_in_run"]
+        if disagreements or (weak and len(data["services"]) > 1):
+            needs.append(
+                {
+                    "id": f"service:{s['id']}",
+                    "kind": "service",
+                    "ref": s["id"],
+                    "title": f"Service {s['id']}: "
+                    + (
+                        "tool schemas disagree"
+                        if disagreements
+                        else "grouping has no shared evidence"
+                    ),
+                    "detail": s["statement"] or "",
+                }
+            )
+    for row in data["inputs"]:
+        if row.get("total") and not row.get("cited"):
+            needs.append(
+                {
+                    "id": f"input:{row.get('artifact_id')}",
+                    "kind": "unused_input",
+                    "ref": row.get("artifact_id"),
+                    "title": f"Input {row.get('artifact_id')} contributed none of its "
+                    f"{row.get('total')} claims",
+                    "detail": "No reconcile pass cited it. If it is outside the target, "
+                    "`rubrica waive` records that; otherwise a pass missed it.",
+                }
+            )
     data["needs_you"] = needs
     return data

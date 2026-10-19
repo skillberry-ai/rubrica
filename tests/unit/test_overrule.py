@@ -370,7 +370,7 @@ def test_gate_brief_json_parses_and_an_unbuilt_gate_is_exit_two(tmp_path, capsys
     code = cli.main(["gate-brief", "--run", str(run.root), "--gate", "0", "--format", "json"])
     assert code == 0
     assert json.loads(capsys.readouterr().out)["gate"] == 0
-    code = cli.main(["gate-brief", "--run", str(run.root), "--gate", "1", "--format", "json"])
+    code = cli.main(["gate-brief", "--run", str(run.root), "--gate", "2", "--format", "json"])
     out = capsys.readouterr()
     assert code == 2
     assert out.out == ""

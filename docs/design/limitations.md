@@ -2945,11 +2945,11 @@ that never saw the override. Re-dispatching the audit after an override would
 hand a stage a human's ruling as input, which is the gate-0 argument run
 backwards.
 
-**Gates 1 to 3 have no equivalent yet.** Gate 1 is corrected by the hand-edit
-`reconcile-seal` already invites; gates 2 and 3 offer approval, feedback that
-reaches `decisions.md` (which no stage reads), `set-limit` and `waive`, and no
+**Gates 2 and 3 have no equivalent yet.** Gate 1 now has `rubrica rule` (see
+the entry below). Gates 2 and 3 offer approval, feedback that reaches
+`decisions.md` (which no stage reads), `set-limit` and `waive`, and no
 structured way to drop a scenario or overturn a verdict. `gate-brief --format
-json` is built for gate 0 only and refuses the others at exit 2.
+json` is built for gates 0 and 1 and refuses the others at exit 2.
 
 What `gate-brief --format json` puts under `needs_you` is chosen by fixed rules
 over fields on disk, never by a model, and those rules are editorial: a decline
