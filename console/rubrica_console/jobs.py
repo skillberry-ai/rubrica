@@ -182,6 +182,7 @@ class _RunState:
             "accepted_findings": [],
             "attempts": {},
             "used": {},
+            "incomplete": {},
         }
         try:
             loaded = json.loads(self.ledger_path.read_text(encoding="utf-8"))
@@ -201,6 +202,7 @@ class _RunState:
             reseeded=set(self.data["reseeded"]),
             failed=set(self.data["failed"]),
             accepted=set(self.data["accepted"]),
+            incomplete={k: set(v) for k, v in self.data["incomplete"].items()},
         )
 
 
@@ -232,6 +234,8 @@ class Console:
         self._procs: dict[str, set[subprocess.Popen]] = {}
         self._cancel: set[str] = set()
         self._failfast: dict[str, str] = {}
+        # job id -> the step id it is running now, for booking unfinished dispatches.
+        self._running_step: dict[str, str] = {}
         self._states: dict[str, _RunState] = {}
         self._skills_checked = False
         self._load_jobs()
@@ -541,6 +545,8 @@ class Console:
             attempts[step.id] = attempts.get(step.id, 0) + 1 if repair else 1
             findings_from = state.data["failed"].get(step.id) if repair else None
             state.save()
+        with self._lock:
+            self._running_step[job.id] = step.id
         try:
             if step.calls_model:
                 self._preflight(job)
@@ -550,6 +556,14 @@ class Console:
                 self._op(job, run, step, op, opts, findings_from)
         except _Stop as stop:
             job.message = stop.message
+            if stop.status == INTERRUPTED and repair:
+                # A repair whose dispatch never finished was not a repair: give the
+                # attempt back, so the one repair is still there to spend.
+                with self._lock:
+                    state.data["attempts"][step.id] = max(
+                        1, state.data["attempts"].get(step.id, 1) - 1
+                    )
+                    state.save()
             if stop.status == FAILED:
                 with self._lock:
                     state.data["failed"][step.id] = job.findings_file
@@ -833,6 +847,7 @@ class Console:
             t.start()
         for t in threads:
             t.join()
+        unfinished = self._book_unfinished(job, stage, ids)
         if job.id in self._failfast:
             raise _Stop(HALTED, self._failfast.pop(job.id))
         if job.id in self._cancel:
@@ -840,11 +855,50 @@ class Console:
         failed = [m for m in job.members.values() if m.id.startswith(stage) and m.status == HALTED]
         if any(m.exit == USAGE for m in failed):
             raise _Stop(HALTED, f"{stage}: the dispatch script refused (exit 2); see its log")
-        if failed:
-            # A member that did not finish leaves its slice missing; the gates below
-            # will name it, and running the step again resumes only the missing ones.
-            job.message = f"{len(failed)} {stage} dispatch(es) did not finish"
+        if unfinished:
+            # Stop here, before validate and check-refs: they would report the
+            # missing output as a stage defect, mark the step failed and offer a
+            # repair -- for what was a lost connection. Resume re-runs only these.
+            errors = {m.error for m in failed if m.error}
+            why = f": {sorted(errors)[0]}" if len(errors) == 1 else ""
+            raise _Stop(
+                INTERRUPTED,
+                f"{len(unfinished)} of {len(ids)} {stage} dispatch(es) did not finish{why}. "
+                "Nothing is wrong with the run: Resume re-runs only those.",
+            )
         self._persist(job)
+
+    def _book_unfinished(self, job: Job, stage: str, ids: list[str | None]) -> list[str]:
+        """Record in the ledger which dispatches of this step finished and which did not.
+
+        A dispatch that exited non-zero (other than the script's own refusal, exit 2)
+        or was killed after it started did not finish. It is booked as unfinished
+        even if it wrote an output file -- it may have written half of one -- and a
+        dispatch that exits 0 later takes it off the list. Returns this fan-out's
+        unfinished member ids ("" for a single dispatch).
+        """
+        step_id = self._running_step.get(job.id)
+        done: set[str] = set()
+        unfinished: set[str] = set()
+        for member_id in ids:
+            key = f"{stage}:{member_id}" if member_id else stage
+            member = job.members.get(key)
+            if member is None or member.exit is None:
+                continue  # never started: its output is missing, and disk says so
+            if member.exit == CLEAN:
+                done.add(member_id or "")
+            elif member.exit != USAGE:
+                unfinished.add(member_id or "")
+        if step_id is not None:
+            with self._lock:
+                state = self._state(job.run)
+                current = set(state.data["incomplete"].get(step_id, [])) - done | unfinished
+                if current:
+                    state.data["incomplete"][step_id] = sorted(current)
+                else:
+                    state.data["incomplete"].pop(step_id, None)
+                state.save()
+        return sorted(unfinished)
 
     def _member(self, job: Job, member: Member, argv: list[str], env: dict) -> None:
         with self._sem:

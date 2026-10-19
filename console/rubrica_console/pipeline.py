@@ -130,6 +130,9 @@ class Step:
     # Facts the UI shows beside a step: a gate's blocking gaps, a round's verdict.
     notes: list[str] = field(default_factory=list)
     done_on_disk: bool = False
+    # Dispatches of this step that did not finish last time (see Ledger.incomplete):
+    # what "Resume" runs.
+    unfinished: list[str] = field(default_factory=list)
 
     @property
     def summary(self) -> str:
@@ -157,6 +160,7 @@ class Step:
             "recipe": self.recipe,
             "notes": self.notes,
             "calls_model": self.calls_model,
+            "unfinished": self.unfinished,
         }
 
 
@@ -171,11 +175,16 @@ class Ledger:
     artifact is on disk, because a stage whose gate is red is not finished.
     `accepted`: step ids a human ruled finished as they stand -- a fan-out whose
     remaining members refused, say. Recorded in decisions.md when it is set.
+    `incomplete`: step id -> the members whose dispatch did not finish (`""` for a
+    single-dispatch step) -- a lost connection, a killed process. Such a member is
+    still to do even when its output file exists, because a dispatch that died may
+    have written half of it; a later dispatch that finishes takes it off the list.
     """
 
     reseeded: set[str] = field(default_factory=set)
     failed: set[str] = field(default_factory=set)
     accepted: set[str] = field(default_factory=set)
+    incomplete: dict[str, set[str]] = field(default_factory=dict)
 
 
 def _quietly(path: Path):
@@ -809,6 +818,9 @@ def steps(run: RunPaths, ledger: Ledger | None = None) -> list[Step]:
         if step.kind == GATE and step.gate == 0 and step.done_on_disk and 0 not in approved:
             step.reason = "passed: intake has admitted the inputs"
 
+    for step in out:
+        _apply_unfinished(step, ledger.incomplete.get(step.id))
+
     first_open = True
     for step in out:
         effective_done = (step.done_on_disk or step.id in ledger.accepted) and (
@@ -827,6 +839,33 @@ def steps(run: RunPaths, ledger: Ledger | None = None) -> list[Step]:
         else:
             step.status = WAITING
     return out
+
+
+def _apply_unfinished(step: Step, unfinished: set[str] | None) -> None:
+    """Put back on the to-do list every dispatch of `step` that did not finish.
+
+    The step is then not done, whatever is on disk, and its recipe re-dispatches
+    exactly those members -- plus any whose output is simply missing -- and no
+    member that finished. That is what makes a lost connection resumable rather
+    than a failure: nothing that completed is paid for twice.
+    """
+    if not unfinished or step.kind not in MODEL_KINDS:
+        return
+    members = sorted(m for m in unfinished if m)
+    step.unfinished = members or [""]
+    step.done_on_disk = False
+    if members:
+        step.members_done = [m for m in step.members_done if m not in unfinished]
+        step.members_todo = sorted(set(step.members_todo) | set(members))
+        for op in step.recipe:
+            if op.get("op") == "fanout":
+                op["ids"] = sorted(set(op.get("ids") or []) | set(members))
+    count = len(step.unfinished)
+    step.reason = (
+        f"interrupted: {count} dispatch{'es' if count != 1 else ''} did not finish "
+        "(a lost connection, or the process was stopped); Resume runs only "
+        f"{'those' if count != 1 else 'that one'}, and nothing that finished"
+    )
 
 
 def find(all_steps: list[Step], step_id: str) -> Step | None:

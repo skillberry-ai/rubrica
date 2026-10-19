@@ -130,6 +130,20 @@ run's name to confirm, and it is refused while a job is still running on the run
 (cancel it first). Dispatch transcripts in the lab directory are shared between
 runs and are left alone.
 
+## When the connection drops
+
+A dispatch that does not finish — the network dropped, the laptop slept, the
+process was stopped — is an **interruption**, not a failure. The step stops
+there, before its checks, so nothing is reported as a stage defect and no repair
+is spent. The page says **Interrupted — nothing is lost**, and **Resume** runs
+again only the dispatches that did not finish: every member that finished is
+kept and not paid for twice. A member that died after writing part of its file
+is redone too, because the console remembers which dispatches did not finish
+rather than trusting that a file on disk is complete. If a repair is the thing
+interrupted, the repair is given back. **Run to next gate** resumes the same way.
+If the console itself stopped, its jobs show as interrupted when it starts again,
+and the step resumes from what is on disk.
+
 ## When a check fails
 
 A check that exits 1 marks the step **failed** and keeps its findings. Then:
@@ -141,7 +155,8 @@ A check that exits 1 marks the step **failed** and keeps its findings. Then:
 - **Accept these findings and continue** records your reason in `decisions.md` and
   treats those exact lines as accepted from then on. A later check that prints the
   same line no longer fails; a new line still does.
-- **Run again from scratch** is there when you have fixed something by hand.
+- **Run again** is there when you have fixed something by hand. For a fan-out it
+  dispatches only the members with no finished output.
 
 A code step (a seal, for instance) offers no repair: its findings name an
 artifact an earlier stage wrote, which is where the fix belongs.

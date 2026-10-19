@@ -111,6 +111,10 @@ _FAKE = textwrap.dedent(
     print(json.dumps({"type": "assistant", "message": {"content": [use]}}))
     print("transcript  /dev/null")
     print("cost        $0.25 over 3 turns, ceiling none")
+    if key in os.environ.get("FAKE_WRITE_THEN_DIE", "").split():
+        # The connection drops after the output was written: the file is there,
+        # and the dispatch did not finish.
+        print("API Error: Connection error.", file=sys.stderr); sys.exit(1)
     """
 )
 
@@ -138,6 +142,7 @@ def fake(tmp_path, reference, monkeypatch) -> dict:
         "FAKE_EXIT2",
         "FAKE_SLEEP",
         "FAKE_EXIT1_AFTER_SPEND",
+        "FAKE_WRITE_THEN_DIE",
     ):
         monkeypatch.delenv(var, raising=False)
     return {"script": script, "log": log}
@@ -486,6 +491,83 @@ def test_gate_0_changes_refuse_an_incomplete_request(tmp_path, fake, changes, no
     console = _console(tmp_path, run.root.parent, fake)
     with pytest.raises(ConsoleError, match=message):
         console.gate0_changes(run.root.name, changes, note)
+
+
+def _ledger(console, name):
+    return console._state(name).data
+
+
+def test_a_fan_out_cut_off_midway_is_interrupted_and_resumes_only_the_rest(
+    tmp_path, fake, intake_run, monkeypatch
+):
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    name = intake_run.root.name
+    monkeypatch.setenv("FAKE_FAIL", "extract:notes-md extract:trace-json")
+    job = console.wait(console.run_step(name, "extract", OPTS).id, timeout=60)
+    assert job.status == INTERRUPTED
+    assert "2 of 3 extract dispatch(es) did not finish" in job.message
+    # No check ran, so nothing was booked as a stage defect and no repair was spent.
+    assert [e.label for e in job.entries] == ["check-skills"]
+    step = pipeline.find(console.steps(name), "extract")
+    assert step.status == pipeline.READY
+    assert step.unfinished == ["notes-md", "trace-json"]
+    assert "extract" not in _ledger(console, name)["failed"]
+
+    monkeypatch.delenv("FAKE_FAIL")
+    before = len(_calls(fake))
+    job = console.wait(console.run_step(name, "extract", OPTS).id, timeout=60)
+    assert job.status == SUCCEEDED, job.message
+    assert sorted(c["member"] for c in _calls(fake)[before:]) == ["notes-md", "trace-json"]
+    assert pipeline.find(console.steps(name), "extract").status == pipeline.DONE
+    assert "extract" not in _ledger(console, name)["incomplete"]
+
+
+def test_a_dispatch_that_wrote_its_file_and_then_died_is_redone(
+    tmp_path, fake, intake_run, monkeypatch
+):
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    name = intake_run.root.name
+    monkeypatch.setenv("FAKE_WRITE_THEN_DIE", "extract:notes-md")
+    job = console.wait(console.run_step(name, "extract", OPTS).id, timeout=60)
+    assert job.status == INTERRUPTED
+    assert intake_run.claims("notes-md").is_file(), "the half-finished output is on disk"
+    step = pipeline.find(console.steps(name), "extract")
+    assert step.unfinished == ["notes-md"] and "notes-md" in step.members_todo
+    monkeypatch.delenv("FAKE_WRITE_THEN_DIE")
+    before = len(_calls(fake))
+    job = console.wait(console.run_step(name, "extract", OPTS).id, timeout=60)
+    assert job.status == SUCCEEDED, job.message
+    assert [c["member"] for c in _calls(fake)[before:]] == ["notes-md"]
+
+
+def test_a_single_dispatch_cut_off_is_not_done_even_with_its_old_output(
+    tmp_path, fake, monkeypatch
+):
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    console = _console(tmp_path, run.root.parent, fake)
+    name = run.root.name
+    monkeypatch.setenv("FAKE_WRITE_THEN_DIE", "reconcile-capabilities")
+    job = console.wait(console.run_step(name, "reconcile-capabilities", OPTS).id, timeout=60)
+    assert job.status == INTERRUPTED
+    step = pipeline.find(console.steps(name), "reconcile-capabilities")
+    assert step.status == pipeline.READY and step.unfinished == [""]
+    assert "interrupted" in step.reason
+    monkeypatch.delenv("FAKE_WRITE_THEN_DIE")
+    job = console.wait(console.run_step(name, "reconcile-capabilities", OPTS).id, timeout=60)
+    assert job.status == SUCCEEDED, job.message
+    assert pipeline.find(console.steps(name), "reconcile-capabilities").status == pipeline.DONE
+
+
+def test_an_interrupted_repair_gives_the_repair_back(tmp_path, fake, intake_run, monkeypatch):
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    name = intake_run.root.name
+    monkeypatch.setenv("FAKE_BAD", "extract:notes-md")
+    job = console.wait(console.run_step(name, "extract", OPTS).id, timeout=60)
+    assert job.status == FAILED
+    monkeypatch.setenv("FAKE_FAIL", "extract:notes-md")
+    job = console.wait(console.run_step(name, "extract", OPTS, repair=True).id, timeout=60)
+    assert job.status == INTERRUPTED
+    assert _ledger(console, name)["attempts"]["extract"] == 1, "the one repair is still there"
 
 
 def test_smoke_never_runs_without_a_roster(tmp_path, fake):

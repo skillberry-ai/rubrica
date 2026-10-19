@@ -840,16 +840,20 @@ function renderNext() {
   const failed = nxt.status === "failed";
   const gate = nxt.kind === "gate";
   const needsInput = nxt.id === "smoke";
+  const cut = (nxt.unfinished || []).length;
   put(box, h("div", { class: `next-card ${failed ? "failed" : gate ? "gate" : ""}` },
     h("div", { class: "what" },
-      h("div", { class: `k ${failed ? "s-failed" : gate ? "s-gate" : "s-ready"}` }, failed ? "Needs attention" : gate ? "Waiting for you" : "Next step"),
+      h("div", { class: `k ${failed ? "s-failed" : gate ? "s-gate" : "s-ready"}` }, failed ? "Needs attention" : gate ? "Waiting for you" : cut ? "Interrupted — nothing is lost" : "Next step"),
       h("div", { class: "t truncate" }, nxt.title),
       h("div", { class: "d" }, failed ? "A check reported findings: repair, accept or re-run them."
+        : cut ? `${cut === 1 && !nxt.unfinished[0] ? "Its dispatch" : `${cut} dispatch(es)`} did not finish, probably a lost connection. Resume runs only ${cut === 1 ? "that one" : "those"}.`
         : gate ? "Read the brief, then approve with a note."
         : needsInput ? "Needs an agents roster file — choose one on the step."
         : nxt.calls_model ? "Calls a model." : "Code only — no model.")),
     h("button", { class: needsInput ? "primary big" : "", onclick: goto(nxt.id) }, gate || failed || needsInput ? "Open" : "Details"),
-    !gate && !failed && !needsInput ? h("button", { class: "primary big", onclick: runToGate, disabled: nxt.calls_model && !STATE.prompt_ready,
+    cut && !failed ? h("button", { class: "primary big", onclick: () => runStep(nxt), disabled: !STATE.prompt_ready,
+      title: !STATE.prompt_ready ? STATE.prompt_reason : "" }, `Resume ▸`) : null,
+    !gate && !failed && !needsInput ? h("button", { class: cut ? "big" : "primary big", onclick: runToGate, disabled: nxt.calls_model && !STATE.prompt_ready,
       title: nxt.calls_model && !STATE.prompt_ready ? STATE.prompt_reason : "" }, "Run to next gate ▸") : null));
 }
 
@@ -934,11 +938,13 @@ async function runStep(step, repair = false) {
   }
   if (step.calls_model) {
     const avg = averageCost();
-    const what = repair ? "Repair" : step.status === "done" ? "Run again" : "Run";
+    const resuming = !repair && ((step.unfinished || []).length || (step.members_todo.length && step.members_done.length));
+    const what = repair ? "Repair" : step.status === "done" ? "Run again" : resuming ? "Resume" : "Run";
     const ok = await confirmDialog(`${what}: ${step.title}`, [
       h("p", {}, h("strong", {}, repair ? `up to ${step.members_total || 1} model dispatch(es) — only the members the findings name` : `${n} model dispatch(es)`), ` using ${RUN.settings.model} at ${RUN.settings.effort} effort` + (RUN.settings.budget ? `, capped at $${RUN.settings.budget} each.` : ".")),
       repair ? h("p", {}, "The findings from the failed check are attached to the dispatch word for word. This is the step's one repair.") : null,
       step.status === "done" ? h("p", {}, "This step is already done. Running it again overwrites its output.") : null,
+      resuming ? h("p", {}, "Only the dispatches that did not finish run again; everything that finished is kept and not paid for twice.") : null,
       avg ? h("p", { class: "muted" }, `Dispatches in this run have averaged ${money(avg)} each.`) : null,
     ], what);
     if (!ok) return;
@@ -1012,8 +1018,14 @@ function staticDetail(step) {
       const roster = h("input", { id: "smoke-roster", style: "flex:1;min-width:240px", placeholder: "agents roster file (never invented)" });
       actions.append(roster, h("button", { onclick: async () => { const p = await pickOne({ mode: "file", start: STATE.root }); if (p) roster.value = p[0]; } }, "Choose…"));
     }
+    // A fan-out re-run only dispatches the members with no finished output, so
+    // a step that was cut off part-way resumes rather than starting over.
+    const left = step.members_todo.length;
+    const resumable = (step.unfinished || []).length || (left && step.members_done.length);
     actions.append(h("button", { class: step.status === "done" ? "" : "primary", disabled: !canRun || noModel, onclick: () => runStep(step) },
-      step.status === "done" ? "Run again" : step.status === "failed" ? "Run again from scratch" : "▸ Run"));
+      step.status === "done" ? "Run again"
+        : resumable ? `▸ Resume${left ? ` (${left} left)` : ""}`
+        : step.status === "failed" ? (step.members_total ? "Run the missing members again" : "Run again") : "▸ Run"));
     if (failed) {
       actions.append(h("button", { class: "primary", disabled: busy || !step.calls_model || attempts >= 2, title: attempts >= 2 ? "already repaired once" : step.calls_model ? "re-dispatch with the findings attached" : "a code step's findings name an upstream artifact", onclick: () => runStep(step, true) }, "Repair (one attempt)"));
     }
