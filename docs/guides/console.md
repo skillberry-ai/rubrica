@@ -166,14 +166,12 @@ fix a harness or filesystem problem.
 
 ## Gates
 
-Approving a gate needs no note; with none, `decisions.md` records that it was
-approved in the console.
-
-The gate 0 page is built so that **you only change what looks
+Gates 0 and 1 have their own pages, built so that **you only change what looks
 wrong**: anything you leave alone stays as the stage decided. A reason is
 optional on every change — type one, click a suggested one, or leave it blank,
 and the record says "no reason given (console)". A decline you don't classify
-gets the code for "doesn't help the tests". **Looks right** on a
+gets the code for "doesn't help the tests". Approving needs no note; with none,
+`decisions.md` records that it was approved in the console. **Looks right** on a
 card records that you checked it and agree, without changing anything, and those
 ticks go into your approval line. The page shows the first few cards and the
 rest behind **Show more**.
@@ -197,6 +195,25 @@ rest behind **Show more**.
   **Approve with N changes** does the same and then approves. Your rulings in
   force are listed with **Undo**. Triage's own decisions stay on disk beside
   yours, and once gate 0 is approved the page is read-only.
+
+**Gate 1** has its own page too, drawn from `gate-brief --gate 1 --format json`:
+
+- A summary strip: testable capabilities and cells, unresolved contradictions,
+  gaps that stop the run, services, your rulings.
+- **Needs you**: each contradiction with its two claims side by side and a
+  resolution select; each gap with **Accept — don't stop the run** or the
+  stages it stops; each capability with no tool binding, with a tool to bind it
+  to (and its fixed arguments) or **Accept as not testable**; services whose
+  grouping is weak, with **move to…**, **merge into…** and **split**; inputs no
+  pass cited. **Accept all gaps** rules that none of them stops the run in one
+  click.
+- **All services**, closed by default, with the same regrouping controls.
+- **Save rulings** records each with `rubrica rule`, re-seals the world model,
+  re-derives the interface documents, and re-checks. **Approve with N rulings**
+  does the same and then approves.
+- After a contradiction ruling, a banner says the passes that modelled the old
+  resolution have not re-run, and **Re-run the 6 passes** does that (six model
+  calls), then re-seals.
 
 The other gates show their `gate-brief` split into sections, one card each. A long section
 shows its first lines and can be filtered, and lines of the form `name: 12/40 ...`

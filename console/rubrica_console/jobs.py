@@ -1134,6 +1134,169 @@ class Console:
             title = f"Save {len(changes)} gate 0 change(s)"
         return self._human(name, title, commands)
 
+    def gate1_changes(
+        self, name: str, changes: list, note: str = "", *, approve: bool = False
+    ) -> Job:
+        """A human's gate-1 rulings from the page: rule, re-seal, re-check, maybe approve.
+
+        Every change is one `rubrica rule` call -- the console writes no run file --
+        followed by the seal that applies them, `synthesise-interfaces` when the run
+        has services (a regrouping changes its documents), `validate` and
+        `check-refs`. A contradiction ruling is applied to the world model's record
+        here but reaches what the passes modelled only through `rerun_for_rulings`.
+        """
+        self._ready_gate(name, 1)
+        if not isinstance(changes, list):
+            raise ConsoleError("changes must be a list")
+        text = " ".join((note or "").split())
+        if not changes and not approve and not text:
+            raise ConsoleError("nothing to save: no ruling was made and no note was written")
+        run = self.run_paths(name)
+        rid = ["--run", str(run.root)]
+        commands = [["rule", *rid, *self._rule_args(c)] for c in changes]
+        if commands:
+            commands.append(["reconcile-seal", *rid])
+            if run.services_part.is_file():
+                commands.append(["synthesise-interfaces", *rid])
+            commands += [["validate", "--stage", "reconcile-seal", *rid], ["check-refs", *rid]]
+        if approve:
+            commands += self._approve_commands(name, 1, self._approval_note(text, len(changes)))
+            title = f"Approve gate 1 with {len(changes)} ruling(s)"
+        else:
+            if text:
+                commands.append(
+                    ["decide", *rid, "--note", f"console: feedback on gate 1, not approved: {text}"]
+                )
+            title = f"Save {len(changes)} gate 1 ruling(s)"
+        return self._human(name, title, commands)
+
+    @staticmethod
+    def _rule_args(change: object) -> list[str]:
+        """One page change as `rubrica rule` arguments; the CLI does every real check."""
+        if not isinstance(change, dict):
+            raise ConsoleError("each change must be an object")
+        reason = Console._reason(change.get("reason"))
+        kind, ref, action = change.get("kind"), change.get("ref"), change.get("action")
+        if not isinstance(ref, str) or not ref:
+            raise ConsoleError("each change names what it rules on")
+        if action == "clear":
+            flag = {
+                "contradiction": "--contradiction",
+                "gap": "--gap",
+                "capability": "--capability",
+                "service": "--service-op",
+            }.get(kind)
+            if flag is None:
+                raise ConsoleError(f"cannot clear a ruling of kind {kind!r}")
+            return [flag, ref, "--clear", "--reason", reason]
+        if kind == "contradiction":
+            return [
+                "--contradiction",
+                ref,
+                "--resolution",
+                str(change.get("resolution")),
+                "--reason",
+                reason,
+            ]
+        if kind == "gap":
+            if action == "accept":
+                return ["--gap", ref, "--accept", "--reason", reason]
+            blocks = change.get("blocks") or []
+            if not isinstance(blocks, list) or not blocks:
+                raise ConsoleError(f"{ref}: choose at least one stage it blocks")
+            return [
+                "--gap",
+                ref,
+                *[a for b in blocks for a in ("--blocks", str(b))],
+                "--reason",
+                reason,
+            ]
+        if kind == "capability":
+            if action == "accept_unbound":
+                return ["--capability", ref, "--accept-unbound", "--reason", reason]
+            args = ["--capability", ref, "--bind-tool", str(change.get("tool") or "")]
+            if change.get("fixed_args"):
+                args += ["--fixed-args", str(change["fixed_args"])]
+            return [*args, "--reason", reason]
+        if kind == "service":
+            if action == "move_tool":
+                return ["--move-tool", ref, "--to", str(change.get("to") or ""), "--reason", reason]
+            if action == "merge":
+                return [
+                    "--merge-service",
+                    ref,
+                    "--into",
+                    str(change.get("into") or ""),
+                    "--reason",
+                    reason,
+                ]
+            if action == "split":
+                tools = change.get("tools") or []
+                return [
+                    "--split-service",
+                    ref,
+                    *[a for t in tools for a in ("--tool", str(t))],
+                    "--new-id",
+                    str(change.get("new_id") or ""),
+                    "--statement",
+                    str(change.get("statement") or ""),
+                    "--reason",
+                    reason,
+                ]
+        raise ConsoleError(f"unknown change: {kind} {action}")
+
+    def rerun_for_rulings(self, name: str, opts: Options) -> Job:
+        """Re-dispatch the passes that model contradictions, then re-seal and re-check.
+
+        Each pass is dispatched and validated, never check-refs'd on its own: until
+        the seal re-runs, `check_partials` reports every re-written partial as edited
+        since the last seal, which is the point of the re-run rather than a defect.
+        One `check-refs` closes the job once the seal has caught up.
+        """
+        self._ready_gate(name, 1)
+        run = self.run_paths(name)
+        present = {
+            "reconcile-capabilities": run.capabilities_part,
+            "reconcile-outcomes": run.outcomes_part,
+            "reconcile-entities": run.entities_part,
+            "reconcile-goals": run.goals_part,
+            "reconcile-gaps": run.gaps_part,
+            "reconcile-services": run.services_part,
+        }
+        recipe: list[dict] = []
+        for stage, part in present.items():
+            if part.is_file():
+                recipe += [
+                    {"op": "dispatch", "stage": stage},
+                    {"op": "validate", "stage": stage},
+                    {"op": "record", "stage": stage},
+                ]
+        if not recipe:
+            raise ConsoleError("none of the passes that model contradictions has run in this run")
+        # Sealed before the interfaces are re-derived: the synthesise op ends in its
+        # own check-refs, which would report every re-written partial as stale if it
+        # ran ahead of the seal. That op's check-refs is then the closing one.
+        recipe += [
+            {"op": "cli", "args": ["reconcile-seal"]},
+            {"op": "validate", "stage": "reconcile-seal"},
+        ]
+        recipe.append(
+            {"op": "synthesise-interfaces"} if run.services_part.is_file() else {"op": "check-refs"}
+        )
+        step = pipeline.Step(
+            "rerun-for-rulings",
+            "Re-run the passes that model contradictions",
+            pipeline.PROMPT,
+            recipe=recipe,
+        )
+        if not self.prompt_ready():
+            raise ConsoleError(self.prompt_unavailable_reason())
+        job = self._new_job(name, step, opts)
+        threading.Thread(
+            target=self._execute, args=(job, step, opts), daemon=True, name=f"rerun-{job.id}"
+        ).start()
+        return job
+
     def gate_feedback(self, name: str, gate: int, note: str) -> Job:
         """Record a human's comments on a gate without approving it.
 

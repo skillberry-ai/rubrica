@@ -490,6 +490,108 @@ def test_gate_0_changes_refuse_an_incomplete_request(tmp_path, fake, changes, no
         console.gate0_changes(run.root.name, changes, note)
 
 
+def test_gate_1_changes_rule_reseal_and_leave_the_gate_open(tmp_path, fake):
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    console = _console(tmp_path, run.root.parent, fake)
+    name = run.root.name
+    assert pipeline.find(console.steps(name), "gate-1").status == pipeline.READY
+    change = {
+        "kind": "contradiction",
+        "ref": "con-missing-semantics",
+        "resolution": "preferred_b",
+        "reason": "the trace is what the target does",
+    }
+    job = console.gate1_changes(name, [change], "read the contradiction")
+    assert job.status == SUCCEEDED, (job.message, [(e.label, e.exit) for e in job.entries])
+    assert [e.label for e in job.entries] == [
+        "rule",
+        "reconcile-seal",
+        "synthesise-interfaces",
+        "validate",
+        "check-refs",
+        "decide",
+    ]
+    world = json.loads(run.world_model.read_text())
+    assert world["contradictions"][0]["resolution"] == "preferred_b"
+    assert pipeline.find(console.steps(name), "gate-1").status == pipeline.READY
+    assert "ruling at gate 1: contradiction con-missing-semantics" in run.decisions.read_text()
+
+
+def test_a_refused_gate_1_ruling_says_why_and_writes_nothing(tmp_path, fake):
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    console = _console(tmp_path, run.root.parent, fake)
+    before = run.world_model.read_bytes()
+    change = {
+        "kind": "capability",
+        "ref": "cap-get-ticket",
+        "action": "bind",
+        "tool": "nope",
+        "reason": "r",
+    }
+    job = console.gate1_changes(run.root.name, [change])
+    assert job.status != SUCCEEDED
+    assert "no service declares tool 'nope'" in job.message
+    assert run.world_model.read_bytes() == before
+    assert not run.rulings.exists()
+
+
+def test_rerun_for_rulings_redispatches_the_passes_then_reseals(tmp_path, fake):
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    console = _console(tmp_path, run.root.parent, fake)
+    name = run.root.name
+    console.gate1_changes(
+        name,
+        [
+            {
+                "kind": "contradiction",
+                "ref": "con-missing-semantics",
+                "resolution": "unresolved",
+                "reason": "r",
+            }
+        ],
+    )
+    job = console.wait(console.rerun_for_rulings(name, OPTS).id, timeout=60)
+    assert job.status == SUCCEEDED, (job.message, [(e.label, e.exit) for e in job.entries])
+    assert [c["stage"] for c in _calls(fake)] == [
+        "reconcile-capabilities",
+        "reconcile-outcomes",
+        "reconcile-entities",
+        "reconcile-goals",
+        "reconcile-gaps",
+        "reconcile-services",
+    ]
+    # Sealed before anything runs check-refs: until the seal catches up, every
+    # re-written partial is reported as edited since the last seal.
+    labels = [e.label for e in job.entries]
+    assert labels.count("check-refs") == 1
+    assert labels.index("reconcile-seal") < labels.index("check-refs") == len(labels) - 1
+
+
+def test_an_accepted_gap_no_longer_blocks_in_the_console(tmp_path, fake):
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    part = json.loads(run.gaps_part.read_text())
+    part["gaps"] = [
+        {
+            "id": "gap-order",
+            "subject": "cap-get-ticket",
+            "unknown": "comment order",
+            "why_it_matters": "nothing to label against",
+            "blocks": ["instantiate"],
+            "claims": ["clm-api-006"],
+        }
+    ]
+    run.gaps_part.write_text(json.dumps(part), encoding="utf-8")
+    console = _console(tmp_path, run.root.parent, fake)
+    name = run.root.name
+    job = console.gate1_changes(
+        name, [{"kind": "gap", "ref": "gap-order", "action": "accept", "reason": "r"}]
+    )
+    assert job.status == SUCCEEDED, (job.message, [(e.label, e.exit) for e in job.entries])
+    assert pipeline.blocking_gaps(run) == []
+    gate = pipeline.find(console.steps(name), "gate-1")
+    assert not any("block a later stage" in n for n in gate.notes)
+
+
 def test_approving_needs_no_note_and_says_so_in_the_record(tmp_path, fake):
     run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
     console = _console(tmp_path, run.root.parent, fake)
@@ -498,7 +600,6 @@ def test_approving_needs_no_note_and_says_so_in_the_record(tmp_path, fake):
     assert (
         "human gate 1 (console): approved in the console, as decided" in run.decisions.read_text()
     )
-
 
 
 def test_a_change_with_no_reason_or_code_is_recorded_as_such(tmp_path, fake):
@@ -515,7 +616,6 @@ def test_a_change_with_no_reason_or_code_is_recorded_as_such(tmp_path, fake):
 
 
 # -- a lost connection is an interruption, not a failure ---------------------------
-
 
 
 def _ledger(console, name):

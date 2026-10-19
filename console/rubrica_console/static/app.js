@@ -1094,6 +1094,7 @@ function gatePanel(step, busy) {
   // file, and the rulings sent as `rubrica overrule`. Every other gate (and gate
   // 0 before triage is sealed) keeps the sectioned text brief.
   if (step.gate === 0) return gate0Panel(step, busy);
+  if (step.gate === 1) return gate1Panel(step, busy);
   return briefPanel(step, busy);
 }
 
@@ -1563,6 +1564,338 @@ function gate0View(step, busy, r) {
       : null,
     full,
     actionsBox,
+  ];
+}
+
+// -- gate 1: interactive ----------------------------------------------------
+//
+// The same contract as gate 0: each change is one `rubrica rule` call on the
+// server, then the seal, interface synthesis and checks re-run. A contradiction
+// ruling also needs the passes that modelled the old resolution to run again;
+// the page says so and offers that re-run, with its cost, rather than hiding it.
+
+const GATE1_KINDS = {
+  contradiction: "Contradiction",
+  gap: "Gap",
+  unbound_capability: "Not testable",
+  service: "Service",
+  unused_input: "Unused input",
+};
+const RESOLUTION_TEXT = {
+  unresolved: "unresolved — model both",
+  preferred_a: "prefer claim A",
+  preferred_b: "prefer claim B",
+  both_possible: "both possible",
+};
+
+function gate1Panel(step, busy) {
+  const box = h("div", {}, h("p", { class: "muted" }, "Loading gate 1…"));
+  api(`/api/runs/${encodeURIComponent(RUN.name)}/gate/1`).then((r) => {
+    if (!r.data || !r.data.sealed) return put(box, ...briefPanel(step, busy));
+    put(box, ...gate1View(step, busy, r));
+  }).catch((e) => put(box, h("div", { class: "banner err" }, e.message)));
+  return [box];
+}
+
+function gate1View(step, busy, r) {
+  const d = r.data;
+  const ready = step.status === "ready" && !d.locked;
+  const key = `rubrica-gate1|${RUN.name}`;
+  let draft = {};
+  try { draft = JSON.parse(localStorage.getItem(key) || "{}") || {}; } catch (_) { draft = {}; }
+  draft.changes = draft.changes || {};
+  draft.comments = draft.comments || {};
+  draft.ok = draft.ok || {};
+  const cardsState = { all: false };
+  const save = () => { try { localStorage.setItem(key, JSON.stringify(draft)); } catch (_) {} paintPending(); paintSummary(); };
+  const byRef = (list) => new Map(list.map((x) => [x.id, x]));
+  const contradictions = byRef(d.contradictions), gaps = byRef(d.gaps), caps = byRef(d.capabilities), services = byRef(d.services);
+  const ruled = (kind, id) => (d.rulings[kind] || []).some((x) => x.id === id);
+
+  const setChange = (k, c) => { if (c) draft.changes[k] = c; else delete draft.changes[k]; save(); };
+  const PRESETS = {
+    contradiction: ["the stated source is right", "what was observed is right", "both really happen"],
+    gap: ["not important for the tests", "has to be answered first"],
+    capability: ["tested through this tool", "outside what we test"],
+    service: ["one backend", "separate backends"],
+  };
+  const reasonBox = (k) => {
+    const c = draft.changes[k];
+    if (!c || !ready) return null;
+    return reasonField(c.reason, (v) => { c.reason = v; save(); }, PRESETS[c.kind] || []);
+  };
+  const undo = (kind, ref) => ready ? h("button", { class: "small", onclick: () => { setChange(`${kind}:${ref}`, { kind, ref, action: "clear", reason: "" }); repaint(); } }, "Undo my ruling") : null;
+  const claimBox = (label, c) => h("div", { class: "g1-claim" }, h("div", { class: "muted small" }, `${label} · ${c.artifact_id || "?"}${c.confidence ? ` · ${c.confidence}` : ""}`),
+    h("div", {}, c.statement || h("span", { class: "muted" }, `(claim ${c.id} not found)`)), h("div", { class: "mono muted small" }, c.id));
+
+  const controls = {
+    contradiction(n) {
+      const c = contradictions.get(n.ref);
+      const k = `contradiction:${n.ref}`;
+      const ch = draft.changes[k];
+      const current = ch && ch.action !== "clear" ? ch.resolution : c.resolution;
+      const sel = h("select", { disabled: !ready, onchange: (e) => {
+        const v = e.target.value;
+        setChange(k, v === c.resolution ? null : { kind: "contradiction", ref: n.ref, resolution: v, reason: (ch || {}).reason || "" });
+        repaint();
+      } }, ...d.resolutions.map((v) => h("option", { value: v, selected: v === current ? true : null }, RESOLUTION_TEXT[v] || v)));
+      return [
+        h("div", { class: "g1-claims" }, claimBox("Claim A", c.claim_a), claimBox("Claim B", c.claim_b)),
+        c.rationale ? h("details", { class: "g0-more" }, h("summary", {}, "Why the model chose this"), h("div", {}, c.rationale)) : null,
+        h("div", { class: "g0-control" }, h("span", { class: "muted small" }, c.ruled ? `model said ${c.model_resolution}; your ruling:` : "Resolution:"), sel, reasonBox(k), c.ruled ? undo("contradiction", n.ref) : null),
+      ];
+    },
+    gap(n) {
+      const g = gaps.get(n.ref);
+      const k = `gap:${n.ref}`;
+      const ch = draft.changes[k];
+      const accepted = ch ? ch.action === "accept" : g.accepted;
+      const blocks = new Set(ch && ch.action === "blocks" ? ch.blocks : g.blocks);
+      const mark = (action, list) => {
+        const same = action === "accept" ? g.accepted : (!g.accepted && JSON.stringify([...list].sort()) === JSON.stringify([...g.blocks].sort()));
+        setChange(k, same ? null : { kind: "gap", ref: n.ref, action, blocks: action === "blocks" ? [...list] : undefined, reason: (ch || {}).reason || "" });
+        repaint();
+      };
+      return [
+        g.suggested_input ? h("div", { class: "small" }, h("b", {}, "Would be answered by: "), g.suggested_input) : null,
+        h("div", { class: "g0-control" },
+          h("div", { class: "seg small" },
+            h("button", { class: accepted ? "on" : "", disabled: !ready, onclick: () => mark("accept") }, "Accept — don't stop the run"),
+            h("button", { class: accepted ? "" : "on", disabled: !ready, onclick: () => mark("blocks", blocks.size ? blocks : new Set(g.model_blocks)) }, "Stops the run")),
+          accepted ? null : h("span", { class: "g1-stages" }, ...d.blockable.map((st) => {
+            const b = h("input", { type: "checkbox", disabled: !ready });
+            b.checked = blocks.has(st);
+            b.onchange = () => { const next = new Set(blocks); if (b.checked) next.add(st); else next.delete(st); mark("blocks", next); };
+            return h("label", { class: "small" }, b, ` ${st}`);
+          })),
+          reasonBox(k), g.ruled ? undo("gap", n.ref) : null),
+      ];
+    },
+    unbound_capability(n) {
+      const c = caps.get(n.ref);
+      const k = `capability:${n.ref}`;
+      const ch = draft.changes[k] || {};
+      const tool = h("select", { disabled: !ready || !d.tools.length, onchange: (e) => {
+        setChange(k, e.target.value ? { kind: "capability", ref: n.ref, action: "bind", tool: e.target.value, fixed_args: ch.fixed_args || "", reason: ch.reason || "" } : null);
+        repaint();
+      } }, h("option", { value: "" }, d.tools.length ? "bind to tool…" : "(no declared tools)"),
+        ...d.tools.map((t) => h("option", { value: t, selected: ch.tool === t ? true : null }, t)));
+      const args = ch.action === "bind" ? h("input", { class: "mono", placeholder: 'fixed args, e.g. {"action": "get_ticket"}', value: ch.fixed_args || "",
+        oninput: (e) => { ch.fixed_args = e.target.value; save(); } }) : null;
+      return [
+        h("div", { class: "small muted" }, `From: ${c.sources.join(", ") || "?"} · ${c.outcome_classes} outcome class(es)`),
+        h("div", { class: "g0-control" }, tool, args,
+          h("button", { class: `small ${ch.action === "accept_unbound" || c.accepted_unbound ? "on" : ""}`, disabled: !ready || c.accepted_unbound,
+            onclick: () => { setChange(k, ch.action === "accept_unbound" ? null : { kind: "capability", ref: n.ref, action: "accept_unbound", reason: ch.reason || "" }); repaint(); } },
+            c.accepted_unbound ? "Accepted as not testable" : "Accept as not testable"),
+          reasonBox(k), c.ruled ? undo("capability", n.ref) : null),
+      ];
+    },
+    service(n) { return serviceControls(n.ref); },
+    unused_input() { return []; },
+  };
+
+  const serviceControls = (sid) => {
+    const s = services.get(sid);
+    if (!s) return [];
+    const others = d.services.filter((x) => x.id !== sid);
+    const out = [h("div", { class: "small" }, s.statement || "")];
+    out.push(h("div", { class: "g1-tools" }, ...s.tools.map((t) => {
+      const k = `service:${t.name}:move_tool`;
+      const ch = draft.changes[k] || {};
+      const move = ready && others.length ? h("select", { class: "small", onchange: (e) => {
+        setChange(k, e.target.value ? { kind: "service", ref: t.name, action: "move_tool", to: e.target.value, reason: ch.reason || "" } : null); repaint();
+      } }, h("option", { value: "" }, "move to…"), ...others.map((o) => h("option", { value: o.id, selected: ch.to === o.id ? true : null }, o.id))) : null;
+      return h("div", { class: "g1-tool" }, h("span", { class: "mono" }, t.name),
+        t.schema_disagreement ? h("span", { class: "warn small", title: t.schema_disagreement }, " schemas disagree") : null, move, reasonBox(k));
+    })));
+    if (ready && others.length) {
+      const k = `service:${sid}:merge`;
+      const ch = draft.changes[k] || {};
+      out.push(h("div", { class: "g0-control" }, h("span", { class: "muted small" }, "Merge this service into"),
+        h("select", { class: "small", onchange: (e) => { setChange(k, e.target.value ? { kind: "service", ref: sid, action: "merge", into: e.target.value, reason: ch.reason || "" } : null); repaint(); } },
+          h("option", { value: "" }, "—"), ...others.map((o) => h("option", { value: o.id, selected: ch.into === o.id ? true : null }, o.id))),
+        reasonBox(k)));
+    }
+    if (ready && s.tools.length > 1) {
+      const k = `service:${sid}:split`;
+      const ch = draft.changes[k] || { kind: "service", ref: sid, action: "split", tools: [], new_id: "", statement: "", reason: "" };
+      const keep = () => { if (ch.tools.length || ch.new_id || ch.statement) setChange(k, ch); else setChange(k, null); };
+      out.push(h("details", { class: "g0-more", open: draft.changes[k] ? true : null }, h("summary", {}, "Split some tools into a new service"),
+        h("div", { class: "g0-control" }, ...s.tools.map((t) => {
+          const b = h("input", { type: "checkbox" }); b.checked = ch.tools.includes(t.name);
+          b.onchange = () => { ch.tools = b.checked ? [...ch.tools, t.name] : ch.tools.filter((x) => x !== t.name); keep(); };
+          return h("label", { class: "small" }, b, ` ${t.name}`);
+        })),
+        h("div", { class: "g0-control" },
+          h("input", { class: "mono", placeholder: "new service id", value: ch.new_id, oninput: (e) => { ch.new_id = e.target.value.trim(); keep(); } }),
+          h("input", { class: "g0-reason", placeholder: "what the new service is", value: ch.statement, oninput: (e) => { ch.statement = e.target.value; keep(); } })),
+        reasonField(ch.reason, (v) => { ch.reason = v; keep(); }, PRESETS.service)));
+    }
+    out.push(h("div", { class: "muted small" }, s.interface ? "interface document: derived" : "interface document: not derived yet"));
+    return out;
+  };
+
+  const card = (n) => {
+    const changed = Object.keys(draft.changes).some((k) => k.startsWith(`${n.kind === "unbound_capability" ? "capability" : n.kind}:${n.ref}`));
+    const comment = h("textarea", { class: "sec-comment", placeholder: "Your comment (goes into your review note)", value: draft.comments[n.title] || "",
+      oninput: (e) => { draft.comments[n.title] = e.target.value; save(); } });
+    comment.hidden = !(draft.comments[n.title] || "").trim();
+    const yours = (n.kind === "contradiction" && ruled("contradictions", n.ref)) || (n.kind === "gap" && ruled("gaps", n.ref)) || (n.kind === "unbound_capability" && ruled("capabilities", n.ref));
+    return h("div", { class: `g0-card k1-${n.kind} ${changed ? "changed" : ""}` },
+      h("div", { class: "g0-card-head" }, h("span", { class: "chip-k" }, GATE1_KINDS[n.kind] || n.kind),
+        h("span", { class: "g0-title" }, n.title), yours ? h("span", { class: "g0-who human" }, "you") : null, h("span", { class: "spacer" }),
+        ready && !changed ? okToggle(draft.ok, n.id, () => { save(); paintNeeds(); }) : null,
+        ready ? h("button", { class: "small ghost", title: "Add a comment", onclick: () => { comment.hidden = !comment.hidden; if (!comment.hidden) comment.focus(); } }, "💬") : null),
+      // A service's statement is part of its controls, so it is not repeated here.
+      n.detail && n.kind !== "service" ? h("div", { class: "small" }, n.detail) : null,
+      ...(controls[n.kind] ? controls[n.kind](n) : []),
+      ready ? comment : null);
+  };
+
+  const summaryBox = h("div", {}), unappliedBox = h("div", {}), needsBox = h("div", { class: "g0-cards" });
+  const servicesBox = h("div", {}), rulingsBox = h("div", {}), actionsBox = h("div", {});
+  const pendingBox = h("div", { class: "g0-pending" });
+  let servicesOpen = false;
+
+  function paintSummary() {
+    const s = d.summary;
+    const n = Object.keys(draft.changes).length;
+    put(summaryBox, h("div", { class: "g0-summary" },
+      h("div", {}, h("div", { class: "v" }, `${s.drivable}/${s.capabilities}`), h("div", { class: "l" }, `capabilities testable · ${s.capability_cells ?? "?"} cells`)),
+      h("div", {}, h("div", { class: "v" }, `${(s.by_resolution || {}).unresolved || 0}/${s.contradictions}`), h("div", { class: "l" }, "contradictions unresolved")),
+      h("div", {}, h("div", { class: "v" }, `${s.gaps_blocking}/${s.gaps}`), h("div", { class: "l" }, "gaps stop the run")),
+      h("div", {}, h("div", { class: "v" }, `${s.services}`), h("div", { class: "l" }, "services")),
+      h("div", {}, h("div", { class: "v" }, `${s.rulings}`), h("div", { class: "l" }, "your rulings")),
+      n ? h("div", {}, h("div", { class: "v pend" }, `${n}`), h("div", { class: "l" }, "unsaved changes")) : null),
+      d.locked ? h("p", { class: "banner" }, "Gate 1 is past: propose has read this world model, so it can no longer be ruled on in this run.") : null);
+  }
+  function paintUnapplied() {
+    if (!d.unapplied.length) return put(unappliedBox, null);
+    put(unappliedBox, h("div", { class: "banner warn" },
+      h("b", {}, `${d.unapplied.length} contradiction ruling(s) not yet reflected in what the passes modelled. `),
+      `The world model records your resolution, but ${d.contradiction_readers.length} passes modelled the old one. Re-running them is ${d.contradiction_readers.length} model calls.`,
+      ready ? h("div", { style: "margin-top:8px" }, h("button", { class: "primary", disabled: busy, onclick: rerun }, `Re-run the ${d.contradiction_readers.length} passes ▸`)) : null));
+  }
+  function paintNeeds() {
+    if (!d.needs_you.length) {
+      return put(needsBox, h("p", { class: "muted" }, "Nothing here needs you: no contradictions, no gaps, every capability is testable. Check the services below if you want to, then approve."));
+    }
+    // One click for the commonest bulk ruling: none of these gaps should stop the run.
+    const open = d.gaps.filter((g) => !g.accepted);
+    const bulk = ready && open.length > 1 ? h("div", { class: "row" },
+      h("button", { class: "small", onclick: () => {
+        for (const g of open) draft.changes[`gap:${g.id}`] = { kind: "gap", ref: g.id, action: "accept", reason: (draft.changes[`gap:${g.id}`] || {}).reason || "" };
+        save(); repaint();
+      } }, `Accept all ${open.length} gaps — none stops the run`)) : null;
+    put(needsBox, bulk, ...someCards(d.needs_you.map(card), cardsState, paintNeeds));
+  }
+  function paintServices() {
+    put(servicesBox, d.services.length ? h("details", { class: "sec", open: servicesOpen ? true : null, ontoggle: (e) => { servicesOpen = e.target.open; } },
+      h("summary", {}, h("span", { class: "sec-title" }, "All services"), h("span", { class: "n" }, String(d.services.length)),
+        h("span", { class: "muted small" }, "each becomes one simulator")),
+      h("div", { class: "sec-body g0-cards" }, ...d.services.map((s) => h("div", { class: "g0-card" },
+        h("div", { class: "g0-card-head" }, h("span", { class: "chip-k" }, "Service"), h("span", { class: "g0-title mono" }, s.id)),
+        ...serviceControls(s.id))))) : null);
+  }
+  function paintRulings() {
+    const all = [];
+    for (const kind of ["contradictions", "gaps", "capabilities", "services"]) {
+      (d.rulings[kind] || []).forEach((x, i) => all.push({ kind, x, i }));
+    }
+    put(rulingsBox, all.length ? h("details", { class: "subform" }, h("summary", {}, `Your rulings in force (${all.length})`),
+      ...all.map(({ kind, x, i }) => {
+        const singular = { contradictions: "contradiction", gaps: "gap", capabilities: "capability", services: "service" }[kind];
+        const ref = kind === "services" ? String(i) : x.id;
+        const what = kind === "services" ? `${x.op} ${x.tool || x.service || ""}` : x.id;
+        return h("div", { class: "row g0-ovr" }, h("span", { class: "chip-k" }, singular), h("span", { class: "mono" }, what),
+          h("span", { class: "muted small" }, x.reason), h("span", { class: "spacer" }),
+          ready ? h("button", { class: "small", onclick: () => { setChange(`${singular}:${ref}`, { kind: singular, ref, action: "clear", reason: "" }); repaint(); } }, "Undo") : null);
+      })) : null);
+  }
+
+  const note = h("textarea", { placeholder: "Anything to add? (optional)", value: draft.note || "",
+    oninput: (e) => { draft.note = e.target.value; save(); } });
+  const shared = h("input", { placeholder: "One reason for every change that has none of its own (optional)", value: draft.shared || "",
+    oninput: (e) => { draft.shared = e.target.value; save(); } });
+  const compose = () => [(draft.note || "").trim(),
+    ...Object.entries(draft.comments).filter(([, c]) => c && c.trim()).map(([t, c]) => `on "${t}": ${c.trim()}`),
+    okClause(draft.ok)].filter(Boolean).join(" | ");
+  const collect = () => {
+    const out = [], problems = [];
+    for (const [k, c] of Object.entries(draft.changes)) {
+      const reason = (c.reason || "").trim() || (draft.shared || "").trim();
+      if (c.kind === "gap" && c.action === "blocks" && !(c.blocks || []).length) problems.push(`${k}: choose a stage it stops`);
+      if (c.kind === "capability" && c.action === "bind" && c.fixed_args) { try { JSON.parse(c.fixed_args); } catch (_) { problems.push(`${k}: fixed args are not JSON`); } }
+      if (c.kind === "service" && c.action === "split" && (!c.tools.length || !c.new_id || !c.statement)) problems.push(`${k}: a split needs its tools, a new id and what the new service is`);
+      out.push({ ...c, reason });
+    }
+    return { changes: out, problems };
+  };
+  function paintPending() {
+    const n = Object.keys(draft.changes).length;
+    const { problems } = collect();
+    const okN = Object.keys(draft.ok).length;
+    put(pendingBox, n ? `${n} unsaved change(s)` : null, okN ? h("span", { class: "muted" }, `${n ? " · " : ""}${okN} marked looks right`) : null,
+      problems.length ? h("span", { class: "warn" }, ` — ${problems.join("; ")}`) : null);
+  }
+  const send = async (approve) => {
+    const { changes, problems } = collect();
+    if (problems.length) return toast(problems.join("; "), true);
+    const text = compose();
+    if (!approve && !changes.length && !text) return toast("Nothing to save yet.", true);
+    if (approve) {
+      const lines = [changes.length ? `${changes.length} ruling(s) will be recorded and applied first.` : "The world model is approved as it is."];
+      if (d.unapplied.length || changes.some((c) => c.kind === "contradiction" && c.action !== "clear")) {
+        lines.push("A contradiction ruling is recorded in the world model, but the passes that modelled the old resolution have not been re-run. Approving now carries that on.");
+      }
+      if (!(await confirmDialog("Approve gate 1", lines, "Approve"))) return;
+    }
+    if (document.activeElement) document.activeElement.blur();
+    const job = await postAction("gates/1/changes", { changes, note: text, approve }, approve ? "Gate 1 approved" : "Saved — gate 1 is still open");
+    if (job && job.status === "succeeded") { try { localStorage.removeItem(key); } catch (_) {} RUN.staticFor = null; refreshRun(); }
+  };
+  async function rerun() {
+    const ok = await confirmDialog("Re-run the passes that model contradictions", [
+      `This dispatches ${d.contradiction_readers.join(", ")} again, then re-seals the world model and re-derives the interface documents.`,
+      `That is ${d.contradiction_readers.length} model calls, each re-reading every claim.`,
+    ], "Re-run");
+    if (!ok) return;
+    if (document.activeElement) document.activeElement.blur();
+    try { await api(`/api/runs/${encodeURIComponent(RUN.name)}/gates/1/rerun`, opts()); toast("Started"); RUN.staticFor = null; refreshRun(); }
+    catch (e) { toast(e.message, true); }
+  }
+  function paintActions() {
+    if (!ready) return put(actionsBox, null);
+    const n = Object.keys(draft.changes).length;
+    paintPending();
+    put(actionsBox, h("div", { class: "actions feedback", style: "flex-direction:column;align-items:stretch" },
+      h("strong", {}, "Your review"), pendingBox, n ? shared : null, note,
+      h("div", { class: "row" },
+        h("button", { class: "primary", disabled: busy, onclick: () => send(true) }, n ? `✓ Approve with ${n} ruling(s)` : "✓ Approve gate 1"),
+        h("button", { disabled: busy, onclick: () => send(false) }, n ? "Save rulings, don't approve yet" : "Record feedback, don't approve yet"),
+        n ? h("button", { class: "ghost", disabled: busy, onclick: () => { draft.changes = {}; save(); repaint(); } }, "Discard changes") : null),
+      h("p", { class: "hint", style: "margin:0" },
+        "Each change is recorded with `rubrica rule` in 01-rulings.json (your reason goes into it and decisions.md), then the world model is re-sealed and the interfaces re-derived. ",
+        "The passes' own files are never edited, so what they decided stays beside what you decided.")));
+  }
+  function repaint() { paintSummary(); paintUnapplied(); paintNeeds(); paintServices(); paintRulings(); paintActions(); }
+  repaint();
+
+  const sections = parseBrief(r.text);
+  const full = h("details", { class: "subform" }, h("summary", {}, "Full text report"),
+    h("div", { class: "sec-body" }, ...sections.flatMap((sec) => [h("div", { class: "bl" }, h("b", {}, sec.title)), ...sec.lines.map(briefLine)])));
+  return [
+    h("div", { class: "row", style: "margin-top:18px" }, h("h3", { style: "margin:0" }, "Gate 1: the world model"), h("span", { class: "spacer" }),
+      h("a", { class: "button small", href: `/runs/${encodeURIComponent(RUN.name)}/gate/1`, target: "_blank" }, "Plain text ↗"),
+      h("a", { class: "button small", href: `/runs/${encodeURIComponent(RUN.name)}/target-brief.html`, target: "_blank" }, "Target brief ↗")),
+    summaryBox, unappliedBox,
+    ready ? gateIntro("the model") : null,
+    h("h4", { class: "g0-h" }, d.locked ? `What was up for review (${d.needs_you.length})` : `Worth a look (${d.needs_you.length})`),
+    needsBox, servicesBox, rulingsBox,
+    r.history && r.history.length ? h("details", { class: "subform" }, h("summary", {}, `Earlier notes on this gate (${r.history.length})`),
+      h("div", { class: "cmds" }, ...r.history.map((l) => h("div", {}, l)))) : null,
+    full, actionsBox,
   ];
 }
 

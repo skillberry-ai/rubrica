@@ -636,6 +636,15 @@ class Handler(BaseHTTPRequestHandler):
             job = c.run_to_gate(name, _opts(c, body))
         elif len(action) == 3 and action[0] == "gates" and action[2] == "approve":
             job = c.approve_gate(name, self._gate_number(action[1]), body.get("note", ""))
+        elif action == ["gates", "1", "changes"]:
+            job = c.gate1_changes(
+                name,
+                body.get("changes") or [],
+                body.get("note", ""),
+                approve=bool(body.get("approve")),
+            )
+        elif action == ["gates", "1", "rerun"]:
+            job = c.rerun_for_rulings(name, _opts(c, body))
         elif action == ["gates", "0", "changes"]:
             job = c.gate0_changes(
                 name,

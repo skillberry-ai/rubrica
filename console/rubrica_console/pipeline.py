@@ -26,7 +26,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from rubrica import summary
+from rubrica import rulings, summary
 from rubrica.artifacts import read_json
 from rubrica.paths import RunPaths, is_safe_segment
 
@@ -282,15 +282,20 @@ def _verdicts(run: RunPaths, ids: list[str]) -> dict[str, str]:
 
 
 def blocking_gaps(run: RunPaths) -> list[dict]:
-    """Gaps whose `blocks` names a stage still to come (B4). Read, never ruled on."""
+    """Gaps whose `blocks` names a stage still to come (B4), less any a human accepted.
+
+    A gap accepted at gate 1 keeps its `blocks` in the world model -- the schema
+    needs them non-empty -- so the acceptance is read from 01-rulings.json.
+    """
     world = _quietly(run.world_model)
     if not isinstance(world, dict) or not isinstance(world.get("gaps"), list):
         return []
-    return [
+    gaps = [
         gap
         for gap in world["gaps"]
         if isinstance(gap, dict) and isinstance(gap.get("blocks"), list) and gap["blocks"]
     ]
+    return rulings.blocking_gaps(gaps, rulings.load(run))
 
 
 # -- recipes -----------------------------------------------------------------
@@ -488,7 +493,9 @@ def _reconcile_steps(run: RunPaths, manifest) -> list[Step]:
             # Up to date when the directory exists and is no older than the
             # grouping it derives from: re-running reconcile-services makes it stale.
             done_on_disk=_exists(run.interfaces_dir)
-            and _mtime(run.interfaces_dir) >= _mtime(run.services_part),
+            and _mtime(run.interfaces_dir) >= _mtime(run.services_part)
+            # A gate-1 regrouping changes the documents too.
+            and (not _exists(run.rulings) or _mtime(run.interfaces_dir) >= _mtime(run.rulings)),
             # A special op, because B3 forbids `validate` when nothing was printed.
             recipe=[{"op": "synthesise-interfaces"}],
         )
@@ -500,7 +507,10 @@ def _reconcile_steps(run: RunPaths, manifest) -> list[Step]:
             CODE,
             "reconcile-seal",
             phase=phase,
-            done_on_disk=_exists(run.world_model),
+            # Stale once a gate-1 ruling is newer than the sealed model: the seal
+            # is what applies it.
+            done_on_disk=_exists(run.world_model)
+            and (not _exists(run.rulings) or _mtime(run.world_model) >= _mtime(run.rulings)),
             recipe=_code(["reconcile-seal"], "reconcile-seal", refs=True),
         )
     )

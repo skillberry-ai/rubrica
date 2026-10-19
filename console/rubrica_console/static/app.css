@@ -429,6 +429,22 @@ span.small, div.small, .g0-files .small { font-size: 12.5px; }
 .g0-group[open] > summary { margin-bottom: 8px; }
 .g0-group .g0-cards { margin-bottom: 0; }
 
+/* -- gate 1: interactive -------------------------------------------------------- */
+.g0-card.k1-contradiction { border-left-color: var(--failed); }
+.g0-card.k1-gap { border-left-color: var(--running); }
+.g0-card.k1-unbound_capability { border-left-color: var(--gate); }
+.g0-card.k1-service, .g0-card.k1-unused_input { border-left-color: var(--faint); }
+.g1-claims { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.g1-claim { border: 1px solid var(--line-2); border-radius: 6px; padding: 6px 8px; background: var(--panel-2); font-size: 13px; }
+.g1-stages { display: inline-flex; gap: 10px; flex-wrap: wrap; }
+.g1-stages label { display: inline-flex; align-items: center; gap: 3px; }
+.g1-stages input { width: 14px; height: 14px; min-height: 0; margin: 0; }
+.g1-tools { display: flex; flex-direction: column; gap: 4px; }
+.g1-tool { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.warn { color: var(--failed); }
+.seg button.on, button.small.on { background: var(--accent-soft); color: var(--accent); }
+@media (max-width: 700px) { .g1-claims { grid-template-columns: 1fr; } }
+
 /* -- shared by the interactive gates ------------------------------------------- */
 .g-intro { margin: 10px 0 4px; padding: 9px 12px; border-radius: 8px; background: var(--done-soft);
   border: 1px solid color-mix(in srgb, var(--done) 30%, var(--line)); font-size: 13px; }
