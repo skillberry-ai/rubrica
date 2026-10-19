@@ -34,12 +34,12 @@ contract, not a diagram convention.
 | `01a` | `extract` | `rb-extract` — fan-out, one per input | the manifest, and its own one file under `00-inputs/` — never a sibling's | `01-claims/<artifact-id>.json` | validate · check-refs |
 | `01b` | `reconcile-subjects` | `rb-reconcile-subjects` — barrier | the manifest and every claims file | `01-subjects.json` | validate · check-refs |
 | `01c` | `reconcile-contradict` | `rb-reconcile-contradict` — fan-out, one per subject | the manifest, every claims file, `01-subjects.json` | `01-contradictions/<subject-id>.json` | validate · check-refs |
-| `01d` | `reconcile-capabilities` | `rb-reconcile-capabilities` | the manifest, every claims file, `01-contradictions/` | `01-capabilities.json` | validate · check-refs |
+| `01d` | `reconcile-capabilities` | `rb-reconcile-capabilities` | the manifest, every claims file, `01-contradictions/`, and `01-rulings.json` when a human has ruled at gate 1 | `01-capabilities.json` | validate · check-refs |
 | `01e` | `reconcile-outcomes` | `rb-reconcile-outcomes` | `01d`'s reads, plus `01-capabilities.json` | `01-outcomes.json` | validate · check-refs |
 | `01f` | `reconcile-entities` | `rb-reconcile-entities` | `01d`'s reads, plus `01-capabilities.json` — **not** `01-outcomes.json` | `01-entities.json` | validate · check-refs |
 | `01g` | `reconcile-goals` | `rb-reconcile-goals` | `01d`'s reads, plus `01-capabilities.json` and `01-entities.json` | `01-goals.json` | validate · check-refs |
-| `01h` | `reconcile-gaps` | `rb-reconcile-gaps` | the manifest, every claims file, and every partial above | `01-gaps.json` | validate · check-refs |
-| `01i` | `reconcile-services` | `rb-reconcile-services` — barrier | the manifest, every claims file, `01-contradictions/` | `01-services.json` | validate · check-refs |
+| `01h` | `reconcile-gaps` | `rb-reconcile-gaps` | the manifest, every claims file, every partial above, and `01-rulings.json` | `01-gaps.json` | validate · check-refs |
+| `01i` | `reconcile-services` | `rb-reconcile-services` — barrier | the manifest, every claims file, `01-contradictions/`, `01-rulings.json` | `01-services.json` | validate · check-refs |
 | `01j` | `synthesise-interfaces` | code — `rubrica synthesise-interfaces` | `01-services.json`, and every claims file, for the payload each `schema_claim` names | `01-interfaces/<service_id>.json` | validate · check-refs |
 | `01k` | `reconcile-seal` | code — `rubrica reconcile-seal` | the manifest, the five singleton partials, every `01-contradictions/*.json`, and `01-services.json` when it exists — **not** `01-subjects.json` | `01-world-model.json` | validate · check-refs · human gate 1 |
 | `02a` | `propose-batches` | code — `rubrica propose-batches`, partitions this round's closable holes | `manifest.json`, `01-world-model.json`, `03-coverage/latest.json` | `02-batches/round-N.json`, or **nothing at all** when no hole is closable | validate |

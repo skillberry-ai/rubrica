@@ -327,6 +327,19 @@ class RunPaths:
         return self.root / "01-services.json"
 
     @property
+    def rulings(self) -> Path:
+        """A human's gate-1 rulings on the world model, or an absent file when there are none.
+
+        In the 01 band beside the partials it rules on, and read by
+        `reconcile-seal`, `synthesise-interfaces` and the passes that model
+        contradictions -- but written only by `rubrica rule`, never by a stage, so
+        it is the band's one human-authored file. The model's own partials are
+        never edited by a ruling: what a pass decided and what the human decided
+        both stay on disk.
+        """
+        return self.root / "01-rulings.json"
+
+    @property
     def interfaces_dir(self) -> Path:
         return self.root / "01-interfaces"
 

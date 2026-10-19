@@ -2565,10 +2565,12 @@ services that should be one are two simulators a human can merge there. **No sta
 reads the merge.** `rubrica decide` appends it to `decisions.md`, and no coverage
 denominator, batch partition or instantiation narrows from it: a person who rules
 at gate 1 that two of these services are one has changed the record and nothing
-else. The one correction at this gate that does propagate is editing
-`01-services.json` and re-running `rubrica synthesise-interfaces`, which re-derives
-that service's document — and that is a correction to the grouping, not a reading
-of a decision about it.
+else. What does propagate is a correction to the *grouping*: `rubrica rule
+--move-tool / --merge-service / --split-service` records a regrouping in
+`01-rulings.json`, which `reconcile-seal` folds into the world model and
+`synthesise-interfaces` derives documents from, without editing
+`01-services.json`. That is a regrouping, not a selection: a human still cannot
+rule a service *out*, and nothing would read it if they did.
 
 Parked with the ruling the design states: consuming a selection, and the
 `denominator` narrowing that would accompany it, belong with the step that reads a
@@ -2954,6 +2956,39 @@ over fields on disk, never by a model, and those rules are editorial: a decline
 always appears, a large admit only past the first few, and nothing ranks how
 much each matters. A human who reads only the cards has read what the rules
 chose, which is why the full file list sits beneath them.
+
+### A gate-1 contradiction ruling reaches the world model only after a re-run
+
+`rubrica rule` records gate-1 rulings in `01-rulings.json`, and three of its four
+kinds take effect in code: `reconcile-seal` applies a binding, a gap's `blocks`
+and a service regrouping, and `synthesise-interfaces` derives documents from the
+regrouped services. A **contradiction** ruling is different in kind. The seal
+writes the human's `resolution` into the world model at once, but the
+capabilities, outcomes, entities, goals, gaps and services were modelled by six
+passes that followed the old one, and only re-running them changes what they
+built. Those six now declare `rulings` in `reads` and are told to model a ruled
+resolution in place of the part's.
+
+Until they re-run, the world model is internally inconsistent in a way no check
+can see — the recorded resolution says one thing and the modelling another — so
+`gate-brief --format json` reports each such ruling as `unapplied` (a ruling
+newer than any of the six partials) and the console labels approval accordingly.
+The comparison is on file times, the console's own staleness test, not a
+content check: a partial touched for another reason reads as re-modelled.
+
+Two smaller edges. **A gap accepted at gate 1 keeps its `blocks`** in the world
+model, because the schema gives `blocks` `minItems: 1`; the acceptance lives in
+the rulings file, and anything deciding whether a gap stops the run must read
+both (the console does, through `rulings.blocking_gaps`; `rb-orchestrate`'s halt
+resumes on the human ruling it already names). And **rulings are refused once
+`02-batches/` exists**: propose has read the world model by then, and the
+coverage built on it would describe a different one.
+
+The six skill changes oblige re-recording the two committed live world models
+under the project's policy. The new paragraph applies only when a rulings file
+exists, and neither fixture has one, so the recordings should be unchanged; that
+is a reasoned expectation, not an observation, and the re-record has not been
+run.
 
 ### The catch-all blames the artifact, and names the wrong run for `diff-runs`
 

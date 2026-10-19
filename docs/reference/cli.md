@@ -1153,6 +1153,60 @@ as stage 6 and invokes `rubrica emit`, and `rb-orchestrate`'s own `invokes`
 list names both commands — it runs `rubrica smoke` itself, since there is no
 `rb-smoke` skill.
 
+### `rubrica rule`
+
+Records a human's **gate-1 ruling on the world model** in `01-rulings.json`, a
+file only a human writes. One target per call, and every call takes
+`--run RUN --reason TEXT`:
+
+```
+rubrica rule --contradiction ID --resolution {unresolved,preferred_a,preferred_b,both_possible}
+rubrica rule --gap ID (--accept | --blocks STAGE [--blocks STAGE ...])
+rubrica rule --capability ID (--bind-tool NAME [--fixed-args JSON] | --accept-unbound)
+rubrica rule --move-tool NAME --to SERVICE_ID
+rubrica rule --merge-service ID --into SERVICE_ID
+rubrica rule --split-service ID --tool NAME [--tool NAME ...] --new-id ID --statement TEXT
+rubrica rule (--contradiction ID | --gap ID | --capability ID | --service-op N) --clear
+```
+
+Prints the change (`contradiction c-1: preferred_a -> unresolved`), and on
+stderr what applies it. It never seals by itself:
+
+- `rubrica reconcile-seal` folds each ruling into `01-world-model.json`: a
+  contradiction's `resolution`, a capability's `binding` (so its cells count in
+  the denominator), a gap's `blocks`, and the service regrouping. The passes'
+  partials are never edited, so what a pass decided and what the human decided
+  both stay on disk, and `01-rulings.json` is recorded among the partials so
+  `check-refs` reports it as stale if it changes after the seal.
+- `rubrica synthesise-interfaces` derives the interface documents from the
+  regrouped services, and `check-refs` checks the regrouped services too.
+- **A contradiction ruling needs one more step.** The six passes that model a
+  resolution (`reconcile-capabilities` through `reconcile-services`) read
+  `01-rulings.json` and model the human's resolution, but only when they run
+  again. Until then the world model records the new resolution while what those
+  passes built still follows the old one; `gate-brief --format json` lists such a
+  ruling as `unapplied`, and the console offers the re-run.
+
+`--accept` on a gap records that it does not stop the run. The gap keeps its
+`blocks` in the world model, whose schema needs them non-empty, and the
+acceptance is read from `01-rulings.json` — by the console, and as the human
+ruling `rb-orchestrate`'s blocking-gap halt already resumes on. `--bind-tool`
+must name a tool a service declares, and `--accept-unbound` records that a
+capability is right to stay out of the denominator.
+
+Each ruling is checked against the partials and is all-or-nothing. Exit `2`,
+writing nothing, for every request that cannot be a ruling: a target no partial
+records; a value the pass already wrote; a second ruling on one target (clear it
+first); a tool no service declares; a regrouping that would leave a service
+empty; a blank or multi-line reason; a malformed `01-rulings.json`; and any
+ruling once `02-batches/` exists, because propose has then read the world model
+and the coverage built on it would describe a different one. Each ruling is also
+appended to `decisions.md` as `ruling at gate 1: ...`, worded so the console
+never reads it as the gate's approval. A ruling the partials no longer support —
+after a pass re-ran and dropped the contradiction it named, say — is a finding
+at exit 1 against `01-rulings.json`, from `reconcile-seal` and `check-refs`
+alike. Only a human runs this.
+
 ### `rubrica overrule`
 
 Records a human's **gate-0 ruling on one or more candidates**, replacing

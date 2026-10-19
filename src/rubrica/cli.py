@@ -67,6 +67,7 @@ from rubrica import (
     reconcile,
     refs,
     rounds,
+    rulings,
     seal,
     skills,
     slices,
@@ -127,6 +128,7 @@ SUBCOMMANDS: tuple[tuple[str, str], ...] = (
     ("decide", "append one orchestrator decision to the run's decisions.md"),
     ("waive", "record a human's waiver of one finding whose remedy lives elsewhere"),
     ("overrule", "record a human's gate-0 ruling replacing triage's on one or more candidates"),
+    ("rule", "record a human's gate-1 ruling on the world model's contradictions, gaps, etc."),
     ("claim-utilisation", "per-artifact share of claims the world model cites"),
     ("gate-brief", "compose the existing reports into the human surface at one gate"),
     ("run-summary", "render one run as a single self-contained HTML page"),
@@ -342,6 +344,34 @@ def _build_parser() -> argparse.ArgumentParser:
     p_overrule.add_argument("--reason-code", choices=list(seal.HUMAN_DECLINE_CODES))
     p_overrule.add_argument("--reason", required=True)
 
+    p_rule = parsers["rule"]
+    p_rule.add_argument("--run", required=True)
+    p_rule.add_argument("--reason", required=True)
+    # Exactly one target per call: a contradiction, a gap, a capability, or one
+    # service operation. --clear removes the ruling on whichever target is named.
+    p_rule_target = p_rule.add_mutually_exclusive_group(required=True)
+    p_rule_target.add_argument("--contradiction", metavar="ID")
+    p_rule_target.add_argument("--gap", metavar="ID")
+    p_rule_target.add_argument("--capability", metavar="ID")
+    p_rule_target.add_argument("--move-tool", metavar="NAME")
+    p_rule_target.add_argument("--merge-service", metavar="ID")
+    p_rule_target.add_argument("--split-service", metavar="ID")
+    p_rule_target.add_argument(
+        "--service-op", metavar="N", help="with --clear: the Nth service ruling"
+    )
+    p_rule.add_argument("--clear", action="store_true")
+    p_rule.add_argument("--resolution", choices=list(rulings.RESOLUTIONS))
+    p_rule.add_argument("--accept", action="store_true")
+    p_rule.add_argument("--blocks", action="append", choices=list(rulings.BLOCKABLE))
+    p_rule.add_argument("--bind-tool", metavar="NAME")
+    p_rule.add_argument("--fixed-args", metavar="JSON")
+    p_rule.add_argument("--accept-unbound", action="store_true")
+    p_rule.add_argument("--to", metavar="SERVICE_ID")
+    p_rule.add_argument("--into", metavar="SERVICE_ID")
+    p_rule.add_argument("--tool", action="append", metavar="NAME")
+    p_rule.add_argument("--new-id", metavar="SERVICE_ID")
+    p_rule.add_argument("--statement")
+
     p_utilisation = parsers["claim-utilisation"]
     p_utilisation.add_argument("--run", required=True)
 
@@ -401,6 +431,81 @@ def subcommand_names() -> tuple[str, ...]:
     cannot disagree.
     """
     return tuple(name for name, _ in SUBCOMMANDS)
+
+
+def _rule(run: RunPaths, args: argparse.Namespace) -> tuple[str, str]:
+    """`rubrica rule`'s argument combinations, turned into one rulings.rule/clear call."""
+
+    def need(flag: str, value: object) -> object:
+        if not value:
+            raise UsageError(f"this ruling needs {flag}")
+        return value
+
+    if args.service_op is not None:
+        if not args.clear:
+            raise UsageError("--service-op names a service ruling to --clear")
+        return rulings.clear(
+            run, kind="services", ref=args.service_op, reason=args.reason
+        ), "services"
+    if args.contradiction:
+        kind, ref = "contradictions", args.contradiction
+        entry = (
+            None if args.clear else {"id": ref, "resolution": need("--resolution", args.resolution)}
+        )
+    elif args.gap:
+        kind, ref = "gaps", args.gap
+        if args.clear:
+            entry = None
+        elif args.accept == bool(args.blocks):
+            raise UsageError("a gap ruling takes exactly one of --accept or --blocks STAGE")
+        else:
+            entry = (
+                {"id": ref, "ruling": "accept"}
+                if args.accept
+                else {"id": ref, "ruling": "blocks", "blocks": args.blocks}
+            )
+    elif args.capability:
+        kind, ref = "capabilities", args.capability
+        if args.clear:
+            entry = None
+        elif bool(args.bind_tool) == args.accept_unbound:
+            raise UsageError(
+                "a capability ruling takes exactly one of --bind-tool or --accept-unbound"
+            )
+        elif args.bind_tool:
+            entry = {
+                "id": ref,
+                "ruling": "bind",
+                "binding": {
+                    "tool": args.bind_tool,
+                    "fixed_args": rulings.parse_fixed_args(args.fixed_args),
+                },
+            }
+        else:
+            entry = {"id": ref, "ruling": "accept_unbound"}
+    else:
+        kind = "services"
+        if args.clear:
+            raise UsageError("to clear a service ruling, name it with --service-op N")
+        if args.move_tool:
+            entry = {"op": "move_tool", "tool": args.move_tool, "to": need("--to", args.to)}
+        elif args.merge_service:
+            entry = {
+                "op": "merge",
+                "service": args.merge_service,
+                "into": need("--into", args.into),
+            }
+        else:
+            entry = {
+                "op": "split",
+                "service": args.split_service,
+                "tools": need("--tool", args.tool),
+                "new_id": need("--new-id", args.new_id),
+                "statement": need("--statement", args.statement),
+            }
+    if entry is None:
+        return rulings.clear(run, kind=kind, ref=ref, reason=args.reason), kind
+    return rulings.rule(run, kind=kind, entry=entry, reason=args.reason), kind
 
 
 def _run_dir(raw: str) -> RunPaths:
@@ -982,6 +1087,27 @@ def main(argv: list[str] | None = None) -> int:
                 return USAGE
             print(waiver_id)
             return CLEAN
+        if args.command == "rule":
+            run = _run_dir(args.run)
+            try:
+                said, kind = _rule(run, args)
+            except (UsageError, OSError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return USAGE
+            print(said)
+            steps = [f"`rubrica reconcile-seal --run {run.root}`"]
+            if kind == "services":
+                steps.append(f"`rubrica synthesise-interfaces --run {run.root}`")
+            if kind == "contradictions":
+                steps.insert(
+                    0,
+                    "re-run the passes that model it ("
+                    + ", ".join(rulings.CONTRADICTION_READERS)
+                    + ")",
+                )
+            print("to apply it: " + ", then ".join(steps), file=sys.stderr)
+            return CLEAN
+
         if args.command == "overrule":
             run = _run_dir(args.run)
             # (UsageError, OSError) for attribution, as decide and waive above:

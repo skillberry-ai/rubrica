@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 from typing import NamedTuple
 
+from rubrica import rulings
 from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths, is_safe_segment, list_json
@@ -150,6 +151,16 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
     services = part.get("services")
     if not isinstance(services, list):
         return [], [Finding(run.services_part, LAYER, "/services", "not an array")]
+
+    # The grouping a human ratified, not only the one the pass wrote: a gate-1
+    # regrouping in 01-rulings.json is applied here as the seal applies it, so the
+    # documents describe the services the run will actually simulate. A ruling
+    # that cannot be applied is a finding against the rulings file, and nothing is
+    # written -- this stage is all-or-nothing. Pointers below index the regrouped
+    # list, which is the pass's list whenever no service ruling exists.
+    services, ruled = rulings.effective_services(run, services, rulings.load_strict(run))
+    if ruled:
+        return [], ruled
 
     # Claim id -> where it was read and what payload it carries, over every claims
     # file. Built once: a run with forty inputs and four services would otherwise

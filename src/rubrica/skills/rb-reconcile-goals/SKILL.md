@@ -15,7 +15,7 @@ amendment. Nothing else in this family is frozen the way your output is.
 
 ```toml
 stage = "reconcile-goals"
-reads = ["manifest", "claims_dir", "contradictions_dir", "capabilities_part", "entities_part"]
+reads = ["manifest", "claims_dir", "contradictions_dir", "rulings", "capabilities_part", "entities_part"]
 writes = ["goals_part"]
 schemas = ["goals-part"]
 invokes = ["validate", "check-refs"]
@@ -50,6 +50,15 @@ the claims. You are dispatched with no memory of any conversation that came
 before you, and nothing you write here carries forward as memory either:
 whatever you need to do this job has to be in the manifest, in the claims, in
 the contradictions, in the two partials above, or in this document.
+
+**A human's ruling on a contradiction supersedes the part's.** If
+`01-rulings.json` (`rulings`) exists, read its `contradictions` list. A
+contradiction named there carries the `resolution` a human gave it at gate 1,
+in place of the one in its `01-contradictions/` part, and that is the
+resolution you model -- you are most likely being re-run precisely so that the
+world model follows the ruling. The rest of that file is not yours to read, and
+none of it is yours to write: it is a person's record. The file is absent on
+most runs, and absent means every part's resolution stands as written.
 
 ## 2. Output
 

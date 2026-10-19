@@ -27,6 +27,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from rubrica import rulings
 from rubrica.artifacts import ArtifactError, read_json, sha256_of
 from rubrica.findings import Finding
 from rubrica.interfaces import TOOL_NAME
@@ -2484,6 +2485,73 @@ def _duplicate_service_ids(part: dict) -> set[str]:
     return {service_id for service_id in declared if declared.count(service_id) > 1}
 
 
+def _regrouped(run: RunPaths, part: object) -> object:
+    """The services part with a human's gate-1 regrouping applied, when it applies.
+
+    check_services and check_interfaces hold the grouping the run will actually
+    simulate -- the one `synthesise-interfaces` derives documents from -- so they
+    read it through `rulings.effective_services`. A regrouping that cannot be
+    applied leaves the pass's grouping in place here; check_rulings is what
+    reports it, once, against the file that holds it.
+    """
+    if not isinstance(part, dict) or not isinstance(part.get("services"), list):
+        return part
+    services, problems = rulings.effective_services(run, part["services"], rulings.load(run))
+    return part if problems else {**part, "services": services}
+
+
+def check_rulings(run: RunPaths) -> list[Finding]:
+    """Every gate-1 ruling names something the partials record.
+
+    `01-rulings.json` is human-authored, so -- like waivers.json for
+    check_claim_utilisation -- a malformed file raises (exit 2) rather than
+    becoming a finding: there is no stage to hand a repair to. A well-formed
+    ruling that names a contradiction, gap or capability no partial records, binds
+    a tool no service declares, or regroups services that are not there is a
+    finding against the rulings file. The checks are rulings.py's own apply_*
+    functions, so check-refs and the seal cannot disagree about which rulings
+    apply.
+
+    Silent until the partials exist: before reconcile-seal's inputs are on disk
+    there is nothing for a ruling to name, and a finding then would be fabricated.
+    """
+    if not run.rulings.is_file():
+        return []
+    human = rulings.load_strict(run)
+    found: list[Finding] = []
+    services_part = _load(run.services_part)
+    services = (
+        services_part["services"]
+        if isinstance(services_part, dict) and isinstance(services_part.get("services"), list)
+        else None
+    )
+    effective, problems = rulings.effective_services(run, services, human)
+    found.extend(problems)
+    contradictions: list[dict] = []
+    for path in list_json(run.contradictions_dir):
+        part = _load(path)
+        if isinstance(part, dict) and isinstance(part.get("contradictions"), list):
+            contradictions.extend(c for c in part["contradictions"] if isinstance(c, dict))
+    if run.contradictions_dir.is_dir():
+        found.extend(rulings.apply_contradictions(run, contradictions, human)[1])
+    gaps = _load(run.gaps_part)
+    if isinstance(gaps, dict) and isinstance(gaps.get("gaps"), list):
+        found.extend(
+            rulings.apply_gaps(run, [g for g in gaps["gaps"] if isinstance(g, dict)], human)[1]
+        )
+    capabilities = _load(run.capabilities_part)
+    if isinstance(capabilities, dict) and isinstance(capabilities.get("capabilities"), list):
+        found.extend(
+            rulings.apply_capabilities(
+                run,
+                [c for c in capabilities["capabilities"] if isinstance(c, dict)],
+                human,
+                rulings.declared_tools(effective),
+            )[1]
+        )
+    return found
+
+
 def check_services(run: RunPaths) -> list[Finding]:
     """The tool grouping in 01-services.json, against the claims it cites.
 
@@ -2515,7 +2583,7 @@ def check_services(run: RunPaths) -> list[Finding]:
     01-claims/ once produced four fabricated `no such claim` findings against a
     correct world model.
     """
-    part = _load(run.services_part)
+    part = _regrouped(run, _load(run.services_part))
     if not isinstance(part, dict):
         # Absent is the ordinary state before reconcile-services. isinstance
         # rather than `is None` for the reason check_input_dispositions guards the
@@ -2789,7 +2857,7 @@ def check_interfaces(run: RunPaths) -> list[Finding]:
     """
     if not run.interfaces_dir.is_dir():
         return []
-    part = _load(run.services_part)
+    part = _regrouped(run, _load(run.services_part))
     if not isinstance(part, dict):
         # With no readable grouping there is no expectation to hold the directory
         # to; an absent part is validate_stage's finding and an unreadable one is
@@ -4461,6 +4529,7 @@ def check_all(run: RunPaths) -> list[Finding]:
     # model: these are properties of what reconcile-services and
     # synthesise-interfaces wrote, answerable while the parts are still separate
     # documents.
+    findings.extend(check_rulings(run))
     findings.extend(check_services(run))
     findings.extend(check_interfaces(run))
     findings.extend(check_world_model(run))

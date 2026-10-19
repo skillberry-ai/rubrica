@@ -51,6 +51,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from rubrica import rulings
 from rubrica.artifacts import ArtifactError, read_json, sha256_of, write_json
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths, list_json
@@ -246,7 +247,31 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
     if findings:
         return None, findings
 
-    capabilities = [dict(item) for item in parts["capabilities_part"]["capabilities"]]
+    # A human's gate-1 rulings, applied on top of what the passes wrote and never
+    # into their partials. Malformed is a UsageError (exit 2) -- a person wrote the
+    # file, waivers' reason; a well-formed ruling that names nothing the partials
+    # record is a finding against 01-rulings.json, the triage seal's precedent for
+    # an override it cannot apply. Recorded among the partials when present, so
+    # refs.check_partials reports a ruling edited after this seal exactly as it
+    # reports an edited partial.
+    human = rulings.load_strict(run)
+    if run.rulings.is_file():
+        assembled.append(run.rulings)
+    services, ruled = rulings.effective_services(run, services, human)
+    findings.extend(ruled)
+    contradictions, ruled = rulings.apply_contradictions(run, contradictions, human)
+    findings.extend(ruled)
+    gaps, ruled = rulings.apply_gaps(run, parts["gaps_part"]["gaps"], human)
+    findings.extend(ruled)
+    capabilities, ruled = rulings.apply_capabilities(
+        run,
+        [dict(item) for item in parts["capabilities_part"]["capabilities"]],
+        human,
+        rulings.declared_tools(services),
+    )
+    findings.extend(ruled)
+    if findings:
+        return None, findings
 
     # Built with a loop rather than a dict comprehension so a repeated
     # capability_id is reported instead of silently overwritten. Two records for
@@ -336,7 +361,7 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
         "actors": parts["goals_part"]["actors"],
         "goals": parts["goals_part"]["goals"],
         "contradictions": contradictions,
-        "gaps": parts["gaps_part"]["gaps"],
+        "gaps": gaps,
         "denominator": {
             "version": denominator_version,
             # *Distinct* (capability_id, outcome_class_id) pairs among the

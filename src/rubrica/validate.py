@@ -78,6 +78,10 @@ ARTIFACT_SCHEMAS: dict[str, str] = {
     # on it.
     "services-part": "services-part-0.1.json",
     "interface": "interface-0.1.json",
+    # A human's gate-1 rulings: like waivers and adoptions, outside
+    # STAGE_ARTIFACTS, because no stage writes it and a schema failure is a
+    # person's to fix.
+    "rulings": "rulings-0.1.json",
     # inputs-seen-0.1.json is deliberately absent from this map, and is the only
     # schema in the package that is not an artifact kind. It holds one $defs/row
     # that every reconcile partial whose pass owns a claim kind $refs, and no

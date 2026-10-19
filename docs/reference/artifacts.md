@@ -1012,6 +1012,31 @@ labels` (the oracle fails too much, indicting the labels or the verifier —
 never the agent under test — and outranking `degenerate_trivial` when both
 could apply), or `inconclusive` (too few scoreable tasks to say anything).
 
+## `rulings`
+
+- **Schema:** `src/rubrica/schema/rulings-0.1.json`
+- **Written by:** a human, through `rubrica rule` — no stage writes it
+- **Read by:** `reconcile-seal` and `synthesise-interfaces`, which apply it;
+  `check-refs` (`check_rulings`, and the regrouped services for
+  `check_services` / `check_interfaces`); the six reconcile passes that model a
+  contradiction's resolution, when they are re-run; and `gate-brief`
+- **Path:** `01-rulings.json`
+
+A human's gate-1 rulings on the world model, in four lists: `contradictions`
+(a `resolution` replacing the pass's, with the pass's value in `replaces`),
+`gaps` (`accept`, or a replacement `blocks`), `capabilities` (`bind` with a
+`binding`, or `accept_unbound`) and `services` (regrouping operations —
+`move_tool`, `merge`, `split` — applied in order). Every ruling carries the
+human's `reason` and `recorded_at`. The passes' partials are never edited: the
+seal and synthesis apply the rulings on top, so the model's value and the
+human's both stay on disk.
+
+Like `waivers`, it is in `validate.ARTIFACT_SCHEMAS` and outside
+`STAGE_ARTIFACTS`: a person wrote it, so a malformed one is an exit 2 from
+whatever reads it strictly rather than a finding a stage could repair. A
+well-formed ruling that names something the partials no longer record is a
+finding (layer `rulings`) against this file.
+
 ## `waivers`
 
 - **Schema:** `src/rubrica/schema/waivers-0.1.json`

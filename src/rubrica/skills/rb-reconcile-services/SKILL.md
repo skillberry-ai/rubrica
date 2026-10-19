@@ -18,7 +18,7 @@ decision; a human makes it at gate 1, from what you write.
 
 ```toml
 stage = "reconcile-services"
-reads = ["manifest", "claims_dir", "contradictions_dir"]
+reads = ["manifest", "claims_dir", "contradictions_dir", "rulings"]
 writes = ["services_part"]
 schemas = ["services-part"]
 invokes = ["validate", "check-refs"]
@@ -51,6 +51,15 @@ you wrote, not permission to reread it instead of the claims. You are dispatched
 with no memory of any conversation that came before you, and nothing you write
 here carries forward as memory either: whatever you need to do this job has to be
 in the manifest, in the claims, in the contradictions, or in this document.
+
+**A human's ruling on a contradiction supersedes the part's.** If
+`01-rulings.json` (`rulings`) exists, read its `contradictions` list. A
+contradiction named there carries the `resolution` a human gave it at gate 1,
+in place of the one in its `01-contradictions/` part, and that is the
+resolution you model -- you are most likely being re-run precisely so that the
+world model follows the ruling. The rest of that file is not yours to read, and
+none of it is yours to write: it is a person's record. The file is absent on
+most runs, and absent means every part's resolution stands as written.
 
 ## 2. Output
 

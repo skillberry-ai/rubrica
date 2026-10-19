@@ -15,7 +15,7 @@ class Finding:
     tell a shape error from a reference error without parsing the message.
     The layers: "schema" | "refs" | "invariant" | "emit" | "reconcile" |
     "internal" | "recall" | "review" | "skill" | "seal" | "rounds" |
-    "interfaces".
+    "interfaces" | "rulings".
 
     "internal" is the layer cli.py uses when a checking layer raised instead of
     returning: the artifact is malformed in a way layer 1 must reject first, and
@@ -60,6 +60,12 @@ class Finding:
     *derivation* rather than an assembly of staged parts, so a reader triaging a
     failed 01 band needs to know it was the derivation that refused and not one of
     the seals.
+
+    "rulings" is rulings.py's layer: the artifact is 01-rulings.json, a human's
+    gate-1 rulings, and the failure is a ruling that cannot be applied -- it names
+    a contradiction, gap, capability or service no partial records, or binds a
+    tool no service declares. Distinct from "refs" because the remedy is a person's
+    (`rubrica rule --clear`), not a re-dispatch: no stage wrote this file.
     """
 
     artifact: Path

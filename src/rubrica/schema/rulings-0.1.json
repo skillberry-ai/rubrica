@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rulings-0.1.json",
+  "title": "A human's gate-1 rulings on one run's world model",
+  "description": "Human-authored, written by `rubrica rule`, never by a stage. Each ruling replaces one value a reconcile pass wrote -- a contradiction's resolution, a gap's blocks, a capability's binding -- or regroups the declared tools into services. reconcile-seal applies them to 01-world-model.json and synthesise-interfaces to the interface documents; the passes' own partials are never edited, so the model's value and the human's both stay on disk. Every ruling carries the human's reason and when it was recorded. A gap accepted here keeps its blocks in the world model (the schema needs them non-empty); 'accepted' is read from this file. Outside validate.STAGE_ARTIFACTS for the reason waivers are: a person wrote it, so a defect is theirs to fix rather than a stage's.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "contradictions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "resolution", "replaces", "reason", "recorded_at"],
+        "properties": {
+          "id": { "$ref": "world-model-0.1.json#/$defs/id" },
+          "resolution": { "enum": ["unresolved", "preferred_a", "preferred_b", "both_possible"] },
+          "replaces": { "enum": ["unresolved", "preferred_a", "preferred_b", "both_possible"] },
+          "reason": { "type": "string", "minLength": 1 },
+          "recorded_at": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "ruling", "replaces", "reason", "recorded_at"],
+        "properties": {
+          "id": { "$ref": "world-model-0.1.json#/$defs/id" },
+          "ruling": {
+            "enum": ["accept", "blocks"],
+            "description": "accept: the gap does not stop the run. blocks: the gap stops the stages listed in `blocks`, replacing the pass's list."
+          },
+          "blocks": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "enum": ["propose", "score", "instantiate", "challenge", "emit", "smoke"] }
+          },
+          "replaces": {
+            "type": "array",
+            "items": { "enum": ["propose", "score", "instantiate", "challenge", "emit", "smoke"] }
+          },
+          "reason": { "type": "string", "minLength": 1 },
+          "recorded_at": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "ruling", "reason", "recorded_at"],
+        "properties": {
+          "id": { "$ref": "world-model-0.1.json#/$defs/id" },
+          "ruling": {
+            "enum": ["bind", "accept_unbound"],
+            "description": "bind: the capability is driven through `binding`, so its cells count. accept_unbound: a human agrees it stays out of the denominator."
+          },
+          "binding": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tool", "fixed_args"],
+            "properties": {
+              "tool": { "type": "string", "minLength": 1 },
+              "fixed_args": { "type": "object" }
+            }
+          },
+          "reason": { "type": "string", "minLength": 1 },
+          "recorded_at": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "services": {
+      "type": "array",
+      "description": "Regrouping operations, applied in order to 01-services.json's grouping.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["op", "reason", "recorded_at"],
+        "properties": {
+          "op": { "enum": ["move_tool", "merge", "split"] },
+          "tool": { "type": "string", "minLength": 1, "description": "move_tool: the tool moved." },
+          "to": { "$ref": "world-model-0.1.json#/$defs/id", "description": "move_tool: the service it moves into." },
+          "service": { "$ref": "world-model-0.1.json#/$defs/id", "description": "merge, split: the service operated on." },
+          "into": { "$ref": "world-model-0.1.json#/$defs/id", "description": "merge: the service that absorbs it." },
+          "tools": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "split: the tools that leave for the new service." },
+          "new_id": { "$ref": "world-model-0.1.json#/$defs/id", "description": "split: the new service's id." },
+          "statement": { "type": "string", "minLength": 1, "description": "split: what the new service is." },
+          "reason": { "type": "string", "minLength": 1 },
+          "recorded_at": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

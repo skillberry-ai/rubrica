@@ -17,7 +17,7 @@ every correct seed the pipeline ever produces.
 
 ```toml
 stage = "reconcile-entities"
-reads = ["manifest", "claims_dir", "contradictions_dir", "capabilities_part"]
+reads = ["manifest", "claims_dir", "contradictions_dir", "rulings", "capabilities_part"]
 writes = ["entities_part"]
 schemas = ["entities-part"]
 invokes = ["validate", "check-refs"]
@@ -78,6 +78,15 @@ front of you actually supports it, stop -- model only what the claims
 establish, and write the inference as `prose:` with the inference stated
 plainly. §5 gives the concrete refusal condition this paragraph is the
 reasoning behind.
+
+**A human's ruling on a contradiction supersedes the part's.** If
+`01-rulings.json` (`rulings`) exists, read its `contradictions` list. A
+contradiction named there carries the `resolution` a human gave it at gate 1,
+in place of the one in its `01-contradictions/` part, and that is the
+resolution you model -- you are most likely being re-run precisely so that the
+world model follows the ruling. The rest of that file is not yours to read, and
+none of it is yours to write: it is a person's record. The file is absent on
+most runs, and absent means every part's resolution stands as written.
 
 ## 2. Output
 

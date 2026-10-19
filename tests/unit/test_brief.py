@@ -1662,9 +1662,13 @@ def test_gate_one_names_the_remedy_without_promising_a_re_dispatch(tmp_path):
     repair attempt on it changes nothing."""
     section = _section(brief.gate_brief(_unbound_run(tmp_path), 1), brief.EXCLUDED_HEADER)
 
+    # The remedy is a gate-1 ruling. It used to tell the reader to edit
+    # 01-world-model.json, which the next reconcile-seal overwrites, so the line
+    # must name the ruling and say the hand-edit is not the way.
     remedy = _row(section, "Acting on this")
-    assert "binding.tool" in remedy and "binding.fixed_args" in remedy
-    assert "01-world-model.json" in remedy
+    assert "rubrica rule --capability" in remedy
+    assert "--bind-tool" in remedy and "--accept-unbound" in remedy
+    assert "not an edit of 01-world-model.json" in remedy
 
     # Co-occurrence on the one line that owns the rule, not presence anywhere in
     # the section: a section that promised a repair would still carry both

@@ -138,11 +138,6 @@ from __future__ import annotations
 
 import textwrap
 
-from rubrica.artifacts import read_json
-from rubrica.errors import UsageError
-from rubrica.intake import admit_sort_key
-from rubrica.paths import STAGES, RunPaths, is_safe_segment, list_json
-
 # Imported rather than re-spelled, private name and all: `_as_list` is the one
 # definition of "a list or nothing" in this build, and its docstring carries the
 # measurement (`value or []` lets a truthy non-list reach a bare `for` and raise
@@ -161,6 +156,11 @@ from rubrica.paths import STAGES, RunPaths, is_safe_segment, list_json
 # gate's reading surface and the field it is describing come to disagree about what
 # a cell is. Both index unguarded (`cap["id"]`, `oc["id"]`), which is why
 # `_cell_counts` below wraps them rather than calling them straight.
+from rubrica import rulings
+from rubrica.artifacts import read_json
+from rubrica.errors import UsageError
+from rubrica.intake import admit_sort_key
+from rubrica.paths import STAGES, RunPaths, is_safe_segment, list_json
 from rubrica.refs import PASS_OWN_KINDS, _as_list, _cells, drivable_cells
 
 # The decline codes a human override may use, by import rather than by value,
@@ -227,6 +227,7 @@ EXCLUDED_HEADER = "Capabilities excluded from the denominator (no tool binding)"
 # row, so `"api-json" in text` passes against a brief with no services section at
 # all. Deliberately not the bare word "Services": that is the word the section is
 # found by, and a one-word anchor is satisfiable by any sentence containing it.
+RULINGS_HEADER = "Rulings in force at gate 1 (01-rulings.json)"
 SERVICES_HEADER = "Services a simulator would stand in for"
 
 # The waiver block's two anchors, named for the five above's reason. This one has a
@@ -536,9 +537,10 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
     # two fields; this one has to add what does *not* work, because the natural
     # reading of any finding in this pipeline is "re-dispatch the stage".
     lines.append(
-        "  Acting on this means editing 01-world-model.json: add binding.tool and "
-        "binding.fixed_args to the capability, or accept the reduced surface and record "
-        "that as a decision (rubrica decide)."
+        "  Acting on this means a gate-1 ruling, not an edit of 01-world-model.json (the "
+        "next seal would overwrite it): `rubrica rule --capability ID --bind-tool NAME "
+        "[--fixed-args JSON]` binds it to a declared tool, and `--accept-unbound` records "
+        "that the reduced surface is right. Then re-run `rubrica reconcile-seal`."
     )
     lines.append(
         "  Re-dispatching a reconcile pass will not add a binding -- "
@@ -851,13 +853,15 @@ def _service_lines(run: RunPaths) -> list[str]:
     # The boundary of this step, stated to the person at the gate rather than left to
     # be discovered. A human who records a selection and expects the run to narrow has
     # been misled by a report that showed them services and stayed silent about what
-    # happens next -- and `rubrica decide` is named because putting the ruling on the
-    # record is the one action that does work here.
+    # happens next. `rubrica rule` is named for the one correction that does reach the
+    # run (a regrouping), and `rubrica decide` for putting anything else on the record.
     lines.extend(
         _fold(
-            "Nothing in this run reads a decision about these services: no stage reads "
-            "a selection, and coverage does not narrow from one. `rubrica decide` puts "
-            "a correction on the record for whichever run acts on it.",
+            "Nothing in this run reads a decision about which of these services to "
+            "simulate: no stage reads a selection, and coverage does not narrow from one. "
+            "A regrouping does propagate: `rubrica rule --move-tool / --merge-service / "
+            "--split-service` records it for reconcile-seal and synthesise-interfaces to "
+            "apply. `rubrica decide` puts anything else on the record.",
             "  ",
             "  ",
         )
@@ -1374,7 +1378,57 @@ def _gate_0(run: RunPaths) -> str:
     return "\n".join(lines) + "\n"
 
 
+_RULING_LABELS = {
+    "contradictions": "contradiction",
+    "gaps": "gap",
+    "capabilities": "capability",
+    "services": "service",
+}
+
+
+def _rulings_lines(human: dict) -> list[str]:
+    """The gate-1 rulings in force, one line each, so a reader sees what a human changed."""
+    lines = [RULINGS_HEADER]
+    count = 0
+    for kind in rulings.KINDS:
+        for entry in _dicts(human.get(kind)):
+            count += 1
+            what = entry.get("id") or entry.get("op", "?")
+            if kind == "contradictions":
+                change = f"{entry.get('replaces', '?')} -> {entry.get('resolution', '?')}"
+            elif kind == "gaps":
+                change = (
+                    "accepted"
+                    if entry.get("ruling") == "accept"
+                    else "blocks " + ", ".join(_strings(entry.get("blocks")))
+                )
+            elif kind == "capabilities":
+                change = (
+                    f"bound to {_mapping(entry.get('binding')).get('tool', '?')}"
+                    if entry.get("ruling") == "bind"
+                    else "accepted as not drivable"
+                )
+            else:
+                change = ", ".join(
+                    f"{k} {entry[k]}"
+                    for k in ("tool", "to", "service", "into", "new_id")
+                    if isinstance(entry.get(k), str)
+                )
+            lines.extend(
+                _fold(
+                    f"{_RULING_LABELS[kind]} {what}: {change} -- {entry.get('reason', '')}",
+                    "  ",
+                    "    ",
+                )
+            )
+    if not count:
+        lines.append("  (none -- every value above is what the passes wrote)")
+    lines.append("")
+    return lines
+
+
 def _gate_1(run: RunPaths) -> str:
+    human = rulings.load(run)
     lines = [f"GATE 1 -- {run.root}", ""]
     lines.extend(_waiver_lines(run))
 
@@ -1556,11 +1610,22 @@ def _gate_1(run: RunPaths) -> str:
     gaps = _dicts(world.get("gaps"))
     lines.append(f"World-model gaps ({len(gaps)})")
     if gaps:
+        accepted = rulings.accepted_gaps(human)
         for gap in gaps:
-            lines.append(f"  {gap.get('id', '?')}: {gap.get('unknown', '')}")
+            blocks = ", ".join(_strings(gap.get("blocks"))) or "nothing"
+            state = (
+                "accepted at gate 1, does not stop the run"
+                if gap.get("id") in accepted
+                else (f"blocks {blocks}")
+            )
+            lines.append(f"  {gap.get('id', '?')} [{state}]: {gap.get('unknown', '')}")
+            if gap.get("why_it_matters"):
+                lines.extend(_fold(f"why it matters: {gap['why_it_matters']}", "      ", "      "))
     else:
         lines.append("  (none)")
     lines.append("")
+
+    lines.extend(_rulings_lines(human))
 
     triage = _quietly(run.triage)
     lines.append(

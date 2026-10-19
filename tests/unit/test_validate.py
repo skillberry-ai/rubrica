@@ -34,6 +34,7 @@ from tests.builders import (
     minimal_objective,
     minimal_outcomes_part,
     minimal_report,
+    minimal_rulings,
     minimal_scenarios,
     minimal_scenarios_part,
     minimal_score_part,
@@ -125,6 +126,7 @@ MINIMAL_BUILDERS = {
     "agents": minimal_agents,
     "gold": minimal_gold,
     "waivers": minimal_waivers,
+    "rulings": minimal_rulings,
 }
 
 

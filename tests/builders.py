@@ -855,3 +855,22 @@ def minimal_waivers(**over: Any) -> dict[str, Any]:
     }
     payload.update(over)
     return payload
+
+
+def minimal_rulings(**over: Any) -> dict[str, Any]:
+    # Human-authored like waivers; one contradiction ruling is the smallest
+    # document that exercises an item schema rather than only the envelope.
+    payload: dict[str, Any] = {
+        "schema_version": "0.1",
+        "contradictions": [
+            {
+                "id": "con-1",
+                "resolution": "unresolved",
+                "replaces": "preferred_a",
+                "reason": "both claims may hold",
+                "recorded_at": "2026-10-14T10:00:00Z",
+            }
+        ],
+    }
+    payload.update(over)
+    return payload
