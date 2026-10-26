@@ -42,6 +42,16 @@ _NEXT = {
 @pytest.mark.parametrize("upto", sorted(_NEXT))
 def test_each_checkpoint_offers_the_next_step_of_the_walk(tmp_path, upto):
     run = build_toy_run(tmp_path, upto=upto)
+    if upto == "score":
+        # The builder writes 02-scenarios.json and the score part back to back, and
+        # on a filesystem with a coarse mtime clock the two tie: measured 18 ties in
+        # 20 builds on WSL2 ext4 (4ms ticks), while CI passes. pipeline's `>=` then
+        # reads the second seal as done. The `>=` is not the defect: the score-seal
+        # checkpoint writes the part, the re-seal and the coverage inside one tick
+        # too, and needs all three read as done. A real score dispatch takes
+        # minutes, so make the part as strictly newer as it would be.
+        later = max(os.stat(p).st_mtime_ns for p in run.root.rglob("*.json")) + 10**9
+        os.utime(run.score_part(1), ns=(later, later))
     steps = pipeline.steps(run)
     nxt = pipeline.next_step(steps)
     assert nxt is not None and nxt.id == _NEXT[upto]
