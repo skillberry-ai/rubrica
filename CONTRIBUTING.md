@@ -81,10 +81,14 @@ uv run pre-commit install --hook-type commit-msg   # the Conventional Commit che
 uv run pre-commit run --all-files                  # to check the whole tree now
 ```
 
-**The hooks are not a fourth gate, and nothing in CI runs them.** The gates stay
-the three above; a change lands or does not on those. What the hooks buy is
-catching locally what the gates would catch later, plus three checks the gates do
-not make at all:
+**The hooks are not a fourth gate.** The gates stay the three above; a change
+lands or does not on those. CI's `pre-commit` job runs every hook with
+`--all-files` and shows red on a PR when one fails, but it is a separate job from
+`check` and the ruleset does not require it, so a red hook run is a signal rather
+than a block. It exists because hooks installed locally only see staged files: a
+change that never ran `--all-files` once landed three failing hooks on `main` with
+every gate green. What the hooks buy is catching what the gates would catch later,
+plus three checks the gates do not make at all:
 
 - **shellcheck** over every script in `scripts/`, `scripts/lib/` included. This is
   the only tool in the project that reads shell — `SECURITY.md` records that CodeQL

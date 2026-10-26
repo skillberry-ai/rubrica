@@ -190,3 +190,32 @@ def test_every_floating_ref_action_is_ignored_for_minor_and_patch():
         "these actions float their major ref but are not ignored for minor/patch "
         f"in .github/dependabot.yml: {missing}"
     )
+
+
+def _ci_jobs() -> dict:
+    return yaml.safe_load((DOT_GITHUB / "workflows" / "ci.yml").read_text(encoding="utf-8"))["jobs"]
+
+
+def _runs(job: dict) -> list[str]:
+    return [step["run"] for step in job.get("steps", []) if "run" in step]
+
+
+def test_ci_runs_every_hook_over_the_whole_tree():
+    """The hooks only ever saw staged files, and that let the browser console land
+    three failing hooks on main with every gate green. `--all-files` is the predicate: without it
+    `pre-commit run` in a fresh checkout has nothing staged and passes vacuously."""
+    job = _ci_jobs().get("pre-commit")
+    assert job, "ci.yml has no `pre-commit` job"
+    hooks = [r for r in _runs(job) if "pre-commit run" in r]
+    assert hooks and all("--all-files" in r for r in hooks), (
+        f"the pre-commit job does not run the hooks with --all-files: {_runs(job)}"
+    )
+
+
+def test_the_hooks_stay_out_of_the_required_check_job():
+    """The ruleset requires `check` by name, so hooks run there would be a fourth
+    gate -- which CONTRIBUTING.md and .pre-commit-config.yaml say they are not."""
+    check = _ci_jobs()["check"]
+    assert not any("pre-commit" in r for r in _runs(check)), (
+        "the required `check` job runs pre-commit, making the hooks a gate"
+    )

@@ -75,3 +75,34 @@ jobs:
 
       - name: Skill contracts
         run: uv run --extra dev rubrica check-skills
+
+  # The pre-commit hooks over the whole tree. Its own job, not a step in `check`,
+  # and the split is the point: the default-branch ruleset requires `check` and
+  # `DCO` by name, so a step there would make the hooks a fourth gate, which
+  # CONTRIBUTING.md and .pre-commit-config.yaml both say they are not. A job of its
+  # own reports red on the PR without blocking the merge; requiring it is a
+  # ruleset change, made on purpose, not a side effect of this file.
+  #
+  # Why it runs at all: the hooks were local-only and run per commit on staged
+  # files, so the browser console, never run with `--all-files`, landed three
+  # failing hooks on main with every gate green.
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: uv sync --extra dev --locked
+
+      # pre-commit installs each hook from its pinned rev on first run; uncached,
+      # so this job pays that once per run rather than adding an action to pin.
+      # `--show-diff-on-failure` because a rewriting hook (trailing whitespace,
+      # end of file, ruff) fails by editing the checkout, and the diff is the
+      # only place a reader of the log sees what it wanted.
+      - name: Hooks
+        run: uv run --extra dev pre-commit run --all-files --show-diff-on-failure
