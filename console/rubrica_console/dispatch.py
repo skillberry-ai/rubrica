@@ -14,7 +14,10 @@ import json
 import os
 import re
 import shutil
-import subprocess
+
+# bandit B404 -- subprocess is what this module is for: it probes for a bash new
+# enough to run dispatch-stage.sh, and the script is the only way a stage dispatches.
+import subprocess  # nosec B404
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,7 +48,9 @@ def find_bash() -> str | None:
         if not path or not os.access(path, os.X_OK):
             continue
         try:
-            out = subprocess.run(
+            # bandit B603 -- argv is a list, the `-c` script is a constant, and `path`
+            # is one of _BASH_CANDIDATES that exists and is executable.
+            out = subprocess.run(  # nosec B603
                 [path, "-c", "echo ${BASH_VERSINFO[0]}"],
                 capture_output=True,
                 text=True,

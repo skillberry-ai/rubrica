@@ -150,7 +150,7 @@ function pickOne({ mode, start }) {
       } catch (err) { toast(err.message, true); }
     }
     function renderFooter() {
-      put(footer, 
+      put(footer,
         mode === "dir"
           ? h("button", { class: "primary", onclick: () => finish([current]) }, "Choose this folder")
           : mode === "files"

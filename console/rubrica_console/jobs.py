@@ -27,7 +27,10 @@ import os
 import re
 import shutil
 import signal
-import subprocess
+
+# bandit B404 -- subprocess is how the console drives a run: every step is either
+# the `rubrica` CLI or dispatch-stage.sh, each in a child process it can cancel.
+import subprocess  # nosec B404
 import sys
 import threading
 import time
@@ -712,7 +715,9 @@ class Console:
         entry = Entry(label, log=str(log))
         job.entries.append(entry)
         self._persist(job)
-        proc = subprocess.Popen(
+        # bandit B603 -- argv is a list, never a shell string: rubrica_argv is this
+        # interpreter running rubrica.cli, and args are subcommand flags the console built.
+        proc = subprocess.Popen(  # nosec B603
             [*self.rubrica_argv, *args],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -837,7 +842,10 @@ class Console:
             member.status = RUNNING
             self._persist(job)
             with open(member.log, "w", encoding="utf-8") as fh:
-                proc = subprocess.Popen(
+                # bandit B603 -- argv is a list, never a shell string: bash, the
+                # dispatch script, and a stage name, run root and slice id, each one
+                # argument, so a run path with spaces or metacharacters stays inert.
+                proc = subprocess.Popen(  # nosec B603
                     argv,
                     stdout=fh,
                     stderr=subprocess.STDOUT,
@@ -1206,7 +1214,11 @@ class Console:
             if spec.get(key):
                 args += [f"--{key.replace('_', '-')}", str(int(spec[key]))]
         self.runs_dir.mkdir(parents=True, exist_ok=True)
-        proc = subprocess.run([*self.rubrica_argv, *args], capture_output=True, text=True)
+        # bandit B603 -- the same list-form `rubrica` call as _cli; the user's target
+        # name and input paths arrive as single arguments, never through a shell.
+        proc = subprocess.run(  # nosec B603
+            [*self.rubrica_argv, *args], capture_output=True, text=True
+        )
         output = proc.stdout + proc.stderr
         if proc.returncode != CLEAN:
             raise ConsoleError(f"{mode} exited {proc.returncode}: {output.strip()}")

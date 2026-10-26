@@ -26,7 +26,10 @@ import json
 import os
 import shutil
 import stat
-import subprocess
+
+# bandit B404 -- subprocess is how the credential test reaches the gateway: it runs
+# `claude -p` exactly as a dispatch does, so there is no import-free way to test.
+import subprocess  # nosec B404
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -240,7 +243,10 @@ def test(creds: Credentials, model: str, *, timeout: float = 120.0) -> dict:
     with tempfile.TemporaryDirectory(prefix="rubrica-cred-test-") as config:
         env["CLAUDE_CONFIG_DIR"] = config
         try:
-            proc = subprocess.run(
+            # bandit B603 -- argv is a list, never a shell string, so nothing here is
+            # word-split or glob-expanded. `claude` is shutil.which's absolute path, and
+            # the model id travels as one argument however it is spelled.
+            proc = subprocess.run(  # nosec B603
                 [
                     claude,
                     "-p",

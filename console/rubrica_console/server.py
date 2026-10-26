@@ -44,7 +44,9 @@ from rubrica_console.jobs import Console, ConsoleError, Options
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
-TOKEN_HEADER = "X-Rubrica-Token"
+# bandit B105 -- not a credential. B105 matches on the *name*; this is the name of
+# the header the per-launch token travels in, and the token itself is minted at start.
+TOKEN_HEADER = "X-Rubrica-Token"  # nosec B105
 _MAX_BODY = 1 << 20
 _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 # A client that went away mid-request. Not ConnectionError as a whole: a refused
