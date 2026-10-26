@@ -4,9 +4,11 @@
 # Run against everything:
 #   uv run pre-commit run --all-files
 #
-# This is local enforcement, NOT a fourth gate. The three gates stay three --
-# `make test`, `make check`, `rubrica check-skills` -- and nothing here is required
-# to pass for a change to land. CONTRIBUTING.md says the same thing to a reader.
+# This is NOT a fourth gate. The three gates stay three -- `make test`,
+# `make check`, `rubrica check-skills` -- and nothing here is required to pass for a
+# change to land. CI's `pre-commit` job runs every hook over the whole tree and
+# reports red, but the ruleset does not require it. CONTRIBUTING.md says the same
+# thing to a reader.
 repos:
   # The rev must equal the ruff `uv.lock` resolves, and
   # tests/unit/test_precommit_config.py fails when it does not. `pyproject.toml`
