@@ -89,14 +89,16 @@ not make at all:
 - **shellcheck** over every script in `scripts/`, `scripts/lib/` included. This is
   the only tool in the project that reads shell — `SECURITY.md` records that CodeQL
   does not, and `dispatch-stage.sh` passes credentials to a dispatched model.
-- **bandit** over `src/`. The four findings this tree has are annotated at their
-  sites with `# nosec <id>` above a `# bandit <id> --` line giving the reason. Write
-  the reason on its own line: `# nosec` parses everything after the id as more ids,
-  so prose on the directive line makes bandit warn.
-- **detect-secrets** against `.secrets.baseline`. The 50 entries in that baseline
-  are all SHA-256 digests from fixtures and one digest of the empty string — no
-  credential detector fires on this tree. Re-scan with
-  `detect-secrets scan --baseline .secrets.baseline` when you add a fixture.
+- **bandit** over `src/` and `console/rubrica_console/`. Every finding this tree has
+  is annotated at its site with `# nosec <id>` beneath a `# bandit <id> --` comment
+  giving the reason. Write the reason on its own line: `# nosec` parses everything
+  after the id as more ids, so prose on the directive line makes bandit warn.
+- **detect-secrets** against `.secrets.baseline`. Its entries are SHA-256 digests
+  from fixtures, one digest of the empty string, and Secret Keyword hits in the
+  console: the `auth_token`/`api_key` kind names in `credentials.py` and made-up
+  secrets in its tests. None is a real credential. Re-scan with
+  `detect-secrets scan --baseline .secrets.baseline` when you add a fixture or move
+  a baselined line, and audit any entry the re-scan adds before committing it.
 
 Two couplings worth knowing before you edit `.pre-commit-config.yaml`:
 

@@ -113,9 +113,10 @@ markers = [
 # makes a manual `bandit -c pyproject.toml -r .` agree with it instead of walking
 # the fixtures and the virtualenv.
 #
-# No `skips` list on purpose. The four LOW findings this project has are annotated
-# at their sites with `# nosec <id>` and a reason -- three subprocess findings in
-# smoke.py, which runs the emitted suite, and one B105 in triage.py where the id
-# matched a constant *name* containing "PASS". Skipping those ids globally would
-# also hide the next real subprocess finding, which is the one worth catching.
+# No `skips` list on purpose. Every LOW finding this project has is annotated at
+# its site with `# nosec <id>` and a reason -- subprocess findings in smoke.py, which
+# runs the emitted suite, and in the console, which drives the CLI and the dispatch
+# script; and B105 where the id matched a constant *name*, not a value. Skipping
+# those ids globally would also hide the next real subprocess finding, which is the
+# one worth catching.
 exclude_dirs = ["tests", ".venv", "runs"]
