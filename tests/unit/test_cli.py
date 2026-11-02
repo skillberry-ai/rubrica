@@ -970,6 +970,33 @@ def test_triage_slices_exits_zero_and_prints_the_plan(tmp_path, capsys):
     assert err == ""
 
 
+def test_triage_slices_refuses_half_a_phase_declaration(tmp_path, capsys):
+    """Exit 2, both directions. A --phase with nothing deferred pays full price and
+    reports a saving; a --defer-kind with no number is a deferral with no phase to
+    defer to. argparse cannot express "required together", so main() does."""
+    run = _toy_survey_run(tmp_path)
+    for argv in (
+        ["triage-slices", "--run", str(run.root), "--phase", "1"],
+        ["triage-slices", "--run", str(run.root), "--defer-kind", "trace"],
+    ):
+        assert main(argv) == 2
+        out, err = capsys.readouterr()
+        assert out == ""  # a 2 must never carry a fabricated finding on stdout
+        assert err.startswith("error: ")
+
+
+def test_triage_slices_refuses_a_defer_kind_the_schema_does_not_declare(tmp_path):
+    """argparse's own usage error, which main() maps to 2. The choices come from
+    catalogue-0.1.json's $defs/kind, so this cannot drift from what a candidate can
+    carry -- `traces` is the plural a hand-typed list would have accepted, deferring
+    nothing while reporting a phase."""
+    run = _toy_survey_run(tmp_path)
+    assert (
+        main(["triage-slices", "--run", str(run.root), "--phase", "1", "--defer-kind", "traces"])
+        == 2
+    )
+
+
 # `target-brief`: the run's description of the target, written for its owners.
 # Six CLI tests, each pinning a wiring mistake rather than the exit code alone --
 # run-summary's six in test_summary.py are the model (its CLI tests are module-local;

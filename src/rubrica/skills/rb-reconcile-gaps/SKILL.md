@@ -42,6 +42,20 @@ pass below the sweep: a disagreement recorded `unresolved` is not one you may
 settle, and where a gap exists *because* two claims disagree and nothing breaks
 the tie, the gap is the honest record of it.
 
+**Under a declared phase there is no sweep to honour, and the constraint does
+not lapse with it.** When `manifest.json` carries a `phase` block,
+`rb-reconcile-contradict` is not dispatched and `01-contradictions/` is absent
+-- §5 says why that is not a refusal. Its absence means no disagreement was
+ruled on, not that the claims agree: two admitted inputs can still contradict
+each other. So where you can see two claims disagree and nothing on disk
+resolves it, treat it as a disagreement recorded `unresolved` for every purpose
+of this skill, including each condition in §5 that names one. Settling it by
+whichever side reads better is the resolution without a record that the
+paragraph above forbids. And record each such disagreement as a gap, citing both
+claims in its `claims`: under a phase no other pass records one at all, so a
+disagreement the passes above you only stepped around is one nobody at gate 1
+would otherwise see.
+
 Nothing else on disk is yours to read. In particular, no pass reads
 `01-world-model.json`: it does not exist yet when you run, and on a re-run of
 this family it is an answer some earlier run assembled rather than evidence
@@ -168,7 +182,9 @@ that exists.
    - a goal in `01-goals.json` that no declared capability could advance, or
      an actor no claim names;
    - a subject in `01-subjects.json` that swept two claims you can see
-     disagree, whose part records no contradiction.
+     disagree, whose part records no contradiction -- under a declared
+     phase there is no `01-subjects.json`, and §5 says why that is not a
+     refusal.
 
    Record each as a gap whose `subject` names the artifact and element, whose
    `unknown` says what evidence is missing, and whose `blocks` reflects what
@@ -278,6 +294,23 @@ actually correct.
   false when read: every partial it named was present by the time anybody
   saw it, because the passes writing them were still working when it was
   written. A gap the artifacts beside it refute is worse than no gap.
+
+- **`01-subjects.json` or `01-contradictions/` is absent, and `manifest.json`
+  carries a `phase` block.** That is not the condition below, and it is the only
+  absence in this family that is not. Under a declared phase the orchestrator
+  dispatches neither `rb-reconcile-subjects` nor `rb-reconcile-contradict`, so
+  no sweep ran and none is coming: there is nothing to wait for, and a refusal
+  here is one no re-dispatch could ever repair -- measured on one real phased
+  run, three dispatches of a pass in this family refused on exactly this and the
+  run could not reach gate 1. Write your partial. Read the absence as "no
+  disagreement has been ruled on", never as "the claims agree" -- §1 says what
+  that obliges. §3 step 3's audit of `01-subjects.json` has nothing to audit and
+  is skipped, not failed. Do not record the absence in your artifact: the seal
+  copies the `phase` block onto the world model, and that is where a human reads
+  that the sweep did not run. The exception is that narrow and no wider: with no
+  `phase` block the absence is the condition below, under one every other input
+  this contract names still is, and either file, when present under a phase is
+  read exactly as it would be without one.
 
 - **An input this pass's contract names is absent from the run directory, or
   is unreadable.** Refuse, say which file and what happened, and stop. Do not
