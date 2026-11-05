@@ -763,6 +763,18 @@ def _side_rows(refs, label: str) -> list[str]:
     return rows
 
 
+def _legacy_taken(dispute) -> str:
+    if dispute.resolution == "both_possible":
+        return "We are treating both as possible."
+    if dispute.chosen is None:
+        return "We have not decided between them."
+    side = dispute.side_a if dispute.chosen == "a" else dispute.side_b
+    files = sorted(target_brief.side_files(side))
+    if not files:
+        return target_brief._UNRESOLVED_SIDE
+    return "We went with " + ", ".join(files) + "."
+
+
 def _group_bc(run: RunPaths):
     """Where our sources disagree, and what we did about it.
 
@@ -828,7 +840,9 @@ def _group_bc(run: RunPaths):
         # asserting a decision nobody made. The renderer says so out loud instead
         # of emitting an empty bold paragraph: on this page, silence after two
         # contradicting sides reads as a decision the reader missed.
-        taken = dispute.taken or "We have not decided between them."
+        # Transitional, replaced wholesale by the Report/Workbook renderer: the old
+        # sentence rebuilt from `chosen`, so the page is unchanged until then.
+        taken = _legacy_taken(dispute)
         rows = _side_rows(dispute.side_a, "One side") + _side_rows(dispute.side_b, "The other side")
         blocks.append(
             # The heading is the number and the chip, nothing else. The nature is a

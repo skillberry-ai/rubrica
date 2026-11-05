@@ -412,35 +412,33 @@ def test_side_reads_a_list_of_ids_as_well_as_the_conformant_single_string():
     assert target_brief._side(None, index) == ()
 
 
-def test_taken_names_the_file_rather_than_inferring_the_kind():
-    """ "We went with the code" needs a code-ness heuristic that fails on the mixed
-    kinds measured -- reservation-service's capabilities span four at once. A file
-    the owner can open needs no inference."""
-    a = (target_brief.SourceRef("clm-a", "notes.md", "L1", "", "design_doc"),)
-    b = (target_brief.SourceRef("clm-b", "src/tool.py", "L2", "", "source_code"),)
-    assert target_brief._taken("preferred_a", a, b) == "We went with notes.md."
-    assert target_brief._taken("preferred_b", a, b) == "We went with src/tool.py."
-    assert target_brief._taken("both_possible", a, b) == "We are treating both as possible."
-    # Unresolved carries no sentence: group B's whole point is that we could not
-    # tell, and a sentence there would assert a decision nobody made.
-    assert target_brief._taken("unresolved", a, b) == ""
+def test_chosen_marks_the_side_and_never_a_file():
+    """The fix for the parked "We went with X" limitation: the reader says which
+    *side* was taken and the renderer badges that column, so a pair whose two
+    sides were read from one file says which reading won as plainly as a pair read
+    from two. Nothing here names a file any more, so nothing can name the same one
+    twice."""
+    assert target_brief._chosen("preferred_a") == "a"
+    assert target_brief._chosen("preferred_b") == "b"
+    # Neither of these is a decision for one side, and an off-enum value is never
+    # read as one: the badge would assert a decision nobody made.
+    assert target_brief._chosen("both_possible") is None
+    assert target_brief._chosen("unresolved") is None
+    assert target_brief._chosen("something_new") is None
 
 
-def test_taken_says_so_when_the_chosen_side_resolves_to_nothing():
-    """Never a bare "We went with ." -- the sentence states its own hole."""
-    b = (target_brief.SourceRef("clm-b", "src/tool.py", "L2", "", "source_code"),)
-    assert target_brief._taken("preferred_a", (), b) == (
-        "We took one side, but could not resolve which file states it."
-    )
-    # The control for the hole above: the *other* resolution over the same two
-    # sides names its file, so the sentence is chosen by which side was taken
-    # rather than returned for every input that has an empty side anywhere.
-    assert target_brief._taken("preferred_b", (), b) == "We went with src/tool.py."
+def test_kind_of_reads_an_off_enum_resolution_as_undecided():
+    assert target_brief.kind_of("unresolved") == "undecided"
+    assert target_brief.kind_of("something_new") == "undecided"
+    assert target_brief.kind_of("") == "undecided"
+    assert target_brief.kind_of("preferred_a") == "confirm"
+    assert target_brief.kind_of("preferred_b") == "confirm"
+    assert target_brief.kind_of("both_possible") == "both"
 
 
-def test_taken_names_the_file_a_slice_came_out_of_rather_than_the_slice(tmp_path):
-    """The resolution line tells the owner which of *their* files we believed, so it
-    has to name one they can open.
+def test_side_files_names_the_file_a_slice_came_out_of_rather_than_the_slice(tmp_path):
+    """The files a side was read from are the ones an owner can open, which is what
+    the quick takes count and the card headline names.
 
     Measured on run-20260826-090456 before the fix: 3 of its 25 resolution lines
     read `We went with traces_parsec-agent-metrics_20260713_115226.json#/11.` and
@@ -457,43 +455,43 @@ def test_taken_names_the_file_a_slice_came_out_of_rather_than_the_slice(tmp_path
     # The control, taken before the mutation: the chosen side already names this
     # file, so what the mutation changes is the *shape of the path* and not which
     # side won.
-    assert target_brief.disputes(run)[0].taken == "We went with notes.md."
+    assert target_brief.side_files(target_brief.disputes(run)[0].side_a) == {"notes.md"}
     for record in manifest["inputs"]:
         if record["artifact_id"] == "notes-md":
             record["source_path"] = record["source_path"] + "#/11"
     run.manifest.write_text(json.dumps(manifest))
     dispute = target_brief.disputes(run)[0]
-    assert dispute.taken == "We went with notes.md."
+    assert target_brief.side_files(dispute.side_a) == {"notes.md"}
     # And the piece is not lost on the way: `SourceRef.path` still carries it, which
     # is what `_side_rows` labels and what tells 71 slices of one capture apart. The
     # sentence drops it; the record does not.
     assert [ref.path for ref in dispute.side_a] == ["notes.md#/11"]
 
 
-def test_taken_says_it_could_not_name_the_file_rather_than_going_with_nothing(tmp_path):
-    """`We went with  .` -- measured on a hand-edited world model, and the sentence
-    that already covers it says we took a side and could not resolve which file
-    states it. Reachable only by hand-editing, because `SourceRef.path` falls back
-    to the artifact id when the manifest registers no path at all."""
+def test_side_files_drops_a_path_with_nothing_nameable_in_it(tmp_path):
+    """`We went with  .` was measured on a hand-edited world model when the page
+    named the chosen file. A side whose only path is whitespace names no file, so
+    it contributes nothing to a file's tally rather than a blank one. Reachable only
+    by hand-editing, because `SourceRef.path` falls back to the artifact id when the
+    manifest registers no path at all."""
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     manifest = json.loads(run.manifest.read_text())
     # The control: with the path readable the sentence names the file, so the
     # sentence below is this shape's and not one returned for every run.
-    assert target_brief.disputes(run)[0].taken == "We went with notes.md."
+    assert target_brief.side_files(target_brief.disputes(run)[0].side_a) == {"notes.md"}
     for record in manifest["inputs"]:
         if record["artifact_id"] == "notes-md":
             record["source_path"] = "   "
     run.manifest.write_text(json.dumps(manifest))
-    assert target_brief.disputes(run)[0].taken == (
-        "We took one side, but could not resolve which file states it."
-    )
+    dispute = target_brief.disputes(run)[0]
+    assert target_brief.side_files(dispute.side_a) == frozenset()
+    # Still a decision for side a: the badge goes on the column whatever it names.
+    assert dispute.chosen == "a"
 
 
-def test_side_drops_a_duplicate_id_the_way_taken_does(tmp_path):
+def test_side_drops_a_duplicate_id(tmp_path):
     """A hand-edited `"claim_a": ["clm-notes-004", "clm-notes-004"]` rendered the
-    same file quoting the same line twice under one side -- measured. The argument
-    is less the duplicate than that `_side` and `_taken`, one function apart, read
-    one list two ways."""
+    same file quoting the same line twice under one side -- measured."""
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     world_model = json.loads(run.world_model.read_text())
     world_model["contradictions"][0]["claim_a"] = ["clm-notes-004", "clm-notes-004"]
@@ -525,7 +523,7 @@ def test_disputes_keeps_a_contradiction_whose_claims_do_not_resolve(tmp_path):
     assert [r.claim_id for r in dispute.side_b] == ["clm-trace-002"]
     assert dispute.side_b[0].path == "trace.json"
     assert dispute.nature  # still there, still rendered
-    assert dispute.taken == "We took one side, but could not resolve which file states it."
+    assert dispute.chosen == "a"
 
 
 def test_disputes_orders_by_id_and_reports_an_unreadable_world_model(tmp_path):
@@ -597,11 +595,13 @@ def test_open_questions_carries_unknown_verbatim_and_drops_the_internals(tmp_pat
     # attribute. The set equality is what closes the general case: any fourth
     # field arriving on the record fails it, whether or not the fixture happens
     # to populate the field it came from. It also subsumes the two `hasattr`
-    # checks it replaced.
+    # checks it replaced. The three grouping fields are ours, computed from the
+    # subjects and the claims a gap cites -- not fields carried off the gap record --
+    # so the set grows by exactly those and still fails on a fourth.
     rendered = " ".join(str(v) for q in found for v in vars(q).values())
     for leaked in ("propose", "score", "instantiate", "outcome class", "ground truth"):
         assert leaked not in rendered
-    assert set(vars(found[0])) == {"id", "subject", "unknown"}
+    assert set(vars(found[0])) == {"id", "subject", "unknown", "topic_id", "topic_label", "ref"}
 
 
 def test_open_questions_is_empty_on_the_toy_world_and_marks_an_unreadable_one(tmp_path):
@@ -882,3 +882,144 @@ def test_inputs_read_keeps_a_hash_that_belongs_to_the_filename(tmp_path):
     # shapes apart rather than switching the collapse off. parsec's 71 slices of one
     # capture are what that behaviour is for.
     assert (groups["trace"].files, groups["trace"].slices) == (("capture.json",), 1)
+
+
+def _toy_with_contradictions(tmp_path, records, subject="sub-cap-get-ticket"):
+    """The toy run with its contradictions replaced, in the world model *and* in the
+    part file the topic is read from -- the two must agree, as they do on a real
+    run, or the test would be about a run the pipeline cannot produce."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["contradictions"] = records
+    run.world_model.write_text(json.dumps(world_model))
+    part = run.contradictions_dir / f"{subject}.json"
+    payload = json.loads(part.read_text())
+    payload["contradictions"] = records
+    part.write_text(json.dumps(payload))
+    return run
+
+
+def _contradiction(cid, **over):
+    record = {
+        "id": cid,
+        "claim_a": "clm-notes-004",
+        "claim_b": "clm-trace-002",
+        "nature": "the notes and the trace disagree",
+        "rationale": "because",
+        "resolution": "unresolved",
+    }
+    record.update(over)
+    return record
+
+
+def test_disputes_carry_their_topic_from_the_part_they_were_written_to(tmp_path):
+    """A contradiction's topic is the subject whose part file holds it: each
+    `rb-reconcile-contradict` member writes one part per subject, so the file a
+    contradiction sits in is the topic it was found under -- measured, all 119 on
+    run-20261103-172151 appear in exactly one part."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    (dispute,) = target_brief.disputes(run)
+    assert dispute.topic_id == "sub-cap-get-ticket"
+    assert dispute.topic_label == "query_tickets.get_ticket"
+    assert dispute.ref == "D1"
+    assert dispute.chosen == "a"
+    assert dispute.rationale.startswith("clm-notes-004 is stated at high confidence")
+
+
+def test_topic_label_is_trimmed_at_its_first_colon_never_rewritten(tmp_path):
+    """Measured on run-20261103-172151, a subject label can run to 160 characters
+    of enumeration after a colon. The part before it is the label's own words, so
+    cutting there trims without rewriting."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    subjects = json.loads(run.subjects.read_text())
+    for subject in subjects["subjects"]:
+        if subject["id"] == "sub-cap-get-ticket":
+            subject["label"] = "Who the parties are: agent, reporter, maintainer"
+    run.subjects.write_text(json.dumps(subjects))
+    assert target_brief.disputes(run)[0].topic_label == "Who the parties are"
+    # The control: a label with no colon ships whole.
+    assert target_brief.topics(run)["sub-ent-ticket"] == "Ticket"
+
+
+def test_disputes_fall_back_to_no_topic_when_the_subjects_cannot_be_read(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.subjects.unlink()
+    (dispute,) = target_brief.disputes(run)
+    assert dispute.topic_id == target_brief.NO_TOPIC
+    assert dispute.topic_label == ""
+    # Never dropped: the grouping is lost, the disagreement is not.
+    assert dispute.nature
+    assert isinstance(target_brief.topics(run), Absent)
+
+
+def test_disputes_fall_back_to_no_topic_when_no_part_holds_them(tmp_path):
+    """A run sealed before parts existed, or a part directory a human removed."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    for part in run.contradictions_dir.iterdir():
+        part.unlink()
+    assert target_brief.disputes(run)[0].topic_id == target_brief.NO_TOPIC
+
+
+@pytest.mark.parametrize(
+    ("nature", "expected"),
+    [
+        ("Short thing. clm-x-001 says more.", "Short thing."),
+        ("Short thing. `clm-x-001` says more.", "Short thing."),
+        ("The claims disagree. More.", ""),
+        ("clm-x-001 says one thing. More.", ""),
+        ("A" * 199 + ". Rest.", "A" * 199 + "."),
+        ("A" * 200 + ". Rest.", ""),
+        ("no stop at all and short", "no stop at all and short"),
+        ("", ""),
+    ],
+)
+def test_headline_is_a_short_first_sentence_without_our_ids(nature, expected):
+    """Selected, never rewritten: the first sentence ships as the stage wrote it or
+    not at all. Measured on run-20261103-172151, only 16 of 119 first sentences pass
+    -- 101 carry an id or the word itself, 100 run past 200 characters."""
+    assert target_brief._headline(nature) == expected
+
+
+def test_headline_prefers_an_owner_facing_question_when_the_run_carries_one(tmp_path):
+    """The spec's forward hook: a later `rb-reconcile-contradict` change may write a
+    short `question`. Read when present, so that change needs no renderer work."""
+    run = _toy_with_contradictions(
+        tmp_path, [_contradiction("con-a", question="May the agent retry after a block?")]
+    )
+    assert target_brief.disputes(run)[0].headline == "May the agent retry after a block?"
+
+
+def test_refs_number_items_in_id_order_within_their_kind(tmp_path):
+    run = _toy_with_contradictions(tmp_path, [_contradiction("con-b"), _contradiction("con-a")])
+    assert [(d.id, d.ref) for d in target_brief.disputes(run)] == [("con-a", "D1"), ("con-b", "D2")]
+
+
+def test_open_question_topic_is_the_subject_holding_most_of_its_claims(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["gaps"] = [
+        {
+            "id": "gap.b",
+            "subject": "s",
+            "unknown": "u?",
+            # Two of three in sub-cap-find-tickets, one in sub-cap-get-ticket.
+            "claims": ["clm-api-001", "clm-api-007", "clm-notes-004"],
+        },
+        {"id": "gap.a", "subject": "s", "unknown": "v?"},
+    ]
+    run.world_model.write_text(json.dumps(world_model))
+    first, second = target_brief.open_questions(run)
+    assert (first.id, first.ref, first.topic_id) == ("gap.a", "Q1", target_brief.NO_TOPIC)
+    assert (second.id, second.ref, second.topic_id) == ("gap.b", "Q2", "sub-cap-find-tickets")
+    assert second.topic_label == "query_tickets.find_tickets"
+
+
+def test_open_question_topic_ties_break_on_the_subject_id(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["gaps"] = [
+        {"id": "gap.a", "subject": "s", "unknown": "u?", "claims": ["clm-api-001", "clm-api-002"]}
+    ]
+    run.world_model.write_text(json.dumps(world_model))
+    # One claim each in sub-cap-find-tickets and sub-cap-get-ticket: the smaller id.
+    assert target_brief.open_questions(run)[0].topic_id == "sub-cap-find-tickets"

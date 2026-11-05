@@ -17,13 +17,14 @@ orchestrator's conclusion wearing a finding's clothes.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 
 # Private helpers from three siblings, deliberately: `summary.py` imports the
 # same four out of `brief.py` for the reason stated there, which is that a second
 # spelling of one rule is how two reports come to disagree about one run.
 from .brief import _dicts, _mapping, _quietly, _strings
-from .paths import RunPaths
+from .paths import RunPaths, list_json
 from .refs import _claims_by_artifact
 from .summary import Marker, _absent_or_malformed
 
@@ -536,30 +537,175 @@ def inputs_read(run: RunPaths) -> list[InputGroup] | Marker:
     return groups
 
 
-# `resolution` -> the sentence that follows a resolved disagreement. Only the two
-# that need no file name live here; `preferred_a` and `preferred_b` are answered
-# by naming the side, in `_taken` below.
-_BOTH_POSSIBLE = "We are treating both as possible."
+# The one sentence the reader still owns about a resolution: a side was taken and
+# it resolves to no file we can name. Everything else a resolution says is now the
+# renderer's badge on a column -- see `_chosen`.
 _UNRESOLVED_SIDE = "We took one side, but could not resolve which file states it."
+
+# The topic of an item that sits in no subject, or of every item when the subjects
+# could not be read. A value rather than `None` so a sort key never meets a `None`.
+NO_TOPIC = ""
+
+# The id shapes this project mints, plus the word it uses for a recorded
+# statement. A first sentence carrying either is ours, not the owner's, and is not
+# used as a headline -- it still ships whole under the card's disclosure.
+_OUR_WORDS = re.compile(r"\b(?:clm|cap|ent|act|goal|gap|con|oc|art)-|\bclaims?\b", re.I)
+# A sentence ends at `.?!` and whitespace before a capital, a backtick, or one of
+# our id shapes -- the last because the stages open a second sentence with a bare
+# claim id (`... the enum. clm-triage-result-schema-json-019 states ...`, measured on
+# run-20261103-172151), and missing that break makes the whole paragraph one
+# over-long "sentence".
+_SENTENCE_END = re.compile(r"(?<=[.?!])\s+(?=[A-Z`]|(?:clm|cap|ent|act|goal|gap|con|oc|art)-)")
+_HEADLINE_MAX = 200
+
+
+def _chosen(resolution: str) -> str | None:
+    """Which side was taken: `"a"`, `"b"`, or `None` when no side was.
+
+    This replaces `_taken`'s "We went with <file>." -- the parked limitation that a
+    sentence naming the chosen file says nothing when both sides were read from the
+    same file (27 of 119 on run-20261103-172151, 4 of 41 on run-20260826-090456).
+    A side is what was chosen, not a file, so the renderer marks the column and the
+    quote under it says which reading won. The reader keeps no layout strings,
+    which is the split the limitation was protecting when it parked the fix.
+
+    An off-enum value is `None`, never a decision, matching `kind_of` below.
+    """
+    return {"preferred_a": "a", "preferred_b": "b"}.get(resolution)
+
+
+def kind_of(resolution: str) -> str:
+    """What a disagreement asks of the owner: rule on it, confirm our pick, or
+    confirm that both hold. Anything outside the four known values asks for a
+    ruling, because reading it as a decision would assert one nobody made."""
+    if resolution in ("preferred_a", "preferred_b"):
+        return "confirm"
+    if resolution == "both_possible":
+        return "both"
+    return "undecided"
+
+
+def _headline(nature: str) -> str:
+    """The first sentence of `nature`, when it is short and carries nothing of ours.
+
+    Selected, never rewritten -- the sentence ships exactly as written or not at all.
+    Measured on run-20261103-172151, 16 of 119 first sentences qualify: 101 carry an
+    id or the word for one, 100 run past 200 characters. The rest are headed by
+    facts the renderer composes (topic and files), not by a paraphrase.
+    """
+    first = _SENTENCE_END.split(nature.strip(), maxsplit=1)[0].strip()
+    if not first or len(first) > _HEADLINE_MAX or _OUR_WORDS.search(first):
+        return ""
+    return first
+
+
+def side_files(refs) -> frozenset[str]:
+    """The owner-openable files one side was read from.
+
+    Through `_file_and_piece`, so two slices of one capture are one file here as
+    everywhere else a file is named for the owner, and a path with nothing nameable
+    in it contributes nothing rather than a blank.
+    """
+    return frozenset(name for name in (_file_and_piece(r.path)[0] for r in refs) if name.strip())
+
+
+def _trim_label(label: str) -> str:
+    """A subject label up to its first colon. Trimming, not rewriting: the words
+    kept are the label's own, in its own order. Measured on run-20261103-172151,
+    `actors-and-roles` carries a 160-character enumeration after its colon."""
+    head, sep, _ = label.partition(":")
+    return (head if sep and head.strip() else label).strip()
+
+
+def topics(run: RunPaths) -> dict[str, str] | Marker:
+    """subject id -> its label, trimmed. A `Marker` when the subjects cannot be read,
+    so a caller can say it could not group rather than imply nothing was grouped."""
+    payload = _mapping(_quietly(run.subjects))
+    if not payload:
+        return _absent_or_malformed(
+            run.subjects, "01-subjects.json", "nothing could be read from it"
+        )
+    return {
+        _text(s.get("id")): _trim_label(_text(s.get("label")))
+        for s in _dicts(payload.get("subjects"))
+        if _text(s.get("id"))
+    }
+
+
+def _topic_of(topic_id: str, labels: dict[str, str]) -> tuple[str, str]:
+    """(topic_id, label), with an id the subjects do not define folded to no topic:
+    a topic the reader cannot name is not a group they can recognise."""
+    if topic_id in labels:
+        return topic_id, labels[topic_id]
+    return NO_TOPIC, ""
+
+
+def contradiction_topics(run: RunPaths) -> dict[str, str]:
+    """contradiction id -> the subject whose part file holds it.
+
+    `{}` on any failure to read: the topic is a grouping aid, and losing it must
+    cost the page its groups and never its disagreements. The first part to hold an
+    id wins, in sorted file order, for determinism; the pipeline writes each id once.
+    """
+    out: dict[str, str] = {}
+    try:
+        parts = list_json(run.contradictions_dir)
+    except Exception:  # deliberate: list_json raises UsageError, not an OSError
+        return out
+    for path in sorted(parts):
+        payload = _mapping(_quietly(path))
+        subject = _text(payload.get("subject_id"))
+        for record in _dicts(payload.get("contradictions")):
+            cid = _text(record.get("id"))
+            if cid and subject:
+                out.setdefault(cid, subject)
+    return out
+
+
+def _subject_of_claims(claim_ids, run: RunPaths) -> str:
+    """The subject holding most of `claim_ids`, ties to the smaller id; `NO_TOPIC`
+    when none of them sits in any subject."""
+    payload = _mapping(_quietly(run.subjects))
+    counts: dict[str, int] = {}
+    wanted = set(claim_ids)
+    for subject in _dicts(payload.get("subjects")):
+        sid = _text(subject.get("id"))
+        hits = len(wanted.intersection(_strings(subject.get("claims"))))
+        if sid and hits:
+            counts[sid] = hits
+    if not counts:
+        return NO_TOPIC
+    return min(counts, key=lambda sid: (-counts[sid], sid))
 
 
 @dataclass(frozen=True)
 class Dispute:
     """One contradiction, with both sides resolved to places in the target.
 
-    `nature` is carried verbatim. It is the sentence an owner acts on, and the
-    world model writes it in their terms already -- "the design document states
-    three actions; the tool module states four". `rationale` is deliberately not
-    here: it is dense with claim ids and argues the case to a reader who already
-    accepts the framing, and it stays available in `run-summary`.
+    `nature` and `rationale` are carried verbatim, and both render under the card's
+    disclosure: `nature` is the sentence an owner acts on, and `rationale` is our
+    full reasoning, dense with ids, shown only to a reader who opens it.
+
+    `chosen` is the side taken (`"a"`, `"b"` or `None`), never a sentence -- see
+    `_chosen`. `ref` is the visible handle (`D<n>`, id order), which an owner quotes
+    back; `id` is ours and never reaches visible text.
     """
 
     id: str
     nature: str
     resolution: str
-    taken: str
+    chosen: str | None
     side_a: tuple[SourceRef, ...]
     side_b: tuple[SourceRef, ...]
+    topic_id: str = NO_TOPIC
+    topic_label: str = ""
+    headline: str = ""
+    ref: str = ""
+    rationale: str = ""
+
+    @property
+    def kind(self) -> str:
+        return kind_of(self.resolution)
 
 
 def _side(value, index: dict[str, SourceRef]) -> tuple[SourceRef, ...]:
@@ -568,60 +714,21 @@ def _side(value, index: dict[str, SourceRef]) -> tuple[SourceRef, ...]:
     `_side_ids` reads the two shapes, so this cannot disagree with
     `disputed_claim_ids` about which ids a side names.
 
-    `sorted(set(...))`, matching `_taken` immediately below: a hand-edited
-    `"claim_a": ["clm-notes-004", "clm-notes-004"]` rendered the same file quoting
-    the same line twice under one side -- measured -- and the argument is less the
-    duplicate than that the two adjacent functions read one list two ways. The
-    schema requires a string here, so ordering is the hand-edited list's alone and
-    sorting it is the deterministic answer.
+    `sorted(set(...))`: a hand-edited `"claim_a": ["clm-notes-004",
+    "clm-notes-004"]` rendered the same file quoting the same line twice under one
+    side -- measured. The schema requires a string here, so ordering is the
+    hand-edited list's alone and sorting it is the deterministic answer.
     """
     return tuple(index[c] for c in sorted(set(_side_ids(value))) if c in index)
-
-
-def _taken(resolution: str, side_a, side_b) -> str:
-    """Which side was taken, as a sentence naming the file.
-
-    Not "we went with the code": that needs code-ness inferred from `kind`, and
-    the kinds measured do not support it -- reservation-service's capabilities
-    each span `design_doc`, `mcp_tool_schema`, `source_code` and `trace` at once.
-    A path the owner can open needs no inference and is checkable.
-    """
-    if resolution == "both_possible":
-        return _BOTH_POSSIBLE
-    if resolution == "preferred_a":
-        chosen = side_a
-    elif resolution == "preferred_b":
-        chosen = side_b
-    else:
-        # `unresolved`, or a value the enum does not cover. Group B's whole point
-        # is that we could not tell, and a sentence here would assert a decision
-        # nobody made.
-        return ""
-    # The file, never the raw `ref.path`: this sentence tells the owner which of
-    # their own sources we believed, so it has to name something they can open --
-    # `_file_and_piece` owns that rule and records what shipped without it. Two
-    # slices of one capture collapse to the one filename here, which is right for
-    # a sentence about which file we went with and is why the piece is dropped
-    # rather than labelled: `_side_rows` above has already shown both sides piece
-    # by piece, and this line is the decision over them.
-    names = (_file_and_piece(ref.path)[0] for ref in chosen)
-    files = sorted({name for name in names if name})
-    if not files:
-        # Reached now by a side that resolves to nothing *and* by one whose paths
-        # name nothing readable -- `We went with  .` was the second case before
-        # `_file_and_piece` answered it, and this sentence is already the true one
-        # for it: we took a side and cannot say which file states it.
-        return _UNRESOLVED_SIDE
-    return "We went with " + ", ".join(files) + "."
 
 
 def disputes(run: RunPaths) -> list[Dispute] | Marker:
     """Every contradiction the world model records, both sides resolved.
 
-    Ordered by id. Ranking by blast radius -- how many elements rest on a disputed
-    claim -- would order better and the inputs already exist in `provenance`, but
-    it is the one piece of genuinely new analysis in this design and shipping it
-    unmeasured is how a report starts asserting a judgment it did not earn.
+    Ordered by id, which is also what numbers the visible `D<n>` references, so a
+    reference is stable for one run whatever the page groups or filters. Which ten
+    the Workbook leads with is `workbook_order`'s, kept apart from this order so a
+    change to that ranking can never renumber an item an owner already quoted.
 
     One asymmetry, recorded rather than fixed: a hand-edited `"contradictions":
     "nope"` is dropped by `_dicts` and renders as `[]`, which tells the owner
@@ -635,28 +742,41 @@ def disputes(run: RunPaths) -> list[Dispute] | Marker:
     if isinstance(payload, Marker):
         return payload
     refs = _refs(run)
+    labels = topics(run)
+    labels = labels if isinstance(labels, dict) else {}
+    placed = contradiction_topics(run)
     out = []
     for record in _dicts(payload.get("contradictions")):
         resolution = _text(record.get("resolution"))
-        side_a = _side(record.get("claim_a"), refs)
-        side_b = _side(record.get("claim_b"), refs)
+        cid = _text(record.get("id"))
+        nature = _text(record.get("nature"))
+        topic_id, topic_label = _topic_of(placed.get(cid, NO_TOPIC), labels)
+        question = _text(record.get("question")).strip()
         out.append(
             Dispute(
-                id=_text(record.get("id")),
+                id=cid,
                 # Verbatim, and `_text`'s `""` rather than a stand-in sentence
                 # when the field is missing: the renderer says it could not read
                 # the description, which is true, where invented prose would not
-                # be. That is a ruling about *this* field, not just about the
-                # helper -- `nature` is the one sentence an owner acts on, so an
-                # invented one would be read as our assertion about their system.
-                nature=_text(record.get("nature")),
+                # be.
+                nature=nature,
                 resolution=resolution,
-                taken=_taken(resolution, side_a, side_b),
-                side_a=side_a,
-                side_b=side_b,
+                chosen=_chosen(resolution),
+                side_a=_side(record.get("claim_a"), refs),
+                side_b=_side(record.get("claim_b"), refs),
+                topic_id=topic_id,
+                topic_label=topic_label,
+                headline=question or _headline(nature),
+                rationale=_text(record.get("rationale")),
             )
         )
-    return sorted(out, key=lambda d: d.id)
+    out.sort(key=lambda d: d.id)
+    return [_numbered(d, f"D{n}") for n, d in enumerate(out, start=1)]
+
+
+def _numbered(item, ref: str):
+    """`item` with its visible reference set. Frozen dataclasses, so a copy."""
+    return replace(item, ref=ref)
 
 
 @dataclass(frozen=True)
@@ -680,23 +800,39 @@ class OpenQuestion:
     id: str
     subject: str
     unknown: str
+    topic_id: str = NO_TOPIC
+    topic_label: str = ""
+    ref: str = ""
 
 
 def open_questions(run: RunPaths) -> list[OpenQuestion] | Marker:
-    """Every gap the world model records, ordered by id."""
+    """Every gap the world model records, ordered by id and numbered `Q<n>`.
+
+    A gap's topic is the subject holding most of the claims it cites. The "no
+    provenance" ruling on `OpenQuestion` was measured when no gap cited a claim;
+    on run-20261103-172151 all 33 do, which is what makes them groupable.
+    """
     payload = _world(run)
     if isinstance(payload, Marker):
         return payload
+    labels = topics(run)
+    labels = labels if isinstance(labels, dict) else {}
     out = []
     for record in _dicts(payload.get("gaps")):
+        topic_id, topic_label = _topic_of(
+            _subject_of_claims(_strings(record.get("claims")), run), labels
+        )
         out.append(
             OpenQuestion(
                 id=_text(record.get("id")),
                 subject=_text(record.get("subject")),
                 unknown=_text(record.get("unknown")),
+                topic_id=topic_id,
+                topic_label=topic_label,
             )
         )
-    return sorted(out, key=lambda q: q.id)
+    out.sort(key=lambda q: q.id)
+    return [_numbered(q, f"Q{n}") for n, q in enumerate(out, start=1)]
 
 
 # `outcome_class.kind` -> the words an owner reads. The enum is the schema's five.
