@@ -1696,7 +1696,7 @@ def test_the_workbook_starts_with_at_most_ten_cards_in_order(tmp_path):
 
 def test_the_workbook_states_the_real_number_when_there_are_fewer_than_ten(tmp_path):
     page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
-    assert "the 1 answer that help us most" in page
+    assert "the 1 answer that helps us most" in page
     assert "/ 1</span>" in page
 
 
@@ -1808,3 +1808,78 @@ def test_the_export_tokens_are_the_spec_s_fixed_set():
         "only_right",
         "dont_know",
     }
+
+
+# Final-review fixes. Each test was run red before its fix.
+def test_the_export_carries_the_spec_s_fields():
+    """Spec "Answers": `manifest_sha256` identifies the run an answer file belongs to,
+    and a question's free text is `text`. Asserted on the script, the only place the
+    export is built."""
+    js = target_brief_html._JS
+    assert "manifest_sha256:" in js
+    assert "out.text = " in js
+    assert "out.note = " in js  # a disagreement's optional note
+    assert "data-manifest" in js
+
+
+def test_body_carries_the_manifest_digest(tmp_path):
+    import hashlib
+
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    digest = hashlib.sha256(run.manifest.read_bytes()).hexdigest()
+    assert f'data-manifest="{digest}"' in page
+    assert digest not in visible_text(page)
+
+
+def test_the_page_says_when_it_could_not_group_by_topic(tmp_path):
+    """Spec "Grouping": losing the subjects loses the grouping and never an item, and
+    the page says so -- one unexplained "Other" group is a silent narrowing."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    page = target_brief_html.render(run)
+    assert "could not group" not in page
+    run.subjects.unlink()
+    page = target_brief_html.render(run)
+    assert "We could not group these by topic" in visible_text(_section(page, "workbook"))
+    assert 'data-item="con-missing-semantics"' in page
+
+
+def test_the_filters_touch_only_the_other_disagreements():
+    """Measured by the review: `#workbook .group .card` also matched the open
+    questions and the missed-source box, so a filter hid them."""
+    js = target_brief_html._JS
+    assert "#workbook .group .card'" not in js
+    assert "#other-disputes .card" in js
+
+
+def test_print_clears_any_filter_and_marks_the_chosen_label(tmp_path):
+    """A filter left on dropped answered cards from the PDF; and without `:has()`
+    every option printed with none marked. `beforeprint` now unhides and marks."""
+    js = target_brief_html._JS
+    before = js[js.index("'beforeprint'") : js.index("'afterprint'")]
+    assert "c.hidden = false" in before
+    assert "chosen" in before
+    assert ".printing fieldset.answer label.chosen" in target_brief_html._CSS
+
+
+def test_the_copy_states_the_real_number_everywhere(tmp_path):
+    page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
+    text = visible_text(page)
+    assert "the 1 answer that helps us most" in text
+    assert "in the one above" in text
+    assert "ten above" not in text and "Ten answers" not in text
+
+
+def test_the_report_s_only_ask_is_its_invitation(tmp_path):
+    """`What we read` asked "tell us" inside the Report; the ask now lives with the
+    missed-source card in the Workbook."""
+    page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
+    report = visible_text(_section(page, "report"))
+    assert "tell us" not in report
+    assert report.count("Open the workbook") == 1
+    assert "If something important is not here, tell us" in visible_text(_section(page, "workbook"))
+
+
+def test_two_pages_without_a_run_id_or_digest_do_not_share_storage():
+    assert "'tb:' + (" in target_brief_html._JS
+    assert "location.pathname" in target_brief_html._JS

@@ -988,8 +988,10 @@ page, written for the people who own that target. It does two jobs, as two tabs:
   disagreement, `Q<n>` for a question, numbered in id order) and answer controls.
   **Print or save as PDF** prints both tabs with each answer beside its question;
   **Download answers** saves a JSON file (`format`
-  `rubrica-target-brief-answers`, `version` 1) keyed by each item's id, carrying its
-  reference, its kind and the choice token. Nothing in rubrica reads that file yet.
+  `rubrica-target-brief-answers`, `version` 1, the run id and `manifest_sha256` of
+  the run's manifest) keyed by each item's id, carrying its reference, its kind
+  (`undecided`, `confirm`, `both` or `question`), the choice token, and a
+  disagreement's `note` or a question's `text`. Nothing in rubrica reads that file yet.
 
 A disagreement's two sides sit in two columns, **left always `claim_a`, right
 always `claim_b`**, and the side we took carries an *our pick* badge. That replaced

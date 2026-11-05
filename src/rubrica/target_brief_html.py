@@ -264,8 +264,12 @@ fieldset.answer textarea { display: block; width: 100%; box-sizing: border-box;
   #report, #workbook { display: block !important; }
   .tabs, .actions, .filters, .nojs { display: none !important; }
   .printing details.untouched { display: none; }
-  fieldset.answer label:has(input:not(:checked)) { display: none; }
-  fieldset.answer label.note:has(textarea) { display: block; }
+  /* Driven by a class the script sets before printing, not by a selector some
+     browsers lack: without it every option printed and none was marked. */
+  .printing fieldset.answer label { display: none; }
+  .printing fieldset.answer label.chosen, .printing fieldset.answer label.note {
+    display: block; }
+  .printing fieldset.answer label.chosen::before { content: "✓ "; }
   fieldset.answer input { display: none; }
   body { max-width: none; background: #fff; color: #000; }
   .tw { overflow: visible; }
@@ -662,7 +666,7 @@ def _files_html(files) -> str:
     return f"{shown} and {tail}" if shown else tail
 
 
-def _group_a(run: RunPaths):
+def _group_a(run: RunPaths, ask: bool = True):
     """What we read. The first ask, because it is the one an owner can answer
     without reading anything else: a file they know we should have had and did not
     is a correction that invalidates everything below it.
@@ -711,9 +715,16 @@ def _group_a(run: RunPaths):
     read_as = f", read as {esc(pieces)} separate pieces" if pieces != files else ""
     return (
         f"<p>We built this description by reading {esc(files)} "
-        f"file{'' if files == 1 else 's'} of yours{read_as}. "
-        "<strong>If something important is not here, tell us — that is the most "
-        "useful correction you can give us.</strong></p>"
+        f"file{'' if files == 1 else 's'} of yours{read_as}."
+        # The ask only where answering is: in the Report this is reference, and the
+        # Report's one ask is its invitation (spec, "Report").
+        + (
+            " <strong>If something important is not here, tell us — that is the most "
+            "useful correction you can give us.</strong>"
+            if ask
+            else ""
+        )
+        + "</p>"
         + _table(("What kind", "Where", "The files"), rows)
     )
 
@@ -1060,7 +1071,8 @@ def _workbook(run: RunPaths, found, questions, takes) -> str:
     )
     if n:
         start = (
-            f"<h3>Start here: the {esc(n)} answer{'' if n == 1 else 's'} that help us most</h3>"
+            f"<h3>Start here: the {esc(n)} answer{'' if n == 1 else 's'} that "
+            f"help{'s' if n == 1 else ''} us most</h3>"
             f'<p class="lede">About {esc(max(5, n * 3 // 2))} minutes. Stop whenever you '
             "like; whatever you answer still counts. "
             f'<span class="counter">Answered <span id="wb-count">0</span> / {esc(n)}</span></p>'
@@ -1068,6 +1080,8 @@ def _workbook(run: RunPaths, found, questions, takes) -> str:
         )
     else:
         start = "<p>We have nothing to ask you about here.</p>"
+    # The real number, never "ten": the spec's rule for fewer than ten items.
+    above = "in the one above" if n == 1 else f"in the {esc(n)} above"
     rest_d = [d for d in disputes if d.id not in first]
     rest_q = [q for q in asked if q.id not in first]
     if isinstance(found, Marker):
@@ -1075,7 +1089,7 @@ def _workbook(run: RunPaths, found, questions, takes) -> str:
     elif not disputes:
         rest_disputes = _no_disputes()
     elif not rest_d:
-        rest_disputes = "<p>Every disagreement is in the ten above.</p>"
+        rest_disputes = f"<p>Every disagreement is {above}.</p>"
     else:
         groups = "".join(
             f'<details class="group"><summary>{esc(_topic_name(items[0], "Other disagreements"))} '
@@ -1090,16 +1104,17 @@ def _workbook(run: RunPaths, found, questions, takes) -> str:
             for kind in ("undecided", "confirm", "both")
         )
         rest_disputes = (
+            '<div id="other-disputes">'
             f'<p class="filters">Show only: {chips} '
             '<button type="button" class="filter" data-filter="" disabled>All</button></p>'
-            f"<details><summary>By file</summary>{_file_index(disputes)}</details>" + groups
+            f"<details><summary>By file</summary>{_file_index(disputes)}</details>"
+            + groups
+            + "</div>"
         )
     if isinstance(questions, Marker):
         rest_questions = _marker(questions, True)
     elif not rest_q:
-        rest_questions = (
-            "<p>Every open question is in the ten above.</p>" if asked else _no_questions()
-        )
+        rest_questions = f"<p>Every open question is {above}.</p>" if asked else _no_questions()
     else:
         rest_questions = "".join(_question_card(q) for q in rest_q)
     missed = (
@@ -1122,7 +1137,16 @@ def _workbook(run: RunPaths, found, questions, takes) -> str:
         '</button> <button type="button" id="wb-download" disabled>Download answers</button></p>'
         + start
         + "<h2>Everything else</h2>"
-        "<p>Optional, for anyone who wants to go deeper.</p>"
+        # Spec "Grouping": losing the subjects costs the page its groups, never an
+        # item, and the page says so -- one unexplained catch-all group would read as
+        # though we had grouped them and found no topics. Said here, once, above every
+        # group it affects, rather than inside a group that may not render.
+        + (
+            "<p>We could not group these by topic, so they are listed together.</p>"
+            if isinstance(target_brief.topics(run), Marker)
+            else ""
+        )
+        + "<p>Optional, for anyone who wants to go deeper.</p>"
         f'<details class="group"><summary>Other disagreements ({esc(len(rest_d))})</summary>'
         f"{rest_disputes}</details>"
         f'<details class="group"><summary>Other open questions ({esc(len(rest_q))})</summary>'
@@ -1345,7 +1369,7 @@ def _reply() -> str:
         '<div class="reply"><h3>How to reply</h3>'
         "<p>Download your answers and send us the file, or save the page as a PDF, or "
         "simply reply by email quoting each item's reference (D12, Q3) — whatever "
-        "suits you. Ten answers are worth more to us than none, and a source we should "
+        "suits you. A few answers are worth more to us than none, and a source we should "
         "have read is worth more than any of them.</p>"
         "<p>Nothing here needs to be agreed to. We are asking whether it is "
         "true.</p></div>"
@@ -1381,7 +1405,8 @@ def _what_it_does(run: RunPaths, operations, personas, terse: bool) -> str:
 _JS = r"""
 (function () {
   var body = document.body;
-  var key = 'tb:' + (body.getAttribute('data-digest') || body.getAttribute('data-run') || '');
+  var key = 'tb:' + (body.getAttribute('data-digest') || body.getAttribute('data-run') ||
+    location.pathname);
   var store = {};
   try { store = JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (e) { store = {}; }
   function save() { try { localStorage.setItem(key, JSON.stringify(store)); } catch (e) {} }
@@ -1443,7 +1468,7 @@ _JS = r"""
     b.disabled = false;
     b.addEventListener('click', function () {
       var want = b.getAttribute('data-filter');
-      document.querySelectorAll('#workbook .group .card').forEach(function (c) {
+      document.querySelectorAll('#other-disputes .card').forEach(function (c) {
         c.hidden = !!want && c.getAttribute('data-kind') !== want;
       });
     });
@@ -1455,6 +1480,13 @@ _JS = r"""
   }
   window.addEventListener('beforeprint', function () {
     body.classList.add('printing');
+    // A filter left on would drop answered cards from the record.
+    cards.forEach(function (c) { c.hidden = false; });
+    // Marks the chosen option for the print rules, which must not depend on :has().
+    document.querySelectorAll('fieldset.answer label').forEach(function (l) {
+      var r = l.querySelector('input[type=radio]');
+      l.classList.toggle('chosen', !!(r && r.checked));
+    });
     document.querySelectorAll('#workbook details').forEach(function (d) {
       var hit = Array.prototype.some.call(d.querySelectorAll('.card'), answered);
       d.classList.toggle('untouched', !hit && d.classList.contains('group'));
@@ -1474,18 +1506,22 @@ _JS = r"""
     dl.addEventListener('click', function () {
       var answers = cards.filter(answered).map(function (c) {
         var a = store[c.getAttribute('data-item')];
-        return {
+        var kind = c.getAttribute('data-kind');
+        var out = {
           item: c.getAttribute('data-item'),
           ref: c.getAttribute('data-ref'),
-          kind: c.getAttribute('data-kind'),
-          choice: a.choice || null,
-          note: a.text || ''
+          kind: kind,
+          choice: a.choice || null
         };
+        // Spec "Answers": a question's answer is `text`, a disagreement's is `note`.
+        if (kind === 'question') { out.text = a.text || ''; } else { out.note = a.text || ''; }
+        return out;
       });
       var doc = {
         format: 'rubrica-target-brief-answers',
         version: 1,
         run_id: body.getAttribute('data-run'),
+        manifest_sha256: body.getAttribute('data-manifest'),
         target: body.getAttribute('data-target'),
         generated: body.getAttribute('data-generated'),
         exported: new Date().toISOString(),
@@ -1565,7 +1601,7 @@ def render(run: RunPaths) -> str:
         'behaves. <a href="#workbook">Open the workbook →</a></p>'
         + "<h2>Reference</h2>"
         + _collapsed("What data it holds", data_types, terse)
-        + _collapsed("What we read", _group_a(run))
+        + _collapsed("What we read", _group_a(run, ask=False))
         + "</section>"
     )
     target = _slug(name)
@@ -1582,7 +1618,8 @@ def render(run: RunPaths) -> str:
         # page stays byte-identical across renders.
         f'<body data-run="{esc(_text_of(manifest, "run_id"))}" '
         f'data-generated="{esc(_text_of(manifest, "created_utc"))}" '
-        f'data-digest="{esc(_digest(manifest))}" data-target="{esc(target)}">',
+        f'data-digest="{esc(_digest(manifest))}" data-manifest="{esc(_manifest_sha(run))}" '
+        f'data-target="{esc(target)}">',
         f"<h1>{esc(name)}</h1>" if name else "<h1>The system we are describing</h1>",
         f'<p class="meta">Reached over {esc(interface)}.</p>' if interface else "",
         '<nav class="tabs"><a href="#report">Report</a> <a href="#workbook">Workbook</a></nav>',
@@ -1611,6 +1648,16 @@ def _digest(manifest: dict) -> str:
         r.get("sha256") for r in _dicts(manifest.get("inputs")) if isinstance(r.get("sha256"), str)
     )
     return hashlib.sha256("\n".join(digests).encode()).hexdigest()[:16] if digests else ""
+
+
+def _manifest_sha(run: RunPaths) -> str:
+    """sha256 of the manifest's bytes, for the export's `manifest_sha256` (spec,
+    "Answers"): what lets a later reader tell which run an answer file belongs to.
+    `""` when the manifest cannot be read -- the page still renders."""
+    try:
+        return hashlib.sha256(run.manifest.read_bytes()).hexdigest()
+    except OSError:
+        return ""
 
 
 def _files_read(run: RunPaths) -> str:
