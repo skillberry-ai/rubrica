@@ -1219,3 +1219,40 @@ def test_workbook_spreads_a_kind_across_topics_before_repeating_one():
     ]
     order = target_brief.workbook_order(disputes, [], [])
     assert order[:3] == ["big0", "small0", "tiny0"]
+
+
+@pytest.mark.parametrize(
+    ("op_id", "group"),
+    [
+        ("cap.tracker.add-label", "tracker"),
+        ("cap.agent.x", "agent"),
+        ("cap-find-tickets", ""),
+        ("cap..x", ""),
+        ("cap.only", ""),
+        ("", ""),
+    ],
+)
+def test_capability_group_is_the_ids_middle_segment(op_id, group):
+    """An id convention, not a schema field, so anything off it is "Other" rather
+    than a group we invented a name for. Measured on run-20261103-172151:
+    agent 50, tracker 44, post 13, skill 7, config 5, dispatch 4, harness 4,
+    labels 2, util 1 -- where `01-services.json` held two services of one tool
+    each, which partitions nothing."""
+    assert target_brief.capability_group(op_id) == group
+
+
+def test_grouped_operations_keeps_first_seen_group_order_and_source_order(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    a, b = world_model["capabilities"]
+    world_model["capabilities"] = [
+        dict(a, id="cap.zeta.one"),
+        dict(b, id="cap.alpha.one"),
+        dict(a, id="cap.zeta.two"),
+    ]
+    run.world_model.write_text(json.dumps(world_model))
+    groups = target_brief.grouped_operations(target_brief.operations(run))
+    assert [(g, [op.id for op in ops]) for g, ops in groups] == [
+        ("zeta", ["cap.zeta.one", "cap.zeta.two"]),
+        ("alpha", ["cap.alpha.one"]),
+    ]

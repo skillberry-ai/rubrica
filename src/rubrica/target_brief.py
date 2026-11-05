@@ -1246,6 +1246,28 @@ def operations(run: RunPaths) -> list[Operation] | Marker:
     return out
 
 
+def capability_group(op_id: str) -> str:
+    """The middle segment of a `cap.<group>.<rest>` id, or `""` (shown as "Other").
+
+    An id convention rather than a schema field -- the toy's ids are `cap-...` and
+    land in "Other" -- so nothing here is a name we made up: a group is shown under
+    its own segment or not at all. Not by service: `01-services.json` on
+    run-20261103-172151 held two services of one tool each, which partitions
+    nothing of 130 capabilities.
+    """
+    parts = op_id.split(".")
+    return parts[1] if len(parts) >= 3 and parts[0] == "cap" and parts[1] else ""
+
+
+def grouped_operations(ops: list[Operation]) -> list[tuple[str, list[Operation]]]:
+    """Operations by `capability_group`, groups in first-seen order, operations in
+    source order -- `operations`' docstring says why source order is kept."""
+    groups: dict[str, list[Operation]] = {}
+    for op in ops:
+        groups.setdefault(capability_group(op.id), []).append(op)
+    return list(groups.items())
+
+
 def data_types(run: RunPaths) -> list[DataType] | Marker:
     """Every entity, with relation targets resolved to their names."""
     payload = _world(run)
