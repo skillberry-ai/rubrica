@@ -23,6 +23,11 @@ read as a promise the page does not make.
 A failure in the first two is prose to reword, never an assertion to relax: a
 recipient asked "does this describe your system?" who is instead reading about
 `01-world-model.json` has been handed the wrong question.
+
+Since 2026-11-05 the page is a Report (asks for nothing) and a Workbook (asks for
+answers), and those two tests read `visible_text(page)` rather than the raw HTML:
+the answers export needs our ids in `data-` attributes and the script, and the
+user ruled that acceptable so long as no reader ever sees one.
 """
 
 from __future__ import annotations
@@ -31,89 +36,148 @@ import json
 import os
 import re
 import shutil
+from html.parser import HTMLParser
 
 import pytest
 
-from rubrica import target_brief_html
+from rubrica import target_brief, target_brief_html
 from tests.toy import build_toy_run
 
 
-def test_page_is_self_contained_and_carries_no_script(tmp_path):
+class _Visible(HTMLParser):
+    """Text nodes only: no attribute, no `<script>`, no `<style>`."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self._skip += 1
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style") and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data):
+        if not self._skip:
+            self.parts.append(data)
+
+
+def visible_text(page: str) -> str:
+    """What a reader can see -- on screen or printed. The vocabulary and identifier
+    rules hold of this, by the user's 2026-11-05 ruling, and no longer of the raw
+    HTML, whose attributes and script carry the ids the answers export needs."""
+    parser = _Visible()
+    parser.feed(page)
+    return " ".join(parser.parts)
+
+
+def _section(page: str, section_id: str) -> str:
+    start = page.index(f'<section id="{section_id}">')
+    return page[start : page.index("</section>", start)]
+
+
+_OUR_IDS = re.compile(r"\b(?:clm|cap|ent|act|goal|gap|con|oc|art)-[a-z0-9-]+")
+
+
+def test_page_is_self_contained_with_one_inline_script(tmp_path):
+    """The user's 2026-11-05 ruling: scripts are allowed so long as the page stays
+    one self-contained file. One inline script, no `src`, no network."""
     page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
     assert page.startswith("<!doctype html>")
     assert page.rstrip().endswith("</html>")
-    # Ruling 1: emailed out of the project, so it must read with scripts off.
-    assert "<script" not in page.lower()
-    # Self-contained: no network, no external asset.
+    assert page.lower().count("<script") == 1
+    assert "<script>" in page
+    assert " src=" not in page
     assert "http://" not in page and "https://" not in page
     assert "<style>" in page
+
+
+def test_inline_script_parses():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not on PATH")
+    import subprocess
+    import tempfile
+
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
+        fh.write(target_brief_html._JS)
+    result = subprocess.run([node, "--check", fh.name], capture_output=True, text=True)
+    os.unlink(fh.name)
+    assert result.returncode == 0, result.stderr
+
+
+def test_page_reads_with_scripts_off(tmp_path):
+    """Ruling 1's reason survives the ruling that overturned it: the page is opened
+    with scripts off, so everything a reader reads is in the HTML and the script
+    only toggles, records and exports."""
+    page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
+    bare = re.sub(r"<script>.*?</script>", "", page, flags=re.S)
+    text = visible_text(bare)
+    for heading in (
+        "What it seems to do",
+        "What looks off",
+        "What we could not find",
+        "Your answers",
+        "Everything else",
+    ):
+        assert f"<h2>{heading}</h2>" in bare, heading
+    assert "D1" in text
+    assert "not an empty result" in text  # side a's quote
+    assert '<a href="#workbook">' in bare
+    # And says what to do instead of answering in place.
+    assert "quote each item's reference" in text
 
 
 def test_page_names_the_target_and_asks_the_question(tmp_path):
     page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
     assert "ticketq" in page
-    assert "does this accurately describe your system?" in page.lower()
+    # Asked in the Workbook, where the answers are; the Report asks nothing.
+    assert "does this accurately describe your system?" in _section(page, "workbook").lower()
     # The dropped sign-off block must not come back by accident.
     for word in ("sign off", "sign-off", "signature", "approve", "ratif"):
         assert word not in page.lower()
 
 
-def test_page_leads_with_the_asks_and_puts_the_description_beneath(tmp_path):
+def test_the_report_comes_first_and_asks_for_nothing(tmp_path):
+    """The user's concern that shaped the page: a reader who only wants the findings
+    must never be handed a to-do list. So the Report carries no control, no count of
+    what is outstanding, and no status chip -- and it comes first.
+
+    Scoped to the Report `<section>`, with the Workbook as the positive control: a
+    page that dropped every control would pass the absences on their own."""
     page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
-    # Tier 1 before tier 2: the asks are the point, the full description is the
-    # appendix that supports it. The first index is heading-scoped because the ranked
-    # asks table names this section in a cell, and that cell is above both tiers by
-    # construction -- so the bare phrase compared two offsets that stay ordered
-    # however the sections move: 8384 for the cell against 9228 for the heading,
-    # measured. `What we believe` needs no tag; it occurs once, and that once is its
-    # own heading.
-    assert page.index("<h2>Where our sources disagree</h2>") < page.index("What we believe")
-    # Tier 2 is collapsed; tier 1 is not.
-    body = page[page.index("What we believe") :]
-    assert "<details>" in body
-    assert "<details>" not in page[: page.index("What we believe")]
+    assert page.index('<section id="report">') < page.index('<section id="workbook">')
+    report = _section(page, "report")
+    for markup in ("<fieldset", "<input", "<textarea", "wb-count", "<button"):
+        assert markup not in report, markup
+    text = visible_text(report).lower()
+    for word in ("undecided", "we could not decide", "please confirm", "answered", "need your"):
+        assert word not in text, word
+    workbook = _section(page, "workbook")
+    assert "<fieldset" in workbook and "wb-count" in workbook
 
 
-def test_page_renders_every_group_and_every_tier_two_section(tmp_path):
+def test_page_renders_every_section_heading_once(tmp_path):
+    """Ruling 36 carried over: a disclosure control *is* its heading, so a collapsed
+    section never also carries an `<h2>` of its own name. The toy's capability ids
+    are `cap-...`, off the `cap.<group>.<rest>` convention, so its operations sit in
+    one "Other" group."""
     page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
-    # Every heading tagged, and by the helper that renders it. Two reasons, both
-    # measured on a rendered page rather than reasoned about:
-    #
-    #   - the ranked asks table names three of these sections in its "Where it is"
-    #     column, so a bare `in page` for `What we read`, `Where our sources disagree`
-    #     or `What we could not tell` is satisfied by a table cell and proves nothing
-    #     about the section. `What we read` was already reachable that way before the
-    #     table existed -- it occurs first inside a `_CSS` comment, which is the
-    #     collision the `What we read` section test records.
-    #   - `_section` and the two tier headings emit an `<h2>`; `_collapsed` emits a
-    #     `<summary>` and deliberately no `<h2>`, which is what the next test is
-    #     about. One spelling for all seven would fail on whichever it did not
-    #     describe.
     for heading in (
-        "What we read",
-        "Where our sources disagree",
-        "What we could not tell",
-        "What we believe, in full",
+        "What it seems to do",
+        "What looks off",
+        "What we could not find",
+        "Reference",
+        "Your answers",
+        "Everything else",
     ):
-        assert f"<h2>{heading}</h2>" in page
-    for heading in ("What it can do", "What data it holds", "Who uses it"):
-        assert f"<summary>{heading}</summary>" in page
-
-
-def test_page_prints_each_collapsed_heading_exactly_once(tmp_path):
-    """Ruling 36. A `<summary>` naming the section plus an `<h2>` naming it again
-    inside the same `<details>` prints every tier-2 heading twice to a reader. The
-    disclosure control *is* the heading here, so the `<h2>` goes."""
-    page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
-    for heading in ("What it can do", "What data it holds", "Who uses it"):
-        assert page.count(heading) == 1, heading
+        assert page.count(f"<h2>{heading}</h2>") == 1, heading
+    for heading in ("Who uses it", "What data it holds", "What we read", "Other (2)"):
+        assert page.count(f"<summary>{heading}</summary>") == 1, heading
         assert f"<h2>{heading}</h2>" not in page, heading
-        # The positive control the absence above needs: the heading is still on
-        # the page, carried by the control that opens the section.
-        assert f"<summary>{heading}</summary>" in page, heading
-    # And the tier-1 headings, which are not collapsed, still are `<h2>`s -- so
-    # the assertion above is about where a heading lives, not about h2 vanishing.
-    assert "<h2>What we read</h2>" in page
 
 
 def test_page_renders_the_toy_contradiction_with_both_files_named(tmp_path):
@@ -127,8 +191,10 @@ def test_page_renders_the_toy_contradiction_with_both_files_named(tmp_path):
     # `esc(dispute.side_a)` puts a dataclass repr here and fails the line above.
     assert "#error-behaviour" in page
     assert "not an empty result" in page
-    # `resolution` is `preferred_a`, so the page names the file it went with.
-    assert "We went with" in page
+    # `resolution` is `preferred_a`: the badge sits on side a's column, and the
+    # sentence that badge replaced is gone (`test_our_pick_badges_the_chosen_side_only`).
+    assert 'class="pick"' in page
+    assert "We went with" not in page
     # A locator is labelled rather than dropped into bare parentheses: side_b's is
     # the raw JSON pointer `#/spans/1/output`, and Task 3 measured `#/126` shapes
     # on a real run. Both sides asserted, because side_b carries no quote and so
@@ -295,20 +361,60 @@ def test_page_labels_an_outcome_that_carries_no_description(tmp_path):
     assert "no ticket matches the filters" in page
 
 
-def test_page_says_an_undecided_disagreement_is_undecided(tmp_path):
-    """Ruling 26 resolved: no B/C partition. `taken` is `""` for `unresolved`, and
-    silence after two contradicting sides reads as a decision the reader missed."""
-    run = build_toy_run(tmp_path, upto="reconcile-seal")
-    page = target_brief_html.render(run)
-    # The positive control, on the golden world: a resolved dispute names its file.
-    assert "We went with notes.md." in page
-    assert "We have not decided between them." not in page
+def _cards(page: str, item: str) -> list[str]:
+    return re.findall(
+        rf'<article class="card" data-item="{re.escape(item)}".*?</article>', page, re.S
+    )
+
+
+def _columns(card: str) -> tuple[str, str]:
+    left, right = re.search(r"<tbody><tr><td>(.*?)</td><td>(.*?)</td></tr>", card, re.S).groups()
+    return left, right
+
+
+def _set_resolution(run, value):
     world_model = json.loads(run.world_model.read_text())
-    world_model["contradictions"][0]["resolution"] = "unresolved"
+    world_model["contradictions"][0]["resolution"] = value
+    run.world_model.write_text(json.dumps(world_model))
+
+
+def test_our_pick_badges_the_chosen_side_only(tmp_path):
+    """The fix for the limitation "We went with X identifies nothing when both sides
+    were read from the same file": the column we took carries the badge, so the
+    quote under it says which reading won. Every resolution, both directions."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    for resolution, left, right in (
+        ("preferred_a", "pick", ""),
+        ("preferred_b", "", "pick"),
+        ("unresolved", "", ""),
+        ("something_new", "", ""),
+        ("both_possible", "maybe", "maybe"),
+    ):
+        _set_resolution(run, resolution)
+        page = target_brief_html.render(run)
+        cards = _cards(page, "con-missing-semantics")
+        assert cards, resolution
+        for card in cards:
+            a, b = _columns(card)
+            for column, want in ((a, left), (b, right)):
+                for badge in ("pick", "maybe"):
+                    assert (f'class="{badge}"' in column) == (badge == want), (resolution, badge)
+        assert "We went with" not in page
+        assert "We have not decided between them." not in page
+
+
+def test_a_same_file_pair_still_shows_which_reading_we_took(tmp_path):
+    """The limitation's own shape: both sides from notes.md. The old sentence would
+    have read "We went with notes.md." whichever side won."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["contradictions"][0]["claim_b"] = "clm-notes-005"
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
-    assert "We have not decided between them." in page
-    assert "We went with notes.md." not in page
+    (card,) = [c for c in _cards(page, "con-missing-semantics") if "<fieldset" in c]
+    a, b = _columns(card)
+    assert "notes.md" in a and "notes.md" in b
+    assert 'class="pick"' in a and 'class="pick"' not in b
 
 
 def test_page_labels_the_nature_of_a_disagreement_rather_than_leading_with_it(tmp_path):
@@ -324,6 +430,8 @@ def test_page_labels_the_nature_of_a_disagreement_rather_than_leading_with_it(tm
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
     assert "The disagreement: count_mismatch" in page
+    # And never the run's own reasoning, which argues in our vocabulary.
+    assert "stated, higher-confidence claim wins" not in page
 
 
 def test_page_states_a_marker_instead_of_dropping_the_section(tmp_path):
@@ -332,7 +440,7 @@ def test_page_states_a_marker_instead_of_dropping_the_section(tmp_path):
     a renderer that forgot one."""
     run = build_toy_run(tmp_path, upto="extract")
     page = target_brief_html.render(run)
-    assert "What we believe" in page
+    assert "<h2>What it seems to do</h2>" in page
     assert "We do not have a description of your system on file" in page
     # An operator's artifact name is not something an owner can act on.
     assert "01-world-model.json" not in page
@@ -346,20 +454,17 @@ def test_page_states_the_partial_run_once_and_still_shows_every_section(tmp_path
     run = build_toy_run(tmp_path, upto="extract")
     page = target_brief_html.render(run)
     assert page.count("We do not have a description of your system on file") == 1
-    assert page.count("see the note at the top of this page") == 5
+    # Seven: the five world-model-backed sections of the Report, plus the two
+    # Workbook groups that read the same file (other disagreements, other questions).
+    assert page.count("see the note at the top of this page") == 7
     # The words in front of that suffix, which the count above cannot reach: every
     # wording shares the suffix, so reverting this sentence to the progress-claiming
     # "Nothing to show here yet" left the whole suite green -- substring-of-message,
     # measured. What the page must never do is tell an owner how far our work has got
     # when all we know is that a file would not read.
-    assert page.count("Nothing on file here — ") == 5
+    assert page.count("Nothing on file here — ") == 7
     assert "not got far enough" not in page
-    # Tagged for `test_page_renders_every_group_and_every_tier_two_section`'s two
-    # reasons: the first two are cells of the ranked asks table as well as headings,
-    # and the last three are `<summary>`s rather than `<h2>`s. Untagged, the two that
-    # matter most here -- the `_section` headings, the ones a marker could have
-    # swallowed -- were the two the asks table satisfied.
-    for heading in ("Where our sources disagree", "What we could not tell"):
+    for heading in ("What looks off", "What we could not find"):
         assert f"<h2>{heading}</h2>" in page
     for heading in ("What it can do", "What data it holds", "Who uses it"):
         assert f"<summary>{heading}</summary>" in page
@@ -406,7 +511,7 @@ def test_page_banners_an_unreadable_claims_directory_once(tmp_path):
     assert page.count('class="banner"') == 1
     assert "could not read" in page.lower()
     # It still describes the target: the banner qualifies the page, not the read.
-    assert "ticketq" in page and "What it can do" in page
+    assert "ticketq" in page and "query_tickets.find_tickets" in page
 
 
 def test_page_carries_the_legend_only_when_a_phrasing_it_glosses_appears(tmp_path):
@@ -480,9 +585,9 @@ def test_the_legend_glosses_both_phrasings_and_leads_the_section_carrying_them(t
     # 8478, against the heading at 10454 and the legend at 10489, so the bare phrase
     # put the legend after a cell it is always after and said nothing about whether
     # it is inside the section.
-    assert page.index("<h2>What we could not tell</h2>") < page.index('class="legend"')
+    assert page.index("<h2>What we could not find</h2>") < page.index('class="legend"')
     assert page.index('class="legend"') < page.index("No claim directly addresses")
-    assert page.index('class="legend"') < page.index("What we believe, in full")
+    assert page.index('class="legend"') < page.index("<h2>Reference</h2>")
 
 
 def test_page_escapes_owner_controlled_prose(tmp_path):
@@ -491,7 +596,8 @@ def test_page_escapes_owner_controlled_prose(tmp_path):
     world_model["target"]["notes"] = '<script>alert("x")</script>'
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
-    assert "<script" not in page.lower()
+    # The page's own one script, and no second one from the prose.
+    assert page.lower().count("<script") == 1
     assert "&lt;script&gt;" in page
 
 
@@ -521,8 +627,21 @@ def test_page_never_shows_a_rubrica_identifier(tmp_path):
     What this test holds is that no builder leaks one into a page built from prose
     that has none."""
     page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
-    leaked = re.findall(r"\b(?:clm|cap|ent|act|goal|gap|con|oc|art)-[a-z0-9-]+", page)
+    leaked = _OUR_IDS.findall(visible_text(page))
     assert leaked == [], leaked
+    # The ids are on the page -- in attributes, for the export -- which is why this
+    # reads visible text: the raw HTML would fail on the first card.
+    assert 'data-item="con-missing-semantics"' in page
+
+
+def test_visible_text_still_catches_a_planted_id(tmp_path):
+    """Both directions of the rescope, measured: an id in a text node is still
+    found, and one in an attribute or the script is not."""
+    page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
+    planted = page.replace("<h2>What looks off</h2>", "<h2>What looks off</h2><td>clm-x-001</td>")
+    assert _OUR_IDS.findall(visible_text(planted)) == ["clm-x-001"]
+    hidden = page.replace("<h2>What looks off</h2>", '<h2 data-x="clm-x-001">What looks off</h2>')
+    assert _OUR_IDS.findall(visible_text(hidden)) == []
 
 
 def test_page_drops_the_target_name_rather_than_showing_the_run_directory(tmp_path):
@@ -531,7 +650,9 @@ def test_page_drops_the_target_name_rather_than_showing_the_run_directory(tmp_pa
     seen. A page whose `<h1>` is that has handed the recipient the wrong subject."""
     run = build_toy_run(tmp_path, upto="extract")
     page = target_brief_html.render(run)
-    assert run.root.name not in page
+    # Visible text: the run id is in `<body data-run>` for the export's file name.
+    assert run.root.name not in visible_text(page)
+    assert f'data-run="{run.root.name}"' in page
     assert "The system we are describing" in page
     # The positive control: the run's name is on the page when the description
     # gives us one, so the line above is the fallback and not the name vanishing.
@@ -570,10 +691,9 @@ def test_the_pages_own_prose_never_names_a_stage_a_gate_or_an_artifact(tmp_path)
     world_model = json.loads(run.world_model.read_text())
     world_model["capabilities"][0]["outcome_classes"][0]["kind"] = "underspecified"
     run.world_model.write_text(json.dumps(world_model))
-    page = target_brief_html.render(run).lower()
-    assert target_brief_html._LEGEND.lower() in page
-    page = page.replace(target_brief_html._LEGEND.lower(), "")
-    assert 'class="legend"' not in page
+    page = target_brief_html.render(run)
+    assert target_brief_html._LEGEND in page
+    page = visible_text(page.replace(target_brief_html._LEGEND, "")).lower()
     for word in (
         "reconcile",
         "extract",
@@ -585,6 +705,7 @@ def test_the_pages_own_prose_never_names_a_stage_a_gate_or_an_artifact(tmp_path)
         "manifest",
         "rubrica",
         "scenario",
+        "subject",
     ):
         assert word not in page, word
 
@@ -630,23 +751,21 @@ def test_page_says_it_could_not_resolve_a_side_rather_than_dropping_it(tmp_path)
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
     # The positive control: with the record readable, both sides name their file.
-    assert "we could not resolve which file states it" not in page
-    assert '<td>One side</td><td><span class="file">notes.md</span>' in page
+    (card,) = [c for c in _cards(page, "con-missing-semantics") if "<fieldset" in c]
+    assert "we could not resolve which file states it" not in card
+    assert '<span class="file">notes.md</span>' in _columns(card)[0]
     run.claims_dir.chmod(0o000)
     try:
         page = target_brief_html.render(run)
     finally:
         run.claims_dir.chmod(0o755)
-    assert page.count("we could not resolve which file states it") == 2
-    assert '<td>One side</td><td><span class="file">' not in page
-    # And the quote cell beside each of those two states its absence with a dash --
-    # Task 2's ruling on the absent directory, reached here on the one branch of this
-    # section that has no wording to put in that column. Both halves, for the reason
-    # the `What we read` test records: `"<td></td>" not in` cannot tell an empty cell
-    # from a dash, so on its own it would leave a revert to `""` green.
-    section = page.split("<h2>Where our sources disagree</h2>")[1].split("<h2>")[0]
-    assert section.count("<td>—</td>") == 2
-    assert "<td></td>" not in section
+    (card,) = [c for c in _cards(page, "con-missing-semantics") if "<fieldset" in c]
+    a, b = _columns(card)
+    for column in (a, b):
+        assert "we could not resolve which file states it" in column
+        assert '<span class="file">' not in column
+    # And the chosen side's hole is stated under the sides, not left to the badge.
+    assert "We took one side, but could not resolve which file states it." in card
 
 
 def test_page_says_a_side_is_stated_in_a_file_it_could_not_name(tmp_path):
@@ -662,8 +781,7 @@ def test_page_says_a_side_is_stated_in_a_file_it_could_not_name(tmp_path):
     """
 
     def disagreement(page):
-        start = page.index("<h2>Where our sources disagree</h2>")
-        return page[start : page.index("<h2>", start + 1)]
+        return "".join(_cards(page, "con-missing-semantics"))
 
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     section = disagreement(target_brief_html.render(run))
@@ -678,10 +796,8 @@ def test_page_says_a_side_is_stated_in_a_file_it_could_not_name(tmp_path):
     run.manifest.write_text(json.dumps(manifest))
     section = disagreement(target_brief_html.render(run))
     assert "a file we could not name (at #error-behaviour)" in section
-    # No blank in either place the section had one: the side line, and the sentence
-    # under it that read `We went with  .`.
+    # No blank where the side line had one.
     assert not re.search(r'<span class="file">\s*</span>', section)
-    assert not re.search(r"We went with\s+\.", section)
     # The quote is still shown, so the side is stated rather than dropped for want
     # of a filename.
     assert "an id no ticket has is an **error**" in section
@@ -799,14 +915,13 @@ def test_what_we_could_not_tell_is_a_numbered_table_of_questions(tmp_path):
     ]
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
-    section = page.split("<h2>What we could not tell</h2>")[1].split("<h2>")[0]
-    # Scoped to the heading tag rather than the bare phrase: the ranked asks table
-    # names this section in its "Where it is" column, so the phrase first occurs there
-    # and a bare split returned a row of that table -- measured on this test.
+    section = page.split("<h2>What we could not find</h2>")[1].split("<h2>")[0]
     assert "<th>#</th>" in section
     assert "<th>The question</th>" in section
     assert "<th>Our reference</th>" in section
-    assert '<span class="num">1</span>' in section
+    # The visible reference, which is what an owner quotes back -- positional in id
+    # order, never the recorded id.
+    assert '<span class="ref">Q1</span>' in section
 
 
 def test_a_question_we_have_no_reference_for_gets_a_dash(tmp_path):
@@ -827,7 +942,7 @@ def test_a_question_we_have_no_reference_for_gets_a_dash(tmp_path):
     ]
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
-    section = page.split("<h2>What we could not tell</h2>")[1].split("<h2>")[0]
+    section = page.split("<h2>What we could not find</h2>")[1].split("<h2>")[0]
     # The positive control: the row is rendered, so the two assertions below are
     # about one absent field rather than about a section that did not render.
     assert "Nothing we read says who owns a closed ticket." in section
@@ -881,33 +996,6 @@ def test_page_states_a_gap_that_records_no_question(tmp_path):
     # question, so this is a statement about one empty field and not a broken section.
     assert "Nothing we read says who a stuck ticket goes to." in page
     assert "(our reference: escalation-path)" in page
-
-
-def test_each_tier_heading_is_followed_by_its_own_content(tmp_path):
-    """Both tier headings introduce sections rather than carrying content of their
-    own, so each needs something of its own under it. Rendered on all three
-    recordings, the draft's `What we most need from you` sat directly above the next
-    `<h2>` -- the one place on the page that read as a section that had failed to
-    fill in.
-
-    The two fill differently now: the asks are a ranked table, its counterpart below
-    still its lead sentence. The failure guarded is the same one either way, a
-    heading standing directly above the next heading.
-    """
-    run = build_toy_run(tmp_path, upto="reconcile-seal")
-    page = target_brief_html.render(run)
-    for heading in ("What we most need from you", "What we believe, in full"):
-        tag = f"<h2>{heading}</h2>"
-        assert tag in page
-        after = page[page.index(tag) + len(tag) :].lstrip()
-        # Structural rather than a phrase pin: what must hold is that the section is
-        # filled, not which words or which element fill it. Enumerated rather than
-        # `not startswith("<h2")`, so that a heading followed by a rule, a disclosure
-        # or any other element fails too, not only a heading followed by a heading.
-        # It cannot tell a filled table wrapper from an empty one and does not need
-        # to: `_table` returns "" for no rows, which is why no header row on this page
-        # stands over nothing.
-        assert after.startswith(("<p", '<div class="tw">')), heading
 
 
 def test_page_labels_a_slice_of_a_file_rather_than_juxtaposing_the_fragment(tmp_path):
@@ -1063,7 +1151,8 @@ def test_page_banners_an_unreadable_description_and_marks_each_section_malformed
         run.world_model.chmod(0o644)
     assert "could not read it back, so the sections below are empty" in page
     assert "a fault at our end and not a statement about your system" in page
-    assert page.count("Nothing to show here — ") == 5
+    # Five in the Report, two in the Workbook -- see the partial-run test.
+    assert page.count("Nothing to show here — ") == 7
     # Not the Absent prose: the two terse markers are separate sentences rather than
     # one word apart, and the banner's own sentence differs from the Absent banner's.
     assert "Nothing on file here" not in page
@@ -1286,7 +1375,7 @@ def test_what_we_read_is_a_table_with_a_kind_column(tmp_path):
     """
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
-    section = page.split("<h2>What we read</h2>")[1].split("<h2>")[0]
+    section = page.split("<summary>What we read</summary>")[1].split("</details>")[0]
     assert "<table>" in section
     assert "<th>What kind</th>" in section
     assert "<th>Where</th>" in section
@@ -1317,24 +1406,8 @@ def test_what_we_read_keeps_its_count_sentence_above_the_table(tmp_path):
     """
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
-    section = page.split("<h2>What we read</h2>")[1].split("<h2>")[0]
+    section = page.split("<summary>What we read</summary>")[1].split("</details>")[0]
     assert section.index("We built this description by reading") < section.index("<table")
-
-
-def test_disagreements_lead_with_an_index_table_of_every_dispute(tmp_path):
-    run = build_toy_run(tmp_path, upto="reconcile-seal")
-    page = target_brief_html.render(run)
-    section = page.split("<h2>Where our sources disagree</h2>")[1].split("<h2>")[0]
-    assert "<th>#</th>" in section
-    assert "<th>Status</th>" in section
-    assert "<th>Files involved</th>" in section
-    # The toy world records exactly one contradiction, so the index has one row
-    # and its number is 1 -- positional, never the recorded id.
-    assert '<span class="num">1</span>' in section
-    # "lead with" is the whole claim of the name, and nothing else here pins it:
-    # moving the index below the per-dispute blocks left every assertion above
-    # green. Same shape as `test_what_we_read_keeps_its_count_sentence_above_the_table`.
-    assert section.index("<th>#</th>") < section.index("<h3>")
 
 
 def test_the_index_never_prints_a_recorded_dispute_id(tmp_path):
@@ -1345,18 +1418,18 @@ def test_the_index_never_prints_a_recorded_dispute_id(tmp_path):
     world_model = json.loads(run.world_model.read_text())
     recorded = world_model["contradictions"][0]["id"]
     page = target_brief_html.render(run)
-    assert recorded not in page
+    assert recorded not in visible_text(page)
 
 
-def test_each_dispute_shows_its_two_sides_as_a_table_of_source_and_quote(tmp_path):
+def test_each_dispute_shows_its_two_sides_side_by_side(tmp_path):
+    """Left is always `claim_a` and right always `claim_b` -- the export's `left` and
+    `right` tokens mean that, so the columns may never swap."""
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     page = target_brief_html.render(run)
-    section = page.split("<h2>Where our sources disagree</h2>")[1].split("<h2>")[0]
-    assert "<th>Side</th>" in section
-    assert "<th>Source</th>" in section
-    assert "<th>What it says</th>" in section
-    assert "<td>One side</td>" in section
-    assert "<td>The other side</td>" in section
+    for card in _cards(page, "con-missing-semantics"):
+        assert "<th>Left</th><th>Right</th>" in card
+        a, b = _columns(card)
+        assert "notes.md" in a and "trace.json" in b
 
 
 def test_an_undecided_dispute_carries_the_amber_chip_and_says_so(tmp_path):
@@ -1365,35 +1438,39 @@ def test_an_undecided_dispute_carries_the_amber_chip_and_says_so(tmp_path):
     world_model["contradictions"][0]["resolution"] = "unresolved"
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
-    assert 'class="undecided"' in page
-    assert ">Undecided<" in page
-    assert "We have not decided between them." in page
+    workbook = _section(page, "workbook")
+    assert 'class="undecided"' in workbook
+    assert ">We could not decide<" in workbook
+    assert 'data-kind="undecided"' in workbook
 
 
-def test_a_settled_dispute_carries_the_settled_chip_and_names_the_file(tmp_path):
+def test_a_settled_dispute_carries_the_settled_chip_and_asks_for_confirmation(tmp_path):
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     world_model = json.loads(run.world_model.read_text())
     world_model["contradictions"][0]["resolution"] = "preferred_a"
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
-    assert 'class="settled"' in page
-    assert ">Side chosen<" in page
-    assert "We went with " in page
+    workbook = _section(page, "workbook")
+    assert 'class="settled"' in workbook
+    assert ">Please confirm our pick<" in workbook
+    assert 'value="yes"' in workbook and 'value="no_other"' in workbook
 
 
 def test_an_off_enum_resolution_reads_as_undecided_and_asserts_no_decision(tmp_path):
-    """`_taken` returns "" for anything outside the three values it knows, so the
-    chip must agree with it without either consulting the other. A colour that said
-    "settled" over a sentence that said "we have not decided" would be the page
-    asserting a decision nobody made."""
+    """`kind_of` and `_chosen` both read anything outside the values they know as
+    undecided, and the chip, the badge and the controls must agree without
+    consulting each other: a colour saying "settled" over controls asking for a
+    ruling would be the page asserting a decision nobody made."""
     run = build_toy_run(tmp_path, upto="reconcile-seal")
     world_model = json.loads(run.world_model.read_text())
     world_model["contradictions"][0]["resolution"] = "something_new"
     run.world_model.write_text(json.dumps(world_model))
     page = target_brief_html.render(run)
-    assert 'class="undecided"' in page
-    assert "We have not decided between them." in page
-    assert 'class="settled"' not in page
+    workbook = _section(page, "workbook")
+    assert 'class="undecided"' in workbook
+    assert 'value="left"' in workbook
+    assert 'class="settled"' not in workbook
+    assert 'class="pick"' not in page
 
 
 def test_the_three_detail_sections_are_tables(tmp_path):
@@ -1509,18 +1586,6 @@ def test_page_states_an_operation_whose_outcomes_we_did_not_record(tmp_path):
     assert "the ticket and its comments, ordered by position" in page
 
 
-def test_the_asks_are_a_ranked_table_of_three(tmp_path):
-    run = build_toy_run(tmp_path, upto="reconcile-seal")
-    page = target_brief_html.render(run)
-    section = page.split("What we most need from you")[1].split("<h2>")[0]
-    assert "<th>Rank</th>" in section
-    assert "<th>What we need</th>" in section
-    assert "<th>Where it is</th>" in section
-    # `_reply()` refers back to "the three things we asked for at the top are
-    # ranked", so the table must have exactly three rows for that to stay true.
-    assert section.count("<tr>") == 4  # one header row plus three
-
-
 def test_a_populated_page_carries_no_bullet_list(tmp_path):
     """The regression guard for the whole change. Measured against a run that
     reaches every section, because a fixture that reaches only some would let a
@@ -1564,7 +1629,7 @@ def test_a_marker_section_keeps_its_heading_and_renders_no_table(tmp_path):
     # the list, so untagged -- satisfied by the asks table's cells at 8515 rather than
     # by the headings at 9359 and 9479 -- this guard did not prove that any `_section`
     # heading survives a description it could not read, which is half of its name.
-    for heading in ("Where our sources disagree", "What we could not tell"):
+    for heading in ("What looks off", "What we could not find"):
         assert f"<h2>{heading}</h2>" in page
     for heading in ("What it can do", "What data it holds", "Who uses it"):
         assert f"<summary>{heading}</summary>" in page
@@ -1580,3 +1645,166 @@ def test_every_table_on_the_page_has_a_header_row(tmp_path):
     page = target_brief_html.render(run)
     assert page.count("<table") == page.count("<thead>")
     assert page.count("<table") >= 6
+
+
+def _many(tmp_path, n_unresolved=6, n_preferred=6, n_gaps=3):
+    """The toy run with enough disagreements and questions to fill the Workbook's
+    first ten, written to the world model and to the one part file the topic is
+    read from, as a real run would have them."""
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    base = world_model["contradictions"][0]
+    records = [dict(base, id=f"con-u{i:02}", resolution="unresolved") for i in range(n_unresolved)]
+    records += [dict(base, id=f"con-p{i:02}", resolution="preferred_a") for i in range(n_preferred)]
+    world_model["contradictions"] = records
+    world_model["gaps"] = [
+        {"id": f"gap-{i:02}", "subject": f"subject {i}", "unknown": f"Question {i}?", "blocks": []}
+        for i in range(n_gaps)
+    ]
+    run.world_model.write_text(json.dumps(world_model))
+    part = run.contradictions_dir / "sub-cap-get-ticket.json"
+    payload = json.loads(part.read_text())
+    payload["contradictions"] = records
+    part.write_text(json.dumps(payload))
+    return run
+
+
+def _start_here(page: str) -> str:
+    workbook = _section(page, "workbook")
+    return workbook[workbook.index("<h3>Start here") : workbook.index("<h2>Everything else</h2>")]
+
+
+def test_the_workbook_starts_with_at_most_ten_cards_in_order(tmp_path):
+    run = _many(tmp_path)
+    page = target_brief_html.render(run)
+    shown = re.findall(r'<article class="card" data-item="([^"]+)"', _start_here(page))
+    disputes = target_brief.disputes(run)
+    expected = target_brief.workbook_order(
+        disputes, target_brief.open_questions(run), target_brief.quick_takes(disputes)
+    )
+    assert len(expected) == 10
+    assert shown == expected
+    assert "the 10 answers that help us most" in page
+    assert 'Answered <span id="wb-count">0</span> / 10' in page
+    # Everything else is still on the page, once, below them.
+    everything = _section(page, "workbook").split("<h2>Everything else</h2>")[1]
+    rest = re.findall(r'<article class="card" data-item="([^"]+)"', everything)
+    assert sorted(set(rest) - {"missed-source"}) == sorted(
+        ({d.id for d in disputes} | {"gap-00", "gap-01", "gap-02"}) - set(expected)
+    )
+
+
+def test_the_workbook_states_the_real_number_when_there_are_fewer_than_ten(tmp_path):
+    page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
+    assert "the 1 answer that help us most" in page
+    assert "/ 1</span>" in page
+
+
+def test_every_card_carries_its_reference_and_its_id(tmp_path):
+    page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
+    assert 'data-item="con-missing-semantics" data-ref="D1"' in page
+    assert "D1" in visible_text(_section(page, "workbook"))
+
+
+def test_a_quote_with_a_closing_script_tag_cannot_escape(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    for path in run.claims_dir.iterdir():
+        payload = json.loads(path.read_text())
+        for claim in payload.get("claims", []):
+            for record in claim.get("evidence", []):
+                record["quote"] = "</script><script>alert(1)</script>"
+        path.write_text(json.dumps(payload))
+    page = target_brief_html.render(run)
+    assert page.lower().count("<script") == 1
+    assert "&lt;/script&gt;" in page
+
+
+def test_an_id_with_quotes_is_escaped_in_its_attribute(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    world_model = json.loads(run.world_model.read_text())
+    world_model["contradictions"][0]["id"] = 'a"b&c'
+    run.world_model.write_text(json.dumps(world_model))
+    page = target_brief_html.render(run)
+    assert 'data-item="a&quot;b&amp;c"' in page
+    assert 'name="a&quot;b&amp;c"' in page
+    assert 'data-item="a"b' not in page
+
+
+def test_the_quick_takes_section_says_when_nothing_stood_out(tmp_path):
+    page = target_brief_html.render(build_toy_run(tmp_path, upto="reconcile-seal"))
+    report = _section(page, "report")
+    assert "No pattern stood out across your files." in report
+
+
+def test_quick_takes_render_their_sentence_and_examples(tmp_path):
+    """Five lost from notes.md to trace.json: `notes.md looks out of date`, with
+    three examples, read-only, and every reference in the workbook listed."""
+    run = _many(tmp_path, n_unresolved=0, n_preferred=0, n_gaps=0)
+    world_model = json.loads(run.world_model.read_text())
+    records = [
+        {
+            "id": f"con-l{i}",
+            "claim_a": "clm-notes-004",
+            "claim_b": "clm-trace-002",
+            "nature": "n",
+            "rationale": "r",
+            "resolution": "preferred_b",
+        }
+        for i in range(5)
+    ]
+    world_model["contradictions"] = records
+    run.world_model.write_text(json.dumps(world_model))
+    part = run.contradictions_dir / "sub-cap-get-ticket.json"
+    payload = json.loads(part.read_text())
+    payload["contradictions"] = records
+    part.write_text(json.dumps(payload))
+    report = _section(target_brief_html.render(run), "report")
+    # Whitespace collapsed: text nodes either side of a tag are joined with a space.
+    text = re.sub(r"\s+", " ", visible_text(report)).replace(" .", ".")
+    assert "notes.md looks out of date." in text
+    assert "the other file was right in 5" in text
+    assert "trace.json looks like your real source of truth." in text
+    assert "<fieldset" not in report
+    assert "All 5 in the workbook: D1, D2, D3, D4, D5." in text
+
+
+def test_page_is_byte_identical_across_two_renders(tmp_path):
+    run = _many(tmp_path)
+    assert target_brief_html.render(run) == target_brief_html.render(run)
+
+
+def test_body_carries_the_export_metadata_and_none_of_it_is_visible(tmp_path):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    manifest = json.loads(run.manifest.read_text())
+    page = target_brief_html.render(run)
+    body = re.search(r"<body [^>]*>", page).group(0)
+    assert f'data-run="{manifest["run_id"]}"' in body
+    assert f'data-generated="{manifest["created_utc"]}"' in body
+    assert 'data-target="ticketq"' in body
+    assert re.search(r'data-digest="[0-9a-f]{16}"', body)
+    text = visible_text(page)
+    assert manifest["run_id"] not in text and manifest["created_utc"] not in text
+
+
+def test_answer_controls_are_disabled_until_the_script_enables_them(tmp_path):
+    """With scripts off a control that records nothing is a trap, so every one ships
+    disabled and the script is what enables it."""
+    workbook = _section(target_brief_html.render(_many(tmp_path)), "workbook")
+    controls = re.findall(r"<(?:input|textarea|button)\b[^>]*>", workbook)
+    assert controls
+    assert all("disabled" in c for c in controls), [c for c in controls if "disabled" not in c]
+
+
+def test_the_export_tokens_are_the_spec_s_fixed_set():
+    tokens = {token for choices in target_brief_html._CHOICES.values() for token, _ in choices}
+    assert tokens == {
+        "left",
+        "right",
+        "both",
+        "neither",
+        "yes",
+        "no_other",
+        "only_left",
+        "only_right",
+        "dont_know",
+    }

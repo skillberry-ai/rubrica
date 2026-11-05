@@ -682,9 +682,10 @@ def _subject_of_claims(claim_ids, run: RunPaths) -> str:
 class Dispute:
     """One contradiction, with both sides resolved to places in the target.
 
-    `nature` and `rationale` are carried verbatim, and both render under the card's
-    disclosure: `nature` is the sentence an owner acts on, and `rationale` is our
-    full reasoning, dense with ids, shown only to a reader who opens it.
+    `nature` is carried verbatim. It is the sentence an owner acts on, and the
+    world model writes it in their terms already. `rationale` is deliberately not
+    here: it argues the case in our vocabulary -- claim ids, and on the toy the word
+    "scenario" -- and it stays available in `run-summary`.
 
     `chosen` is the side taken (`"a"`, `"b"` or `None`), never a sentence -- see
     `_chosen`. `ref` is the visible handle (`D<n>`, id order), which an owner quotes
@@ -701,7 +702,6 @@ class Dispute:
     topic_label: str = ""
     headline: str = ""
     ref: str = ""
-    rationale: str = ""
 
     @property
     def kind(self) -> str:
@@ -767,7 +767,6 @@ def disputes(run: RunPaths) -> list[Dispute] | Marker:
                 topic_id=topic_id,
                 topic_label=topic_label,
                 headline=question or _headline(nature),
-                rationale=_text(record.get("rationale")),
             )
         )
     out.sort(key=lambda d: d.id)

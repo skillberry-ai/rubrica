@@ -923,7 +923,8 @@ def test_disputes_carry_their_topic_from_the_part_they_were_written_to(tmp_path)
     assert dispute.topic_label == "query_tickets.get_ticket"
     assert dispute.ref == "D1"
     assert dispute.chosen == "a"
-    assert dispute.rationale.startswith("clm-notes-004 is stated at high confidence")
+    # `rationale` argues in our vocabulary and stays off the owner's page.
+    assert not hasattr(dispute, "rationale")
 
 
 def test_topic_label_is_trimmed_at_its_first_colon_never_rewritten(tmp_path):

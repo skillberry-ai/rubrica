@@ -7,10 +7,13 @@ builder rather than in two spellings of the same read.
 Three things this page does differently from `summary_html`, all because it leaves
 the project rather than sitting in a run directory:
 
-**No JavaScript.** Not one line. `<details>` collapses natively, nothing here
-sorts, and this page is emailed -- opened in a mail client's browser view, behind a
-corporate proxy, by a reader with scripts off. A page that needs a script to be
-readable arrives broken for some of its recipients.
+**One inline script, and a page that reads without it.** This page used to carry no
+JavaScript at all, because it is emailed -- opened in a mail client's view, behind a
+proxy, with scripts off. The user overturned that on 2026-11-05 so the page can
+collect answers, on the condition that it stays one self-contained file. So the
+script builds nothing a reader reads: every disagreement, question and table is in
+the HTML, both sections render one after the other with scripts off, and the script
+only switches tabs, enables and records the answer controls, prints and exports.
 
 **Its own `_CSS`.** Importing `summary_html._CSS` would let a tweak to the operator
 page restyle a document already sent to somebody outside the project.
@@ -19,23 +22,23 @@ page restyle a document already sent to somebody outside the project.
 which is right for an operator and meaningless to an owner; here the same fact
 reads "We do not have this on file, so this section is empty."
 
-**Nothing this module's own prose puts on the page names a stage, a gate, an
+**Nothing a reader can see in this module's own prose names a stage, a gate, an
 artifact or rubrica itself,** and
 `test_the_pages_own_prose_never_names_a_stage_a_gate_or_an_artifact` plus
 `test_page_never_shows_a_rubrica_identifier` fail the suite rather than let one back
-in. The claim is deliberately about our own chrome and not about the page as a whole:
-prose this module *selects* from the run ships as written, ids and all, for the reason
-the next paragraph gives. That is not tidiness: a recipient asked "does this describe
-your system?" who is instead reading about `01-world-model.json` has been handed the
-wrong question.
+in. Both are scoped to *visible* text, by the user's ruling of 2026-11-05: the
+answers export needs our ids, so they sit in `data-` attributes and in the script,
+and never in a text node. The claim is also about our own chrome and not about the
+page as a whole: prose this module *selects* from the run ships as written, ids and
+all. That is not tidiness: a recipient asked "does this describe your system?" who
+is instead reading about `01-world-model.json` has been handed the wrong question.
 
 One id shape can still reach the page and is accepted rather than suppressed.
 `SourceRef.path` falls back to the artifact id when the manifest does not register
-the cited artifact, so `_taken` can render "We went with art-notes-md-1." and a
-source row can name the same string. Suppressing it would need this module to
-decide, from a string, whether Task 4's sentence names a real file -- a second
-spelling of a rule Task 1 already ruled on, in the module that owns it, in favour
-of naming *something* chaseable over naming nothing. The no-identifier test is
+the cited artifact, so a side can name `art-notes-md-1` as its source. Suppressing
+it would need this module to decide, from a string, whether a path names a real
+file -- a second spelling of a rule `target_brief` already rules on, in favour of
+naming *something* chaseable over naming nothing. The no-identifier test is
 therefore a test about the toy corpus, where every cited artifact is registered,
 and not a proof about every run.
 
@@ -46,7 +49,10 @@ and it was a report exiting 1 after rendering correctly before it did.
 
 from __future__ import annotations
 
+import hashlib
+
 from rubrica import target_brief
+from rubrica.brief import _dicts, _mapping, _quietly
 from rubrica.paths import RunPaths
 from rubrica.summary import Malformed, Marker, esc
 
@@ -211,9 +217,56 @@ tbody tr:nth-child(even) { background: var(--zebra); }
 .kind-doc { color: var(--kind-doc); border-color: currentColor; }
 .kind-code { color: var(--kind-code); border-color: currentColor; }
 .kind-other { color: var(--kind-other); border-color: currentColor; }
+/* Two tabs over two sections. Both sections are visible until the script runs,
+   so a reader with scripts off gets the whole page; the script hides one. */
+.tabs { display: flex; gap: .4rem; margin: 1rem 0 0; border-bottom: 2px solid var(--rule); }
+.tabs a { padding: .4rem .9rem; text-decoration: none; color: var(--muted);
+          font-weight: 600; border-bottom: 3px solid transparent; margin-bottom: -2px; }
+.tabs a.on { color: var(--fg); border-bottom-color: var(--settled-line); }
+.js .nojs { display: none; }
+.invite { border: 1px solid var(--settled-line); background: var(--settled-bg);
+          color: var(--settled-fg); border-radius: 6px; padding: .8rem 1.1rem;
+          margin: 2.5rem 0; }
+.invite a { color: inherit; font-weight: 600; }
+.ref { font-family: ui-monospace, monospace; font-size: .85em; color: var(--muted);
+       margin-right: .3rem; }
+.card { border: 1px solid var(--rule); border-left: 4px solid var(--rule);
+        border-radius: 6px; padding: .6rem 1rem; margin: 1rem 0; background: var(--bg); }
+.card[data-kind="undecided"] { border-left-color: var(--attn-line); }
+.card[data-kind="confirm"] { border-left-color: var(--settled-line); }
+.card.done { border-left-color: var(--kind-code); }
+.card h4 { margin: .2rem 0 .5rem; font-size: .98rem; }
+.sides td { width: 50%; }
+.side + .side { margin-top: .6rem; padding-top: .6rem; border-top: 1px dashed var(--rule); }
+.said { margin-top: .2rem; }
+.pick, .maybe { display: inline-block; font-size: .72rem; font-weight: 700;
+                text-transform: uppercase; letter-spacing: .05em; padding: .05rem .4rem;
+                border-radius: 4px; margin-bottom: .3rem; border: 1px solid; }
+.pick { color: var(--settled-fg); background: var(--settled-bg);
+        border-color: var(--settled-line); }
+.maybe { color: var(--both-fg); background: var(--both-bg); border-color: var(--both-line); }
+fieldset.answer { border: 1px solid var(--rule); border-radius: 6px; margin: .6rem 0 .2rem;
+                  padding: .4rem .8rem .6rem; display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; }
+fieldset.answer legend { font-size: .78rem; color: var(--muted); text-transform: uppercase;
+                         letter-spacing: .05em; padding: 0 .3rem; }
+fieldset.answer .note { flex-basis: 100%; font-size: .85rem; color: var(--muted); }
+fieldset.answer textarea { display: block; width: 100%; box-sizing: border-box;
+                           font: inherit; margin-top: .2rem; background: var(--bg);
+                           color: var(--fg); border: 1px solid var(--rule); border-radius: 4px; }
+.counter { font-weight: 600; white-space: nowrap; }
+.actions button, .filters button { font: inherit; font-size: .9rem; padding: .3rem .8rem;
+                                   border-radius: 4px; border: 1px solid var(--rule);
+                                   background: var(--surface); color: var(--fg); cursor: pointer; }
 /* The page is emailed, so it is printed. Backgrounds do not print by default;
-   the border and the chip's own word are what survive. */
+   the border and the chip's own word are what survive. Both sections print; the
+   controls do not, and an answered card prints the option chosen and the note. */
 @media print {
+  #report, #workbook { display: block !important; }
+  .tabs, .actions, .filters, .nojs { display: none !important; }
+  .printing details.untouched { display: none; }
+  fieldset.answer label:has(input:not(:checked)) { display: none; }
+  fieldset.answer label.note:has(textarea) { display: block; }
+  fieldset.answer input { display: none; }
   body { max-width: none; background: #fff; color: #000; }
   .tw { overflow: visible; }
   thead { display: table-header-group; }
@@ -337,9 +390,11 @@ _KIND_SLUG = {
 # ask.
 #
 # Read through `.get(resolution, _STATUS_CHIP["unresolved"])`. An off-enum value is
-# undecided, never a decision: `target_brief._taken` already returns `""` for
-# anything outside the three it knows, so the chip and the sentence agree without
-# either consulting the other.
+# undecided, never a decision: `target_brief._chosen` returns `None` and
+# `target_brief.kind_of` returns "undecided" for anything outside the values they
+# know, so the chip, the badge and the controls agree without consulting each other.
+#
+# Kept for the colour variants; the words a card shows are `_ASK`'s.
 _STATUS_CHIP = {
     "unresolved": ("undecided", "Undecided"),
     "preferred_a": ("settled", "Side chosen"),
@@ -664,85 +719,42 @@ def _group_a(run: RunPaths):
 
 
 def _status_chip(resolution: str) -> str:
-    """One dispute's status, as a chip.
+    """One dispute's status, as a chip, in the Workbook only.
 
     Anything outside the three values `_STATUS_CHIP` knows reads as undecided, which
-    is what `target_brief._taken` independently does with the same field: it returns
-    `""` for an unrecognised resolution, so the sentence below the sides also says
-    nothing was decided. The two agree by both defaulting to "we did not decide"
-    rather than by consulting each other -- a colour claiming a decision over a
-    sentence denying one is the page asserting a judgment nobody made.
+    is what `target_brief.kind_of` and `target_brief._chosen` independently do with
+    the same field: the chip, the controls and the badge all default to "we did not
+    decide" rather than consulting each other.
     """
     variant, word = _STATUS_CHIP.get(resolution, _STATUS_CHIP["unresolved"])
     return _chip(variant, word)
 
 
-def _side_rows(refs, label: str) -> list[str]:
-    """One side of a disagreement, as rows of a source-and-quote table.
+def _side_cell(refs) -> str:
+    """One side of a disagreement as one cell: each source, where in it, and what it
+    says.
 
-    Was `_side_html`, which returned a `<p>` plus a `<ul>`. The rows carry the same
-    three facts and let the reader compare the two sides down a column, which is the
-    comparison the section is asking them to make and the one a pair of nested
-    bullet lists made hardest.
+    Was `_side_rows`, which emitted a row per source under a "One side" / "The other
+    side" label. A card shows the two sides as two columns instead, so the side a
+    reader compares against is beside it rather than below it, and the column, not a
+    sentence, is what the "our pick" badge marks -- the fix for the "We went with X"
+    limitation.
 
-    `Dispute.side_a` is a `tuple[SourceRef, ...]`, not a sentence. Rendering it
-    through `esc()` directly would print the dataclass repr and put
-    `claim_id='clm-notes-004'` on a page whose entire premise is that no rubrica
-    identifier appears on it -- the no-identifier test would catch it, with nothing
-    to say about the fix. Each ref becomes its path, its locator and the line it
-    quotes, which is what spec section 3.3 asks for: each side shown as a real file
-    quoting itself. `_provenance` is not reused here because that renders a whole
-    element's sources as one subordinate line, and a side of a disagreement is the
-    thing being read, not a footnote under it.
+    Every absence is stated, never blank, for `_side_rows`' reasons, which still
+    hold: a side that resolves to no source says so, a path with nothing nameable in
+    it is "a file we could not name" (`_files_html`'s phrase), and a missing quote
+    is "we did not record the wording".
 
-    The locator is labelled `at`, not dropped into bare parentheses: it is a
-    fragment or a JSON pointer -- `#error-behaviour` and `#/spans/1/output` on the
-    toy, and Task 3 measured `#/126` shapes on a real run -- and `notes.md
-    (#error-behaviour)` reads as a note about the file where `notes.md (at
-    #error-behaviour)` reads as a place inside it.
-
-    The label repeats down every row of a multi-ref side rather than spanning them.
-    A `rowspan` over a side whose refs are empty is a branch whose edge case is
-    invisible until an owner meets it, and the empty case is real: a side can resolve
-    to no refs at all.
+    A sliced input's piece is separated from its file and labelled: measured on
+    run-20260816-172810, `trajectories2.json#/10 (at /data/spans/5/...)` read as
+    one path. Which part is the file is `target_brief._file_and_piece`'s ruling.
     """
     if not refs:
-        # A side whose claims did not resolve to any input. Saying so beats
-        # dropping the side: `taken` below may still name a file, and a page that
-        # answers a question it never asked reads as a page with something missing.
-        #
-        # The quote cell is a dash, never `""`. There is no wording to put there --
-        # nothing resolved, so nothing was quoted -- but Task 2's ruling on the
-        # absent directory applies unchanged: this module states an absence rather
-        # than leaving a cell blank, because an empty `<td>` reads as a render that
-        # broke and the bullet form could hide the same gap by omitting a clause.
-        return [_row(esc(label), "we could not resolve which file states it", "—")]
-    rows = []
+        return '<div class="src">we could not resolve which file states it</div>'
+    out = []
     for ref in refs:
-        # Task 4's handoff: a sliced input's `path` carries the slicer's fragment,
-        # and juxtaposing it against the filename does not explain itself. Measured
-        # on run-20260816-172810, this side line read `trajectories2.json#/10 (at
-        # /data/spans/5/...)`; the file is the owner's and the `#/10` is our index
-        # into it, so the two are separated and only the index is labelled. Nothing
-        # is dropped -- `_shorten` keeps the fragment precisely because it is the
-        # only thing telling 71 slices of one capture apart.
-        #
-        # Which part is the file is `target_brief._file_and_piece`'s ruling, not a
-        # second reading of the same path here: it owns the JSON-pointer clause and
-        # the measurements behind it, and the sentence under these two sides now
-        # names the file through the same helper, so one source cannot be spelled
-        # two ways on one page.
         base, piece = target_brief._file_and_piece(ref.path)
-        # A path with nothing nameable in it rendered as a blank
-        # `<span class="file">` -- measured on a hand-edited world model, reachable
-        # only there because `SourceRef.path` falls back to the artifact id. The
-        # phrase is `_files_html`'s, which already counts the files it could not
-        # name in the section above, so the absence is stated in words this page
-        # already uses rather than in a new sentence.
         where = f'<span class="file">{esc(base)}</span>' if base else "a file we could not name"
-        # One parenthesis, not two in a row: the piece and the locator are both
-        # "where inside your material this is", and reading them as one clause is
-        # why they are joined rather than emitted as separate spans.
         inside = []
         if piece:
             inside.append(f"piece {esc(piece)}")
@@ -750,176 +762,373 @@ def _side_rows(refs, label: str) -> list[str]:
             inside.append(f"at {esc(ref.locator)}")
         if inside:
             where += f" ({', '.join(inside)})"
-        # Degrades to path plus locator when the evidence record carries no quote --
-        # 59 of executive-agent's 126 cited claims, per Task 1, and the toy's own
-        # side_b, whose `quote` is `""`. The cell states the absence rather than
-        # sitting empty: an empty cell in a quote column reads as a quote we lost.
         said = (
             f'<span class="quote">“{esc(ref.quote)}”</span>'
             if ref.quote
-            else "we did not record the wording"
+            else '<span class="src">we did not record the wording</span>'
         )
-        rows.append(_row(esc(label), where, said))
-    return rows
+        out.append(f'<div class="side">{where}<div class="said">{said}</div></div>')
+    return "".join(out)
 
 
-def _legacy_taken(dispute) -> str:
-    if dispute.resolution == "both_possible":
-        return "We are treating both as possible."
-    if dispute.chosen is None:
-        return "We have not decided between them."
-    side = dispute.side_a if dispute.chosen == "a" else dispute.side_b
-    files = sorted(target_brief.side_files(side))
-    if not files:
-        return target_brief._UNRESOLVED_SIDE
-    return "We went with " + ", ".join(files) + "."
+def _files_label(refs) -> str:
+    """The files one side names, for a card's heading."""
+    files = sorted(target_brief.side_files(refs))
+    return ", ".join(files) if files else "a source we could not name"
 
 
-def _group_bc(run: RunPaths):
-    """Where our sources disagree, and what we did about it.
+def _card_title(dispute) -> str:
+    """A card's heading: its reference, then the selected first sentence when there
+    is one, else facts we compose -- the topic and the two sides' files. Never a
+    paraphrase: `Dispute.headline` is `nature`'s own first sentence or nothing."""
+    if dispute.headline:
+        text = esc(dispute.headline)
+    else:
+        a, b = _files_label(dispute.side_a), _files_label(dispute.side_b)
+        files = esc(a) if a == b else f"{esc(a)} and {esc(b)}"
+        text = f"{esc(dispute.topic_label)} — {files}" if dispute.topic_label else files
+    return f'<span class="ref">{esc(dispute.ref)}</span> {text}'
 
-    Task 4's `Dispute` carries both the two sides and the side taken, so B and C
-    are one list rather than two: a reader deciding "which of these two is right"
-    needs to see in the same place which one we acted on. An unresolved
-    contradiction is not split out either -- it is visibly undecided in its own
-    position in the list, and splitting would break the comparison the reader is
-    making across it.
 
-    Two tiers, which is new. The index table exists because 41 disputes -- measured
-    on run-20260826-090456 -- is more than anyone scans as prose, and the one thing
-    a reader wants first is which of them are still open. It carries three columns
-    and deliberately not the nature: on that same run the field's median length is
-    305 characters, so an index column of it is a wall of the paragraphs the detail
-    below already prints. The detail stays whole beneath it because the two verbatim
-    quotes are what let an owner settle a dispute, and they cannot be shortened
-    without taking away the thing they are being asked to rule on.
+# `kind` -> the answer choices a card offers, as (token, label). The tokens are
+# the export format's and are fixed (spec, "Answers"); left is always `claim_a` and
+# right always `claim_b`, so the columns are never swapped anywhere on the page.
+_CHOICES = {
+    "undecided": (
+        ("left", "The left is right"),
+        ("right", "The right is right"),
+        ("both", "Both, in different cases"),
+        ("neither", "Neither"),
+    ),
+    "confirm": (
+        ("yes", "Yes, our pick is right"),
+        ("no_other", "No, the other side is"),
+        ("neither", "Neither"),
+    ),
+    "both": (
+        ("yes", "Yes, both hold"),
+        ("only_left", "No, only the left"),
+        ("only_right", "No, only the right"),
+    ),
+    "question": (("dont_know", "I don't know either"),),
+}
 
-    No anchor or link between the two tiers. The number is the handle, printed in
-    both places, and a reader who wants dispute 7 scrolls to heading 7.
+# What each kind asks, as the card's chip. Workbook only: the Report never shows
+# what is outstanding, because a reader who only came for the findings must never be
+# handed a to-do list (spec, "Anti-goals").
+_ASK = {
+    "undecided": ("undecided", "We could not decide"),
+    "confirm": ("settled", "Please confirm our pick"),
+    "both": ("both", "Both readings may hold"),
+    "question": ("both", "Open question"),
+}
 
-    Numbering is positional, 1-based, and is not `Dispute.id`: the id is the run's
-    own string and this page never shows one.
+
+def _answer(item_id: str, kind: str, text: bool) -> str:
+    """The answer controls for one item. Disabled until the script enables them, so
+    a reader with scripts off is not offered controls that record nothing -- the
+    note above the Workbook tells them to reply quoting the reference instead.
+
+    `name` is the item id, escaped for an attribute: an id is ours and never
+    visible, and `esc` quotes `"` and `&` for exactly this position.
     """
-    found = target_brief.disputes(run)
-    if isinstance(found, Marker):
-        return found
-    if not found:
-        return (
-            '<p class="absent">Nothing we read contradicted anything else we read. '
-            "That is a weaker statement than it sounds: it means we found no "
-            "disagreement, not that your documents agree.</p>"
-        )
-    index_rows = []
-    blocks = []
-    for position, dispute in enumerate(found, start=1):
-        chip = _status_chip(dispute.resolution)
-        # The files on both sides, deduplicated and in first-seen order, so the index
-        # row names what the reader would search their own tree for. `dict.fromkeys`
-        # rather than a set: a set reorders, and the order the sides were read in is
-        # the order the detail below shows them.
-        names = [
-            target_brief._file_and_piece(ref.path)[0] for ref in (*dispute.side_a, *dispute.side_b)
-        ]
-        files = list(dict.fromkeys(n for n in names if n))
-        involved = _file_spans(files) if files else "we could not name them"
-        # `nature` is carried verbatim, because this document never rewrites prose.
-        # It is not an index column: measured across the 41 disputes on
-        # run-20260826-090456 it runs 14 characters at its shortest, 305 at the
-        # median and 780 at its longest, with 38 of 41 over 200. A column of those
-        # is a wall, which destroys the one thing an index is for. The files are the
-        # better handle at index width anyway -- an owner scans 41 rows for a name
-        # they recognise in their own tree, which a 305-character paragraph is not.
-        nature = esc(dispute.nature) or "we could not read our own note of what about"
-        # `esc(position)` on an integer this function itself produced, matching the
-        # `<h3>` below rather than being spelled two ways in one function: the module
-        # docstring's rule covers numbers, `_group_a` already escapes its two counts,
-        # and one number rendered escaped in one place and raw in another is the shape
-        # a later edit reads as permission to skip it.
-        index_rows.append(_row(f'<span class="num">{esc(position)}</span>', chip, involved))
-        # `taken` is `""` for `unresolved` -- Task 4 leaves it empty rather than
-        # asserting a decision nobody made. The renderer says so out loud instead
-        # of emitting an empty bold paragraph: on this page, silence after two
-        # contradicting sides reads as a decision the reader missed.
-        # Transitional, replaced wholesale by the Report/Workbook renderer: the old
-        # sentence rebuilt from `chosen`, so the page is unchanged until then.
-        taken = _legacy_taken(dispute)
-        rows = _side_rows(dispute.side_a, "One side") + _side_rows(dispute.side_b, "The other side")
-        blocks.append(
-            # The heading is the number and the chip, nothing else. The nature is a
-            # paragraph beneath it for the reason measured above: on 38 of
-            # run-20260826-090456's 41 disputes, heading on that field puts a
-            # multi-hundred-character paragraph inside an `<h3>`.
-            f"<h3>{esc(position)}. {chip}</h3>"
-            # "The disagreement: " is pinned by
-            # `test_page_labels_the_nature_of_a_disagreement_rather_than_leading_with_it`,
-            # which records that a bare `count_mismatch` reads as a sentence we wrote
-            # badly rather than as a category we were handed. The label stays
-            # immediately in front of the nature, which is what keeps that true after
-            # the heading gave the field up.
-            + f"<p>The disagreement: {nature}</p>"
-            + _table(("Side", "Source", "What it says"), rows)
-            + f"<p><strong>{esc(taken)}</strong></p>"
-        )
+    name = esc(item_id)
+    radios = "".join(
+        f'<label><input type="radio" name="{name}" value="{token}" disabled> {esc(label)}</label>'
+        for token, label in _CHOICES[kind]
+    )
+    box = "Your answer" if text else "A note (optional)"
     return (
-        "<p>Two things we read said different things. Each one below is a place "
-        "where a word from you settles it. The table lists them all; the detail "
-        "under it quotes both sides.</p>"
-        + _table(("#", "Status", "Files involved"), index_rows)
-        + "".join(blocks)
+        f'<fieldset class="answer"><legend>Your answer</legend>{radios}'
+        f'<label class="note">{box}<textarea data-note rows="2" disabled></textarea></label>'
+        "</fieldset>"
     )
 
 
-def _group_d(run: RunPaths):
-    """What we could not tell. No provenance line: a gap cites nothing in any of
-    the three recordings measured (0 of 18, 0 of 19, 0 of 15), so a provenance
-    line here would be blank on every real run."""
-    found = target_brief.open_questions(run)
+def _dispute_card(dispute, answerable: bool) -> str:
+    """One disagreement: heading, the two sides side by side, our reasoning behind a
+    disclosure, and -- in the Workbook only -- the controls.
+
+    The badge goes on the column we took. A pair read from one file shows which
+    reading won exactly as a pair read from two does, which is what the sentence it
+    replaces could not do (spec, "Our pick").
+    """
+    badge_a = badge_b = ""
+    if dispute.chosen == "a":
+        badge_a = '<span class="pick">our pick</span> '
+    elif dispute.chosen == "b":
+        badge_b = '<span class="pick">our pick</span> '
+    elif dispute.resolution == "both_possible":
+        badge_a = badge_b = '<span class="maybe">both may hold</span> '
+    chosen = dispute.side_a if dispute.chosen == "a" else dispute.side_b
+    hole = (
+        f'<p class="src">{esc(target_brief._UNRESOLVED_SIDE)}</p>'
+        if dispute.chosen and not chosen
+        else ""
+    )
+    # `nature` only, never `rationale`. The spec put both here and was wrong to:
+    # `Dispute`'s earlier ruling kept `rationale` off this page because it argues in
+    # our vocabulary, and the toy's own proves it -- it names claim ids and says "a
+    # scenario built on the trace's behaviour would be labelled", which is rubrica
+    # talking about itself to a reader who never asked.
+    nature = esc(dispute.nature) or "we could not read our own note of what about"
+    reasoning = f"<p>The disagreement: {nature}</p>"
+    kind = dispute.kind
+    variant, word = _ASK[kind]
+    chip = _chip(variant, word) if answerable else ""
+    return (
+        f'<article class="card" data-item="{esc(dispute.id)}" data-ref="{esc(dispute.ref)}" '
+        f'data-kind="{esc(kind)}">'
+        f"<h4>{_card_title(dispute)} {chip}</h4>"
+        '<div class="tw"><table class="sides"><thead><tr><th>Left</th><th>Right</th></tr>'
+        f"</thead><tbody><tr><td>{badge_a}{_side_cell(dispute.side_a)}</td>"
+        f"<td>{badge_b}{_side_cell(dispute.side_b)}</td></tr></tbody></table></div>"
+        f"{hole}"
+        f"<details><summary>The disagreement in full</summary>{reasoning}</details>"
+        + (_answer(dispute.id, kind, text=False) if answerable else "")
+        + "</article>"
+    )
+
+
+def _question_card(q) -> str:
+    """One open question, in the Workbook: the question, our reference, an answer box."""
+    asked = esc(q.unknown) or "We did not record what it was that we could not tell."
+    ref = f' <span class="ident">(our reference: {esc(q.subject)})</span>' if q.subject else ""
+    return (
+        f'<article class="card" data-item="{esc(q.id)}" data-ref="{esc(q.ref)}" '
+        'data-kind="question">'
+        f'<h4><span class="ref">{esc(q.ref)}</span> {asked}{ref} {_chip(*_ASK["question"])}</h4>'
+        + _answer(q.id, "question", text=True)
+        + "</article>"
+    )
+
+
+def _no_disputes() -> str:
+    return (
+        '<p class="absent">Nothing we read contradicted anything else we read. '
+        "That is a weaker statement than it sounds: it means we found no "
+        "disagreement, not that your documents agree.</p>"
+    )
+
+
+def _no_questions() -> str:
+    return (
+        '<p class="absent">We did not record any open question. On a real '
+        "target that is more likely to mean we did not notice one than that "
+        "none exists.</p>"
+    )
+
+
+def _take_sentence(take) -> str:
+    """One quick take as a sentence. These are ours, composed from counts, and the
+    section heading says so; each sits beside the disagreements it counts so a
+    reader can check it. Hedged ("looks") because a threshold tuned on one run is
+    one sample (`target_brief`'s constants record it)."""
+    f = f'<span class="file">{esc(take.subject)}</span>'
+    if take.kind == "stale":
+        return (
+            f"<strong>{f} looks out of date.</strong> Of the {esc(take.settled)} "
+            "disagreements with other files we could settle, the other file was "
+            f"right in {esc(take.lost)}."
+        )
+    if take.kind == "trusted":
+        return (
+            f"<strong>{f} looks like your real source of truth.</strong> It was on "
+            f"the winning side in {esc(take.won)} of {esc(take.settled)}."
+        )
+    if take.kind == "self":
+        return f"<strong>{f} contradicts itself</strong> in {esc(take.count)} places."
+    undecided = f", {esc(take.open)} of them we could not decide" if take.open else ""
+    return (
+        f"Your files disagree most about <strong>{esc(take.subject)}</strong> "
+        f"({esc(take.count)} places{undecided})."
+    )
+
+
+def _takes_html(takes, by_id) -> str:
+    """What looks off: one row per take, its examples read-only beneath it."""
+    if not takes:
+        return "<p>No pattern stood out across your files.</p>"
+    rows = []
+    for take in takes:
+        cards = "".join(_dispute_card(by_id[i], answerable=False) for i in take.examples)
+        more = len(take.item_ids) - len(take.examples)
+        refs = ", ".join(esc(by_id[i].ref) for i in take.item_ids)
+        tail = (
+            f'<p class="src">All {esc(len(take.item_ids))} in the workbook: {refs}.</p>'
+            if more > 0
+            else ""
+        )
+        # One column, the examples opening under the sentence: measured on
+        # run-20261103-172151, a second column for them left each card a quarter of
+        # the page wide, and a card is two quotes side by side.
+        rows.append(
+            _row(
+                _take_sentence(take)
+                + f'<details class="examples"><summary>Examples ({esc(len(take.examples))})'
+                f"</summary>{cards}{tail}</details>"
+            )
+        )
+    return (
+        "<p>Patterns we noticed across the places your files disagree. These "
+        "sentences are ours, worked out from counts; the examples under each are "
+        "what it rests on.</p>" + _table(("What we noticed",), rows)
+    )
+
+
+def _topic_groups(items, heading_of) -> list[tuple[str, list]]:
+    """Items by topic, largest group first, then by label; no-topic last."""
+    groups: dict[str, list] = {}
+    for item in items:
+        groups.setdefault(item.topic_id, []).append(item)
+    return sorted(
+        groups.items(),
+        key=lambda kv: (kv[0] == target_brief.NO_TOPIC, -len(kv[1]), heading_of(kv[1][0])),
+    )
+
+
+def _topic_name(item, fallback: str) -> str:
+    return item.topic_label or fallback
+
+
+def _group_d(run: RunPaths, found):
+    """What we could not find, in the Report: the questions read-only, grouped by
+    topic. No answer box -- the Report asks for nothing.
+
+    The question leads and our label for it trails, which is the reverse of the
+    draft. Measured over the 49 questions in the three recordings: `unknown` is a
+    self-contained sentence in all 49, while `subject` is a bare slug or an id pair
+    in most. The label is kept rather than dropped, and named as ours, because it is
+    what a reader would quote back at us -- now beside the visible `Q<n>`, which is
+    the handle the reply block asks for.
+    """
     if isinstance(found, Marker):
         return found
     if not found:
-        return (
-            '<p class="absent">We did not record any open question. On a real '
-            "target that is more likely to mean we did not notice one than that "
-            "none exists.</p>"
+        return _no_questions()
+    blocks = []
+    for _, items in _topic_groups(found, lambda q: _topic_name(q, "")):
+        rows = []
+        for q in items:
+            ref = (
+                f'<span class="ident">(our reference: {esc(q.subject)})</span>'
+                if q.subject
+                else "—"
+            )
+            asked = esc(q.unknown) or "We did not record what it was that we could not tell."
+            rows.append(_row(f'<span class="ref">{esc(q.ref)}</span>', asked, ref))
+        name = _topic_name(items[0], "Other questions")
+        blocks.append(
+            f"<details><summary>{esc(name)} ({esc(len(items))})</summary>"
+            + _table(("#", "The question", "Our reference"), rows)
+            + "</details>"
         )
-    rows = []
-    for position, q in enumerate(found, start=1):
-        # The question leads and our label for it trails, which is the reverse of
-        # the draft. Measured over the 49 questions in the three recordings:
-        # `unknown` is a self-contained sentence in all 49, while `subject` is a
-        # bare slug in 19 of 19 on run-20260825-094033 (one of them,
-        # `outbox-approval-invariant`, four times over), an `ent-… / inv-…` id pair
-        # in 10 of 12 on run-20260816-172810, and an id-prefixed phrase in all 18
-        # on run-20260826-090456. Bolding that as the lead of a question put a
-        # rubrica identifier in the recipient's eye ahead of the question itself.
-        # The label is kept rather than dropped, and named as ours, because it is
-        # what they would quote back at us.
-        #
-        # It is now a column, which is the same ruling expressed in a grid: the
-        # question is the wide first column and our reference is the narrow last
-        # one, so the eye reaches the question before the slug on every row.
-        # The words "our reference:" and the parentheses stay in the cell, not just
-        # in the column heading. `test_page_renders_an_open_question_as_a_question`
-        # and `test_page_states_a_gap_that_records_no_question` both pin the exact
-        # string `(our reference: X)`, and what they are pinning is that the label is
-        # named as *ours* -- a column heading a reader skims past does not carry that.
-        #
-        # An em dash where there is no subject, never an empty cell: a `<td></td>`
-        # in a column of references reads as a value this render dropped, which is
-        # the same failure the absent sentences in this module exist to avoid.
-        ref = f'<span class="ident">(our reference: {esc(q.subject)})</span>' if q.subject else "—"
-        # No run has yet produced a gap with no `unknown`, so this is the branch
-        # for an artifact that was written outside the schema rather than one
-        # observed: state the absence, never leave a row holding only our id.
-        asked = esc(q.unknown) or "We did not record what it was that we could not tell."
-        # `esc(position)` on an integer this function itself produced, for the reason
-        # `_group_bc` states where it numbers its own index: one number rendered
-        # escaped in one place and raw in another is the shape a later edit reads as
-        # permission to skip it.
-        rows.append(_row(f'<span class="num">{esc(position)}</span>', asked, ref))
     return (
         "<p>These are things we could not work out from what we read. They are "
-        "questions, not criticisms.</p>" + _table(("#", "The question", "Our reference"), rows)
+        "questions, not criticisms.</p>" + "".join(blocks)
+    )
+
+
+def _file_index(found) -> str:
+    """Every file a disagreement names, with the references that name it -- the
+    by-file view over the topic grouping below it (plan, Task 4: one rendering of
+    each card, never two)."""
+    by_file: dict[str, list[str]] = {}
+    for d in found:
+        for f in sorted(target_brief.side_files(d.side_a) | target_brief.side_files(d.side_b)):
+            by_file.setdefault(f, []).append(d.ref)
+    rows = [
+        _row(f'<span class="file">{esc(f)}</span>', esc(len(refs)), esc(", ".join(refs)))
+        for f, refs in sorted(by_file.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+    ]
+    return _table(("File", "Disagreements", "References"), rows)
+
+
+def _workbook(run: RunPaths, found, questions, takes) -> str:
+    """The Workbook: the ten answers that help us most, then everything else."""
+    disputes = found if isinstance(found, list) else []
+    asked = questions if isinstance(questions, list) else []
+    order = target_brief.workbook_order(disputes, asked, takes)
+    by_id = {d.id: d for d in disputes} | {q.id: q for q in asked}
+    first = set(order)
+    n = len(order)
+    cards = "".join(
+        _dispute_card(by_id[i], answerable=True)
+        if isinstance(by_id[i], target_brief.Dispute)
+        else _question_card(by_id[i])
+        for i in order
+    )
+    if n:
+        start = (
+            f"<h3>Start here: the {esc(n)} answer{'' if n == 1 else 's'} that help us most</h3>"
+            f'<p class="lede">About {esc(max(5, n * 3 // 2))} minutes. Stop whenever you '
+            "like; whatever you answer still counts. "
+            f'<span class="counter">Answered <span id="wb-count">0</span> / {esc(n)}</span></p>'
+            + cards
+        )
+    else:
+        start = "<p>We have nothing to ask you about here.</p>"
+    rest_d = [d for d in disputes if d.id not in first]
+    rest_q = [q for q in asked if q.id not in first]
+    if isinstance(found, Marker):
+        rest_disputes = _marker(found, True)
+    elif not disputes:
+        rest_disputes = _no_disputes()
+    elif not rest_d:
+        rest_disputes = "<p>Every disagreement is in the ten above.</p>"
+    else:
+        groups = "".join(
+            f'<details class="group"><summary>{esc(_topic_name(items[0], "Other disagreements"))} '
+            f"({esc(len(items))})</summary>"
+            + "".join(_dispute_card(d, answerable=True) for d in items)
+            + "</details>"
+            for _, items in _topic_groups(rest_d, lambda d: _topic_name(d, ""))
+        )
+        chips = "".join(
+            f'<button type="button" class="filter" data-filter="{kind}" disabled>'
+            f"{esc(_ASK[kind][1])} ({esc(sum(d.kind == kind for d in rest_d))})</button>"
+            for kind in ("undecided", "confirm", "both")
+        )
+        rest_disputes = (
+            f'<p class="filters">Show only: {chips} '
+            '<button type="button" class="filter" data-filter="" disabled>All</button></p>'
+            f"<details><summary>By file</summary>{_file_index(disputes)}</details>" + groups
+        )
+    if isinstance(questions, Marker):
+        rest_questions = _marker(questions, True)
+    elif not rest_q:
+        rest_questions = (
+            "<p>Every open question is in the ten above.</p>" if asked else _no_questions()
+        )
+    else:
+        rest_questions = "".join(_question_card(q) for q in rest_q)
+    missed = (
+        '<article class="card" data-item="missed-source" data-ref="S1" data-kind="question">'
+        '<h4><span class="ref">S1</span> A file we should have read</h4>'
+        '<fieldset class="answer"><legend>Your answer</legend><label class="note">'
+        "Which file, and why it matters"
+        '<textarea data-note rows="2" disabled></textarea></label></fieldset></article>'
+    )
+    return (
+        '<section id="workbook">'
+        "<h2>Your answers</h2>"
+        '<p class="lede"><strong>Does this accurately describe your system?</strong> '
+        "Where it does not, we would rather hear it now than build on it. Your answers "
+        "help us build tests that match how your system really behaves.</p>"
+        '<p class="nojs">Answering here needs scripts, which are off in this view. You can '
+        "still reply by email: quote each item's reference (D12, Q3) with your "
+        "answer.</p>"
+        '<p class="actions"><button type="button" id="wb-print" disabled>Print or save as PDF'
+        '</button> <button type="button" id="wb-download" disabled>Download answers</button></p>'
+        + start
+        + "<h2>Everything else</h2>"
+        "<p>Optional, for anyone who wants to go deeper.</p>"
+        f'<details class="group"><summary>Other disagreements ({esc(len(rest_d))})</summary>'
+        f"{rest_disputes}</details>"
+        f'<details class="group"><summary>Other open questions ({esc(len(rest_q))})</summary>'
+        f"{rest_questions}</details>"
+        f'<details class="group"><summary>Did we miss a source?</summary>'
+        f"{_body(_group_a(run), False)}{missed}</details>" + _reply() + "</section>"
     )
 
 
@@ -932,6 +1141,11 @@ def _operations(run: RunPaths):
         return found
     if not found:
         return '<p class="absent">We did not identify anything it can be asked to do.</p>'
+    return _operations_table(found)
+
+
+def _operations_table(found) -> str:
+    """One table of operations -- the whole set, or one capability group's."""
     rows = []
     for op in found:
         params = esc(", ".join(op.params)) if op.params else "Takes no parameters."
@@ -1120,69 +1334,241 @@ def _description_banner(head) -> str:
 
 
 def _reply() -> str:
-    """How to reply. This is what stands in place of the sign-off block the design
-    dropped: the document asks for corrections in prose and offers no place to
-    record an approval, because whether a ratification is worth collecting is a
-    question these conversations have not answered yet.
+    """How to reply, at the foot of the Workbook.
 
-    At the foot of the page, where the closing of an emailed document belongs --
-    which is why it says "the description above" and not "below": `render` puts
-    this last, and the brief's draft described a layout it did not build.
+    It records answers per item and never a ratification of the run: whether one is
+    worth collecting is a question these conversations have not answered yet, and
+    `test_page_names_the_target_and_asks_the_question` keeps the word for it off
+    the page.
     """
     return (
-        '<div class="reply"><h2>How to reply</h2>'
-        "<p>Reply in whatever form suits you — prose in an email is ideal. The three "
-        "things we asked for at the top are ranked: a source we should have read is "
-        "worth more to us than a misread field, and a disagreement you settle is "
-        "worth more than a detail you confirm. You do not need to work through the "
-        "full description above to be useful to us.</p>"
-        # Not "we are not asking you to approve anything", which is what the brief
-        # wrote here: the brief's own
-        # `test_page_names_the_target_and_asks_the_question` forbids the word
-        # `approve` anywhere on the page, and the two shipped contradicting each
-        # other. The test wins, because the word is the strongest signal that the
-        # dropped sign-off block has come back -- and the sentence keeps its whole
-        # meaning without it.
+        '<div class="reply"><h3>How to reply</h3>'
+        "<p>Download your answers and send us the file, or save the page as a PDF, or "
+        "simply reply by email quoting each item's reference (D12, Q3) — whatever "
+        "suits you. Ten answers are worth more to us than none, and a source we should "
+        "have read is worth more than any of them.</p>"
         "<p>Nothing here needs to be agreed to. We are asking whether it is "
         "true.</p></div>"
     )
 
 
+def _what_it_does(run: RunPaths, operations, personas, terse: bool) -> str:
+    """What it seems to do: who uses it, then what it can do, in groups.
+
+    Capabilities are grouped by their id's middle segment (`capability_group`),
+    because 130 rows in one table is a reference dump and the run's services do not
+    partition them. Each group is collapsed, so the section reads as a list of what
+    the system does before it reads as a table of how.
+    """
+    users = _collapsed("Who uses it", personas, terse)
+    found = target_brief.operations(run)
+    if isinstance(found, Marker) or not found:
+        return users + _collapsed("What it can do", operations, terse)
+    groups = []
+    for group, ops in target_brief.grouped_operations(found):
+        name = group.capitalize() if group else "Other"
+        groups.append(
+            f"<details><summary>{esc(name)} ({esc(len(ops))})</summary>"
+            f"{_operations_table(ops)}</details>"
+        )
+    return (
+        users
+        + f"<p>It can be asked to do {esc(len(found))} things, which we have grouped:</p>"
+        + "".join(groups)
+    )
+
+
+_JS = r"""
+(function () {
+  var body = document.body;
+  var key = 'tb:' + (body.getAttribute('data-digest') || body.getAttribute('data-run') || '');
+  var store = {};
+  try { store = JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (e) { store = {}; }
+  function save() { try { localStorage.setItem(key, JSON.stringify(store)); } catch (e) {} }
+  body.classList.add('js');
+  var cards = Array.prototype.slice.call(document.querySelectorAll('#workbook .card'));
+  var first = cards.filter(function (c) { return !c.closest('.group'); });
+  function answered(card) {
+    var a = store[card.getAttribute('data-item')];
+    return !!(a && (a.choice || a.text));
+  }
+  function refresh() {
+    cards.forEach(function (c) { c.classList.toggle('done', answered(c)); });
+    var n = first.filter(answered).length;
+    var out = document.getElementById('wb-count');
+    if (out) { out.textContent = String(n); }
+  }
+  cards.forEach(function (card) {
+    var id = card.getAttribute('data-item');
+    var saved = store[id] || {};
+    card.querySelectorAll('input, textarea').forEach(function (el) { el.disabled = false; });
+    card.querySelectorAll('input[type=radio]').forEach(function (r) {
+      if (saved.choice === r.value) { r.checked = true; }
+      r.addEventListener('change', function () {
+        store[id] = store[id] || {};
+        store[id].choice = r.value;
+        save(); refresh();
+      });
+    });
+    var note = card.querySelector('textarea');
+    if (note) {
+      note.value = saved.text || '';
+      note.addEventListener('input', function () {
+        store[id] = store[id] || {};
+        store[id].text = note.value;
+        save(); refresh();
+      });
+    }
+  });
+  function show(tab) {
+    ['report', 'workbook'].forEach(function (name) {
+      var s = document.getElementById(name);
+      if (s) { s.hidden = name !== tab; }
+      var a = document.querySelector('.tabs a[href="#' + name + '"]');
+      if (a) { a.classList.toggle('on', name === tab); }
+    });
+    window.scrollTo(0, 0);
+  }
+  function route() { show(location.hash === '#workbook' ? 'workbook' : 'report'); }
+  window.addEventListener('hashchange', route);
+  document.querySelectorAll('a[href="#workbook"], a[href="#report"]').forEach(function (a) {
+    a.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      history.replaceState(null, '', a.getAttribute('href'));
+      route();
+    });
+  });
+  route();
+  document.querySelectorAll('button.filter').forEach(function (b) {
+    b.disabled = false;
+    b.addEventListener('click', function () {
+      var want = b.getAttribute('data-filter');
+      document.querySelectorAll('#workbook .group .card').forEach(function (c) {
+        c.hidden = !!want && c.getAttribute('data-kind') !== want;
+      });
+    });
+  });
+  var print = document.getElementById('wb-print');
+  if (print) {
+    print.disabled = false;
+    print.addEventListener('click', function () { window.print(); });
+  }
+  window.addEventListener('beforeprint', function () {
+    body.classList.add('printing');
+    document.querySelectorAll('#workbook details').forEach(function (d) {
+      var hit = Array.prototype.some.call(d.querySelectorAll('.card'), answered);
+      d.classList.toggle('untouched', !hit && d.classList.contains('group'));
+      if (hit) { d.setAttribute('data-was', d.open ? '1' : '0'); d.open = true; }
+    });
+  });
+  window.addEventListener('afterprint', function () {
+    body.classList.remove('printing');
+    document.querySelectorAll('#workbook details[data-was]').forEach(function (d) {
+      d.open = d.getAttribute('data-was') === '1';
+      d.removeAttribute('data-was');
+    });
+  });
+  var dl = document.getElementById('wb-download');
+  if (dl) {
+    dl.disabled = false;
+    dl.addEventListener('click', function () {
+      var answers = cards.filter(answered).map(function (c) {
+        var a = store[c.getAttribute('data-item')];
+        return {
+          item: c.getAttribute('data-item'),
+          ref: c.getAttribute('data-ref'),
+          kind: c.getAttribute('data-kind'),
+          choice: a.choice || null,
+          note: a.text || ''
+        };
+      });
+      var doc = {
+        format: 'rubrica-target-brief-answers',
+        version: 1,
+        run_id: body.getAttribute('data-run'),
+        target: body.getAttribute('data-target'),
+        generated: body.getAttribute('data-generated'),
+        exported: new Date().toISOString(),
+        answers: answers
+      };
+      var blob = new Blob([JSON.stringify(doc, null, 2)], {type: 'application/json'});
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'answers-' + (body.getAttribute('data-target') || 'system') + '-' +
+        (body.getAttribute('data-run') || 'run') + '.json';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    });
+  }
+  refresh();
+})();
+"""
+
+
+def _slug(value: str) -> str:
+    """A file-name-safe form of the target's name, for the download's file name."""
+    return "".join(c if c.isalnum() or c in "-_" else "-" for c in value).strip("-")[:60]
+
+
 def render(run: RunPaths) -> str:
-    """The whole page, as one string."""
+    """The whole page, as one string: a Report that asks for nothing, then a
+    Workbook that asks for a bounded set of answers first.
+
+    Both are rendered in full, and the script only shows one at a time: with
+    scripts off, the reader gets the Report and then the Workbook, one after the
+    other, and every disagreement and question is still on the page.
+    """
     head = target_brief.headline(run)
     known = isinstance(head, target_brief.Headline)
     # `head.name` can be `""` on a description that was read but names nothing, so
-    # the test is the name and not the type. No fallback to `run.root.name`, which
-    # the brief's draft used: measured, that is `run-20260827-115248`, which is
-    # rubrica's identifier for the work rather than anything the recipient has seen
-    # -- and a page whose `<h1>` is that has handed them the wrong subject.
+    # the test is the name and not the type. No fallback to `run.root.name`:
+    # measured, that is `run-20260827-115248`, rubrica's identifier for the work
+    # rather than anything the recipient has seen.
     name = head.name.strip() if known else ""
-    # `.strip()` on all three: the schema's `minLength: 1` admits `" "`, and
-    # measured, a whitespace-only `interface` rendered `Reached over  .`, a
-    # whitespace-only `notes` an empty `<p> </p>`, and a whitespace-only `name` an
-    # `<h1>` holding one space where the no-name branch says what the page is about.
-    # Stripping what is displayed is not rewriting it.
+    # `.strip()` on all three: the schema's `minLength: 1` admits `" "`. Stripping
+    # what is displayed is not rewriting it.
     interface = head.interface.strip() if known else ""
     notes = head.notes.strip() if known else ""
-    # The subject of every sentence about the target, so one branch decides it
-    # rather than each sentence guessing.
     subject = f"<strong>{esc(name)}</strong>" if name else "your system"
-    # True for exactly the five sections that read the description, which is the
-    # only case `_marker`'s terse form is correct for.
     terse = isinstance(head, Marker)
-    # Built once, so the legend below can ask whether the label is on the page
-    # rather than recomputing the operations to find out.
     operations = _operations(run)
-    # Every body built before the page is assembled, because the legend's trigger is
-    # a property of all of them and the legend must be readable above the lines it
-    # glosses. Tier 2's three are built here for that reason alone -- they were
-    # interpolated in place before, which is what put the gloss below the tier-1 ask
-    # carrying most of what it explains.
-    could_not_tell = _group_d(run)
     data_types = _data_types(run)
     personas = _personas(run)
-    legend = _LEGEND if _needs_legend(could_not_tell, operations, data_types, personas) else ""
+    found = target_brief.disputes(run)
+    questions = target_brief.open_questions(run)
+    disputes = found if isinstance(found, list) else []
+    takes = target_brief.quick_takes(disputes)
+    by_id = {d.id: d for d in disputes}
+    could_not_find = _group_d(run, questions)
+    legend = _LEGEND if _needs_legend(could_not_find, operations, data_types, personas) else ""
+    looks_off = (
+        found
+        if isinstance(found, Marker)
+        else (_takes_html(takes, by_id) if disputes else _no_disputes())
+    )
+    manifest = _mapping_of(run)
+    files = _files_read(run)
+    report = (
+        '<section id="report">'
+        f'<p class="lede">An independent reader went through {files} of yours and wrote '
+        f"down what {subject} seems to do, what it can do, and where its documents "
+        "disagree. Here is what we took away.</p>"
+        + _description_banner(head)
+        + _sources_banner(run)
+        + (f"<p>{esc(notes)}</p>" if notes else "")
+        + _section("What it seems to do", _what_it_does(run, operations, personas, terse))
+        + _section("What looks off", looks_off, terse)
+        + _section("What we could not find", could_not_find, terse, lead=legend)
+        + '<p class="invite"><strong>Want to help us test this system?</strong> '
+        "Answering a few questions lets us build tests that match how it really "
+        'behaves. <a href="#workbook">Open the workbook →</a></p>'
+        + "<h2>Reference</h2>"
+        + _collapsed("What data it holds", data_types, terse)
+        + _collapsed("What we read", _group_a(run))
+        + "</section>"
+    )
+    target = _slug(name)
     body = [
         "<!doctype html>",
         '<html lang="en"><head><meta charset="utf-8">',
@@ -1190,47 +1576,46 @@ def render(run: RunPaths) -> str:
         f"<title>{esc(name)} — does this describe your system?</title>"
         if name
         else "<title>Does this describe your system?</title>",
-        f"<style>{_CSS}</style></head><body>",
+        f"<style>{_CSS}</style></head>",
+        # Machine text for the export, in attributes only: never in what a reader
+        # sees (the visible-text tests hold that), and constant for one run, so the
+        # page stays byte-identical across renders.
+        f'<body data-run="{esc(_text_of(manifest, "run_id"))}" '
+        f'data-generated="{esc(_text_of(manifest, "created_utc"))}" '
+        f'data-digest="{esc(_digest(manifest))}" data-target="{esc(target)}">',
         f"<h1>{esc(name)}</h1>" if name else "<h1>The system we are describing</h1>",
         f'<p class="meta">Reached over {esc(interface)}.</p>' if interface else "",
-        f'<p class="lede">This is what we currently believe about {subject}, '
-        "written from your own documents. "
-        "<strong>Does this accurately describe your system?</strong> Where it does "
-        "not, we would rather hear it now than build on it.</p>",
-        _description_banner(head),
-        _sources_banner(run),
-        f"<p>{esc(notes)}</p>" if notes else "",
-        "<h2>What we most need from you</h2>",
-        # The draft left this heading with nothing under it, and on all three
-        # recordings it rendered as a bare rule above the next heading -- the one
-        # place on the page that read as a section that had failed to fill in.
-        # Its counterpart below ("What we believe, in full") always had its lead
-        # sentence, so this is the sentence that was missing rather than a new
-        # tier. It also states the ranking that the reply block refers back to.
-        #
-        # Now a table, because the ranking *is* tabular: three asks, in order, each
-        # pointing at the section that answers it. The sentence stated an order the
-        # reader then had to hold; the table shows it. Three rows exactly -- `_reply`
-        # says "the three things we asked for at the top are ranked", and
-        # `CLAUDE.md` and `docs/reference/cli.md` both say three ranked asks lead.
-        _table(
-            ("Rank", "What we need", "Where it is"),
-            [
-                _row("1", "A source we should have read", "What we read"),
-                _row("2", "A place our sources disagree", "Where our sources disagree"),
-                _row("3", "Something we could not work out", "What we could not tell"),
-            ],
-        ),
-        _section("What we read", _group_a(run)),
-        _section("Where our sources disagree", _group_bc(run), terse),
-        _section("What we could not tell", could_not_tell, terse, lead=legend),
-        "<h2>What we believe, in full</h2>",
-        "<p>Everything below is the detail behind the asks above. Skim it or skip "
-        "it — the sections above are where a correction helps us most.</p>",
-        _collapsed("What it can do", operations, terse),
-        _collapsed("What data it holds", data_types, terse),
-        _collapsed("Who uses it", personas, terse),
-        _reply(),
+        '<nav class="tabs"><a href="#report">Report</a> <a href="#workbook">Workbook</a></nav>',
+        report,
+        _workbook(run, found, questions, takes),
+        f"<script>{_JS}</script>",
         "</body></html>",
     ]
     return "\n".join(part for part in body if part)
+
+
+def _mapping_of(run: RunPaths) -> dict:
+    return _mapping(_quietly(run.manifest))
+
+
+def _text_of(manifest: dict, key: str) -> str:
+    value = manifest.get(key)
+    return value if isinstance(value, str) else ""
+
+
+def _digest(manifest: dict) -> str:
+    """A short stable digest of the manifest's inputs, so answers in one browser for
+    one run never restore into the page for another. sha256 over the sorted input
+    digests; the raw ones are already recorded, so nothing new is asserted."""
+    digests = sorted(
+        r.get("sha256") for r in _dicts(manifest.get("inputs")) if isinstance(r.get("sha256"), str)
+    )
+    return hashlib.sha256("\n".join(digests).encode()).hexdigest()[:16] if digests else ""
+
+
+def _files_read(run: RunPaths) -> str:
+    groups = target_brief.inputs_read(run)
+    if isinstance(groups, Marker) or not groups:
+        return "the documents"
+    n = sum(len(g.files) for g in groups)
+    return f"{esc(n)} file{'' if n == 1 else 's'}"
