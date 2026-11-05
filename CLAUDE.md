@@ -293,18 +293,22 @@ are judgments rather than list entries:
   says so rather than letting a recorded selection read as a narrowing.
   `target-brief` is a report too, and the one written for somebody outside the
   project: it renders a run's description of the *target* — not of the run — for the
-  people who own that target, asking them to correct it. Three ranked asks lead, and
-  the full description sits collapsed beneath — what it can do, what data it holds,
-  who uses it — each of *its* statements carrying the file it was read from, which is
-  the scope [`docs/reference/cli.md`](docs/reference/cli.md) states. The asks above it
-  are not held to it and were never meant to be: a gap names no file by design, and
-  where we could not work out which file something came from the page says so instead
-  of guessing.
+  people who own that target, asking them to correct it. It is two tabs in one
+  self-contained file: a **Report** that asks for nothing — what the system seems to
+  do, the patterns across its disagreements stated as hedged sentences of ours, and
+  what we could not find — and a **Workbook** that leads with ten answers chosen by
+  quota and exports them as a PDF or a JSON file. The description's statements carry
+  the file they were read from, which is the scope
+  [`docs/reference/cli.md`](docs/reference/cli.md) states; a gap names no file by
+  design, and where we could not work out which file something came from the page
+  says so instead of guessing. It carries one inline script, and everything a reader
+  reads is in the HTML, so it still reads with scripts off.
   Two things about it are load-bearing rather than stylistic: prose written by a stage
   is **selected and relabelled, never rewritten**, since an owner correcting a
   sentence we paraphrased would be correcting our paraphrase; and no stage, gate,
-  artifact or mention of rubrica reaches the page *in this project's own wording*,
-  which two tests enforce because a recipient reading about
+  artifact or mention of rubrica reaches the page's *visible text* in this project's
+  own wording — ids sit in attributes for the export, by ruling — which two tests
+  enforce because a recipient reading about
   `01-world-model.json` has been handed the wrong question — a claim id inside a
   sentence we selected ships as written, which is that same rule seen from the other
   side. It exits **0** on an unreadable `01-claims/` where `claim-utilisation` and

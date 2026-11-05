@@ -970,11 +970,34 @@ rubrica run-summary --run runs/run-20260806-123005
 ### `rubrica target-brief`
 
 Renders one run's *description of the target* as a single self-contained HTML
-page, written for the people who own that target and asking them to correct it.
-Three ranked asks lead: the files we read, the places our sources disagreed and
-which side we took, and what we could not tell from what we read. Beneath them,
-collapsed, the description itself — what it can do, what data it holds, who uses
-it — each statement carrying the file it was read from.
+page, written for the people who own that target. It does two jobs, as two tabs:
+
+- **Report** — opens first and asks for nothing. What the system seems to do (who
+  uses it; what it can do, grouped by the middle segment of each capability's
+  `cap.<group>.<rest>` id, "Other" for an id off that convention); **what looks
+  off** — patterns across the disagreements, stated as hedged sentences of ours
+  ("`docs/triage.md` looks out of date", "… looks like your real source of truth",
+  "… contradicts itself", the busiest topics), each with up to three read-only
+  examples; what we could not find, grouped by topic; and one invitation to the
+  Workbook. No answer control and no count of anything outstanding appears here.
+- **Workbook** — the ten answers that help us most, chosen mechanically by quota
+  (five undecided disagreements, three picks to confirm, two open questions; spare
+  slots pass on), spread across topics and interleaved by kind. Then everything
+  else, optional and grouped by topic, with a by-file index and a card for a source
+  we should have read. Every item is a card with a visible reference (`D<n>` for a
+  disagreement, `Q<n>` for a question, numbered in id order) and answer controls.
+  **Print or save as PDF** prints both tabs with each answer beside its question;
+  **Download answers** saves a JSON file (`format`
+  `rubrica-target-brief-answers`, `version` 1) keyed by each item's id, carrying its
+  reference, its kind and the choice token. Nothing in rubrica reads that file yet.
+
+A disagreement's two sides sit in two columns, **left always `claim_a`, right
+always `claim_b`**, and the side we took carries an *our pick* badge. That replaced
+the sentence "We went with `<file>`.", which said nothing when both sides were read
+from the same file. Its topic is the subject whose `01-contradictions/` part holds
+it; its heading is the first sentence of `nature` when that is short and carries
+none of our ids, otherwise its topic and the two sides' files. `nature` ships
+verbatim beneath; `rationale` never does, because it argues in our vocabulary.
 
 Required: `--run RUN`. Optional: `-o PATH` / `--output PATH` — where to write
 the page, defaulting to `<run>/target-brief.html`.
@@ -984,31 +1007,33 @@ than `claim-utilisation` and `gate-brief` there, on purpose: an unreadable
 `01-claims/` exits 2 out of both, because an empty utilisation table is the one
 reading a human at gate 1 must never be handed. This page has no
 number to be quietly wrong, so it states at the top that it could not read where
-each statement came from and renders the description anyway.
+each statement came from and renders the description anyway. An unreadable
+`01-subjects.json` or `01-contradictions/` costs the page its grouping, never an
+item.
 
-Nothing **this page's own prose** names is a stage, a gate, an artifact or
-rubrica itself, and two tests fail the suite rather than let one back in. That
-claim is deliberately about our chrome and not about every string on the page:
-prose written by a stage is *selected and relabelled, never rewritten* — an owner
-correcting a sentence we paraphrased would be correcting our paraphrase — so a
-claim id inside a selected sentence ships as written, and on a real run many do.
-One id is the page's own rather than a stage's: an open question we cannot phrase
-without one carries `(our reference: ...)`, because a recipient replying about it
-needs something to name it by.
-What the two tests hold is the wording this project chose, because a recipient
-asked "does this accurately describe your system?" who is instead reading about
-`01-world-model.json` has been handed the wrong question.
+Nothing **a reader can see** in this page's own prose names a stage, a gate, an
+artifact or rubrica itself, and two tests fail the suite rather than let one back
+in. Both read the page's visible text: our ids are on the page — in `data-`
+attributes and the inline script, where the export needs them — and never in a
+text node. That claim is also about our chrome and not about every string on the
+page: prose written by a stage is *selected and relabelled, never rewritten* — an
+owner correcting a sentence we paraphrased would be correcting our paraphrase — so
+a claim id inside a selected sentence ships as written, and on a real run many do.
+An open question we cannot phrase without one of our ids carries
+`(our reference: ...)` beside its `Q<n>`.
 
-The page carries no JavaScript at all, unlike `run-summary`: it is meant to be
-sent out of the project, and an attachment opened behind a corporate proxy or by
-a reader with scripts off must still read. It is otherwise self-contained the
-same way — inline CSS, no external asset, no network — and unlike `run-summary`
-it links to no sibling artifact, so it reads identically wherever it is written
-or forwarded.
+The page carries **one inline script and no other**: no `src`, no network, no
+external asset, inline CSS. The script builds nothing a reader reads — it switches
+tabs, enables the answer controls (which ship disabled), keeps answers in the
+reader's own browser, prints and exports. With scripts off both tabs render one
+after the other, every card is present, and a note asks the reader to reply by
+email quoting each item's reference. It links to no sibling artifact, so it reads
+identically wherever it is written or forwarded, and two renders of one run are
+byte-identical.
 
-There is no place on it to record an approval, deliberately: it asks whether the
-description is true, and whether a ratification is worth collecting is a question
-the conversations this report exists for have not answered yet.
+It records per-item answers and never a ratification of the run: whether one is
+worth collecting is a question the conversations this report exists for have not
+answered yet.
 
 ```bash
 rubrica target-brief --run runs/run-20260806-123005
