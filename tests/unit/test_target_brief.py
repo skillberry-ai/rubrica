@@ -1023,3 +1023,199 @@ def test_open_question_topic_ties_break_on_the_subject_id(tmp_path):
     run.world_model.write_text(json.dumps(world_model))
     # One claim each in sub-cap-find-tickets and sub-cap-get-ticket: the smaller id.
     assert target_brief.open_questions(run)[0].topic_id == "sub-cap-find-tickets"
+
+
+# Quick takes and the Workbook's first ten. Built from `Dispute`s directly: the
+# rules are arithmetic over sides, resolutions and topics, and a toy run has one
+# contradiction, which reaches none of the thresholds.
+def _ref(path):
+    return target_brief.SourceRef("clm-x", path, "", "", "design_doc")
+
+
+def _d(cid, files_a, files_b, resolution, topic="t"):
+    return target_brief.Dispute(
+        id=cid,
+        nature="n",
+        resolution=resolution,
+        chosen=target_brief._chosen(resolution),
+        side_a=tuple(_ref(f) for f in files_a),
+        side_b=tuple(_ref(f) for f in files_b),
+        topic_id=topic,
+        topic_label=topic.upper(),
+    )
+
+
+def _q(qid, topic=target_brief.NO_TOPIC):
+    return target_brief.OpenQuestion(id=qid, subject="s", unknown="u?", topic_id=topic)
+
+
+def _losing(n_lost, n_won, file="doc.md", other="code.sh"):
+    lost = [_d(f"l{i}", [file], [other], "preferred_b") for i in range(n_lost)]
+    won = [_d(f"w{i}", [file], [other], "preferred_a") for i in range(n_won)]
+    return lost + won
+
+
+def _take(takes, kind, subject):
+    return next(t for t in takes if t.kind == kind and t.subject == subject)
+
+
+def test_a_file_losing_five_of_six_looks_stale():
+    takes = target_brief.quick_takes(_losing(5, 1))
+    stale = _take(takes, "stale", "doc.md")
+    assert (stale.lost, stale.won, stale.settled) == (5, 1, 6)
+    # Only the disagreements it lost, because that is what the sentence claims.
+    assert stale.examples == ("l0", "l1", "l2")
+    assert set(stale.item_ids) == {"l0", "l1", "l2", "l3", "l4"}
+
+
+def test_a_file_losing_four_of_six_does_not_look_stale():
+    assert not [t for t in target_brief.quick_takes(_losing(4, 2)) if t.kind == "stale"]
+
+
+def test_a_file_losing_four_of_four_does_not_look_stale():
+    """Below the minimum: four is a share, not a pattern."""
+    assert not [t for t in target_brief.quick_takes(_losing(4, 0)) if t.kind == "stale"]
+
+
+def test_a_file_losing_three_of_four_at_scale_does_not_look_stale():
+    """The share rule bites on its own: 6 lost of 9 settled is 67%."""
+    assert not [t for t in target_brief.quick_takes(_losing(6, 3)) if t.kind == "stale"]
+
+
+def test_a_file_winning_five_and_losing_one_looks_trusted():
+    takes = target_brief.quick_takes(_losing(5, 1))
+    trusted = _take(takes, "trusted", "code.sh")
+    assert (trusted.won, trusted.lost) == (5, 1)
+    assert trusted.examples == ("l0", "l1", "l2")
+
+
+def test_a_file_losing_two_is_not_trusted_however_often_it_wins():
+    disputes = _losing(2, 6, file="code.sh", other="doc.md")
+    assert not [t for t in target_brief.quick_takes(disputes) if t.kind == "trusted"]
+
+
+def test_a_file_contradicting_itself_three_times_is_a_take_and_not_a_loss():
+    disputes = [_d(f"s{i}", ["a.md"], ["a.md"], "preferred_a") for i in range(3)]
+    takes = target_brief.quick_takes(disputes)
+    own = _take(takes, "self", "a.md")
+    assert own.count == 3
+    # A same-file pair credits no win and no loss: the file is on both sides.
+    assert not [t for t in takes if t.kind in ("stale", "trusted")]
+
+
+def test_two_self_contradictions_are_not_a_take():
+    disputes = [_d(f"s{i}", ["a.md"], ["a.md"], "unresolved") for i in range(2)]
+    assert not [t for t in target_brief.quick_takes(disputes) if t.kind == "self"]
+
+
+def test_a_file_on_both_sides_is_credited_neither():
+    takes = target_brief.quick_takes(
+        [_d(f"x{i}", ["x.md", "y.md"], ["y.md"], "preferred_a") for i in range(5)]
+    )
+    assert _take(takes, "trusted", "x.md").won == 5
+    assert not [t for t in takes if t.subject == "y.md" and t.kind != "topic"]
+
+
+def test_topic_takes_are_the_top_three_by_count_and_skip_no_topic():
+    disputes = (
+        [_d(f"a{i}", ["p"], ["q"], "unresolved", topic="ta") for i in range(4)]
+        + [_d(f"b{i}", ["p"], ["q"], "preferred_a", topic="tb") for i in range(3)]
+        + [_d(f"c{i}", ["p"], ["q"], "unresolved", topic="tc") for i in range(2)]
+        + [_d(f"d{i}", ["p"], ["q"], "unresolved", topic="td") for i in range(2)]
+        + [_d(f"n{i}", ["p"], ["q"], "unresolved", topic=target_brief.NO_TOPIC) for i in range(9)]
+    )
+    topic = [t for t in target_brief.quick_takes(disputes) if t.kind == "topic"]
+    # Ties broken on the label, so tc beats td.
+    assert [(t.topic_id, t.count, t.open) for t in topic] == [
+        ("ta", 4, 4),
+        ("tb", 3, 0),
+        ("tc", 2, 2),
+    ]
+
+
+def test_a_topic_of_one_is_not_a_take():
+    topic = [
+        t
+        for t in target_brief.quick_takes([_d("a", ["p"], ["q"], "unresolved")])
+        if t.kind == "topic"
+    ]
+    assert topic == []
+
+
+def test_examples_put_undecided_first_then_id():
+    disputes = [_d("a", ["p"], ["q"], "preferred_a")] + [
+        _d(f"z{i}", ["p"], ["q"], "unresolved") for i in range(3)
+    ]
+    (topic,) = [t for t in target_brief.quick_takes(disputes) if t.kind == "topic"]
+    assert topic.examples == ("z0", "z1", "z2")
+
+
+def _kinds(order, disputes, questions):
+    by = {d.id: d.kind for d in disputes} | {q.id: "question" for q in questions}
+    return "".join(
+        {"undecided": "U", "confirm": "C", "question": "Q", "both": "B"}[by[i]] for i in order
+    )
+
+
+def test_workbook_fills_its_quotas_and_interleaves():
+    disputes = [_d(f"u{i}", ["p"], ["q"], "unresolved") for i in range(6)] + [
+        _d(f"c{i}", ["p"], ["q"], "preferred_a") for i in range(4)
+    ]
+    questions = [_q(f"q{i}") for i in range(3)]
+    order = target_brief.workbook_order(disputes, questions, [])
+    assert len(order) == 10
+    # 5 undecided, 3 confirm, 2 questions, round-robin -- a reader who stops after
+    # three has met one of each.
+    assert _kinds(order, disputes, questions) == "UCQUCQUCUU"
+
+
+def test_workbook_hands_unused_slots_on():
+    disputes = [_d(f"u{i}", ["p"], ["q"], "unresolved") for i in range(2)] + [
+        _d(f"c{i:02}", ["p"], ["q"], "preferred_a") for i in range(10)
+    ]
+    order = target_brief.workbook_order(disputes, [], [])
+    assert sorted(_kinds(order, disputes, [])) == sorted("UU" + "C" * 8)
+
+
+def test_workbook_reaches_both_possible_only_when_the_rest_run_out():
+    disputes = [_d("u0", ["p"], ["q"], "unresolved")] + [
+        _d(f"b{i}", ["p"], ["q"], "both_possible") for i in range(3)
+    ]
+    order = target_brief.workbook_order(disputes, [_q("q0")], [])
+    assert _kinds(order, disputes, [_q("q0")]) == "UQBBB"
+
+
+def test_workbook_takes_everything_when_there_is_less_than_ten():
+    disputes = [_d("u0", ["p"], ["q"], "unresolved"), _d("c0", ["p"], ["q"], "preferred_b")]
+    assert len(target_brief.workbook_order(disputes, [_q("q0")], [])) == 3
+    assert target_brief.workbook_order([], [], []) == []
+
+
+def test_workbook_prefers_items_touching_a_take():
+    disputes = [
+        _d("u-a", ["p"], ["q"], "unresolved", topic="lonely"),
+        _d("u-z", ["doc.md"], ["q"], "unresolved", topic="lonely2"),
+        *_losing(5, 0),
+    ]
+    takes = target_brief.quick_takes(disputes)
+    order = target_brief.workbook_order(disputes, [], takes)
+    assert order.index("u-z") < order.index("u-a")
+
+
+def test_workbook_is_deterministic():
+    disputes = [_d(f"u{i}", ["p"], ["q"], "unresolved") for i in range(12)]
+    assert target_brief.workbook_order(disputes, [], []) == target_brief.workbook_order(
+        list(reversed(disputes)), [], []
+    )
+
+
+def test_workbook_spreads_a_kind_across_topics_before_repeating_one():
+    """Measured on run-20261103-172151 before this rule: four of the five undecided
+    slots went to one topic, because its size ranked every one of its items above
+    every other topic's. One item per topic first, then the second of each."""
+    disputes = [_d(f"big{i}", ["p"], ["q"], "unresolved", topic="big") for i in range(5)] + [
+        _d("small0", ["p"], ["q"], "unresolved", topic="small"),
+        _d("tiny0", ["p"], ["q"], "unresolved", topic="tiny"),
+    ]
+    order = target_brief.workbook_order(disputes, [], [])
+    assert order[:3] == ["big0", "small0", "tiny0"]

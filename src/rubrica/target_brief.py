@@ -835,6 +835,248 @@ def open_questions(run: RunPaths) -> list[OpenQuestion] | Marker:
     return [_numbered(q, f"Q{n}") for n, q in enumerate(out, start=1)]
 
 
+# Quick takes: patterns across disagreements, stated as sentences we compose. The
+# sentence is the renderer's; this is the arithmetic it rests on. Every threshold
+# is ours and named here so a change to one is a reviewable diff, and each was
+# chosen to fire on run-20261103-172151 (fullsend-triage, 119 disagreements) and to
+# stay silent on a run too small to have a pattern. Measured there, through these
+# functions:
+#
+#   stale    docs/triage.md               won 3, lost 14 of 17 settled
+#   trusted  scripts/post-triage.src.sh   won 6, lost 1
+#   self     agents/triage.md             6 disagreements with itself
+#   topic    forge-label-write-ops 9, triggers-and-dispatch 8, comment posting 7
+#
+# A threshold tuned on one run is one sample; the take's sentence is hedged
+# ("looks") for that reason, and its Examples show the disagreements it counts.
+STALE_MIN_LOSSES = 5
+STALE_MIN_SHARE = 0.75
+TRUSTED_MIN_WINS = 5
+TRUSTED_MAX_LOSSES = 1
+SELF_MIN = 3
+TOPIC_TAKES = 3
+TOPIC_MIN = 2
+EXAMPLES = 3
+
+# The Workbook's first ten, by quota per kind. A strict kind order filled all ten
+# with undecided disagreements on run-20261103-172151 (43 of them), so no owner
+# would ever be asked to confirm a pick or answer a question. Unused slots pass
+# down this order, then back round to the start.
+WORKBOOK_SIZE = 10
+WORKBOOK_QUOTAS: tuple[tuple[str, int], ...] = (
+    ("undecided", 5),
+    ("confirm", 3),
+    ("question", 2),
+    ("both", 0),
+)
+
+
+@dataclass(frozen=True)
+class Take:
+    """One pattern across disagreements. Counts only -- no prose.
+
+    `kind` is `stale` (a file that lost most of its settled disagreements),
+    `trusted` (one that won and almost never lost), `self` (a file disagreeing with
+    itself), or `topic` (where the disagreements cluster). `subject` is the file,
+    or the topic's label. `item_ids` are every disagreement the take counts, in id
+    order; `examples` the up-to-three the page shows beside it.
+    """
+
+    kind: str
+    subject: str
+    topic_id: str = NO_TOPIC
+    won: int = 0
+    lost: int = 0
+    count: int = 0
+    open: int = 0
+    item_ids: tuple[str, ...] = ()
+    examples: tuple[str, ...] = ()
+
+    @property
+    def settled(self) -> int:
+        return self.won + self.lost
+
+
+def _same_file(d: Dispute) -> str:
+    """The file a disagreement has with itself, or `""`.
+
+    Same-file only when both sides name exactly one file and it is the same one.
+    Two sides over overlapping sets of several files are a cross-file pair whose
+    shared file is credited neither way -- see `_tally`.
+    """
+    a, b = side_files(d.side_a), side_files(d.side_b)
+    return next(iter(a)) if a == b and len(a) == 1 else ""
+
+
+def _examples(ids, by_id: dict[str, Dispute]) -> tuple[str, ...]:
+    """Undecided first, then id: mechanical, never "representative"."""
+    ranked = sorted(ids, key=lambda i: (by_id[i].kind != "undecided", i))
+    return tuple(ranked[:EXAMPLES])
+
+
+def quick_takes(found: list[Dispute]) -> list[Take]:
+    """Every take that fires, in the order the page shows them: stale, trusted, self,
+    then the busiest topics."""
+    by_id = {d.id: d for d in found}
+    won: dict[str, list[str]] = {}
+    lost: dict[str, list[str]] = {}
+    own: dict[str, list[str]] = {}
+    for d in found:
+        same = _same_file(d)
+        if same:
+            own.setdefault(same, []).append(d.id)
+            continue
+        if d.chosen is None:
+            continue
+        a, b = side_files(d.side_a), side_files(d.side_b)
+        winner, loser = (a, b) if d.chosen == "a" else (b, a)
+        # A file on both sides was neither right nor wrong here.
+        for f in winner - loser:
+            won.setdefault(f, []).append(d.id)
+        for f in loser - winner:
+            lost.setdefault(f, []).append(d.id)
+    files = sorted(set(won) | set(lost))
+    stale, trusted = [], []
+    for f in files:
+        w, l_ = sorted(won.get(f, [])), sorted(lost.get(f, []))
+        if len(l_) >= STALE_MIN_LOSSES and len(l_) / (len(w) + len(l_)) >= STALE_MIN_SHARE:
+            stale.append(
+                Take(
+                    "stale",
+                    f,
+                    won=len(w),
+                    lost=len(l_),
+                    count=len(l_),
+                    item_ids=tuple(l_),
+                    examples=_examples(l_, by_id),
+                )
+            )
+        if len(w) >= TRUSTED_MIN_WINS and len(l_) <= TRUSTED_MAX_LOSSES:
+            trusted.append(
+                Take(
+                    "trusted",
+                    f,
+                    won=len(w),
+                    lost=len(l_),
+                    count=len(w),
+                    item_ids=tuple(w),
+                    examples=_examples(w, by_id),
+                )
+            )
+    stale.sort(key=lambda t: (-t.lost, t.subject))
+    trusted.sort(key=lambda t: (-t.won, t.subject))
+    selves = sorted(
+        (
+            Take(
+                "self",
+                f,
+                count=len(ids),
+                open=sum(by_id[i].kind == "undecided" for i in ids),
+                item_ids=tuple(sorted(ids)),
+                examples=_examples(ids, by_id),
+            )
+            for f, ids in own.items()
+            if len(ids) >= SELF_MIN
+        ),
+        key=lambda t: (-t.count, t.subject),
+    )
+    grouped: dict[str, list[str]] = {}
+    for d in found:
+        if d.topic_id != NO_TOPIC:
+            grouped.setdefault(d.topic_id, []).append(d.id)
+    label = {d.topic_id: d.topic_label for d in found}
+    topics_ = sorted(
+        (
+            Take(
+                "topic",
+                label[tid],
+                topic_id=tid,
+                count=len(ids),
+                open=sum(by_id[i].kind == "undecided" for i in ids),
+                item_ids=tuple(sorted(ids)),
+                examples=_examples(ids, by_id),
+            )
+            for tid, ids in grouped.items()
+            if len(ids) >= TOPIC_MIN
+        ),
+        key=lambda t: (-t.count, t.subject, t.topic_id),
+    )[:TOPIC_TAKES]
+    return stale + trusted + selves + topics_
+
+
+def _spread(ranked: list) -> list:
+    """`ranked` reordered so each topic contributes one item before any contributes
+    a second, keeping `ranked`'s order within each pass. Items with no topic each
+    count as their own."""
+    out, rest = [], list(ranked)
+    while rest:
+        seen: set[str] = set()
+        kept = []
+        for item in rest:
+            topic = item.topic_id or f"\0{item.id}"
+            if topic in seen:
+                kept.append(item)
+            else:
+                seen.add(topic)
+                out.append(item)
+        rest = kept
+    return out
+
+
+def workbook_order(
+    found: list[Dispute], questions: list[OpenQuestion], takes: list[Take]
+) -> list[str]:
+    """The ids the Workbook leads with, in display order.
+
+    Quota per kind (`WORKBOOK_QUOTAS`), unused slots handed down the kinds in order
+    and then round to the start; within a kind, items that touch a take first, then
+    items in the larger topic, then id -- spread so each topic gives one item before
+    any gives a second (`_spread`). Displayed round-robin across kinds so a
+    reader who stops early has still met each kind of ask.
+
+    Labelled as an ordering, never as importance: the page says "the answers that
+    help us most", which is a statement about us.
+    """
+    take_files = {t.subject for t in takes if t.kind in ("stale", "trusted", "self")}
+    take_topics = {t.topic_id for t in takes if t.kind == "topic"}
+    topic_size: dict[str, int] = {}
+    for d in found:
+        topic_size[d.topic_id] = topic_size.get(d.topic_id, 0) + 1
+
+    def touches(item) -> bool:
+        if isinstance(item, Dispute):
+            files = side_files(item.side_a) | side_files(item.side_b)
+            return bool(files & take_files) or item.topic_id in take_topics
+        return item.topic_id in take_topics
+
+    def key(item):
+        size = topic_size.get(item.topic_id, 0) if item.topic_id != NO_TOPIC else 0
+        return (not touches(item), -size, item.id)
+
+    pools: dict[str, list] = {kind: [] for kind, _ in WORKBOOK_QUOTAS}
+    for d in found:
+        pools[d.kind].append(d)
+    pools["question"] = list(questions)
+    for kind in pools:
+        pools[kind] = _spread(sorted(pools[kind], key=key))
+
+    kinds = [kind for kind, _ in WORKBOOK_QUOTAS]
+    take = {kind: min(quota, len(pools[kind])) for kind, quota in WORKBOOK_QUOTAS}
+    spare = min(WORKBOOK_SIZE, sum(len(p) for p in pools.values())) - sum(take.values())
+    while spare > 0:
+        for kind in kinds:
+            if spare and take[kind] < len(pools[kind]):
+                take[kind] += 1
+                spare -= 1
+    queues = {kind: pools[kind][: take[kind]] for kind in kinds}
+    order: list[str] = []
+    while any(queues.values()):
+        for kind in kinds:
+            if queues[kind]:
+                order.append(queues[kind].pop(0).id)
+    return order
+
+
 # `outcome_class.kind` -> the words an owner reads. The enum is the schema's five.
 #
 # No mechanical absence detection anywhere near this table, deliberately. parsec
