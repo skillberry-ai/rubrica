@@ -175,7 +175,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parsers = {name: subparsers.add_parser(name, help=help_) for name, help_ in SUBCOMMANDS}
 
     p_survey = parsers["survey"]
-    p_survey.add_argument("--corpus", action="append", required=True, metavar="PATH")
+    p_survey.add_argument(
+        "--corpus",
+        action="append",
+        required=True,
+        metavar="PATH",
+        help="a folder to walk, or a single file to catalogue as named (repeatable)",
+    )
     p_survey.add_argument("--runs-dir", required=True)
     p_survey.add_argument("--target-name", required=True)
     p_survey.add_argument("--target-interface", required=True)

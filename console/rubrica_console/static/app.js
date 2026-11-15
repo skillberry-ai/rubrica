@@ -185,16 +185,26 @@ function pickSelection({ mode, start, initial }) {
     let listing = null;
     let filter = "";
     let done = false;
+    // Remembered per browser, like the other settings: someone who works in a
+    // corpus full of dot-folders should not have to tick it every time.
+    let hidden = !!settings.load({}).showHidden;
 
     const pathBox = h("input", { class: "mono", style: "flex:1", spellcheck: "false" });
     const filterBox = h("input", { placeholder: "filter this folder", size: 18 });
+    const hiddenBox = h("input", { type: "checkbox" });
+    hiddenBox.checked = hidden;
+    hiddenBox.onchange = () => {
+      hidden = hiddenBox.checked;
+      settings.save({ ...settings.load({}), showHidden: hidden });
+      load(listing ? listing.path : start);
+    };
     const crumbs = h("div", { class: "crumbs mono" });
     const list = h("div", { class: "picker-list" });
     const summary = h("div", { class: "pick-summary" });
     const count = h("div", { class: "muted" });
     const useBtn = h("button", { class: "primary" }, "Use this selection");
     const help = mode === "survey"
-      ? "Check folders to read as corpus roots. Inside a checked folder, uncheck anything to leave it out (it becomes an --exclude pattern)."
+      ? "Check the files and folders that matter. A checked folder brings everything inside it; uncheck anything inside to leave it out (it becomes an --exclude pattern). Triage then chooses among what you checked."
       : "Check files or folders. A checked folder brings every file inside it; uncheck anything inside to leave it out.";
     const body = h("div", {},
       h("div", { class: "row" }, pathBox, h("button", { onclick: () => load(pathBox.value.trim()) }, "Go")),
@@ -202,13 +212,14 @@ function pickSelection({ mode, start, initial }) {
       h("div", { class: "row", style: "margin:6px 0" }, filterBox,
         h("button", { onclick: () => bulk(true) }, "Select all here"),
         h("button", { onclick: () => bulk(false) }, "Clear here"),
+        h("label", { title: "Show files and folders whose names start with a dot" }, hiddenBox, " Show hidden files"),
         h("div", { class: "spacer" }),
         h("button", { class: "ghost", onclick: () => { decided.clear(); redraw(); } }, "Clear all")),
       list,
       h("p", { class: "muted" }, help),
       h("h3", {}, "Selection"), summary, count,
       h("div", { class: "row", style: "margin-top:10px" }, useBtn));
-    const close = openModal(mode === "survey" ? "Choose corpus folders" : "Choose input files and folders", body,
+    const close = openModal(mode === "survey" ? "Choose files and folders to start from" : "Choose input files and folders", body,
       () => { if (countAbort) countAbort.abort(); clearTimeout(countTimer); if (!done) resolve(null); });
     useBtn.onclick = () => {
       done = true;
@@ -239,9 +250,6 @@ function pickSelection({ mode, start, initial }) {
       const ancestors = [...decided].filter(([p]) => isUnder(entry.path, p));
       if (ancestors.some(([, d]) => d.state === "exc") && stateOf(entry.path) !== "inc") {
         return "inside a folder you left out: survey cannot take something back in";
-      }
-      if (!entry.dir && !ancestors.some(([, d]) => d.state === "inc")) {
-        return "survey reads folders: check the folder this file is in, or hand-pick files instead";
       }
       return null;
     }
@@ -314,18 +322,18 @@ function pickSelection({ mode, start, initial }) {
         if (countAbort) countAbort.abort();
         countAbort = new AbortController();
         try {
-          const r = await api("/api/fs/expand", { include: inc.map(([p]) => p), exclude: exc.map(([p]) => p) }, countAbort.signal);
+          const r = await api("/api/fs/expand", { include: inc.map(([p]) => p), exclude: exc.map(([p]) => p), hidden }, countAbort.signal);
           const mb = size(r.bytes);
           const n = r.partial ? `at least ${r.total} file(s), ${mb} (stopped counting: this is a large selection)` : `${r.total} file(s), ${mb}`;
           count.textContent = mode === "survey"
-            ? `${n} under the chosen folders, before survey's own filters (VCS, vendored, lock and gitignored files).`
+            ? `${n} chosen, before survey's own filters (in a checked folder: VCS, vendored, lock and gitignored files).`
             : `${n}${r.truncated || r.partial ? " — too many to hand-pick; survey a corpus instead" : ""}. Each file is one extract dispatch.`;
         } catch (err) { if (err.name !== "AbortError") count.textContent = err.message; }
       }, 250);
     }
     async function load(path) {
       try {
-        listing = await api(`/api/fs?path=${encodeURIComponent(path || "")}`);
+        listing = await api(`/api/fs?path=${encodeURIComponent(path || "")}${hidden ? "&hidden=1" : ""}`);
         pathBox.value = listing.path;
         // From the picker's root down: anything above it would only be refused.
         const rootParts = STATE.root.split(sep).filter(Boolean);
@@ -344,13 +352,16 @@ function pickSelection({ mode, start, initial }) {
   });
 }
 
-// What a survey selection means for `rubrica survey`: each included folder is a
-// --corpus root, and each excluded path a glob relative to its root. survey
+// What a survey selection means for `rubrica survey`: each included folder, and
+// each included file not inside one, is a --corpus seed (survey walks a folder
+// and catalogues a file as named), and each excluded path a glob relative to its
+// folder. survey
 // matches a glob against each file's path relative to *every* root, and a glob
 // with no "/" also against the bare file name, so both caveats are returned for
 // the form to show rather than hidden.
 function surveyArgs(sel) {
   const roots = sel.include.filter((p) => sel.dirs[p]);
+  const files = sel.include.filter((p) => !sel.dirs[p] && !roots.some((r) => isUnder(p, r)));
   const globs = [];
   const warnings = [];
   for (const p of sel.exclude) {
@@ -362,7 +373,7 @@ function surveyArgs(sel) {
     if (!glob.includes("/")) warnings.push(`“${glob}” has no folder in it, so survey also leaves out every file named ${glob} in any subfolder.`);
   }
   if (roots.length > 1 && globs.length) warnings.push("Exclusions apply under every corpus folder, not only the one you unchecked them in.");
-  return { roots, globs, warnings };
+  return { roots, files, seeds: [...roots, ...files], globs, warnings };
 }
 
 // -- routing -----------------------------------------------------------------
@@ -454,8 +465,6 @@ async function newRunPage(fromRun) {
   const app = $("#app");
   const f = {};
   const field = (key, label, input, help) => h("div", {}, h("label", { for: key }, label), input, help ? h("div", { class: "muted" }, help) : null);
-  f.mode = h("select", { id: "mode" }, h("option", { value: "survey" }, "Survey a corpus (folders → triage → gate 0)"),
-    h("option", { value: "intake" }, "Hand-pick input files (skips triage and gate 0)"));
   f.target_name = h("input", { id: "target_name", placeholder: "e.g. autotrade" });
   f.target_interface = h("input", { id: "target_interface", list: "ifaces", placeholder: "mcp, http, http-sse, a2a…" });
   f.objective = h("select", { id: "objective" }, h("option", { value: "breadth" }, "breadth"), h("option", { value: "depth" }, "depth"));
@@ -464,9 +473,11 @@ async function newRunPage(fromRun) {
   f.exclude = h("textarea", { id: "exclude", placeholder: "one glob per line, e.g. **/node_modules/**" });
   f.max_rounds = h("input", { id: "max_rounds", type: "number", min: 1, placeholder: "default" });
   f.max_scenarios = h("input", { id: "max_scenarios", type: "number", min: 1, placeholder: "default" });
-  // One selection per mode, so switching modes does not lose either.
-  const sel = { survey: null, intake: null, ...((initial && initial.sel) || {}) };
-  const FIELDS = ["mode", "target_name", "target_interface", "objective", "objective_note", "scope_note", "exclude", "max_rounds", "max_scenarios"];
+  // One way in, so one selection. A draft or a run from before there was only
+  // one keeps its selection under its old mode's key; either becomes the seed.
+  const old = (initial && initial.sel) || {};
+  const sel = { survey: old.survey || old.intake || null };
+  const FIELDS = ["target_name", "target_interface", "objective", "objective_note", "scope_note", "exclude", "max_rounds", "max_scenarios"];
   for (const k of FIELDS) if (initial && initial.fields && initial.fields[k] != null) f[k].value = initial.fields[k];
   const saveDraft = () => {
     const fields = {};
@@ -474,70 +485,40 @@ async function newRunPage(fromRun) {
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ fields, sel })); } catch (_) {}
   };
   for (const k of FIELDS) f[k].addEventListener("input", saveDraft);
-  const intakeFiles = { list: [], total: 0, partial: false };
   const chips = h("div", {});
   const pickerGlobs = h("div", {});
-  let renderChipsHook = null;
-  const renderChipsBase = async () => {
-    const mode = f.mode.value;
-    const cur = sel[mode];
-    if (!cur || !cur.include.length) { put(chips, h("p", { class: "muted" }, "Nothing chosen yet.")); put(pickerGlobs); return; }
-    if (mode === "survey") {
-      const { roots, globs, warnings } = surveyArgs(cur);
-      put(chips, h("div", { class: "chips" }, ...roots.map((r) => h("span", { class: "chip" }, "+ " + r + "/"))));
-      put(pickerGlobs, globs.length ? h("div", {}, h("div", { class: "muted" }, "Left out (passed as --exclude):"),
-        h("div", { class: "chips" }, ...globs.map((g) => h("span", { class: "chip chip-exc" }, "− " + g))),
-        ...warnings.map((w) => h("div", { class: "notes" }, w))) : null);
-    } else {
-      put(chips, h("p", { class: "muted" }, "Counting…"));
-      try {
-        const r = await api("/api/fs/expand", { include: cur.include, exclude: cur.exclude });
-        intakeFiles.list = r.files; intakeFiles.total = r.total; intakeFiles.partial = r.partial;
-        const shown = r.files.slice(0, 12);
-        put(chips, h("div", {}, h("div", {}, h("strong", {}, `${r.partial ? "at least " : ""}${r.total} file(s)`), h("span", { class: "muted" }, ` — each is one extract dispatch${r.truncated || r.partial ? "; too many to hand-pick, survey a corpus instead" : ""}`)),
-          h("div", { class: "chips" }, ...shown.map((p) => h("span", { class: "chip" }, p))),
-          r.total > shown.length ? h("details", {}, h("summary", {}, `and ${r.total - shown.length} more`), h("pre", { class: "box" }, r.files.slice(12).join("\n"))) : null));
-      } catch (err) { put(chips, h("p", { class: "s-failed" }, err.message)); }
-      put(pickerGlobs);
-    }
+  const summaryBox = h("div", {});
+  const renderChips = () => {
+    const cur = sel.survey;
+    const { roots, files, globs, warnings } = surveyArgs(cur || { include: [], exclude: [], dirs: {} });
+    if (!roots.length && !files.length) put(chips, h("p", { class: "muted" }, "Nothing chosen yet."));
+    else put(chips, h("div", { class: "chips" }, ...roots.map((r) => h("span", { class: "chip" }, "📁 " + r + "/")), ...files.map((p) => h("span", { class: "chip" }, "📄 " + p))));
+    put(pickerGlobs, globs.length ? h("div", {}, h("div", { class: "muted" }, "Left out (passed as --exclude):"),
+      h("div", { class: "chips" }, ...globs.map((g) => h("span", { class: "chip chip-exc" }, "− " + g))),
+      ...warnings.map((w) => h("div", { class: "notes" }, w))) : null);
+    const n = (k, word) => `${k} ${word}${k === 1 ? "" : "s"}`;
+    put(summaryBox,
+      h("div", { class: "num" }, String(roots.length + files.length)),
+      h("div", { class: "muted" }, `starting point${roots.length + files.length === 1 ? "" : "s"}: ${n(roots.length, "folder")}, ${n(files.length, "file")}`),
+      h("p", { class: "muted", style: "margin-top:12px" }, "Triage reads these and chooses what the run reads; you approve its choice at gate 0."),
+      h("p", { class: "muted" }, `Created in ${STATE.runs_dir}. Creating a run calls no model.`));
   };
-  const renderChips = () => (renderChipsHook ? renderChipsHook() : renderChipsBase());
   const addBtn = h("button", { onclick: async () => {
-    const mode = f.mode.value;
-    const got = await pickSelection({ mode, start: STATE.root, initial: sel[mode] });
-    if (got) { sel[mode] = got; saveDraft(); renderChips(); }
+    const got = await pickSelection({ mode: "survey", start: STATE.root, initial: sel.survey });
+    if (got) { sel.survey = got; saveDraft(); renderChips(); }
   } }, "Choose…");
-  const clearBtn = h("button", { class: "ghost", onclick: () => { sel[f.mode.value] = null; saveDraft(); renderChips(); } }, "Clear");
-  const surveyOnly = h("div", {},
-    field("objective", "Objective", f.objective, "breadth: cover many capabilities; depth: probe fewer deeply"),
-    h("div", { class: "grid2" }, field("objective_note", "Objective note", f.objective_note), field("scope_note", "Scope note", f.scope_note)),
-    pickerGlobs,
-    field("exclude", "More exclusions", f.exclude, "glob patterns, one per line, matched against each file's path inside a corpus folder"));
-  const sourceLabel = h("label", { style: "margin-top:18px" });
-  const syncMode = () => {
-    const survey = f.mode.value === "survey";
-    surveyOnly.hidden = !survey;
-    sourceLabel.textContent = survey ? "Corpus folders" : "Input files";
-    renderChips();
-  };
-  f.mode.onchange = () => { saveDraft(); syncMode(); };
+  const clearBtn = h("button", { class: "ghost", onclick: () => { sel.survey = null; saveDraft(); renderChips(); } }, "Clear");
   const submit = h("button", { class: "primary", onclick: async () => {
-    const survey = f.mode.value === "survey";
-    const spec = { mode: f.mode.value };
+    const spec = { mode: "survey" };
     for (const k of ["target_name", "target_interface", "objective", "objective_note", "scope_note", "max_rounds", "max_scenarios"]) spec[k] = f[k].value.trim();
     spec.exclude = f.exclude.value.split("\n").map((s) => s.trim()).filter(Boolean);
-    const cur = sel[f.mode.value];
+    const cur = sel.survey;
     // Kept with the run, so "New run from these inputs" restores this exactly.
     spec.selection = cur;
     spec.extra_exclude = spec.exclude.slice();
-    if (survey) {
-      const { roots, globs } = surveyArgs(cur || { include: [], exclude: [], dirs: {} });
-      spec.corpus = roots;
-      spec.exclude = [...new Set([...globs, ...spec.exclude])];
-    } else {
-      if (intakeFiles.partial || intakeFiles.total > intakeFiles.list.length) { submit.disabled = false; return toast("Too many files to hand-pick; survey a corpus instead", true); }
-      spec.inputs = intakeFiles.list;
-    }
+    const { seeds, globs } = surveyArgs(cur || { include: [], exclude: [], dirs: {} });
+    spec.corpus = seeds;
+    spec.exclude = [...new Set([...globs, ...spec.exclude])];
     submit.disabled = true;
     try {
       const res = await api("/api/runs", spec);
@@ -546,26 +527,6 @@ async function newRunPage(fromRun) {
       location.hash = `#/run/${encodeURIComponent(res.name)}`;
     } catch (err) { toast(err.message, true); submit.disabled = false; }
   } }, "Create run");
-  // The mode as two choices side by side rather than a dropdown: it decides what
-  // the rest of the form means, so both options and their consequence stay visible.
-  const segBtn = (value, title, sub) => h("button", { type: "button", "data-mode": value, onclick: () => {
-    f.mode.value = value; f.mode.dispatchEvent(new Event("change"));
-  } }, h("strong", {}, title), h("small", {}, sub));
-  const seg = h("div", { class: "seg" },
-    segBtn("survey", "Survey a corpus", "Pick folders. Triage chooses what to read; you approve it at gate 0."),
-    segBtn("intake", "Hand-pick files", "Pick exactly the files to read. Skips triage and gate 0."));
-  const summaryBox = h("div", {});
-  const renderSummary = () => {
-    const cur = sel[f.mode.value];
-    const survey = f.mode.value === "survey";
-    const n = survey ? (cur ? surveyArgs(cur).roots.length : 0) : intakeFiles.total;
-    put(summaryBox,
-      h("div", { class: "num" }, survey ? `${n}` : `${intakeFiles.partial ? "≥" : ""}${n}`),
-      h("div", { class: "muted" }, survey ? `corpus folder${n === 1 ? "" : "s"}` : `input file${n === 1 ? "" : "s"} · ${n} extract dispatch${n === 1 ? "" : "es"}`),
-      h("p", { class: "muted", style: "margin-top:12px" }, `Created in ${STATE.runs_dir}. Creating a run calls no model.`));
-    for (const b of seg.querySelectorAll("button")) b.classList.toggle("on", b.dataset.mode === f.mode.value);
-  };
-  renderChipsHook = async () => { await renderChipsBase(); renderSummary(); };
   put(app,
     h("div", { class: "page-head" }, h("div", {}, h("div", { class: "crumbs muted" }, h("a", { href: "#/" }, "Runs"), " / new"),
       h("h1", {}, fromRun ? `New run from ${fromRun}` : "New run"))),
@@ -574,10 +535,13 @@ async function newRunPage(fromRun) {
     h("datalist", { id: "ifaces" }, ...["mcp", "http", "http-sse", "a2a"].map((v) => h("option", { value: v }))),
     h("div", { class: "form-grid" },
       h("div", {},
-        h("div", { class: "panel form-sec" }, h("h2", {}, "1 · What to read"), h("p", { class: "lead" }, "Nothing outside what you choose here is ever read by the run."),
-          seg, h("div", { style: "display:none" }, f.mode),
-          sourceLabel, chips, h("div", { class: "row" }, addBtn, clearBtn),
-          surveyOnly),
+        h("div", { class: "panel form-sec" }, h("h2", {}, "1 · Where to start"),
+          h("p", { class: "lead" }, "Point at the files and folders that matter. Triage reads them and chooses what the run reads; you approve its choice at gate 0. Nothing outside what you choose here is ever read."),
+          h("label", { style: "margin-top:18px" }, "Files and folders"), chips, h("div", { class: "row" }, addBtn, clearBtn),
+          pickerGlobs,
+          field("exclude", "More exclusions", f.exclude, "glob patterns, one per line, matched against each file's path inside a chosen folder (a file you chose by name is never excluded)"),
+          field("objective", "Objective", f.objective, "breadth: cover many capabilities; depth: probe fewer deeply"),
+          h("div", { class: "grid2" }, field("objective_note", "Objective note", f.objective_note), field("scope_note", "Scope note", f.scope_note))),
         h("div", { class: "panel form-sec" }, h("h2", {}, "2 · The target"), h("p", { class: "lead" }, "What the suite will test."),
           h("div", { class: "grid2" }, field("target_name", "Name", f.target_name), field("target_interface", "Interface", f.target_interface, "Free text: how the target is spoken to."))),
         h("div", { class: "panel form-sec" }, h("h2", {}, "3 · Limits"), h("p", { class: "lead" }, "Leave blank for the defaults. They can be raised later with set-limit."),
@@ -587,25 +551,27 @@ async function newRunPage(fromRun) {
   submit.classList.add("big");
   submit.style.width = "100%";
   submit.style.justifyContent = "center";
-  syncMode();
+  renderChips();
 }
 
 function specToForm(spec) {
   const fields = {};
-  for (const k of ["mode", "target_name", "target_interface", "objective", "objective_note", "scope_note", "max_rounds", "max_scenarios"]) {
+  for (const k of ["target_name", "target_interface", "objective", "objective_note", "scope_note", "max_rounds", "max_scenarios"]) {
     if (spec[k] != null) fields[k] = String(spec[k]);
   }
   const sel = {};
+  // Every earlier run becomes a seed: a hand-picked run's input files are named
+  // one by one, the way a seed file is.
   if (spec.selection && spec.selection.include) {
-    sel[spec.mode] = spec.selection;
+    sel.survey = spec.selection;
     fields.exclude = (spec.extra_exclude || []).join("\n");
   } else if (spec.mode === "survey") {
     const dirs = {};
-    for (const p of spec.corpus || []) dirs[p] = true;
+    for (const p of spec.corpus || []) if (!(spec.seed_files || []).includes(p)) dirs[p] = true;
     sel.survey = { include: spec.corpus || [], exclude: [], dirs };
     fields.exclude = (spec.exclude || []).join("\n");
   } else {
-    sel.intake = { include: spec.inputs || [], exclude: [], dirs: {} };
+    sel.survey = { include: spec.inputs || [], exclude: [], dirs: {} };
   }
   return { fields, sel, derived: spec.source === "derived" };
 }

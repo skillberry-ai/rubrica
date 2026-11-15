@@ -30,7 +30,8 @@ that writes them.
 Every candidate a survey found in a corpus, each with a bounded digest rather
 than its own bytes — `sha256`, `bytes`, `kind`, and a `digest` object, never a
 copy of the source content. It also carries the survey `request` (target,
-objective, corpus roots, limits) and the `policy` that governed digesting and
+objective, corpus roots, limits, and `seed_files` when single files were named)
+and the `policy` that governed digesting and
 exclusion, so a later reader can see what the survey was told to look for
 without re-deriving it. `excluded` records every path the survey chose not to
 catalogue, with a `reason` (`gitignored`, `binary`, `duplicate`, and the like).

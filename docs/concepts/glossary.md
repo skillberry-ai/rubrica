@@ -60,8 +60,10 @@ they choose to model the thing.
 
 ## corpus
 
-The directory roots `rubrica survey` walks, recorded verbatim in
-`request.corpus_roots` (`src/rubrica/schema/catalogue-0.1.json`). It is the only
+The folders and files `rubrica survey` reads: a folder is walked whole, a file is
+read as named. The folders are recorded in `request.corpus_roots`, and the named
+files, each under its own folder there, in `request.seed_files`
+(`src/rubrica/schema/catalogue-0.1.json`). It is the only
 thing a run ever sees of the target's own files, and it is read exactly once:
 `survey` catalogues what it finds, the `triage-*` family rules on the
 catalogue, and

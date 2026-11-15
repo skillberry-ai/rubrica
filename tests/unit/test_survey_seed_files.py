@@ -1,0 +1,174 @@
+"""`survey --corpus` naming a single file, not only a folder.
+
+A human seeding a run points at the files that matter, some of them loose. The
+rule these tests hold: a named file is catalogued as named -- whatever the walk
+would have dropped it for by *where* it sits -- and every file still has to be
+something a candidate can be, with a decline recorded when it is not.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+
+from rubrica import intake, survey, validate
+from rubrica.artifacts import read_json
+from rubrica.errors import UsageError
+
+NOW = datetime(2026, 11, 10, 9, 0, 0, tzinfo=UTC)
+
+
+def _survey(tmp_path, seeds, **over):
+    kwargs = dict(
+        corpus_roots=seeds,
+        runs_dir=tmp_path / "runs",
+        target_name="toy",
+        target_interface="mcp",
+        objective="breadth",
+        max_rounds=2,
+        max_scenarios=128,
+        now=NOW,
+    )
+    kwargs.update(over)
+    return survey.survey(**kwargs)
+
+
+def _tree(tmp_path):
+    root = tmp_path / "repo"
+    (root / "docs").mkdir(parents=True)
+    (root / "src").mkdir()
+    (root / "docs" / "spec.md").write_text("# Spec\n\nThe tools.\n", encoding="utf-8")
+    (root / "docs" / "notes.md").write_text("# Notes\n\nMore prose.\n", encoding="utf-8")
+    (root / "docs" / "unwanted.md").write_text("# Unwanted\n", encoding="utf-8")
+    (root / "src" / "tools.py").write_text("TOOLS = {}\n", encoding="utf-8")
+    return root
+
+
+def _paths(catalogue):
+    roots = catalogue["request"]["corpus_roots"]
+    return sorted(
+        f"{roots[c['root_index']]}/{c['path']}"
+        for c in catalogue["candidates"]
+        if c["origin"] == "corpus"
+    )
+
+
+def test_a_named_file_is_the_only_candidate_from_its_folder(tmp_path):
+    root = _tree(tmp_path)
+    run = _survey(tmp_path, [root / "docs" / "spec.md"])
+    catalogue = read_json(run.catalogue)
+    assert validate.validate_stage(run, "survey") == []
+    assert _paths(catalogue) == [f"{root / 'docs'}/spec.md"]
+    assert catalogue["request"]["corpus_roots"] == [str(root / "docs")]
+    assert catalogue["request"]["seed_files"] == [str(root / "docs" / "spec.md")]
+
+
+def test_two_named_siblings_share_one_root(tmp_path):
+    root = _tree(tmp_path)
+    run = _survey(tmp_path, [root / "docs" / "spec.md", root / "docs" / "notes.md"])
+    catalogue = read_json(run.catalogue)
+    assert catalogue["request"]["corpus_roots"] == [str(root / "docs")]
+    assert {c["root_index"] for c in catalogue["candidates"]} == {0}
+    assert sorted(c["path"] for c in catalogue["candidates"]) == ["notes.md", "spec.md"]
+
+
+def test_a_file_and_a_folder_in_one_survey(tmp_path):
+    root = _tree(tmp_path)
+    run = _survey(tmp_path, [root / "src", root / "docs" / "spec.md"])
+    catalogue = read_json(run.catalogue)
+    assert catalogue["request"]["corpus_roots"] == [str(root / "src"), str(root / "docs")]
+    assert _paths(catalogue) == sorted([f"{root / 'src'}/tools.py", f"{root / 'docs'}/spec.md"])
+
+
+def test_a_named_file_also_inside_a_named_folder_is_one_candidate(tmp_path):
+    root = _tree(tmp_path)
+    run = _survey(tmp_path, [root / "docs", root / "docs" / "spec.md"])
+    catalogue = read_json(run.catalogue)
+    assert sum(c["path"] == "spec.md" for c in catalogue["candidates"]) == 1
+    assert {"path": "spec.md", "reason": "duplicate"} in catalogue["excluded"]
+
+
+def test_a_named_file_skips_the_filters_on_where_it_sits(tmp_path):
+    """The human pointed at it: neither --exclude nor .gitignore takes it away."""
+    root = _tree(tmp_path)
+    (root / "docs" / ".gitignore").write_text("spec.md\n", encoding="utf-8")
+    run = _survey(tmp_path, [root / "docs" / "spec.md"], operator_globs=["*.md"])
+    catalogue = read_json(run.catalogue)
+    assert [c["path"] for c in catalogue["candidates"]] == ["spec.md"]
+    assert catalogue["excluded"] == []
+
+
+def test_a_named_file_that_cannot_be_a_candidate_is_declined_visibly(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "spec.md").write_text("# Spec\n", encoding="utf-8")
+    (root / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00")
+    (root / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+    run = _survey(tmp_path, [root / "spec.md", root / "logo.png", root / "uv.lock"])
+    catalogue = read_json(run.catalogue)
+    assert [c["path"] for c in catalogue["candidates"]] == ["spec.md"]
+    reasons = {e["path"]: e["reason"] for e in catalogue["excluded"]}
+    assert reasons == {"logo.png": "binary", "uv.lock": "lockfile"}
+
+
+def test_a_missing_path_is_a_usage_error_and_mints_no_run(tmp_path):
+    with pytest.raises(UsageError, match="neither a file nor a directory"):
+        _survey(tmp_path, [tmp_path / "nope.md"])
+    assert not (tmp_path / "runs").exists()
+
+
+def test_an_unreadable_named_file_is_a_usage_error_naming_it(tmp_path):
+    """Inside a walked folder an unreadable file is one declined candidate; a file
+    the human named and the harness cannot open is the harness misconfigured."""
+    root = _tree(tmp_path)
+    locked = root / "docs" / "spec.md"
+    locked.chmod(0o000)
+    try:
+        with pytest.raises(UsageError, match="cannot read corpus file: .*spec.md"):
+            _survey(tmp_path, [locked])
+    finally:
+        locked.chmod(0o644)
+    assert not (tmp_path / "runs").exists()
+
+
+def test_intake_admits_a_named_file_from_its_own_folder(tmp_path):
+    """The reader that joins roots[root_index] / path needs no change."""
+    root = _tree(tmp_path)
+    run = _survey(tmp_path, [root / "src", root / "docs" / "spec.md"])
+    catalogue = read_json(run.catalogue)
+    spec = next(c for c in catalogue["candidates"] if c["path"] == "spec.md")
+    source_root = catalogue["request"]["corpus_roots"][spec["root_index"]]
+    run.inputs_dir.mkdir(parents=True)
+    entry = intake.materialise(
+        run, candidate=spec, source_root=source_root, artifact_id=spec["candidate_id"]
+    )
+    stored = (run.inputs_dir / entry["stored_as"]).read_bytes()
+    assert stored == (root / "docs" / "spec.md").read_bytes()
+
+
+def test_the_cli_takes_a_file_for_corpus(tmp_path, capsys):
+    from rubrica import cli
+
+    root = _tree(tmp_path)
+    code = cli.main(
+        [
+            "survey",
+            "--corpus",
+            str(root / "docs" / "spec.md"),
+            "--runs-dir",
+            str(tmp_path / "runs"),
+            "--target-name",
+            "toy",
+            "--target-interface",
+            "mcp",
+            "--objective",
+            "breadth",
+        ]
+    )
+    assert code == 0
+    run_dir = Path(capsys.readouterr().out.strip())
+    catalogue = json.loads((run_dir / "00-catalogue.json").read_text(encoding="utf-8"))
+    assert [c["path"] for c in catalogue["candidates"]] == ["spec.md"]

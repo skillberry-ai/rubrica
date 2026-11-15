@@ -1,7 +1,7 @@
 # rubrica console
 
-A local web page for operating rubrica runs: start a run from a corpus or from
-hand-picked files, run each stage or a stretch up to the next human gate, watch
+A local web page for operating rubrica runs: start a run from the files and folders
+that matter (triage chooses among them), run each stage or a stretch up to the next human gate, watch
 dispatches and their cost as they happen, hold the gates, and read every report.
 
 ```bash

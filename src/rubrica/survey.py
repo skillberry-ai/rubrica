@@ -129,6 +129,7 @@ def walk_corpus(
     *,
     operator_globs: Sequence[str] = (),
     seen: dict[str, Path] | None = None,
+    only: Sequence[Path] | None = None,
 ) -> tuple[list[Path], list[dict]]:
     """Every file worth cataloguing, and every one dropped with its reason.
 
@@ -143,11 +144,28 @@ def walk_corpus(
     still caught as `duplicate` even though each root gets its own call (for
     `root_index`); without a shared dict, each call started from empty and a
     cross-root duplicate was admitted twice with no finding anywhere.
+
+    `only` is the files a human named one by one, all under the single root
+    passed with it, and replaces the walk of that root. A named file skips the
+    filters that judge a file by *where* it sits -- version control, vendored
+    folders, the root's .gitignore, `--exclude` -- because the human pointed at
+    it on purpose and those filters exist to drop what nobody chose. It keeps
+    the ones that judge *what* it is (lockfile, binary, unreadable, duplicate),
+    each still recorded, so a named file that cannot be a candidate is visible
+    as declined rather than missing.
     """
     kept: list[Path] = []
     excluded: list[dict] = []
     if seen is None:
         seen = {}
+
+    if only is not None:
+        if len(roots) != 1:
+            raise UsageError("walk_corpus takes `only` with exactly one root")
+        root = Path(roots[0])
+        for path in sorted(Path(p) for p in only):
+            _keep_or_drop(path, path.relative_to(root).as_posix(), kept, excluded, seen)
+        return kept, excluded
 
     for root in roots:
         root = Path(root)
@@ -194,24 +212,74 @@ def walk_corpus(
             if ignore_patterns and _matches_any(relative, ignore_patterns):
                 drop("gitignored")
                 continue
-            try:
-                if _looks_binary(path):
-                    drop("binary")
-                    continue
-                digest = sha256_of(path)
-            except OSError:
-                # One bad mode in a user tree must not abort the inventory. The
-                # file is recorded as declined, so it is visible rather than
-                # absent -- which is the whole rule this module is built on.
-                drop("unreadable")
-                continue
-            if digest in seen:
-                drop("duplicate")
-                continue
-            seen[digest] = path
-            kept.append(path)
+            _keep_or_drop(path, relative, kept, excluded, seen, lockfile_checked=True)
 
     return kept, excluded
+
+
+def _keep_or_drop(
+    path: Path,
+    relative: str,
+    kept: list[Path],
+    excluded: list[dict],
+    seen: dict[str, Path],
+    *,
+    lockfile_checked: bool = False,
+) -> None:
+    """The checks on what a file *is*, shared by the walk and by a named file."""
+    if not lockfile_checked and path.name in _LOCKFILES:
+        excluded.append({"path": relative, "reason": "lockfile"})
+        return
+    try:
+        if _looks_binary(path):
+            excluded.append({"path": relative, "reason": "binary"})
+            return
+        digest = sha256_of(path)
+    except OSError:
+        # One bad mode in a user tree must not abort the inventory. The
+        # file is recorded as declined, so it is visible rather than
+        # absent -- which is the whole rule this module is built on.
+        excluded.append({"path": relative, "reason": "unreadable"})
+        return
+    if digest in seen:
+        excluded.append({"path": relative, "reason": "duplicate"})
+        return
+    seen[digest] = path
+    kept.append(path)
+
+
+def _seed_roots(seeds: Sequence[Path]) -> list[tuple[Path, list[Path] | None]]:
+    """Each `--corpus` path as a (root, named files) pair, in the order given.
+
+    A folder is a root walked whole (`None`). Files are grouped under their
+    parent folder, which becomes a root walked over exactly those files, so
+    `request.corpus_roots` stays a list of folders and every reader that joins
+    `roots[root_index] / path` -- intake above all -- resolves a named file
+    unchanged. A path that is neither, or a file that cannot be opened, is the
+    harness pointed at something it cannot read: exit 2 before any run exists,
+    like an unreadable folder root.
+    """
+    out: list[tuple[Path, list[Path] | None]] = []
+    by_parent: dict[Path, list[Path]] = {}
+    for seed in seeds:
+        seed = Path(seed)
+        if seed.is_dir():
+            out.append((seed, None))
+            continue
+        if not seed.is_file():
+            raise UsageError(f"corpus path is neither a file nor a directory: {seed}")
+        try:
+            with seed.open("rb"):
+                pass
+        except OSError as exc:
+            raise UsageError(f"cannot read corpus file: {seed} ({exc})") from exc
+        parent = seed.parent
+        if parent not in by_parent:
+            by_parent[parent] = []
+            out.append((parent, by_parent[parent]))
+        if seed not in by_parent[parent]:
+            by_parent[parent].append(seed)
+    return out
 
 
 def classify_payload(payload: Any) -> str:
@@ -393,8 +461,11 @@ def survey(
     # `walk_corpus([Path(root)], ...)` call (a fresh, private `seen` each
     # time) would silently admit twice.
     seen: dict[str, Path] = {}
-    for root_index, root in enumerate(corpus_roots):
-        kept, root_excluded = walk_corpus([Path(root)], operator_globs=operator_globs, seen=seen)
+    roots = _seed_roots(corpus_roots)
+    for root_index, (root, named) in enumerate(roots):
+        kept, root_excluded = walk_corpus(
+            [root], operator_globs=operator_globs, seen=seen, only=named
+        )
         excluded.extend(root_excluded)
 
         for path in kept:
@@ -524,9 +595,14 @@ def survey(
     request = {
         "target": {"name": target_name.strip(), "interface": target_interface.strip()},
         "objective": objective,
-        "corpus_roots": [str(Path(root)) for root in corpus_roots],
+        "corpus_roots": [str(root) for root, _ in roots],
         "limits": {"max_rounds": max_rounds, "max_scenarios": max_scenarios},
     }
+    # What a human named file by file, so a root that is only a named file's
+    # folder does not read as "this whole folder was surveyed".
+    seed_files = [str(path) for _, named in roots for path in named or []]
+    if seed_files:
+        request["seed_files"] = seed_files
     if objective_note:
         request["objective_note"] = objective_note
     if scope_note:

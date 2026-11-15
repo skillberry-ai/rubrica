@@ -36,6 +36,12 @@
           "minItems": 1,
           "items": {"type": "string", "minLength": 1}
         },
+        "seed_files": {
+          "description": "The files a human named one by one with --corpus. Each one's folder is in corpus_roots, but only the named files under it were catalogued; a folder named whole has no entry here.",
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
         "limits": {
           "type": "object",
           "required": ["max_rounds", "max_scenarios"],

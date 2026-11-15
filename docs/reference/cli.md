@@ -51,6 +51,17 @@ model that will do its best with an unfamiliar word.
 Intake is code and no repair prompt can rewrite a manifest, so the value a run
 is minted with is the value it keeps.
 
+**`--corpus` takes a folder or a single file.** A folder is walked whole, with
+the filters `excluded` records. A file is catalogued as named: its folder joins
+`request.corpus_roots` so `intake` resolves it like any other candidate, only the
+named files under that folder are catalogued, and the file is listed in
+`request.seed_files`. A named file skips the filters that judge a file by where it
+sits — version control, vendored folders, `.gitignore`, `--exclude` — because a
+human pointed at it; it still goes through the ones that judge what it is, so a
+named binary or lockfile is recorded in `excluded` rather than catalogued. A
+`--corpus` path that is neither a file nor a folder, or a named file that cannot
+be opened, exits 2.
+
 Prints the new run directory.
 
 ```bash
