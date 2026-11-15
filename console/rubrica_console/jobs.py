@@ -1159,57 +1159,46 @@ class Console:
                 del self._jobs[job_id]
 
     def create_run(self, spec: dict) -> tuple[str | None, Job | None, str]:
-        """Mint a run with `survey` or `intake --input`. Returns (run name, job, output)."""
-        mode = spec.get("mode")
+        """Mint a run with `survey`. Returns (run name, job, output).
+
+        One way in: the human names files and folders as a seed, and triage
+        chooses among them at gate 0. Each seed is one `--corpus`, which survey
+        takes as a folder to walk or a file to catalogue as named. `intake
+        --input`, which skips triage and gate 0, is left to the CLI.
+        """
+        mode = spec.get("mode") or "survey"
         target = (spec.get("target_name") or "").strip()
         interface = (spec.get("target_interface") or "").strip()
         if not target or not interface:
             raise ConsoleError("a target name and interface are required")
-        args: list[str]
-        if mode == "survey":
-            corpus = [c for c in spec.get("corpus") or [] if c]
-            if not corpus:
-                raise ConsoleError("pick at least one corpus folder")
-            objective = spec.get("objective") or "breadth"
-            args = [
-                "survey",
-                "--runs-dir",
-                str(self.runs_dir),
-                "--target-name",
-                target,
-                "--target-interface",
-                interface,
-                "--objective",
-                objective,
-            ]
-            for c in corpus:
-                args += ["--corpus", c]
-            for g in spec.get("exclude") or []:
-                if g:
-                    args += ["--exclude", g]
-            for key in ("objective_note", "scope_note"):
-                if spec.get(key):
-                    args += [f"--{key.replace('_', '-')}", spec[key]]
-        elif mode == "intake":
-            inputs = [i for i in spec.get("inputs") or [] if i]
-            if not inputs:
-                raise ConsoleError("pick at least one input file")
-            secret = self.credentials.path.expanduser().resolve()
-            if any(Path(i).expanduser().resolve() == secret for i in inputs):
-                raise ConsoleError("the console's credentials file cannot be a run input")
-            args = [
-                "intake",
-                "--runs-dir",
-                str(self.runs_dir),
-                "--target-name",
-                target,
-                "--target-interface",
-                interface,
-            ]
-            for i in inputs:
-                args += ["--input", i]
-        else:
-            raise ConsoleError("mode must be 'survey' or 'intake'")
+        if mode != "survey":
+            raise ConsoleError("the console starts every run with survey; use the CLI for intake")
+        corpus = [c for c in spec.get("corpus") or [] if c]
+        if not corpus:
+            raise ConsoleError("pick at least one file or folder")
+        secret = self.credentials.path.expanduser().resolve()
+        if any(Path(c).expanduser().resolve() == secret for c in corpus):
+            raise ConsoleError("the console's credentials file cannot be read by a run")
+        objective = spec.get("objective") or "breadth"
+        args: list[str] = [
+            "survey",
+            "--runs-dir",
+            str(self.runs_dir),
+            "--target-name",
+            target,
+            "--target-interface",
+            interface,
+            "--objective",
+            objective,
+        ]
+        for c in corpus:
+            args += ["--corpus", c]
+        for g in spec.get("exclude") or []:
+            if g:
+                args += ["--exclude", g]
+        for key in ("objective_note", "scope_note"):
+            if spec.get(key):
+                args += [f"--{key.replace('_', '-')}", spec[key]]
         for key in ("max_rounds", "max_scenarios"):
             if spec.get(key):
                 args += [f"--{key.replace('_', '-')}", str(int(spec[key]))]
@@ -1259,9 +1248,18 @@ class Console:
             request = catalogue.get("request") or {}
             policy = catalogue.get("policy") or {}
             target = request.get("target") or {}
+            # A root that is only a named file's folder was never walked whole,
+            # so the files stand in for it: one root per distinct parent, the
+            # way survey added them.
+            seeds = [str(p) for p in request.get("seed_files") or []]
+            roots = [str(p) for p in request.get("corpus_roots") or []]
+            for parent in dict.fromkeys(str(Path(f).parent) for f in seeds):
+                if parent in roots:
+                    roots.remove(parent)
             spec.update(
                 mode="survey",
-                corpus=[str(p) for p in request.get("corpus_roots") or []],
+                corpus=roots + seeds,
+                seed_files=seeds,
                 exclude=[str(g) for g in policy.get("operator_globs") or []],
                 objective=request.get("objective") or "breadth",
                 target_name=target.get("name", ""),

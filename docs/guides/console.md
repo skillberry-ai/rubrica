@@ -47,29 +47,29 @@ real run was refused with a 401.
 **Runs.** Every run under `--runs-dir`, how far it has got, what is next, and what
 the console has spent on it.
 
-**New run.** Either *survey a corpus* — the run goes through triage and stops at
-gate 0 — or *hand-pick input files*, which skips triage and gate 0 the way
-`rubrica intake --input` does. Creating a run calls no model.
+**New run.** One way in: point at the files and folders that matter, and they are
+the run's starting point. Triage reads them and chooses what the run reads, and the
+run stops at gate 0 for you to approve that choice. Creating a run calls no model.
+(`rubrica intake --input`, which skips triage and gate 0, is still there from the
+command line.)
 
-Both use the same picker: a checkbox on every file and folder, a path box, a filter
-for the folder you are in, *select all here* / *clear here*, and a summary of what
-is in and out with a live file count. Checking a folder takes everything inside it;
-open it and uncheck anything to leave that out. A half-filled box is a folder that
-is partly in. The selection is kept as you move between folders.
+The picker has a checkbox on every file and folder, a path box, a filter for the
+folder you are in, *select all here* / *clear here*, and a summary of what is in and
+out with a live file count. Checking a folder takes everything inside it; open it
+and uncheck anything to leave that out. A half-filled box is a folder that is partly
+in. The selection is kept as you move between folders.
 
-What a selection becomes depends on the mode, because the two commands take
-different things:
+What a selection becomes for `rubrica survey`:
 
-- **Hand-pick:** every file the selection covers, folders expanded, minus what you
-  unchecked, becomes one `--input`. Hidden files and folders (`.git`, `.venv`) are
-  skipped and symlinks are not followed.
-- **Survey:** each checked folder is a `--corpus` root, and each thing you unchecked
-  inside one becomes an `--exclude` pattern, shown on the form before the run is
-  created. `survey` only takes folders, so a file cannot be checked on its own, and
-  it cannot take something back in from inside a folder you left out; the picker
-  greys both out and says why. An exclusion applies under *every* corpus folder,
-  and one with no folder in it (a file at the top of a root) also leaves out every
-  file with that name below it — the form says so when either applies.
+- each checked folder, and each checked file not inside a checked folder, is one
+  `--corpus` — survey walks a folder and reads a file as named;
+- each thing you unchecked inside a checked folder becomes an `--exclude` pattern,
+  shown on the form before the run is created. Survey cannot take something back in
+  from inside a folder you left out, so the picker greys that out and says why. An
+  exclusion applies under *every* checked folder, and one with no folder in it (a
+  file at the top of a folder) also leaves out every file with that name below it —
+  the form says so when either applies. A file you checked by name is never
+  excluded.
 
 **A run.** On the left, every step of the pipeline in order, grouped by phase:
 triage, world model, each round, suite. Each step is one of:
@@ -114,12 +114,13 @@ action, and each command's log.
 
 ## Running the same inputs again
 
-Each run keeps what it was made from — the mode, every folder and file you picked,
+Each run keeps what it was made from — every folder and file you picked,
 what you unchecked, the target, the limits — beside its console records. **New run
 from these inputs**, on a run's page, opens the New run form already filled in;
 change anything, then create. For a run the console did not create, the form is
-filled from the run itself (a survey run's corpus folders and exclusion patterns,
-or a hand-picked run's input files), and the page says so. The New run form also
+filled from the run itself (a survey run's folders, named files and exclusion
+patterns, or a hand-picked run's input files, which become named files), and the
+page says so. The New run form also
 keeps a draft in your browser, so leaving the page does not lose a selection.
 
 ## Deleting a run
