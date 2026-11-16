@@ -287,6 +287,66 @@ def test_an_html_file_in_a_run_is_served_as_text_never_as_a_page(console, run):
     assert status == 200 and content_type.startswith("text/plain")
 
 
+def _get_headers(port, path):
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
+    try:
+        conn.request("GET", path, headers={"Host": f"127.0.0.1:{port}"})
+        res = conn.getresponse()
+        return res.status, {k.lower(): v for k, v in res.getheaders()}, res.read()
+    finally:
+        conn.close()
+
+
+# Every type a browser can run script in, plus one it has never heard of. The SVG
+# under 00-inputs/ is the real path: intake copies a corpus SVG there and the run
+# summary links it.
+_SCRIPT = '<svg xmlns="http://www.w3.org/2000/svg"><script>steal()</script></svg>'
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "evil.html",
+        "evil.svg",
+        "evil.xhtml",
+        "evil.xht",
+        "evil.xml",
+        "evil.weirdext",
+        "00-inputs/evil.svg",
+    ],
+)
+def test_a_run_file_that_could_run_script_is_served_as_inert_text(console, run, rel):
+    target = run.root / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_SCRIPT)
+    with _serving(console) as port:
+        status, headers, body = _get_headers(port, f"/runs/{run.root.name}/{rel}")
+    assert status == 200
+    assert headers["content-type"] == "text/plain; charset=utf-8"
+    assert headers["content-security-policy"] == "sandbox"
+    assert headers["x-content-type-options"] == "nosniff"
+    assert body == _SCRIPT.encode()
+
+
+def test_a_binary_run_file_of_unknown_type_is_served_as_bytes(console, run):
+    (run.root / "blob.bin").write_bytes(b"\xff\xfe\x00<script>")
+    with _serving(console) as port:
+        status, headers, _ = _get_headers(port, f"/runs/{run.root.name}/blob.bin")
+    assert status == 200 and headers["content-type"] == "application/octet-stream"
+    assert headers["content-security-policy"] == "sandbox"
+
+
+def test_a_json_run_file_still_reads_back_as_json(console, run):
+    (run.root / "data.json").write_text('{"a": 1}')
+    with _serving(console) as port:
+        status, headers, body = _get_headers(port, f"/runs/{run.root.name}/data.json")
+    assert status == 200
+    assert headers["content-type"] == "application/json; charset=utf-8"
+    assert headers["content-security-policy"] == "sandbox"
+    assert headers["x-content-type-options"] == "nosniff"
+    assert json.loads(body) == {"a": 1}
+
+
 # Thirty levels, because pytest's temp directory sits deep under /private/var:
 # four `..` stayed inside it and the old viewer's test once passed with the guard
 # deleted.

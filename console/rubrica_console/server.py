@@ -212,6 +212,34 @@ def _char_end(data: bytes, start: int, end: int) -> int:
     return end
 
 
+# Types served as what they are, because no browser runs script in them. Everything
+# else -- text/html, image/svg+xml, application/xhtml+xml, any XML (which can pull in
+# XHTML or an XSLT), and anything unknown -- goes out as plain text or raw bytes.
+# An allow-list, not a deny-list: a corpus file is copied into the run as-is, and the
+# run summary links straight to it, so one missed scripting type is script on the
+# console's own origin. Measured before this list: an .svg came back image/svg+xml.
+_INERT_TYPES = {
+    "text/plain": "text/plain; charset=utf-8",
+    "application/json": "application/json; charset=utf-8",
+    "image/png": "image/png",
+    "image/jpeg": "image/jpeg",
+    "image/gif": "image/gif",
+    "image/webp": "image/webp",
+}
+
+
+def _inert_content_type(name: str, body: bytes) -> str:
+    """The Content-Type a run file is served with: its own if inert, else text or bytes."""
+    guessed = mimetypes.guess_type(name)[0]
+    if guessed in _INERT_TYPES:
+        return _INERT_TYPES[guessed]
+    try:
+        body.decode("utf-8")
+    except UnicodeDecodeError:
+        return "application/octet-stream"
+    return "text/plain; charset=utf-8"
+
+
 class Handler(BaseHTTPRequestHandler):
     console: Console
     token: str
@@ -228,10 +256,19 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- plumbing ------------------------------------------------------------
 
-    def _send(self, status: HTTPStatus, body: bytes, content_type: str, head: bool = False):
+    def _send(
+        self,
+        status: HTTPStatus,
+        body: bytes,
+        content_type: str,
+        head: bool = False,
+        extra_headers: dict[str, str] | None = None,
+    ):
         try:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
+            for key, value in (extra_headers or {}).items():
+                self.send_header(key, value)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
@@ -675,14 +712,18 @@ class Handler(BaseHTTPRequestHandler):
         target = root.joinpath(*rest).resolve()
         if not target.is_relative_to(root) or not target.is_file():
             return self._json(HTTPStatus.NOT_FOUND, {"error": "no such file in this run"}, head)
-        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        if content_type.startswith("text/") or content_type == "application/json":
-            content_type += "; charset=utf-8"
-        # Served as data, never as a page from this origin: an HTML file in a corpus
-        # copy must not run script with access to the console's token.
-        if content_type.startswith("text/html"):
-            content_type = "text/plain; charset=utf-8"
-        return self._send(HTTPStatus.OK, target.read_bytes(), content_type, head)
+        body = target.read_bytes()
+        content_type = _inert_content_type(target.name, body)
+        # The sandbox policy is the second lock: even if a browser ever renders one
+        # of these as a document, it runs with no script and an opaque origin, so it
+        # cannot read the console's token or call its API.
+        return self._send(
+            HTTPStatus.OK,
+            body,
+            content_type,
+            head,
+            extra_headers={"Content-Security-Policy": "sandbox"},
+        )
 
     def _credentials_post(self, action: list[str], body: dict):
         store = self.console.credentials
