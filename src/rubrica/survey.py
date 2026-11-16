@@ -337,7 +337,14 @@ def _seed_roots(seeds: Sequence[Path]) -> list[tuple[Path, list[Path] | None]]:
     out: list[tuple[Path, list[Path] | None]] = []
     by_parent: dict[Path, list[Path]] = {}
     for seed in seeds:
-        seed = Path(seed)
+        # Absolute once, here, before anything is grouped or recorded: the
+        # catalogue outlives the folder survey ran from, and intake joins
+        # `corpus_roots[i] / path` against its *own* cwd. A relative root --
+        # `.` for a bare `--corpus notes.md` -- then failed with a bare
+        # FileNotFoundError, or read a different same-named file. `absolute()`
+        # rather than `resolve()` so a symlinked folder root is recorded as
+        # spelled; a symlinked named file is still resolved below.
+        seed = Path(seed).absolute()
         vcs = _vcs_part_of(seed)
         if vcs is not None:
             raise UsageError(
