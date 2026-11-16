@@ -38,7 +38,6 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from rubrica import skills
 from rubrica.paths import RunPaths
 from rubrica_console import credentials as credentials_mod
 from rubrica_console import dispatch, pipeline
@@ -271,14 +270,54 @@ class Console:
         except credentials_mod.CredentialError:
             return credentials_mod.Credentials()
 
+    @property
+    def skills_dir(self) -> Path:
+        """The skill set the dispatch script actually dispatches.
+
+        `dispatch-stage.sh` reads `$REPO/src/rubrica/skills/rb-<stage>/SKILL.md`,
+        where `$REPO` is the parent of the script's own directory, and it ignores
+        `RUBRICA_SKILLS_DIR`. So the digest record-stage writes and the set
+        check-skills checks must come from here, not from `skills.skills_dir()`:
+        otherwise a run records (and preflights) one skill and runs another,
+        which breaks "record-stage hashes the skill file the run actually used".
+        """
+        return self.dispatch_script.parent.parent / "src" / "rubrica" / "skills"
+
+    def _skills_dir_conflict(self) -> str | None:
+        """A reason to refuse prompt steps when RUBRICA_SKILLS_DIR names another set.
+
+        The console cannot honour the override -- the script would run its own
+        checkout's skills anyway -- and silently ignoring it would let a person
+        probing a candidate set believe the candidate is what ran.
+        """
+        override = os.environ.get("RUBRICA_SKILLS_DIR")
+        if not override:
+            return None
+        if Path(override).resolve() == self.skills_dir.resolve():
+            return None
+        return (
+            f"RUBRICA_SKILLS_DIR is {override}, but the dispatch script "
+            f"{self.dispatch_script} runs the skills in {self.skills_dir}; "
+            "unset RUBRICA_SKILLS_DIR, or point --dispatch-script at the checkout "
+            "that holds the skills you want to run"
+        )
+
     def prompt_ready(self) -> bool:
-        return self.dispatch_script.is_file() and self.bash is not None and self._creds().configured
+        return (
+            self.dispatch_script.is_file()
+            and self.bash is not None
+            and self._skills_dir_conflict() is None
+            and self._creds().configured
+        )
 
     def prompt_unavailable_reason(self) -> str:
         if not self.dispatch_script.is_file():
             return f"Needs a repository checkout: {self.dispatch_script} does not exist"
         if self.bash is None:
             return "Needs bash 4 or newer (macOS: brew install bash)"
+        conflict = self._skills_dir_conflict()
+        if conflict:
+            return conflict
         return "Set up model access in Settings first: the console uses its own credentials"
 
     def ledger_view(self, name: str) -> dict:
@@ -558,7 +597,11 @@ class Console:
         """B0, once per server: a broken skill contract halts before any dispatch."""
         if self._skills_checked:
             return
-        code, out = self._cli(job, ["check-skills"], "check-skills")
+        # The set the dispatch script runs, named explicitly: inheriting the
+        # environment would check RUBRICA_SKILLS_DIR's set instead.
+        code, out = self._cli(
+            job, ["check-skills", "--skills-dir", str(self.skills_dir)], "check-skills"
+        )
         if code != CLEAN:
             raise _Stop(HALTED, "check-skills reported problems; no stage can be dispatched")
         self._skills_checked = True
@@ -584,7 +627,7 @@ class Console:
         elif kind == "check-refs":
             self._gate(job, ["check-refs", *rid], "check-refs")
         elif kind == "record":
-            skill = skills.skills_dir() / f"rb-{op['stage']}" / "SKILL.md"
+            skill = self.skills_dir / f"rb-{op['stage']}" / "SKILL.md"
             self._gate(
                 job,
                 [
@@ -1000,7 +1043,7 @@ class Console:
             used = self._state(name).data["used"]
             for stage in ("triage-objective", "triage-rule", "triage-audit"):
                 if stage in used:
-                    skill = skills.skills_dir() / f"rb-{stage}" / "SKILL.md"
+                    skill = self.skills_dir / f"rb-{stage}" / "SKILL.md"
                     commands.append(
                         [
                             "record-stage",
