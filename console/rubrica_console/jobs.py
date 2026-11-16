@@ -802,13 +802,15 @@ class Console:
         # one earlier success keeps every later fan-out from ever stopping early.
         keys: list[str] = []
         for member_id in ids:
-            key = f"{stage}:{member_id}" if member_id else stage
-            log = state.logs_dir / job.id / f"{key.replace(':', '-')}.log"
-            log.parent.mkdir(parents=True, exist_ok=True)
-            member = Member(id=key, log=str(log))
-            keys.append(key)
             with self._lock:
+                key = self._member_key(job, stage, member_id)
+                # "#" becomes "." in the file name so the name stays one plain token.
+                name = key.replace(":", "-").replace("#", ".")
+                log = state.logs_dir / job.id / f"{name}.log"
+                member = Member(id=key, log=str(log))
                 job.members[key] = member
+            log.parent.mkdir(parents=True, exist_ok=True)
+            keys.append(key)
             env = dispatch.env_for(
                 credentials=creds_env,
                 lab=self.lab,
@@ -835,7 +837,9 @@ class Console:
             raise _Stop(HALTED, self._failfast.pop(job.id))
         if job.id in self._cancel:
             raise _Stop(CANCELLED, "cancelled")
-        failed = [m for m in job.members.values() if m.id.startswith(stage) and m.status == HALTED]
+        # This dispatch's own members only: an earlier round's halted `score` is
+        # still in job.members and says nothing about this one.
+        failed = [job.members[k] for k in keys if job.members[k].status == HALTED]
         if any(m.exit == USAGE for m in failed):
             raise _Stop(HALTED, f"{stage}: the dispatch script refused (exit 2); see its log")
         if failed:
@@ -843,6 +847,26 @@ class Console:
             # will name it, and running the step again resumes only the missing ones.
             job.message = f"{len(failed)} {stage} dispatch(es) did not finish"
         self._persist(job)
+
+    @staticmethod
+    def _member_key(job: Job, stage: str, member_id: str | None) -> str:
+        """A key no earlier dispatch in this job holds.
+
+        A chain crossing rounds dispatches `score` (no member id) once a round, and a
+        re-seed can dispatch one instance twice. Keyed on the stage and slice alone,
+        the later dispatch replaced the earlier's record and overwrote its log, so the
+        job showed one dispatch and half the spend. The first dispatch keeps the plain
+        key (`score`, `propose:r1-b01`); a repeat gets `#N` on the stage part
+        (`score#2`, `instantiate#2:S01`), so the slice id after the colon -- which the
+        page matches fan-out squares on -- is unchanged.
+        """
+        n = 1
+        while True:
+            head = stage if n == 1 else f"{stage}#{n}"
+            key = f"{head}:{member_id}" if member_id else head
+            if key not in job.members:
+                return key
+            n += 1
 
     def _member(
         self, job: Job, member: Member, argv: list[str], env: dict, keys: list[str]
