@@ -60,7 +60,13 @@ sits — version control, vendored folders, `.gitignore`, `--exclude` — becaus
 human pointed at it; it still goes through the ones that judge what it is, so a
 named binary or lockfile is recorded in `excluded` rather than catalogued. A
 `--corpus` path that is neither a file nor a folder, or a named file that cannot
-be opened, exits 2.
+be opened, exits 2. So does a `--corpus` path that is, or sits inside, a `.git`,
+`.hg` or `.svn` folder — `--corpus repo/.git` would otherwise catalogue the
+repository's own `config` (where remote credentials live) as evidence. The check
+reads the path as given and the path it resolves to, so a symlink into such a
+folder is refused too. Version-control folder names are matched regardless of
+capital letters, here and in the walk's `vcs_metadata` filter, because on a
+case-insensitive volume `.GIT` is the same folder as `.git`.
 
 Prints the new run directory.
 

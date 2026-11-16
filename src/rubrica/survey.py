@@ -20,6 +20,7 @@ development run -- a full-pipeline run over a large real-world corpus, called
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import hashlib
 import json
@@ -89,6 +90,36 @@ _LOCKFILES = frozenset(
 _BINARY_SNIFF_BYTES = 8192
 
 
+def _is_vcs_name(part: str) -> bool:
+    """Whether one path part names a version-control folder, ignoring case.
+
+    Case-blind on purpose: on a case-insensitive volume -- the macOS default --
+    `.GIT` *is* the `.git` folder, so an exact match let it through the walk and
+    the seed check alike. `casefold` rather than `lower` so the comparison is the
+    one Python documents for caseless matching.
+    """
+    return part.casefold() in _VCS_DIRS
+
+
+def _vcs_part_of(path: Path) -> str | None:
+    """The first VCS folder name in `path` or the path it resolves to, if any.
+
+    Both spellings are checked: the path as given catches `repo/.git` named
+    directly, and the resolved one catches a symlink or `..` that lands inside a
+    VCS folder while its own spelling does not mention one.
+    """
+    candidates = [Path(path).absolute()]
+    # A resolve failure (a symlink loop) leaves the spelled path to judge;
+    # whether the seed is readable at all is decided by the caller.
+    with contextlib.suppress(OSError, RuntimeError):
+        candidates.append(Path(path).resolve())
+    for candidate in candidates:
+        for part in candidate.parts:
+            if _is_vcs_name(part):
+                return part
+    return None
+
+
 def _gitignore_patterns(root: Path) -> list[str]:
     """Patterns from `root/.gitignore`, one level only.
 
@@ -152,7 +183,8 @@ def walk_corpus(
     it on purpose and those filters exist to drop what nobody chose. It keeps
     the ones that judge *what* it is (lockfile, binary, unreadable, duplicate),
     each still recorded, so a named file that cannot be a candidate is visible
-    as declined rather than missing.
+    as declined rather than missing. A named file inside a version-control
+    folder never reaches here from survey(): `_seed_roots` refuses it first.
     """
     kept: list[Path] = []
     excluded: list[dict] = []
@@ -197,7 +229,7 @@ def walk_corpus(
             def drop(reason: str, rel: str = relative) -> None:
                 excluded.append({"path": rel, "reason": reason})
 
-            if parts & _VCS_DIRS:
+            if any(_is_vcs_name(part) for part in parts):
                 drop("vcs_metadata")
                 continue
             if parts & _VENDOR_DIRS:
@@ -258,11 +290,25 @@ def _seed_roots(seeds: Sequence[Path]) -> list[tuple[Path, list[Path] | None]]:
     unchanged. A path that is neither, or a file that cannot be opened, is the
     harness pointed at something it cannot read: exit 2 before any run exists,
     like an unreadable folder root.
+
+    A seed that is, or sits inside, a version-control folder is refused the
+    same way. A named file skips the walk's VCS filter on purpose, and a folder
+    seed is filtered only on the parts *below* it, so without this check
+    `--corpus repo/.git` catalogued `config`, `HEAD` and the hooks as evidence --
+    and `.git/config` is where remote credentials live. Refusing rather than
+    recording a decline because the seed is the whole request: there is no
+    run worth minting from a VCS folder, and exit 2 is what an unreadable root
+    already gets. The name match ignores case, as the walk's does.
     """
     out: list[tuple[Path, list[Path] | None]] = []
     by_parent: dict[Path, list[Path]] = {}
     for seed in seeds:
         seed = Path(seed)
+        vcs = _vcs_part_of(seed)
+        if vcs is not None:
+            raise UsageError(
+                f"corpus path is or sits inside a version-control folder ({vcs}): {seed}"
+            )
         if seed.is_dir():
             out.append((seed, None))
             continue

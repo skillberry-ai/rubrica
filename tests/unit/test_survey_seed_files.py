@@ -172,3 +172,92 @@ def test_the_cli_takes_a_file_for_corpus(tmp_path, capsys):
     run_dir = Path(capsys.readouterr().out.strip())
     catalogue = json.loads((run_dir / "00-catalogue.json").read_text(encoding="utf-8"))
     assert [c["path"] for c in catalogue["candidates"]] == ["spec.md"]
+
+
+def _repo_with_vcs(tmp_path, name=".git"):
+    root = _tree(tmp_path)
+    vcs = root / name
+    (vcs / "hooks").mkdir(parents=True)
+    (vcs / "config").write_text('[remote "origin"]\n\turl = x\n', encoding="utf-8")
+    (vcs / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    return root, vcs
+
+
+@pytest.mark.parametrize("name", [".git", ".hg", ".svn", ".GIT", ".Hg"])
+def test_a_vcs_folder_seed_is_a_usage_error_and_mints_no_run(tmp_path, name):
+    """`--corpus repo/.git` catalogued `config` and `HEAD` as evidence: the walk
+    filters only the parts *below* a root, so the root itself slipped past."""
+    _, vcs = _repo_with_vcs(tmp_path, name)
+    with pytest.raises(UsageError, match="version-control folder"):
+        _survey(tmp_path, [vcs])
+    assert not (tmp_path / "runs").exists()
+
+
+@pytest.mark.parametrize("name", [".git", ".GIT"])
+def test_a_named_file_inside_a_vcs_folder_is_a_usage_error(tmp_path, name):
+    """A named file skips the walk's where-it-sits filters, so the seed check
+    is the only thing between `.git/config` and the catalogue."""
+    _, vcs = _repo_with_vcs(tmp_path, name)
+    with pytest.raises(UsageError, match="version-control folder"):
+        _survey(tmp_path, [vcs / "config"])
+    with pytest.raises(UsageError, match="version-control folder"):
+        _survey(tmp_path, [vcs / "hooks"])
+    assert not (tmp_path / "runs").exists()
+
+
+def test_a_symlink_into_a_vcs_folder_is_refused(tmp_path):
+    """The spelled path names no VCS folder; the resolved one does."""
+    _, vcs = _repo_with_vcs(tmp_path)
+    link = tmp_path / "innocent"
+    link.symlink_to(vcs, target_is_directory=True)
+    with pytest.raises(UsageError, match="version-control folder"):
+        _survey(tmp_path, [link])
+    with pytest.raises(UsageError, match="version-control folder"):
+        _survey(tmp_path, [link / "config"])
+
+
+def test_a_folder_holding_a_vcs_folder_is_still_walked(tmp_path):
+    """Only a seed that *is* or sits inside one is refused; a repo root is the
+    ordinary case, and its VCS folder is dropped as `vcs_metadata`."""
+    root, _ = _repo_with_vcs(tmp_path)
+    run = _survey(tmp_path, [root])
+    catalogue = read_json(run.catalogue)
+    assert not any(".git" in c["path"] for c in catalogue["candidates"])
+    reasons = {e["path"]: e["reason"] for e in catalogue["excluded"]}
+    assert reasons[".git/config"] == "vcs_metadata"
+
+
+def test_the_walk_drops_a_vcs_folder_whatever_its_case(tmp_path):
+    """`.GIT` is the `.git` folder on a case-insensitive volume; an exact-case
+    match let its contents into the catalogue."""
+    root, _ = _repo_with_vcs(tmp_path, ".GIT")
+    run = _survey(tmp_path, [root])
+    catalogue = read_json(run.catalogue)
+    assert not any(c["path"].startswith(".GIT/") for c in catalogue["candidates"])
+    reasons = {e["path"]: e["reason"] for e in catalogue["excluded"]}
+    assert reasons[".GIT/config"] == "vcs_metadata"
+    assert reasons[".GIT/HEAD"] == "vcs_metadata"
+
+
+def test_the_cli_exits_2_on_a_vcs_folder_seed(tmp_path, capsys):
+    from rubrica import cli
+
+    _, vcs = _repo_with_vcs(tmp_path)
+    code = cli.main(
+        [
+            "survey",
+            "--corpus",
+            str(vcs),
+            "--runs-dir",
+            str(tmp_path / "runs"),
+            "--target-name",
+            "toy",
+            "--target-interface",
+            "mcp",
+            "--objective",
+            "breadth",
+        ]
+    )
+    assert code == 2
+    assert capsys.readouterr().out == ""
+    assert not (tmp_path / "runs").exists()
