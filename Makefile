@@ -14,7 +14,7 @@ setup: ## Create the venv and install runtime + dev deps from uv.lock
 test: ## Run the test suite
 	uv run pytest -q
 
-live: ## Run the live stage exercises (dispatches a model; costs money)
+live: ## Run the live-marked tests against committed recordings (free; no model call)
 	RUBRICA_LIVE=1 uv run pytest -m live -q
 
 check: ## Lint and verify formatting, making no changes

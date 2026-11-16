@@ -1,9 +1,10 @@
 """Shared pytest configuration: the live marker and its default skip.
 
-A live test dispatches a model. It costs money, it is not deterministic, and it
-needs credentials, so it is skipped unless RUBRICA_LIVE is set. The skip
-message names the command that runs it, because a marker nobody can find is a
-suite that does not exist.
+A live test checks a recording of a real model run that is committed in the
+repo. Running it dispatches nothing and costs nothing. Making a new recording
+is what dispatches a model and costs money. Live tests are skipped unless
+RUBRICA_LIVE is set. The skip message names the command that runs them,
+because a marker nobody can find is a suite that does not exist.
 """
 
 from __future__ import annotations
@@ -14,12 +15,13 @@ import pytest
 
 LIVE_ENV = "RUBRICA_LIVE"
 LIVE_SKIP_REASON = (
-    f"live test: dispatches a model. Run with `{LIVE_ENV}=1 make live`, or "
+    "live test: asserts against committed recordings (free; re-recording costs money). "
+    f"Run with `{LIVE_ENV}=1 make live`, or "
     f"`{LIVE_ENV}=1 uv run pytest -m live`."
 )
 
-# Spellings that mean "off". A live test dispatches a model and spends money,
-# so treating *any* non-empty string as "on" -- os.environ.get(...) alone is
+# Spellings that mean "off". Live tests are opt-in (and re-recording spends
+# money), so treating *any* non-empty string as "on" -- os.environ.get(...) alone is
 # truthy for "0" and "false" -- would make `RUBRICA_LIVE=0`, typed by someone
 # who means "off", opt IN instead. Checked case-insensitively and stripped, so
 # whitespace or capitalization cannot smuggle a value past the comparison.

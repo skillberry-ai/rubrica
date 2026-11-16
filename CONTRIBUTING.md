@@ -63,7 +63,7 @@ in CI while this file claims it does.
 
 ## `make live` is not one of them
 
-`make live` dispatches a model against the `live`-marked tests, gated by
+`make live` runs the `live`-marked tests, gated by
 `RUBRICA_LIVE` and the `live` pytest marker. Running it against the
 recordings already committed in the repo is free — that's what the three
 gates exercise indirectly, since they never touch `live` tests at all.
