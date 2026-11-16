@@ -96,6 +96,23 @@ jobs:
       - name: Install
         run: uv sync --extra dev --locked
 
+      # The runner's `bash` is Apple's /bin/bash 3.2, and release-notes.sh needs
+      # bash 4+; the tests call `bash -c`, so under 3.2, 11 of 20 produced empty
+      # notes (PR #28). This job tests BSD sed, not old bash, so put Homebrew's
+      # bash first on PATH -- and then check sed is still BSD /usr/bin/sed, since
+      # Homebrew's bin is now ahead of it and a GNU sed there would void the job.
+      - name: Modern bash
+        run: |
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+      - name: Show bash and sed
+        run: |
+          command -v bash
+          bash --version
+          test "$(command -v sed)" = /usr/bin/sed || { echo "sed is $(command -v sed), not BSD /usr/bin/sed"; exit 1; }
+          bash -c 'test "${BASH_VERSINFO[0]}" -ge 4' || { echo "bash on PATH is older than 4"; exit 1; }
+
       - name: Release-notes tests on BSD sed
         run: uv run --extra dev pytest -q tests/unit/test_release_notes.py
 
