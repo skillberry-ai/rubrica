@@ -142,8 +142,8 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
         return [], [Finding(run.services_part, LAYER, "", f"cannot read: {exc}")]
 
     if not isinstance(part, dict):
-        # isinstance rather than a None check, for the reason reconcile.seal's
-        # _UNREADABLE sentinel exists: `null` is legitimate JSON, and a document
+        # isinstance rather than a None check, for the reason the seals'
+        # parts.UNREADABLE sentinel exists: `null` is legitimate JSON, and a document
         # that parses to a list reached `.get` and raised AttributeError.
         return [], [Finding(run.services_part, LAYER, "", "services part is not a JSON object")]
 

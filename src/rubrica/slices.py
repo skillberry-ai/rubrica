@@ -674,7 +674,7 @@ def write_slices(run: RunPaths, *, cap: int = DEFAULT_SLICE_BYTES) -> tuple[Path
     stale, unreferenced file a later stage could mistakenly read.
     """
     catalogue = read_json(run.catalogue)
-    # The container door, and the same one seal._payload_keys' docstring
+    # The container door, and the same one parts.payload_keys' docstring
     # describes: two of the four wrong top-level shapes (`[]`, `"hi"`) answer
     # `key not in catalogue` correctly and reach the exit-2 refusal below,
     # while `null` and `7` raised TypeError -- an `[internal]` finding at exit 1

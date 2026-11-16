@@ -65,8 +65,8 @@ defect is ever checked against the plan that scoped it.
 
 Presence, parseability, payload-key presence and *container* shape are the
 whole of what item 1 checks -- never the type of a scalar a payload key
-holds, for the reason the seal on the staged-reconcile branch gives for its
-own identical door: layer 1 (one schema per staged artifact, all already
+holds, for the reason reconcile-seal gives for the door the two seals now
+share in parts.py: layer 1 (one schema per staged artifact, all already
 shipped) is the rejection point for a wrong-typed value, and duplicating that
 here would put the same rule in two places with two messages.
 
@@ -78,8 +78,8 @@ MEASURED that twenty distinct nested-shape defects each took a KeyError or
 TypeError out of this function -- reaching cli.py's catch-all as an
 `[internal]` finding naming the RUN ROOT rather than the offending part and
 pointer, which is the exit-code contract's third rule breached and the exact
-outcome `_read_part`'s docstring and `_UNREADABLE`'s comment each cite as the
-thing to avoid one level up. `_NESTED_READS` declares only the fields this
+outcome `parts.read_part`'s docstring and `parts.UNREADABLE`'s comment each
+cite as the thing to avoid one level up. `_NESTED_READS` declares only the fields this
 module reads, so it stays a statement of what assembly needs rather than a
 second copy of the schema: an id that is present but numeric is still layer
 1's to reject, and still does.
@@ -89,8 +89,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rubrica.artifacts import ArtifactError, read_json, write_json
+from rubrica.artifacts import write_json
 from rubrica.findings import Finding
+from rubrica.parts import EACH, read_checked
 from rubrica.paths import RunPaths
 
 # Every singleton input this seal reads through the same door, in the order a
@@ -98,23 +99,12 @@ from rubrica.paths import RunPaths
 # predates triage entirely, and the audit pass consolidates every part's
 # deficiency_notes last. (RunPaths attribute, the payload keys this module
 # actually reads from it) -- the keys are checked, not merely documented, by
-# _payload_keys below, mirroring the same table in the staged-reconcile
-# branch's seal exactly.
+# parts.payload_keys, mirroring the same table in reconcile-seal exactly.
 _SINGLETON_PARTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("objective", ("run_id", "objective_review")),
     ("slices", ("slices",)),
     ("audit", ("deficiencies", "projections")),
 )
-
-# The read-failure sentinel, and specifically *not* None -- `null` is a
-# legitimate JSON document and read_json returns None for it, which would
-# make `document is not None` mean two different things at once. Measured on
-# the sibling seal on the staged-reconcile branch: a `null` part skipped
-# the payload-key check
-# below and reached a bare dict index, raising a KeyError that cli.py's
-# catch-all then reported against the run root rather than the broken
-# artifact. An object() cannot be read off disk.
-_UNREADABLE = object()
 
 # The lowest rank a disposition without a member-assigned `priority` sorts
 # at, within its own surface group -- mirroring intake._NO_PRIORITY, but not
@@ -125,82 +115,11 @@ _UNREADABLE = object()
 _NO_MEMBER_PRIORITY = 1 << 30
 
 
-def _read_part(path: Path, out: list[Finding]) -> object:
-    """One part's parsed JSON, or _UNREADABLE with a finding naming *that* part.
-
-    Naming the right artifact is the exit-code contract's third rule, learned
-    the hard way in this repo: check-refs over an unreadable 01-claims/ once
-    reported four fabricated findings against a world model that was fine.
-    """
-    try:
-        return read_json(path)
-    except ArtifactError as exc:
-        out.append(Finding(path, "seal", "", str(exc)))
-        return _UNREADABLE
-
-
-# JSON's own type names, because the finding sits next to the JSON file it
-# names: "found null" and "found array" describe what is on disk, not Python.
-_JSON_TYPES: dict[type, str] = {
-    type(None): "null",
-    bool: "boolean",
-    int: "number",
-    float: "number",
-    str: "string",
-    list: "array",
-}
-
-
-def _json_type(document: object) -> str:
-    return _JSON_TYPES.get(type(document), type(document).__name__)
-
-
-def _payload_keys(path: Path, keys: tuple[str, ...], document: object, out: list[Finding]) -> bool:
-    """Whether `document` is an object carrying every key declared for it.
-
-    Mirrors the staged-reconcile branch's equivalent precisely, including the
-    isinstance guard
-    doing double duty: a document that is not a dict has no payload key
-    either, and two of the wrong shapes (a list, a string) would otherwise
-    answer `key not in document` correctly while the other two (`None`, an
-    int) raise TypeError trying -- the guard is what turns all four into one
-    finding instead of one finding and three tracebacks.
-    """
-    if not isinstance(document, dict):
-        out.append(
-            Finding(
-                path,
-                "seal",
-                "",
-                f"expected a JSON object with {' and '.join(sorted(keys))}, found "
-                f"{_json_type(document)}",
-            )
-        )
-        return False
-    missing = [key for key in keys if key not in document]
-    for key in missing:
-        out.append(
-            Finding(
-                path,
-                "seal",
-                "",
-                f"no {key!r} key; whatever wrote this artifact did not record its "
-                "payload, so there is nothing to assemble from it",
-            )
-        )
-    return not missing
-
-
-# The marker for "every element of the array here", as a spec key. An object()
-# rather than a string so it can never collide with a JSON key name a part
-# might legitimately carry.
-_EACH = object()
-
 # Every field *below* a payload key that this module indexes with a bare
 # `[...]`, one spec per artifact, keyed by the same attribute name
 # _SINGLETON_PARTS uses. A spec maps a key to the spec for its value, or to
-# None when presence is the whole requirement; a spec carrying _EACH describes
-# the elements of an array rather than the keys of an object, and _EACH mapped
+# None when presence is the whole requirement; a spec carrying EACH describes
+# the elements of an array rather than the keys of an object, and EACH mapped
 # to None asserts array-ness alone (which is what `set(...)`, `in` and a `for`
 # over the value each need before they can run).
 #
@@ -211,91 +130,37 @@ _EACH = object()
 # the seal was reached without a clean layer 1, which the gate order forbids
 # but `refs.check_all` by hand and the orchestrator's repair loop both reach.
 _NESTED_READS: dict[str, dict] = {
-    "objective": {"objective_review": {"surfaces": {_EACH: {"evidence": {_EACH: None}}}}},
-    "slices": {"slices": {_EACH: {"id": None, "candidate_ids": {_EACH: None}}}},
+    "objective": {"objective_review": {"surfaces": {EACH: {"evidence": {EACH: None}}}}},
+    "slices": {"slices": {EACH: {"id": None, "candidate_ids": {EACH: None}}}},
     "audit": {
-        "deficiencies": {_EACH: {"deficiency_id": None}},
-        "projections": {_EACH: {"projection_id": None, "sources": {_EACH: {"candidate_id": None}}}},
+        "deficiencies": {EACH: {"deficiency_id": None}},
+        "projections": {EACH: {"projection_id": None, "sources": {EACH: {"candidate_id": None}}}},
     },
     "adoptions": {
         "adoptions": {
-            _EACH: {
+            EACH: {
                 "projection_id": None,
                 "candidate_id": None,
-                "closed_deficiency_ids": {_EACH: None},
+                "closed_deficiency_ids": {EACH: None},
                 "disposition": {"candidate_id": None},
             }
         }
     },
-    "dispositions_part": {"dispositions": {_EACH: {"candidate_id": None}}},
+    "dispositions_part": {"dispositions": {EACH: {"candidate_id": None}}},
 }
-
-
-def _nested_shape(
-    path: Path, document: object, spec: dict, pointer: str, out: list[Finding]
-) -> None:
-    """Report every nested container shape `spec` declares and `document` breaks.
-
-    Recursive rather than a flat list of walks so a defect high in the tree is
-    reported once, at the pointer where it lives, instead of once per leaf the
-    seal would have read beneath it.
-    """
-    if _EACH in spec:
-        if not isinstance(document, list):
-            out.append(
-                Finding(path, "seal", pointer, f"expected an array, found {_json_type(document)}")
-            )
-            return
-        element_spec = spec[_EACH]
-        if element_spec is None:
-            return
-        for index, element in enumerate(document):
-            _nested_shape(path, element, element_spec, f"{pointer}/{index}", out)
-        return
-    if not isinstance(document, dict):
-        out.append(
-            Finding(path, "seal", pointer, f"expected a JSON object, found {_json_type(document)}")
-        )
-        return
-    for key, child in spec.items():
-        if key not in document:
-            out.append(
-                Finding(
-                    path,
-                    "seal",
-                    f"{pointer}/{key}",
-                    f"no {key!r} key; this seal indexes it directly and cannot assemble "
-                    "a record without it",
-                )
-            )
-            continue
-        if child is not None:
-            _nested_shape(path, document[key], child, f"{pointer}/{key}", out)
 
 
 def _read_checked(
     path: Path, keys: tuple[str, ...], out: list[Finding], nested: dict | None = None
 ) -> dict | None:
-    """One artifact that is readable, carries its payload keys, and holds the
-    nested containers this module indexes -- else None.
+    """One artifact through the shared door in parts.py, under this seal's label.
 
-    The one door every artifact this seal reads comes through, so a read
-    failure, a document missing a payload key and a nested container of the
-    wrong shape are different findings but the same outcome for the caller --
-    exactly the shape a `null` part exploited at the top level before this
-    existed, and that twenty nested defects exploited one level down.
+    The door itself -- read failure, payload keys, nested container shape, and
+    why each is a finding rather than a traceback -- is parts.read_checked,
+    which reconcile-seal reads through too; only the check label differs.
+    `nested` is one of _NESTED_READS' specs, walked by parts.nested_shape.
     """
-    document = _read_part(path, out)
-    if document is _UNREADABLE:
-        return None
-    if not _payload_keys(path, keys, document, out):
-        return None
-    if nested is not None:
-        before = len(out)
-        _nested_shape(path, document, nested, "", out)
-        if len(out) > before:
-            return None
-    return document
+    return read_checked(path, keys, out, check="seal", nested=nested)
 
 
 def _member_priority(entry: dict) -> int:
