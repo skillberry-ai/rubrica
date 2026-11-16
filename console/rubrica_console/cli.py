@@ -8,8 +8,9 @@ knows it exists, and removing this folder removes the console and nothing else.
 
 Exit codes follow the core CLI's contract as far as they apply: `0` when the server
 is interrupted, `2` for a runs folder or run that does not exist, a port that cannot
-be bound, or a bad argument. There is no `1`: the console checks nothing itself, and
-the work it starts reports through its own subprocesses' exit codes, in the page.
+be bound, a bad argument, or a manifest schema the parser cannot be built from. There
+is no `1`: the console checks nothing itself, and the work it starts reports through
+its own subprocesses' exit codes, in the page.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import os
 import sys
 from pathlib import Path
 
+from rubrica.artifacts import ArtifactError
 from rubrica.paths import RunPaths
 from rubrica.validate import manifest_stage_efforts
 from rubrica_console import credentials, jobs, server
@@ -69,8 +71,24 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Building the parser reads the manifest schema (--effort's choices), so a bad
+    # RUBRICA_SCHEMA_DIR fails here, before any argument is parsed. Caught for the
+    # same reason and with the same wording as rubrica's own cli.main: without it an
+    # ArtifactError escapes as a traceback and exit 1, a code the console never uses.
+    # ArtifactError is the schema missing or not JSON; KeyError and TypeError a
+    # schema whose effort enum has moved or changed shape; OSError an unreadable file.
     try:
-        args = _parser().parse_args(argv)
+        parser = _parser()
+    except (ArtifactError, OSError, KeyError, TypeError) as exc:
+        print(
+            f"error: cannot build the command-line parser: {type(exc).__name__}: {exc}. "
+            "--effort's choices are read from the manifest schema; check "
+            "RUBRICA_SCHEMA_DIR and that the rubrica package's schema/ data is installed",
+            file=sys.stderr,
+        )
+        return USAGE
+    try:
+        args = parser.parse_args(argv)
     except SystemExit as exc:
         # argparse exits 0 for --help and 2 for a usage error; keep both, and
         # always return an int rather than letting SystemExit escape a caller.
