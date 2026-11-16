@@ -35,6 +35,11 @@ and the `policy` that governed digesting and
 exclusion, so a later reader can see what the survey was told to look for
 without re-deriving it. `excluded` records every path the survey chose not to
 catalogue, with a `reason` (`gitignored`, `binary`, `duplicate`, and the like).
+One of those reasons, `symlink_outside_root`, marks a symlinked file whose target
+lies outside the corpus root it was found in (or cannot be resolved at all): its
+target is never opened, so a link to a credentials file elsewhere on the machine
+is recorded as declined rather than read. A symlink to a file inside the root is
+kept and judged like any other file, by its target's location as well as its own.
 
 Fields worth knowing: `candidates[].origin` (`corpus`, `container_element`, or
 `projection` — a candidate exploded out of a container file, or manufactured

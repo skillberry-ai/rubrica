@@ -37,7 +37,7 @@ from rubrica.intake import _unique_artifact_id, classify, slug
 from rubrica.manifest import utc_stamp
 from rubrica.paths import RunPaths
 
-# Same eight strings as catalogue-0.1.json's exclusion_reason enum. Kept here
+# Same nine strings as catalogue-0.1.json's exclusion_reason enum. Kept here
 # too because walk_corpus emits them and a test pins the two lists identical --
 # they drifted in exactly this shape once before, for validate.CONFIG_KINDS.
 EXCLUSION_REASONS: tuple[str, ...] = (
@@ -49,6 +49,7 @@ EXCLUSION_REASONS: tuple[str, ...] = (
     "duplicate",
     "unreadable",
     "operator_excluded",
+    "symlink_outside_root",
 )
 
 DEFAULT_MAX_CANDIDATES = 500
@@ -221,6 +222,7 @@ def walk_corpus(
             raise UsageError(f"cannot read corpus root: {root} ({exc})") from exc
 
         ignore_patterns = _gitignore_patterns(root)
+        resolved_root = _resolve_or_none(root)
 
         for path in walked:
             relative = path.relative_to(root).as_posix()
@@ -228,6 +230,26 @@ def walk_corpus(
 
             def drop(reason: str, rel: str = relative) -> None:
                 excluded.append({"path": rel, "reason": reason})
+
+            # rglob does not descend into a symlinked folder, but is_file()
+            # follows a symlinked *file*, so a link in the corpus pointing at
+            # ~/.ssh/id_rsa or a credentials file was read, hashed and
+            # catalogued as evidence. A link whose target lands outside this
+            # root is declined before anything opens it -- recorded, not
+            # dropped silently, because the corpus owner may have meant it.
+            # A link to a file inside the root is kept, but judged by where its
+            # target sits as well as by its own spelling, so `notes -> .git/config`
+            # is still `vcs_metadata`.
+            if path.is_symlink():
+                target = _resolve_or_none(path)
+                if (
+                    target is None
+                    or resolved_root is None
+                    or not target.is_relative_to(resolved_root)
+                ):
+                    drop("symlink_outside_root")
+                    continue
+                parts |= set(target.relative_to(resolved_root).parts)
 
             if any(_is_vcs_name(part) for part in parts):
                 drop("vcs_metadata")
@@ -247,6 +269,18 @@ def walk_corpus(
             _keep_or_drop(path, relative, kept, excluded, seen, lockfile_checked=True)
 
     return kept, excluded
+
+
+def _resolve_or_none(path: Path) -> Path | None:
+    """`path` with every symlink followed, or None when that cannot be done.
+
+    None (a loop, a vanished target) is treated by the caller as a target it
+    cannot place inside the root, which is the safe side to fail on.
+    """
+    try:
+        return Path(path).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
 
 
 def _keep_or_drop(
@@ -314,6 +348,11 @@ def _seed_roots(seeds: Sequence[Path]) -> list[tuple[Path, list[Path] | None]]:
             continue
         if not seed.is_file():
             raise UsageError(f"corpus path is neither a file nor a directory: {seed}")
+        if seed.is_symlink():
+            target = _resolve_or_none(seed)
+            if target is None:
+                raise UsageError(f"cannot resolve corpus file symlink: {seed}")
+            seed = target
         try:
             with seed.open("rb"):
                 pass
