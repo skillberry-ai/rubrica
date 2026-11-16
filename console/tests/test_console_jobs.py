@@ -769,3 +769,100 @@ def test_each_dispatch_in_a_job_keeps_its_own_member_and_log(tmp_path, fake, int
     assert "propose:r1-b01" in job.members
     assert "propose#2:r1-b01" in job.members
     assert job.members["propose#2:r1-b01"].id.split(":").pop() == "r1-b01"
+
+
+# -- limits: only a whole positive number reaches `rubrica` ---------------------
+
+# Each of these once escaped `str(int(value))` as a 500, or (2.9, True) passed
+# silently as a number nobody typed, which decisions.md then recorded.
+_BAD_LIMITS = [
+    "abc",
+    "3.5",
+    "",
+    " ",
+    "-2",
+    "0",
+    "²",  # str.isdigit() is true for it; int() is not
+    2.9,
+    float("nan"),
+    float("inf"),
+    True,
+    False,
+    0,
+    -1,
+    [4],
+    {"n": 4},
+]
+
+
+def _capture_human(console, monkeypatch) -> list[list[str]]:
+    seen: list[list[str]] = []
+    monkeypatch.setattr(console, "_human", lambda name, title, commands: seen.extend(commands))
+    return seen
+
+
+@pytest.mark.parametrize("value", _BAD_LIMITS, ids=repr)
+def test_set_limit_refuses_anything_but_a_whole_positive_number(
+    tmp_path, fake, intake_run, monkeypatch, value
+):
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    seen = _capture_human(console, monkeypatch)
+    with pytest.raises(ConsoleError, match="max_scenarios must be a whole number"):
+        console.set_limit(intake_run.root.name, {"max_scenarios": value}, "raise it")
+    assert seen == []
+
+
+@pytest.mark.parametrize("value", [4, "4", " 4 "], ids=repr)
+def test_set_limit_passes_a_whole_number_to_rubrica_as_digits(
+    tmp_path, fake, intake_run, monkeypatch, value
+):
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    seen = _capture_human(console, monkeypatch)
+    console.set_limit(intake_run.root.name, {"max_scenarios": value}, "raise it")
+    [args] = seen
+    assert args[args.index("--max-scenarios") + 1] == "4"
+
+
+def test_set_limit_with_a_string_number_changes_the_manifest(tmp_path, fake, intake_run):
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    job = console.set_limit(intake_run.root.name, {"max_rounds": "4"}, "one more round")
+    assert job.status == SUCCEEDED, job.message
+    manifest = json.loads(intake_run.manifest.read_text())
+    assert manifest["limits"]["max_rounds"] == 4
+
+
+@pytest.mark.parametrize("key", ["max_rounds", "max_scenarios"])
+@pytest.mark.parametrize("value", ["abc", 2.9, True, 0, float("nan"), [3]], ids=repr)
+def test_create_run_refuses_a_limit_that_is_not_a_whole_positive_number(
+    tmp_path, fake, monkeypatch, key, value
+):
+    toy = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "toy"
+    console = _console(tmp_path, tmp_path / "runs", fake)
+    with pytest.raises(ConsoleError, match=f"{key} must be a whole number"):
+        console.create_run(
+            {
+                "mode": "survey",
+                "target_name": "toy",
+                "target_interface": "http",
+                "corpus": [str(toy)],
+                key: value,
+            }
+        )
+    assert console.list_runs() == []
+
+
+def test_create_run_passes_a_string_limit_to_survey_as_a_number(tmp_path, fake):
+    toy = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "toy"
+    console = _console(tmp_path, tmp_path / "runs", fake)
+    name, _, _ = console.create_run(
+        {
+            "mode": "survey",
+            "target_name": "toy",
+            "target_interface": "http",
+            "corpus": [str(toy)],
+            "max_rounds": "4",
+            "max_scenarios": 7,
+        }
+    )
+    catalogue = json.loads(console.run_paths(name).catalogue.read_text())
+    assert catalogue["request"]["limits"] == {"max_rounds": 4, "max_scenarios": 7}

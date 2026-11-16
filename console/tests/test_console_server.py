@@ -936,3 +936,63 @@ def test_a_bad_budget_over_http_is_a_409_and_starts_nothing(console, run):
         )
     assert status == 409
     assert b"a budget is a positive number of dollars" in data
+
+
+# -- set-limit over HTTP ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "limits",
+    [
+        {"max_scenarios": "abc"},
+        {"max_scenarios": "3.5"},
+        {"max_scenarios": 2.9},
+        {"max_scenarios": True},
+        {"max_scenarios": 0},
+        {"max_scenarios": -3},
+        {"max_scenarios": [4]},
+        {"max_scenarios": 1e400},  # JSON's Infinity once escaped as OverflowError
+    ],
+    ids=repr,
+)
+def test_set_limit_with_a_bad_value_is_a_409_naming_the_limit(console, run, limits):
+    before = run.manifest.read_bytes()
+    with _serving(console) as port:
+        status, _, body = _req(
+            port, "POST", f"/api/runs/{run.root.name}/set-limit", {"limits": limits, "reason": "r"}
+        )
+    assert status == 409, body
+    assert b"max_scenarios must be a whole number" in body
+    assert run.manifest.read_bytes() == before
+
+
+@pytest.mark.parametrize("limits", [["max_scenarios", 4], "max_scenarios=4", 4], ids=repr)
+def test_set_limit_with_limits_that_are_not_an_object_is_a_409(console, run, limits):
+    with _serving(console) as port:
+        status, _, body = _req(
+            port, "POST", f"/api/runs/{run.root.name}/set-limit", {"limits": limits, "reason": "r"}
+        )
+    assert status == 409, body
+    assert b"limits must be an object" in body
+
+
+@pytest.mark.parametrize("value", ["4", 4], ids=repr)
+def test_set_limit_over_http_reaches_rubrica_as_digits(console, run, monkeypatch, value):
+    seen: list[list[str]] = []
+
+    def human(name, title, commands):
+        seen.extend(commands)
+        return Job(id="j", run=name, step="human", title=title, kind="gate", status="succeeded")
+
+    monkeypatch.setattr(console, "_human", human)
+    with _serving(console) as port:
+        status, _, body = _req(
+            port,
+            "POST",
+            f"/api/runs/{run.root.name}/set-limit",
+            {"limits": {"max_scenarios": value}, "reason": "raise it"},
+        )
+    assert status == 200, body
+    [args] = seen
+    assert args[0] == "set-limit"
+    assert args[args.index("--max-scenarios") + 1] == "4"
