@@ -389,7 +389,26 @@ def subcommand_names() -> tuple[str, ...]:
     return tuple(name for name, _ in SUBCOMMANDS)
 
 
-def _run_dir(raw: str) -> RunPaths:
+def _refuse_blank(flag: str, *values: str | None) -> None:
+    """Raise a UsageError if any value given for a path flag is empty or blank.
+
+    Path("") is Path("."), so once a value is converted nothing downstream can
+    tell an unset shell variable in a caller's script ($CORPUS, $RUNS, $RUN)
+    from a deliberate "." -- and the former silently reads, or writes into,
+    whatever folder the caller happened to be in. Whitespace-only is refused
+    too: no real path is named "  ", and a value like that is a quoting mistake
+    far more often than a folder. None is not blank: an omitted optional flag is
+    each caller's own business.
+    """
+    if any(v is not None and not v.strip() for v in values):
+        raise UsageError(f"{flag} must not be empty or blank")
+
+
+def _run_dir(raw: str, flag: str = "--run") -> RunPaths:
+    # A blank --run would resolve to the current folder, which is_dir() accepts:
+    # run-summary and target-brief then wrote their HTML pages into it and
+    # exited 0, as if the caller's folder were a run.
+    _refuse_blank(flag, raw)
     root = Path(raw)
     if not root.is_dir():
         raise FileNotFoundError(f"run directory does not exist: {root}")
@@ -463,17 +482,15 @@ def main(argv: list[str] | None = None) -> int:
         # usage error or a misconfigured harness -- there is no stage to send
         # a finding back to.
         #
-        # A blank --corpus is refused here, before Path() sees it: Path("") is
-        # Path("."), so once converted survey.py cannot tell an unset $CORPUS
-        # in a caller's script from a deliberate "." -- and the former would
-        # silently catalogue whatever folder the caller happened to be in,
-        # $HOME or a repository with secrets included. Whitespace-only is
-        # refused too: no real corpus path is named "  ", and a value like
-        # that is a quoting mistake far more often than a folder.
-        if any(not p.strip() for p in args.corpus):
-            print("error: --corpus must not be empty or blank", file=sys.stderr)
-            return USAGE
+        # A blank --corpus or --runs-dir is refused here, before Path() sees
+        # it (see _refuse_blank): a blank --corpus would silently catalogue
+        # whatever folder the caller happened to be in, $HOME or a repository
+        # with secrets included, and a blank --runs-dir would write the run
+        # into it -- where a later survey of that folder catalogues the run's
+        # own files.
         try:
+            _refuse_blank("--corpus", *args.corpus)
+            _refuse_blank("--runs-dir", args.runs_dir)
             run = survey.survey(
                 corpus_roots=[Path(p) for p in args.corpus],
                 runs_dir=Path(args.runs_dir),
@@ -555,6 +572,9 @@ def main(argv: list[str] | None = None) -> int:
             ]
             if missing:
                 raise UsageError(f"intake --input needs {', '.join(missing)}")
+            # Present but blank is refused too, for survey's reason above: a
+            # blank --runs-dir would mint the run in the current folder.
+            _refuse_blank("--runs-dir", args.runs_dir)
             run = intake(
                 inputs=[Path(p) for p in args.input],
                 runs_dir=Path(args.runs_dir),
@@ -856,7 +876,7 @@ def main(argv: list[str] | None = None) -> int:
             return CLEAN
 
         if args.command == "diff-runs":
-            report = diff_runs(_run_dir(args.a), _run_dir(args.b))
+            report = diff_runs(_run_dir(args.a, "--a"), _run_dir(args.b, "--b"))
             print(json.dumps(report, indent=2, sort_keys=True))
             if not report["comparable"]:
                 # stderr, not a finding. Exit 1 means finding lines on stdout, and
