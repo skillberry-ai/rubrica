@@ -239,7 +239,8 @@ def walk_corpus(
             # dropped silently, because the corpus owner may have meant it.
             # A link to a file inside the root is kept, but judged by where its
             # target sits as well as by its own spelling, so `notes -> .git/config`
-            # is still `vcs_metadata`.
+            # is still `vcs_metadata` and `notes.md -> .env` is still `gitignored`
+            # when `.env` is.
             if path.is_symlink():
                 target = _resolve_or_none(path)
                 if (
@@ -249,7 +250,16 @@ def walk_corpus(
                 ):
                     drop("symlink_outside_root")
                     continue
-                parts |= set(target.relative_to(resolved_root).parts)
+                target_relative = target.relative_to(resolved_root)
+                parts |= set(target_relative.parts)
+                # The name-and-path checks below must see the target too, not
+                # only the link's own spelling: before this, `notes.md -> .env`
+                # catalogued a gitignored `.env`'s contents as `notes.md`, and
+                # `alias.txt -> real.md` got past `--exclude real.md`. The
+                # reason recorded is still the one an ordinary file would get.
+                spellings = [relative, target_relative.as_posix()]
+            else:
+                spellings = [relative]
 
             if any(_is_vcs_name(part) for part in parts):
                 drop("vcs_metadata")
@@ -257,13 +267,13 @@ def walk_corpus(
             if parts & _VENDOR_DIRS:
                 drop("vendored")
                 continue
-            if path.name in _LOCKFILES:
+            if any(Path(rel).name in _LOCKFILES for rel in spellings):
                 drop("lockfile")
                 continue
-            if operator_globs and _matches_any(relative, operator_globs):
+            if operator_globs and any(_matches_any(rel, operator_globs) for rel in spellings):
                 drop("operator_excluded")
                 continue
-            if ignore_patterns and _matches_any(relative, ignore_patterns):
+            if ignore_patterns and any(_matches_any(rel, ignore_patterns) for rel in spellings):
                 drop("gitignored")
                 continue
             _keep_or_drop(path, relative, kept, excluded, seen, lockfile_checked=True)

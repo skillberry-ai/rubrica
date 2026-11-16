@@ -134,3 +134,75 @@ def test_a_named_seed_that_is_a_link_is_catalogued_as_its_target(tmp_path):
         (str(outside.resolve()), "real.md")
     ]
     assert validate.validate_stage(run, "survey") == []
+
+
+# The lockfile, `--exclude` and `.gitignore` checks once looked only at the
+# link's own name, so a link was a way to smuggle a declined file's contents
+# into the catalogue under an innocent name. Each test below also surveys for
+# real and reads the catalogue text, so "excluded" means "never read into it".
+
+
+def _survey(tmp_path, root, **kwargs):
+    return survey.survey(
+        corpus_roots=[root],
+        runs_dir=tmp_path / "runs",
+        target_name="toy",
+        target_interface="mcp",
+        objective="breadth",
+        max_rounds=2,
+        max_scenarios=128,
+        now=NOW,
+        **kwargs,
+    )
+
+
+def _catalogued_paths(run):
+    return {c["path"] for c in read_json(run.catalogue)["candidates"] if c["origin"] == "corpus"}
+
+
+def test_a_link_to_a_gitignored_file_is_gitignored(tmp_path):
+    root, _ = _layout(tmp_path)
+    (root / ".gitignore").write_text(".env\n", encoding="utf-8")
+    (root / ".env").write_text(f"API_KEY={SECRET}\n", encoding="utf-8")
+    (root / "notes.md").symlink_to(root / ".env")
+    kept, excluded = survey.walk_corpus([root])
+    assert root / "notes.md" not in kept
+    assert _reasons(excluded)["notes.md"] == "gitignored"
+    assert _reasons(excluded)[".env"] == "gitignored"
+    run = _survey(tmp_path, root)
+    assert SECRET not in run.catalogue.read_text(encoding="utf-8")
+    assert "notes.md" not in _catalogued_paths(run)
+
+
+def test_a_link_to_an_operator_excluded_file_is_operator_excluded(tmp_path):
+    root, _ = _layout(tmp_path)
+    (root / "real.md").write_text(f"# Real\n\n{SECRET}\n", encoding="utf-8")
+    (root / "alias.txt").symlink_to(root / "real.md")
+    kept, excluded = survey.walk_corpus([root], operator_globs=["real.md"])
+    assert root / "alias.txt" not in kept
+    assert _reasons(excluded)["alias.txt"] == "operator_excluded"
+    assert _reasons(excluded)["real.md"] == "operator_excluded"
+
+
+def test_a_link_to_a_lockfile_is_a_lockfile(tmp_path):
+    root, _ = _layout(tmp_path)
+    (root / "package-lock.json").write_text(f'{{"token": "{SECRET}"}}\n', encoding="utf-8")
+    (root / "deps.json").symlink_to(root / "package-lock.json")
+    kept, excluded = survey.walk_corpus([root])
+    assert root / "deps.json" not in kept
+    assert _reasons(excluded)["deps.json"] == "lockfile"
+    run = _survey(tmp_path, root)
+    assert SECRET not in run.catalogue.read_text(encoding="utf-8")
+    assert "deps.json" not in _catalogued_paths(run)
+
+
+def test_a_link_to_an_ordinary_file_survives_the_name_checks(tmp_path):
+    root, _ = _layout(tmp_path)
+    (root / ".gitignore").write_text(".env\n", encoding="utf-8")
+    # The target sorts after the link, so the link is the path that claims
+    # the bytes and the target is the `duplicate` -- the link is kept.
+    (root / "zz-real.md").write_text("# Real\n", encoding="utf-8")
+    (root / "guide.md").symlink_to(root / "zz-real.md")
+    kept, excluded = survey.walk_corpus([root], operator_globs=["*.lock"])
+    assert root / "guide.md" in kept
+    assert "guide.md" not in _reasons(excluded)
