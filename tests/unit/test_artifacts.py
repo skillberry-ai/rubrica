@@ -115,3 +115,62 @@ def test_read_non_utf8_artifact_names_the_path(tmp_path):
     # produces a finding that cannot be acted on.
     with pytest.raises(ArtifactError, match=re.escape(str(path))):
         read_json(path)
+
+
+# read_json_or_none has two modes, and the split between them is the point: the
+# default turns only ArtifactError into None, so a checker over a chmod-000 file
+# still reaches cli.py and exits 2 instead of reporting it as absent; quiet=True
+# turns any failure into None, because a report must say what it could not read
+# rather than crash. Each test below pins one side of that split.
+
+_BOTH_MODES = pytest.mark.parametrize("quiet", [False, True], ids=["default", "quiet"])
+
+_running_as_root = hasattr(os, "geteuid") and os.geteuid() == 0
+
+
+@_BOTH_MODES
+def test_read_json_or_none_returns_none_for_a_missing_file(tmp_path, quiet):
+    assert artifacts.read_json_or_none(tmp_path / "absent.json", quiet=quiet) is None
+
+
+@_BOTH_MODES
+def test_read_json_or_none_returns_none_for_malformed_json(tmp_path, quiet):
+    path = tmp_path / "bad.json"
+    path.write_text("{not json", encoding="utf-8")
+    assert artifacts.read_json_or_none(path, quiet=quiet) is None
+
+
+@_BOTH_MODES
+def test_read_json_or_none_returns_none_for_bytes_that_are_not_utf_8(tmp_path, quiet):
+    path = tmp_path / "binary.json"
+    path.write_bytes(b"\xff\xfe\x00bogus")
+    assert artifacts.read_json_or_none(path, quiet=quiet) is None
+
+
+@_BOTH_MODES
+def test_read_json_or_none_returns_the_contents_of_a_good_file(tmp_path, quiet):
+    path = tmp_path / "good.json"
+    write_json(path, {"a": [1, 2], "b": None})
+    assert artifacts.read_json_or_none(path, quiet=quiet) == {"a": [1, 2], "b": None}
+
+
+@pytest.fixture
+def unreadable_file(tmp_path):
+    if _running_as_root:
+        pytest.skip("root reads a chmod-000 file, so it is not unreadable")
+    path = tmp_path / "locked.json"
+    write_json(path, {"a": 1})
+    path.chmod(0)
+    yield path
+    path.chmod(0o644)  # so tmp_path cleanup can remove it
+
+
+def test_read_json_or_none_lets_an_unreadable_file_raise_by_default(unreadable_file):
+    """Treating a permission failure as absent is how a checker reports
+    fabricated findings against the wrong artifact; it must reach cli.py."""
+    with pytest.raises(PermissionError):
+        artifacts.read_json_or_none(unreadable_file)
+
+
+def test_read_json_or_none_returns_none_for_an_unreadable_file_when_quiet(unreadable_file):
+    assert artifacts.read_json_or_none(unreadable_file, quiet=True) is None

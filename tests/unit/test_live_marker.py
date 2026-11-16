@@ -1,10 +1,12 @@
 """The live marker exists, is registered, and is skipped by default.
 
-A live test is one that dispatches a model. It cannot run in CI, and a marker
-nobody can find is a suite that does not exist -- so this file pins that the
-marker is registered (an unregistered marker is a ruff/pytest warning, not an
-error, and would silently do nothing) and that the skip message names the
-command that runs it.
+A live test asserts against a committed recording of real model output, so
+running one is free; it is re-recording that dispatches a model and costs
+money. Live tests are kept out of `make test`, and a marker nobody can find is
+a suite that does not exist -- so this file pins that the marker is
+registered (an unregistered marker is a ruff/pytest warning, not an error, and
+would silently do nothing) and that the skip message names the command that
+runs it.
 """
 
 from __future__ import annotations
