@@ -53,13 +53,14 @@ from pathlib import Path
 
 from rubrica.artifacts import ArtifactError, read_json, sha256_of, write_json
 from rubrica.findings import Finding
+from rubrica.parts import read_checked
 from rubrica.paths import RunPaths, list_json
 from rubrica.refs import drivable_cells
 
 # (RunPaths attribute, the payload keys inside that partial) in the order the
 # passes run, so a run missing several partials names the earliest pass first --
 # the one a repair should start from, the same ordering _readable_targets uses.
-# The keys are checked, not merely documented: see _payload_keys below.
+# The keys are checked, not merely documented: see parts.payload_keys.
 _SINGLETON_PARTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("capabilities_part", ("capabilities",)),
     ("outcomes_part", ("outcomes",)),
@@ -69,113 +70,14 @@ _SINGLETON_PARTS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-# The read-failure sentinel, and specifically *not* None. `null` is a legitimate
-# JSON document and read_json is annotated `-> Any` and rejects no shape, so it
-# returns None for a partial containing `null` -- which made `document is not None`
-# mean two different things at once. Measured: with 01-gaps.json set to `null` the
-# payload-key check was skipped entirely and the assembly raised `KeyError:
-# 'gaps_part'`, which cli.py's catch-all reported against the run root, naming a
-# RunPaths attribute rather than any artifact. An object() cannot be read off disk.
-_UNREADABLE = object()
-
-
-def _read_part(path: Path, out: list[Finding]) -> object:
-    """One partial's parsed JSON, or _UNREADABLE with a finding naming *that* partial.
-
-    Naming the right artifact is the third rule of the exit-code contract, learned
-    the hard way here: check-refs over an unreadable 01-claims/ once reported four
-    fabricated `no such claim` findings against a world model that was correct.
-    """
-    try:
-        return read_json(path)
-    except ArtifactError as exc:
-        out.append(Finding(path, "reconcile", "", str(exc)))
-        return _UNREADABLE
-
-
-# JSON's own type names, because the finding is read next to the JSON file it
-# names: `found NoneType` and `found list` describe Python to someone looking at
-# `null` and `[...]` on disk.
-_JSON_TYPES: dict[type, str] = {
-    type(None): "null",
-    bool: "boolean",
-    int: "number",
-    float: "number",
-    str: "string",
-    list: "array",
-}
-
-
-def _json_type(document: object) -> str:
-    return _JSON_TYPES.get(type(document), type(document).__name__)
-
-
-def _payload_keys(path: Path, keys: tuple[str, ...], document: object, out: list[Finding]) -> bool:
-    """Whether `document` is an object carrying every key declared for it.
-
-    A partial that is present and valid JSON but has no payload key used to reach
-    the assembly below and raise KeyError there. cli.py's catch-all turned that
-    into an exit-1 `[internal]` finding against the *run root*: two of the three
-    exit-code rules held, and the third -- name the right artifact -- did not. That
-    is the rule this repo learned when check-refs reported four fabricated `no such
-    claim` findings against a world model that was correct, so the keys the table
-    declares are checked here rather than carried and discarded.
-
-    The isinstance guard is part of the same check and not a separate one: a
-    partial whose top level is anything but an object has no payload key either.
-    Two of those shapes answer `key not in document` correctly (a list, a string)
-    and two cannot answer it at all -- `"gaps" not in 5` and `"gaps" not in None`
-    both raise TypeError -- and the guard is what makes all four one finding
-    instead of one finding and three tracebacks. It is the shape refs._as_list
-    exists for, one layer up.
-
-    It checks the *shape of the document*, never the type of what a payload key
-    holds: `{"capabilities": 5}` passes here and is layer 1's to reject.
-
-    The return value is defensive rather than load-bearing today, and measurably so:
-    returning True unconditionally leaves every test green, because the finding is
-    already recorded and seal() returns before it touches `parts`. It keeps an
-    incomplete document out of `parts` anyway, so a future caller that stops
-    returning early cannot read a payload key this function just reported absent.
-    """
-    if not isinstance(document, dict):
-        out.append(
-            Finding(
-                path,
-                "reconcile",
-                "",
-                f"expected a JSON object with {' and '.join(sorted(keys))}, found "
-                f"{_json_type(document)}",
-            )
-        )
-        return False
-    missing = [key for key in keys if key not in document]
-    for key in missing:
-        out.append(
-            Finding(
-                path,
-                "reconcile",
-                "",
-                f"no {key!r} key; whatever wrote this artifact did not record its "
-                "payload, so there is nothing to assemble from it",
-            )
-        )
-    return not missing
-
-
 def _read_checked(path: Path, keys: tuple[str, ...], out: list[Finding]) -> dict | None:
     """One artifact that is readable *and* carries its payload keys, else None.
 
-    The one door every artifact the seal reads comes through, so the two halves
-    cannot drift apart: a read failure and a document that carries no payload key
-    are different findings but the same outcome, and folding them into a single
-    `None` return means a caller cannot use one artifact while forgetting to check
-    the other. That is the shape the `null` case exploited.
+    The door is parts.read_checked, shared with triage-seal; this seal passes its
+    own check label and no nested spec -- what a payload key holds is layer 1's
+    to reject here, for the reason this module's docstring gives.
     """
-    document = _read_part(path, out)
-    if document is _UNREADABLE:
-        return None
-    return document if _payload_keys(path, keys, document, out) else None
+    return read_checked(path, keys, out, check="reconcile")
 
 
 def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, list[Finding]]:
