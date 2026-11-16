@@ -39,7 +39,10 @@ One of those reasons, `symlink_outside_root`, marks a symlinked file whose targe
 lies outside the corpus root it was found in (or cannot be resolved at all): its
 target is never opened, so a link to a credentials file elsewhere on the machine
 is recorded as declined rather than read. A symlink to a file inside the root is
-kept and judged like any other file, by its target's location as well as its own.
+kept and judged like any other file, by its target's location as well as its own:
+the version-control, vendored, lockfile, `--exclude` and `.gitignore` checks each
+look at both the link's path and its target's path within the root, and the link
+is dropped with that check's reason if either matches.
 
 Fields worth knowing: `candidates[].origin` (`corpus`, `container_element`, or
 `projection` — a candidate exploded out of a container file, or manufactured
