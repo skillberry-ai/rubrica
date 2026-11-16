@@ -462,6 +462,17 @@ def main(argv: list[str] | None = None) -> int:
         # a corpus, not a run artifact, so every failure here really is a
         # usage error or a misconfigured harness -- there is no stage to send
         # a finding back to.
+        #
+        # A blank --corpus is refused here, before Path() sees it: Path("") is
+        # Path("."), so once converted survey.py cannot tell an unset $CORPUS
+        # in a caller's script from a deliberate "." -- and the former would
+        # silently catalogue whatever folder the caller happened to be in,
+        # $HOME or a repository with secrets included. Whitespace-only is
+        # refused too: no real corpus path is named "  ", and a value like
+        # that is a quoting mistake far more often than a folder.
+        if any(not p.strip() for p in args.corpus):
+            print("error: --corpus must not be empty or blank", file=sys.stderr)
+            return USAGE
         try:
             run = survey.survey(
                 corpus_roots=[Path(p) for p in args.corpus],

@@ -294,3 +294,75 @@ def test_the_cli_exits_2_on_a_vcs_folder_seed(tmp_path, capsys):
     assert code == 2
     assert capsys.readouterr().out == ""
     assert not (tmp_path / "runs").exists()
+
+
+def _cli_survey(corpus, runs):
+    from rubrica import cli
+
+    return cli.main(
+        [
+            "survey",
+            "--corpus",
+            corpus,
+            "--runs-dir",
+            str(runs),
+            "--target-name",
+            "toy",
+            "--target-interface",
+            "mcp",
+            "--objective",
+            "breadth",
+        ]
+    )
+
+
+# Path("") is Path("."), so a blank --corpus (an unset $CORPUS in a caller's
+# script) used to catalogue whatever folder the caller ran from and exit 0.
+# The cwd here is a real tree, so the old behaviour would mint a run.
+@pytest.mark.parametrize("blank", ["", "  ", "\t"])
+def test_a_blank_corpus_is_a_usage_error_and_mints_no_run(tmp_path, capsys, monkeypatch, blank):
+    root = _tree(tmp_path)
+    monkeypatch.chdir(root)
+    runs = tmp_path / "runs"
+    assert _cli_survey(blank, runs) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--corpus" in captured.err
+    assert not runs.exists()
+
+
+def test_a_blank_corpus_beside_a_real_one_is_still_refused(tmp_path, capsys, monkeypatch):
+    from rubrica import cli
+
+    root = _tree(tmp_path)
+    monkeypatch.chdir(root)
+    runs = tmp_path / "runs"
+    code = cli.main(
+        [
+            "survey",
+            "--corpus",
+            str(root),
+            "--corpus",
+            "",
+            "--runs-dir",
+            str(runs),
+            "--target-name",
+            "toy",
+            "--target-interface",
+            "mcp",
+            "--objective",
+            "breadth",
+        ]
+    )
+    assert code == 2
+    assert capsys.readouterr().out == ""
+    assert not runs.exists()
+
+
+def test_a_dot_corpus_still_walks_the_current_folder(tmp_path, capsys, monkeypatch):
+    root = _tree(tmp_path)
+    monkeypatch.chdir(root)
+    assert _cli_survey(".", tmp_path / "runs") == 0
+    run_dir = Path(capsys.readouterr().out.strip())
+    catalogue = json.loads((run_dir / "00-catalogue.json").read_text(encoding="utf-8"))
+    assert catalogue["candidates"]
