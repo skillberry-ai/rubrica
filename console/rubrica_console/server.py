@@ -36,7 +36,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from rubrica import brief, summary, survey, target_brief, validate, waivers
 from rubrica.paths import RunPaths
@@ -710,6 +710,8 @@ class Handler(BaseHTTPRequestHandler):
         """
         root = run.root.resolve()
         target = root.joinpath(*rest).resolve()
+        if target.is_relative_to(root) and target.is_dir():
+            return self._folder(root, target, run.root.name, head)
         if not target.is_relative_to(root) or not target.is_file():
             return self._json(HTTPStatus.NOT_FOUND, {"error": "no such file in this run"}, head)
         body = target.read_bytes()
@@ -721,6 +723,48 @@ class Handler(BaseHTTPRequestHandler):
             HTTPStatus.OK,
             body,
             content_type,
+            head,
+            extra_headers={"Content-Security-Policy": "sandbox"},
+        )
+
+    def _folder(self, root: Path, target: Path, name: str, head: bool):
+        """A folder under the run directory, as a small listing page built here.
+
+        run-summary links `04-instances/<id>/` and `06-suite/<id>/`. Opened from
+        disk a browser lists the folder itself; through the console nothing would,
+        so those links answered 404. The page is built from names alone, each one
+        escaped, and links are absolute paths under this run so they resolve with
+        or without a trailing slash. An entry that resolves outside the run (a
+        symlink pointing out) is left off the list, since `_file` would refuse it
+        anyway. Served under the same sandbox policy as a run file: no script runs
+        in it whatever a file name contains.
+        """
+        rel = target.relative_to(root).parts
+        base = "/runs/" + "/".join(quote(p, safe="") for p in (name, *rel))
+        try:
+            entries = sorted(target.iterdir(), key=lambda e: e.name)
+        except OSError:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": "cannot read this folder"}, head)
+        items = []
+        for entry in entries:
+            resolved = entry.resolve()
+            if not resolved.is_relative_to(root):
+                continue
+            is_dir = resolved.is_dir()
+            if not is_dir and not resolved.is_file():
+                continue
+            href = f"{base}/{quote(entry.name, safe='')}" + ("/" if is_dir else "")
+            label = entry.name + ("/" if is_dir else "")
+            items.append(f'<li><a href="{escape(href)}">{escape(label)}</a></li>')
+        if rel:
+            up = "/runs/" + "/".join(quote(p, safe="") for p in (name, *rel[:-1])) + "/"
+            items.insert(0, f'<li><a href="{escape(up)}">../</a></li>')
+        listing = f"<ul>{''.join(items)}</ul>" if items else "<p>This folder is empty.</p>"
+        page = _text_page("/".join(rel) + "/", listing)
+        return self._send(
+            HTTPStatus.OK,
+            page.encode("utf-8"),
+            "text/html; charset=utf-8",
             head,
             extra_headers={"Content-Security-Policy": "sandbox"},
         )
