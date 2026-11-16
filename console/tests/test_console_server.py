@@ -12,11 +12,12 @@ import json
 import threading
 from contextlib import contextmanager
 from html import escape
+from pathlib import Path
 
 import pytest
 from rubrica_console import server as console_server
 from rubrica_console.cli import main
-from rubrica_console.jobs import Console
+from rubrica_console.jobs import Console, Entry, Job, Member
 
 from rubrica import brief, summary
 from tests.toy import build_toy_run
@@ -557,3 +558,98 @@ def test_the_picker_does_not_list_the_credentials_file(cred_console, tmp_path):
         _, data = _expand(port, [str(home)])
     assert [e["name"] for e in json.loads(body)["entries"]] == ["notes.txt"]
     assert not any("console-credentials" in p for p in data["files"])
+
+
+# -- the job log ---------------------------------------------------------------
+
+
+@pytest.fixture
+def log_job(console, run, tmp_path):
+    """A finished job with one entry log and one member log, put straight into
+    the console's table: the endpoint under test only reads it, and dispatching
+    a real job would need a model."""
+    entry_log = tmp_path / "entry.log"
+    entry_log.write_bytes(b"0123456789")
+    member_log = tmp_path / "member.log"
+    member_log.write_bytes(b"member says hi")
+    job = Job(
+        id="job-log-1",
+        run=run.root.name,
+        step="extract",
+        title="extract",
+        kind="stage",
+        entries=[Entry(label="first", log=str(entry_log))],
+        members={"m1": Member(id="m1", log=str(member_log))},
+    )
+    console._jobs[job.id] = job
+    return job
+
+
+def _log(port, query=""):
+    status, _, body = _req(port, "GET", f"/api/jobs/job-log-1/log{query}", token=None)
+    return status, json.loads(body)
+
+
+def test_the_job_log_reads_the_last_entry_and_follows_on_from_next(console, log_job):
+    with _serving(console) as port:
+        status, first = _log(port)
+        Path(log_job.entries[0].log).write_bytes(b"0123456789abc")
+        _, follow = _log(port, f"?offset={first['next']}")
+    assert status == 200
+    assert first == {"text": "0123456789", "next": 10}
+    assert follow == {"text": "abc", "next": 13}
+
+
+def test_the_job_log_reads_a_member_log_by_id(console, log_job):
+    with _serving(console) as port:
+        status, data = _log(port, "?member=m1")
+    assert status == 200
+    assert data["text"] == "member says hi"
+
+
+def test_an_entry_out_of_range_is_a_409(console, log_job):
+    with _serving(console) as port:
+        status, data = _log(port, "?entry=5")
+    assert status == 409
+    assert data["error"] == "no such entry in this job"
+
+
+def test_an_unknown_member_is_a_409(console, log_job):
+    with _serving(console) as port:
+        status, data = _log(port, "?member=nobody")
+    assert status == 409
+    assert data["error"] == "no such member in this job"
+
+
+@pytest.mark.parametrize("value", ["abc", "undefined", "NaN", "1.5"])
+def test_a_non_numeric_entry_is_a_409_naming_it_not_a_500(console, log_job, value):
+    with _serving(console) as port:
+        status, data = _log(port, f"?entry={value}")
+    assert status == 409
+    assert data["error"] == "entry must be a whole number"
+
+
+@pytest.mark.parametrize("value", ["abc", "undefined", "NaN", "1.5"])
+def test_a_non_numeric_offset_is_a_409_naming_it_not_a_500(console, log_job, value):
+    with _serving(console) as port:
+        status, data = _log(port, f"?offset={value}")
+    assert status == 409
+    assert data["error"] == "offset must be a whole number"
+
+
+def test_a_missing_log_file_reads_as_empty_text(console, log_job):
+    Path(log_job.entries[0].log).unlink()
+    with _serving(console) as port:
+        status, data = _log(port)
+    assert status == 200
+    assert data == {"text": "", "next": 0}
+
+
+@pytest.mark.parametrize("offset", ["999", "-3"])
+def test_an_offset_outside_the_file_reads_the_tail_chunk(console, log_job, monkeypatch, offset):
+    # A small chunk so "the tail" is distinguishable from "the whole file".
+    monkeypatch.setattr(console_server, "_LOG_CHUNK", 4)
+    with _serving(console) as port:
+        status, data = _log(port, f"?offset={offset}")
+    assert status == 200
+    assert data == {"text": "6789", "next": 10}
