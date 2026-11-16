@@ -56,12 +56,25 @@ release_notes_heading() {
 # accepted cost, because the real remedy is upstream and docs/releasing.md already
 # states it: "write the subject you would want to read there." A clipped bullet is
 # a cosmetic defect; a live pointer to an unrelated public issue is a wrong one.
+#
+# No `\b` anywhere in these expressions: macOS /usr/bin/sed (BSD) does not support
+# it, so on a Mac every `\b` pattern silently matched nothing and the spelled
+# citations reached CHANGELOG.md, while CI on GNU sed never saw it. A word boundary
+# is spelled out instead -- `(^|[^[:alnum:]_])` before, `([^[:alnum:]_]|$)` after,
+# both put back -- which behaves the same under both seds. Because the trailing
+# group consumes the character after the number, two citations separated by one
+# space would overlap under `g`, so the spelled forms loop (`:i`/`ti`, `:p`/`tp`)
+# one deletion at a time instead; each pass removes text, so the loop ends.
 _release_notes_scrub_citations() {
     printf '%s' "$1" | sed -E \
         -e 's/\(#[0-9]+\)//g' \
-        -e "s/#[0-9]+'s\\b//g" \
-        -e 's/\b[Ii]ssues?[[:space:]]+#?[0-9]+\b//g' \
-        -e 's/\bPR[[:space:]]+#[0-9]+\b//g' \
+        -e "s/#[0-9]+'s([^[:alnum:]_]|\$)/\\1/g" \
+        -e ':i' \
+        -e 's/(^|[^[:alnum:]_])[Ii]ssues?[[:space:]]+#?[0-9]+([^[:alnum:]_]|$)/\1\2/' \
+        -e 'ti' \
+        -e ':p' \
+        -e 's/(^|[^[:alnum:]_])PR[[:space:]]+#[0-9]+([^[:alnum:]_]|$)/\1\2/' \
+        -e 'tp' \
         -e 's/#[0-9]+//g' \
         -e 's/[[:space:]]+,/,/g' \
         -e 's/,([[:space:]]*,)+/,/g' \

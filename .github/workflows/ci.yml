@@ -76,6 +76,29 @@ jobs:
       - name: Skill contracts
         run: uv run --extra dev rubrica check-skills
 
+  # The release-notes library on BSD sed. scripts/lib/release-notes.sh shells out
+  # to sed, and `make release` is run from a maintainer's Mac, where /usr/bin/sed is
+  # BSD; `check` above runs on GNU sed only. Measured: the citation scrub once used
+  # `\b`, which BSD sed does not support, so on a Mac "issue N" and "PR #N" reached
+  # CHANGELOG.md with every CI job green. Only that module runs here -- it is the
+  # one whose behaviour depends on which sed is installed -- and, like `pre-commit`,
+  # it is not a required check unless the ruleset is changed to make it one.
+  release-notes-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: uv sync --extra dev --locked
+
+      - name: Release-notes tests on BSD sed
+        run: uv run --extra dev pytest -q tests/unit/test_release_notes.py
+
   # The pre-commit hooks over the whole tree. Its own job, not a step in `check`,
   # and the split is the point: the default-branch ruleset requires `check` and
   # `DCO` by name, so a step there would make the hooks a fourth gate, which
