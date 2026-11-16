@@ -123,7 +123,7 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
     # AttributeError against the run root.
     #
     # No element type on the annotation, matching every other payload value here:
-    # _payload_keys checks the shape of the *document* and never the type of what a
+    # parts.payload_keys checks the shape of the *document* and never the type of what a
     # payload key holds, so `{"services": 5}` reaches this line and is layer 1's to
     # reject, exactly as `{"capabilities": 5}` is.
     services: list | None = None
