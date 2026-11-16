@@ -412,8 +412,16 @@ class Handler(BaseHTTPRequestHandler):
             raise ConsoleError(f"cannot list {target}: {exc}") from exc
         for child in children:
             # Dot-entries are hidden unless asked for, like a file manager; the
-            # credentials file is never listed either way.
-            if (child.name.startswith(".") and not hidden) or child.resolve() == secret:
+            # credentials file is never listed either way, and nor is VCS metadata
+            # (`survey._VCS_DIRS`). A ticked `.git` becomes a survey root, and
+            # survey's VCS filter only looks at path parts *below* a root, so it
+            # would catalogue git config, which can hold a remote URL with a token.
+            # This matches `_expand`'s `shown()`.
+            if (
+                (child.name.startswith(".") and not hidden)
+                or child.name in survey._VCS_DIRS
+                or child.resolve() == secret
+            ):
                 continue
             try:
                 is_dir = child.is_dir()
