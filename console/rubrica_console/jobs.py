@@ -63,6 +63,27 @@ class ConsoleError(Exception):
     """A request the console refuses: shown to the human, never a crash."""
 
 
+def _whole_positive(key: str, value: object) -> str:
+    """A limit as the digits `rubrica` is given, or a ConsoleError naming it.
+
+    Only an int or a string of digits is a limit. `int()` alone was the check
+    before, and it was both too loose and too strict: 2.9 and True passed as 2
+    and 1, so decisions.md recorded a number nobody typed, while "abc", NaN or a
+    list escaped as a 500 with a traceback instead of a refusal the human reads.
+    """
+    if isinstance(value, bool):
+        number = None
+    elif isinstance(value, int):
+        number = value
+    elif isinstance(value, str) and value.strip().isascii() and value.strip().isdigit():
+        number = int(value.strip())
+    else:
+        number = None
+    if number is None or number < 1:
+        raise ConsoleError(f"{key} must be a whole number of at least 1, not {value!r}")
+    return str(number)
+
+
 class _Stop(Exception):
     """Internal: a recipe op ended the job (findings, halt, or cancel)."""
 
@@ -1207,7 +1228,7 @@ class Console:
         for key, value in limits.items():
             if key not in flags:
                 raise ConsoleError(f"unknown limit {key}")
-            args += [flags[key], str(int(value))]
+            args += [flags[key], _whole_positive(key, value)]
         if len(args) == 6:
             raise ConsoleError("no limit given")
         return self._human(name, "Change a limit", [args])
@@ -1295,8 +1316,8 @@ class Console:
             if spec.get(key):
                 args += [f"--{key.replace('_', '-')}", spec[key]]
         for key in ("max_rounds", "max_scenarios"):
-            if spec.get(key):
-                args += [f"--{key.replace('_', '-')}", str(int(spec[key]))]
+            if spec.get(key) not in (None, ""):
+                args += [f"--{key.replace('_', '-')}", _whole_positive(key, spec[key])]
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         # bandit B603 -- the same list-form `rubrica` call as _cli; the user's target
         # name and input paths arrive as single arguments, never through a shell.

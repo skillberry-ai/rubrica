@@ -846,7 +846,10 @@ class Handler(BaseHTTPRequestHandler):
                 body.get("reason", ""),
             )
         elif action == ["set-limit"]:
-            limits = {k: v for k, v in (body.get("limits") or {}).items() if v not in (None, "")}
+            raw = body.get("limits") or {}
+            if not isinstance(raw, dict):
+                raise ConsoleError("limits must be an object of limit names to numbers")
+            limits = {k: v for k, v in raw.items() if v not in (None, "")}
             job = c.set_limit(name, limits, body.get("reason", ""))
         else:
             raise ConsoleError("no such API path")
