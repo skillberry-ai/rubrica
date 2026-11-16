@@ -346,6 +346,25 @@ def test_deleting_a_run_removes_it_and_the_consoles_records(tmp_path, fake, inta
     assert console.jobs(name) == [] and name not in console.list_runs()
 
 
+@pytest.mark.parametrize("text", ["{not json", "[1, 2, 3]"])
+def test_a_corrupt_ledger_reads_as_an_empty_ledger(tmp_path, fake, intake_run, text):
+    # Bad JSON and a JSON list are both "no usable ledger": the console is a
+    # report, so it starts from the empty ledger rather than crashing.
+    name = intake_run.root.name
+    home = tmp_path / "lab" / "console" / name
+    home.mkdir(parents=True)
+    (home / "ledger.json").write_text(text, encoding="utf-8")
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    assert console.ledger_view(name) == {
+        "reseeded": [],
+        "failed": {},
+        "accepted": [],
+        "accepted_findings": [],
+        "attempts": {},
+        "used": {},
+    }
+
+
 def test_a_run_with_a_job_going_is_not_deleted(tmp_path, fake, intake_run, monkeypatch):
     monkeypatch.setenv("FAKE_SLEEP", "30")
     console = _console(tmp_path, intake_run.root.parent, fake)
