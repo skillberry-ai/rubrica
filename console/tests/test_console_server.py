@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import socket
 import threading
 from contextlib import contextmanager
 from html import escape
@@ -111,6 +112,51 @@ def test_a_step_id_with_a_slash_reaches_the_api_as_one_segment(console, run):
     # than reporting "no such API path".
     assert status == 409
     assert b"no open findings" in body
+
+
+def _raw_post(port, content_length: str) -> bytes:
+    """POST with a hand-written Content-Length, over a bare socket.
+
+    `http.client` computes the header itself, so it cannot send a bad one. The
+    short timeout makes a server that waits on the body fail the test (as
+    `TimeoutError`) instead of stalling the suite.
+    """
+    with socket.create_connection(("127.0.0.1", port), timeout=3) as sock:
+        sock.sendall(
+            (
+                "POST /api/runs/x/delete HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{port}\r\n"
+                f"X-Rubrica-Token: {TOKEN}\r\n"
+                f"Content-Length: {content_length}\r\n"
+                "\r\n"
+            ).encode()
+        )
+        # No body follows, and the socket stays open: a server that reads
+        # "until the client closes" would block here.
+        reply = b""
+        while b"\r\n\r\n" not in reply:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            reply += chunk
+    return reply
+
+
+@pytest.mark.parametrize("bad", ["abc", "-5", "+5", "1_0", "\u0665"])
+def test_a_bad_content_length_is_refused_promptly(console, bad):
+    with _serving(console) as port:
+        reply = _raw_post(port, bad)
+    status_line = reply.split(b"\r\n", 1)[0]
+    # A 409 from ConsoleError, like an oversized body -- not a 500, not a hang.
+    assert status_line.startswith(b"HTTP/1.0 409") or status_line.startswith(b"HTTP/1.1 409"), reply
+
+
+def test_a_valid_content_length_still_reads_the_body(console, run):
+    # The guard must not refuse what `http.client` sends for an ordinary request.
+    with _serving(console) as port:
+        status, _, body = _req(port, "POST", f"/api/runs/{run.root.name}/delete", {"confirm": "no"})
+    assert status == 409
+    assert b"Content-Length" not in body
 
 
 def test_gate_approval_over_http_records_the_note(console, run):

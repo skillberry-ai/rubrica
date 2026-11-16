@@ -314,8 +314,20 @@ class Handler(BaseHTTPRequestHandler):
         return {k: v[-1] for k, v in parse_qs(urlsplit(self.path).query).items()}
 
     def _body(self) -> dict:
-        length = int(self.headers.get("Content-Length") or 0)
+        raw_length = (self.headers.get("Content-Length") or "0").strip()
+        # ASCII digits only. A bare `int()` turned "abc" into a 500 with a
+        # traceback, and let "-5" past the size check into `rfile.read(-5)`,
+        # which reads until the client hangs up and so held the handler thread.
+        # `int()` also takes "+5", "1_0" and non-ASCII digits, none of which is
+        # a Content-Length a well-behaved client sends.
+        if not (raw_length.isascii() and raw_length.isdigit()):
+            # The body's extent is unknown, so the connection cannot be reused.
+            self.close_connection = True
+            raise ConsoleError("Content-Length must be a non-negative whole number")
+        length = int(raw_length)
         if length > _MAX_BODY:
+            # The unread body would be parsed as the next request on this connection.
+            self.close_connection = True
             raise ConsoleError("request body too large")
         raw = self.rfile.read(length) if length else b"{}"
         try:
