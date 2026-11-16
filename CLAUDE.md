@@ -404,7 +404,7 @@ so running them is free; *producing* a recording dispatches a model and costs
 money. They are not part of `make test`, and the skip message names the command
 that runs them.
 
-Most skills carry an `exercise.md` beside the `SKILL.md`, recording what **one**
+The single-pass skills carry an `exercise.md` beside the `SKILL.md`, recording what **one**
 real dispatch measurably did — the only behavioural evidence this project has,
 and one sample is one sample. No pass of either staged family carries one, which
 leaves both the earliest and the widest fan-out in the pipeline with no
