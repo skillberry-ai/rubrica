@@ -149,3 +149,88 @@ def test_a_shared_seen_dict_dedupes_across_two_separate_calls(tmp_path):
     assert kept1 == []
     assert excluded0 == []
     assert _reasons(excluded1)["b.md"] == "duplicate"
+
+
+# The two commonest top-level .gitignore shapes after a bare name -- `/x` tied
+# to the root and `x/` naming a folder -- once excluded nothing: `/.env` kept
+# its slash and matched no path, and `secrets/` became `secrets` and matched
+# only a *file* of that name. A bug scout's corpus with exactly those two
+# lines catalogued a `.env` holding a secret and `secrets/key.txt`.
+
+
+def _ignoring(tmp_path, ignore: str, files: list[str]):
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / ".gitignore").write_text(ignore, encoding="utf-8")
+    for i, rel in enumerate(files):
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Distinct bytes per file, so no keep is a `duplicate` drop instead.
+        path.write_text(f"file {i}: {rel}\n", encoding="utf-8")
+    kept, excluded = survey.walk_corpus([root])
+    return {p.relative_to(root).as_posix() for p in kept}, _reasons(excluded)
+
+
+def test_an_anchored_pattern_drops_only_the_root_file(tmp_path):
+    kept, reasons = _ignoring(tmp_path, "/.env\n", [".env", "sub/.env"])
+    assert reasons[".env"] == "gitignored"
+    assert "sub/.env" in kept
+    assert "sub/.env" not in reasons
+
+
+def test_an_anchored_wildcard_does_not_cross_a_folder(tmp_path):
+    """fnmatch's `*` matches `/`, so a whole-path match would drop `sub/a.env`."""
+    kept, reasons = _ignoring(tmp_path, "/*.env\n", ["a.env", "sub/a.env"])
+    assert reasons["a.env"] == "gitignored"
+    assert "sub/a.env" in kept
+
+
+def test_a_folder_pattern_drops_every_file_under_that_folder_at_any_depth(tmp_path):
+    kept, reasons = _ignoring(
+        tmp_path, "secrets/\n", ["secrets/key.txt", "a/secrets/k.txt", "secrets.md"]
+    )
+    assert reasons["secrets/key.txt"] == "gitignored"
+    assert reasons["a/secrets/k.txt"] == "gitignored"
+    # A *file* whose name merely starts the same is not under the folder.
+    assert "secrets.md" in kept
+
+
+def test_a_folder_pattern_does_not_drop_a_file_of_that_name(tmp_path):
+    """`x/` names a folder; git keeps a plain file called `x`, and so do we."""
+    kept, reasons = _ignoring(tmp_path, "secrets/\n", ["secrets", "docs/secrets"])
+    assert {"secrets", "docs/secrets"} <= kept
+
+
+def test_an_anchored_folder_pattern_drops_only_the_root_folder(tmp_path):
+    """The task's `/build/` example, renamed: `build` is a vendored folder name,
+    so it is dropped as `vendored` at any depth before .gitignore is consulted,
+    and the anchoring could not be observed through it."""
+    kept, reasons = _ignoring(
+        tmp_path, "/generated/\n", ["generated/x", "generated/deep/y", "src/generated/x"]
+    )
+    assert reasons["generated/x"] == "gitignored"
+    assert reasons["generated/deep/y"] == "gitignored"
+    assert "src/generated/x" in kept
+
+
+def test_a_folder_pattern_with_an_inner_slash_is_anchored(tmp_path):
+    kept, reasons = _ignoring(tmp_path, "out/gen/\n", ["out/gen/a.py", "pkg/out/gen/b.py"])
+    assert reasons["out/gen/a.py"] == "gitignored"
+    assert "pkg/out/gen/b.py" in kept
+
+
+@pytest.mark.parametrize("line", ["/\n", "//\n", "  /  \n"])
+def test_a_line_of_only_slashes_ignores_nothing(tmp_path, line):
+    """An empty pattern must not turn into one that matches the whole corpus."""
+    kept, reasons = _ignoring(tmp_path, line, ["a.md", "sub/b.md"])
+    assert {"a.md", "sub/b.md"} <= kept
+    assert "gitignored" not in reasons.values()
+
+
+def test_plain_patterns_still_match_by_path_or_bare_name(tmp_path):
+    kept, reasons = _ignoring(
+        tmp_path, ".env\n*.log\n", [".env", "sub/.env", "x.log", "deep/y.log", "keep.md"]
+    )
+    for rel in (".env", "sub/.env", "x.log", "deep/y.log"):
+        assert reasons[rel] == "gitignored"
+    assert "keep.md" in kept

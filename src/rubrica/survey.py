@@ -122,14 +122,27 @@ def _vcs_part_of(path: Path) -> str | None:
 
 
 def _gitignore_patterns(root: Path) -> list[str]:
-    """Patterns from `root/.gitignore`, one level only.
+    """Patterns from `root/.gitignore`, one level only, as written.
 
     Deliberately not a full gitignore implementation: nested ignore files,
-    negations and directory semantics are a library's job, and getting them
-    subtly wrong would drop evidence *silently*, which is the one failure this
-    module exists to prevent. What it does catch is the common case -- a
-    top-level ignore listing generated and secret files -- and anything it
-    misses stays in the catalogue where triage and a human can see it.
+    negations and `**` are a library's job, and getting them subtly wrong would
+    drop evidence *silently*, which is the one failure this module exists to
+    prevent. What it does catch is the common case -- a top-level ignore
+    listing generated and secret files -- and anything it misses stays in the
+    catalogue where triage and a human can see it.
+
+    Three shapes are honoured (see `_gitignored` for how each matches):
+
+    - plain, `x` or `*.log` -- the file's path from the root or its bare name;
+    - anchored, `/x` -- only the path from the root, never a same-named file
+      deeper down;
+    - folder, `x/` -- every file under a folder matching `x` at any depth, or
+      under the one folder at that path when the pattern also starts with `/`
+      or has another `/` in it.
+
+    Before the last two were honoured, `/.env` and `secrets/` -- two of the
+    commonest top-level lines -- excluded nothing, and a `.env` and a
+    `secrets/key.txt` were catalogued as evidence.
     """
     ignore = root / ".gitignore"
     try:
@@ -139,9 +152,56 @@ def _gitignore_patterns(root: Path) -> list[str]:
     patterns = []
     for raw in text.splitlines():
         line = raw.strip()
-        if line and not line.startswith("#") and not line.startswith("!"):
-            patterns.append(line.rstrip("/"))
+        # A line that is only slashes names no file; kept, it would strip to an
+        # empty pattern, which matches nothing useful at best and everything
+        # under the root at worst.
+        if line.strip("/") and not line.startswith("#") and not line.startswith("!"):
+            patterns.append(line)
     return patterns
+
+
+def _segments_match(segments: Sequence[str], pattern: Sequence[str]) -> bool:
+    """`segments` match `pattern` one folder level per segment.
+
+    Segment by segment rather than one fnmatch over the joined path, because
+    fnmatch's `*` crosses `/`: `/*.env` over the whole path would also drop
+    `sub/x.env`, which an anchored pattern exists precisely not to do.
+    """
+    return len(segments) == len(pattern) and all(
+        fnmatch.fnmatch(seg, pat) for seg, pat in zip(segments, pattern, strict=True)
+    )
+
+
+def _gitignored(relative: str, patterns: Sequence[str]) -> bool:
+    """Whether `relative` (a corpus-relative POSIX path) is matched by `patterns`."""
+    parts = relative.split("/")
+    folders = parts[:-1]
+    for pattern in patterns:
+        folder_only = pattern.endswith("/")
+        body = pattern.strip("/")
+        # As in git: a leading `/`, or a `/` anywhere but the end, ties the
+        # pattern to the root instead of letting it match at any depth.
+        anchored = pattern.startswith("/") or "/" in body
+        if not folder_only and not anchored:
+            # Plain: unchanged from before the other shapes were honoured.
+            if _matches_any(relative, [body]):
+                return True
+            continue
+        segments = body.split("/")
+        if folder_only and anchored:
+            # The file sits somewhere under the one folder the pattern names.
+            if len(folders) >= len(segments) and _segments_match(
+                folders[: len(segments)], segments
+            ):
+                return True
+        elif folder_only:
+            # A single name: any folder on the path that matches it.
+            if any(fnmatch.fnmatch(folder, body) for folder in folders):
+                return True
+        elif _segments_match(parts, segments):
+            # Anchored file pattern: the whole path from the root, nothing else.
+            return True
+    return False
 
 
 def _looks_binary(path: Path) -> bool:
@@ -273,7 +333,7 @@ def walk_corpus(
             if operator_globs and any(_matches_any(rel, operator_globs) for rel in spellings):
                 drop("operator_excluded")
                 continue
-            if ignore_patterns and any(_matches_any(rel, ignore_patterns) for rel in spellings):
+            if ignore_patterns and any(_gitignored(rel, ignore_patterns) for rel in spellings):
                 drop("gitignored")
                 continue
             _keep_or_drop(path, relative, kept, excluded, seen, lockfile_checked=True)
