@@ -9,6 +9,7 @@ there, which is the confusion that made four parsec gaps unreadable.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -122,6 +123,47 @@ def test_an_unreadable_file_is_recorded_rather_than_raised(tmp_path):
         assert _reasons(excluded)["locked.md"] == "unreadable"
     finally:
         bad.chmod(0o644)
+
+
+_AS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+def test_an_unreadable_subfolder_is_recorded_and_its_siblings_kept(tmp_path):
+    """rglob skipped a folder it could not list without a word, so every file
+    inside was in neither list -- measured as ([a.md], []) on this exact tree.
+    The folder cannot name its files, so the folder itself is what is recorded.
+    """
+    root = tmp_path / "corpus"
+    locked = root / "locked"
+    locked.mkdir(parents=True)
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (root / "z.md").write_text("# Z\n", encoding="utf-8")
+    (locked / "spec.md").write_text("# Spec\n", encoding="utf-8")
+    locked.chmod(0o000)
+    try:
+        kept, excluded = survey.walk_corpus([root])
+    finally:
+        locked.chmod(0o755)
+    assert kept == [root / "a.md", root / "z.md"]
+    assert _reasons(excluded) == {"locked": "unreadable"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+def test_an_unreadable_folder_two_levels_down_is_recorded_too(tmp_path):
+    root = tmp_path / "corpus"
+    locked = root / "docs" / "inner" / "locked"
+    locked.mkdir(parents=True)
+    (root / "docs" / "guide.md").write_text("# Guide\n", encoding="utf-8")
+    (root / "docs" / "inner" / "note.md").write_text("# Note\n", encoding="utf-8")
+    (locked / "spec.md").write_text("# Spec\n", encoding="utf-8")
+    locked.chmod(0o000)
+    try:
+        kept, excluded = survey.walk_corpus([root])
+    finally:
+        locked.chmod(0o755)
+    assert kept == [root / "docs" / "guide.md", root / "docs" / "inner" / "note.md"]
+    assert _reasons(excluded) == {"docs/inner/locked": "unreadable"}
 
 
 def test_a_shared_seen_dict_dedupes_across_two_separate_calls(tmp_path):

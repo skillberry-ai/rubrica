@@ -35,6 +35,9 @@ and the `policy` that governed digesting and
 exclusion, so a later reader can see what the survey was told to look for
 without re-deriving it. `excluded` records every path the survey chose not to
 catalogue, with a `reason` (`gitignored`, `binary`, `duplicate`, and the like).
+`unreadable` names either a file that could not be read or a folder below a
+corpus root that could not be listed; for a folder the `path` is the folder's own,
+because the files inside it cannot be named, and the entry stands for all of them.
 One of those reasons, `symlink_outside_root`, marks a symlinked file whose target
 lies outside the corpus root it was found in (or cannot be resolved at all): its
 target is never opened, so a link to a credentials file elsewhere on the machine

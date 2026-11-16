@@ -340,7 +340,7 @@ def walk_corpus(
             # comment already warned about. Forcing one iterdir() first makes
             # that failure visible before rglob can hide it.
             list(root.iterdir())
-            walked = sorted(p for p in root.rglob("*") if p.is_file())
+            walked, unlistable = _walk_files(root)
         except OSError as exc:
             # An unreadable *root* is the harness pointed at something it cannot
             # read, which is exit 2 -- the same call paths.list_dir makes, and
@@ -350,6 +350,24 @@ def walk_corpus(
 
         ignore_patterns = _gitignore_patterns(root)
         resolved_root = _resolve_or_none(root)
+
+        # A folder below the root that could not be listed is recorded rather
+        # than skipped: rglob used to swallow its PermissionError, so every
+        # file inside was in neither `kept` nor `excluded` -- measured on
+        # `c/locked/spec.md` under a `chmod 000 c/locked`, which came back as
+        # ([a.md], []). Its path is the folder's, since its files cannot be
+        # named, and a folder inside version control or a vendored tree keeps
+        # the reason its files would have got, so the tally does not change
+        # meaning when a mode bit does.
+        for folder in unlistable:
+            folder_parts = set(folder.relative_to(root).parts)
+            if any(_is_vcs_name(part) for part in folder_parts):
+                reason = "vcs_metadata"
+            elif folder_parts & _VENDOR_DIRS:
+                reason = "vendored"
+            else:
+                reason = "unreadable"
+            excluded.append({"path": folder.relative_to(root).as_posix(), "reason": reason})
 
         for path in walked:
             relative = path.relative_to(root).as_posix()
@@ -406,6 +424,34 @@ def walk_corpus(
             _keep_or_drop(path, relative, kept, excluded, seen, lockfile_checked=True)
 
     return kept, excluded
+
+
+def _walk_files(root: Path) -> tuple[list[Path], list[Path]]:
+    """Every file under `root`, sorted, and every folder below it that could not be listed.
+
+    os.walk rather than rglob because rglob gives no way to learn that it
+    skipped a folder it could not list. `followlinks=False` keeps rglob's rule
+    that a symlinked folder is never descended into; a symlinked *file* still
+    appears and is_file() still follows it, so the symlink checks the caller
+    makes see exactly what they saw before. The sort is over the same Path
+    objects rglob produced, so the order -- and so which of two identical
+    files is the `duplicate` -- is unchanged.
+    """
+    unlistable: list[Path] = []
+
+    def note(exc: OSError) -> None:
+        if exc.filename is not None:
+            unlistable.append(Path(exc.filename))
+
+    files: list[Path] = []
+    for folder, _dirnames, filenames in root.walk(on_error=note, follow_symlinks=False):
+        # A symlinked folder is listed without being entered; rglob yielded it
+        # too and is_file() rejected it, so the filter below drops it the same way.
+        files.extend(folder / name for name in filenames)
+    walked = sorted(p for p in files if p.is_file())
+    # The root's own listing failure is the caller's exit 2, raised by its
+    # forced iterdir() before this runs; anything left here is below it.
+    return walked, sorted(p for p in unlistable if p != root)
 
 
 def _resolve_or_none(path: Path) -> Path | None:
