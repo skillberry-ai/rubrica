@@ -274,6 +274,20 @@ def test_the_picker_shows_dot_entries_only_when_asked(console, tmp_path):
     assert [e["name"] for e in json.loads(shown)["entries"]] == [".config", ".env.example", "a.md"]
 
 
+def test_the_picker_hides_vcs_folders_whatever_their_case(console, tmp_path):
+    # On a case-insensitive volume (the macOS default) `.GIT` is the `.git` folder,
+    # so an exact-name check let it into the hidden listing.
+    (tmp_path / "corpus" / ".GIT").mkdir(parents=True)
+    (tmp_path / "corpus" / ".GIT" / "config").write_text("x")
+    (tmp_path / "corpus" / "a.md").write_text("x")
+    url = f"/api/fs?path={tmp_path / 'corpus'}"
+    with _serving(console, root=tmp_path) as port:
+        _, _, plain = _req(port, "GET", url, token=None)
+        _, _, shown = _req(port, "GET", url + "&hidden=1", token=None)
+    assert [e["name"] for e in json.loads(plain)["entries"]] == ["a.md"]
+    assert [e["name"] for e in json.loads(shown)["entries"]] == ["a.md"]
+
+
 @pytest.mark.parametrize("escape_path", ["/etc", "{root}/../..", "{root}/link"])
 def test_the_picker_never_leaves_its_root(console, tmp_path, escape_path):
     root = tmp_path / "root"
@@ -574,6 +588,26 @@ def test_expansion_with_hidden_walks_dot_entries_but_never_vcs_metadata(console,
     assert status == 200
     # `.git/config` stays out: survey drops VCS metadata whatever the picker shows.
     assert names == [".hidden.py", "README.md", "a.py", "b.py", "ci.yml", "t.py"]
+
+
+def test_expansion_skips_vcs_folders_whatever_their_case(console, tmp_path):
+    root = tmp_path / "pick"
+    (root / ".GIT").mkdir(parents=True)
+    (root / ".GIT" / "config").write_text("x")
+    (root / "README.md").write_text("r")
+    with _serving(console, root=root) as port:
+        for hidden in (False, True):
+            status, _, body = _req(
+                port,
+                "POST",
+                "/api/fs/expand",
+                {"include": [str(root)], "hidden": hidden},
+                token=TOKEN,
+            )
+            data = json.loads(body)
+            assert status == 200
+            assert [p.rsplit("/", 1)[1] for p in data["files"]] == ["README.md"]
+            assert data["total"] == 1
 
 
 def test_files_and_folders_can_be_mixed_and_overlaps_count_once(console, tree):
