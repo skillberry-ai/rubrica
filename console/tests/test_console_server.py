@@ -213,6 +213,10 @@ def test_the_picker_lists_folders_under_its_root(console, tmp_path):
 
 def test_the_picker_shows_dot_entries_only_when_asked(console, tmp_path):
     (tmp_path / "corpus" / ".config").mkdir(parents=True)
+    # VCS metadata stays out of both listings: a ticked `.git` would be walked by
+    # survey as a root, cataloguing git config (which can carry a token in a URL).
+    (tmp_path / "corpus" / ".git").mkdir()
+    (tmp_path / "corpus" / ".git" / "config").write_text("x")
     (tmp_path / "corpus" / ".env.example").write_text("x")
     (tmp_path / "corpus" / "a.md").write_text("x")
     url = f"/api/fs?path={tmp_path / 'corpus'}"
