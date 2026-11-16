@@ -115,6 +115,21 @@ def _gate_page(run: RunPaths, gate: int) -> str:
     )
 
 
+def _whole(query: dict[str, str], name: str, default: int) -> int:
+    """A query parameter as an int, or a 409 that names it.
+
+    A bare `int()` here let `?offset=undefined` -- a front-end bug, not a server
+    fault -- reach `_handle`'s catch-all as a 500 with a traceback.
+    """
+    raw = query.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        raise ConsoleError(f"{name} must be a whole number") from None
+
+
 def _opts(console: Console, body: dict) -> Options:
     effort = body.get("effort") or console.defaults.effort
     if effort not in validate.manifest_stage_efforts():
@@ -383,7 +398,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ConsoleError("no such member in this job")
             path = Path(member.log)
         else:
-            index = int(q.get("entry", -1))
+            index = _whole(q, "entry", -1)
             if not job.entries or not -len(job.entries) <= index < len(job.entries):
                 raise ConsoleError("no such entry in this job")
             path = Path(job.entries[index].log)
@@ -391,7 +406,7 @@ class Handler(BaseHTTPRequestHandler):
             data = path.read_bytes()
         except OSError:
             data = b""
-        offset = int(q.get("offset", -1))
+        offset = _whole(q, "offset", -1)
         if offset < 0 or offset > len(data):
             offset = max(0, len(data) - _LOG_CHUNK)
         chunk = data[offset : offset + _LOG_CHUNK]
