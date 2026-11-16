@@ -620,3 +620,40 @@ def test_the_credentials_file_is_never_a_run_input(tmp_path, fake):
                 "corpus": [str(console.credentials.path)],
             }
         )
+
+
+def _seed(console, *corpus):
+    return console.create_run(
+        {"mode": "survey", "target_name": "t", "target_interface": "x", "corpus": list(corpus)}
+    )
+
+
+def test_a_folder_holding_the_credentials_file_is_never_a_run_input(tmp_path, fake):
+    """A folder seed is walked whole, so one that holds the file -- its own folder, or
+    any folder above it -- would hand it to survey as a candidate."""
+    console = _console(tmp_path, tmp_path / "runs", fake)
+    secret = console.credentials.path
+    links = tmp_path / "links"
+    links.mkdir()
+    (links / "file").symlink_to(secret)
+    (links / "folder").symlink_to(secret.parent)
+    seeds = [secret.parent, tmp_path, links / "file", links / "folder"]
+    for seed in seeds:
+        with pytest.raises(ConsoleError, match="credentials"):
+            _seed(console, str(seed))
+    # Hidden among harmless seeds, it is still refused, and nothing was minted.
+    with pytest.raises(ConsoleError, match="credentials"):
+        _seed(console, str(Path(__file__)), str(secret.parent))
+    assert console.list_runs() == []
+
+
+def test_a_sibling_folder_without_the_credentials_file_is_still_a_run_input(tmp_path, fake):
+    toy = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "toy"
+    console = _console(tmp_path, tmp_path / "runs", fake)
+    # Shares a name prefix with the credentials folder, so a string-prefix check
+    # (rather than a path-ancestry one) would wrongly refuse it.
+    sibling = tmp_path / "creds-other"
+    sibling.mkdir()
+    (sibling / "notes.md").write_bytes((toy / "notes.md").read_bytes())
+    name, _, _ = _seed(console, str(sibling))
+    assert name in console.list_runs()

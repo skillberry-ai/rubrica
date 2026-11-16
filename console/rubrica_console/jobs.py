@@ -1176,9 +1176,22 @@ class Console:
         corpus = [c for c in spec.get("corpus") or [] if c]
         if not corpus:
             raise ConsoleError("pick at least one file or folder")
+        # A seed that is the credentials file, or any folder above it (~/.config,
+        # ~/.config/rubrica, $HOME, /), would let survey catalogue the file as a
+        # candidate that can reach a model dispatch. Refusing is chosen over a
+        # silent `--exclude`: an exclude glob is matched by survey against its own
+        # relative paths, so its exactness depends on code outside this check, and a
+        # human who picked ~/.config should learn why rather than find one file
+        # quietly missing. Both sides are resolved, so a symlink to the file or to
+        # any of its folders is caught too.
         secret = self.credentials.path.expanduser().resolve()
-        if any(Path(c).expanduser().resolve() == secret for c in corpus):
-            raise ConsoleError("the console's credentials file cannot be read by a run")
+        for c in corpus:
+            seed = Path(c).expanduser().resolve()
+            if seed == secret or seed in secret.parents:
+                raise ConsoleError(
+                    f"{c} is or contains the console's credentials file, which a run "
+                    "cannot read; pick a folder that does not contain it"
+                )
         objective = spec.get("objective") or "breadth"
         args: list[str] = [
             "survey",
