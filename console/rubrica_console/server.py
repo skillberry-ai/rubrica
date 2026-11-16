@@ -150,6 +150,53 @@ def _opts(console: Console, body: dict) -> Options:
     return Options(model=model, effort=effort, budget=budget, agents=body.get("agents") or None)
 
 
+def _is_continuation(byte: int) -> bool:
+    return byte & 0b1100_0000 == 0b1000_0000
+
+
+def _char_start(data: bytes, pos: int) -> int:
+    """Move `pos` forward past at most three UTF-8 continuation bytes, the most a
+    character can carry, so a run of stray ones in a broken file is not skipped."""
+    for _ in range(3):
+        if pos < len(data) and _is_continuation(data[pos]):
+            pos += 1
+    return pos
+
+
+def _char_end(data: bytes, start: int, end: int) -> int:
+    """Pull `end` back to just before a character the cut leaves incomplete.
+
+    Only a valid lead byte followed by fewer continuation bytes than it needs
+    counts as cut; anything else is left for the decoder to replace. When pulling
+    back would leave nothing although the rest of the character is in `data`
+    (a chunk smaller than one character), `end` is pushed forward over it
+    instead, so the reader always makes progress."""
+    for back in range(1, 4):
+        lead = end - back
+        if lead < start:
+            break
+        byte = data[lead]
+        if _is_continuation(byte):
+            continue
+        if 0xC2 <= byte <= 0xDF:
+            need = 2
+        elif 0xE0 <= byte <= 0xEF:
+            need = 3
+        elif 0xF0 <= byte <= 0xF4:
+            need = 4
+        else:
+            break
+        if back >= need:
+            break
+        if lead > start:
+            return lead
+        full = lead + need
+        if full <= len(data) and all(_is_continuation(b) for b in data[end:full]):
+            return full
+        return lead
+    return end
+
+
 class Handler(BaseHTTPRequestHandler):
     console: Console
     token: str
@@ -408,9 +455,16 @@ class Handler(BaseHTTPRequestHandler):
             data = b""
         offset = _whole(q, "offset", -1)
         if offset < 0 or offset > len(data):
-            offset = max(0, len(data) - _LOG_CHUNK)
-        chunk = data[offset : offset + _LOG_CHUNK]
-        return {"text": chunk.decode("utf-8", errors="replace"), "next": offset + len(chunk)}
+            # A computed tail start can land inside a multi-byte character; step
+            # past its continuation bytes so the chunk opens on a whole one.
+            offset = _char_start(data, max(0, len(data) - _LOG_CHUNK))
+        end = _char_end(data, offset, min(len(data), offset + _LOG_CHUNK))
+        chunk = data[offset:end]
+        # `next` is the byte after what was decoded, so a character cut by the
+        # chunk edge (or by a write still in progress) is re-read whole next poll
+        # instead of showing as U+FFFD. A genuinely invalid byte still decodes
+        # as U+FFFD: only cut-induced ones are held back.
+        return {"text": chunk.decode("utf-8", errors="replace"), "next": end}
 
     def _fs(self, raw: str, hidden: bool = False) -> dict:
         root = self.root.resolve()

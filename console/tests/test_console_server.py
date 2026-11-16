@@ -653,3 +653,61 @@ def test_an_offset_outside_the_file_reads_the_tail_chunk(console, log_job, monke
         status, data = _log(port, f"?offset={offset}")
     assert status == 200
     assert data == {"text": "6789", "next": 10}
+
+
+# "—" is three bytes (e2 80 94); this project's output is full of it, and a chunk
+# edge or a half-written log can fall inside it.
+_DASH = "—".encode()
+
+
+def test_a_character_spanning_the_chunk_edge_reads_back_whole_in_two_polls(
+    console, log_job, monkeypatch
+):
+    monkeypatch.setattr(console_server, "_LOG_CHUNK", 4)
+    text = "ab—c"
+    Path(log_job.entries[0].log).write_bytes(text.encode())
+    with _serving(console) as port:
+        _, first = _log(port, "?offset=0")
+        _, second = _log(port, f"?offset={first['next']}")
+    assert first == {"text": "ab", "next": 2}
+    assert second == {"text": "—c", "next": 6}
+    assert first["text"] + second["text"] == text
+
+
+def test_a_log_ending_mid_character_holds_it_back_until_the_rest_is_written(console, log_job):
+    log = Path(log_job.entries[0].log)
+    log.write_bytes(b"done " + _DASH[:2])
+    with _serving(console) as port:
+        _, partial = _log(port, "?offset=0")
+        log.write_bytes(b"done " + _DASH + b" ok")
+        _, rest = _log(port, f"?offset={partial['next']}")
+    assert partial == {"text": "done ", "next": 5}
+    assert rest == {"text": "— ok", "next": len(b"done ") + 3 + 3}
+
+
+def test_a_chunk_smaller_than_one_character_still_makes_progress(console, log_job, monkeypatch):
+    monkeypatch.setattr(console_server, "_LOG_CHUNK", 2)
+    Path(log_job.entries[0].log).write_bytes(_DASH + b"x")
+    with _serving(console) as port:
+        _, data = _log(port, "?offset=0")
+    assert data == {"text": "—", "next": 3}
+
+
+@pytest.mark.parametrize("chunk", [3, 4, 5])
+def test_the_tail_jump_never_starts_mid_character(console, log_job, monkeypatch, chunk):
+    # With "a—b" (5 bytes) a 3-byte tail would start inside the dash; a 4-byte
+    # one starts on its lead byte, and the whole file needs no jump at all.
+    monkeypatch.setattr(console_server, "_LOG_CHUNK", chunk)
+    Path(log_job.entries[0].log).write_bytes(b"a" + _DASH + b"b")
+    with _serving(console) as port:
+        _, data = _log(port)
+    assert "\ufffd" not in data["text"]
+    assert data["next"] == 5
+    assert data["text"] == {3: "b", 4: "—b", 5: "a—b"}[chunk]
+
+
+def test_a_genuinely_invalid_byte_still_decodes_as_a_replacement(console, log_job):
+    Path(log_job.entries[0].log).write_bytes(b"a\xffb")
+    with _serving(console) as port:
+        _, data = _log(port, "?offset=0")
+    assert data == {"text": "a\ufffdb", "next": 3}
