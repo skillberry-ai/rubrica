@@ -366,3 +366,69 @@ def test_a_dot_corpus_still_walks_the_current_folder(tmp_path, capsys, monkeypat
     run_dir = Path(capsys.readouterr().out.strip())
     catalogue = json.loads((run_dir / "00-catalogue.json").read_text(encoding="utf-8"))
     assert catalogue["candidates"]
+
+
+# Path("") is Path("."), so a blank --runs-dir (an unset $RUNS in a caller's
+# script) used to mint `run-<ts>/` in whatever folder the caller ran from and
+# exit 0 -- often the corpus itself, where a later survey catalogues the run.
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_a_blank_runs_dir_on_survey_is_a_usage_error_and_mints_no_run(
+    tmp_path, capsys, monkeypatch, blank
+):
+    root = _tree(tmp_path)
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    assert _cli_survey(str(root), blank) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--runs-dir" in captured.err
+    assert list(cwd.iterdir()) == []
+
+
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_a_blank_runs_dir_on_intake_is_a_usage_error_and_mints_no_run(
+    tmp_path, capsys, monkeypatch, blank
+):
+    from rubrica import cli
+
+    spec = tmp_path / "spec.md"
+    spec.write_text("# Spec\n\nThe tools.\n", encoding="utf-8")
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    code = cli.main(
+        [
+            "intake",
+            "--input",
+            str(spec),
+            "--runs-dir",
+            blank,
+            "--target-name",
+            "toy",
+            "--target-interface",
+            "mcp",
+        ]
+    )
+    assert code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--runs-dir" in captured.err
+    assert list(cwd.iterdir()) == []
+
+
+# The same Path("") hazard one flag over: a blank --run made the current folder
+# the run, and run-summary and target-brief wrote their pages into it.
+@pytest.mark.parametrize("command", ["run-summary", "target-brief"])
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_a_blank_run_is_a_usage_error_and_writes_nothing(
+    tmp_path, capsys, monkeypatch, command, blank
+):
+    from rubrica import cli
+
+    monkeypatch.chdir(tmp_path)
+    assert cli.main([command, "--run", blank]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--run" in captured.err
+    assert list(tmp_path.iterdir()) == []

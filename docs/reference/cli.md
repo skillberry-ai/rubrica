@@ -25,6 +25,8 @@ Required: `--corpus PATH` (repeatable), `--runs-dir RUNS_DIR`, `--target-name
 TARGET_NAME`, `--target-interface TARGET_INTERFACE`, `--objective
 {breadth,depth}`.
 
+A blank (empty or whitespace-only) `--corpus`, `--runs-dir` — here and on `intake --input` — or `--run` on any subcommand exits 2 rather than meaning the current folder.
+
 Optional: `--objective-note OBJECTIVE_NOTE`, `--scope-note SCOPE_NOTE`,
 `--exclude GLOB` (repeatable), `--max-rounds MAX_ROUNDS`, `--max-scenarios
 MAX_SCENARIOS`, `--max-candidates MAX_CANDIDATES`, `--max-catalogue-bytes
