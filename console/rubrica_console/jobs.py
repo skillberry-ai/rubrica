@@ -490,7 +490,10 @@ class Console:
                 # The marker, not entries[-1]: the recipe appended its own entries.
                 marker.status = status
                 if status != SUCCEEDED:
-                    raise _Stop(status, f"stopped: {step.title} ended {status}")
+                    # Keep the step's own reason: a fail-fast stop carries the model's
+                    # error (a 401, say), and "ended halted" alone hides what to fix.
+                    why = f": {job.message}" if job.message else ""
+                    raise _Stop(status, f"stopped: {step.title} ended {status}{why}")
                 ran += 1
             job.status = SUCCEEDED
         except _Stop as stop:
@@ -794,11 +797,16 @@ class Console:
         # Settings applies from the next step.
         creds_env = self._creds().env()
         threads = []
+        # This fan-out's own members. A chain is one job, so job.members also holds
+        # every earlier step's members; fail-fast must judge only this fan-out's, or
+        # one earlier success keeps every later fan-out from ever stopping early.
+        keys: list[str] = []
         for member_id in ids:
             key = f"{stage}:{member_id}" if member_id else stage
             log = state.logs_dir / job.id / f"{key.replace(':', '-')}.log"
             log.parent.mkdir(parents=True, exist_ok=True)
             member = Member(id=key, log=str(log))
+            keys.append(key)
             with self._lock:
                 job.members[key] = member
             env = dispatch.env_for(
@@ -814,7 +822,9 @@ class Console:
             argv = [self.bash or "bash", str(self.dispatch_script), stage, str(run.root)]
             if member_id:
                 argv.append(member_id)
-            t = threading.Thread(target=self._member, args=(job, member, argv, env), daemon=True)
+            t = threading.Thread(
+                target=self._member, args=(job, member, argv, env, keys), daemon=True
+            )
             threads.append(t)
         self._persist(job)
         for t in threads:
@@ -834,7 +844,9 @@ class Console:
             job.message = f"{len(failed)} {stage} dispatch(es) did not finish"
         self._persist(job)
 
-    def _member(self, job: Job, member: Member, argv: list[str], env: dict) -> None:
+    def _member(
+        self, job: Job, member: Member, argv: list[str], env: dict, keys: list[str]
+    ) -> None:
         with self._sem:
             if job.id in self._cancel:
                 member.status = CANCELLED
@@ -868,9 +880,9 @@ class Console:
             else:
                 member.status = SUCCEEDED if proc.returncode == 0 else HALTED
             self._persist(job)
-            self._maybe_fail_fast(job)
+            self._maybe_fail_fast(job, keys)
 
-    def _maybe_fail_fast(self, job: Job) -> None:
+    def _maybe_fail_fast(self, job: Job, keys: list[str]) -> None:
         """Stop a fan-out whose first dispatches all failed without spending anything.
 
         Measured: with the gateway refusing every call, a 114-member extract ran 102
@@ -878,11 +890,16 @@ class Console:
         that cost nothing are failures to *reach* the model -- credentials, gateway,
         model id -- and every remaining member would fail the same way. A member
         that spent money and then failed is a different case and does not count.
+
+        Only `keys`, the current fan-out's members, are judged: inside "Run to next
+        gate" an earlier step's successes say nothing about whether this one can
+        reach the model.
         """
         with self._lock:
             if job.id in self._cancel:
                 return
-            ended = [m for m in job.members.values() if m.status in (SUCCEEDED, HALTED)]
+            mine = [job.members[k] for k in keys if k in job.members]
+            ended = [m for m in mine if m.status in (SUCCEEDED, HALTED)]
             if len(ended) < _FAIL_FAST_AFTER or any(m.status == SUCCEEDED for m in ended):
                 return
             if any((m.cost or 0) > 0 for m in ended):
