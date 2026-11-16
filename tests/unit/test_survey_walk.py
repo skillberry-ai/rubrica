@@ -301,3 +301,29 @@ def test_many_double_stars_on_a_deep_path_stay_fast():
     started = time.monotonic()
     assert not survey._gitignored(path, [pattern])
     assert time.monotonic() - started < 2.0
+
+
+# `!` lines were once skipped while the broad line they narrow still applied,
+# so the common "ignore everything, keep a few" file dropped exactly what git
+# keeps: a bug scout's corpus with the five lines below came out empty, every
+# file `gitignored`, where `git check-ignore` keeps three of the four.
+
+
+def test_an_ignore_everything_keep_a_few_file_keeps_what_git_keeps(tmp_path):
+    ignore = "*\n!*/\n!*.py\n!*.md\n!.gitignore\n"
+    kept, reasons = _ignoring(tmp_path, ignore, ["docs/api.md", "src/app.py", "build.log"])
+    assert {".gitignore", "docs/api.md", "src/app.py"} <= kept
+    assert reasons["build.log"] == "gitignored"
+
+
+def test_a_negated_file_inside_an_ignored_folder_glob_is_kept(tmp_path):
+    kept, reasons = _ignoring(tmp_path, "docs/*\n!docs/api.md\n", ["docs/api.md", "docs/other.md"])
+    assert "docs/api.md" in kept
+    assert reasons["docs/other.md"] == "gitignored"
+
+
+def test_a_later_plain_line_overrides_an_earlier_negation(tmp_path):
+    """Last match wins: `!x` before `x` re-includes nothing."""
+    kept, reasons = _ignoring(tmp_path, "!x\nx\n", ["x", "y"])
+    assert reasons["x"] == "gitignored"
+    assert "y" in kept
