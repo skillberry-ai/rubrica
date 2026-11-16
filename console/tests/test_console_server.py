@@ -7,8 +7,10 @@ handling, not in a function a unit test could call around it.
 
 from __future__ import annotations
 
+import errno
 import http.client
 import json
+import os
 import socket
 import threading
 from contextlib import contextmanager
@@ -480,6 +482,36 @@ def test_a_folder_listing_escapes_names(console, run):
     assert status == 200
     assert b"<img" not in body
     assert b"&lt;img src=x onerror=steal()&gt;.txt" in body
+
+
+def test_a_folder_listing_survives_a_file_name_that_is_not_utf_8(console, run):
+    """One non-UTF-8 name (an orphaned temp file) once made the whole listing a 500.
+
+    `iterdir` hands such a name back with a lone surrogate, which both `quote` and
+    the page's `.encode` refused. The label now shows the `\\udcff` escape, as
+    `rubrica.summary.esc` renders it, and the link carries the raw byte, which the
+    server decodes back to the same path. macOS APFS refuses the name (`EILSEQ`), so
+    there the test skips, as T-15's summary tests do; Linux CI runs it in full.
+    """
+    folder = run.root / "odd"
+    folder.mkdir()
+    try:
+        with open(os.path.join(os.fsencode(folder), b"bad\xff.txt"), "wb") as fh:
+            fh.write(b"the odd one")
+    except OSError as exc:
+        if exc.errno == errno.EILSEQ:
+            pytest.skip(f"this filesystem (e.g. macOS APFS) refuses non-UTF-8 names: {exc}")
+        raise
+    (folder / "kept.txt").write_text("fine")
+    with _serving(console) as port:
+        status, _, listing = _get_headers(port, f"/runs/{run.root.name}/odd/")
+        href = f"/runs/{run.root.name}/odd/bad%FF.txt"
+        file_status, _, body = _get_headers(port, href)
+    assert status == 200
+    assert rb">bad\udcff.txt</a>" in listing
+    assert f'href="{href}"'.encode() in listing
+    assert b"kept.txt" in listing
+    assert file_status == 200 and body == b"the odd one"
 
 
 def test_a_folder_listing_leaves_off_a_symlink_out_of_the_run(console, run, tmp_path):

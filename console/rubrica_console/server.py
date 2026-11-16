@@ -308,7 +308,11 @@ class Handler(BaseHTTPRequestHandler):
         # Split before unquoting, so a step id carrying an encoded "/" (round-1/propose)
         # stays one segment.
         raw = urlsplit(self.path).path
-        return [unquote(s) for s in raw.split("/") if s]
+        # `surrogateescape`, not unquote's default `replace`: a folder listing links
+        # a non-UTF-8 file name by its raw bytes, and decoding them this way gives
+        # back the very string `iterdir` returned (`os.fsdecode`), so `_file` opens
+        # that file. `replace` turned the byte into U+FFFD, a name nothing has.
+        return [unquote(s, errors="surrogateescape") for s in raw.split("/") if s]
 
     def _query(self) -> dict[str, str]:
         return {k: v[-1] for k, v in parse_qs(urlsplit(self.path).query).items()}
@@ -754,7 +758,12 @@ class Handler(BaseHTTPRequestHandler):
         in it whatever a file name contains.
         """
         rel = target.relative_to(root).parts
-        base = "/runs/" + "/".join(quote(p, safe="") for p in (name, *rel))
+        # Links are quoted from each name's raw bytes (`os.fsencode`). A name that is
+        # not valid UTF-8 -- an orphaned temp file, say -- comes back from `iterdir`
+        # with lone surrogates, which `quote(str)` cannot encode: it raised, and the
+        # whole folder answered 500 over one odd file. `_segments` decodes the bytes
+        # back with `surrogateescape`, so the link reaches the same path.
+        base = "/runs/" + "/".join(quote(os.fsencode(p), safe="") for p in (name, *rel))
         try:
             entries = sorted(target.iterdir(), key=lambda e: e.name)
         except OSError:
@@ -767,17 +776,21 @@ class Handler(BaseHTTPRequestHandler):
             is_dir = resolved.is_dir()
             if not is_dir and not resolved.is_file():
                 continue
-            href = f"{base}/{quote(entry.name, safe='')}" + ("/" if is_dir else "")
+            href = f"{base}/{quote(os.fsencode(entry.name), safe='')}" + ("/" if is_dir else "")
             label = entry.name + ("/" if is_dir else "")
             items.append(f'<li><a href="{escape(href)}">{escape(label)}</a></li>')
         if rel:
-            up = "/runs/" + "/".join(quote(p, safe="") for p in (name, *rel[:-1])) + "/"
+            up = "/runs/" + "/".join(quote(os.fsencode(p), safe="") for p in (name, *rel[:-1]))
+            up += "/"
             items.insert(0, f'<li><a href="{escape(up)}">../</a></li>')
         listing = f"<ul>{''.join(items)}</ul>" if items else "<p>This folder is empty.</p>"
         page = _text_page("/".join(rel) + "/", listing)
         return self._send(
             HTTPStatus.OK,
-            page.encode("utf-8"),
+            # `backslashreplace`, as `rubrica.summary.esc` does for the same names: a
+            # lone surrogate in a label or the title shows as `\udcff`, the escape
+            # `os.fsdecode` made, instead of making `.encode` raise.
+            page.encode("utf-8", "backslashreplace"),
             "text/html; charset=utf-8",
             head,
             extra_headers={"Content-Security-Policy": "sandbox"},
