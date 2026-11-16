@@ -213,6 +213,14 @@ browse; default your home directory), `--lab` (the console's own records; defaul
 `--dispatch-script` (default this checkout's `scripts/dispatch-stage.sh`),
 `--credentials` (default `~/.config/rubrica/console-credentials.json`).
 
+The skills the console checks (with `check-skills`) and records (the
+`skill_sha256` in `manifest.stages`) are the ones the dispatch script actually
+runs: `src/rubrica/skills/` in the checkout that holds `--dispatch-script`. The
+script ignores `RUBRICA_SKILLS_DIR`, so if that variable points at a different
+folder the console refuses every model step, naming both folders, rather than
+recording one skill set while running another. To try a candidate skill set,
+point `--dispatch-script` at a checkout that holds it.
+
 It exits `0` when interrupted and `2` for a runs folder or run that does not exist,
 a port that cannot be bound, or a bad argument. It never exits `1`: the work it
 starts reports through its own subprocesses' exit codes, shown in the page. A

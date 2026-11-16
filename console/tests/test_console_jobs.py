@@ -10,6 +10,7 @@ called clean.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -33,6 +34,8 @@ from rubrica_console.jobs import (
 )
 
 from tests.toy import build_toy_run
+
+_SKILLS = Path(__file__).resolve().parents[2] / "src" / "rubrica" / "skills"
 
 # Where each stage's output lives, so the fake can copy it from the reference run.
 _FAKE = textwrap.dedent(
@@ -124,7 +127,13 @@ def reference(tmp_path_factory) -> Path:
 
 @pytest.fixture
 def fake(tmp_path, reference, monkeypatch) -> dict:
-    script = tmp_path / "fake-dispatch.sh"
+    # A fake checkout: the console takes the skill set from the dispatch script's
+    # own repo (`<repo>/scripts/x.sh` -> `<repo>/src/rubrica/skills`), as the real
+    # script does, so the fake needs one beside it.
+    checkout = tmp_path / "checkout"
+    shutil.copytree(_SKILLS, checkout / "src" / "rubrica" / "skills")
+    (checkout / "scripts").mkdir()
+    script = checkout / "scripts" / "fake-dispatch.sh"
     py = tmp_path / "fake.py"
     py.write_text(_FAKE, encoding="utf-8")
     script.write_text(f'#!/usr/bin/env bash\nexec "{os.sys.executable}" "{py}" "$@"\n')
@@ -132,6 +141,7 @@ def fake(tmp_path, reference, monkeypatch) -> dict:
     log = tmp_path / "fake.log"
     monkeypatch.setenv("FAKE_REF", str(reference))
     monkeypatch.setenv("FAKE_LOG", str(log))
+    monkeypatch.delenv("RUBRICA_SKILLS_DIR", raising=False)
     for var in (
         "FAKE_FAIL",
         "FAKE_BAD",
@@ -141,7 +151,7 @@ def fake(tmp_path, reference, monkeypatch) -> dict:
         "FAKE_EXIT1_AFTER_SPEND",
     ):
         monkeypatch.delenv(var, raising=False)
-    return {"script": script, "log": log}
+    return {"script": script, "log": log, "skills": checkout / "src" / "rubrica" / "skills"}
 
 
 def _calls(fake) -> list[dict]:
@@ -425,6 +435,42 @@ def test_prompt_steps_are_refused_without_a_dispatch_script(tmp_path, intake_run
         console.run_step(intake_run.root.name, "extract", OPTS)
     extract = pipeline.find(console.steps(intake_run.root.name), "extract")
     assert "repository checkout" in extract.reason
+
+
+def test_the_recorded_digest_is_the_dispatch_scripts_own_skill(tmp_path, fake, intake_run):
+    """record-stage hashes the SKILL.md the script runs, from the script's checkout."""
+    skill = fake["skills"] / "rb-extract" / "SKILL.md"
+    # Make the checkout's copy differ from the package's, so the two digests split.
+    skill.write_text(skill.read_text(encoding="utf-8") + "\n<!-- fake checkout -->\n")
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    job = console.wait(console.run_step(intake_run.root.name, "extract", OPTS).id, timeout=180)
+    assert job.status == SUCCEEDED, (job.message, [(e.label, e.status) for e in job.entries])
+    recorded = json.loads(intake_run.manifest.read_text())["stages"]["extract"]["skill_sha256"]
+    assert recorded == hashlib.sha256(skill.read_bytes()).hexdigest()
+    package_copy = (_SKILLS / "rb-extract" / "SKILL.md").read_bytes()
+    assert recorded != hashlib.sha256(package_copy).hexdigest()
+    # The preflight checked that same set, by name, not whatever the env pointed at.
+    preflight = next(e for e in job.entries if e.label == "check-skills")
+    assert str(fake["skills"]) in Path(preflight.log).read_text()
+
+
+def test_a_skills_dir_override_elsewhere_refuses_prompt_steps(
+    tmp_path, fake, intake_run, monkeypatch
+):
+    """The script ignores RUBRICA_SKILLS_DIR, so the console refuses rather than mislabel."""
+    other = tmp_path / "candidate-skills"
+    shutil.copytree(_SKILLS, other)
+    monkeypatch.setenv("RUBRICA_SKILLS_DIR", str(other))
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    with pytest.raises(ConsoleError) as exc:
+        console.run_step(intake_run.root.name, "extract", OPTS)
+    assert str(other) in str(exc.value) and str(fake["skills"]) in str(exc.value)
+    extract = pipeline.find(console.steps(intake_run.root.name), "extract")
+    assert str(other) in extract.reason and str(fake["skills"]) in extract.reason
+    assert _calls(fake) == []
+    # Pointing it at the script's own set is no conflict.
+    monkeypatch.setenv("RUBRICA_SKILLS_DIR", str(fake["skills"]))
+    assert console.prompt_ready()
 
 
 def test_create_run_from_a_folder_and_a_loose_file(tmp_path, fake):
