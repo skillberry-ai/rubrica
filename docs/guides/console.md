@@ -199,8 +199,13 @@ protection on its own: any page open in your browser can send requests to
 - Requests whose `Host` or `Origin` names some other site are refused, which stops
   a hostile domain from pointing itself at your machine.
 - The file picker stays under `--root` (default: your home directory), and run
-  files are served only from inside the run. An HTML file inside a run is shown as
-  text, never run as a page.
+  files are served only from inside the run.
+- Run files are sent as inert data. Only plain text, JSON, and PNG, JPEG, GIF and
+  WebP images keep their own type. Everything else, including HTML, SVG, XHTML,
+  XML and unknown types, is sent as plain text (or as raw bytes if it is not valid
+  text), so the browser shows it and never runs it as a page. Every run file also
+  carries a `Content-Security-Policy: sandbox` header, which tells the browser to
+  treat it as a locked-down page even if it were to open one.
 
 ## Options and exit codes
 

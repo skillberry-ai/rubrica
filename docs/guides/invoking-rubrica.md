@@ -8,9 +8,9 @@ at a time. **Or in one step:** hand an agent
 dispatches the prompt stages from `extract` through `emit` itself, gating each
 artifact before the next stage sees it and stopping at each human gate.
 
-These runs dispatch a model. They cost money, they are not deterministic, and
-they need credentials — which is why they live behind the `live` pytest marker
-(`tests/conftest.py`) and `make live`, and are never part of `make test`.
+Running a stage by hand dispatches a model. It costs money, it is not
+deterministic, and it needs credentials. (`make live` is a different thing: it
+only checks committed recordings, so it is free. See §8.)
 
 This document is the reference for both, and it is about mechanics: the flags,
 the environment variables, what a dispatch is handed and what it is denied.
@@ -881,8 +881,9 @@ RUBRICA_LIVE=1 uv run pytest -m live -q  # opt in. "", "0", "false", "no" (any
 ```
 
 `tests/unit/test_live_marker.py` proves both directions of the skip mechanically,
-including that those off-spellings stay off: a live test dispatches (and bills
-for) a model, so `RUBRICA_LIVE=0` must not be the thing that turns it on.
+including that those off-spellings stay off: `RUBRICA_LIVE=0` says "off", so it
+must not be the thing that turns the live tests on. (The tests themselves are
+free. Only a hand-run stage or a re-recording dispatches a model.)
 The exercises above are run by hand, one skill at a time, following §5, §7 and §8 — they
 are not `-m live` pytest tests themselves, because a live exercise's pass
 criteria are read by a person, not asserted by an
