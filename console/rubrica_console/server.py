@@ -546,13 +546,14 @@ class Handler(BaseHTTPRequestHandler):
         for child in children:
             # Dot-entries are hidden unless asked for, like a file manager; the
             # credentials file is never listed either way, and nor is VCS metadata
-            # (`survey._VCS_DIRS`). A ticked `.git` becomes a survey root, and
+            # (`survey._is_vcs_name`, case-blind so `.GIT` on a case-insensitive
+            # volume is caught as the `.git` it is). A ticked `.git` becomes a survey root, and
             # survey's VCS filter only looks at path parts *below* a root, so it
             # would catalogue git config, which can hold a remote URL with a token.
             # This matches `_expand`'s `shown()`.
             if (
                 (child.name.startswith(".") and not hidden)
-                or child.name in survey._VCS_DIRS
+                or survey._is_vcs_name(child.name)
                 or child.resolve() == secret
             ):
                 continue
@@ -611,7 +612,8 @@ class Handler(BaseHTTPRequestHandler):
         hidden = body.get("hidden") is True
 
         def shown(name: str) -> bool:
-            return not name.startswith(".") or (hidden and name not in survey._VCS_DIRS)
+            # Case-blind like survey, so `.GIT` is skipped as `.git` is.
+            return not name.startswith(".") or (hidden and not survey._is_vcs_name(name))
 
         include = [inside(p) for p in body.get("include") or []]
         exclude = {inside(p).resolve() for p in body.get("exclude") or []}
