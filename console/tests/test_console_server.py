@@ -711,3 +711,43 @@ def test_a_genuinely_invalid_byte_still_decodes_as_a_replacement(console, log_jo
     with _serving(console) as port:
         _, data = _log(port, "?offset=0")
     assert data == {"text": "a\ufffdb", "next": 3}
+
+
+# -- the budget a dispatch is capped at ----------------------------------------
+
+
+@pytest.fixture
+def bare_console(tmp_path):
+    (tmp_path / "runs").mkdir()
+    return Console(tmp_path / "runs", tmp_path / "lab", dispatch_script=tmp_path / "none.sh")
+
+
+# "nan", "inf" and "1e999" passed the old `float(budget) <= 0` check and reached
+# `claude --max-budget-usd` as a ceiling that caps nothing.
+@pytest.mark.parametrize(
+    "budget", ["nan", "NaN", "inf", "-inf", "1e999", "0", "-1", "abc", True, [5], {"usd": 5}]
+)
+def test_a_budget_that_is_not_a_finite_positive_number_is_refused(bare_console, budget):
+    with pytest.raises(console_server.ConsoleError, match="a budget is a positive number"):
+        console_server._opts(bare_console, {"budget": budget})
+
+
+@pytest.mark.parametrize(
+    ("budget", "forwarded"), [("5", "5"), ("0.5", "0.5"), (5, "5"), (" 5 ", "5"), (2.5, "2.5")]
+)
+def test_a_good_budget_is_forwarded_as_a_clean_number(bare_console, budget, forwarded):
+    assert console_server._opts(bare_console, {"budget": budget}).budget == forwarded
+
+
+@pytest.mark.parametrize("body", [{}, {"budget": ""}, {"budget": None}])
+def test_no_budget_means_none_is_forwarded(bare_console, body):
+    assert console_server._opts(bare_console, body).budget is None
+
+
+def test_a_bad_budget_over_http_is_a_409_and_starts_nothing(console, run):
+    with _serving(console) as port:
+        status, _, data = _req(
+            port, "POST", f"/api/runs/{run.root.name}/run-to-gate", {"budget": "inf"}
+        )
+    assert status == 409
+    assert b"a budget is a positive number of dollars" in data
