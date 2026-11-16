@@ -62,7 +62,10 @@ sits — version control, vendored folders, `.gitignore`, `--exclude` — becaus
 human pointed at it; it still goes through the ones that judge what it is, so a
 named binary or lockfile is recorded in `excluded` rather than catalogued. A
 `--corpus` path that is neither a file nor a folder, or a named file that cannot
-be opened, exits 2. So does a `--corpus` path that is, or sits inside, a `.git`,
+be opened, exits 2. An empty or whitespace-only `--corpus` value exits 2 as well
+and mints no run, rather than being read as the current folder — an unset
+variable in a caller's script would otherwise catalogue wherever it ran from.
+So does a `--corpus` path that is, or sits inside, a `.git`,
 `.hg` or `.svn` folder — `--corpus repo/.git` would otherwise catalogue the
 repository's own `config` (where remote credentials live) as evidence. The check
 reads the path as given and the path it resolves to, so a symlink into such a
