@@ -72,8 +72,10 @@ nothing downstream of `intake` opens the corpus again.
 A file can fail to reach `extract` two different ways, and the difference is
 load-bearing. `survey` *excludes* it mechanically, recording a `path` and one
 `exclusion_reason` — `gitignored`, `vcs_metadata`, `binary`, `lockfile`,
-`vendored`, `duplicate`, `unreadable`, or `operator_excluded` — and it never
-becomes a candidate at all. `rb-triage-rule` *declines* a candidate as a
+`vendored`, `duplicate`, `unreadable`, `operator_excluded`, or
+`symlink_outside_root` (a symlink whose target is outside the corpus folder it
+was found in, or cannot be found at all, so the target is never opened) — and it
+never becomes a candidate at all. `rb-triage-rule` *declines* a candidate as a
 judgment,
 under one of the `decline_reason` codes. An exclusion is arithmetic; a decline
 is the thing gate 0 exists to review.

@@ -121,15 +121,24 @@ def oversized_rows(
     ]
 
 
-# Four of the eight exclusion_reason values embed a judgment that could be
+# Five of the nine exclusion_reason values embed a judgment that could be
 # wrong, and those are the ones an operator could dispute at gate 0: an
 # --exclude that over-reached, a permissions failure, a near-duplicate that is
-# not one, a heuristic vendored-detection. The other four -- gitignored,
-# vcs_metadata, binary, lockfile -- are mechanical facts about a file with no
-# scoping decision in them. Measured on the tau2 catalogue: keeping these four
-# kept all 11 `duplicate` entries and dropped 123 `binary` paths, 1,062 bytes
-# against 12,914 for the whole array.
-DISPUTABLE_EXCLUSION_REASONS = ("duplicate", "operator_excluded", "unreadable", "vendored")
+# not one, a heuristic vendored-detection, and a symlink whose target lies
+# outside the corpus root -- a link the operator may have put there on purpose,
+# so the decision not to follow it is one they can overrule. The other four --
+# gitignored, vcs_metadata, binary, lockfile -- are mechanical facts about a
+# file with no scoping decision in them. Measured on the tau2 catalogue (before
+# symlink_outside_root existed): keeping the first four kept all 11 `duplicate`
+# entries and dropped 123 `binary` paths, 1,062 bytes against 12,914 for the
+# whole array. Kept in alphabetical order.
+DISPUTABLE_EXCLUSION_REASONS = (
+    "duplicate",
+    "operator_excluded",
+    "symlink_outside_root",
+    "unreadable",
+    "vendored",
+)
 
 # A byte budget rather than an entry count, and the reason is a defect open
 # against this repository right now: digest's `names` is capped at 64 entries
