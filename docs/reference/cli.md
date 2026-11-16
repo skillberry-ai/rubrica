@@ -66,7 +66,11 @@ repository's own `config` (where remote credentials live) as evidence. The check
 reads the path as given and the path it resolves to, so a symlink into such a
 folder is refused too. Version-control folder names are matched regardless of
 capital letters, here and in the walk's `vcs_metadata` filter, because on a
-case-insensitive volume `.GIT` is the same folder as `.git`.
+case-insensitive volume `.GIT` is the same folder as `.git`. Inside a walked folder, a
+symlinked file whose target lies outside that folder is not read; it is recorded
+in `excluded` as `symlink_outside_root`. A symlink to a file inside the folder is
+kept. A named file that is itself a symlink is resolved first, and its target is
+catalogued as the named file, under the target's own folder.
 
 Prints the new run directory.
 
