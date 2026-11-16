@@ -1062,6 +1062,14 @@ a probe run gets onto the record rather than into an argument nobody kept.
 
 Prints the manifest path.
 
+The manifest is written first and `decisions.md` second, and the two writes are
+not transactional. If the `decisions.md` append fails — a read-only file, say —
+the new limit **is already in the manifest and in effect**, so the exit 2 names
+each limit with its old and new value, says the `decisions.md` note is missing,
+and prints the line to add by hand, rather than reading as "nothing happened".
+The order is deliberate: the other way round would leave `decisions.md`, which
+is append-only, asserting a change that never happened.
+
 ```bash
 rubrica set-limit --run runs/run-20260806-123005 --max-scenarios 200 \
   --reason "breadth objective under-covered the tool surface at 128"

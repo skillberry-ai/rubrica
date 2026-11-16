@@ -229,7 +229,22 @@ def set_limit(
     # write a blank note.
     write_json(run.manifest, manifest)
 
-    append_decision(run.decisions, f"- {utc_stamp(now)} set-limit: {'; '.join(changes)} -- {text}")
+    note = f"- {utc_stamp(now)} set-limit: {'; '.join(changes)} -- {text}"
+    try:
+        append_decision(run.decisions, note)
+    except OSError as exc:
+        # The order above is kept; what was wrong here was the silence, as in
+        # `waivers.record`. A read-only decisions.md once surfaced as a bare
+        # `[Errno 13] Permission denied`, exit 2, while the manifest already held
+        # the new limit -- a live, unrecorded change behind a message that reads
+        # as "nothing happened". So the failure names each change (old -> new)
+        # and the exact line a human has to add by hand. Still exit 2: the file
+        # is a human's, and no stage re-dispatch can append to it.
+        raise UsageError(
+            f"the limit WAS changed in {run.manifest} ({'; '.join(changes)}) and is in "
+            f"effect, but {run.decisions} could not be appended to: {exc}. The "
+            f"decisions.md note is missing; add this line by hand: {note}"
+        ) from exc
 
 
 def decide(run: RunPaths, note: str, *, now: datetime | None = None) -> None:
