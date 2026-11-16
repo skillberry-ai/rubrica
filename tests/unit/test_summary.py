@@ -8,6 +8,8 @@ exercising the common path.
 
 from __future__ import annotations
 
+import contextlib
+import errno
 import json
 import os
 import re
@@ -5410,6 +5412,23 @@ def test_cli_exits_clean_on_a_lone_surrogate_in_an_artifact(tmp_path, capsys):
     assert r"\udcff" in page
 
 
+@contextlib.contextmanager
+def _skip_if_the_filesystem_refuses_non_utf_8_names():
+    """Skip, rather than fail, when the *setup* cannot create a non-UTF-8 name.
+
+    macOS APFS refuses such a name outright (`OSError` errno 92, `EILSEQ`), so on a
+    Mac the two tests below died before `run-summary` ever ran. Only that errno is a
+    skip: any other `OSError` is a real setup failure and still raises. Linux CI,
+    whose filesystems take the bytes, runs both tests in full.
+    """
+    try:
+        yield
+    except OSError as exc:
+        if exc.errno == errno.EILSEQ:
+            pytest.skip(f"this filesystem (e.g. macOS APFS) refuses non-UTF-8 names: {exc}")
+        raise
+
+
 def test_cli_exits_clean_on_a_stray_temp_file_whose_name_is_not_utf_8(tmp_path):
     """C2(b): `run.root.iterdir()` surrogate-escapes a non-UTF-8 filename.
 
@@ -5418,7 +5437,8 @@ def test_cli_exits_clean_on_a_stray_temp_file_whose_name_is_not_utf_8(tmp_path):
     reason the fix is one decision in `esc` rather than three at three sources.
     """
     run = build_toy_run(tmp_path / "runs", upto="intake")
-    (run.root / os.fsdecode(b"x.json.tmp.1.\xff\xfe")).write_bytes(b"{}")
+    with _skip_if_the_filesystem_refuses_non_utf_8_names():
+        (run.root / os.fsdecode(b"x.json.tmp.1.\xff\xfe")).write_bytes(b"{}")
     assert cli.main(["run-summary", "--run", str(run.root)]) == 0
     page = (run.root / "run-summary.html").read_text(encoding="utf-8")
     assert "orphaned temp file(s)" in page, "the flag is what carries the name onto the page"
@@ -5431,7 +5451,8 @@ def test_cli_exits_clean_on_a_run_directory_whose_name_is_not_utf_8(tmp_path):
     source: no artifact, no stray file, and the page still could not be written.
     """
     root = tmp_path / os.fsdecode(b"run-\xff\xfe")
-    root.mkdir()
+    with _skip_if_the_filesystem_refuses_non_utf_8_names():
+        root.mkdir()
     assert cli.main(["run-summary", "--run", str(root)]) == 0
     page = (root / "run-summary.html").read_text(encoding="utf-8")
     assert page.startswith("<!doctype html>")

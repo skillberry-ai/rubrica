@@ -99,6 +99,14 @@ jobs:
       - name: Release-notes tests on BSD sed
         run: uv run --extra dev pytest -q tests/unit/test_release_notes.py
 
+      # APFS refuses non-UTF-8 names (EILSEQ), so on macOS these two must skip in
+      # setup rather than fail; Linux CI runs them in full.
+      - name: Non-UTF-8 run-summary tests skip on APFS
+        run: >-
+          uv run --extra dev pytest -q -rs
+          "tests/unit/test_summary.py::test_cli_exits_clean_on_a_stray_temp_file_whose_name_is_not_utf_8"
+          "tests/unit/test_summary.py::test_cli_exits_clean_on_a_run_directory_whose_name_is_not_utf_8"
+
   # The pre-commit hooks over the whole tree. Its own job, not a step in `check`,
   # and the split is the point: the default-branch ruleset requires `check` and
   # `DCO` by name, so a step there would make the hooks a fourth gate, which
