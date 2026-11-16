@@ -18,7 +18,7 @@ import hashlib
 import json
 from typing import Any
 
-from rubrica.artifacts import ArtifactError, read_json, sha256_of, write_json
+from rubrica.artifacts import ArtifactError, read_json, read_json_or_none, sha256_of, write_json
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths
@@ -55,11 +55,9 @@ def confidence_band(verdict: dict[str, Any] | None) -> str:
     return "high" if unqualified else "low"
 
 
-def _load(path) -> Any | None:
-    try:
-        return read_json(path)
-    except ArtifactError:
-        return None
+# Only ArtifactError reads as absence; a PermissionError still reaches cli.py's
+# exit-2 path. See artifacts.read_json_or_none.
+_load = read_json_or_none
 
 
 def candidates(run: RunPaths) -> list[dict[str, Any]]:

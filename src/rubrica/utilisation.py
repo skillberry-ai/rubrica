@@ -14,7 +14,7 @@ exactly one case is a finding, and `refs.check_claim_utilisation` owns it.
 
 from __future__ import annotations
 
-from rubrica.artifacts import read_json
+from rubrica.artifacts import read_json_or_none
 from rubrica.paths import RunPaths, list_json
 
 FORMAT = "rubrica-utilisation/1"
@@ -181,7 +181,4 @@ def _claim_ids(value) -> list[str]:
 def _quietly(path):
     """The document, or None. An unreadable artifact is `check_readable`'s
     finding to report, and duplicating it here would double-count one defect."""
-    try:
-        return read_json(path)
-    except Exception:  # deliberate: an unreadable artifact is check_readable's finding
-        return None
+    return read_json_or_none(path, quiet=True)

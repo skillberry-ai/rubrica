@@ -49,6 +49,34 @@ def read_json(path: Path | str) -> Any:
         raise ArtifactError(f"malformed JSON in {path}: {exc}") from exc
 
 
+def read_json_or_none(path: Path | str, *, quiet: bool = False) -> Any | None:
+    """Read one artifact, or None when it cannot be read -- in one of two senses.
+
+    Default (`quiet=False`), for the checkers and code stages (refs, emit,
+    review, stability): only ArtifactError becomes None -- absent, not UTF-8, or
+    malformed JSON, which is "that stage has not run yet" or some other check's
+    finding. Anything else, PermissionError above all, still propagates, so
+    cli.py maps an unreadable run to exit 2 rather than a check quietly treating
+    a chmod-000 file as absent and reporting fabricated findings against the
+    wrong artifact.
+
+    `quiet=True`, for the reports (brief, utilisation, the console): *any*
+    exception becomes None. A report is never a gate; an unreadable artifact is
+    validate's or check-refs' finding to report, and repeating it here would
+    double-count one defect and, worse, make a report crash instead of stating
+    what it could not read.
+    """
+    if quiet:
+        try:
+            return read_json(path)
+        except Exception:  # deliberate: see the docstring
+            return None
+    try:
+        return read_json(path)
+    except ArtifactError:
+        return None
+
+
 def sha256_of(path: Path | str) -> str:
     """Hex digest of a file's bytes, streamed so a large trace is fine."""
     digest = hashlib.sha256()

@@ -138,7 +138,7 @@ from __future__ import annotations
 
 import textwrap
 
-from rubrica.artifacts import read_json
+from rubrica.artifacts import read_json_or_none
 from rubrica.errors import UsageError
 from rubrica.intake import admit_sort_key
 from rubrica.paths import STAGES, RunPaths, is_safe_segment, list_json
@@ -246,10 +246,7 @@ def _quietly(path):
     other command's finding to report (validate's, check-refs'); duplicating
     that here would double-count the same defect and, worse, would make a
     report crash instead of stating what it could not read."""
-    try:
-        return read_json(path)
-    except Exception:  # deliberate, matching utilisation._quietly's reasoning
-        return None
+    return read_json_or_none(path, quiet=True)
 
 
 def _dicts(value) -> list[dict]:

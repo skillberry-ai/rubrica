@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from rubrica.artifacts import ArtifactError, read_json
+from rubrica.artifacts import read_json_or_none
 from rubrica.metrics import jaccard
 from rubrica.paths import RunPaths
 from rubrica.refs import OPEN_STATUSES
@@ -34,18 +34,13 @@ from rubrica.refs import OPEN_STATUSES
 _STAGE_FIELDS = ("model", "effort", "skill_sha256")
 
 
-def _load(path) -> Any | None:
-    """None for absent or unparseable, so diff-runs works on a run that halted.
-
-    Comparing a complete run against one that stopped after propose is exactly the
-    comparison that localizes where reproducibility broke, so an absent artifact
-    is data rather than an error. `comparability` treats an unreadable *manifest*
-    separately, because there absence must not read as agreement.
-    """
-    try:
-        return read_json(path)
-    except ArtifactError:
-        return None
+# None for absent or unparseable, so diff-runs works on a run that halted.
+#
+# Comparing a complete run against one that stopped after propose is exactly the
+# comparison that localizes where reproducibility broke, so an absent artifact
+# is data rather than an error. `comparability` treats an unreadable *manifest*
+# separately, because there absence must not read as agreement.
+_load = read_json_or_none
 
 
 def input_digests(run: RunPaths) -> frozenset[tuple[str, str]]:
