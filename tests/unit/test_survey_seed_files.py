@@ -149,6 +149,39 @@ def test_intake_admits_a_named_file_from_its_own_folder(tmp_path):
     assert stored == (root / "docs" / "spec.md").read_bytes()
 
 
+def test_relative_seeds_are_recorded_absolute_and_intake_runs_from_elsewhere(tmp_path, monkeypatch):
+    """A relative folder and a bare file name, surveyed from one folder, admitted
+    from another. Before the fix the bare name's root was recorded as `.`, which
+    intake joined onto its own cwd -- here a folder holding a decoy of the same
+    name, so the wrong bytes would have been admitted rather than an error."""
+    root = _tree(tmp_path)
+    monkeypatch.chdir(root / "docs")
+    run = _survey(tmp_path, [Path("../src"), Path("spec.md")])
+    catalogue = read_json(run.catalogue)
+    request = catalogue["request"]
+    assert all(Path(r).is_absolute() for r in request["corpus_roots"])
+    assert request["seed_files"]
+    assert all(Path(s).is_absolute() for s in request["seed_files"])
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "spec.md").write_text("# Decoy\n", encoding="utf-8")
+    monkeypatch.chdir(elsewhere)
+    run.inputs_dir.mkdir(parents=True)
+    for name, source in (
+        ("spec.md", root / "docs" / "spec.md"),
+        ("tools.py", root / "src" / "tools.py"),
+    ):
+        cand = next(c for c in catalogue["candidates"] if c["path"] == name)
+        entry = intake.materialise(
+            run,
+            candidate=cand,
+            source_root=request["corpus_roots"][cand["root_index"]],
+            artifact_id=cand["candidate_id"],
+        )
+        assert (run.inputs_dir / entry["stored_as"]).read_bytes() == source.read_bytes()
+
+
 def test_the_cli_takes_a_file_for_corpus(tmp_path, capsys):
     from rubrica import cli
 
