@@ -124,12 +124,20 @@ def _vcs_part_of(path: Path) -> str | None:
 def _gitignore_patterns(root: Path) -> list[str]:
     """Patterns from `root/.gitignore`, one level only, as written.
 
-    Deliberately not a full gitignore implementation: nested ignore files and
-    negations are a library's job, and getting them subtly wrong would drop
-    evidence *silently*, which is the one failure this module exists to
-    prevent. What it does catch is the common case -- a top-level ignore
-    listing generated and secret files -- and anything it misses stays in the
-    catalogue where triage and a human can see it.
+    Deliberately not a full gitignore implementation: nested ignore files are
+    a library's job, and getting them subtly wrong would drop evidence
+    *silently*, which is the one failure this module exists to prevent. What
+    it does catch is the common case -- a top-level ignore listing generated
+    and secret files -- and anything it misses stays in the catalogue where
+    triage and a human can see it.
+
+    Lines come back in file order, a `!` line with its `!` still on, because
+    order is what a `!` line means: `_gitignored` lets the last matching line
+    decide. Before that, every `!` line was skipped while the broad line it
+    narrowed still applied, so the common "ignore everything, keep a few"
+    file (`*`, `!*/`, `!*.py`, ...) dropped every file git keeps -- a bug
+    scout's corpus came out empty, the exact failure this module exists to
+    prevent.
 
     These shapes are honoured (see `_gitignored` for how each matches):
 
@@ -160,9 +168,11 @@ def _gitignore_patterns(root: Path) -> list[str]:
         line = raw.strip()
         # A line that is only slashes names no file; kept, it would strip to an
         # empty pattern, which matches nothing useful at best and everything
-        # under the root at worst.
-        if line.strip("/") and not line.startswith("#") and not line.startswith("!"):
-            patterns.append(line)
+        # under the root at worst. The same holds after a `!`, so a bare `!`
+        # or `!/` is skipped too.
+        if line.startswith("#") or not line.removeprefix("!").strip("/"):
+            continue
+        patterns.append(line)
     return patterns
 
 
@@ -218,10 +228,23 @@ def _gitignored(relative: str, patterns: Sequence[str]) -> bool:
     - `*`, `?` and `[...]` stay within one folder level; `**` as a whole
       segment spans any number of them (see `_segments_match`).
 
-    Negation and nested `.gitignore` files are not honoured.
+    - a line starting with `!` re-includes what it matches, and the last line
+      that matches decides, so `docs/*` then `!docs/api.md` keeps `api.md`
+      while `!x` then `x` still drops `x`.
+
+    One git rule is deliberately not honoured: git cannot re-include a file
+    whose parent folder is excluded, so under `*` then `!*/` it still drops
+    `docs/other.txt` (the file itself matches `*`), where this keeps it
+    because `!*/` was the last line to match something on its path. Leaving
+    that rule out only ever errs toward *keeping* a file, which is this
+    module's safe side: a file kept by mistake is seen at gate 0, a file
+    dropped by mistake is gone. Nested `.gitignore` files are not honoured.
     """
     parts = [part for part in relative.split("/") if part]
-    for pattern in patterns:
+    ignored = False
+    for line in patterns:
+        negate = line.startswith("!")
+        pattern = line[1:] if negate else line
         folder_only = pattern.endswith("/")
         body = pattern.strip("/")
         # As in git: a leading `/`, or a `/` anywhere but the end, ties the
@@ -238,8 +261,10 @@ def _gitignored(relative: str, patterns: Sequence[str]) -> bool:
         # it, or any folder it sits in, is.
         last = len(parts) - 1 if folder_only else len(parts)
         if any(_segments_match(parts[:k], segments) for k in range(1, last + 1)):
-            return True
-    return False
+            # Last match wins, as in git; with no `!` lines this is "any line
+            # matches", exactly the rule before negation was honoured.
+            ignored = not negate
+    return ignored
 
 
 def _looks_binary(path: Path) -> bool:
