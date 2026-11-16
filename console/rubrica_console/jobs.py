@@ -168,12 +168,10 @@ class _RunState:
             "attempts": {},
             "used": {},
         }
-        try:
-            loaded = json.loads(self.ledger_path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                self.data.update({k: v for k, v in loaded.items() if k in self.data})
-        except (OSError, ValueError):
-            pass
+        # A missing or corrupt ledger reads as empty, as it always has.
+        loaded = pipeline._quietly(self.ledger_path)
+        if isinstance(loaded, dict):
+            self.data.update({k: v for k, v in loaded.items() if k in self.data})
 
     def save(self) -> None:
         # Callers hold Console._lock, so one writer at a time.
@@ -1331,13 +1329,10 @@ class Console:
         """
         run = self.run_paths(name)
         stored = self._state(name).home / "spec.json"
-        try:
-            spec = json.loads(stored.read_text(encoding="utf-8"))
-            if isinstance(spec, dict):
-                spec["source"] = "console"
-                return spec
-        except (OSError, ValueError):
-            pass
+        stored_spec = pipeline._quietly(stored)
+        if isinstance(stored_spec, dict):
+            stored_spec["source"] = "console"
+            return stored_spec
         spec: dict = {"source": "derived"}
         catalogue = pipeline._quietly(run.catalogue)
         manifest = pipeline._quietly(run.manifest)
