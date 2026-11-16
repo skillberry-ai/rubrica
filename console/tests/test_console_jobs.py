@@ -557,6 +557,28 @@ def test_a_fan_out_whose_first_dispatches_cannot_reach_the_model_stops_early(
     assert "401" in member.error
 
 
+def test_inside_run_to_gate_a_fan_out_that_cannot_reach_the_model_still_stops_early(
+    tmp_path, fake, intake_run, monkeypatch
+):
+    """Measured: a chain is one job, so extract's successes kept a later fan-out from
+    stopping early -- every member dispatched, and the message lost the 401."""
+    reference = build_toy_run(tmp_path / "ref")
+    subjects = sorted(p.stem for p in (reference.root / "01-contradictions").glob("*.json"))
+    assert len(subjects) > 1
+    monkeypatch.setenv("FAKE_FAIL", " ".join(f"reconcile-contradict:{s}" for s in subjects))
+    monkeypatch.setattr("rubrica_console.jobs._FAIL_FAST_AFTER", 1)
+    console = _console(tmp_path, intake_run.root.parent, fake, max_parallel=1)
+    job = console.wait(console.run_to_gate(intake_run.root.name, OPTS).id, timeout=180)
+    calls = _calls(fake)
+    # The earlier steps did succeed inside this same job.
+    assert any(c["stage"] == "extract" for c in calls)
+    assert any(c["stage"] == "reconcile-subjects" for c in calls)
+    assert job.status == HALTED, job.message
+    assert "Failed to authenticate" in job.message
+    contradict = [c for c in calls if c["stage"] == "reconcile-contradict"]
+    assert 0 < len(contradict) < len(subjects)
+
+
 def test_a_dispatch_that_spent_money_and_failed_does_not_stop_the_fan_out(
     tmp_path, fake, intake_run, monkeypatch
 ):
