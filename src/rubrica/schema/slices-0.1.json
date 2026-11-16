@@ -29,7 +29,7 @@
           "description": "The catalogue's policy, copied verbatim, held to the catalogue's own definition for the reason request is."
         },
         "excluded": {
-          "description": "The catalogue's excluded array as a tally plus the paths for the four exclusion reasons that embed a disputable judgment. Bounded in bytes, not entries: a count cap without a character bound is the defect open against digest's names.",
+          "description": "The catalogue's excluded array as a tally plus the paths for the exclusion reasons that embed a disputable judgment. Bounded in bytes, not entries: a count cap without a character bound is the defect open against digest's names.",
           "type": "object",
           "required": ["total", "by_reason", "entries", "entries_truncated"],
           "additionalProperties": false,

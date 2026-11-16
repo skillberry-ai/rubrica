@@ -234,3 +234,70 @@ def test_plain_patterns_still_match_by_path_or_bare_name(tmp_path):
     for rel in (".env", "sub/.env", "x.log", "deep/y.log"):
         assert reasons[rel] == "gitignored"
     assert "keep.md" in kept
+
+
+# The first cut of the shapes above compared any pattern with a `/` one folder
+# level per segment, so `**` became a single `*` and `**/.env` stopped dropping
+# a nested `a/b/.env`; and a line naming a folder without a trailing slash --
+# `secrets`, `/creds` -- excluded nothing inside it, where git ignores the
+# whole folder (`git check-ignore -v secrets/key.txt` -> `.gitignore:1:secrets`).
+
+
+def test_a_leading_double_star_matches_at_any_depth(tmp_path):
+    kept, reasons = _ignoring(tmp_path, "**/.env\n", [".env", "a/.env", "a/b/.env", "a/b/k.md"])
+    for rel in (".env", "a/.env", "a/b/.env"):
+        assert reasons[rel] == "gitignored"
+    assert "a/b/k.md" in kept
+
+
+def test_a_trailing_double_star_drops_everything_inside_at_any_depth(tmp_path):
+    kept, reasons = _ignoring(
+        tmp_path, "logs/**\n", ["logs/top.txt", "logs/x/y/z.txt", "src/logs/a.txt"]
+    )
+    assert reasons["logs/top.txt"] == "gitignored"
+    assert reasons["logs/x/y/z.txt"] == "gitignored"
+    # As in git: `logs/**` names what is inside `logs`, not a file called it,
+    # and the inner `/` anchors it to the root.
+    assert "src/logs/a.txt" in kept
+    assert not survey._gitignored("logs", ["logs/**"])
+
+
+def test_an_inner_double_star_matches_zero_or_more_folders(tmp_path):
+    kept, reasons = _ignoring(tmp_path, "a/**/b\n", ["a/b/f", "a/x/y/b/f", "a/x/y/c/f", "z/a/b/f"])
+    assert reasons["a/b/f"] == "gitignored"
+    assert reasons["a/x/y/b/f"] == "gitignored"
+    assert {"a/x/y/c/f", "z/a/b/f"} <= kept
+
+
+def test_a_plain_name_drops_a_folder_of_that_name_at_any_depth(tmp_path):
+    kept, reasons = _ignoring(
+        tmp_path, "secrets\n", ["secrets/key.txt", "a/secrets/k.txt", "secretsx/k.txt"]
+    )
+    assert reasons["secrets/key.txt"] == "gitignored"
+    assert reasons["a/secrets/k.txt"] == "gitignored"
+    assert "secretsx/k.txt" in kept
+
+
+def test_an_anchored_name_drops_only_the_root_folder_of_that_name(tmp_path):
+    kept, reasons = _ignoring(tmp_path, "/creds\n", ["creds/t.txt", "sub/creds/t.txt"])
+    assert reasons["creds/t.txt"] == "gitignored"
+    assert "sub/creds/t.txt" in kept
+    assert "sub/creds/t.txt" not in reasons
+
+
+def test_a_plain_wildcard_does_not_cross_a_folder(tmp_path):
+    """fnmatch's `*` matches `/`: over the whole path `a*b` would drop `a/x/b`."""
+    kept, reasons = _ignoring(tmp_path, "a*b\n", ["axb", "a/x/b"])
+    assert reasons["axb"] == "gitignored"
+    assert "a/x/b" in kept
+
+
+def test_many_double_stars_on_a_deep_path_stay_fast():
+    """A hostile .gitignore line must not make matching blow up with depth."""
+    import time
+
+    pattern = "/".join(["**"] * 30) + "/nomatch"
+    path = "/".join(f"d{i}" for i in range(60)) + "/f"
+    started = time.monotonic()
+    assert not survey._gitignored(path, [pattern])
+    assert time.monotonic() - started < 2.0
