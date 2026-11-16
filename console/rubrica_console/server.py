@@ -24,6 +24,7 @@ runs the `rubrica` CLI or `scripts/dispatch-stage.sh` as a subprocess.
 from __future__ import annotations
 
 import json
+import math
 import mimetypes
 import os
 import secrets
@@ -130,20 +131,34 @@ def _whole(query: dict[str, str], name: str, default: int) -> int:
         raise ConsoleError(f"{name} must be a whole number") from None
 
 
+def _budget(raw: object) -> str | None:
+    """A request's budget as the clean number `claude --max-budget-usd` gets, or None.
+
+    Parsed once and checked with `isfinite`: the old `float(raw) <= 0` test let
+    "nan", "inf" and "1e999" through (every comparison with nan is False, and inf
+    is not <= 0), so a run the human thought was capped could have no ceiling. The
+    parsed value is what is forwarded, not the raw text, so " 5 " becomes "5". A
+    JSON `true` is refused rather than read as one dollar.
+    """
+    if raw is None or raw == "":
+        return None
+    try:
+        if isinstance(raw, bool):
+            raise TypeError
+        value = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ConsoleError("a budget is a positive number of dollars") from None
+    if not (math.isfinite(value) and value > 0):
+        raise ConsoleError("a budget is a positive number of dollars")
+    text = repr(value)
+    return text[:-2] if text.endswith(".0") else text
+
+
 def _opts(console: Console, body: dict) -> Options:
     effort = body.get("effort") or console.defaults.effort
     if effort not in validate.manifest_stage_efforts():
         raise ConsoleError(f"effort must be one of {validate.manifest_stage_efforts()}")
-    budget = body.get("budget")
-    if budget not in (None, ""):
-        try:
-            if float(budget) <= 0:
-                raise ValueError
-        except (TypeError, ValueError):
-            raise ConsoleError("a budget is a positive number of dollars") from None
-        budget = str(budget)
-    else:
-        budget = None
+    budget = _budget(body.get("budget"))
     model = (body.get("model") or console.defaults.model).strip()
     if not model or any(c.isspace() for c in model):
         raise ConsoleError("a model id has no spaces")
