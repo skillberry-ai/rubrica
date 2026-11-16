@@ -28,6 +28,7 @@ from rubrica_console.jobs import (
     SUCCEEDED,
     Console,
     ConsoleError,
+    Job,
     Options,
 )
 
@@ -679,3 +680,27 @@ def test_a_sibling_folder_without_the_credentials_file_is_still_a_run_input(tmp_
     (sibling / "notes.md").write_bytes((toy / "notes.md").read_bytes())
     name, _, _ = _seed(console, str(sibling))
     assert name in console.list_runs()
+
+
+def test_each_dispatch_in_a_job_keeps_its_own_member_and_log(tmp_path, fake, intake_run):
+    # A chain crossing rounds dispatches `score` (no member id) once a round. Keyed
+    # on the stage alone, round 2 replaced round 1's record and overwrote its log:
+    # measured, two $0.25 dispatches left one member and $0.25.
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    name = intake_run.root.name
+    job = Job(id="j-score", run=name, step="score", title="score twice", kind="chain")
+    console._dispatch_members(job, intake_run, "score", [None], OPTS)
+    console._dispatch_members(job, intake_run, "score", [None], OPTS)
+    assert [c["stage"] for c in _calls(fake)] == ["score", "score"]
+    assert list(job.members) == ["score", "score#2"]
+    logs = [Path(m.log) for m in job.members.values()]
+    assert len(set(logs)) == 2
+    assert all("cost        $0.25" in p.read_text() for p in logs)
+    assert job.cost == pytest.approx(0.5)
+    # A fan-out member's first dispatch keeps its plain key; a repeat keeps the
+    # slice id after the colon, which the page matches fan-out squares on.
+    console._dispatch_members(job, intake_run, "propose", ["r1-b01"], OPTS)
+    console._dispatch_members(job, intake_run, "propose", ["r1-b01"], OPTS)
+    assert "propose:r1-b01" in job.members
+    assert "propose#2:r1-b01" in job.members
+    assert job.members["propose#2:r1-b01"].id.split(":").pop() == "r1-b01"
