@@ -371,6 +371,85 @@ def test_a_symlink_out_of_the_run_is_not_followed(console, run, tmp_path):
     assert status == 404 and b"do not serve" not in body
 
 
+# -- folder links from the run summary -----------------------------------------
+# run-summary links `04-instances/<id>/` and `06-suite/<id>/`; the console answers
+# a folder with a listing it builds, rather than the 404 those links used to get.
+
+
+def test_the_summary_links_folders_that_the_console_answers_with_a_listing(console, run):
+    page = summary.run_summary(run)
+    sid = next(p.name for p in run.instances_dir.iterdir() if p.is_dir())
+    assert f'href="04-instances/{sid}/"' in page
+    inside = sorted(p.name for p in (run.instances_dir / sid).iterdir())
+    with _serving(console) as port:
+        status, headers, body = _get_headers(port, f"/runs/{run.root.name}/04-instances/{sid}/")
+    assert status == 200
+    assert headers["content-type"] == "text/html; charset=utf-8"
+    assert headers["content-security-policy"] == "sandbox"
+    assert headers["x-content-type-options"] == "nosniff"
+    text = body.decode()
+    for name in inside:
+        assert f'href="/runs/{run.root.name}/04-instances/{sid}/{name}' in text
+
+
+def test_a_suite_folder_lists_and_its_files_are_served_inert(console, run):
+    # The toy run stops before emit, so the suite folder is written here.
+    sid = next(p.name for p in run.instances_dir.iterdir() if p.is_dir())
+    folder = run.suite_dir / sid
+    folder.mkdir(parents=True)
+    (folder / "evil.html").write_text("<script>steal()</script>")
+    with _serving(console) as port:
+        status, _, body = _get_headers(port, f"/runs/{run.root.name}/06-suite/{sid}")
+        file_status, headers, file_body = _get_headers(
+            port, f"/runs/{run.root.name}/06-suite/{sid}/evil.html"
+        )
+    assert status == 200
+    assert f'href="/runs/{run.root.name}/06-suite/{sid}/evil.html"' in body.decode()
+    assert file_status == 200
+    assert headers["content-type"] == "text/plain; charset=utf-8"
+    assert headers["content-security-policy"] == "sandbox"
+    assert file_body == b"<script>steal()</script>"
+
+
+def test_a_folder_listing_escapes_names(console, run):
+    folder = run.root / "odd"
+    folder.mkdir()
+    (folder / "<img src=x onerror=steal()>.txt").write_text("x")
+    with _serving(console) as port:
+        status, _, body = _get_headers(port, f"/runs/{run.root.name}/odd/")
+    assert status == 200
+    assert b"<img" not in body
+    assert b"&lt;img src=x onerror=steal()&gt;.txt" in body
+
+
+def test_a_folder_listing_leaves_off_a_symlink_out_of_the_run(console, run, tmp_path):
+    outside = tmp_path / "secret.txt"
+    outside.write_text("do not serve")
+    folder = run.root / "odd"
+    folder.mkdir()
+    (folder / "door.txt").symlink_to(outside)
+    (folder / "kept.txt").write_text("fine")
+    with _serving(console) as port:
+        _, _, listing = _get_headers(port, f"/runs/{run.root.name}/odd/")
+        status, _, body = _req(port, "GET", f"/runs/{run.root.name}/odd/door.txt", token=None)
+    assert b"kept.txt" in listing and b"door.txt" not in listing
+    assert status == 404 and b"do not serve" not in body
+
+
+def test_a_folder_outside_the_run_is_not_listed(console, run, tmp_path):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("do not list")
+    (run.root / "dirlink").symlink_to(outside)
+    with _serving(console) as port:
+        linked = _req(port, "GET", f"/runs/{run.root.name}/dirlink/", token=None)
+        climbed = _req(port, "GET", f"/runs/{run.root.name}/{_UP}tmp/", token=None)
+        climbed_enc = _req(port, "GET", f"/runs/{run.root.name}/{_UP_ENCODED}", token=None)
+    for status, _, body in (linked, climbed, climbed_enc):
+        assert status == 404
+        assert b"secret.txt" not in body
+
+
 def test_an_unknown_run_is_refused(console):
     with _serving(console) as port:
         status, _, _ = _req(port, "GET", "/api/runs/..%2F..%2Fetc", token=None)
