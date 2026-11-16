@@ -135,10 +135,10 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
 
     try:
         part = read_json(run.services_part)
-    except (ArtifactError, FileNotFoundError) as exc:
-        # FileNotFoundError as well as ArtifactError: an absent part is the
-        # ordinary shape of "reconcile-services has not run or failed", and it is
-        # repairable by re-dispatching that pass -- so a finding, not an exception.
+    except ArtifactError as exc:
+        # read_json already turns an absent file into ArtifactError. An absent part
+        # is the ordinary shape of "reconcile-services has not run or failed", and it
+        # is repairable by re-dispatching that pass -- so a finding, not an exception.
         return [], [Finding(run.services_part, LAYER, "", f"cannot read: {exc}")]
 
     if not isinstance(part, dict):

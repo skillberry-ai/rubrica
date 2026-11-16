@@ -27,7 +27,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from rubrica.artifacts import ArtifactError, read_json, sha256_of
+from rubrica.artifacts import ArtifactError, read_json, read_json_or_none, sha256_of
 from rubrica.findings import Finding
 from rubrica.interfaces import TOOL_NAME
 from rubrica.invariants import InvariantForm
@@ -86,12 +86,9 @@ def parse_hole_ref(ref: str) -> tuple[str, tuple[str, ...]]:
     raise ValueError(f"malformed hole reference: {ref!r}")
 
 
-def _load(path) -> Any | None:
-    """Read an artifact, or None when it does not exist yet."""
-    try:
-        return read_json(path)
-    except ArtifactError:
-        return None
+# Read an artifact, or None when it does not exist yet. Only ArtifactError reads
+# as absence; a PermissionError still reaches cli.py's exit-2 path.
+_load = read_json_or_none
 
 
 def _readable_targets(run: RunPaths) -> list[Path]:

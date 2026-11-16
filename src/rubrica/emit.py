@@ -30,7 +30,7 @@ from typing import Any
 
 import tomli_w
 
-from rubrica.artifacts import ArtifactError, read_json, write_json
+from rubrica.artifacts import read_json_or_none, write_json
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths
 from rubrica.suite.verify import CONTRACT, DATA_KINDS, DEFAULT_WEIGHTS, TRAJECTORY_KINDS
@@ -244,11 +244,9 @@ def _provenance(scenario: dict[str, Any], expected: dict[str, Any], verdict: dic
     return "\n".join(lines)
 
 
-def _load(path) -> Any | None:
-    try:
-        return read_json(path)
-    except ArtifactError:
-        return None
+# Only ArtifactError reads as absence; a PermissionError still reaches cli.py's
+# exit-2 path. See artifacts.read_json_or_none.
+_load = read_json_or_none
 
 
 def _unreadable_instance(run: RunPaths, sid: str, seed: Any | None, expected: Any | None) -> str:

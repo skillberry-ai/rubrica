@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from rubrica import summary
-from rubrica.artifacts import read_json
+from rubrica.artifacts import read_json_or_none
 from rubrica.paths import RunPaths, is_safe_segment
 
 # The five step kinds. `prompt` and `fanout` call a model; `code` runs a rubrica
@@ -179,10 +179,8 @@ class Ledger:
 
 
 def _quietly(path: Path):
-    try:
-        return read_json(path)
-    except Exception:  # deliberate: an unreadable artifact reads as absent here
-        return None
+    # Any failure reads as absent here: the console is a report, not a gate.
+    return read_json_or_none(path, quiet=True)
 
 
 def _exists(path: Path) -> bool:
