@@ -29,7 +29,11 @@ from rubrica_console.credentials import SCRUBBED
 # dispatching. A Homebrew bash is tried first for that reason.
 _BASH_CANDIDATES = ("/opt/homebrew/bin/bash", "/usr/local/bin/bash", "bash")
 
-_COST_LINE = re.compile(r"^cost\s+\$([0-9.]+) over (\d+) turns")
+# The cost is jq's rendering of `total_cost_usd`, and jq 1.7.1 (measured) prints a
+# tiny spend in scientific notation -- 0.0000001 comes out as `1E-7` -- so the
+# pattern takes an exponent. It is a real number, not any run of `[0-9.]`: "$."
+# once matched that and raised in float() from inside the status poll.
+_COST_LINE = re.compile(r"^cost\s+\$(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?) over (\d+) turns")
 
 
 def repo_root() -> Path:
@@ -91,9 +95,14 @@ def read_progress(log: Path) -> Progress:
     for line in text.splitlines():
         match = _COST_LINE.match(line)
         if match:
-            progress.cost = float(match.group(1))
-            progress.turns = int(match.group(2))
-            progress.finished = True
+            # The pattern already admits only a number, so this guard is belt and
+            # braces: a line that cannot be read is skipped, never raised, because
+            # the caller (jobs._refresh) has no try/except around this function.
+            try:
+                cost, turns = float(match.group(1)), int(match.group(2))
+            except ValueError:
+                continue
+            progress.cost, progress.turns, progress.finished = cost, turns, True
             continue
         if not line.startswith("{"):
             continue
@@ -105,10 +114,15 @@ def read_progress(log: Path) -> Progress:
             continue
         if event.get("type") == "assistant":
             progress.turns += 1
-            content = (event.get("message") or {}).get("content") or []
+            # `message` and a block's `input` are checked to be objects before
+            # `.get`: a list in either once raised AttributeError out of here.
+            message = event.get("message")
+            content = (message.get("content") if isinstance(message, dict) else None) or []
             for block in content if isinstance(content, list) else []:
                 if isinstance(block, dict) and block.get("type") == "tool_use":
-                    target = block.get("input") or {}
+                    target = block.get("input")
+                    if not isinstance(target, dict):
+                        target = {}
                     hint = target.get("file_path") or target.get("command") or ""
                     progress.last = f"{block.get('name', 'tool')} {str(hint)[:120]}".strip()
         elif event.get("type") == "result":
