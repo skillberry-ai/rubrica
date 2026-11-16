@@ -327,3 +327,40 @@ def test_a_later_plain_line_overrides_an_earlier_negation(tmp_path):
     kept, reasons = _ignoring(tmp_path, "!x\nx\n", ["x", "y"])
     assert reasons["x"] == "gitignored"
     assert "y" in kept
+
+
+# A .gitignore saved with a UTF-8 byte-order mark (Windows Notepad, some
+# editors) once kept the mark on its first pattern, `﻿.env`, which matched
+# nothing: a bug scout's corpus catalogued `.env` while `git status --ignored`
+# showed it ignored. Git drops one leading mark, and so must we.
+
+
+def test_a_byte_order_mark_does_not_hide_the_first_gitignore_line(tmp_path):
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / ".gitignore").write_bytes(b"\xef\xbb\xbf.env\nsecrets/\n")
+    (root / ".env").write_text("TOKEN=placeholder\n", encoding="utf-8")
+    (root / "secrets").mkdir()
+    (root / "secrets" / "key.txt").write_text("k\n", encoding="utf-8")
+    (root / "README.md").write_text("# Target\n", encoding="utf-8")
+    assert survey._gitignore_patterns(root) == [".env", "secrets/"]
+    kept, excluded = survey.walk_corpus([root])
+    reasons = _reasons(excluded)
+    assert reasons[".env"] == "gitignored"
+    assert reasons["secrets/key.txt"] == "gitignored"
+    assert "README.md" in {p.relative_to(root).as_posix() for p in kept}
+
+
+def test_a_gitignore_without_a_byte_order_mark_reads_the_same(tmp_path):
+    kept, reasons = _ignoring(tmp_path, ".env\nsecrets/\n", [".env", "secrets/k.txt", "a.md"])
+    assert reasons[".env"] == "gitignored"
+    assert reasons["secrets/k.txt"] == "gitignored"
+    assert "a.md" in kept
+
+
+def test_only_one_leading_byte_order_mark_is_dropped(tmp_path):
+    """Git strips one mark at the start of the file, not one inside a line."""
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / ".gitignore").write_bytes(b"\xef\xbb\xbf.env\n\xef\xbb\xbfx\n")
+    assert survey._gitignore_patterns(root) == [".env", "﻿x"]

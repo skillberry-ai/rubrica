@@ -159,8 +159,12 @@ def _gitignore_patterns(root: Path) -> list[str]:
     `secrets/key.txt` were catalogued again.
     """
     ignore = root / ".gitignore"
+    # `utf-8-sig` drops one leading byte-order mark, as git does. Read as plain
+    # `utf-8`, a file saved with one (Windows Notepad, some editors) kept the
+    # mark on its first pattern -- `str.strip()` does not remove U+FEFF -- so
+    # `\ufeff.env` matched nothing and a `.env` git ignores was catalogued.
     try:
-        text = ignore.read_text(encoding="utf-8")
+        text = ignore.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return []
     patterns = []
