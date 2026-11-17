@@ -244,13 +244,14 @@ def test_a_locked_folder_a_glob_may_not_fully_cover_stays_unreadable(tmp_path):
 
 
 @pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
-@pytest.mark.parametrize("line", ["data/*", "data/**"])
+@pytest.mark.parametrize("line", ["data/*", "data/**", "data/**/*"])
 def test_a_locked_folder_under_a_trailing_star_ignore_line_keeps_the_gitignored_reason(
     tmp_path, line
 ):
-    """`data/*` and `data/**` match only the files inside `data`, never the
-    folder's own path, so a locked `data` used to read `unreadable` while a
-    readable one gave every file `gitignored` -- measured on this tree.
+    """`data/*`, `data/**` and `data/**/*` match only the files inside
+    `data`, never the folder's own path, so a locked `data` used to read
+    `unreadable` while a readable one gave every file `gitignored` -- measured
+    on this tree.
     """
     root = tmp_path / "corpus"
     locked = root / "data"
@@ -281,10 +282,14 @@ def test_a_locked_folder_an_ignore_line_may_not_fully_cover_stays_unreadable(tmp
 
 def test_a_trailing_star_line_reaches_a_folder_only_in_folder_mode():
     """The folder-mode rule must not leak into file checks: a file called
-    `logs` is not matched by `logs/**`, nor by `logs/*`.
+    `logs` is not matched by `logs/**`, `logs/*` or `logs/**/*`.
     """
     assert survey._gitignored("logs", ["logs/**"], folder=True)
     assert survey._gitignored("logs", ["logs/*"], folder=True)
+    assert survey._gitignored("logs", ["logs/**/*"], folder=True)
+    assert not survey._gitignored("logs", ["logs/**/*"])
+    assert survey._gitignored("logs/k.md", ["logs/**/*"])
+    assert not survey._gitignored("logs", ["logs/*/*"], folder=True)
     assert survey._gitignored("a/logs", ["logs/**"], folder=True) is False
     assert not survey._gitignored("logs", ["logs/*"])
     assert not survey._gitignored("logs", ["logs/**", "!logs/**"], folder=True)

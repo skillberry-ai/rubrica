@@ -285,7 +285,16 @@ def _gitignored(relative: str, patterns: Sequence[str], *, folder: bool = False)
             # only some files (`data/*.md`) ends in more than stars and does
             # not count, and nor does `data/*/`, which skips files directly
             # inside `data`. File mode never takes this branch.
+            #
+            # `data/**/*` too: its `**` may match zero levels, so it covers the
+            # files directly inside `data` as well, yet a trailing `**` in
+            # `_segments_match` must match at least one level, so a stem of
+            # `["data", "**"]` would never match `data` itself. Only `**` is
+            # dropped from the stem: a `*` there (`data/*/*`) is one whole
+            # level, which skips the files directly inside `data`.
             stem = segments[:-1]
+            while stem and stem[-1] == "**":
+                stem = stem[:-1]
             matched = bool(stem) and any(
                 _segments_match(parts[:k], stem) for k in range(1, len(parts) + 1)
             )
