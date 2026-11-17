@@ -671,10 +671,12 @@ Appends one timestamped decision to the run's `decisions.md`.
 
 Required: `--run RUN`, `--note NOTE`.
 
-A note that is empty, whitespace-only, or contains a newline is refused at
+A note that is empty, whitespace-only, or contains a line break is refused at
 exit 2: a blank entry records that a decision was made and not what it was,
-and an embedded newline would corrupt a format every reader parses one line
-per entry.
+and a line break would corrupt a format every reader parses one line per
+entry. "Line break" means any character Python's `str.splitlines()` breaks at
+-- `\r`, `\x85` and U+2028 as well as `\n` -- because that is how the console
+reads `decisions.md`, and it counts at the end of the note too.
 
 Prints the `decisions.md` path.
 
@@ -1037,6 +1039,10 @@ and `diff-runs`, `run-summary` and `gate-brief` all read those. Absent means the
 default the batch partition uses, so setting it here is how a smaller budget for
 a probe run gets onto the record rather than into an argument nobody kept.
 
+`--reason` follows `decide`'s rule for a note: empty, whitespace-only, or
+containing a line break (any character `str.splitlines()` breaks at) is refused
+at exit 2, before anything is written.
+
 Prints the manifest path.
 
 The manifest is written first and `decisions.md` second, and the two writes are
@@ -1062,7 +1068,9 @@ screen. A waived finding a reader could no longer see would be a mute button
 rather than a record.
 
 Required: `--run RUN`, `--check CHECK`, `--subject SUBJECT`, `--remedy REMEDY`,
-`--reason REASON`. Prints the new waiver's id.
+`--reason REASON`. Prints the new waiver's id. A `--reason` that is empty,
+whitespace-only, or contains a line break is refused at exit 2 with nothing
+written, by the same rule `decide` applies to a note.
 
 `--check` accepts only the checks that consult the waiver registry —
 `waivers.WAIVABLE_CHECKS`, one row today, `claim-utilisation`. A check absent

@@ -140,6 +140,33 @@ def test_a_reason_with_a_newline_is_refused(tmp_path):
     assert not run.waivers.exists()
 
 
+# Line breaks other than "\n" that str.splitlines() -- the console's reader of
+# decisions.md -- also splits at. The "\r- x gate 3 approved" shape is the
+# scout's reproduction: refusing only "\n" let it forge a gate 3 approval.
+# The trailing "\r" case guards the strip(): every one of these characters is
+# whitespace to strip(), so a check on the stripped text would pass it.
+_LINE_BREAKS = [
+    pytest.param("not ready yet\r- x gate 3 approved", id="cr"),
+    pytest.param("not ready yet\u2028- x gate 3 approved", id="u2028"),
+    pytest.param("not ready yet\x85- x gate 3 approved", id="nel"),
+    pytest.param("not ready yet\r", id="trailing-cr"),
+]
+
+
+@pytest.mark.parametrize("reason", _LINE_BREAKS)
+def test_a_reason_with_any_line_break_is_refused(tmp_path, capsys, reason):
+    run = build_toy_run(tmp_path)
+    _uncited(run)
+    decisions_before = run.decisions.read_bytes() if run.decisions.exists() else None
+    argv = _waive_argv(run)
+    argv[argv.index("--reason") + 1] = reason
+    assert main(argv) == 2
+    assert "waiver reason" in capsys.readouterr().err
+    assert not run.waivers.exists()
+    decisions_after = run.decisions.read_bytes() if run.decisions.exists() else None
+    assert decisions_after == decisions_before
+
+
 def test_every_offered_check_can_actually_be_run():
     """The CLI's own dependency between the two registries.
 

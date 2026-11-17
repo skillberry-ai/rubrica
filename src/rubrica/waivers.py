@@ -214,9 +214,14 @@ def record(
     text = reason.strip()
     if not text:
         raise UsageError("a waiver reason cannot be empty")
-    if "\n" in text:
+    # The same guard `decide` carries, deferred-imported for the reason given at
+    # the `utc_stamp` import below. Tested on the raw reason, not `text`: strip()
+    # would quietly drop a trailing `\\r` instead of refusing it.
+    from rubrica.manifest import has_line_break
+
+    if has_line_break(reason):
         raise UsageError(
-            "a waiver reason cannot contain a newline; decisions.md is one line per entry"
+            "a waiver reason cannot contain a line break; decisions.md is one line per entry"
         )
     if not finding_text.strip():
         raise UsageError("a waiver's finding text cannot be empty")
