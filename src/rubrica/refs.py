@@ -27,7 +27,14 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from rubrica.artifacts import ArtifactError, read_json, read_json_or_none, sha256_of
+from rubrica.artifacts import (
+    ArtifactError,
+    dict_members,
+    read_json,
+    read_json_or_none,
+    sha256_of,
+    str_members,
+)
 from rubrica.findings import Finding
 from rubrica.interfaces import TOOL_NAME
 from rubrica.invariants import InvariantForm
@@ -226,9 +233,7 @@ def _claims_by_artifact(run: RunPaths) -> dict[str, list[dict]]:
         artifact_id = payload.get("artifact_id")
         if not isinstance(artifact_id, str):
             continue
-        out.setdefault(artifact_id, []).extend(
-            claim for claim in _as_list(payload.get("claims")) if isinstance(claim, dict)
-        )
+        out.setdefault(artifact_id, []).extend(dict_members(payload.get("claims")))
     return out
 
 
@@ -246,7 +251,7 @@ def _claim_refs_in(node: Any) -> list[str]:
     if isinstance(node, dict):
         for key, value in node.items():
             if key == "claims":
-                found.extend(v for v in _as_list(value) if isinstance(v, str))
+                found.extend(str_members(value))
             else:
                 found.extend(_claim_refs_in(value))
     elif isinstance(node, list):
@@ -485,7 +490,7 @@ def check_slices(run: RunPaths) -> list[Finding]:
             continue
         pointer = f"/slices/{index}"
         sid = _str_or_none(entry.get("id"))
-        candidate_ids = [c for c in _as_list(entry.get("candidate_ids")) if isinstance(c, str)]
+        candidate_ids = str_members(entry.get("candidate_ids"))
 
         if known_ids is not None:
             for j, cid in enumerate(candidate_ids):
@@ -529,7 +534,7 @@ def check_slices(run: RunPaths) -> list[Finding]:
         if not isinstance(shard, dict):
             continue
 
-        shard_candidates = [c for c in _as_list(shard.get("candidates")) if isinstance(c, dict)]
+        shard_candidates = dict_members(shard.get("candidates"))
 
         # Check 6: shard candidates match candidate_ids, in order -- the same
         # ids in the same sequence, not merely the same set.
@@ -707,9 +712,7 @@ def check_disposition_parts(run: RunPaths) -> list[Finding]:
             continue
         sid = _str_or_none(entry.get("id"))
         if sid is not None:
-            slice_candidates[sid] = {
-                c for c in _as_list(entry.get("candidate_ids")) if isinstance(c, str)
-            }
+            slice_candidates[sid] = set(str_members(entry.get("candidate_ids")))
 
     have_parts = set(run.slice_ids_with_parts())
     out: list[Finding] = []
@@ -891,7 +894,7 @@ def check_objective(run: RunPaths) -> list[Finding]:
         if not isinstance(surface, dict):
             continue
         pointer = f"/objective_review/surfaces/{index}"
-        evidence = [e for e in _as_list(surface.get("evidence")) if isinstance(e, str)]
+        evidence = str_members(surface.get("evidence"))
 
         # Clause 1: every evidence id resolves to a real catalogue candidate.
         # Skipped (like check_slices' known_ids is None branch) when the
@@ -1771,9 +1774,7 @@ def check_contradiction_parts(run: RunPaths) -> list[Finding]:
     if cover is None or not run.contradictions_dir.is_dir():
         return []
     out: list[Finding] = []
-    declared = {
-        s["id"] for s in _as_list(cover.get("subjects")) if isinstance(s, dict) and "id" in s
-    }
+    declared = {s["id"] for s in dict_members(cover.get("subjects")) if "id" in s}
     on_disk = set(run.subject_part_ids())
 
     # A part filename that is not a safe path segment cannot be a subject id, so
@@ -1819,9 +1820,9 @@ def check_contradiction_parts(run: RunPaths) -> list[Finding]:
     # no entry and the own-subject clause below skips its part rather than
     # resolving against a claim list it cannot address.
     covered_by = {
-        s["id"]: {c for c in _as_list(s.get("claims")) if isinstance(c, str)}
-        for s in _as_list(cover.get("subjects"))
-        if isinstance(s, dict) and isinstance(s.get("id"), str)
+        s["id"]: set(str_members(s.get("claims")))
+        for s in dict_members(cover.get("subjects"))
+        if isinstance(s.get("id"), str)
     }
 
     known = _claim_ids(run)
@@ -2214,7 +2215,7 @@ def check_input_dispositions(run: RunPaths) -> list[Finding]:
         def report(pointer: str, message: str, path: Path = path) -> None:
             out.append(Finding(path, "refs", pointer, message))
 
-        rows = [row for row in _as_list(part.get("inputs_seen")) if isinstance(row, dict)]
+        rows = dict_members(part.get("inputs_seen"))
         cited_ids = set(_claim_refs_in(part))
         seen: set[str] = set()
 
@@ -2474,9 +2475,7 @@ def _duplicate_service_ids(part: dict) -> set[str]:
     Non-string ids are dropped rather than counted: an unhashable one would raise
     out of the set, and layer 1 owns the shape.
     """
-    ids = [
-        service.get("id") for service in _as_list(part.get("services")) if isinstance(service, dict)
-    ]
+    ids = [service.get("id") for service in dict_members(part.get("services"))]
     declared = [service_id for service_id in ids if isinstance(service_id, str)]
     return {service_id for service_id in declared if declared.count(service_id) > 1}
 
@@ -3104,7 +3103,7 @@ def check_batches(run: RunPaths) -> list[Finding]:
     world = _load(run.world_model)
     cells = _cells(world) if isinstance(world, dict) else None
     goal_ids = (
-        {g["id"] for g in _as_list(world.get("goals")) if isinstance(g, dict) and "id" in g}
+        {g["id"] for g in dict_members(world.get("goals")) if "id" in g}
         if isinstance(world, dict)
         else None
     )

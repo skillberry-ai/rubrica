@@ -138,7 +138,13 @@ from __future__ import annotations
 
 import textwrap
 
+# `_dicts` and `_strings` keep their private names here because target_brief.py
+# and summary.py import them from this module; the guards themselves, and the
+# measurements that justify them, live in artifacts.py so that refs.py and
+# utilisation.py can share them without importing each other.
+from rubrica.artifacts import dict_members as _dicts
 from rubrica.artifacts import read_json_or_none
+from rubrica.artifacts import str_members as _strings
 from rubrica.errors import UsageError
 from rubrica.intake import admit_sort_key
 from rubrica.paths import STAGES, RunPaths, is_safe_segment, list_json
@@ -249,37 +255,6 @@ def _quietly(path):
     return read_json_or_none(path, quiet=True)
 
 
-def _dicts(value) -> list[dict]:
-    """The dict members of `value`, or `[]` if it is not a list at all.
-
-    `_quietly` above only guards the document; every loop below then indexed
-    into that document's *elements* with a bare `.get`, and half of them had an
-    `isinstance` guard while their siblings in the same function did not. A
-    triage record carrying `"deficiencies": ["oops-a-string"]` -- which is
-    precisely the shape a human hand-editing the document gate 0 invites them
-    to hand-edit produces -- raised `AttributeError: 'str' object has no
-    attribute 'get'` and turned this command into a fabricated `[internal]`
-    finding at exit 1.
-
-    That is two promises at once: this module's docstring says `gate_brief`
-    never raises on a readable run's *content*, and the exit-code contract's
-    ruling for a report (claim-utilisation's, restated at cli.py's gate-brief
-    arm) is that it always exits 0 on a readable run, so an orchestrator
-    reading its code cannot mistake data for a defect. A report that reports
-    "this document is malformed" by crashing is the least useful reading of a
-    document, and gate 0 is not holdable without it.
-
-    Silently dropping the malformed element is deliberate and is the *only*
-    thing this can do: raising breaks the promise above, and inventing a
-    finding is `validate`'s job -- run `rubrica validate --stage triage` and
-    the schema names it precisely. Each caller states the count it rendered, so
-    a dropped element shows up as a number that disagrees with the file.
-    """
-    if not isinstance(value, list):
-        return []
-    return [member for member in value if isinstance(member, dict)]
-
-
 def _mapping(value) -> dict:
     """`value` if it is a dict, else `{}`.
 
@@ -289,20 +264,6 @@ def _mapping(value) -> dict:
     Measured at gates 0, 1 and 2, all three at exit 1.
     """
     return value if isinstance(value, dict) else {}
-
-
-def _strings(value) -> list[str]:
-    """The string members of `value`, or `[]` if it is not a list at all.
-
-    `_dicts`' sibling, for the fields whose elements are ids rather than
-    objects -- `candidate_ids`, `other_slices`, a surface's `evidence`. The
-    same measured failure applies: a hand-edited `"other_slices": "s02"` is a
-    string, iterating it yields characters, and every one of them would be
-    counted as a slice holding the group.
-    """
-    if not isinstance(value, list):
-        return []
-    return [member for member in value if isinstance(member, str)]
 
 
 def _count(value) -> int:
