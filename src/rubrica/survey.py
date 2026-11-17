@@ -25,7 +25,7 @@ import fnmatch
 import hashlib
 import json
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +33,14 @@ from rubrica import digest as digest_module
 from rubrica import slices as slices_module
 from rubrica.artifacts import canonical_bytes, sha256_of, write_json
 from rubrica.errors import UsageError
-from rubrica.intake import _unique_artifact_id, classify, slug
+from rubrica.intake import (
+    _unique_artifact_id,
+    classify,
+    create_run_dir,
+    resolve_stamp,
+    run_id_for,
+    slug,
+)
 from rubrica.manifest import utc_stamp
 from rubrica.paths import RunPaths
 
@@ -752,12 +759,7 @@ def survey(
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             raise UsageError(f"survey needs {label} to be an integer >= 1, got {value!r}")
 
-    if now is None:
-        stamp = datetime.now(UTC)
-    elif now.tzinfo is None:
-        raise UsageError("survey needs a timezone-aware datetime, got a naive one")
-    else:
-        stamp = now.astimezone(UTC)
+    stamp = resolve_stamp(now, command="survey")
 
     candidates: list[dict] = []
     excluded: list[dict] = []
@@ -901,7 +903,7 @@ def survey(
             "could never be dispatched over it"
         )
 
-    run_id = f"run-{stamp:%Y%m%d-%H%M%S}"
+    run_id = run_id_for(stamp)
 
     request = {
         "target": {"name": target_name.strip(), "interface": target_interface.strip()},
@@ -950,10 +952,7 @@ def survey(
             "triage dispatch's context"
         )
 
-    run = RunPaths(Path(runs_dir) / run_id)
-    if run.root.exists():
-        raise FileExistsError(f"run directory already exists: {run.root}")
-    run.root.mkdir(parents=True)
+    run = create_run_dir(runs_dir, run_id)
 
     write_json(run.catalogue, payload)
     return run
