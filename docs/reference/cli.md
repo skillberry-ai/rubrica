@@ -27,6 +27,8 @@ TARGET_NAME`, `--target-interface TARGET_INTERFACE`, `--objective
 
 A blank (empty or whitespace-only) `--corpus`, `--runs-dir` — here and on `intake --input` — or `--run` on any subcommand exits 2 rather than meaning the current folder.
 
+The same holds for `intake --input`, `check-skills --skills-dir`, and `--output` on `run-summary` and `target-brief`: a blank value exits 2 and writes nothing.
+
 Optional: `--objective-note OBJECTIVE_NOTE`, `--scope-note SCOPE_NOTE`,
 `--exclude GLOB` (repeatable), `--max-rounds MAX_ROUNDS`, `--max-scenarios
 MAX_SCENARIOS`, `--max-candidates MAX_CANDIDATES`, `--max-catalogue-bytes

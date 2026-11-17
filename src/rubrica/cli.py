@@ -512,7 +512,12 @@ def main(argv: list[str] | None = None) -> int:
         return CLEAN
 
     if args.command == "intake":
-        if args.run:
+        # `is not None`, not truthiness: a blank --run ("" from an unset $RUN)
+        # is falsy, so a truthiness test sent it down the --input branch, where
+        # it either drew a misleading "intake --input needs ..." message or,
+        # with those flags given, crashed iterating a None --input -- a
+        # traceback with exit 1 and empty stdout.
+        if args.run is not None:
             # Minting a run from an ambiguous parameter set (a human's
             # --target-name alongside a catalogue that already carries one)
             # is refused rather than resolved by precedence -- this is the
@@ -528,6 +533,9 @@ def main(argv: list[str] | None = None) -> int:
             # failure shape -- exit 1, printed on stdout -- and must not be
             # caught here.
             try:
+                # Before the illegal-flags check, so a blank --run is named as
+                # the problem rather than the flags beside it.
+                _refuse_blank("--run", args.run)
                 illegal = [
                     flag
                     for flag, value in (
@@ -575,6 +583,7 @@ def main(argv: list[str] | None = None) -> int:
             # Present but blank is refused too, for survey's reason above: a
             # blank --runs-dir would mint the run in the current folder.
             _refuse_blank("--runs-dir", args.runs_dir)
+            _refuse_blank("--input", *args.input)
             run = intake(
                 inputs=[Path(p) for p in args.input],
                 runs_dir=Path(args.runs_dir),
@@ -822,7 +831,12 @@ def main(argv: list[str] | None = None) -> int:
             # so a run that stopped at extract is a page saying so, not a
             # finding -- which is why there is no _report call on this path.
             run = _run_dir(args.run)
-            destination = Path(args.output) if args.output else run.root / "run-summary.html"
+            # A blank --output is refused rather than read as "use the default":
+            # truthiness would quietly write somewhere the caller did not name.
+            _refuse_blank("--output", args.output)
+            destination = (
+                Path(args.output) if args.output is not None else run.root / "run-summary.html"
+            )
             # No local catch: an OSError from write_text -- a read-only
             # destination, a missing parent -- is the filesystem refusing, and
             # the shared handler below already maps that to USAGE. Catching it
@@ -845,7 +859,12 @@ def main(argv: list[str] | None = None) -> int:
             # wants -- but this page has no number to be quietly wrong, so it
             # banners the missing citations and still exits 0.
             run = _run_dir(args.run)
-            destination = Path(args.output) if args.output else run.root / "target-brief.html"
+            # A blank --output is refused rather than read as "use the default":
+            # truthiness would quietly write somewhere the caller did not name.
+            _refuse_blank("--output", args.output)
+            destination = (
+                Path(args.output) if args.output is not None else run.root / "target-brief.html"
+            )
             # No local catch, for run-summary's reason: an OSError from write_text
             # is the filesystem refusing, and the shared handler below already
             # maps that to USAGE. Catching it here to return FINDINGS would be the
@@ -894,6 +913,11 @@ def main(argv: list[str] | None = None) -> int:
             # exit 2 -- and unlike the other two, this one is not about a run
             # directory at all, so keeping it local is what documents that.
             try:
+                # A blank --skills-dir is Path("."): the current folder was read
+                # as the skills folder and every contract drew a fabricated
+                # "no skill named ..." finding with exit 1 -- a 1 naming the
+                # wrong artifact for what is a usage error.
+                _refuse_blank("--skills-dir", args.skills_dir)
                 findings = skills.check_all(args.skills_dir)
             except UsageError as exc:
                 print(f"error: {exc}", file=sys.stderr)

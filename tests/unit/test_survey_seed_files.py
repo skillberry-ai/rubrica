@@ -432,3 +432,90 @@ def test_a_blank_run_is_a_usage_error_and_writes_nothing(
     assert captured.out == ""
     assert "--run" in captured.err
     assert list(tmp_path.iterdir()) == []
+
+
+# The same Path("") hazard on check-skills: a blank --skills-dir read the
+# current folder as the skills folder and printed fabricated "no skill named"
+# findings with exit 1, a stage defect's code for a caller's usage error.
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_a_blank_skills_dir_is_a_usage_error_not_findings(tmp_path, capsys, monkeypatch, blank):
+    from rubrica import cli
+
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["check-skills", "--skills-dir", blank]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--skills-dir" in captured.err
+
+
+# intake tested --run by truthiness, so a blank one fell into the --input
+# branch: alone it drew a misleading "intake --input needs ..." message, and
+# with the --input flags beside it it crashed iterating a None --input -- a
+# traceback, exit 1 and empty stdout, against the exit-code contract.
+@pytest.mark.parametrize("blank", ["", "  "])
+@pytest.mark.parametrize(
+    "extra",
+    [[], ["--runs-dir", "runs", "--target-name", "toy", "--target-interface", "mcp"]],
+    ids=["alone", "with-input-flags"],
+)
+def test_a_blank_run_on_intake_is_a_usage_error_naming_run(
+    tmp_path, capsys, monkeypatch, blank, extra
+):
+    from rubrica import cli
+
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["intake", "--run", blank, *extra]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--run must not be empty or blank" in captured.err
+    assert list(tmp_path.iterdir()) == []
+
+
+# A blank --input is the same Path("") hazard on intake's other branch.
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_a_blank_input_on_intake_is_a_usage_error(tmp_path, capsys, monkeypatch, blank):
+    from rubrica import cli
+
+    monkeypatch.chdir(tmp_path)
+    code = cli.main(
+        [
+            "intake",
+            "--input",
+            blank,
+            "--runs-dir",
+            "runs",
+            "--target-name",
+            "toy",
+            "--target-interface",
+            "mcp",
+        ]
+    )
+    assert code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--input must not be empty or blank" in captured.err
+    assert list(tmp_path.iterdir()) == []
+
+
+# run-summary and target-brief tested --output by truthiness, so a blank one
+# was quietly read as "use the default" and the page landed somewhere the
+# caller never named.
+@pytest.mark.parametrize("command", ["run-summary", "target-brief"])
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_a_blank_output_is_a_usage_error_and_writes_nothing(
+    tmp_path, capsys, monkeypatch, command, blank
+):
+    from rubrica import cli
+
+    # chdir so a regression writes its stray page into tmp_path, not the repo.
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    run = tmp_path / "run"
+    run.mkdir()
+    assert cli.main([command, "--run", str(run), "--output", blank]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--output must not be empty or blank" in captured.err
+    assert list(run.iterdir()) == []
+    assert list(cwd.iterdir()) == []
