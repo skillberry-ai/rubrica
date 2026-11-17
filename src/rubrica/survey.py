@@ -560,6 +560,13 @@ def _walk_files(root: Path) -> tuple[list[Path], list[Path]]:
                     # caller's resolve() fails and records it as
                     # `symlink_outside_root`. A link to a folder still falls
                     # through here unrecorded, exactly as rglob left it.
+                    #
+                    # A link to a FIFO, socket or device also lands here, and
+                    # it *does* resolve -- inside the root, the symlink check
+                    # lets it through. It is passed on all the same, so it is
+                    # recorded rather than lost, and `_keep_or_drop` declines
+                    # it before opening anything: measured, `c/link.md -> pipe`
+                    # (a FIFO) hung survey forever in `_looks_binary`'s open().
                     walked_files.append(path)
             except OSError:
                 if not is_link:
@@ -610,6 +617,16 @@ def _keep_or_drop(
         excluded.append({"path": relative, "reason": "lockfile"})
         return
     try:
+        # Never open anything that is not a regular file once followed. A
+        # FIFO blocks open() until a writer appears -- forever, in a survey --
+        # and a device or socket is not evidence either. `unreadable` rather
+        # than a new reason: it is the existing "survey could not read this as
+        # a file" entry, and adding one would mean a schema change for a case
+        # no corpus owner means as a document. stat() follows the link, so
+        # this judges the target, which is what the open below would reach.
+        if not stat.S_ISREG(Path(path).stat().st_mode):
+            excluded.append({"path": relative, "reason": "unreadable"})
+            return
         if _looks_binary(path):
             excluded.append({"path": relative, "reason": "binary"})
             return
