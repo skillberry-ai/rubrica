@@ -76,6 +76,54 @@ jobs:
       - name: Skill contracts
         run: uv run --extra dev rubrica check-skills
 
+  # The release-notes library on BSD sed. scripts/lib/release-notes.sh shells out
+  # to sed, and `make release` is run from a maintainer's Mac, where /usr/bin/sed is
+  # BSD; `check` above runs on GNU sed only. Measured: the citation scrub once used
+  # `\b`, which BSD sed does not support, so on a Mac "issue N" and "PR #N" reached
+  # CHANGELOG.md with every CI job green. Only that module runs here -- it is the
+  # one whose behaviour depends on which sed is installed -- and, like `pre-commit`,
+  # it is not a required check unless the ruleset is changed to make it one.
+  release-notes-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: uv sync --extra dev --locked
+
+      # The runner's `bash` is Apple's /bin/bash 3.2, and release-notes.sh needs
+      # bash 4+; the tests call `bash -c`, so under 3.2, 11 of 20 produced empty
+      # notes (PR #28). This job tests BSD sed, not old bash, so put Homebrew's
+      # bash first on PATH -- and then check sed is still BSD /usr/bin/sed, since
+      # Homebrew's bin is now ahead of it and a GNU sed there would void the job.
+      - name: Modern bash
+        run: |
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+      - name: Show bash and sed
+        run: |
+          command -v bash
+          bash --version
+          test "$(command -v sed)" = /usr/bin/sed || { echo "sed is $(command -v sed), not BSD /usr/bin/sed"; exit 1; }
+          bash -c 'test "${BASH_VERSINFO[0]}" -ge 4' || { echo "bash on PATH is older than 4"; exit 1; }
+
+      - name: Release-notes tests on BSD sed
+        run: uv run --extra dev pytest -q tests/unit/test_release_notes.py
+
+      # APFS refuses non-UTF-8 names (EILSEQ), so on macOS these two must skip in
+      # setup rather than fail; Linux CI runs them in full.
+      - name: Non-UTF-8 run-summary tests skip on APFS
+        run: >-
+          uv run --extra dev pytest -q -rs
+          "tests/unit/test_summary.py::test_cli_exits_clean_on_a_stray_temp_file_whose_name_is_not_utf_8"
+          "tests/unit/test_summary.py::test_cli_exits_clean_on_a_run_directory_whose_name_is_not_utf_8"
+
   # The pre-commit hooks over the whole tree. Its own job, not a step in `check`,
   # and the split is the point: the default-branch ruleset requires `check` and
   # `DCO` by name, so a step there would make the hooks a fourth gate, which

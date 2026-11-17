@@ -5,6 +5,12 @@ runs/
 .superpowers/
 .claude/worktrees/
 .claude/.cc-writes/
+# symcc board worktrees hold in-progress task code; ruff honours .gitignore, so
+# without this `make check` in the main checkout lints every open task's copy.
+.symcc/
+
+# macOS Finder clutter
+.DS_Store
 
 # Python
 .venv/
