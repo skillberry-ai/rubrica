@@ -275,7 +275,21 @@ def _gitignored(relative: str, patterns: Sequence[str], *, folder: bool = False)
         # itself, unless the pattern names folders only. A file is ignored when
         # it, or any folder it sits in, is.
         last = len(parts) - 1 if folder_only and not folder else len(parts)
-        if any(_segments_match(parts[:k], segments) for k in range(1, last + 1)):
+        matched = any(_segments_match(parts[:k], segments) for k in range(1, last + 1))
+        if not matched and folder and not folder_only and set(segments[-1]) == {"*"}:
+            # A folder that could not be listed: `data/*` and `logs/**` match
+            # only what is inside, never the folder's own path, yet they cover
+            # every file it could hold -- so they count when what comes before
+            # the trailing stars matches the folder or one it sits in. The
+            # same idea as `_folder_operator_excluded`. A pattern covering
+            # only some files (`data/*.md`) ends in more than stars and does
+            # not count, and nor does `data/*/`, which skips files directly
+            # inside `data`. File mode never takes this branch.
+            stem = segments[:-1]
+            matched = bool(stem) and any(
+                _segments_match(parts[:k], stem) for k in range(1, len(parts) + 1)
+            )
+        if matched:
             # Last match wins, as in git; with no `!` lines this is "any line
             # matches", exactly the rule before negation was honoured.
             ignored = not negate

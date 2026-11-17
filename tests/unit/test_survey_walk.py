@@ -243,6 +243,53 @@ def test_a_locked_folder_a_glob_may_not_fully_cover_stays_unreadable(tmp_path):
     assert _reasons(excluded) == {"private": "unreadable"}
 
 
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+@pytest.mark.parametrize("line", ["data/*", "data/**"])
+def test_a_locked_folder_under_a_trailing_star_ignore_line_keeps_the_gitignored_reason(
+    tmp_path, line
+):
+    """`data/*` and `data/**` match only the files inside `data`, never the
+    folder's own path, so a locked `data` used to read `unreadable` while a
+    readable one gave every file `gitignored` -- measured on this tree.
+    """
+    root = tmp_path / "corpus"
+    locked = root / "data"
+    locked.mkdir(parents=True)
+    (root / ".gitignore").write_text(f"{line}\n", encoding="utf-8")
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (locked / "k.md").write_text("# K\n", encoding="utf-8")
+    _, readable = survey.walk_corpus([root])
+    assert _reasons(readable) == {"data/k.md": "gitignored"}
+    _, excluded = _walk_with_locked(root, locked)
+    assert _reasons(excluded) == {"data": "gitignored"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+@pytest.mark.parametrize("line", ["data/*.md", "data/*/"])
+def test_a_locked_folder_an_ignore_line_may_not_fully_cover_stays_unreadable(tmp_path, line):
+    """`data/*.md` covers only some files, and `data/*/` skips the files
+    directly inside `data`, so neither may claim a folder nobody can list.
+    """
+    root = tmp_path / "corpus"
+    locked = root / "data"
+    locked.mkdir(parents=True)
+    (root / ".gitignore").write_text(f"{line}\n", encoding="utf-8")
+    (locked / "k.md").write_text("# K\n", encoding="utf-8")
+    _, excluded = _walk_with_locked(root, locked)
+    assert _reasons(excluded) == {"data": "unreadable"}
+
+
+def test_a_trailing_star_line_reaches_a_folder_only_in_folder_mode():
+    """The folder-mode rule must not leak into file checks: a file called
+    `logs` is not matched by `logs/**`, nor by `logs/*`.
+    """
+    assert survey._gitignored("logs", ["logs/**"], folder=True)
+    assert survey._gitignored("logs", ["logs/*"], folder=True)
+    assert survey._gitignored("a/logs", ["logs/**"], folder=True) is False
+    assert not survey._gitignored("logs", ["logs/*"])
+    assert not survey._gitignored("logs", ["logs/**", "!logs/**"], folder=True)
+
+
 def test_a_shared_seen_dict_dedupes_across_two_separate_calls(tmp_path):
     """The fix for the per-root loop's own dedup gap, one level down from
     survey.survey: two *separate* walk_corpus calls, sharing one `seen` dict
