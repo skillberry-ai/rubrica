@@ -166,6 +166,83 @@ def test_an_unreadable_folder_two_levels_down_is_recorded_too(tmp_path):
     assert _reasons(excluded) == {"docs/inner/locked": "unreadable"}
 
 
+def _walk_with_locked(root, locked, **kwargs):
+    locked.chmod(0o000)
+    try:
+        return survey.walk_corpus([root], **kwargs)
+    finally:
+        locked.chmod(0o755)
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+def test_a_locked_gitignored_folder_keeps_the_gitignored_reason(tmp_path):
+    """Readable, `secret/k.md` is `gitignored`; locked, the folder used to read
+    `unreadable`, so a mode bit changed what the tally meant. The folder-only
+    pattern `secret/` must match the folder's own path.
+    """
+    root = tmp_path / "corpus"
+    locked = root / "secret"
+    locked.mkdir(parents=True)
+    (root / ".gitignore").write_text("secret/\n", encoding="utf-8")
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (locked / "k.md").write_text("# K\n", encoding="utf-8")
+    _, readable = survey.walk_corpus([root])
+    assert _reasons(readable)["secret/k.md"] == "gitignored"
+    _, excluded = _walk_with_locked(root, locked)
+    assert _reasons(excluded)["secret"] == "gitignored"  # pragma: allowlist secret
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+def test_a_locked_folder_under_an_operator_glob_keeps_the_operator_reason(tmp_path):
+    root = tmp_path / "corpus"
+    locked = root / "private"
+    locked.mkdir(parents=True)
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (locked / "k.md").write_text("# K\n", encoding="utf-8")
+    _, readable = survey.walk_corpus([root], operator_globs=["private/*"])
+    assert _reasons(readable) == {"private/k.md": "operator_excluded"}
+    _, excluded = _walk_with_locked(root, locked, operator_globs=["private/*"])
+    assert _reasons(excluded) == {"private": "operator_excluded"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+def test_a_locked_folder_under_a_double_star_glob_keeps_the_operator_reason(tmp_path):
+    root = tmp_path / "corpus"
+    locked = root / "skip"
+    locked.mkdir(parents=True)
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (locked / "k.md").write_text("# K\n", encoding="utf-8")
+    _, readable = survey.walk_corpus([root], operator_globs=["skip/**"])
+    assert _reasons(readable) == {"skip/k.md": "operator_excluded"}
+    _, excluded = _walk_with_locked(root, locked, operator_globs=["skip/**"])
+    assert _reasons(excluded) == {"skip": "operator_excluded"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+def test_a_plain_locked_folder_is_still_unreadable(tmp_path):
+    root = tmp_path / "corpus"
+    locked = root / "locked"
+    locked.mkdir(parents=True)
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (locked / "k.md").write_text("# K\n", encoding="utf-8")
+    _, excluded = _walk_with_locked(root, locked)
+    assert _reasons(excluded) == {"locked": "unreadable"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+def test_a_locked_folder_a_glob_may_not_fully_cover_stays_unreadable(tmp_path):
+    """`private/*.md` cannot be shown to cover every file in a folder nobody
+    can list, and an unrelated ignore line must not reach it either.
+    """
+    root = tmp_path / "corpus"
+    locked = root / "private"
+    locked.mkdir(parents=True)
+    (root / ".gitignore").write_text("other/\n", encoding="utf-8")
+    (locked / "k.md").write_text("# K\n", encoding="utf-8")
+    _, excluded = _walk_with_locked(root, locked, operator_globs=["private/*.md"])
+    assert _reasons(excluded) == {"private": "unreadable"}
+
+
 def test_a_shared_seen_dict_dedupes_across_two_separate_calls(tmp_path):
     """The fix for the per-root loop's own dedup gap, one level down from
     survey.survey: two *separate* walk_corpus calls, sharing one `seen` dict

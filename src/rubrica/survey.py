@@ -218,8 +218,12 @@ def _segments_match(segments: Sequence[str], pattern: Sequence[str]) -> bool:
     return reach[m]
 
 
-def _gitignored(relative: str, patterns: Sequence[str]) -> bool:
+def _gitignored(relative: str, patterns: Sequence[str], *, folder: bool = False) -> bool:
     """Whether `relative` (a corpus-relative POSIX path) is matched by `patterns`.
+
+    `folder` says `relative` names a folder rather than a file, so a
+    folder-only pattern (`secret/`) may match its last segment too. Only the
+    walk's unlistable-folder branch passes it; every file check leaves it off.
 
     What is honoured, each as git does it:
 
@@ -263,7 +267,7 @@ def _gitignored(relative: str, patterns: Sequence[str]) -> bool:
         # Each folder on the path, as its path from the root; then the file
         # itself, unless the pattern names folders only. A file is ignored when
         # it, or any folder it sits in, is.
-        last = len(parts) - 1 if folder_only else len(parts)
+        last = len(parts) - 1 if folder_only and not folder else len(parts)
         if any(_segments_match(parts[:k], segments) for k in range(1, last + 1)):
             # Last match wins, as in git; with no `!` lines this is "any line
             # matches", exactly the rule before negation was honoured.
@@ -281,6 +285,30 @@ def _matches_any(relative: str, patterns: Sequence[str]) -> bool:
     return any(
         fnmatch.fnmatch(relative, pattern) or fnmatch.fnmatch(name, pattern) for pattern in patterns
     )
+
+
+def _folder_operator_excluded(relative: str, patterns: Sequence[str]) -> bool:
+    """Whether every file a folder at `relative` could hold matches `patterns`.
+
+    For a folder that could not be listed, so its files cannot be named. A
+    glob written for files, like `private/*`, never matches the folder's own
+    path, so testing the folder with `_matches_any` would miss it; and testing
+    one made-up child would let `private/*.md` claim files it may not cover.
+    The rule chosen: a glob counts only when it ends in `*` and what comes
+    before the trailing stars matches some leading part of `<folder>/` --
+    then fnmatch's `*`, which crosses `/`, matches every file underneath, so
+    `_matches_any` would have dropped each one as `operator_excluded`. Any
+    other glob leaves the folder `unreadable`, which errs toward saying we
+    could not read it rather than claiming a reason we cannot check.
+    """
+    prefix_of = f"{relative}/"
+    for pattern in patterns:
+        stem = pattern.rstrip("*")
+        if stem == pattern:
+            continue
+        if any(fnmatch.fnmatch(prefix_of[:k], stem) for k in range(len(prefix_of) + 1)):
+            return True
+    return False
 
 
 def walk_corpus(
@@ -358,16 +386,24 @@ def walk_corpus(
         # ([a.md], []). Its path is the folder's, since its files cannot be
         # named, and a folder inside version control or a vendored tree keeps
         # the reason its files would have got, so the tally does not change
-        # meaning when a mode bit does.
+        # meaning when a mode bit does. The checks run in the file loop's
+        # order below, minus `lockfile`, which names a file and never a folder.
+        # A gitignore `!` line re-including a file inside an ignored folder
+        # cannot be seen from here, so such a folder still reads `gitignored`.
         for folder in unlistable:
+            folder_relative = folder.relative_to(root).as_posix()
             folder_parts = set(folder.relative_to(root).parts)
             if any(_is_vcs_name(part) for part in folder_parts):
                 reason = "vcs_metadata"
             elif folder_parts & _VENDOR_DIRS:
                 reason = "vendored"
+            elif operator_globs and _folder_operator_excluded(folder_relative, operator_globs):
+                reason = "operator_excluded"
+            elif ignore_patterns and _gitignored(folder_relative, ignore_patterns, folder=True):
+                reason = "gitignored"
             else:
                 reason = "unreadable"
-            excluded.append({"path": folder.relative_to(root).as_posix(), "reason": reason})
+            excluded.append({"path": folder_relative, "reason": reason})
 
         for path in walked:
             relative = path.relative_to(root).as_posix()
