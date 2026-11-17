@@ -24,6 +24,7 @@ import contextlib
 import fnmatch
 import hashlib
 import json
+import stat
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -525,12 +526,20 @@ def _walk_files(root: Path) -> tuple[list[Path], list[Path]]:
         # so naming it would claim more than survey checked, and recording the
         # folder lets the caller's locked-folder logic give it the reason its
         # files would have got, with no second copy of that logic.
+        #
+        # Only lstat -- the entry itself -- decides that. is_file() follows a
+        # symlink, so a link whose *target* cannot be stat'ed (one into a
+        # `chmod 000` folder outside the corpus) raised for the link alone:
+        # measured on `c/docs/link.md` beside `c/docs/a.md` and
+        # `c/docs/sub/b.md`, the survey kept docs/a.md, called `docs`
+        # unreadable, lost docs/sub/b.md from both lists and never recorded the
+        # link; the same link in the root aborted the survey with exit 2. Such
+        # a link is passed on, so the caller's symlink checks decline it.
         stat_failed = False
         for name in filenames:
             path = folder / name
             try:
-                if path.is_file():
-                    walked_files.append(path)
+                is_link = stat.S_ISLNK(path.lstat().st_mode)
             except OSError:
                 if folder == root:
                     # The root's own entries failing is still the caller's
@@ -538,6 +547,22 @@ def _walk_files(root: Path) -> tuple[list[Path], list[Path]]:
                     # out below and report an empty corpus instead.
                     raise
                 stat_failed = True
+                continue
+            try:
+                if path.is_file():
+                    walked_files.append(path)
+            except OSError:
+                if not is_link:
+                    # lstat worked but stat did not on a non-link: nothing
+                    # measured reaches here, so fail the folder the old way.
+                    if folder == root:
+                        raise
+                    stat_failed = True
+                    continue
+                # A link we cannot follow: is_symlink() and resolve() in the
+                # caller judge it, and a target that cannot be resolved is
+                # `symlink_outside_root`, the safe side to fail on.
+                walked_files.append(path)
         if stat_failed:
             unlistable.append(folder)
             # Its subfolders cannot be entered either; walking into them would

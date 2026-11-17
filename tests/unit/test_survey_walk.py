@@ -217,6 +217,54 @@ def test_a_listable_but_unenterable_root_still_raises(tmp_path):
         root.chmod(0o755)
 
 
+def _locked_outside_target(tmp_path):
+    """A file outside the corpus inside a `chmod 000` folder, so stat-ing it
+    through a symlink raises PermissionError while the link itself lstats fine."""
+    outside = tmp_path / "outside" / "locked"
+    outside.mkdir(parents=True)
+    (outside / "secret").write_text("hunter2\n", encoding="utf-8")
+    return outside, outside / "secret"
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from reading a target")
+def test_a_symlink_to_an_unreadable_target_is_a_symlink_decline_not_a_locked_folder(tmp_path):
+    """is_file() follows a link, so a link into a locked place raised for the
+    link alone and its whole folder was recorded `unreadable` -- measured on
+    this tree as kept [docs/a.md], excluded {docs: unreadable}, with
+    docs/sub/b.md in neither list and the link never recorded at all.
+    """
+    root = tmp_path / "corpus"
+    (root / "docs" / "sub").mkdir(parents=True)
+    (root / "docs" / "a.md").write_text("# A\n", encoding="utf-8")
+    (root / "docs" / "sub" / "b.md").write_text("# B\n", encoding="utf-8")
+    locked, secret = _locked_outside_target(tmp_path)
+    (root / "docs" / "link.md").symlink_to(secret)
+    locked.chmod(0o000)
+    try:
+        kept, excluded = survey.walk_corpus([root])
+    finally:
+        locked.chmod(0o755)
+    assert kept == [root / "docs" / "a.md", root / "docs" / "sub" / "b.md"]
+    assert _reasons(excluded) == {"docs/link.md": "symlink_outside_root"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from reading a target")
+def test_a_symlink_to_an_unreadable_target_in_the_root_does_not_abort_the_survey(tmp_path):
+    """The same link directly in the root escaped as "cannot read corpus root"."""
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    locked, secret = _locked_outside_target(tmp_path)
+    (root / "link.md").symlink_to(secret)
+    locked.chmod(0o000)
+    try:
+        kept, excluded = survey.walk_corpus([root])
+    finally:
+        locked.chmod(0o755)
+    assert kept == [root / "a.md"]
+    assert _reasons(excluded) == {"link.md": "symlink_outside_root"}
+
+
 def _walk_with_locked(root, locked, **kwargs):
     locked.chmod(0o000)
     try:
