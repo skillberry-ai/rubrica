@@ -53,6 +53,12 @@ _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 # A client that went away mid-request. Not ConnectionError as a whole: a refused
 # outbound connection is a different thing and should still be reported.
 _GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+# How long one read or write on a request socket may wait. Without it, a valid
+# Content-Length whose body never arrives held its handler thread until the client
+# hung up. Every page and API call sends its whole body at once and gets a quick
+# answer (the log view polls, it does not hold a request open), so ten seconds of
+# silence on loopback means a stalled client, not a slow one.
+_SOCKET_TIMEOUT = 10.0
 # How much of a log one poll returns. A dispatch log is a stream-json transcript
 # and can run to megabytes; the UI asks for the tail and then follows it.
 _LOG_CHUNK = 256 * 1024
@@ -240,6 +246,10 @@ def _inert_content_type(name: str, body: bytes) -> str:
     return "text/plain; charset=utf-8"
 
 
+class _Stalled(Exception):
+    """The client stopped sending mid-body: drop the connection, answer nothing."""
+
+
 class Handler(BaseHTTPRequestHandler):
     console: Console
     token: str
@@ -247,6 +257,11 @@ class Handler(BaseHTTPRequestHandler):
     bound_host: str
 
     server_version = "rubrica-console"
+    # StreamRequestHandler.setup applies this to the connection's socket. A timed
+    # out request line is already handled by the stdlib (it closes the connection);
+    # a timed out body read is turned into _Stalled in _body, and a timed out
+    # write is caught in _send.
+    timeout = _SOCKET_TIMEOUT
 
     def log_message(self, format, *args):
         # Quiet: the UI polls every two seconds per open tab, and one line per
@@ -276,8 +291,9 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             if not head:
                 self.wfile.write(body)
-        except _GONE:
-            # The browser stopped waiting -- a closed picker, a page left, a newer
+        except (*_GONE, TimeoutError):
+            # The browser stopped waiting (or stopped reading, until the socket
+            # timeout ran out) -- a closed picker, a page left, a newer
             # count superseding this one. Normal, not an error: there is nobody to
             # answer, so stop. Measured before this catch: the write raised
             # BrokenPipeError, _handle's catch-all then tried to send a 500 down the
@@ -333,7 +349,13 @@ class Handler(BaseHTTPRequestHandler):
             # The unread body would be parsed as the next request on this connection.
             self.close_connection = True
             raise ConsoleError("request body too large")
-        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            raw = self.rfile.read(length) if length else b"{}"
+        except TimeoutError:
+            # A valid length whose body never (fully) arrived. Only the read is
+            # caught, so a timeout raised by anything else stays a reported 500.
+            self.close_connection = True
+            raise _Stalled from None
         try:
             data = json.loads(raw or b"{}")
         except ValueError:
@@ -364,8 +386,9 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET":
                 return self._get(head)
             return self._post()
-        except _GONE:
+        except (*_GONE, _Stalled):
             # Raised while reading the request body, before any reply: same case.
+            # A stalled body gets no reply either: the client is not reading one.
             self.close_connection = True
             return None
         except ConsoleError as exc:

@@ -153,6 +153,36 @@ def test_a_bad_content_length_is_refused_promptly(console, bad):
     assert status_line.startswith(b"HTTP/1.0 409") or status_line.startswith(b"HTTP/1.1 409"), reply
 
 
+def test_a_body_that_never_arrives_is_dropped_within_the_timeout(console, monkeypatch):
+    """A valid Content-Length with half a body must not hold a handler thread."""
+    monkeypatch.setattr(console_server.Handler, "timeout", 0.5)
+    with (
+        _serving(console) as port,
+        socket.create_connection(("127.0.0.1", port), timeout=5) as sock,
+    ):
+        sock.sendall(
+            (
+                "POST /api/runs/x/delete HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{port}\r\n"
+                f"X-Rubrica-Token: {TOKEN}\r\n"
+                "Content-Length: 100\r\n"
+                "\r\n"
+                '{"confirm": '
+            ).encode()
+        )
+        # The server closes without a reply; recv returns b"" (EOF). A server
+        # that kept waiting would make this raise TimeoutError after 5 seconds.
+        assert sock.recv(4096) == b""
+
+
+def test_the_socket_timeout_is_set_and_modest(console):
+    server = console_server.make_server(console, "127.0.0.1", 0, token=TOKEN)
+    try:
+        assert 0 < server.RequestHandlerClass.timeout <= 60
+    finally:
+        server.server_close()
+
+
 def test_a_valid_content_length_still_reads_the_body(console, run):
     # The guard must not refuse what `http.client` sends for an ordinary request.
     with _serving(console) as port:
