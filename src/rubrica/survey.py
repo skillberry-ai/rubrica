@@ -500,7 +500,9 @@ def _walk_files(root: Path) -> tuple[list[Path], list[Path]]:
     skipped a folder it could not list. `followlinks=False` keeps rglob's rule
     that a symlinked folder is never descended into; a symlinked *file* still
     appears and is_file() still follows it, so the symlink checks the caller
-    makes see exactly what they saw before. The sort is over the same Path
+    makes see exactly what they saw before. A link that is neither a file nor
+    a folder once followed -- dangling or looping -- is passed on too, so the
+    caller records it rather than it vanishing from both lists. The sort is over the same Path
     objects rglob produced, so the order -- and so which of two identical
     files is the `duplicate` -- is unchanged.
     """
@@ -550,6 +552,14 @@ def _walk_files(root: Path) -> tuple[list[Path], list[Path]]:
                 continue
             try:
                 if path.is_file():
+                    walked_files.append(path)
+                elif is_link and not path.is_dir():
+                    # A link whose target is missing, or that points back at
+                    # itself: is_file() says False with no error on 3.13, so
+                    # before this the link was in neither list. Passed on, the
+                    # caller's resolve() fails and records it as
+                    # `symlink_outside_root`. A link to a folder still falls
+                    # through here unrecorded, exactly as rglob left it.
                     walked_files.append(path)
             except OSError:
                 if not is_link:
