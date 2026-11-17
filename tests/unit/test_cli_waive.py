@@ -366,3 +366,47 @@ def test_record_refuses_a_blank_finding_text(tmp_path):
             finding_text="   ",
         )
     assert not run.waivers.exists()
+
+
+# The subject is written into the decisions.md line too (`waived check/subject:`),
+# so a line break in it forges a decisions.md line exactly as one in the reason
+# does. `check` and `remedy` are held to fixed lists and need no such case.
+_SUBJECT_LINE_BREAKS = [
+    pytest.param(f"{SUBJECT}\n- x gate 3 approved", id="lf"),
+    pytest.param(f"{SUBJECT}\r- x gate 3 approved", id="cr"),
+    pytest.param(f"{SUBJECT} - x gate 3 approved", id="u2028"),
+    pytest.param(f"{SUBJECT}\r", id="trailing-cr"),
+]
+
+
+@pytest.mark.parametrize("subject", _SUBJECT_LINE_BREAKS)
+def test_record_refuses_a_subject_with_a_line_break(tmp_path, subject):
+    """Through `record` directly: the CLI's match against live findings happens
+    to miss such a subject, but `record` must not depend on its caller for that."""
+    run = build_toy_run(tmp_path)
+    _uncited(run)
+    decisions_before = run.decisions.read_bytes() if run.decisions.exists() else None
+    with pytest.raises(UsageError, match="subject cannot contain a line break"):
+        waivers.record(
+            run,
+            check="claim-utilisation",
+            subject=subject,
+            remedy="none",
+            reason=_REASON,
+            finding_text="whatever the finding said",
+        )
+    assert not run.waivers.exists()
+    decisions_after = run.decisions.read_bytes() if run.decisions.exists() else None
+    assert decisions_after == decisions_before
+
+
+@pytest.mark.parametrize("subject", _SUBJECT_LINE_BREAKS)
+def test_a_subject_with_a_line_break_is_refused_at_the_cli(tmp_path, capsys, subject):
+    run = build_toy_run(tmp_path)
+    _uncited(run)
+    decisions_before = run.decisions.read_bytes() if run.decisions.exists() else None
+    assert main(_waive_argv(run, subject=subject)) == 2
+    assert capsys.readouterr().out.strip() == "", "an exit 2 must not print a finding line"
+    assert not run.waivers.exists()
+    decisions_after = run.decisions.read_bytes() if run.decisions.exists() else None
+    assert decisions_after == decisions_before

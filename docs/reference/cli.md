@@ -1070,7 +1070,11 @@ rather than a record.
 Required: `--run RUN`, `--check CHECK`, `--subject SUBJECT`, `--remedy REMEDY`,
 `--reason REASON`. Prints the new waiver's id. A `--reason` that is empty,
 whitespace-only, or contains a line break is refused at exit 2 with nothing
-written, by the same rule `decide` applies to a note.
+written, by the same rule `decide` applies to a note. A `--subject` that
+contains a line break is refused the same way, because it is written into the
+same `decisions.md` line; it is not stripped, since it is the key a finding is
+matched on. `--check` and `--remedy` are limited to fixed lists, so neither can
+carry one.
 
 `--check` accepts only the checks that consult the waiver registry —
 `waivers.WAIVABLE_CHECKS`, one row today, `claim-utilisation`. A check absent

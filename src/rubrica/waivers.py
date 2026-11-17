@@ -209,16 +209,32 @@ def record(
     # is the key waived_subjects compares against, and `finding_text` is a byte
     # copy of the finding's own message. Stripping either would make the record
     # differ from what the caller matched.
+    # The same guard `decide` carries, deferred-imported for the reason given at
+    # the `utc_stamp` import below.
+    from rubrica.manifest import has_line_break
+
     if not subject.strip():
         raise UsageError("a waiver subject cannot be empty")
+    # `subject` is written into the decisions.md line below as well as into
+    # waivers.json, so a line break in it forges a line exactly as one in the
+    # reason does: `x\\r- y gate 3 approved` reads to the console's splitlines()
+    # as a gate 3 approval nobody gave. Refused rather than stripped, for the
+    # reason above -- it is a key and must be stored as the caller matched it.
+    # The CLI's own match against live findings would already miss such a
+    # subject, but `record` is callable directly and must not rely on that.
+    #
+    # `check` and `remedy` need no such guard: both were just held to fixed
+    # lists (WAIVABLE_CHECKS, remedy_choices()), none of whose entries holds a
+    # line break. `finding_text` reaches waivers.json only, never decisions.md.
+    if has_line_break(subject):
+        raise UsageError(
+            "a waiver subject cannot contain a line break; decisions.md is one line per entry"
+        )
     text = reason.strip()
     if not text:
         raise UsageError("a waiver reason cannot be empty")
-    # The same guard `decide` carries, deferred-imported for the reason given at
-    # the `utc_stamp` import below. Tested on the raw reason, not `text`: strip()
-    # would quietly drop a trailing `\\r` instead of refusing it.
-    from rubrica.manifest import has_line_break
-
+    # Tested on the raw reason, not `text`: strip() would quietly drop a
+    # trailing `\\r` instead of refusing it.
     if has_line_break(reason):
         raise UsageError(
             "a waiver reason cannot contain a line break; decisions.md is one line per entry"
