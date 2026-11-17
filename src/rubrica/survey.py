@@ -509,12 +509,41 @@ def _walk_files(root: Path) -> tuple[list[Path], list[Path]]:
         if exc.filename is not None:
             unlistable.append(Path(exc.filename))
 
-    files: list[Path] = []
-    for folder, _dirnames, filenames in root.walk(on_error=note, follow_symlinks=False):
+    walked_files: list[Path] = []
+    for folder, dirnames, filenames in root.walk(on_error=note, follow_symlinks=False):
         # A symlinked folder is listed without being entered; rglob yielded it
         # too and is_file() rejected it, so the filter below drops it the same way.
-        files.extend(folder / name for name in filenames)
-    walked = sorted(p for p in files if p.is_file())
+        #
+        # A folder with read but no execute permission (`chmod 644`) can be
+        # listed, so on_error never fires, but stat-ing any entry in it raises
+        # PermissionError -- measured on 3.13: `c/half/spec.md` under a
+        # `chmod 644 c/half` escaped as "cannot read corpus root: c" with
+        # exit 2 and no run. Such a folder is recorded as the *folder*, in
+        # `unlistable`, rather than file by file, even though its entries can
+        # be named here: a name we cannot stat is not yet known to be a file
+        # (it may be a symlink pointing outside the root, or anything else),
+        # so naming it would claim more than survey checked, and recording the
+        # folder lets the caller's locked-folder logic give it the reason its
+        # files would have got, with no second copy of that logic.
+        stat_failed = False
+        for name in filenames:
+            path = folder / name
+            try:
+                if path.is_file():
+                    walked_files.append(path)
+            except OSError:
+                if folder == root:
+                    # The root's own entries failing is still the caller's
+                    # exit 2: dropping it into `unlistable` would be filtered
+                    # out below and report an empty corpus instead.
+                    raise
+                stat_failed = True
+        if stat_failed:
+            unlistable.append(folder)
+            # Its subfolders cannot be entered either; walking into them would
+            # only add one more record per subfolder for the same cause.
+            dirnames.clear()
+    walked = sorted(walked_files)
     # The root's own listing failure is the caller's exit 2, raised by its
     # forced iterdir() before this runs; anything left here is below it.
     return walked, sorted(p for p in unlistable if p != root)

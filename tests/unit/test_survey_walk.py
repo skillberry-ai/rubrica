@@ -166,6 +166,57 @@ def test_an_unreadable_folder_two_levels_down_is_recorded_too(tmp_path):
     assert _reasons(excluded) == {"docs/inner/locked": "unreadable"}
 
 
+def _walk_with_half_locked(root, half, **kwargs):
+    half.chmod(0o644)
+    try:
+        return survey.walk_corpus([root], **kwargs)
+    finally:
+        half.chmod(0o755)
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 644 does not stop root from entering a folder")
+def test_a_listable_but_unenterable_subfolder_is_recorded_and_its_siblings_kept(tmp_path):
+    """A `chmod 644` folder can be listed, so the walk's on_error never fired,
+    but is_file() on its entries raised PermissionError and the whole survey
+    aborted as "cannot read corpus root" -- measured on `c/half/spec.md`.
+    """
+    root = tmp_path / "corpus"
+    half = root / "half"
+    (half / "deeper").mkdir(parents=True)
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (half / "spec.md").write_text("# Spec\n", encoding="utf-8")
+    (half / "deeper" / "more.md").write_text("# More\n", encoding="utf-8")
+    kept, excluded = _walk_with_half_locked(root, half)
+    assert kept == [root / "a.md"]
+    assert _reasons(excluded) == {"half": "unreadable"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 644 does not stop root from entering a folder")
+def test_a_listable_but_unenterable_gitignored_folder_keeps_the_gitignored_reason(tmp_path):
+    root = tmp_path / "corpus"
+    half = root / "secret"
+    half.mkdir(parents=True)
+    (root / ".gitignore").write_text("secret/\n", encoding="utf-8")
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (half / "k.md").write_text("# K\n", encoding="utf-8")
+    kept, excluded = _walk_with_half_locked(root, half)
+    assert root / "a.md" in kept
+    assert _reasons(excluded)["secret"] == "gitignored"  # pragma: allowlist secret
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 644 does not stop root from entering a folder")
+def test_a_listable_but_unenterable_root_still_raises(tmp_path):
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    root.chmod(0o644)
+    try:
+        with pytest.raises(UsageError, match="cannot read corpus root"):
+            survey.walk_corpus([root])
+    finally:
+        root.chmod(0o755)
+
+
 def _walk_with_locked(root, locked, **kwargs):
     locked.chmod(0o000)
     try:
