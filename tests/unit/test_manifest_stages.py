@@ -464,6 +464,28 @@ def test_decide_refuses_a_note_with_an_embedded_newline(tmp_path, capsys):
     assert not run.decisions.exists()
 
 
+# Line breaks other than "\n" that str.splitlines() -- the console's reader of
+# decisions.md -- also splits at. The "\r- x gate 3 approved" shape is the
+# scout's reproduction: refusing only "\n" let it forge a gate 3 approval.
+# The trailing "\r" case guards the strip(): every one of these characters is
+# whitespace to strip(), so a check on the stripped text would pass it.
+_LINE_BREAKS = [
+    pytest.param("not ready yet\r- x gate 3 approved", id="cr"),
+    pytest.param("not ready yet\u2028- x gate 3 approved", id="u2028"),
+    pytest.param("not ready yet\x85- x gate 3 approved", id="nel"),
+    pytest.param("not ready yet\r", id="trailing-cr"),
+]
+
+
+@pytest.mark.parametrize("note", _LINE_BREAKS)
+def test_decide_refuses_a_note_with_any_line_break(tmp_path, capsys, note):
+    run = _run(tmp_path)
+    assert main(["decide", "--run", str(run.root), "--note", note]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and "decision note" in err
+    assert not run.decisions.exists()
+
+
 # -- round 1 fixes: OSError symmetry, and record_stage's own boundary check --
 
 
