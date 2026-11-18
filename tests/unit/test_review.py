@@ -588,3 +588,69 @@ def test_a_readable_seed_still_shows_its_digest_in_a_code_span(tmp_path, capsys)
     run = _two_task_run(tmp_path)
     block = _seed_digest_block(_section_of(_sample(run, capsys), SID))
     assert f"`sha256:{sha256_of(run.seed(SID))}`" in block
+
+
+# T-69: a verdict that could not be read is sampled as low, but it is not evidence
+# that the adversary qualified anything. A chmod 000 on 05-verdicts/ used to yield
+# "every accept was qualified by the adversary" against a run whose only verdict
+# was a clean accept.
+_QUALIFIED_CLAIM = "every accept was qualified by the adversary"
+
+
+def _damage_verdicts(run, how):
+    if how == "folder-locked":
+        run.verdict(SID).parent.chmod(0)
+        return run.verdict(SID).parent
+    if how == "file-locked":
+        run.verdict(SID).chmod(0)
+        return run.verdict(SID)
+    run.verdict(SID).write_text("[]", "utf-8")
+    return run.verdict(SID)
+
+
+@_no_root()
+@pytest.mark.parametrize("how", ["folder-locked", "file-locked", "list"])
+def test_a_damaged_verdict_is_not_claimed_as_qualified_by_the_adversary(tmp_path, capsys, how):
+    run = build_state(tmp_path, "emit")
+    code, out = _sample_cli(run, capsys)
+    assert code == 0, out  # the clean accept, untouched, is high confidence
+
+    locked = _damage_verdicts(run, how)
+    try:
+        code, out = _sample_cli(run, capsys)
+    finally:
+        locked.chmod(0o755 if locked.is_dir() else 0o644)
+    assert "[internal]" not in out
+    assert _QUALIFIED_CLAIM not in out
+    assert "adversary qualified" not in out.replace("not counted as an accept the adversary", "")
+    label = run.verdict(SID).relative_to(run.root).as_posix()
+    named = [line for line in out.splitlines() if line.startswith(f"[review] {run.verdict(SID)}")]
+    assert len(named) == 1, out
+    assert label in named[0]
+    assert any(
+        line.startswith(f"[review] {run.review_sample}") and label in line
+        for line in out.splitlines()
+    ), out
+    # The packet is still written, and still names the damaged verdict in its section.
+    assert label in _section_of(run.review_packet.read_text("utf-8"), SID)
+
+
+def test_a_damaged_verdict_beside_a_qualified_one_names_both(tmp_path, capsys):
+    run = _two_task_run(tmp_path)
+    write_json(run.verdict(OTHER), minimal_verdict(verdict="reject", notes="ambiguous"))
+    run.verdict(SID).write_text("[]", "utf-8")
+    code, out = _sample_cli(run, capsys)
+    assert code == 1, out
+    assert _QUALIFIED_CLAIM not in out
+    assert "every readable accept was qualified by the adversary" in out
+    assert f"[review] {run.verdict(SID)}: " in out
+    assert run.verdict(OTHER).relative_to(run.root).as_posix() not in out
+
+
+def test_a_really_qualified_verdict_still_gets_the_adversary_finding(tmp_path, capsys):
+    run = build_state(tmp_path, "emit")
+    write_json(run.verdict(SID), minimal_verdict(verdict="reject", notes="ambiguous"))
+    code, out = _sample_cli(run, capsys)
+    assert code == 1, out
+    assert _QUALIFIED_CLAIM in out
+    assert f"[review] {run.review_sample}: " in out

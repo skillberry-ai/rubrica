@@ -166,23 +166,18 @@ def _probe(run: RunPaths, path: Path) -> tuple[bool, str | None]:
     return False, None
 
 
-def candidates(run: RunPaths) -> list[dict[str, Any]]:
-    """Every emitted package, with its band and its hop depth, in id order.
+def scenarios_by_id(run: RunPaths) -> dict[str, dict[str, Any]]:
+    """02-scenarios.json's scenarios by id. Raises ArtifactError naming the file.
 
-    Emitted packages only. A reviewer can act on a task that shipped; a scenario
-    the pipeline discarded is not something to ask four questions about.
-
-    Raises ArtifactError when 02-scenarios.json cannot be read. Defaulting it to
-    an empty document gave every candidate `hop_depth: 0`, which collapses the
-    stratification this tool exists for -- a packet of three tasks all at one
-    depth, written at exit 0 with no finding, looking exactly like a suite that
-    really is flat. recall.generated_tasks makes the same distinction.
+    Raised both when the file cannot be read and when it parses but is the wrong
+    shape, so a caller gives the two the same outcome. recall._load_scenarios
+    (compare-gold) uses this too: it had the same unguarded shape (T-69).
     """
     document = read_json(run.scenarios)
     # Parsed is not the same as usable. `[]`, a string entry, or an entry with no
     # `id` used to escape as AttributeError/TypeError/KeyError, which cli.py
     # reported as an [internal] finding naming the run folder rather than this
-    # file (T-68). Each is raised here so sample_run names 02-scenarios.json.
+    # file (T-68). Each is raised here so the caller names 02-scenarios.json.
     label = _label(run, run.scenarios)
     if not isinstance(document, dict):
         raise ArtifactError(f"{label} is a {_json_kind(document)}, not an object")
@@ -198,6 +193,22 @@ def candidates(run: RunPaths) -> list[dict[str, Any]]:
         if not isinstance(scenario.get("id"), str):
             raise ArtifactError(f"{label}: scenarios[{index}] has no string `id`")
         scenarios[scenario["id"]] = scenario
+    return scenarios
+
+
+def candidates(run: RunPaths) -> list[dict[str, Any]]:
+    """Every emitted package, with its band and its hop depth, in id order.
+
+    Emitted packages only. A reviewer can act on a task that shipped; a scenario
+    the pipeline discarded is not something to ask four questions about.
+
+    Raises ArtifactError when 02-scenarios.json cannot be read. Defaulting it to
+    an empty document gave every candidate `hop_depth: 0`, which collapses the
+    stratification this tool exists for -- a packet of three tasks all at one
+    depth, written at exit 0 with no finding, looking exactly like a suite that
+    really is flat. recall.generated_tasks makes the same distinction.
+    """
+    scenarios = scenarios_by_id(run)
     entries = []
     for sid in run.scenario_ids_with_tasks():
         scenario = scenarios.get(sid, {})
@@ -345,6 +356,57 @@ def packet(run: RunPaths, entries: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _no_high_confidence_findings(run: RunPaths, pool: list[dict[str, Any]]) -> list[Finding]:
+    """What to say when no entry in the pool is in the high band.
+
+    A verdict that could not be read, or is not an object, is sampled as low --
+    the packet names it in that task's section -- but it is not evidence that the
+    adversary qualified anything. Counting it as such once turned a chmod 000 on
+    05-verdicts/ into "every accept was qualified by the adversary" against a
+    suite whose only verdict was a clean accept (T-69). So each damaged verdict
+    is named on its own line, and the claim about the adversary is made only
+    about the verdicts that could actually be read.
+    """
+    damaged: list[tuple[Path, str]] = []
+    for entry in pool:
+        path = run.verdict(entry["scenario_id"])
+        note = _load(run, path)[1]
+        if note is not None:
+            damaged.append((path, note.removeprefix("(").removesuffix(")")))
+    findings = [
+        Finding(
+            path,
+            "review",
+            "",
+            f"{note}; its confidence band is unknown, so it was sampled as low confidence "
+            "and is not counted as an accept the adversary qualified",
+        )
+        for path, note in damaged
+    ]
+    if not damaged:
+        message = (
+            "no high-confidence accept exists in this suite, so the packet cannot look "
+            "where a correlated labeler/adversary blind spot would hide; every accept was "
+            "qualified by the adversary"
+        )
+    elif len(damaged) < len(pool):
+        message = (
+            "no high-confidence accept exists among the verdicts that could be read, so the "
+            "packet cannot look where a correlated labeler/adversary blind spot would hide; "
+            "every readable accept was qualified by the adversary, and "
+            f"{len(damaged)} verdict(s) could not be read: "
+            + ", ".join(_label(run, path) for path, _ in damaged)
+        )
+    else:
+        message = (
+            "no verdict in this suite could be read, so it is unknown whether any "
+            "high-confidence accept exists and the packet may not look where a correlated "
+            "labeler/adversary blind spot would hide; unreadable: "
+            + ", ".join(_label(run, path) for path, _ in damaged)
+        )
+    return [Finding(run.review_sample, "review", "", message), *findings]
+
+
 def sample_run(run: RunPaths, size: int = DEFAULT_SAMPLE_SIZE) -> tuple[list[dict], list[Finding]]:
     """Write the packet and the machine-readable record. -> (sampled, findings).
 
@@ -394,16 +456,7 @@ def sample_run(run: RunPaths, size: int = DEFAULT_SAMPLE_SIZE) -> tuple[list[dic
     sampled = stratified(pool, size)
     findings: list[Finding] = []
     if not any(entry["band"] == "high" for entry in pool):
-        findings.append(
-            Finding(
-                run.review_sample,
-                "review",
-                "",
-                "no high-confidence accept exists in this suite, so the packet cannot look "
-                "where a correlated labeler/adversary blind spot would hide; every accept was "
-                "qualified by the adversary",
-            )
-        )
+        findings += _no_high_confidence_findings(run, pool)
     run.review_dir.mkdir(parents=True, exist_ok=True)
     run.review_packet.write_text(packet(run, sampled), encoding="utf-8")
     write_json(

@@ -528,3 +528,50 @@ def test_the_novel_finding_names_only_the_spurious_entries_not_every_novel_one(t
     assert len(novel_findings) == 1
     assert "scn-spurious" in novel_findings[0].message
     assert "scn-new-cap" not in novel_findings[0].message
+
+
+# T-69: a 02-scenarios.json that parses but is the wrong shape escaped
+# _load_scenarios as AttributeError/TypeError/KeyError -- an [internal] line naming
+# the run folder, not the file. It must give the same outcome as one that does not
+# parse at all.
+def _compare_cli(run, gold, capsys):
+    from rubrica.cli import main
+
+    code = main(["compare-gold", "--run", str(run.root), "--gold", str(gold)])
+    return code, capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda doc: [],
+        lambda doc: {**doc, "scenarios": ["scn-001", *doc["scenarios"]]},
+        lambda doc: {
+            **doc,
+            "scenarios": [{k: v for k, v in doc["scenarios"][0].items() if k != "id"}],
+        },
+    ],
+    ids=["list-document", "string-entry", "entry-without-id"],
+)
+def test_a_malformed_scenario_list_is_named_like_an_unreadable_one(tmp_path, capsys, mutate):
+    from rubrica.artifacts import read_json
+
+    gold = _gold_file(tmp_path)
+    baseline = build_state(tmp_path / "baseline", "emit")
+    baseline.scenarios.write_text("{not json", encoding="utf-8")
+    want_code, want_out = _compare_cli(baseline, gold, capsys)
+
+    run = build_state(tmp_path / "run", "emit")
+    write_json(run.scenarios, mutate(read_json(run.scenarios)))
+    code, out = _compare_cli(run, gold, capsys)
+
+    assert code == want_code, out
+    assert "[internal]" not in out
+    named = [line for line in out.splitlines() if line.startswith(f"[recall] {run.scenarios}: ")]
+    assert len(named) == 1, out
+    want = f"[recall] {baseline.scenarios}: "
+    assert any(line.startswith(want) for line in want_out.splitlines()), want_out
+
+    report = read_json(run.recall)
+    assert report["recall"] is None
+    assert "02-scenarios.json" in report["unreadable"]

@@ -22,6 +22,7 @@ from rubrica.errors import UsageError
 from rubrica.findings import Finding, format_findings
 from rubrica.metrics import jaccard
 from rubrica.paths import RunPaths
+from rubrica.review import scenarios_by_id
 from rubrica.validate import validate_artifact
 
 # Cell-overlap at or above this proposes a pair, once the goals already match.
@@ -78,9 +79,14 @@ def generated_tasks(run: RunPaths) -> list[dict[str, Any]]:
 
 
 def _load_scenarios(run: RunPaths) -> dict[str, dict[str, Any]]:
-    """The scenarios by id. Raises ArtifactError if 02-scenarios.json is unreadable."""
-    document = read_json(run.scenarios)
-    return {s["id"]: s for s in document.get("scenarios", [])}
+    """The scenarios by id. Raises ArtifactError if 02-scenarios.json is unreadable.
+
+    Also when it parses but is the wrong shape -- `[]`, a string entry, an entry
+    with no `id`. Those used to escape as AttributeError/TypeError/KeyError, which
+    cli.py reported as an [internal] finding naming the run folder rather than
+    this file (T-69). review.scenarios_by_id is the one guard both tools share.
+    """
+    return scenarios_by_id(run)
 
 
 def _pair_score(gold_task: dict[str, Any], scenario: dict[str, Any]) -> float | None:
