@@ -508,3 +508,83 @@ def test_a_verdict_or_expected_that_is_not_an_object_is_named(
     section = _section_of(_sample(run, capsys), SID)
     label = path.relative_to(run.root).as_posix()
     assert f"({label} is a {kind}, not an object)" in section
+
+
+# T-68: a 02-scenarios.json that parses but is the wrong shape escaped candidates()
+# as AttributeError/TypeError/KeyError -- an [internal] line naming the run folder,
+# not the file. It must give the same outcome as one that does not parse at all.
+def _sample_cli(run, capsys):
+    from rubrica.cli import main
+
+    code = main(["sample-for-review", "--run", str(run.root), "--size", "5"])
+    return code, capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda doc: [],
+        lambda doc: {**doc, "scenarios": ["scn-001", *doc["scenarios"]]},
+        lambda doc: {
+            **doc,
+            "scenarios": [{k: v for k, v in doc["scenarios"][0].items() if k != "id"}],
+        },
+        lambda doc: {**doc, "scenarios": "oops"},
+    ],
+    ids=["list-document", "string-entry", "entry-without-id", "scenarios-not-a-list"],
+)
+def test_a_malformed_scenario_list_is_named_like_an_unreadable_one(tmp_path, capsys, mutate):
+    baseline = build_state(tmp_path / "baseline", "emit")
+    baseline.scenarios.write_text("{not json", encoding="utf-8")
+    want_code, want_out = _sample_cli(baseline, capsys)
+
+    run = build_state(tmp_path / "run", "emit")
+    write_json(run.scenarios, mutate(read_json(run.scenarios)))
+    code, out = _sample_cli(run, capsys)
+
+    assert code == want_code, out
+    assert "[internal]" not in out
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert len(lines) == 1, out
+    # Same check tag and same artifact as the unparseable case, path for path.
+    assert lines[0].startswith(f"[review] {run.scenarios}: "), lines[0]
+    assert want_out.startswith(f"[review] {baseline.scenarios}: "), want_out
+    assert not run.review_packet.exists()
+    assert not run.review_sample.exists()
+
+    _, findings = sample_run(run, DEFAULT_SAMPLE_SIZE)
+    assert len(findings) == 1 and findings[0].artifact == run.scenarios
+
+
+def _seed_digest_block(section):
+    start = section.index("### Seed digest")
+    return section[start : section.index("The seed itself", start)]
+
+
+def test_a_missing_seed_is_a_plain_note_not_a_digest(tmp_path, capsys):
+    run = _two_task_run(tmp_path)
+    run.seed(SID).unlink()
+    block = _seed_digest_block(_section_of(_sample(run, capsys), SID))
+    assert "(no seed.json)" in block
+    assert "sha256:" not in block
+
+
+@_no_root()
+def test_an_unreadable_seed_is_a_plain_note_not_a_digest(tmp_path, capsys):
+    run = _two_task_run(tmp_path)
+    run.seed(SID).chmod(0)
+    try:
+        section = _section_of(_sample(run, capsys), SID)
+    finally:
+        run.seed(SID).chmod(0o644)
+    block = _seed_digest_block(section)
+    assert "seed.json could not be read" in block
+    assert "sha256:" not in block
+
+
+def test_a_readable_seed_still_shows_its_digest_in_a_code_span(tmp_path, capsys):
+    from rubrica.artifacts import sha256_of
+
+    run = _two_task_run(tmp_path)
+    block = _seed_digest_block(_section_of(_sample(run, capsys), SID))
+    assert f"`sha256:{sha256_of(run.seed(SID))}`" in block

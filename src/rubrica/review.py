@@ -179,7 +179,25 @@ def candidates(run: RunPaths) -> list[dict[str, Any]]:
     really is flat. recall.generated_tasks makes the same distinction.
     """
     document = read_json(run.scenarios)
-    scenarios = {s["id"]: s for s in document.get("scenarios", [])}
+    # Parsed is not the same as usable. `[]`, a string entry, or an entry with no
+    # `id` used to escape as AttributeError/TypeError/KeyError, which cli.py
+    # reported as an [internal] finding naming the run folder rather than this
+    # file (T-68). Each is raised here so sample_run names 02-scenarios.json.
+    label = _label(run, run.scenarios)
+    if not isinstance(document, dict):
+        raise ArtifactError(f"{label} is a {_json_kind(document)}, not an object")
+    listed = document.get("scenarios", [])
+    if not isinstance(listed, list):
+        raise ArtifactError(f"{label}: `scenarios` is a {_json_kind(listed)}, not a list")
+    scenarios: dict[str, dict[str, Any]] = {}
+    for index, scenario in enumerate(listed):
+        if not isinstance(scenario, dict):
+            raise ArtifactError(
+                f"{label}: scenarios[{index}] is a {_json_kind(scenario)}, not an object"
+            )
+        if not isinstance(scenario.get("id"), str):
+            raise ArtifactError(f"{label}: scenarios[{index}] has no string `id`")
+        scenarios[scenario["id"]] = scenario
     entries = []
     for sid in run.scenario_ids_with_tasks():
         scenario = scenarios.get(sid, {})
@@ -247,12 +265,14 @@ def _section(run: RunPaths, entry: dict[str, Any]) -> list[str]:
         instruction = "\n\n".join(part for part in (note, text.strip()) if part)
     else:
         instruction = "(no instruction.md in the emitted package)"
+    # Only a real digest goes inside the `sha256:` code span; a note printed there
+    # read as if it were the digest of a seed that does not exist (T-68).
     present, probe_note = _probe(run, run.seed(sid))
     if probe_note:
         digest = probe_note
     elif present:
         try:
-            digest = sha256_of(run.seed(sid))
+            digest = f"`sha256:{sha256_of(run.seed(sid))}`"
         except OSError as exc:
             digest = f"({_label(run, run.seed(sid))} could not be read: {exc.strerror or exc})"
     else:
@@ -264,7 +284,7 @@ def _section(run: RunPaths, entry: dict[str, Any]) -> list[str]:
         "",
         instruction,
         "",
-        f"### Seed digest\n\n`sha256:{digest}`\n",
+        f"### Seed digest\n\n{digest}\n",
         "The seed itself is deliberately not inlined: the digest is what confirms which world",
         "this label was authored against, and the whole simulated backend would bury the four",
         "questions below.",
