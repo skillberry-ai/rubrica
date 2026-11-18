@@ -736,3 +736,78 @@ def test_the_verifier_is_invoked_the_way_test_sh_invokes_it(tmp_path):
     shell = (run.task_dir(SID) / "tests" / "test.sh").read_text()
     for flag in ("--expected", "--agent-logs", "--out"):
         assert flag in shell
+
+
+# -- output that is not valid UTF-8 -------------------------------------------
+
+# \xff\xfe is never valid UTF-8 (0xff cannot start or continue a sequence).
+# Bare text=True decodes strictly, so before the fix both subprocess.run calls
+# raised UnicodeDecodeError -- which neither caught -- and one bad task ended
+# the whole smoke run.
+_BAD_BYTES_AGENT = (
+    COMPETENT
+    + "sys.stdout.flush()\n"
+    + 'sys.stdout.buffer.write(b"\\xff\\xfe\\n")\n'
+    + 'sys.stderr.buffer.write(b"warning \\xff\\xfe\\n")\n'
+)
+
+# Wraps the copied verifier rather than replacing it, so the score that comes
+# back is the real verify.py's: the bad bytes are the only thing added.
+_BAD_BYTES_VERIFIER = """\
+import pathlib, runpy, sys
+sys.stderr.buffer.write(b"note \\xff\\xfe\\n")
+sys.stderr.flush()
+runpy.run_path(str(pathlib.Path(__file__).with_name("real_verify.py")), run_name="__main__")
+"""
+
+
+def test_an_agent_that_writes_invalid_utf8_is_scored_not_a_crash(tmp_path):
+    """The agent's output is the one thing smoke cannot control.
+
+    A byte that is not UTF-8 on stdout or stderr becomes U+FFFD, and the
+    transcript around it still scores.
+    """
+    run = _emitted(tmp_path)
+    logs, out, base = _paths(run)
+    code, note = run_agent(
+        _spec(_script(tmp_path, "bad_bytes.py", _BAD_BYTES_AGENT)),
+        task_dir=run.task_dir(SID),
+        logs_dir=logs,
+        stderr_path=base / "agent-stderr.txt",
+        scenario_id=SID,
+    )
+    assert (code, note) == (0, "")
+    assert "�" in (logs / "agent-stdout.jsonl").read_text(encoding="utf-8")
+    assert "�" in (base / "agent-stderr.txt").read_text(encoding="utf-8")
+    vcode, reward, vnote = verify_package(
+        run.task_dir(SID),
+        agent_logs=logs,
+        out_dir=out,
+        stderr_path=base / "verifier-stderr.txt",
+    )
+    assert (vcode, vnote) == (0, "")
+    assert reward["reward"] == 1.0
+
+
+def test_a_verifier_that_writes_invalid_utf8_is_scored_not_a_crash(tmp_path):
+    run = _emitted(tmp_path)
+    logs, out, base = _paths(run)
+    run_agent(
+        _spec(_script(tmp_path, "good_utf8.py", COMPETENT)),
+        task_dir=run.task_dir(SID),
+        logs_dir=logs,
+        stderr_path=base / "agent-stderr.txt",
+        scenario_id=SID,
+    )
+    tests_dir = run.task_dir(SID) / "tests"
+    (tests_dir / "verify.py").rename(tests_dir / "real_verify.py")
+    (tests_dir / "verify.py").write_text(_BAD_BYTES_VERIFIER, encoding="utf-8")
+    code, reward, note = verify_package(
+        run.task_dir(SID),
+        agent_logs=logs,
+        out_dir=out,
+        stderr_path=base / "verifier-stderr.txt",
+    )
+    assert (code, note) == (0, "")
+    assert reward["reward"] == 1.0
+    assert "�" in (base / "verifier-stderr.txt").read_text(encoding="utf-8")

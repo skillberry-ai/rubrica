@@ -292,25 +292,38 @@ def _clear_transcripts(logs_dir: Path) -> str:
     return ""
 
 
+# How both subprocess calls below, and _decode on their timeout path, turn the
+# captured bytes into text. Bare text=True would decode strictly, so one byte
+# that is not valid UTF-8 -- on the agent's stdout or stderr, the one output
+# smoke cannot control, or the verifier's -- raises UnicodeDecodeError out of
+# subprocess.run. Only TimeoutExpired is caught there, so that one bad task
+# would end the whole smoke run as an [internal] exit 1 naming the wrong cause
+# and cost every remaining task its data. errors="replace" turns the byte into
+# U+FFFD and the task is scored like any other.
+_DECODE = {"encoding": "utf-8", "errors": "replace"}
+
+
 def _decode(output: str | bytes | None) -> str:
     """Normalise a subprocess's captured stream to str, treating None as empty.
 
-    Exists for TimeoutExpired.stdout/.stderr specifically: subprocess.run's
-    text=True decodes a *successful* communicate() return, but a timeout raises
-    from inside communicate() with the raw bytes it had collected so far, before
+    Exists for TimeoutExpired.stdout/.stderr specifically: subprocess.run
+    decodes a *successful* communicate() return, but a timeout raises from
+    inside communicate() with the raw bytes it had collected so far, before
     that decoding step runs -- so the partial output on a timeout is bytes even
     though the call asked for text. None means the process was killed before it
     produced anything at all -- a hung-from-the-start agent, most often.
 
-    utf-8 is hardcoded rather than left to locale.getencoding(): the agent's
-    stdout is stream-json by definition, which is UTF-8, so there is no
-    encoding to detect. errors="replace" keeps a stream cut mid-character by
-    the kill readable instead of raising on it.
+    It decodes exactly the way the successful path does (_DECODE below), so a
+    transcript reads the same whether or not the agent was killed. utf-8 is
+    hardcoded rather than left to locale.getencoding(): the agent's stdout is
+    stream-json by definition, which is UTF-8, so there is no encoding to
+    detect. errors="replace" keeps a stream cut mid-character by the kill
+    readable instead of raising on it.
     """
     if output is None:
         return ""
     if isinstance(output, bytes):
-        return output.decode("utf-8", errors="replace")
+        return output.decode(**_DECODE)
     return output
 
 
@@ -376,14 +389,14 @@ def run_agent(
             list(argv),
             cwd=task_dir,
             capture_output=True,
-            text=True,
+            **_DECODE,
             timeout=spec.timeout_sec,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        # CPython quirk, not a text=True bug in this code: on a timeout with
+        # CPython quirk, not a decoding bug in this code: on a timeout with
         # partial output, TimeoutExpired.stdout/.stderr carry raw bytes even
-        # though text=True was passed -- the newline/encoding translation that
+        # though an encoding was passed -- the newline/encoding translation that
         # normally runs happens only on communicate()'s *successful* return, a
         # path a timeout never reaches. Decode defensively rather than let a
         # hung agent's partial transcript raise TypeError instead of scoring.
@@ -464,7 +477,7 @@ def verify_package(
         completed = subprocess.run(  # nosec B603
             verifier_argv(task_dir, agent_logs=agent_logs, out_dir=out_dir),
             capture_output=True,
-            text=True,
+            **_DECODE,
             timeout=timeout_sec,
             env=scrubbed_env(),
             check=False,
