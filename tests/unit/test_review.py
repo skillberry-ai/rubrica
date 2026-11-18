@@ -468,3 +468,43 @@ def test_an_unreadable_verdict_or_expected_is_named_not_exit_two(tmp_path, capsy
         path.chmod(0o644)
     assert f"{path.name} could not be read" in section
     assert "ermission" in section
+
+
+# T-67: a locked *folder*, not just a locked file. On Python 3.13 Path.is_file()
+# raises PermissionError when the folder cannot be entered, which reached cli.py as
+# exit 2 with no packet; on 3.14 it returns False, which would have said "no
+# instruction.md" and dropped the rationale silently.
+@_no_root()
+@pytest.mark.parametrize(
+    ("which", "names"),
+    [("suite", ["instruction.md"]), ("instances", ["seed.json", "expected.json"])],
+)
+def test_an_unreachable_task_folder_is_named_in_the_packet(tmp_path, capsys, which, names):
+    run = _two_task_run(tmp_path)
+    folder = run.task_dir(SID) if which == "suite" else run.instance_dir(SID)
+    folder.chmod(0)
+    try:
+        section = _section_of(_sample(run, capsys), SID)
+    finally:
+        folder.chmod(0o755)
+    for name in names:
+        assert f"{name} could not be read" in section, name
+    assert "ermission" in section, "the reason is stated"
+    assert "(no instruction.md in the emitted package)" not in section
+    assert "(no seed.json)" not in section
+    assert "### Adversary notes" in section, "the rest of the damaged task's section"
+
+
+@pytest.mark.parametrize(
+    ("which", "content", "kind"),
+    [("verdict", "[]", "list"), ("expected", '"oops"', "string")],
+)
+def test_a_verdict_or_expected_that_is_not_an_object_is_named(
+    tmp_path, capsys, which, content, kind
+):
+    run = _two_task_run(tmp_path)
+    path = run.verdict(SID) if which == "verdict" else run.expected(SID)
+    path.write_text(content, "utf-8")
+    section = _section_of(_sample(run, capsys), SID)
+    label = path.relative_to(run.root).as_posix()
+    assert f"({label} is a {kind}, not an object)" in section

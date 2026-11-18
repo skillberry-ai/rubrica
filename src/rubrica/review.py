@@ -93,23 +93,77 @@ def _read_text(run: RunPaths, path: Path) -> tuple[str, str | None]:
         return raw.decode("utf-8", errors="replace"), note
 
 
-def _load(run: RunPaths, path: Path) -> tuple[Any | None, str | None]:
-    """-> (document, note). An absent file is (None, None): that is a state, not damage.
+def _json_kind(doc: Any) -> str:
+    """The JSON name of a parsed value's type, for a note a reader can act on."""
+    if doc is None:
+        return "null"
+    if isinstance(doc, bool):
+        return "boolean"
+    if isinstance(doc, list):
+        return "list"
+    if isinstance(doc, str):
+        return "string"
+    return "number"
 
-    A present file that is not UTF-8, not JSON, or not readable at all is
-    (None, note), and the note goes into the packet. read_json_or_none used to
-    turn the first two into a silent None -- a verdict shown as "None" with
-    nothing saying why -- and let the third reach cli.py's exit-2 path, which
-    wrote no packet at all.
+
+def _load(run: RunPaths, path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """-> (object, note). An absent file is (None, None): that is a state, not damage.
+
+    A present file that is not UTF-8, not JSON, not a JSON object, or not
+    readable at all is (None, note), and the note goes into the packet.
+    read_json_or_none used to turn the first two into a silent None -- a
+    verdict shown as "None" with nothing saying why -- and let the fourth reach
+    cli.py's exit-2 path, which wrote no packet at all. The third was the same
+    silent None one step later: a verdict of `[]` parsed, was swapped for `{}`,
+    and showed as "Verdict: None" with no note (T-67).
     """
     try:
-        return read_json(path), None
+        doc = read_json(path)
     except ArtifactError as exc:
-        if not path.exists():
+        try:
+            present = path.exists()
+        except OSError:
+            # Unreachable rather than absent; read_json only raises
+            # ArtifactError for a missing file when the stat said ENOENT, so
+            # this is belt and braces, but a guess of "absent" here would be
+            # exactly the silent None this function exists to remove.
+            present = True
+        if not present:
             return None, None
         return None, f"({_label(run, path)} could not be read: {exc})"
     except OSError as exc:
         return None, f"({_label(run, path)} could not be read: {exc.strerror or exc})"
+    if not isinstance(doc, dict):
+        return None, f"({_label(run, path)} is a {_json_kind(doc)}, not an object)"
+    return doc, None
+
+
+def _probe(run: RunPaths, path: Path) -> tuple[bool, str | None]:
+    """-> (is_file, note). Never raises.
+
+    On Python 3.13 Path.is_file() raises PermissionError when the *folder* holding
+    the file cannot be entered (chmod 000 on 06-suite/<sid> or 04-instances/<sid>),
+    which reached cli.py as exit 2 with no packet; 3.14 returns False instead, which
+    would print "(no instruction.md ...)" and drop the rationale silently. Either
+    way the reader was told the wrong thing, so an unreachable file is reported as
+    present-but-unreadable, with the reason, like a chmod-000 file.
+    """
+    try:
+        if path.is_file():
+            return True, None
+    except OSError as exc:
+        return True, f"({_label(run, path)} could not be read: {exc.strerror or exc})"
+    try:
+        # is_file() is False both for a file that is not there and, on 3.14, for
+        # one behind a folder that cannot be entered. Listing the folder tells
+        # the two apart without depending on which Python is running.
+        path.parent.stat()
+        list(path.parent.iterdir())
+    except FileNotFoundError:
+        return False, None
+    except OSError as exc:
+        return True, f"({_label(run, path)} could not be read: {exc.strerror or exc})"
+    return False, None
 
 
 def candidates(run: RunPaths) -> list[dict[str, Any]]:
@@ -182,15 +236,21 @@ def _section(run: RunPaths, entry: dict[str, Any]) -> list[str]:
     task = run.task_dir(sid)
     verdict, verdict_note = _load(run, run.verdict(sid))
     expected, expected_note = _load(run, run.expected(sid))
-    verdict = verdict if isinstance(verdict, dict) else {}
-    expected = expected if isinstance(expected, dict) else {}
+    verdict = verdict or {}
+    expected = expected or {}
     instruction_path = task / "instruction.md"
-    if instruction_path.is_file():
+    present, probe_note = _probe(run, instruction_path)
+    if probe_note:
+        instruction = probe_note
+    elif present:
         text, note = _read_text(run, instruction_path)
         instruction = "\n\n".join(part for part in (note, text.strip()) if part)
     else:
         instruction = "(no instruction.md in the emitted package)"
-    if run.seed(sid).is_file():
+    present, probe_note = _probe(run, run.seed(sid))
+    if probe_note:
+        digest = probe_note
+    elif present:
         try:
             digest = sha256_of(run.seed(sid))
         except OSError as exc:
@@ -225,8 +285,9 @@ def _section(run: RunPaths, entry: dict[str, Any]) -> list[str]:
         "```",
         "",
     ]
-    if run.rationale(sid).is_file():
-        text, note = _read_text(run, run.rationale(sid))
+    present, probe_note = _probe(run, run.rationale(sid))
+    if present:
+        text, note = ("", probe_note) if probe_note else _read_text(run, run.rationale(sid))
         lines += ["### Why the instantiate stage chose this world", ""]
         lines += [part for part in (note, text.strip()) if part]
         lines.append("")
