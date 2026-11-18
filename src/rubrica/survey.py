@@ -436,7 +436,12 @@ def walk_corpus(
             raise UsageError("walk_corpus takes `only` with exactly one root")
         root = Path(roots[0])
         for path in sorted(Path(p) for p in only):
-            _keep_or_drop(path, path.relative_to(root).as_posix(), kept, excluded, seen)
+            relative = path.relative_to(root).as_posix()
+            escaped = _unencodable_name(relative)
+            if escaped is not None:
+                excluded.append({"path": escaped, "reason": "unreadable"})
+                continue
+            _keep_or_drop(path, relative, kept, excluded, seen)
         return kept, excluded
 
     for root in roots:
@@ -476,6 +481,12 @@ def walk_corpus(
         # cannot be seen from here, so such a folder still reads `gitignored`.
         for folder in unlistable:
             folder_relative = folder.relative_to(root).as_posix()
+            escaped = _unencodable_name(folder_relative)
+            if escaped is not None:
+                # Same rule as the file loop below: a folder name that is not
+                # text cannot go into the catalogue as itself.
+                excluded.append({"path": escaped, "reason": "unreadable"})
+                continue
             folder_parts = set(folder.relative_to(root).parts)
             if any(_is_vcs_name(part) for part in folder_parts):
                 reason = "vcs_metadata"
@@ -495,6 +506,22 @@ def walk_corpus(
 
             def drop(reason: str, rel: str = relative) -> None:
                 excluded.append({"path": rel, "reason": reason})
+
+            # A name that is not valid UTF-8 (Linux allows any bytes) reaches
+            # here from os.walk as a lone surrogate, `caf\udce9.md`, and the
+            # catalogue's UTF-8 encoding raised UnicodeEncodeError on it: a
+            # ValueError none of survey's handlers catch, so the user got a
+            # traceback, exit 1, empty stdout and no run. Checked before
+            # anything else, because every later reason would record the same
+            # unencodable path. Recorded rather than dropped, under its bytes
+            # written out as `caf\xe9.md`. `unreadable` rather than a new
+            # reason, as for a FIFO: survey could not take this as a document,
+            # and a new reason would mean a schema change for a case no corpus
+            # owner means as one.
+            escaped = _unencodable_name(relative)
+            if escaped is not None:
+                drop("unreadable", escaped)
+                continue
 
             # rglob does not descend into a symlinked folder, but is_file()
             # follows a symlinked *file*, so a link in the corpus pointing at
@@ -544,6 +571,28 @@ def walk_corpus(
             _keep_or_drop(path, relative, kept, excluded, seen, lockfile_checked=True)
 
     return kept, excluded
+
+
+def _unencodable_name(relative: str) -> str | None:
+    """None when `relative` is valid text; otherwise a printable stand-in for it.
+
+    The stand-in spells each byte that was not UTF-8 as `\\xNN`, the same
+    `backslashreplace` choice summary.esc makes and for its reason: a reader can
+    see which byte it was, where `?` or U+FFFD would erase it. os.fsencode gives
+    back the name's real bytes; a surrogate it cannot map (none comes from
+    os.walk, but a caller may pass one) falls back to escaping the surrogate.
+    """
+    try:
+        relative.encode("utf-8")
+    except UnicodeEncodeError:
+        pass
+    else:
+        return None
+    try:
+        raw = os.fsencode(relative)
+    except UnicodeError:
+        return relative.encode("utf-8", "backslashreplace").decode("utf-8")
+    return raw.decode("utf-8", "backslashreplace")
 
 
 def _walk_files(root: Path) -> tuple[list[Path], list[Path]]:

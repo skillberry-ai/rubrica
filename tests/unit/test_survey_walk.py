@@ -800,3 +800,79 @@ def test_a_fifo_passed_as_a_named_file_is_declined_without_opening_it(tmp_path):
     kept, excluded = _walk_or_fail([root], root / "pipe", only=[root / "a.md", root / "pipe"])
     assert [p.relative_to(root).as_posix() for p in kept] == ["a.md"]
     assert _reasons(excluded) == {"pipe": "unreadable"}
+
+
+# A file name that is not UTF-8 (Linux allows any bytes) reaches survey from
+# os.walk as a lone surrogate, and the catalogue's UTF-8 encoding raised on it:
+# a traceback, exit 1, empty stdout and no run. It is recorded as `unreadable`
+# under an escaped spelling instead. macOS refuses to create such a name
+# (EILSEQ), so the first test feeds one through a patched `_walk_files`.
+_BAD_NAME = "caf\udce9.md"
+
+
+def _walk_with_bad_name(monkeypatch):
+    real = survey._walk_files
+
+    def walk(root):
+        files, unlistable = real(root)
+        return sorted([*files, root / _BAD_NAME]), unlistable
+
+    monkeypatch.setattr(survey, "_walk_files", walk)
+
+
+def _assert_bad_name_recorded(root, runs, code):
+    assert code == 0
+    [run] = list(runs.iterdir())
+    raw = (run / "00-catalogue.json").read_bytes()
+    raw.decode("utf-8")  # strict: no surrogate ever reached the artifact
+    catalogue = json.loads(raw)
+    assert _reasons(catalogue["excluded"]).get("caf\\xe9.md") == "unreadable"
+    text = json.dumps(catalogue, ensure_ascii=False)
+    assert "a.md" in text
+    assert not any("\udc80" <= ch <= "\udcff" for ch in text)
+
+
+def test_a_non_utf8_file_name_is_recorded_not_a_crash(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "c"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    _walk_with_bad_name(monkeypatch)
+    kept, excluded = survey.walk_corpus([root])
+    assert [p.relative_to(root).as_posix() for p in kept] == ["a.md"]
+    assert _reasons(excluded) == {"caf\\xe9.md": "unreadable"}
+    runs = tmp_path / "runs"
+    _assert_bad_name_recorded(root, runs, _survey_cli(root, runs))
+
+
+def test_a_non_utf8_unlistable_folder_name_is_recorded_escaped(tmp_path, monkeypatch):
+    root = tmp_path / "c"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    real = survey._walk_files
+    monkeypatch.setattr(survey, "_walk_files", lambda r: (real(r)[0], [r / "caf\udce9"]))
+    _, excluded = survey.walk_corpus([root])
+    assert _reasons(excluded) == {"caf\\xe9": "unreadable"}
+
+
+def test_a_non_utf8_file_name_on_disk_is_recorded_end_to_end(tmp_path):
+    root = tmp_path / "c"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    try:
+        fd = os.open(os.fsencode(root) + b"/caf\xe9.md", os.O_CREAT | os.O_WRONLY, 0o644)
+    except OSError as exc:
+        pytest.skip(f"this filesystem refuses non-UTF-8 names: {exc}")
+    os.write(fd, b"# B\n")
+    os.close(fd)
+    runs = tmp_path / "runs"
+    _assert_bad_name_recorded(root, runs, _survey_cli(root, runs))
+
+
+def test_a_unicode_error_in_survey_is_exit_2_with_a_message(tmp_path, monkeypatch, capsys):
+    def boom(**_):
+        raise UnicodeEncodeError("utf-8", "\udce9", 0, 1, "surrogates not allowed")
+
+    monkeypatch.setattr(survey, "survey", boom)
+    assert _survey_cli(tmp_path / "c", tmp_path / "runs") == 2
+    err = capsys.readouterr().err
+    assert len(err.strip().splitlines()) == 1 and "UTF-8" in err
