@@ -625,3 +625,50 @@ def test_a_malformed_scenario_list_is_named_like_an_unreadable_one(tmp_path, cap
     report = read_json(run.recall)
     assert report["recall"] is None
     assert "02-scenarios.json" in report["unreadable"]
+
+
+# T-72: a scenarios schema that cannot be loaded is a misconfigured run. It used
+# to be reported as a fault in 02-scenarios.json -- exit 1, and a recall.md on
+# disk saying "Repair 02-scenarios.json" about a file that was fine.
+@pytest.mark.parametrize("how", ["missing", "unresolvable-ref"])
+def test_an_unusable_scenarios_schema_is_exit_two_and_writes_nothing(
+    tmp_path, capsys, monkeypatch, how
+):
+    import shutil
+
+    from rubrica.validate import ARTIFACT_SCHEMAS, schema_dir
+
+    gold = _gold_file(tmp_path)
+    run = build_state(tmp_path / "run", "emit")
+    root = tmp_path / "schemas"
+    shutil.copytree(schema_dir(), root)
+    path = root / ARTIFACT_SCHEMAS["scenarios"]
+    if how == "missing":
+        path.unlink()
+    else:
+        text = path.read_text("utf-8")
+        assert '"#/$defs/scenario"' in text
+        path.write_text(text.replace('"#/$defs/scenario"', '"absent-0.1.json#/x"'), "utf-8")
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(root))
+
+    from rubrica.cli import main
+
+    code = main(["compare-gold", "--run", str(run.root), "--gold", str(gold)])
+    captured = capsys.readouterr()
+    assert code == 2, captured
+    assert captured.out == "", captured.out
+    errors = [line for line in captured.err.splitlines() if line.strip()]
+    assert len(errors) == 1, captured.err
+    assert str(root) in errors[0]
+    assert "02-scenarios.json" not in errors[0]
+    assert not run.recall.exists()
+    assert not run.recall_md.exists()
+
+
+def test_a_valid_run_still_compares_with_the_normal_schemas(tmp_path, capsys):
+    gold = _gold_file(tmp_path)
+    run = build_state(tmp_path / "run", "emit")
+    code, out = _compare_cli(run, gold, capsys)
+    assert code in (0, 1), out
+    assert f"[recall] {run.scenarios}" not in out
+    assert run.recall.exists()

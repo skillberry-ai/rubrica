@@ -719,3 +719,62 @@ def test_a_really_qualified_verdict_still_gets_the_adversary_finding(tmp_path, c
     assert code == 1, out
     assert _QUALIFIED_CLAIM in out
     assert f"[review] {run.review_sample}: " in out
+
+
+# T-72: a scenarios schema that cannot be loaded is a misconfigured run, not a
+# fault in 02-scenarios.json. It used to come out as exit 1 with a finding
+# naming 02-scenarios.json, which sends a repair at a file that was fine.
+def _broken_schema_dir(tmp_path, how):
+    """A copy of the schema directory with the scenarios schema missing or unusable."""
+    root = tmp_path / f"schemas-{how}"
+    shutil.copytree(schema_dir(), root)
+    path = root / ARTIFACT_SCHEMAS["scenarios"]
+    if how == "missing":
+        path.unlink()
+    else:
+        # A $ref into a file the directory does not hold. It only fails once
+        # validation walks to it, inside validate_artifact.
+        text = path.read_text("utf-8")
+        assert '"#/$defs/scenario"' in text
+        path.write_text(text.replace('"#/$defs/scenario"', '"absent-0.1.json#/x"'), "utf-8")
+    return root
+
+
+@pytest.mark.parametrize("how", ["missing", "unresolvable-ref"])
+def test_an_unusable_scenarios_schema_is_exit_two_and_writes_nothing(
+    tmp_path, capsys, monkeypatch, how
+):
+    from rubrica.cli import main
+
+    run = build_state(tmp_path, "emit")
+    root = _broken_schema_dir(tmp_path, how)
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(root))
+    code = main(["sample-for-review", "--run", str(run.root), "--size", "5"])
+    captured = capsys.readouterr()
+    assert code == 2, captured
+    assert captured.out == "", captured.out
+    errors = [line for line in captured.err.splitlines() if line.strip()]
+    assert len(errors) == 1, captured.err
+    assert str(root) in errors[0]
+    assert "02-scenarios.json" not in errors[0]
+    assert not run.review_dir.exists()
+
+
+def test_a_missing_verdict_is_not_claimed_as_qualified_by_the_adversary(tmp_path, capsys):
+    run = build_state(tmp_path, "emit")
+    run.verdict(SID).unlink()
+    code, out = _sample_cli(run, capsys)
+    assert code == 1, out
+    assert "[internal]" not in out
+    assert _QUALIFIED_CLAIM not in out
+    label = run.verdict(SID).relative_to(run.root).as_posix()
+    named = [line for line in out.splitlines() if line.startswith(f"[review] {run.verdict(SID)}")]
+    assert len(named) == 1, out
+    assert f"{label} is missing" in named[0]
+    assert any(
+        line.startswith(f"[review] {run.review_sample}") and label in line
+        for line in out.splitlines()
+    ), out
+    # The sampling is unchanged: the task is still in the packet, as low confidence.
+    assert run.review_packet.exists()
+    assert read_json(run.review_sample)["sampled"][0]["band"] == "low"

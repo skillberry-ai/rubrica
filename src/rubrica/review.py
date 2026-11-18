@@ -23,7 +23,7 @@ from rubrica.artifacts import ArtifactError, read_json, sha256_of, write_json
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths
-from rubrica.validate import validate_artifact
+from rubrica.validate import _validator_for, schema_dir, validate_artifact
 
 # Fixed, so review is a trend line rather than a fresh opinion each time.
 RUBRIC = ("fair", "unambiguous", "correctly_labeled", "non_trivial")
@@ -174,6 +174,21 @@ def scenarios_by_id(run: RunPaths) -> dict[str, dict[str, Any]]:
     its schema, so a caller gives the two the same outcome. recall._load_scenarios
     (compare-gold) uses this too: it had the same unguarded shape (T-69).
     """
+    # The schema is loaded before 02-scenarios.json is read, and a fault in it is
+    # a UsageError (exit 2) naming the schema, not an ArtifactError: both callers
+    # catch ArtifactError as a fault in 02-scenarios.json. Measured before this
+    # split (T-72), with RUBRICA_SCHEMA_DIR holding only manifest-0.1.json:
+    # sample-for-review exited 1 with "[review] R/02-scenarios.json: missing
+    # artifact: <dir>/scenarios-0.1.json", and compare-gold also wrote a
+    # recall.md telling the reader to "Repair 02-scenarios.json". Nothing in the
+    # run was wrong, and no repair of it could help.
+    root = schema_dir()
+    try:
+        _validator_for("scenarios", root)
+    except ArtifactError as exc:
+        raise UsageError(
+            f"the scenarios schema in RUBRICA_SCHEMA_DIR ({root}) cannot be loaded: {exc}"
+        ) from exc
     document = read_json(run.scenarios)
     # Parsed is not the same as usable. T-68 and T-69 guarded the shape field by
     # field -- not an object, `scenarios` not a list, an entry not an object, no
@@ -191,7 +206,15 @@ def scenarios_by_id(run: RunPaths) -> dict[str, dict[str, Any]]:
     # (measured). It admits 1.0, which compares and hashes as 1, so no explicit
     # check is kept.
     label = _label(run, run.scenarios)
-    findings = validate_artifact(run.scenarios, "scenarios")
+    try:
+        findings = validate_artifact(run.scenarios, "scenarios")
+    except ArtifactError as exc:
+        # validate_artifact turns a fault in the document into findings, so an
+        # ArtifactError out of it is about the schemas: a $ref that does not
+        # resolve, which only shows up once validation walks to it.
+        raise UsageError(
+            f"the scenarios schema in RUBRICA_SCHEMA_DIR ({root}) cannot be used: {exc}"
+        ) from exc
     if findings:
         first = findings[0]
         where = f" at {first.pointer}" if first.pointer else ""
@@ -363,7 +386,7 @@ def packet(run: RunPaths, entries: list[dict[str, Any]]) -> str:
 def _no_high_confidence_findings(run: RunPaths, pool: list[dict[str, Any]]) -> list[Finding]:
     """What to say when no entry in the pool is in the high band.
 
-    A verdict that could not be read, or is not an object, is sampled as low --
+    A verdict that is missing, could not be read, or is not an object, is sampled as low --
     the packet names it in that task's section -- but it is not evidence that the
     adversary qualified anything. Counting it as such once turned a chmod 000 on
     05-verdicts/ into "every accept was qualified by the adversary" against a
@@ -374,9 +397,16 @@ def _no_high_confidence_findings(run: RunPaths, pool: list[dict[str, Any]]) -> l
     damaged: list[tuple[Path, str]] = []
     for entry in pool:
         path = run.verdict(entry["scenario_id"])
-        note = _load(run, path)[1]
+        doc, note = _load(run, path)
         if note is not None:
             damaged.append((path, note.removeprefix("(").removesuffix(")")))
+        elif doc is None:
+            # Absent. _load calls that a state, not damage, and the packet shows
+            # it so -- but it is no more evidence of an adversary's qualification
+            # than a damaged file is. Left out of `damaged`, deleting a suite's
+            # only verdict produced "every accept was qualified by the adversary"
+            # (T-72).
+            damaged.append((path, f"{_label(run, path)} is missing"))
     findings = [
         Finding(
             path,
@@ -398,14 +428,14 @@ def _no_high_confidence_findings(run: RunPaths, pool: list[dict[str, Any]]) -> l
             "no high-confidence accept exists among the verdicts that could be read, so the "
             "packet cannot look where a correlated labeler/adversary blind spot would hide; "
             "every readable accept was qualified by the adversary, and "
-            f"{len(damaged)} verdict(s) could not be read: "
+            f"{len(damaged)} verdict(s) are missing or could not be read: "
             + ", ".join(_label(run, path) for path, _ in damaged)
         )
     else:
         message = (
             "no verdict in this suite could be read, so it is unknown whether any "
             "high-confidence accept exists and the packet may not look where a correlated "
-            "labeler/adversary blind spot would hide; unreadable: "
+            "labeler/adversary blind spot would hide; missing or unreadable: "
             + ", ".join(_label(run, path) for path, _ in damaged)
         )
     return [Finding(run.review_sample, "review", "", message), *findings]
