@@ -508,6 +508,15 @@ def main(argv: list[str] | None = None) -> int:
         except (UsageError, ArtifactError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return USAGE
+        except UnicodeError as exc:
+            # Backstop only: the walk records a non-UTF-8 file name as
+            # `unreadable` itself, so this is for a surrogate reaching an
+            # artifact some other way (a corpus root's own name, say). Survey
+            # sits outside main()'s catch-all, so without this it was a
+            # traceback with exit 1 and empty stdout. `2`, not `1`: no stage
+            # exists to repair a corpus survey could not name.
+            print(f"error: survey met text it cannot write as UTF-8: {exc}", file=sys.stderr)
+            return USAGE
         print(run.root)
         return CLEAN
 

@@ -519,3 +519,37 @@ def test_a_blank_output_is_a_usage_error_and_writes_nothing(
     assert "--output must not be empty or blank" in captured.err
     assert list(run.iterdir()) == []
     assert list(cwd.iterdir()) == []
+
+
+# A FIFO named with --corpus, or a link to one, must be refused before the
+# seed check's open(), which would otherwise block until a writer appeared.
+# Run in a thread with a join timeout so a regression fails rather than hangs.
+@pytest.mark.skipif(not hasattr(__import__("os"), "mkfifo"), reason="no mkfifo here")
+@pytest.mark.parametrize("linked", [False, True], ids=["fifo", "link-to-fifo"])
+def test_a_fifo_named_with_corpus_is_a_usage_error_and_does_not_hang(tmp_path, linked):
+    import os
+    import threading
+
+    pipe = tmp_path / "pipe"
+    os.mkfifo(pipe)
+    seed = pipe
+    if linked:
+        seed = tmp_path / "notes.md"
+        seed.symlink_to(pipe)
+    result: dict = {}
+
+    def run() -> None:
+        try:
+            _survey(tmp_path, [seed])
+        except UsageError as exc:
+            result["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+    if worker.is_alive():
+        fd = os.open(pipe, os.O_WRONLY | os.O_NONBLOCK)
+        os.close(fd)
+        pytest.fail("survey hung opening a FIFO named with --corpus")
+    assert "neither a file nor a directory" in str(result.get("error"))
+    assert not (tmp_path / "runs").exists()

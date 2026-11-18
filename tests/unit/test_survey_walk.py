@@ -166,6 +166,105 @@ def test_an_unreadable_folder_two_levels_down_is_recorded_too(tmp_path):
     assert _reasons(excluded) == {"docs/inner/locked": "unreadable"}
 
 
+def _walk_with_half_locked(root, half, **kwargs):
+    half.chmod(0o644)
+    try:
+        return survey.walk_corpus([root], **kwargs)
+    finally:
+        half.chmod(0o755)
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 644 does not stop root from entering a folder")
+def test_a_listable_but_unenterable_subfolder_is_recorded_and_its_siblings_kept(tmp_path):
+    """A `chmod 644` folder can be listed, so the walk's on_error never fired,
+    but is_file() on its entries raised PermissionError and the whole survey
+    aborted as "cannot read corpus root" -- measured on `c/half/spec.md`.
+    """
+    root = tmp_path / "corpus"
+    half = root / "half"
+    (half / "deeper").mkdir(parents=True)
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (half / "spec.md").write_text("# Spec\n", encoding="utf-8")
+    (half / "deeper" / "more.md").write_text("# More\n", encoding="utf-8")
+    kept, excluded = _walk_with_half_locked(root, half)
+    assert kept == [root / "a.md"]
+    assert _reasons(excluded) == {"half": "unreadable"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 644 does not stop root from entering a folder")
+def test_a_listable_but_unenterable_gitignored_folder_keeps_the_gitignored_reason(tmp_path):
+    root = tmp_path / "corpus"
+    half = root / "secret"
+    half.mkdir(parents=True)
+    (root / ".gitignore").write_text("secret/\n", encoding="utf-8")
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (half / "k.md").write_text("# K\n", encoding="utf-8")
+    kept, excluded = _walk_with_half_locked(root, half)
+    assert root / "a.md" in kept
+    assert _reasons(excluded)["secret"] == "gitignored"  # pragma: allowlist secret
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 644 does not stop root from entering a folder")
+def test_a_listable_but_unenterable_root_still_raises(tmp_path):
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    root.chmod(0o644)
+    try:
+        with pytest.raises(UsageError, match="cannot read corpus root"):
+            survey.walk_corpus([root])
+    finally:
+        root.chmod(0o755)
+
+
+def _locked_outside_target(tmp_path):
+    """A file outside the corpus inside a `chmod 000` folder, so stat-ing it
+    through a symlink raises PermissionError while the link itself lstats fine."""
+    outside = tmp_path / "outside" / "locked"
+    outside.mkdir(parents=True)
+    (outside / "secret").write_text("hunter2\n", encoding="utf-8")
+    return outside, outside / "secret"
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from reading a target")
+def test_a_symlink_to_an_unreadable_target_is_a_symlink_decline_not_a_locked_folder(tmp_path):
+    """is_file() follows a link, so a link into a locked place raised for the
+    link alone and its whole folder was recorded `unreadable` -- measured on
+    this tree as kept [docs/a.md], excluded {docs: unreadable}, with
+    docs/sub/b.md in neither list and the link never recorded at all.
+    """
+    root = tmp_path / "corpus"
+    (root / "docs" / "sub").mkdir(parents=True)
+    (root / "docs" / "a.md").write_text("# A\n", encoding="utf-8")
+    (root / "docs" / "sub" / "b.md").write_text("# B\n", encoding="utf-8")
+    locked, secret = _locked_outside_target(tmp_path)
+    (root / "docs" / "link.md").symlink_to(secret)
+    locked.chmod(0o000)
+    try:
+        kept, excluded = survey.walk_corpus([root])
+    finally:
+        locked.chmod(0o755)
+    assert kept == [root / "docs" / "a.md", root / "docs" / "sub" / "b.md"]
+    assert _reasons(excluded) == {"docs/link.md": "symlink_outside_root"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from reading a target")
+def test_a_symlink_to_an_unreadable_target_in_the_root_does_not_abort_the_survey(tmp_path):
+    """The same link directly in the root escaped as "cannot read corpus root"."""
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    locked, secret = _locked_outside_target(tmp_path)
+    (root / "link.md").symlink_to(secret)
+    locked.chmod(0o000)
+    try:
+        kept, excluded = survey.walk_corpus([root])
+    finally:
+        locked.chmod(0o755)
+    assert kept == [root / "a.md"]
+    assert _reasons(excluded) == {"link.md": "symlink_outside_root"}
+
+
 def _walk_with_locked(root, locked, **kwargs):
     locked.chmod(0o000)
     try:
@@ -535,3 +634,245 @@ def test_only_one_leading_byte_order_mark_is_dropped(tmp_path):
     root.mkdir()
     (root / ".gitignore").write_bytes(b"\xef\xbb\xbf.env\n\xef\xbb\xbfx\n")
     assert survey._gitignore_patterns(root) == [".env", "﻿x"]
+
+
+def _walk_or_fail(roots, fifo, **kwargs):
+    """walk_corpus in a thread with a join timeout, so a hang fails the test.
+
+    A blocked open() on a FIFO would otherwise hang the whole suite. On a
+    timeout the FIFO gets a writer, which unblocks the stuck read so the daemon
+    thread can finish, and the test fails naming the hang.
+    """
+    import threading
+
+    result: dict = {}
+
+    def walk() -> None:
+        # Kept rather than lost in the thread, so a refusal reaches the test.
+        try:
+            result["value"] = survey.walk_corpus(roots, **kwargs)
+        except Exception as exc:
+            result["error"] = exc
+
+    worker = threading.Thread(target=walk, daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+    if worker.is_alive():
+        fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+        os.close(fd)
+        pytest.fail(f"walk_corpus hung opening the FIFO {fifo}")
+    if "error" in result:
+        raise result["error"]
+    return result["value"]
+
+
+# A FIFO at the root's .gitignore was read before any file was walked, and
+# read_text() blocked until a writer appeared: `c/a.md` plus
+# `mkfifo c/.gitignore` hung walk_corpus forever. It then counted as no
+# patterns, which surveyed under rules nobody could read; it is now refused,
+# still without ever opening the FIFO.
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no mkfifo here")
+def test_a_fifo_gitignore_is_refused_and_does_not_hang(tmp_path):
+    root = tmp_path / "c"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    os.mkfifo(root / ".gitignore")
+    with pytest.raises(UsageError, match=r"\.gitignore is not a regular file"):
+        _walk_or_fail([root], root / ".gitignore")
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no mkfifo here")
+def test_a_gitignore_linked_to_a_fifo_is_refused_and_does_not_hang(tmp_path):
+    root = tmp_path / "c"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    os.mkfifo(tmp_path / "pipe")
+    (root / ".gitignore").symlink_to(tmp_path / "pipe")
+    with pytest.raises(UsageError, match=r"\.gitignore is not a regular file"):
+        _walk_or_fail([root], tmp_path / "pipe")
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no mkfifo here")
+def test_survey_over_a_fifo_gitignore_exits_2_without_hanging(tmp_path, capsys):
+    import threading
+
+    root = tmp_path / "c"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    os.mkfifo(root / ".gitignore")
+    runs = tmp_path / "runs"
+    result: dict = {}
+    worker = threading.Thread(
+        target=lambda: result.setdefault("code", _survey_cli(root, runs)), daemon=True
+    )
+    worker.start()
+    worker.join(timeout=10)
+    if worker.is_alive():
+        os.close(os.open(root / ".gitignore", os.O_WRONLY | os.O_NONBLOCK))
+        pytest.fail("survey hung opening the FIFO .gitignore")
+    assert result["code"] == 2
+    assert ".gitignore" in capsys.readouterr().err
+    assert not runs.exists() or list(runs.iterdir()) == []
+
+
+def _survey_cli(root, runs):
+    from rubrica import cli
+
+    return cli.main(
+        [
+            "survey",
+            "--corpus",
+            str(root),
+            "--runs-dir",
+            str(runs),
+            "--target-name",
+            "toy",
+            "--target-interface",
+            "mcp",
+            "--objective",
+            "breadth",
+        ]
+    )
+
+
+# One byte that is not UTF-8 anywhere in the .gitignore -- here a Latin-1 `é`
+# in a comment -- made the strict decode fail, and the failure counted as no
+# patterns: a bug scout's corpus catalogued `.env` and its key while
+# `git check-ignore` ignored it. Git reads the file as bytes; so do we now.
+def test_a_latin_1_comment_does_not_drop_the_other_gitignore_lines(tmp_path):
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / ".gitignore").write_bytes(b"# caf\xe9 notes\n.env\n")
+    (root / ".env").write_text("API_KEY=placeholder\n", encoding="utf-8")
+    (root / "README.md").write_text("# Target\n", encoding="utf-8")
+    assert ".env" in survey._gitignore_patterns(root)
+    kept, excluded = survey.walk_corpus([root])
+    assert _reasons(excluded)[".env"] == "gitignored"
+    assert "README.md" in {p.relative_to(root).as_posix() for p in kept}
+
+
+def test_a_bad_byte_inside_a_pattern_line_spares_the_lines_around_it(tmp_path):
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / ".gitignore").write_bytes(b".env\nbad\xff.txt\nsecrets/\n")
+    patterns = survey._gitignore_patterns(root)
+    assert patterns[0] == ".env"
+    assert patterns[-1] == "secrets/"
+
+
+def test_a_missing_gitignore_is_still_no_patterns(tmp_path):
+    root = tmp_path / "corpus"
+    root.mkdir()
+    assert survey._gitignore_patterns(root) == []
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from reading a file")
+def test_an_unreadable_gitignore_is_refused_and_mints_no_run(tmp_path, capsys):
+    """A `chmod 000 .gitignore` once counted as no patterns, so every file git
+    ignores -- a `.env` included -- was catalogued with its contents. Unknown
+    ignore rules are now a usage error, raised before the run folder exists."""
+    root = tmp_path / "corpus"
+    root.mkdir()
+    ignore = root / ".gitignore"
+    ignore.write_text(".env\n", encoding="utf-8")
+    (root / ".env").write_text("API_KEY=placeholder\n", encoding="utf-8")
+    (root / "README.md").write_text("# Target\n", encoding="utf-8")
+    runs = tmp_path / "runs"
+    ignore.chmod(0o000)
+    try:
+        with pytest.raises(UsageError, match=r"cannot read the corpus root's \.gitignore"):
+            survey.walk_corpus([root])
+        assert _survey_cli(root, runs) == 2
+        assert str(ignore) in capsys.readouterr().err
+        assert not runs.exists() or list(runs.iterdir()) == []
+    finally:
+        ignore.chmod(0o644)
+
+
+# The `only` path (files named one by one) goes through the same check: a FIFO
+# handed in directly is declined as unreadable, never opened.
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no mkfifo here")
+def test_a_fifo_passed_as_a_named_file_is_declined_without_opening_it(tmp_path):
+    root = tmp_path / "c"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    os.mkfifo(root / "pipe")
+    kept, excluded = _walk_or_fail([root], root / "pipe", only=[root / "a.md", root / "pipe"])
+    assert [p.relative_to(root).as_posix() for p in kept] == ["a.md"]
+    assert _reasons(excluded) == {"pipe": "unreadable"}
+
+
+# A file name that is not UTF-8 (Linux allows any bytes) reaches survey from
+# os.walk as a lone surrogate, and the catalogue's UTF-8 encoding raised on it:
+# a traceback, exit 1, empty stdout and no run. It is recorded as `unreadable`
+# under an escaped spelling instead. macOS refuses to create such a name
+# (EILSEQ), so the first test feeds one through a patched `_walk_files`.
+_BAD_NAME = "caf\udce9.md"
+
+
+def _walk_with_bad_name(monkeypatch):
+    real = survey._walk_files
+
+    def walk(root):
+        files, unlistable = real(root)
+        return sorted([*files, root / _BAD_NAME]), unlistable
+
+    monkeypatch.setattr(survey, "_walk_files", walk)
+
+
+def _assert_bad_name_recorded(root, runs, code):
+    assert code == 0
+    [run] = list(runs.iterdir())
+    raw = (run / "00-catalogue.json").read_bytes()
+    raw.decode("utf-8")  # strict: no surrogate ever reached the artifact
+    catalogue = json.loads(raw)
+    assert _reasons(catalogue["excluded"]).get("caf\\xe9.md") == "unreadable"
+    text = json.dumps(catalogue, ensure_ascii=False)
+    assert "a.md" in text
+    assert not any("\udc80" <= ch <= "\udcff" for ch in text)
+
+
+def test_a_non_utf8_file_name_is_recorded_not_a_crash(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "c"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    _walk_with_bad_name(monkeypatch)
+    kept, excluded = survey.walk_corpus([root])
+    assert [p.relative_to(root).as_posix() for p in kept] == ["a.md"]
+    assert _reasons(excluded) == {"caf\\xe9.md": "unreadable"}
+    runs = tmp_path / "runs"
+    _assert_bad_name_recorded(root, runs, _survey_cli(root, runs))
+
+
+def test_a_non_utf8_unlistable_folder_name_is_recorded_escaped(tmp_path, monkeypatch):
+    root = tmp_path / "c"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    real = survey._walk_files
+    monkeypatch.setattr(survey, "_walk_files", lambda r: (real(r)[0], [r / "caf\udce9"]))
+    _, excluded = survey.walk_corpus([root])
+    assert _reasons(excluded) == {"caf\\xe9": "unreadable"}
+
+
+def test_a_non_utf8_file_name_on_disk_is_recorded_end_to_end(tmp_path):
+    root = tmp_path / "c"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    try:
+        fd = os.open(os.fsencode(root) + b"/caf\xe9.md", os.O_CREAT | os.O_WRONLY, 0o644)
+    except OSError as exc:
+        pytest.skip(f"this filesystem refuses non-UTF-8 names: {exc}")
+    os.write(fd, b"# B\n")
+    os.close(fd)
+    runs = tmp_path / "runs"
+    _assert_bad_name_recorded(root, runs, _survey_cli(root, runs))
+
+
+def test_a_unicode_error_in_survey_is_exit_2_with_a_message(tmp_path, monkeypatch, capsys):
+    def boom(**_):
+        raise UnicodeEncodeError("utf-8", "\udce9", 0, 1, "surrogates not allowed")
+
+    monkeypatch.setattr(survey, "survey", boom)
+    assert _survey_cli(tmp_path / "c", tmp_path / "runs") == 2
+    err = capsys.readouterr().err
+    assert len(err.strip().splitlines()) == 1 and "UTF-8" in err

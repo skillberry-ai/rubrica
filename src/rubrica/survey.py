@@ -24,6 +24,8 @@ import contextlib
 import fnmatch
 import hashlib
 import json
+import os
+import stat
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -128,6 +130,21 @@ def _vcs_part_of(path: Path) -> str | None:
     return None
 
 
+def _is_regular_file(path: Path) -> bool:
+    """True only when `path`, with links followed, is a regular file.
+
+    The one check every corpus path goes through before survey opens it. A
+    FIFO blocks open() until a writer appears -- forever, in a survey -- and a
+    socket or device is not evidence either. stat() follows a link, so this
+    judges the target, which is what an open would reach. A path that cannot
+    be stat'ed is not a regular file as far as an open is concerned.
+    """
+    try:
+        return stat.S_ISREG(Path(path).stat().st_mode)
+    except OSError:
+        return False
+
+
 def _gitignore_patterns(root: Path) -> list[str]:
     """Patterns from `root/.gitignore`, one level only, as written.
 
@@ -166,14 +183,51 @@ def _gitignore_patterns(root: Path) -> list[str]:
     `secrets/key.txt` were catalogued again.
     """
     ignore = root / ".gitignore"
-    # `utf-8-sig` drops one leading byte-order mark, as git does. Read as plain
-    # `utf-8`, a file saved with one (Windows Notepad, some editors) kept the
-    # mark on its first pattern -- `str.strip()` does not remove U+FEFF -- so
-    # `\ufeff.env` matched nothing and a `.env` git ignores was catalogued.
+    # Only a regular file is read. A FIFO named `.gitignore` -- or a link to
+    # one -- blocked read_text() forever before any file was walked: measured,
+    # `c/a.md` plus `mkfifo c/.gitignore` hung `walk_corpus([c])` until killed.
+    #
+    # A missing file is the one case that means "no patterns". Anything else
+    # that cannot be read as a regular file -- a `chmod 000 .gitignore`, a
+    # FIFO, socket, device or folder by that name, a link to one, a looping
+    # link -- is refused with exit 2. It used to count as no patterns, and so
+    # did any read error: survey then catalogued every file git ignores,
+    # contents and all, while exiting 0. Surveying under ignore rules we could
+    # not read is how a secret gets admitted silently, and no stage re-dispatch
+    # can fix a file mode, so it is a usage error naming the file. A dangling
+    # link counts as missing, because git cannot open it either and so applies
+    # no rules from it.
+    if not _is_regular_file(ignore):
+        try:
+            ignore.stat()
+        except FileNotFoundError:
+            return []
+        except OSError as exc:
+            raise UsageError(f"cannot read the corpus root's .gitignore: {ignore} ({exc})") from exc
+        raise UsageError(f"the corpus root's .gitignore is not a regular file: {ignore}")
     try:
-        text = ignore.read_text(encoding="utf-8-sig")
-    except (OSError, UnicodeDecodeError):
-        return []
+        # O_NONBLOCK, and fstat on what was actually opened, so a file swapped
+        # for a FIFO between the check above and this open still cannot block
+        # the read or be taken as rules.
+        fd = os.open(ignore, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(fd, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise UsageError(f"the corpus root's .gitignore is not a regular file: {ignore}")
+            data = handle.read()
+    except OSError as exc:
+        raise UsageError(f"cannot read the corpus root's .gitignore: {ignore} ({exc})") from exc
+    # Read as bytes and decoded leniently, as git reads it. A strict utf-8
+    # decode threw the whole file away on one bad byte -- measured: a Latin-1
+    # `# caf\xe9 notes` comment above `.env` made survey catalogue `.env` and
+    # its key while `git check-ignore` ignored it. With `surrogateescape` a
+    # line holding such a byte keeps it as a lone surrogate, which is how
+    # Python spells the same byte in a file name, and every other line applies.
+    #
+    # One leading byte-order mark is dropped, as git does. Kept, it stayed on
+    # the first pattern -- `str.strip()` does not remove U+FEFF -- so
+    # `\ufeff.env` matched nothing and a `.env` git ignores was catalogued.
+    data = data.removeprefix(b"\xef\xbb\xbf")
+    text = data.decode("utf-8", errors="surrogateescape")
     patterns = []
     for raw in text.splitlines():
         line = raw.strip()
@@ -382,7 +436,12 @@ def walk_corpus(
             raise UsageError("walk_corpus takes `only` with exactly one root")
         root = Path(roots[0])
         for path in sorted(Path(p) for p in only):
-            _keep_or_drop(path, path.relative_to(root).as_posix(), kept, excluded, seen)
+            relative = path.relative_to(root).as_posix()
+            escaped = _unencodable_name(relative)
+            if escaped is not None:
+                excluded.append({"path": escaped, "reason": "unreadable"})
+                continue
+            _keep_or_drop(path, relative, kept, excluded, seen)
         return kept, excluded
 
     for root in roots:
@@ -422,6 +481,12 @@ def walk_corpus(
         # cannot be seen from here, so such a folder still reads `gitignored`.
         for folder in unlistable:
             folder_relative = folder.relative_to(root).as_posix()
+            escaped = _unencodable_name(folder_relative)
+            if escaped is not None:
+                # Same rule as the file loop below: a folder name that is not
+                # text cannot go into the catalogue as itself.
+                excluded.append({"path": escaped, "reason": "unreadable"})
+                continue
             folder_parts = set(folder.relative_to(root).parts)
             if any(_is_vcs_name(part) for part in folder_parts):
                 reason = "vcs_metadata"
@@ -441,6 +506,22 @@ def walk_corpus(
 
             def drop(reason: str, rel: str = relative) -> None:
                 excluded.append({"path": rel, "reason": reason})
+
+            # A name that is not valid UTF-8 (Linux allows any bytes) reaches
+            # here from os.walk as a lone surrogate, `caf\udce9.md`, and the
+            # catalogue's UTF-8 encoding raised UnicodeEncodeError on it: a
+            # ValueError none of survey's handlers catch, so the user got a
+            # traceback, exit 1, empty stdout and no run. Checked before
+            # anything else, because every later reason would record the same
+            # unencodable path. Recorded rather than dropped, under its bytes
+            # written out as `caf\xe9.md`. `unreadable` rather than a new
+            # reason, as for a FIFO: survey could not take this as a document,
+            # and a new reason would mean a schema change for a case no corpus
+            # owner means as one.
+            escaped = _unencodable_name(relative)
+            if escaped is not None:
+                drop("unreadable", escaped)
+                continue
 
             # rglob does not descend into a symlinked folder, but is_file()
             # follows a symlinked *file*, so a link in the corpus pointing at
@@ -492,6 +573,28 @@ def walk_corpus(
     return kept, excluded
 
 
+def _unencodable_name(relative: str) -> str | None:
+    """None when `relative` is valid text; otherwise a printable stand-in for it.
+
+    The stand-in spells each byte that was not UTF-8 as `\\xNN`, the same
+    `backslashreplace` choice summary.esc makes and for its reason: a reader can
+    see which byte it was, where `?` or U+FFFD would erase it. os.fsencode gives
+    back the name's real bytes; a surrogate it cannot map (none comes from
+    os.walk, but a caller may pass one) falls back to escaping the surrogate.
+    """
+    try:
+        relative.encode("utf-8")
+    except UnicodeEncodeError:
+        pass
+    else:
+        return None
+    try:
+        raw = os.fsencode(relative)
+    except UnicodeError:
+        return relative.encode("utf-8", "backslashreplace").decode("utf-8")
+    return raw.decode("utf-8", "backslashreplace")
+
+
 def _walk_files(root: Path) -> tuple[list[Path], list[Path]]:
     """Every file under `root`, sorted, and every folder below it that could not be listed.
 
@@ -499,7 +602,9 @@ def _walk_files(root: Path) -> tuple[list[Path], list[Path]]:
     skipped a folder it could not list. `followlinks=False` keeps rglob's rule
     that a symlinked folder is never descended into; a symlinked *file* still
     appears and is_file() still follows it, so the symlink checks the caller
-    makes see exactly what they saw before. The sort is over the same Path
+    makes see exactly what they saw before. A link that is neither a file nor
+    a folder once followed -- dangling or looping -- is passed on too, so the
+    caller records it rather than it vanishing from both lists. The sort is over the same Path
     objects rglob produced, so the order -- and so which of two identical
     files is the `duplicate` -- is unchanged.
     """
@@ -509,12 +614,80 @@ def _walk_files(root: Path) -> tuple[list[Path], list[Path]]:
         if exc.filename is not None:
             unlistable.append(Path(exc.filename))
 
-    files: list[Path] = []
-    for folder, _dirnames, filenames in root.walk(on_error=note, follow_symlinks=False):
+    walked_files: list[Path] = []
+    for folder, dirnames, filenames in root.walk(on_error=note, follow_symlinks=False):
         # A symlinked folder is listed without being entered; rglob yielded it
         # too and is_file() rejected it, so the filter below drops it the same way.
-        files.extend(folder / name for name in filenames)
-    walked = sorted(p for p in files if p.is_file())
+        #
+        # A folder with read but no execute permission (`chmod 644`) can be
+        # listed, so on_error never fires, but stat-ing any entry in it raises
+        # PermissionError -- measured on 3.13: `c/half/spec.md` under a
+        # `chmod 644 c/half` escaped as "cannot read corpus root: c" with
+        # exit 2 and no run. Such a folder is recorded as the *folder*, in
+        # `unlistable`, rather than file by file, even though its entries can
+        # be named here: a name we cannot stat is not yet known to be a file
+        # (it may be a symlink pointing outside the root, or anything else),
+        # so naming it would claim more than survey checked, and recording the
+        # folder lets the caller's locked-folder logic give it the reason its
+        # files would have got, with no second copy of that logic.
+        #
+        # Only lstat -- the entry itself -- decides that. is_file() follows a
+        # symlink, so a link whose *target* cannot be stat'ed (one into a
+        # `chmod 000` folder outside the corpus) raised for the link alone:
+        # measured on `c/docs/link.md` beside `c/docs/a.md` and
+        # `c/docs/sub/b.md`, the survey kept docs/a.md, called `docs`
+        # unreadable, lost docs/sub/b.md from both lists and never recorded the
+        # link; the same link in the root aborted the survey with exit 2. Such
+        # a link is passed on, so the caller's symlink checks decline it.
+        stat_failed = False
+        for name in filenames:
+            path = folder / name
+            try:
+                is_link = stat.S_ISLNK(path.lstat().st_mode)
+            except OSError:
+                if folder == root:
+                    # The root's own entries failing is still the caller's
+                    # exit 2: dropping it into `unlistable` would be filtered
+                    # out below and report an empty corpus instead.
+                    raise
+                stat_failed = True
+                continue
+            try:
+                if path.is_file():
+                    walked_files.append(path)
+                elif is_link and not path.is_dir():
+                    # A link whose target is missing, or that points back at
+                    # itself: is_file() says False with no error on 3.13, so
+                    # before this the link was in neither list. Passed on, the
+                    # caller's resolve() fails and records it as
+                    # `symlink_outside_root`. A link to a folder still falls
+                    # through here unrecorded, exactly as rglob left it.
+                    #
+                    # A link to a FIFO, socket or device also lands here, and
+                    # it *does* resolve -- inside the root, the symlink check
+                    # lets it through. It is passed on all the same, so it is
+                    # recorded rather than lost, and `_keep_or_drop` declines
+                    # it before opening anything: measured, `c/link.md -> pipe`
+                    # (a FIFO) hung survey forever in `_looks_binary`'s open().
+                    walked_files.append(path)
+            except OSError:
+                if not is_link:
+                    # lstat worked but stat did not on a non-link: nothing
+                    # measured reaches here, so fail the folder the old way.
+                    if folder == root:
+                        raise
+                    stat_failed = True
+                    continue
+                # A link we cannot follow: is_symlink() and resolve() in the
+                # caller judge it, and a target that cannot be resolved is
+                # `symlink_outside_root`, the safe side to fail on.
+                walked_files.append(path)
+        if stat_failed:
+            unlistable.append(folder)
+            # Its subfolders cannot be entered either; walking into them would
+            # only add one more record per subfolder for the same cause.
+            dirnames.clear()
+    walked = sorted(walked_files)
     # The root's own listing failure is the caller's exit 2, raised by its
     # forced iterdir() before this runs; anything left here is below it.
     return walked, sorted(p for p in unlistable if p != root)
@@ -546,6 +719,16 @@ def _keep_or_drop(
         excluded.append({"path": relative, "reason": "lockfile"})
         return
     try:
+        # Never open anything that is not a regular file once followed. A
+        # FIFO blocks open() until a writer appears -- forever, in a survey --
+        # and a device or socket is not evidence either. `unreadable` rather
+        # than a new reason: it is the existing "survey could not read this as
+        # a file" entry, and adding one would mean a schema change for a case
+        # no corpus owner means as a document. stat() follows the link, so
+        # this judges the target, which is what the open below would reach.
+        if not _is_regular_file(path):
+            excluded.append({"path": relative, "reason": "unreadable"})
+            return
         if _looks_binary(path):
             excluded.append({"path": relative, "reason": "binary"})
             return
@@ -602,7 +785,12 @@ def _seed_roots(seeds: Sequence[Path]) -> list[tuple[Path, list[Path] | None]]:
         if seed.is_dir():
             out.append((seed, None))
             continue
-        if not seed.is_file():
+        # The shared regular-file check rather than is_file(): the two agree
+        # today (is_file() is S_ISREG after following links), so a FIFO, socket
+        # or device named with --corpus is refused before the open() below,
+        # which would otherwise block on a FIFO. One helper keeps the walk, the
+        # .gitignore read and this seed check from drifting apart.
+        if not _is_regular_file(seed):
             raise UsageError(f"corpus path is neither a file nor a directory: {seed}")
         if seed.is_symlink():
             target = _resolve_or_none(seed)

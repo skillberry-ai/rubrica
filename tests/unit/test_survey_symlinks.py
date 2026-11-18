@@ -206,3 +206,74 @@ def test_a_link_to_an_ordinary_file_survives_the_name_checks(tmp_path):
     kept, excluded = survey.walk_corpus([root], operator_globs=["*.lock"])
     assert root / "guide.md" in kept
     assert "guide.md" not in _reasons(excluded)
+
+
+# A link whose target is missing, or one that points back at itself, makes
+# is_file() return False with no error on 3.13, so before this such a link was
+# in neither `kept` nor `excluded` -- left out, against the rule that
+# `excluded` records every path the survey chose not to catalogue.
+def test_a_dangling_link_is_recorded_as_outside_the_root(tmp_path):
+    root, _ = _layout(tmp_path)
+    (root / "docs" / "gone.md").symlink_to(tmp_path / "nowhere" / "gone.md")
+    kept, excluded = survey.walk_corpus([root])
+    assert [p.relative_to(root).as_posix() for p in kept] == ["docs/spec.md"]
+    assert _reasons(excluded) == {"docs/gone.md": "symlink_outside_root"}
+
+
+def test_a_self_looping_link_is_recorded_as_outside_the_root(tmp_path):
+    root, _ = _layout(tmp_path)
+    (root / "docs" / "loop.md").symlink_to("loop.md")
+    kept, excluded = survey.walk_corpus([root])
+    assert [p.relative_to(root).as_posix() for p in kept] == ["docs/spec.md"]
+    assert _reasons(excluded) == {"docs/loop.md": "symlink_outside_root"}
+
+
+def test_a_link_to_a_folder_is_still_neither_entered_nor_recorded(tmp_path):
+    # Today's behaviour, kept on purpose: a symlinked folder is not descended
+    # into and is not recorded, whether its target is inside the root or not.
+    root, outside = _layout(tmp_path)
+    (root / "inner").symlink_to(root / "docs", target_is_directory=True)
+    (root / "outer").symlink_to(outside, target_is_directory=True)
+    kept, excluded = survey.walk_corpus([root])
+    assert [p.relative_to(root).as_posix() for p in kept] == ["docs/spec.md"]
+    assert excluded == []
+
+
+# A link to a FIFO inside the root resolves inside the root, so the symlink
+# check let it through, and `_looks_binary` opened it -- which blocks until a
+# writer appears, so survey hung forever. The walk runs in a thread with a
+# join timeout so a regression fails here instead of hanging the suite.
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no mkfifo here")
+def test_a_link_to_a_fifo_inside_the_root_is_declined_without_opening_it(tmp_path):
+    import threading
+
+    root, _ = _layout(tmp_path)
+    os.mkfifo(root / "docs" / "pipe")
+    (root / "docs" / "link.md").symlink_to("pipe")
+    result: dict = {}
+
+    def walk() -> None:
+        result["value"] = survey.walk_corpus([root])
+
+    worker = threading.Thread(target=walk, daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+    if worker.is_alive():
+        # Unblock the stuck open() so the daemon thread can finish.
+        fd = os.open(root / "docs" / "pipe", os.O_WRONLY | os.O_NONBLOCK)
+        os.close(fd)
+        pytest.fail("walk_corpus hung opening a symlink to a FIFO")
+    kept, excluded = result["value"]
+    assert [p.relative_to(root).as_posix() for p in kept] == ["docs/spec.md"]
+    assert _reasons(excluded) == {"docs/link.md": "unreadable"}
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no mkfifo here")
+def test_a_plain_fifo_is_still_neither_kept_nor_recorded(tmp_path):
+    # Today's behaviour for a FIFO with no link: is_file() is False, so the
+    # walk never passes it on and it never reaches an open().
+    root, _ = _layout(tmp_path)
+    os.mkfifo(root / "docs" / "pipe")
+    kept, excluded = survey.walk_corpus([root])
+    assert [p.relative_to(root).as_posix() for p in kept] == ["docs/spec.md"]
+    assert excluded == []
