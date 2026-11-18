@@ -1303,7 +1303,16 @@ Required: `--run RUN`, `--gold PATH`. An example two-task benchmark:
 Writes `measurement/recall.json` and `measurement/recall.md`. Prints only the
 `recall.md` path on stdout, because stdout is the findings channel; the
 rendered markdown goes to stderr, where a human reads it and no machine
-parser is affected. Exits 1 if any gold task went unmatched.
+parser is affected. Exits 1, with one summary line per cause, if any of these holds:
+
+- `02-scenarios.json` could not be read, so no recall was measured (the recall
+  is `null`, not `0.00`);
+- one or more gold tasks went unmatched, even if the rest matched;
+- one or more generated tasks are `spurious`, meaning they add no coverage axis
+  beyond the gold set, even if every gold task matched.
+
+Task ids in the gold file must be unique: a file that repeats one is refused
+with exit 2, naming the repeated id, and nothing is written.
 
 ```bash
 rubrica compare-gold --run runs/run-20260806-123005 --gold gold.json

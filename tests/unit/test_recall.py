@@ -83,6 +83,33 @@ def test_an_empty_gold_list_is_allowed(tmp_path):
     assert load_gold(_gold_file(tmp_path, minimal_gold(tasks=[])))["tasks"] == []
 
 
+def test_a_gold_file_with_a_repeated_task_id_is_refused_and_nothing_is_written(tmp_path, capsys):
+    """T-71: assign_matches keys gold by id, so a repeated id once read as
+    "Recall: 0.50" beside "nothing unmatched" and exited 0. A person wrote the
+    file, so the repeat is a usage error (exit 2) naming the id, before any
+    measurement is written."""
+    from rubrica.cli import main
+
+    gold = _gold_file(tmp_path, minimal_gold(tasks=[_gold("bench-001"), _gold("bench-001")]))
+    run = build_state(tmp_path / "run", "emit")
+    code = main(["compare-gold", "--run", str(run.root), "--gold", str(gold)])
+    captured = capsys.readouterr()
+
+    assert code == 2, captured
+    assert captured.out == ""
+    errors = [line for line in captured.err.splitlines() if line.startswith("error:")]
+    assert len(errors) == 1, captured.err
+    assert "bench-001" in errors[0] and "repeated" in errors[0]
+    assert not run.recall.exists()
+    assert not run.recall_md.exists()
+
+
+def test_a_gold_file_with_unique_ids_still_loads(tmp_path):
+    gold = minimal_gold(tasks=[_gold("bench-001"), _gold("bench-002")])
+    loaded = load_gold(_gold_file(tmp_path, gold))
+    assert [task["id"] for task in loaded["tasks"]] == ["bench-001", "bench-002"]
+
+
 # -- generated_tasks ---------------------------------------------------------
 
 
@@ -458,7 +485,13 @@ def _scenario_doc(sid, refs):
         "capability_refs": [{"capability_id": c, "outcome_class_id": o} for c, o in refs],
         "discriminating_fact": "fact",
         "status": "active",
-        "provenance": {"hole_refs": [], "claim_ids": ["clm-001"], "round": 1},
+        # A real hole ref, not []: 02-scenarios.json is held to its schema before
+        # compare-gold uses it (T-70), and the schema wants at least one.
+        "provenance": {
+            "hole_refs": [f"cell:{c}/{o}" for c, o in refs],
+            "claim_ids": ["clm-001"],
+            "round": 1,
+        },
     }
 
 
@@ -528,3 +561,114 @@ def test_the_novel_finding_names_only_the_spurious_entries_not_every_novel_one(t
     assert len(novel_findings) == 1
     assert "scn-spurious" in novel_findings[0].message
     assert "scn-new-cap" not in novel_findings[0].message
+
+
+# T-69: a 02-scenarios.json that parses but is the wrong shape escaped
+# recall.generated_tasks as AttributeError/TypeError/KeyError -- an [internal] line naming
+# the run folder, not the file. It must give the same outcome as one that does not
+# parse at all.
+def _with_hop_depths(doc, depths):
+    """`doc` with its scenarios' hop_depths set to `depths`, in order.
+
+    The emit-state run lists one scenario, so a depth past the first is set on a
+    copy of it under the next id (scn-002, ...); every other field stays valid.
+    """
+    listed = [dict(scenario) for scenario in doc["scenarios"]]
+    while len(listed) < len(depths):
+        listed.append({**listed[0], "id": f"scn-{len(listed) + 1:03d}"})
+    for scenario, depth in zip(listed, depths, strict=False):
+        scenario["hop_depth"] = depth
+    return {**doc, "scenarios": listed}
+
+
+def _compare_cli(run, gold, capsys):
+    from rubrica.cli import main
+
+    code = main(["compare-gold", "--run", str(run.root), "--gold", str(gold)])
+    return code, capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda doc: [],
+        lambda doc: {**doc, "scenarios": ["scn-001", *doc["scenarios"]]},
+        lambda doc: {
+            **doc,
+            "scenarios": [{k: v for k, v in doc["scenarios"][0].items() if k != "id"}],
+        },
+        # T-70: fields past the shape checks, caught by the scenarios schema.
+        lambda doc: _with_hop_depths(doc, [[1]]),
+        lambda doc: _with_hop_depths(doc, [None, 2]),
+    ],
+    ids=["list-document", "string-entry", "entry-without-id", "hop-depth-list", "hop-depth-null"],
+)
+def test_a_malformed_scenario_list_is_named_like_an_unreadable_one(tmp_path, capsys, mutate):
+    from rubrica.artifacts import read_json
+
+    gold = _gold_file(tmp_path)
+    baseline = build_state(tmp_path / "baseline", "emit")
+    baseline.scenarios.write_text("{not json", encoding="utf-8")
+    want_code, want_out = _compare_cli(baseline, gold, capsys)
+
+    run = build_state(tmp_path / "run", "emit")
+    write_json(run.scenarios, mutate(read_json(run.scenarios)))
+    code, out = _compare_cli(run, gold, capsys)
+
+    assert code == want_code, out
+    assert "[internal]" not in out
+    named = [line for line in out.splitlines() if line.startswith(f"[recall] {run.scenarios}: ")]
+    assert len(named) == 1, out
+    want = f"[recall] {baseline.scenarios}: "
+    assert any(line.startswith(want) for line in want_out.splitlines()), want_out
+
+    report = read_json(run.recall)
+    assert report["recall"] is None
+    assert "02-scenarios.json" in report["unreadable"]
+
+
+# T-72: a scenarios schema that cannot be loaded is a misconfigured run. It used
+# to be reported as a fault in 02-scenarios.json -- exit 1, and a recall.md on
+# disk saying "Repair 02-scenarios.json" about a file that was fine.
+@pytest.mark.parametrize("how", ["missing", "unresolvable-ref"])
+def test_an_unusable_scenarios_schema_is_exit_two_and_writes_nothing(
+    tmp_path, capsys, monkeypatch, how
+):
+    import shutil
+
+    from rubrica.validate import ARTIFACT_SCHEMAS, schema_dir
+
+    gold = _gold_file(tmp_path)
+    run = build_state(tmp_path / "run", "emit")
+    root = tmp_path / "schemas"
+    shutil.copytree(schema_dir(), root)
+    path = root / ARTIFACT_SCHEMAS["scenarios"]
+    if how == "missing":
+        path.unlink()
+    else:
+        text = path.read_text("utf-8")
+        assert '"#/$defs/scenario"' in text
+        path.write_text(text.replace('"#/$defs/scenario"', '"absent-0.1.json#/x"'), "utf-8")
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(root))
+
+    from rubrica.cli import main
+
+    code = main(["compare-gold", "--run", str(run.root), "--gold", str(gold)])
+    captured = capsys.readouterr()
+    assert code == 2, captured
+    assert captured.out == "", captured.out
+    errors = [line for line in captured.err.splitlines() if line.strip()]
+    assert len(errors) == 1, captured.err
+    assert str(root) in errors[0]
+    assert "02-scenarios.json" not in errors[0]
+    assert not run.recall.exists()
+    assert not run.recall_md.exists()
+
+
+def test_a_valid_run_still_compares_with_the_normal_schemas(tmp_path, capsys):
+    gold = _gold_file(tmp_path)
+    run = build_state(tmp_path / "run", "emit")
+    code, out = _compare_cli(run, gold, capsys)
+    assert code in (0, 1), out
+    assert f"[recall] {run.scenarios}" not in out
+    assert run.recall.exists()

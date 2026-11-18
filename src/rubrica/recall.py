@@ -22,6 +22,7 @@ from rubrica.errors import UsageError
 from rubrica.findings import Finding, format_findings
 from rubrica.metrics import jaccard
 from rubrica.paths import RunPaths
+from rubrica.review import scenarios_by_id
 from rubrica.validate import validate_artifact
 
 # Cell-overlap at or above this proposes a pair, once the goals already match.
@@ -46,9 +47,26 @@ def load_gold(path: Path | str) -> dict[str, Any]:
         findings = validate_artifact(Path(path), "gold")
         if findings:
             raise UsageError(f"unusable gold task list:\n{format_findings(findings)}")
-        return read_json(path)
+        gold = read_json(path)
     except (OSError, UnicodeDecodeError, ArtifactError) as exc:
         raise UsageError(f"unusable gold task list: {path}: {exc}") from exc
+    # Ids must be unique, and the check is here because JSON Schema cannot say
+    # "this property is unique across array items". assign_matches keys the gold
+    # side by id, so once one copy of a repeated id matched, every copy counted as
+    # matched while the denominator still counted them all: a report reading
+    # "Recall: 0.50" over "nothing unmatched", exiting 0. A person wrote the file,
+    # so a repeat is a usage error, not a finding.
+    seen: set[str] = set()
+    repeated: list[str] = []
+    for task in gold["tasks"]:
+        if task["id"] in seen and task["id"] not in repeated:
+            repeated.append(task["id"])
+        seen.add(task["id"])
+    if repeated:
+        raise UsageError(
+            f"unusable gold task list: {path}: task id(s) repeated: {', '.join(repeated)}"
+        )
+    return gold
 
 
 def cells(capability_refs: list[dict[str, Any]]) -> frozenset[tuple[str, str]]:
@@ -73,14 +91,8 @@ def generated_tasks(run: RunPaths) -> list[dict[str, Any]]:
     stability.comparability makes the same distinction for the same reason --
     absence must not read as agreement.
     """
-    scenarios = _load_scenarios(run)
+    scenarios = scenarios_by_id(run)
     return [scenarios[sid] for sid in run.scenario_ids_with_tasks() if sid in scenarios]
-
-
-def _load_scenarios(run: RunPaths) -> dict[str, dict[str, Any]]:
-    """The scenarios by id. Raises ArtifactError if 02-scenarios.json is unreadable."""
-    document = read_json(run.scenarios)
-    return {s["id"]: s for s in document.get("scenarios", [])}
 
 
 def _pair_score(gold_task: dict[str, Any], scenario: dict[str, Any]) -> float | None:
