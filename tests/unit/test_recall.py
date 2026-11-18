@@ -83,6 +83,33 @@ def test_an_empty_gold_list_is_allowed(tmp_path):
     assert load_gold(_gold_file(tmp_path, minimal_gold(tasks=[])))["tasks"] == []
 
 
+def test_a_gold_file_with_a_repeated_task_id_is_refused_and_nothing_is_written(tmp_path, capsys):
+    """T-71: assign_matches keys gold by id, so a repeated id once read as
+    "Recall: 0.50" beside "nothing unmatched" and exited 0. A person wrote the
+    file, so the repeat is a usage error (exit 2) naming the id, before any
+    measurement is written."""
+    from rubrica.cli import main
+
+    gold = _gold_file(tmp_path, minimal_gold(tasks=[_gold("bench-001"), _gold("bench-001")]))
+    run = build_state(tmp_path / "run", "emit")
+    code = main(["compare-gold", "--run", str(run.root), "--gold", str(gold)])
+    captured = capsys.readouterr()
+
+    assert code == 2, captured
+    assert captured.out == ""
+    errors = [line for line in captured.err.splitlines() if line.startswith("error:")]
+    assert len(errors) == 1, captured.err
+    assert "bench-001" in errors[0] and "repeated" in errors[0]
+    assert not run.recall.exists()
+    assert not run.recall_md.exists()
+
+
+def test_a_gold_file_with_unique_ids_still_loads(tmp_path):
+    gold = minimal_gold(tasks=[_gold("bench-001"), _gold("bench-002")])
+    loaded = load_gold(_gold_file(tmp_path, gold))
+    assert [task["id"] for task in loaded["tasks"]] == ["bench-001", "bench-002"]
+
+
 # -- generated_tasks ---------------------------------------------------------
 
 

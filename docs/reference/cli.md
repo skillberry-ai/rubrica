@@ -1305,6 +1305,9 @@ Writes `measurement/recall.json` and `measurement/recall.md`. Prints only the
 rendered markdown goes to stderr, where a human reads it and no machine
 parser is affected. Exits 1 if any gold task went unmatched.
 
+Task ids in the gold file must be unique: a file that repeats one is refused
+with exit 2, naming the repeated id, and nothing is written.
+
 ```bash
 rubrica compare-gold --run runs/run-20260806-123005 --gold gold.json
 # runs/run-20260806-123005/measurement/recall.md
