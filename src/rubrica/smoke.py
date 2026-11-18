@@ -17,8 +17,8 @@ container, a network, or an LLM call.
 **Precondition: emit must have run.** This module reads emitted packages, which
 nothing orders `validate --stage emit` before, so it uses `.get()` on their
 contents rather than indexing directly -- the same exception refs.check_suite
-documents. It indexes `manifest.json` directly, because that is a gated stage
-output.
+documents. It reads `manifest.json` through manifest.read_run_id, which refuses
+a manifest with no usable run_id as exit 2.
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.emit import AGENT_TIMEOUT_SEC, VERIFIER_TIMEOUT_SEC
 from rubrica.errors import UsageError
 from rubrica.findings import Finding, format_findings
+from rubrica.manifest import read_run_id
 from rubrica.paths import RunPaths
 from rubrica.validate import validate_artifact
 
@@ -749,10 +750,11 @@ def smoke_run(run: RunPaths, specs: tuple[AgentSpec, ...]) -> tuple[dict | None,
     the entire product.
     """
     # Read before anything runs. This raises ArtifactError on a directory with no
-    # manifest, which cli.py maps to exit 2 -- and reading it after the agent loop
+    # manifest, and UsageError on one that is not an object or has no run_id; cli.py
+    # maps both to exit 2 -- and reading it after the agent loop
     # would burn every agent invocation in the run before discovering that the
     # thing it was pointed at is not a run.
-    run_id = read_json(run.manifest)["run_id"]
+    run_id = read_run_id(run)
 
     findings: list[Finding] = []
     sids = run.scenario_ids_with_tasks()
@@ -855,9 +857,10 @@ def smoke_run(run: RunPaths, specs: tuple[AgentSpec, ...]) -> tuple[dict | None,
     verdict = verdict_for(tasks, summary, roles)
     report = {
         "schema_version": "0.1",
-        # Indexed directly: manifest.json is a gated stage output, and a directory
-        # without one is not a run. The ArtifactError becomes exit 2, which is the
-        # honest answer -- no repair to a stage would produce a manifest.
+        # Read through manifest.read_run_id above: manifest.json is intake's code
+        # output, and a directory without a usable one is not a run. The refusal
+        # becomes exit 2, which is the honest answer -- no repair to a stage would
+        # produce a manifest.
         "run_id": run_id,
         "agents": [
             {
