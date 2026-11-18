@@ -14,7 +14,7 @@ exactly one case is a finding, and `refs.check_claim_utilisation` owns it.
 
 from __future__ import annotations
 
-from rubrica.artifacts import read_json
+from rubrica.artifacts import dict_members, read_json_or_none, str_members
 from rubrica.paths import RunPaths, list_json
 
 FORMAT = "rubrica-utilisation/1"
@@ -77,8 +77,8 @@ def _cited_claim_ids(run: RunPaths) -> set[str] | None:
         return None
     cited: set[str] = set()
     for group in ("capabilities", "entities", "actors", "goals"):
-        for item in _elements(world.get(group)):
-            cited.update(_claim_ids(item.get("claims")))
+        for item in dict_members(world.get(group)):
+            cited.update(str_members(item.get("claims")))
     # The three nested sites. `$defs/invariant`, `$defs/outcome_class` and
     # `$defs/gap` carried no `claims` array at all until the read-coverage variance
     # was closed, so an invariant's provenance had to go on its entity or into
@@ -87,24 +87,24 @@ def _cited_claim_ids(run: RunPaths) -> set[str] | None:
     # 62, with 24 more appearing only inside prose -- 117 of 434 claims, 27% of the
     # corpus, that this function could not see. Walking the children is what makes
     # those citations structural rather than prose.
-    for capability in _elements(world.get("capabilities")):
-        for outcome_class in _elements(capability.get("outcome_classes")):
-            cited.update(_claim_ids(outcome_class.get("claims")))
-    for entity in _elements(world.get("entities")):
-        for invariant in _elements(entity.get("invariants")):
-            cited.update(_claim_ids(invariant.get("claims")))
-    for gap in _elements(world.get("gaps")):
-        cited.update(_claim_ids(gap.get("claims")))
+    for capability in dict_members(world.get("capabilities")):
+        for outcome_class in dict_members(capability.get("outcome_classes")):
+            cited.update(str_members(outcome_class.get("claims")))
+    for entity in dict_members(world.get("entities")):
+        for invariant in dict_members(entity.get("invariants")):
+            cited.update(str_members(invariant.get("claims")))
+    for gap in dict_members(world.get("gaps")):
+        cited.update(str_members(gap.get("claims")))
     # `refs.check_world_model` (refs.py:1920-1923, its `/contradictions/` loop)
     # already resolves contradictions[].claim_a
     # and claim_b as claim references -- it reports one as a finding if it does not
     # resolve. A definition of "cited" that excludes them would disagree with that
     # checker in the same module family, and would tell an input whose only surviving
     # contribution is a recorded contradiction that nothing cites it, which is false.
-    for contradiction in _elements(world.get("contradictions")):
+    for contradiction in dict_members(world.get("contradictions")):
         for side in ("claim_a", "claim_b"):
             claim_id = contradiction.get(side)
-            # isinstance rather than `is not None`, for _claim_ids' reason below:
+            # isinstance rather than `is not None`, for `artifacts.str_members`' reason:
             # `set.add` raises on an unhashable side exactly as `set.update` did
             # on an unhashable member, and both sides are one hand-edit apart
             # from the arrays above.
@@ -113,75 +113,7 @@ def _cited_claim_ids(run: RunPaths) -> set[str] | None:
     return cited
 
 
-def _elements(value) -> list[dict]:
-    """The dict members of a list of citing elements, or `[]` for anything else.
-
-    `_claim_ids`' sibling, for the *containers* rather than the members. Same
-    contract, same measurement, one level up: on a readable world model, every one
-    of `capabilities`, `entities`, `actors`, `goals`, `gaps`, `contradictions`,
-    `capabilities[].outcome_classes` and `entities[].invariants` set to `"nope"`
-    or `["nope"]` raised `AttributeError: 'str' object has no attribute 'get'`
-    here -- a bare string is the shape that does not fail loudly, since iterating
-    it yields characters that then reach `.get` -- and an integer raised
-    `TypeError: 'int' object is not iterable`. Both reports exited 1 with one
-    fabricated `[internal]` finding. Three of those eight containers -- `gaps`,
-    `outcome_classes` and `invariants` -- are walks added when the read-coverage
-    variance was closed, so those crashes were through a path this build created
-    rather than one it inherited.
-
-    Guarding here rather than at the gate that reads it is the point: a layer-2
-    checker that raises degrades to an `internal` finding at exit 1, which is bad
-    but is still a finding, while a **report** has no findings channel at all --
-    `claim-utilisation` and `gate-brief` must exit 0 on a readable run, so a raise
-    here is a violation of the exit-code contract rather than a strict reading of
-    a malformed document.
-
-    Not `refs._as_list` plus a local isinstance, which is how the checkers spell
-    this: `refs` imports `claim_utilisation`, so importing anything from `refs`
-    here is a circular import. `brief.py` can endorse that import and this module
-    cannot, which is why the guard is local and named for what it returns.
-    """
-    if not isinstance(value, list):
-        return []
-    return [member for member in value if isinstance(member, dict)]
-
-
-def _claim_ids(value) -> list[str]:
-    """The string members of a `claims` array, or `[]` for anything else.
-
-    Measured on a readable toy run carrying `"claims": [{"a": 1}]` on a gap --
-    JSON that parses, and precisely what a hand-edit at gate 1 produces from a
-    list of ids: `set.update` raised `TypeError: unhashable type: 'dict'`, and
-    cli.py turned that into exit 1 with one fabricated `[internal]` finding for
-    `claim-utilisation` and for `gate-brief --gate 1`, which reads this report.
-    Both are reports, and a report always exits 0 on a readable run -- so that
-    was a violation of the exit-code contract, not a strictness question. Closing
-    the read-coverage variance widened the exposure from four citation sites to
-    seven and `gaps[].claims` is the newest of them, but the shape was always
-    reachable.
-
-    A non-list `claims` is dropped whole for `refs._as_list`'s measured reason,
-    and a bare string is the sharper case of it: `set.update("clm-api-001")` does
-    not raise at all, it iterates the string and adds each character, so a guard
-    on truthiness alone would have counted one hand-typed id as nine citations of
-    nothing.
-
-    Dropping the malformed member is the only thing this can do, on
-    `brief._dicts`' ruling: raising breaks the promise above, and inventing a
-    finding is layer 1's job -- `claim_refs` is an array of ids in
-    world-model-0.1.json, so `rubrica validate --stage reconcile-seal` names it
-    precisely. The dropped member shows up as a claim that resolves against
-    nothing, which is what it is.
-    """
-    if not isinstance(value, list):
-        return []
-    return [member for member in value if isinstance(member, str)]
-
-
 def _quietly(path):
     """The document, or None. An unreadable artifact is `check_readable`'s
     finding to report, and duplicating it here would double-count one defect."""
-    try:
-        return read_json(path)
-    except Exception:  # deliberate: an unreadable artifact is check_readable's finding
-        return None
+    return read_json_or_none(path, quiet=True)
