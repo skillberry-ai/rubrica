@@ -129,6 +129,21 @@ def _vcs_part_of(path: Path) -> str | None:
     return None
 
 
+def _is_regular_file(path: Path) -> bool:
+    """True only when `path`, with links followed, is a regular file.
+
+    The one check every corpus path goes through before survey opens it. A
+    FIFO blocks open() until a writer appears -- forever, in a survey -- and a
+    socket or device is not evidence either. stat() follows a link, so this
+    judges the target, which is what an open would reach. A path that cannot
+    be stat'ed is not a regular file as far as an open is concerned.
+    """
+    try:
+        return stat.S_ISREG(Path(path).stat().st_mode)
+    except OSError:
+        return False
+
+
 def _gitignore_patterns(root: Path) -> list[str]:
     """Patterns from `root/.gitignore`, one level only, as written.
 
@@ -171,6 +186,14 @@ def _gitignore_patterns(root: Path) -> list[str]:
     # `utf-8`, a file saved with one (Windows Notepad, some editors) kept the
     # mark on its first pattern -- `str.strip()` does not remove U+FEFF -- so
     # `\ufeff.env` matched nothing and a `.env` git ignores was catalogued.
+    #
+    # Only a regular file is read. A FIFO named `.gitignore` -- or a link to
+    # one -- blocked read_text() forever before any file was walked: measured,
+    # `c/a.md` plus `mkfifo c/.gitignore` hung `walk_corpus([c])` until killed,
+    # and the except below never fired because nothing raised. Anything that
+    # is not a regular file gets what a missing one gets: no patterns.
+    if not _is_regular_file(ignore):
+        return []
     try:
         text = ignore.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
@@ -624,7 +647,7 @@ def _keep_or_drop(
         # a file" entry, and adding one would mean a schema change for a case
         # no corpus owner means as a document. stat() follows the link, so
         # this judges the target, which is what the open below would reach.
-        if not stat.S_ISREG(Path(path).stat().st_mode):
+        if not _is_regular_file(path):
             excluded.append({"path": relative, "reason": "unreadable"})
             return
         if _looks_binary(path):
@@ -683,7 +706,12 @@ def _seed_roots(seeds: Sequence[Path]) -> list[tuple[Path, list[Path] | None]]:
         if seed.is_dir():
             out.append((seed, None))
             continue
-        if not seed.is_file():
+        # The shared regular-file check rather than is_file(): the two agree
+        # today (is_file() is S_ISREG after following links), so a FIFO, socket
+        # or device named with --corpus is refused before the open() below,
+        # which would otherwise block on a FIFO. One helper keeps the walk, the
+        # .gitignore read and this seed check from drifting apart.
+        if not _is_regular_file(seed):
             raise UsageError(f"corpus path is neither a file nor a directory: {seed}")
         if seed.is_symlink():
             target = _resolve_or_none(seed)

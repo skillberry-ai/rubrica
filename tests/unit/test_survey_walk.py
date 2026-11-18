@@ -634,3 +634,68 @@ def test_only_one_leading_byte_order_mark_is_dropped(tmp_path):
     root.mkdir()
     (root / ".gitignore").write_bytes(b"\xef\xbb\xbf.env\n\xef\xbb\xbfx\n")
     assert survey._gitignore_patterns(root) == [".env", "﻿x"]
+
+
+def _walk_or_fail(roots, fifo, **kwargs):
+    """walk_corpus in a thread with a join timeout, so a hang fails the test.
+
+    A blocked open() on a FIFO would otherwise hang the whole suite. On a
+    timeout the FIFO gets a writer, which unblocks the stuck read so the daemon
+    thread can finish, and the test fails naming the hang.
+    """
+    import threading
+
+    result: dict = {}
+
+    def walk() -> None:
+        result["value"] = survey.walk_corpus(roots, **kwargs)
+
+    worker = threading.Thread(target=walk, daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+    if worker.is_alive():
+        fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+        os.close(fd)
+        pytest.fail(f"walk_corpus hung opening the FIFO {fifo}")
+    return result["value"]
+
+
+# A FIFO at the root's .gitignore was read before any file was walked, and
+# read_text() blocked until a writer appeared: `c/a.md` plus
+# `mkfifo c/.gitignore` hung walk_corpus forever. It now counts as no patterns.
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no mkfifo here")
+def test_a_fifo_gitignore_is_no_patterns_and_does_not_hang(tmp_path):
+    root = tmp_path / "c"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    os.mkfifo(root / ".gitignore")
+    kept, excluded = _walk_or_fail([root], root / ".gitignore")
+    assert [p.relative_to(root).as_posix() for p in kept] == ["a.md"]
+    # The FIFO itself is not a file, so the walk never passes it on.
+    assert excluded == []
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no mkfifo here")
+def test_a_gitignore_linked_to_a_fifo_is_no_patterns_and_does_not_hang(tmp_path):
+    root = tmp_path / "c"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    os.mkfifo(tmp_path / "pipe")
+    (root / ".gitignore").symlink_to(tmp_path / "pipe")
+    kept, excluded = _walk_or_fail([root], tmp_path / "pipe")
+    assert [p.relative_to(root).as_posix() for p in kept] == ["a.md"]
+    # The link itself is walked, and declined like any link leaving the root.
+    assert _reasons(excluded) == {".gitignore": "symlink_outside_root"}
+
+
+# The `only` path (files named one by one) goes through the same check: a FIFO
+# handed in directly is declined as unreadable, never opened.
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no mkfifo here")
+def test_a_fifo_passed_as_a_named_file_is_declined_without_opening_it(tmp_path):
+    root = tmp_path / "c"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    os.mkfifo(root / "pipe")
+    kept, excluded = _walk_or_fail([root], root / "pipe", only=[root / "a.md", root / "pipe"])
+    assert [p.relative_to(root).as_posix() for p in kept] == ["a.md"]
+    assert _reasons(excluded) == {"pipe": "unreadable"}
