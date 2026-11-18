@@ -24,6 +24,7 @@ import contextlib
 import fnmatch
 import hashlib
 import json
+import os
 import stat
 from collections.abc import Sequence
 from datetime import datetime
@@ -182,22 +183,51 @@ def _gitignore_patterns(root: Path) -> list[str]:
     `secrets/key.txt` were catalogued again.
     """
     ignore = root / ".gitignore"
-    # `utf-8-sig` drops one leading byte-order mark, as git does. Read as plain
-    # `utf-8`, a file saved with one (Windows Notepad, some editors) kept the
-    # mark on its first pattern -- `str.strip()` does not remove U+FEFF -- so
-    # `\ufeff.env` matched nothing and a `.env` git ignores was catalogued.
-    #
     # Only a regular file is read. A FIFO named `.gitignore` -- or a link to
     # one -- blocked read_text() forever before any file was walked: measured,
-    # `c/a.md` plus `mkfifo c/.gitignore` hung `walk_corpus([c])` until killed,
-    # and the except below never fired because nothing raised. Anything that
-    # is not a regular file gets what a missing one gets: no patterns.
+    # `c/a.md` plus `mkfifo c/.gitignore` hung `walk_corpus([c])` until killed.
+    #
+    # A missing file is the one case that means "no patterns". Anything else
+    # that cannot be read as a regular file -- a `chmod 000 .gitignore`, a
+    # FIFO, socket, device or folder by that name, a link to one, a looping
+    # link -- is refused with exit 2. It used to count as no patterns, and so
+    # did any read error: survey then catalogued every file git ignores,
+    # contents and all, while exiting 0. Surveying under ignore rules we could
+    # not read is how a secret gets admitted silently, and no stage re-dispatch
+    # can fix a file mode, so it is a usage error naming the file. A dangling
+    # link counts as missing, because git cannot open it either and so applies
+    # no rules from it.
     if not _is_regular_file(ignore):
-        return []
+        try:
+            ignore.stat()
+        except FileNotFoundError:
+            return []
+        except OSError as exc:
+            raise UsageError(f"cannot read the corpus root's .gitignore: {ignore} ({exc})") from exc
+        raise UsageError(f"the corpus root's .gitignore is not a regular file: {ignore}")
     try:
-        text = ignore.read_text(encoding="utf-8-sig")
-    except (OSError, UnicodeDecodeError):
-        return []
+        # O_NONBLOCK, and fstat on what was actually opened, so a file swapped
+        # for a FIFO between the check above and this open still cannot block
+        # the read or be taken as rules.
+        fd = os.open(ignore, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+        with os.fdopen(fd, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise UsageError(f"the corpus root's .gitignore is not a regular file: {ignore}")
+            data = handle.read()
+    except OSError as exc:
+        raise UsageError(f"cannot read the corpus root's .gitignore: {ignore} ({exc})") from exc
+    # Read as bytes and decoded leniently, as git reads it. A strict utf-8
+    # decode threw the whole file away on one bad byte -- measured: a Latin-1
+    # `# caf\xe9 notes` comment above `.env` made survey catalogue `.env` and
+    # its key while `git check-ignore` ignored it. With `surrogateescape` a
+    # line holding such a byte keeps it as a lone surrogate, which is how
+    # Python spells the same byte in a file name, and every other line applies.
+    #
+    # One leading byte-order mark is dropped, as git does. Kept, it stayed on
+    # the first pattern -- `str.strip()` does not remove U+FEFF -- so
+    # `\ufeff.env` matched nothing and a `.env` git ignores was catalogued.
+    data = data.removeprefix(b"\xef\xbb\xbf")
+    text = data.decode("utf-8", errors="surrogateescape")
     patterns = []
     for raw in text.splitlines():
         line = raw.strip()

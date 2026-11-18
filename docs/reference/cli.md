@@ -66,7 +66,11 @@ sits — version control, vendored folders, `.gitignore`, `--exclude` — becaus
 human pointed at it; it still goes through the ones that judge what it is, so a
 named binary or lockfile is recorded in `excluded` rather than catalogued. A
 `--corpus` path that is neither a file nor a folder, or a named file that cannot
-be opened, exits 2. An empty or whitespace-only `--corpus` value exits 2 as well
+be opened, exits 2. So does a walked folder whose own `.gitignore` exists but cannot
+be read, or is not a regular file (a FIFO, a device, a link to one), because
+surveying under ignore rules nobody could read would catalogue the files git
+ignores; a missing `.gitignore` means no rules, and a byte that is not UTF-8
+spoils only its own line. An empty or whitespace-only `--corpus` value exits 2 as well
 and mints no run, rather than being read as the current folder — an unset
 variable in a caller's script would otherwise catalogue wherever it ran from.
 So does a `--corpus` path that is, or sits inside, a `.git`,

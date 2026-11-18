@@ -648,7 +648,11 @@ def _walk_or_fail(roots, fifo, **kwargs):
     result: dict = {}
 
     def walk() -> None:
-        result["value"] = survey.walk_corpus(roots, **kwargs)
+        # Kept rather than lost in the thread, so a refusal reaches the test.
+        try:
+            result["value"] = survey.walk_corpus(roots, **kwargs)
+        except Exception as exc:
+            result["error"] = exc
 
     worker = threading.Thread(target=walk, daemon=True)
     worker.start()
@@ -657,35 +661,132 @@ def _walk_or_fail(roots, fifo, **kwargs):
         fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
         os.close(fd)
         pytest.fail(f"walk_corpus hung opening the FIFO {fifo}")
+    if "error" in result:
+        raise result["error"]
     return result["value"]
 
 
 # A FIFO at the root's .gitignore was read before any file was walked, and
 # read_text() blocked until a writer appeared: `c/a.md` plus
-# `mkfifo c/.gitignore` hung walk_corpus forever. It now counts as no patterns.
+# `mkfifo c/.gitignore` hung walk_corpus forever. It then counted as no
+# patterns, which surveyed under rules nobody could read; it is now refused,
+# still without ever opening the FIFO.
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no mkfifo here")
-def test_a_fifo_gitignore_is_no_patterns_and_does_not_hang(tmp_path):
+def test_a_fifo_gitignore_is_refused_and_does_not_hang(tmp_path):
     root = tmp_path / "c"
     root.mkdir()
     (root / "a.md").write_text("# A\n", encoding="utf-8")
     os.mkfifo(root / ".gitignore")
-    kept, excluded = _walk_or_fail([root], root / ".gitignore")
-    assert [p.relative_to(root).as_posix() for p in kept] == ["a.md"]
-    # The FIFO itself is not a file, so the walk never passes it on.
-    assert excluded == []
+    with pytest.raises(UsageError, match=r"\.gitignore is not a regular file"):
+        _walk_or_fail([root], root / ".gitignore")
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no mkfifo here")
-def test_a_gitignore_linked_to_a_fifo_is_no_patterns_and_does_not_hang(tmp_path):
+def test_a_gitignore_linked_to_a_fifo_is_refused_and_does_not_hang(tmp_path):
     root = tmp_path / "c"
     root.mkdir()
     (root / "a.md").write_text("# A\n", encoding="utf-8")
     os.mkfifo(tmp_path / "pipe")
     (root / ".gitignore").symlink_to(tmp_path / "pipe")
-    kept, excluded = _walk_or_fail([root], tmp_path / "pipe")
-    assert [p.relative_to(root).as_posix() for p in kept] == ["a.md"]
-    # The link itself is walked, and declined like any link leaving the root.
-    assert _reasons(excluded) == {".gitignore": "symlink_outside_root"}
+    with pytest.raises(UsageError, match=r"\.gitignore is not a regular file"):
+        _walk_or_fail([root], tmp_path / "pipe")
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no mkfifo here")
+def test_survey_over_a_fifo_gitignore_exits_2_without_hanging(tmp_path, capsys):
+    import threading
+
+    root = tmp_path / "c"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    os.mkfifo(root / ".gitignore")
+    runs = tmp_path / "runs"
+    result: dict = {}
+    worker = threading.Thread(
+        target=lambda: result.setdefault("code", _survey_cli(root, runs)), daemon=True
+    )
+    worker.start()
+    worker.join(timeout=10)
+    if worker.is_alive():
+        os.close(os.open(root / ".gitignore", os.O_WRONLY | os.O_NONBLOCK))
+        pytest.fail("survey hung opening the FIFO .gitignore")
+    assert result["code"] == 2
+    assert ".gitignore" in capsys.readouterr().err
+    assert not runs.exists() or list(runs.iterdir()) == []
+
+
+def _survey_cli(root, runs):
+    from rubrica import cli
+
+    return cli.main(
+        [
+            "survey",
+            "--corpus",
+            str(root),
+            "--runs-dir",
+            str(runs),
+            "--target-name",
+            "toy",
+            "--target-interface",
+            "mcp",
+            "--objective",
+            "breadth",
+        ]
+    )
+
+
+# One byte that is not UTF-8 anywhere in the .gitignore -- here a Latin-1 `é`
+# in a comment -- made the strict decode fail, and the failure counted as no
+# patterns: a bug scout's corpus catalogued `.env` and its key while
+# `git check-ignore` ignored it. Git reads the file as bytes; so do we now.
+def test_a_latin_1_comment_does_not_drop_the_other_gitignore_lines(tmp_path):
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / ".gitignore").write_bytes(b"# caf\xe9 notes\n.env\n")
+    (root / ".env").write_text("API_KEY=placeholder\n", encoding="utf-8")
+    (root / "README.md").write_text("# Target\n", encoding="utf-8")
+    assert ".env" in survey._gitignore_patterns(root)
+    kept, excluded = survey.walk_corpus([root])
+    assert _reasons(excluded)[".env"] == "gitignored"
+    assert "README.md" in {p.relative_to(root).as_posix() for p in kept}
+
+
+def test_a_bad_byte_inside_a_pattern_line_spares_the_lines_around_it(tmp_path):
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / ".gitignore").write_bytes(b".env\nbad\xff.txt\nsecrets/\n")
+    patterns = survey._gitignore_patterns(root)
+    assert patterns[0] == ".env"
+    assert patterns[-1] == "secrets/"
+
+
+def test_a_missing_gitignore_is_still_no_patterns(tmp_path):
+    root = tmp_path / "corpus"
+    root.mkdir()
+    assert survey._gitignore_patterns(root) == []
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from reading a file")
+def test_an_unreadable_gitignore_is_refused_and_mints_no_run(tmp_path, capsys):
+    """A `chmod 000 .gitignore` once counted as no patterns, so every file git
+    ignores -- a `.env` included -- was catalogued with its contents. Unknown
+    ignore rules are now a usage error, raised before the run folder exists."""
+    root = tmp_path / "corpus"
+    root.mkdir()
+    ignore = root / ".gitignore"
+    ignore.write_text(".env\n", encoding="utf-8")
+    (root / ".env").write_text("API_KEY=placeholder\n", encoding="utf-8")
+    (root / "README.md").write_text("# Target\n", encoding="utf-8")
+    runs = tmp_path / "runs"
+    ignore.chmod(0o000)
+    try:
+        with pytest.raises(UsageError, match=r"cannot read the corpus root's \.gitignore"):
+            survey.walk_corpus([root])
+        assert _survey_cli(root, runs) == 2
+        assert str(ignore) in capsys.readouterr().err
+        assert not runs.exists() or list(runs.iterdir()) == []
+    finally:
+        ignore.chmod(0o644)
 
 
 # The `only` path (files named one by one) goes through the same check: a FIFO
