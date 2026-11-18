@@ -169,15 +169,15 @@ function pickOne({ mode, start }) {
 // or `exc` (excluded). A path's state is the decision of its nearest decided
 // ancestor-or-self; undecided means out. So checking a folder takes everything
 // under it, and unchecking something inside it carves that out. The result is
-// { include: [paths], exclude: [paths] }, which the caller turns into intake's
-// files or survey's roots and --exclude globs.
+// { include: [paths], exclude: [paths] }, which the caller turns into survey's
+// --corpus seeds and --exclude globs.
 
 const sep = "/";
 const parentOf = (p) => p.slice(0, p.lastIndexOf(sep)) || sep;
 const isUnder = (p, dir) => p !== dir && p.startsWith(dir.endsWith(sep) ? dir : dir + sep);
 
-function pickSelection({ mode, start, initial }) {
-  // mode: "survey" (folders are roots; files only as exclusions) or "intake" (anything).
+function pickSelection({ start, initial }) {
+  // The result is a survey selection: surveyArgs turns it into --corpus seeds and --exclude globs.
   return new Promise((resolve) => {
     const decided = new Map(); // path -> { state: "inc"|"exc", dir: bool }
     for (const p of (initial && initial.include) || []) decided.set(p, { state: "inc", dir: !!(initial.dirs || {})[p] });
@@ -203,9 +203,7 @@ function pickSelection({ mode, start, initial }) {
     const summary = h("div", { class: "pick-summary" });
     const count = h("div", { class: "muted" });
     const useBtn = h("button", { class: "primary" }, "Use this selection");
-    const help = mode === "survey"
-      ? "Check the files and folders that matter. A checked folder brings everything inside it; uncheck anything inside to leave it out (it becomes an --exclude pattern). Triage then chooses among what you checked."
-      : "Check files or folders. A checked folder brings every file inside it; uncheck anything inside to leave it out.";
+    const help = "Check the files and folders that matter. A checked folder brings everything inside it; uncheck anything inside to leave it out (it becomes an --exclude pattern). Triage then chooses among what you checked.";
     const body = h("div", {},
       h("div", { class: "row" }, pathBox, h("button", { onclick: () => load(pathBox.value.trim()) }, "Go")),
       crumbs,
@@ -219,7 +217,7 @@ function pickSelection({ mode, start, initial }) {
       h("p", { class: "muted" }, help),
       h("h3", {}, "Selection"), summary, count,
       h("div", { class: "row", style: "margin-top:10px" }, useBtn));
-    const close = openModal(mode === "survey" ? "Choose files and folders to start from" : "Choose input files and folders", body,
+    const close = openModal("Choose files and folders to start from", body,
       () => { if (countAbort) countAbort.abort(); clearTimeout(countTimer); if (!done) resolve(null); });
     useBtn.onclick = () => {
       done = true;
@@ -246,7 +244,6 @@ function pickSelection({ mode, start, initial }) {
     };
     function blocked(entry) {
       // What survey cannot express; say why rather than silently doing something else.
-      if (mode !== "survey") return null;
       const ancestors = [...decided].filter(([p]) => isUnder(entry.path, p));
       if (ancestors.some(([, d]) => d.state === "exc") && stateOf(entry.path) !== "inc") {
         return "inside a folder you left out: survey cannot take something back in";
@@ -325,9 +322,7 @@ function pickSelection({ mode, start, initial }) {
           const r = await api("/api/fs/expand", { include: inc.map(([p]) => p), exclude: exc.map(([p]) => p), hidden }, countAbort.signal);
           const mb = size(r.bytes);
           const n = r.partial ? `at least ${r.total} file(s), ${mb} (stopped counting: this is a large selection)` : `${r.total} file(s), ${mb}`;
-          count.textContent = mode === "survey"
-            ? `${n} chosen, before survey's own filters (in a checked folder: VCS, vendored, lock and gitignored files).`
-            : `${n}${r.truncated || r.partial ? " — too many to hand-pick; survey a corpus instead" : ""}. Each file is one extract dispatch.`;
+          count.textContent = `${n} chosen, before survey's own filters (in a checked folder: VCS, vendored, lock and gitignored files).`;
         } catch (err) { if (err.name !== "AbortError") count.textContent = err.message; }
       }, 250);
     }
@@ -504,7 +499,7 @@ async function newRunPage(fromRun) {
       h("p", { class: "muted" }, `Created in ${STATE.runs_dir}. Creating a run calls no model.`));
   };
   const addBtn = h("button", { onclick: async () => {
-    const got = await pickSelection({ mode: "survey", start: STATE.root, initial: sel.survey });
+    const got = await pickSelection({ start: STATE.root, initial: sel.survey });
     if (got) { sel.survey = got; saveDraft(); renderChips(); }
   } }, "Choose…");
   const clearBtn = h("button", { class: "ghost", onclick: () => { sel.survey = null; saveDraft(); renderChips(); } }, "Clear");

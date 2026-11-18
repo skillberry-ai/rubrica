@@ -207,6 +207,14 @@ class Store:
             env = json.loads(settings.read_text(encoding="utf-8")).get("env") or {}
         except (OSError, ValueError, AttributeError) as exc:
             raise CredentialError(f"cannot read {settings}: {exc}") from exc
+        # Checked here rather than left to the `.get` calls below: a string, list
+        # or number there raised AttributeError, which the server does not catch,
+        # so the user saw a 500 instead of which file was wrong. Only the type is
+        # named, never the value, since the value may be a secret.
+        if not isinstance(env, dict):
+            raise CredentialError(
+                f"cannot read {settings}: its env is a {type(env).__name__}, not an object"
+            )
         token, key = env.get("ANTHROPIC_AUTH_TOKEN"), env.get("ANTHROPIC_API_KEY")
         if not token and not key:
             raise CredentialError(f"{settings} has no ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY")
@@ -282,6 +290,14 @@ def test(creds: Credentials, model: str, *, timeout: float = 120.0) -> dict:
     except (ValueError, IndexError):
         tail = (proc.stderr or proc.stdout).strip()[-400:]
         return {"ok": False, "message": f"claude exited {proc.returncode}: {tail}"}
+    if not isinstance(result, dict):
+        # Valid JSON that is not the result object (`42`, a list): not a pass,
+        # and not a crash either -- say what came back, as the branch above does.
+        tail = proc.stdout.strip()[-400:]
+        return {
+            "ok": False,
+            "message": f"claude exited {proc.returncode} without a result object: {tail}",
+        }
     if result.get("is_error"):
         return {"ok": False, "message": str(result.get("result") or "the call failed")[:600]}
     return {

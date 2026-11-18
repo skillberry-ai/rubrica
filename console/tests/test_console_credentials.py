@@ -134,3 +134,74 @@ def test_a_failed_connection_test_says_why(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
     result = credentials.test(Credentials(secret="x"), "m")
     assert result["ok"] is False and "401" in result["message"]
+
+
+# -- a settings file or a reply of the wrong shape -------------------------------------
+#
+# Each of these once escaped as an AttributeError: `.get` on a string, list or
+# number. Over HTTP that is a 500 with a traceback, where the console's own
+# error reply would have told the user which file it could not read.
+
+
+@pytest.mark.parametrize("env", ["oops", ["ANTHROPIC_API_KEY"], 42], ids=["str", "list", "num"])
+def test_import_refuses_settings_whose_env_is_not_an_object(store, tmp_path, env):
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"env": env}))
+    with pytest.raises(CredentialError, match="cannot read"):
+        store.import_claude_settings(settings)
+    assert not store.path.exists()
+
+
+def test_importing_a_non_object_env_over_http_is_the_consoles_error_reply(tmp_path, monkeypatch):
+    import http.client
+    import threading
+
+    from rubrica_console import server as console_server
+    from rubrica_console.jobs import Console
+
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text(json.dumps({"env": "oops"}))
+    monkeypatch.setenv("HOME", str(home))
+    (tmp_path / "runs").mkdir()
+    console = Console(
+        tmp_path / "runs",
+        tmp_path / "lab",
+        dispatch_script=tmp_path / "none.sh",
+        credentials=Store(tmp_path / "console-credentials.json"),
+    )
+    server = console_server.make_server(console, "127.0.0.1", 0, token="t")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
+        conn.request(
+            "POST",
+            "/api/credentials/import",
+            body=b"{}",
+            headers={
+                "Host": f"127.0.0.1:{port}",
+                "X-Rubrica-Token": "t",
+                "Content-Type": "application/json",
+            },
+        )
+        res = conn.getresponse()
+        status, body = res.status, json.loads(res.read())
+        conn.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert status == 409, body
+    assert "cannot read" in body["error"]
+
+
+def test_a_connection_test_whose_reply_is_not_an_object_fails_without_raising(
+    tmp_path, monkeypatch
+):
+    fake = tmp_path / "claude"
+    fake.write_text("#!/usr/bin/env python3\nprint('42')\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    result = credentials.test(Credentials(secret="x"), "m")
+    assert result["ok"] is False and "42" in result["message"]

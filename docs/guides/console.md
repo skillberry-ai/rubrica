@@ -199,8 +199,13 @@ protection on its own: any page open in your browser can send requests to
 - Requests whose `Host` or `Origin` names some other site are refused, which stops
   a hostile domain from pointing itself at your machine.
 - The file picker stays under `--root` (default: your home directory), and run
-  files are served only from inside the run. An HTML file inside a run is shown as
-  text, never run as a page.
+  files are served only from inside the run.
+- Run files are sent as inert data. Only plain text, JSON, and PNG, JPEG, GIF and
+  WebP images keep their own type. Everything else, including HTML, SVG, XHTML,
+  XML and unknown types, is sent as plain text (or as raw bytes if it is not valid
+  text), so the browser shows it and never runs it as a page. Every run file also
+  carries a `Content-Security-Policy: sandbox` header, which tells the browser to
+  treat it as a locked-down page even if it were to open one.
 
 ## Options and exit codes
 
@@ -212,6 +217,14 @@ browse; default your home directory), `--lab` (the console's own records; defaul
 `--model` (default `$RUBRICA_MODEL`, else `sonnet`), `--effort` (default `medium`),
 `--dispatch-script` (default this checkout's `scripts/dispatch-stage.sh`),
 `--credentials` (default `~/.config/rubrica/console-credentials.json`).
+
+The skills the console checks (with `check-skills`) and records (the
+`skill_sha256` in `manifest.stages`) are the ones the dispatch script actually
+runs: `src/rubrica/skills/` in the checkout that holds `--dispatch-script`. The
+script ignores `RUBRICA_SKILLS_DIR`, so if that variable points at a different
+folder the console refuses every model step, naming both folders, rather than
+recording one skill set while running another. To try a candidate skill set,
+point `--dispatch-script` at a checkout that holds it.
 
 It exits `0` when interrupted and `2` for a runs folder or run that does not exist,
 a port that cannot be bound, or a bad argument. It never exits `1`: the work it

@@ -10,6 +10,7 @@ called clean.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -28,10 +29,13 @@ from rubrica_console.jobs import (
     SUCCEEDED,
     Console,
     ConsoleError,
+    Job,
     Options,
 )
 
 from tests.toy import build_toy_run
+
+_SKILLS = Path(__file__).resolve().parents[2] / "src" / "rubrica" / "skills"
 
 # Where each stage's output lives, so the fake can copy it from the reference run.
 _FAKE = textwrap.dedent(
@@ -123,7 +127,13 @@ def reference(tmp_path_factory) -> Path:
 
 @pytest.fixture
 def fake(tmp_path, reference, monkeypatch) -> dict:
-    script = tmp_path / "fake-dispatch.sh"
+    # A fake checkout: the console takes the skill set from the dispatch script's
+    # own repo (`<repo>/scripts/x.sh` -> `<repo>/src/rubrica/skills`), as the real
+    # script does, so the fake needs one beside it.
+    checkout = tmp_path / "checkout"
+    shutil.copytree(_SKILLS, checkout / "src" / "rubrica" / "skills")
+    (checkout / "scripts").mkdir()
+    script = checkout / "scripts" / "fake-dispatch.sh"
     py = tmp_path / "fake.py"
     py.write_text(_FAKE, encoding="utf-8")
     script.write_text(f'#!/usr/bin/env bash\nexec "{os.sys.executable}" "{py}" "$@"\n')
@@ -131,6 +141,7 @@ def fake(tmp_path, reference, monkeypatch) -> dict:
     log = tmp_path / "fake.log"
     monkeypatch.setenv("FAKE_REF", str(reference))
     monkeypatch.setenv("FAKE_LOG", str(log))
+    monkeypatch.delenv("RUBRICA_SKILLS_DIR", raising=False)
     for var in (
         "FAKE_FAIL",
         "FAKE_BAD",
@@ -140,7 +151,7 @@ def fake(tmp_path, reference, monkeypatch) -> dict:
         "FAKE_EXIT1_AFTER_SPEND",
     ):
         monkeypatch.delenv(var, raising=False)
-    return {"script": script, "log": log}
+    return {"script": script, "log": log, "skills": checkout / "src" / "rubrica" / "skills"}
 
 
 def _calls(fake) -> list[dict]:
@@ -335,6 +346,25 @@ def test_deleting_a_run_removes_it_and_the_consoles_records(tmp_path, fake, inta
     assert console.jobs(name) == [] and name not in console.list_runs()
 
 
+@pytest.mark.parametrize("text", ["{not json", "[1, 2, 3]"])
+def test_a_corrupt_ledger_reads_as_an_empty_ledger(tmp_path, fake, intake_run, text):
+    # Bad JSON and a JSON list are both "no usable ledger": the console is a
+    # report, so it starts from the empty ledger rather than crashing.
+    name = intake_run.root.name
+    home = tmp_path / "lab" / "console" / name
+    home.mkdir(parents=True)
+    (home / "ledger.json").write_text(text, encoding="utf-8")
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    assert console.ledger_view(name) == {
+        "reseeded": [],
+        "failed": {},
+        "accepted": [],
+        "accepted_findings": [],
+        "attempts": {},
+        "used": {},
+    }
+
+
 def test_a_run_with_a_job_going_is_not_deleted(tmp_path, fake, intake_run, monkeypatch):
     monkeypatch.setenv("FAKE_SLEEP", "30")
     console = _console(tmp_path, intake_run.root.parent, fake)
@@ -424,6 +454,42 @@ def test_prompt_steps_are_refused_without_a_dispatch_script(tmp_path, intake_run
         console.run_step(intake_run.root.name, "extract", OPTS)
     extract = pipeline.find(console.steps(intake_run.root.name), "extract")
     assert "repository checkout" in extract.reason
+
+
+def test_the_recorded_digest_is_the_dispatch_scripts_own_skill(tmp_path, fake, intake_run):
+    """record-stage hashes the SKILL.md the script runs, from the script's checkout."""
+    skill = fake["skills"] / "rb-extract" / "SKILL.md"
+    # Make the checkout's copy differ from the package's, so the two digests split.
+    skill.write_text(skill.read_text(encoding="utf-8") + "\n<!-- fake checkout -->\n")
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    job = console.wait(console.run_step(intake_run.root.name, "extract", OPTS).id, timeout=180)
+    assert job.status == SUCCEEDED, (job.message, [(e.label, e.status) for e in job.entries])
+    recorded = json.loads(intake_run.manifest.read_text())["stages"]["extract"]["skill_sha256"]
+    assert recorded == hashlib.sha256(skill.read_bytes()).hexdigest()
+    package_copy = (_SKILLS / "rb-extract" / "SKILL.md").read_bytes()
+    assert recorded != hashlib.sha256(package_copy).hexdigest()
+    # The preflight checked that same set, by name, not whatever the env pointed at.
+    preflight = next(e for e in job.entries if e.label == "check-skills")
+    assert str(fake["skills"]) in Path(preflight.log).read_text()
+
+
+def test_a_skills_dir_override_elsewhere_refuses_prompt_steps(
+    tmp_path, fake, intake_run, monkeypatch
+):
+    """The script ignores RUBRICA_SKILLS_DIR, so the console refuses rather than mislabel."""
+    other = tmp_path / "candidate-skills"
+    shutil.copytree(_SKILLS, other)
+    monkeypatch.setenv("RUBRICA_SKILLS_DIR", str(other))
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    with pytest.raises(ConsoleError) as exc:
+        console.run_step(intake_run.root.name, "extract", OPTS)
+    assert str(other) in str(exc.value) and str(fake["skills"]) in str(exc.value)
+    extract = pipeline.find(console.steps(intake_run.root.name), "extract")
+    assert str(other) in extract.reason and str(fake["skills"]) in extract.reason
+    assert _calls(fake) == []
+    # Pointing it at the script's own set is no conflict.
+    monkeypatch.setenv("RUBRICA_SKILLS_DIR", str(fake["skills"]))
+    assert console.prompt_ready()
 
 
 def test_create_run_from_a_folder_and_a_loose_file(tmp_path, fake):
@@ -557,6 +623,28 @@ def test_a_fan_out_whose_first_dispatches_cannot_reach_the_model_stops_early(
     assert "401" in member.error
 
 
+def test_inside_run_to_gate_a_fan_out_that_cannot_reach_the_model_still_stops_early(
+    tmp_path, fake, intake_run, monkeypatch
+):
+    """Measured: a chain is one job, so extract's successes kept a later fan-out from
+    stopping early -- every member dispatched, and the message lost the 401."""
+    reference = build_toy_run(tmp_path / "ref")
+    subjects = sorted(p.stem for p in (reference.root / "01-contradictions").glob("*.json"))
+    assert len(subjects) > 1
+    monkeypatch.setenv("FAKE_FAIL", " ".join(f"reconcile-contradict:{s}" for s in subjects))
+    monkeypatch.setattr("rubrica_console.jobs._FAIL_FAST_AFTER", 1)
+    console = _console(tmp_path, intake_run.root.parent, fake, max_parallel=1)
+    job = console.wait(console.run_to_gate(intake_run.root.name, OPTS).id, timeout=180)
+    calls = _calls(fake)
+    # The earlier steps did succeed inside this same job.
+    assert any(c["stage"] == "extract" for c in calls)
+    assert any(c["stage"] == "reconcile-subjects" for c in calls)
+    assert job.status == HALTED, job.message
+    assert "Failed to authenticate" in job.message
+    contradict = [c for c in calls if c["stage"] == "reconcile-contradict"]
+    assert 0 < len(contradict) < len(subjects)
+
+
 def test_a_dispatch_that_spent_money_and_failed_does_not_stop_the_fan_out(
     tmp_path, fake, intake_run, monkeypatch
 ):
@@ -620,3 +708,161 @@ def test_the_credentials_file_is_never_a_run_input(tmp_path, fake):
                 "corpus": [str(console.credentials.path)],
             }
         )
+
+
+def _seed(console, *corpus):
+    return console.create_run(
+        {"mode": "survey", "target_name": "t", "target_interface": "x", "corpus": list(corpus)}
+    )
+
+
+def test_a_folder_holding_the_credentials_file_is_never_a_run_input(tmp_path, fake):
+    """A folder seed is walked whole, so one that holds the file -- its own folder, or
+    any folder above it -- would hand it to survey as a candidate."""
+    console = _console(tmp_path, tmp_path / "runs", fake)
+    secret = console.credentials.path
+    links = tmp_path / "links"
+    links.mkdir()
+    (links / "file").symlink_to(secret)
+    (links / "folder").symlink_to(secret.parent)
+    seeds = [secret.parent, tmp_path, links / "file", links / "folder"]
+    for seed in seeds:
+        with pytest.raises(ConsoleError, match="credentials"):
+            _seed(console, str(seed))
+    # Hidden among harmless seeds, it is still refused, and nothing was minted.
+    with pytest.raises(ConsoleError, match="credentials"):
+        _seed(console, str(Path(__file__)), str(secret.parent))
+    assert console.list_runs() == []
+
+
+def test_a_sibling_folder_without_the_credentials_file_is_still_a_run_input(tmp_path, fake):
+    toy = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "toy"
+    console = _console(tmp_path, tmp_path / "runs", fake)
+    # Shares a name prefix with the credentials folder, so a string-prefix check
+    # (rather than a path-ancestry one) would wrongly refuse it.
+    sibling = tmp_path / "creds-other"
+    sibling.mkdir()
+    (sibling / "notes.md").write_bytes((toy / "notes.md").read_bytes())
+    name, _, _ = _seed(console, str(sibling))
+    assert name in console.list_runs()
+
+
+def test_each_dispatch_in_a_job_keeps_its_own_member_and_log(tmp_path, fake, intake_run):
+    # A chain crossing rounds dispatches `score` (no member id) once a round. Keyed
+    # on the stage alone, round 2 replaced round 1's record and overwrote its log:
+    # measured, two $0.25 dispatches left one member and $0.25.
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    name = intake_run.root.name
+    job = Job(id="j-score", run=name, step="score", title="score twice", kind="chain")
+    console._dispatch_members(job, intake_run, "score", [None], OPTS)
+    console._dispatch_members(job, intake_run, "score", [None], OPTS)
+    assert [c["stage"] for c in _calls(fake)] == ["score", "score"]
+    assert list(job.members) == ["score", "score#2"]
+    logs = [Path(m.log) for m in job.members.values()]
+    assert len(set(logs)) == 2
+    assert all("cost        $0.25" in p.read_text() for p in logs)
+    assert job.cost == pytest.approx(0.5)
+    # A fan-out member's first dispatch keeps its plain key; a repeat keeps the
+    # slice id after the colon, which the page matches fan-out squares on.
+    console._dispatch_members(job, intake_run, "propose", ["r1-b01"], OPTS)
+    console._dispatch_members(job, intake_run, "propose", ["r1-b01"], OPTS)
+    assert "propose:r1-b01" in job.members
+    assert "propose#2:r1-b01" in job.members
+    assert job.members["propose#2:r1-b01"].id.split(":").pop() == "r1-b01"
+
+
+# -- limits: only a whole positive number reaches `rubrica` ---------------------
+
+# Each of these once escaped `str(int(value))` as a 500, or (2.9, True) passed
+# silently as a number nobody typed, which decisions.md then recorded.
+_BAD_LIMITS = [
+    "abc",
+    "3.5",
+    "",
+    " ",
+    "-2",
+    "0",
+    "²",  # str.isdigit() is true for it; int() is not
+    2.9,
+    float("nan"),
+    float("inf"),
+    True,
+    False,
+    0,
+    -1,
+    [4],
+    {"n": 4},
+]
+
+
+def _capture_human(console, monkeypatch) -> list[list[str]]:
+    seen: list[list[str]] = []
+    monkeypatch.setattr(console, "_human", lambda name, title, commands: seen.extend(commands))
+    return seen
+
+
+@pytest.mark.parametrize("value", _BAD_LIMITS, ids=repr)
+def test_set_limit_refuses_anything_but_a_whole_positive_number(
+    tmp_path, fake, intake_run, monkeypatch, value
+):
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    seen = _capture_human(console, monkeypatch)
+    with pytest.raises(ConsoleError, match="max_scenarios must be a whole number"):
+        console.set_limit(intake_run.root.name, {"max_scenarios": value}, "raise it")
+    assert seen == []
+
+
+@pytest.mark.parametrize("value", [4, "4", " 4 "], ids=repr)
+def test_set_limit_passes_a_whole_number_to_rubrica_as_digits(
+    tmp_path, fake, intake_run, monkeypatch, value
+):
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    seen = _capture_human(console, monkeypatch)
+    console.set_limit(intake_run.root.name, {"max_scenarios": value}, "raise it")
+    [args] = seen
+    assert args[args.index("--max-scenarios") + 1] == "4"
+
+
+def test_set_limit_with_a_string_number_changes_the_manifest(tmp_path, fake, intake_run):
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    job = console.set_limit(intake_run.root.name, {"max_rounds": "4"}, "one more round")
+    assert job.status == SUCCEEDED, job.message
+    manifest = json.loads(intake_run.manifest.read_text())
+    assert manifest["limits"]["max_rounds"] == 4
+
+
+@pytest.mark.parametrize("key", ["max_rounds", "max_scenarios"])
+@pytest.mark.parametrize("value", ["abc", 2.9, True, 0, float("nan"), [3]], ids=repr)
+def test_create_run_refuses_a_limit_that_is_not_a_whole_positive_number(
+    tmp_path, fake, monkeypatch, key, value
+):
+    toy = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "toy"
+    console = _console(tmp_path, tmp_path / "runs", fake)
+    with pytest.raises(ConsoleError, match=f"{key} must be a whole number"):
+        console.create_run(
+            {
+                "mode": "survey",
+                "target_name": "toy",
+                "target_interface": "http",
+                "corpus": [str(toy)],
+                key: value,
+            }
+        )
+    assert console.list_runs() == []
+
+
+def test_create_run_passes_a_string_limit_to_survey_as_a_number(tmp_path, fake):
+    toy = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "toy"
+    console = _console(tmp_path, tmp_path / "runs", fake)
+    name, _, _ = console.create_run(
+        {
+            "mode": "survey",
+            "target_name": "toy",
+            "target_interface": "http",
+            "corpus": [str(toy)],
+            "max_rounds": "4",
+            "max_scenarios": 7,
+        }
+    )
+    catalogue = json.loads(console.run_paths(name).catalogue.read_text())
+    assert catalogue["request"]["limits"] == {"max_rounds": 4, "max_scenarios": 7}
