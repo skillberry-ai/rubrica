@@ -386,7 +386,8 @@ def packet(run: RunPaths, entries: list[dict[str, Any]]) -> str:
 def _no_high_confidence_findings(run: RunPaths, pool: list[dict[str, Any]]) -> list[Finding]:
     """What to say when no entry in the pool is in the high band.
 
-    A verdict that is missing, could not be read, or is not an object, is sampled as low --
+    A verdict that is missing, could not be read, is not an object, or is not a
+    schema-valid accept, is sampled as low --
     the packet names it in that task's section -- but it is not evidence that the
     adversary qualified anything. Counting it as such once turned a chmod 000 on
     05-verdicts/ into "every accept was qualified by the adversary" against a
@@ -394,19 +395,58 @@ def _no_high_confidence_findings(run: RunPaths, pool: list[dict[str, Any]]) -> l
     is named on its own line, and the claim about the adversary is made only
     about the verdicts that could actually be read.
     """
+    # The verdict schema is loaded before any verdict is judged against it, and a
+    # fault in it is a UsageError (exit 2) naming RUBRICA_SCHEMA_DIR -- the split
+    # scenarios_by_id makes for the scenarios schema (T-72). Without it a missing
+    # verdict-0.1.json would be reported against every verdict file in the suite.
+    root = schema_dir()
+    try:
+        _validator_for("verdict", root)
+    except ArtifactError as exc:
+        raise UsageError(
+            f"the verdict schema in RUBRICA_SCHEMA_DIR ({root}) cannot be loaded: {exc}"
+        ) from exc
     damaged: list[tuple[Path, str]] = []
     for entry in pool:
         path = run.verdict(entry["scenario_id"])
+        label = _label(run, path)
         doc, note = _load(run, path)
         if note is not None:
             damaged.append((path, note.removeprefix("(").removesuffix(")")))
-        elif doc is None:
+            continue
+        if doc is None:
             # Absent. _load calls that a state, not damage, and the packet shows
             # it so -- but it is no more evidence of an adversary's qualification
             # than a damaged file is. Left out of `damaged`, deleting a suite's
             # only verdict produced "every accept was qualified by the adversary"
             # (T-72).
-            damaged.append((path, f"{_label(run, path)} is missing"))
+            damaged.append((path, f"{label} is missing"))
+            continue
+        # Read is not the same as an accept the adversary qualified. confidence_band
+        # puts every dict that is not a clean accept in the low band, so `{}`,
+        # `{"verdict": "reject"}` or an accept with no `uniquely_determined` all
+        # used to fall under "every accept was qualified by the adversary" (T-73).
+        # Rather than guard field by field, the verdict is held to its schema, as
+        # scenarios_by_id holds 02-scenarios.json (T-70), and only a schema-valid
+        # accept counts as one the adversary could have qualified. emit ships only
+        # accepts, so anything else here is a hand edit or damage after emit.
+        try:
+            problems = validate_artifact(path, "verdict")
+        except ArtifactError as exc:
+            # validate_artifact turns a fault in the document into findings, so
+            # an ArtifactError out of it is about the schemas (an unresolvable $ref).
+            raise UsageError(
+                f"the verdict schema in RUBRICA_SCHEMA_DIR ({root}) cannot be used: {exc}"
+            ) from exc
+        if problems:
+            first = problems[0]
+            where = f" at {first.pointer}" if first.pointer else ""
+            more = f" (and {len(problems) - 1} more)" if len(problems) > 1 else ""
+            damaged.append(
+                (path, f"{label} does not match its schema{where}: {first.message}{more}")
+            )
+        elif doc.get("verdict") != "accept":
+            damaged.append((path, f"{label} is not an accept (verdict: {doc.get('verdict')})"))
     findings = [
         Finding(
             path,
@@ -428,15 +468,16 @@ def _no_high_confidence_findings(run: RunPaths, pool: list[dict[str, Any]]) -> l
             "no high-confidence accept exists among the verdicts that could be read, so the "
             "packet cannot look where a correlated labeler/adversary blind spot would hide; "
             "every readable accept was qualified by the adversary, and "
-            f"{len(damaged)} verdict(s) are missing or could not be read: "
-            + ", ".join(_label(run, path) for path, _ in damaged)
+            f"{len(damaged)} verdict(s) are missing, could not be read, or are not a "
+            "schema-valid accept: " + ", ".join(_label(run, path) for path, _ in damaged)
         )
     else:
         message = (
-            "no verdict in this suite could be read, so it is unknown whether any "
+            "no verdict in this suite could be read as a schema-valid accept, so it is unknown "
+            "whether any "
             "high-confidence accept exists and the packet may not look where a correlated "
-            "labeler/adversary blind spot would hide; missing or unreadable: "
-            + ", ".join(_label(run, path) for path, _ in damaged)
+            "labeler/adversary blind spot would hide; missing, unreadable or not a "
+            "schema-valid accept: " + ", ".join(_label(run, path) for path, _ in damaged)
         )
     return [Finding(run.review_sample, "review", "", message), *findings]
 

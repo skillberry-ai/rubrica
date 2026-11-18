@@ -702,7 +702,7 @@ def test_a_damaged_verdict_is_not_claimed_as_qualified_by_the_adversary(tmp_path
 
 def test_a_damaged_verdict_beside_a_qualified_one_names_both(tmp_path, capsys):
     run = _two_task_run(tmp_path)
-    write_json(run.verdict(OTHER), minimal_verdict(verdict="reject", notes="ambiguous"))
+    write_json(run.verdict(OTHER), minimal_verdict(flags=["difficulty_overstated"]))
     run.verdict(SID).write_text("[]", "utf-8")
     code, out = _sample_cli(run, capsys)
     assert code == 1, out
@@ -712,13 +712,94 @@ def test_a_damaged_verdict_beside_a_qualified_one_names_both(tmp_path, capsys):
     assert run.verdict(OTHER).relative_to(run.root).as_posix() not in out
 
 
-def test_a_really_qualified_verdict_still_gets_the_adversary_finding(tmp_path, capsys):
+@pytest.mark.parametrize(
+    "qualified",
+    [
+        {"flags": ["difficulty_overstated"]},
+        {"derivable_without_guessing": False},
+        {
+            "uniquely_determined": False,
+            "alternative_answers": [{"answer": "b", "world_consistent_reason": "both fit"}],
+        },
+    ],
+)
+def test_a_really_qualified_verdict_still_gets_the_adversary_finding(tmp_path, capsys, qualified):
+    # A schema-valid accept the adversary qualified: the one case the claim is about.
     run = build_state(tmp_path, "emit")
-    write_json(run.verdict(SID), minimal_verdict(verdict="reject", notes="ambiguous"))
+    write_json(run.verdict(SID), minimal_verdict(**qualified))
     code, out = _sample_cli(run, capsys)
     assert code == 1, out
     assert _QUALIFIED_CLAIM in out
     assert f"[review] {run.review_sample}: " in out
+    assert f"[review] {run.verdict(SID)}" not in out
+
+
+# T-73: a verdict that parses as an object but is not a schema-valid accept is in
+# the low band too, and used to fall under "every accept was qualified by the
+# adversary". emit ships only accepts, so each of these is damage after emit.
+def _accept_missing_uniquely_determined():
+    verdict = minimal_verdict()
+    del verdict["uniquely_determined"]
+    return verdict
+
+
+@pytest.mark.parametrize(
+    ("doc", "quoted"),
+    [
+        ({}, "does not match its schema"),
+        ({"verdict": "reject"}, "does not match its schema"),
+        (_accept_missing_uniquely_determined(), "'uniquely_determined' is a required property"),
+        (minimal_verdict(verdict="reject", notes="ambiguous"), "is not an accept"),
+    ],
+    ids=["empty", "bare-reject", "accept-missing-field", "valid-reject"],
+)
+def test_a_verdict_that_is_not_a_schema_valid_accept_is_named(tmp_path, capsys, doc, quoted):
+    run = build_state(tmp_path, "emit")
+    write_json(run.verdict(SID), doc)
+    code, out = _sample_cli(run, capsys)
+    assert code == 1, out
+    assert "[internal]" not in out
+    assert _QUALIFIED_CLAIM not in out
+    label = run.verdict(SID).relative_to(run.root).as_posix()
+    named = [line for line in out.splitlines() if line.startswith(f"[review] {run.verdict(SID)}")]
+    assert len(named) == 1, out
+    assert label in named[0]
+    assert quoted in named[0]
+    assert any(
+        line.startswith(f"[review] {run.review_sample}") and label in line
+        for line in out.splitlines()
+    ), out
+    # The sampling is unchanged: the task is still in the packet, as low confidence.
+    assert read_json(run.review_sample)["sampled"][0]["band"] == "low"
+
+
+@pytest.mark.parametrize("how", ["missing", "unresolvable-ref"])
+def test_an_unusable_verdict_schema_is_exit_two_not_a_verdict_finding(
+    tmp_path, capsys, monkeypatch, how
+):
+    from rubrica.cli import main
+
+    run = build_state(tmp_path, "emit")
+    write_json(run.verdict(SID), minimal_verdict(flags=["difficulty_overstated"]))
+    root = tmp_path / f"schemas-{how}"
+    shutil.copytree(schema_dir(), root)
+    path = root / ARTIFACT_SCHEMAS["verdict"]
+    if how == "missing":
+        path.unlink()
+    else:
+        text = path.read_text("utf-8")
+        assert '"#/$defs/id"' in text
+        path.write_text(text.replace('"#/$defs/id"', '"absent-0.1.json#/x"'), "utf-8")
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(root))
+    code = main(["sample-for-review", "--run", str(run.root), "--size", "5"])
+    captured = capsys.readouterr()
+    assert code == 2, captured
+    assert captured.out == "", captured.out
+    errors = [line for line in captured.err.splitlines() if line.strip()]
+    assert len(errors) == 1, captured.err
+    assert str(root) in errors[0]
+    assert "RUBRICA_SCHEMA_DIR" in errors[0]
+    assert not run.review_dir.exists()
 
 
 # T-72: a scenarios schema that cannot be loaded is a misconfigured run, not a
