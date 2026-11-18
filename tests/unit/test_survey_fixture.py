@@ -92,7 +92,10 @@ def test_the_fixture_produces_every_exclusion_reason_but_operator_excluded(tmp_p
     finally:
         locked.chmod(0o644)
     produced = {entry["reason"] for entry in catalogue["excluded"]}
-    assert produced == set(survey.EXCLUSION_REASONS) - {"operator_excluded"}
+    # symlink_outside_root needs a symlink, which a committed fixture should
+    # not carry (it would point outside the repository); test_survey_symlinks
+    # covers it.
+    assert produced == set(survey.EXCLUSION_REASONS) - {"operator_excluded", "symlink_outside_root"}
 
 
 def test_the_exclusion_reasons_in_code_and_schema_cannot_drift(tmp_path):

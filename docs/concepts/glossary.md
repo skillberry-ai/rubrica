@@ -60,8 +60,10 @@ they choose to model the thing.
 
 ## corpus
 
-The directory roots `rubrica survey` walks, recorded verbatim in
-`request.corpus_roots` (`src/rubrica/schema/catalogue-0.1.json`). It is the only
+The folders and files `rubrica survey` reads: a folder is walked whole, a file is
+read as named. The folders are recorded in `request.corpus_roots`, and the named
+files, each under its own folder there, in `request.seed_files`
+(`src/rubrica/schema/catalogue-0.1.json`). It is the only
 thing a run ever sees of the target's own files, and it is read exactly once:
 `survey` catalogues what it finds, the `triage-*` family rules on the
 catalogue, and
@@ -70,8 +72,10 @@ nothing downstream of `intake` opens the corpus again.
 A file can fail to reach `extract` two different ways, and the difference is
 load-bearing. `survey` *excludes* it mechanically, recording a `path` and one
 `exclusion_reason` — `gitignored`, `vcs_metadata`, `binary`, `lockfile`,
-`vendored`, `duplicate`, `unreadable`, or `operator_excluded` — and it never
-becomes a candidate at all. `rb-triage-rule` *declines* a candidate as a
+`vendored`, `duplicate`, `unreadable`, `operator_excluded`, or
+`symlink_outside_root` (a symlink whose target is outside the corpus folder it
+was found in, or cannot be found at all, so the target is never opened) — and it
+never becomes a candidate at all. `rb-triage-rule` *declines* a candidate as a
 judgment,
 under one of the `decline_reason` codes. An exclusion is arithmetic; a decline
 is the thing gate 0 exists to review.

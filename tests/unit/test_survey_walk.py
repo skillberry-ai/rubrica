@@ -9,6 +9,7 @@ there, which is the confusion that made four parsec gaps unreadable.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -124,6 +125,176 @@ def test_an_unreadable_file_is_recorded_rather_than_raised(tmp_path):
         bad.chmod(0o644)
 
 
+_AS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+def test_an_unreadable_subfolder_is_recorded_and_its_siblings_kept(tmp_path):
+    """rglob skipped a folder it could not list without a word, so every file
+    inside was in neither list -- measured as ([a.md], []) on this exact tree.
+    The folder cannot name its files, so the folder itself is what is recorded.
+    """
+    root = tmp_path / "corpus"
+    locked = root / "locked"
+    locked.mkdir(parents=True)
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (root / "z.md").write_text("# Z\n", encoding="utf-8")
+    (locked / "spec.md").write_text("# Spec\n", encoding="utf-8")
+    locked.chmod(0o000)
+    try:
+        kept, excluded = survey.walk_corpus([root])
+    finally:
+        locked.chmod(0o755)
+    assert kept == [root / "a.md", root / "z.md"]
+    assert _reasons(excluded) == {"locked": "unreadable"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+def test_an_unreadable_folder_two_levels_down_is_recorded_too(tmp_path):
+    root = tmp_path / "corpus"
+    locked = root / "docs" / "inner" / "locked"
+    locked.mkdir(parents=True)
+    (root / "docs" / "guide.md").write_text("# Guide\n", encoding="utf-8")
+    (root / "docs" / "inner" / "note.md").write_text("# Note\n", encoding="utf-8")
+    (locked / "spec.md").write_text("# Spec\n", encoding="utf-8")
+    locked.chmod(0o000)
+    try:
+        kept, excluded = survey.walk_corpus([root])
+    finally:
+        locked.chmod(0o755)
+    assert kept == [root / "docs" / "guide.md", root / "docs" / "inner" / "note.md"]
+    assert _reasons(excluded) == {"docs/inner/locked": "unreadable"}
+
+
+def _walk_with_locked(root, locked, **kwargs):
+    locked.chmod(0o000)
+    try:
+        return survey.walk_corpus([root], **kwargs)
+    finally:
+        locked.chmod(0o755)
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+def test_a_locked_gitignored_folder_keeps_the_gitignored_reason(tmp_path):
+    """Readable, `secret/k.md` is `gitignored`; locked, the folder used to read
+    `unreadable`, so a mode bit changed what the tally meant. The folder-only
+    pattern `secret/` must match the folder's own path.
+    """
+    root = tmp_path / "corpus"
+    locked = root / "secret"
+    locked.mkdir(parents=True)
+    (root / ".gitignore").write_text("secret/\n", encoding="utf-8")
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (locked / "k.md").write_text("# K\n", encoding="utf-8")
+    _, readable = survey.walk_corpus([root])
+    assert _reasons(readable)["secret/k.md"] == "gitignored"
+    _, excluded = _walk_with_locked(root, locked)
+    assert _reasons(excluded)["secret"] == "gitignored"  # pragma: allowlist secret
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+def test_a_locked_folder_under_an_operator_glob_keeps_the_operator_reason(tmp_path):
+    root = tmp_path / "corpus"
+    locked = root / "private"
+    locked.mkdir(parents=True)
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (locked / "k.md").write_text("# K\n", encoding="utf-8")
+    _, readable = survey.walk_corpus([root], operator_globs=["private/*"])
+    assert _reasons(readable) == {"private/k.md": "operator_excluded"}
+    _, excluded = _walk_with_locked(root, locked, operator_globs=["private/*"])
+    assert _reasons(excluded) == {"private": "operator_excluded"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+def test_a_locked_folder_under_a_double_star_glob_keeps_the_operator_reason(tmp_path):
+    root = tmp_path / "corpus"
+    locked = root / "skip"
+    locked.mkdir(parents=True)
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (locked / "k.md").write_text("# K\n", encoding="utf-8")
+    _, readable = survey.walk_corpus([root], operator_globs=["skip/**"])
+    assert _reasons(readable) == {"skip/k.md": "operator_excluded"}
+    _, excluded = _walk_with_locked(root, locked, operator_globs=["skip/**"])
+    assert _reasons(excluded) == {"skip": "operator_excluded"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+def test_a_plain_locked_folder_is_still_unreadable(tmp_path):
+    root = tmp_path / "corpus"
+    locked = root / "locked"
+    locked.mkdir(parents=True)
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (locked / "k.md").write_text("# K\n", encoding="utf-8")
+    _, excluded = _walk_with_locked(root, locked)
+    assert _reasons(excluded) == {"locked": "unreadable"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+def test_a_locked_folder_a_glob_may_not_fully_cover_stays_unreadable(tmp_path):
+    """`private/*.md` cannot be shown to cover every file in a folder nobody
+    can list, and an unrelated ignore line must not reach it either.
+    """
+    root = tmp_path / "corpus"
+    locked = root / "private"
+    locked.mkdir(parents=True)
+    (root / ".gitignore").write_text("other/\n", encoding="utf-8")
+    (locked / "k.md").write_text("# K\n", encoding="utf-8")
+    _, excluded = _walk_with_locked(root, locked, operator_globs=["private/*.md"])
+    assert _reasons(excluded) == {"private": "unreadable"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+@pytest.mark.parametrize("line", ["data/*", "data/**", "data/**/*"])
+def test_a_locked_folder_under_a_trailing_star_ignore_line_keeps_the_gitignored_reason(
+    tmp_path, line
+):
+    """`data/*`, `data/**` and `data/**/*` match only the files inside
+    `data`, never the folder's own path, so a locked `data` used to read
+    `unreadable` while a readable one gave every file `gitignored` -- measured
+    on this tree.
+    """
+    root = tmp_path / "corpus"
+    locked = root / "data"
+    locked.mkdir(parents=True)
+    (root / ".gitignore").write_text(f"{line}\n", encoding="utf-8")
+    (root / "a.md").write_text("# A\n", encoding="utf-8")
+    (locked / "k.md").write_text("# K\n", encoding="utf-8")
+    _, readable = survey.walk_corpus([root])
+    assert _reasons(readable) == {"data/k.md": "gitignored"}
+    _, excluded = _walk_with_locked(root, locked)
+    assert _reasons(excluded) == {"data": "gitignored"}
+
+
+@pytest.mark.skipif(_AS_ROOT, reason="chmod 000 does not stop root from listing a folder")
+@pytest.mark.parametrize("line", ["data/*.md", "data/*/"])
+def test_a_locked_folder_an_ignore_line_may_not_fully_cover_stays_unreadable(tmp_path, line):
+    """`data/*.md` covers only some files, and `data/*/` skips the files
+    directly inside `data`, so neither may claim a folder nobody can list.
+    """
+    root = tmp_path / "corpus"
+    locked = root / "data"
+    locked.mkdir(parents=True)
+    (root / ".gitignore").write_text(f"{line}\n", encoding="utf-8")
+    (locked / "k.md").write_text("# K\n", encoding="utf-8")
+    _, excluded = _walk_with_locked(root, locked)
+    assert _reasons(excluded) == {"data": "unreadable"}
+
+
+def test_a_trailing_star_line_reaches_a_folder_only_in_folder_mode():
+    """The folder-mode rule must not leak into file checks: a file called
+    `logs` is not matched by `logs/**`, `logs/*` or `logs/**/*`.
+    """
+    assert survey._gitignored("logs", ["logs/**"], folder=True)
+    assert survey._gitignored("logs", ["logs/*"], folder=True)
+    assert survey._gitignored("logs", ["logs/**/*"], folder=True)
+    assert not survey._gitignored("logs", ["logs/**/*"])
+    assert survey._gitignored("logs/k.md", ["logs/**/*"])
+    assert not survey._gitignored("logs", ["logs/*/*"], folder=True)
+    assert survey._gitignored("a/logs", ["logs/**"], folder=True) is False
+    assert not survey._gitignored("logs", ["logs/*"])
+    assert not survey._gitignored("logs", ["logs/**", "!logs/**"], folder=True)
+
+
 def test_a_shared_seen_dict_dedupes_across_two_separate_calls(tmp_path):
     """The fix for the per-root loop's own dedup gap, one level down from
     survey.survey: two *separate* walk_corpus calls, sharing one `seen` dict
@@ -149,3 +320,218 @@ def test_a_shared_seen_dict_dedupes_across_two_separate_calls(tmp_path):
     assert kept1 == []
     assert excluded0 == []
     assert _reasons(excluded1)["b.md"] == "duplicate"
+
+
+# The two commonest top-level .gitignore shapes after a bare name -- `/x` tied
+# to the root and `x/` naming a folder -- once excluded nothing: `/.env` kept
+# its slash and matched no path, and `secrets/` became `secrets` and matched
+# only a *file* of that name. A bug scout's corpus with exactly those two
+# lines catalogued a `.env` holding a secret and `secrets/key.txt`.
+
+
+def _ignoring(tmp_path, ignore: str, files: list[str]):
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / ".gitignore").write_text(ignore, encoding="utf-8")
+    for i, rel in enumerate(files):
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Distinct bytes per file, so no keep is a `duplicate` drop instead.
+        path.write_text(f"file {i}: {rel}\n", encoding="utf-8")
+    kept, excluded = survey.walk_corpus([root])
+    return {p.relative_to(root).as_posix() for p in kept}, _reasons(excluded)
+
+
+def test_an_anchored_pattern_drops_only_the_root_file(tmp_path):
+    kept, reasons = _ignoring(tmp_path, "/.env\n", [".env", "sub/.env"])
+    assert reasons[".env"] == "gitignored"
+    assert "sub/.env" in kept
+    assert "sub/.env" not in reasons
+
+
+def test_an_anchored_wildcard_does_not_cross_a_folder(tmp_path):
+    """fnmatch's `*` matches `/`, so a whole-path match would drop `sub/a.env`."""
+    kept, reasons = _ignoring(tmp_path, "/*.env\n", ["a.env", "sub/a.env"])
+    assert reasons["a.env"] == "gitignored"
+    assert "sub/a.env" in kept
+
+
+def test_a_folder_pattern_drops_every_file_under_that_folder_at_any_depth(tmp_path):
+    kept, reasons = _ignoring(
+        tmp_path, "secrets/\n", ["secrets/key.txt", "a/secrets/k.txt", "secrets.md"]
+    )
+    assert reasons["secrets/key.txt"] == "gitignored"
+    assert reasons["a/secrets/k.txt"] == "gitignored"
+    # A *file* whose name merely starts the same is not under the folder.
+    assert "secrets.md" in kept
+
+
+def test_a_folder_pattern_does_not_drop_a_file_of_that_name(tmp_path):
+    """`x/` names a folder; git keeps a plain file called `x`, and so do we."""
+    kept, reasons = _ignoring(tmp_path, "secrets/\n", ["secrets", "docs/secrets"])
+    assert {"secrets", "docs/secrets"} <= kept
+
+
+def test_an_anchored_folder_pattern_drops_only_the_root_folder(tmp_path):
+    """The task's `/build/` example, renamed: `build` is a vendored folder name,
+    so it is dropped as `vendored` at any depth before .gitignore is consulted,
+    and the anchoring could not be observed through it."""
+    kept, reasons = _ignoring(
+        tmp_path, "/generated/\n", ["generated/x", "generated/deep/y", "src/generated/x"]
+    )
+    assert reasons["generated/x"] == "gitignored"
+    assert reasons["generated/deep/y"] == "gitignored"
+    assert "src/generated/x" in kept
+
+
+def test_a_folder_pattern_with_an_inner_slash_is_anchored(tmp_path):
+    kept, reasons = _ignoring(tmp_path, "out/gen/\n", ["out/gen/a.py", "pkg/out/gen/b.py"])
+    assert reasons["out/gen/a.py"] == "gitignored"
+    assert "pkg/out/gen/b.py" in kept
+
+
+@pytest.mark.parametrize("line", ["/\n", "//\n", "  /  \n"])
+def test_a_line_of_only_slashes_ignores_nothing(tmp_path, line):
+    """An empty pattern must not turn into one that matches the whole corpus."""
+    kept, reasons = _ignoring(tmp_path, line, ["a.md", "sub/b.md"])
+    assert {"a.md", "sub/b.md"} <= kept
+    assert "gitignored" not in reasons.values()
+
+
+def test_plain_patterns_still_match_by_path_or_bare_name(tmp_path):
+    kept, reasons = _ignoring(
+        tmp_path, ".env\n*.log\n", [".env", "sub/.env", "x.log", "deep/y.log", "keep.md"]
+    )
+    for rel in (".env", "sub/.env", "x.log", "deep/y.log"):
+        assert reasons[rel] == "gitignored"
+    assert "keep.md" in kept
+
+
+# The first cut of the shapes above compared any pattern with a `/` one folder
+# level per segment, so `**` became a single `*` and `**/.env` stopped dropping
+# a nested `a/b/.env`; and a line naming a folder without a trailing slash --
+# `secrets`, `/creds` -- excluded nothing inside it, where git ignores the
+# whole folder (`git check-ignore -v secrets/key.txt` -> `.gitignore:1:secrets`).
+
+
+def test_a_leading_double_star_matches_at_any_depth(tmp_path):
+    kept, reasons = _ignoring(tmp_path, "**/.env\n", [".env", "a/.env", "a/b/.env", "a/b/k.md"])
+    for rel in (".env", "a/.env", "a/b/.env"):
+        assert reasons[rel] == "gitignored"
+    assert "a/b/k.md" in kept
+
+
+def test_a_trailing_double_star_drops_everything_inside_at_any_depth(tmp_path):
+    kept, reasons = _ignoring(
+        tmp_path, "logs/**\n", ["logs/top.txt", "logs/x/y/z.txt", "src/logs/a.txt"]
+    )
+    assert reasons["logs/top.txt"] == "gitignored"
+    assert reasons["logs/x/y/z.txt"] == "gitignored"
+    # As in git: `logs/**` names what is inside `logs`, not a file called it,
+    # and the inner `/` anchors it to the root.
+    assert "src/logs/a.txt" in kept
+    assert not survey._gitignored("logs", ["logs/**"])
+
+
+def test_an_inner_double_star_matches_zero_or_more_folders(tmp_path):
+    kept, reasons = _ignoring(tmp_path, "a/**/b\n", ["a/b/f", "a/x/y/b/f", "a/x/y/c/f", "z/a/b/f"])
+    assert reasons["a/b/f"] == "gitignored"
+    assert reasons["a/x/y/b/f"] == "gitignored"
+    assert {"a/x/y/c/f", "z/a/b/f"} <= kept
+
+
+def test_a_plain_name_drops_a_folder_of_that_name_at_any_depth(tmp_path):
+    kept, reasons = _ignoring(
+        tmp_path, "secrets\n", ["secrets/key.txt", "a/secrets/k.txt", "secretsx/k.txt"]
+    )
+    assert reasons["secrets/key.txt"] == "gitignored"
+    assert reasons["a/secrets/k.txt"] == "gitignored"
+    assert "secretsx/k.txt" in kept
+
+
+def test_an_anchored_name_drops_only_the_root_folder_of_that_name(tmp_path):
+    kept, reasons = _ignoring(tmp_path, "/creds\n", ["creds/t.txt", "sub/creds/t.txt"])
+    assert reasons["creds/t.txt"] == "gitignored"
+    assert "sub/creds/t.txt" in kept
+    assert "sub/creds/t.txt" not in reasons
+
+
+def test_a_plain_wildcard_does_not_cross_a_folder(tmp_path):
+    """fnmatch's `*` matches `/`: over the whole path `a*b` would drop `a/x/b`."""
+    kept, reasons = _ignoring(tmp_path, "a*b\n", ["axb", "a/x/b"])
+    assert reasons["axb"] == "gitignored"
+    assert "a/x/b" in kept
+
+
+def test_many_double_stars_on_a_deep_path_stay_fast():
+    """A hostile .gitignore line must not make matching blow up with depth."""
+    import time
+
+    pattern = "/".join(["**"] * 30) + "/nomatch"
+    path = "/".join(f"d{i}" for i in range(60)) + "/f"
+    started = time.monotonic()
+    assert not survey._gitignored(path, [pattern])
+    assert time.monotonic() - started < 2.0
+
+
+# `!` lines were once skipped while the broad line they narrow still applied,
+# so the common "ignore everything, keep a few" file dropped exactly what git
+# keeps: a bug scout's corpus with the five lines below came out empty, every
+# file `gitignored`, where `git check-ignore` keeps three of the four.
+
+
+def test_an_ignore_everything_keep_a_few_file_keeps_what_git_keeps(tmp_path):
+    ignore = "*\n!*/\n!*.py\n!*.md\n!.gitignore\n"
+    kept, reasons = _ignoring(tmp_path, ignore, ["docs/api.md", "src/app.py", "build.log"])
+    assert {".gitignore", "docs/api.md", "src/app.py"} <= kept
+    assert reasons["build.log"] == "gitignored"
+
+
+def test_a_negated_file_inside_an_ignored_folder_glob_is_kept(tmp_path):
+    kept, reasons = _ignoring(tmp_path, "docs/*\n!docs/api.md\n", ["docs/api.md", "docs/other.md"])
+    assert "docs/api.md" in kept
+    assert reasons["docs/other.md"] == "gitignored"
+
+
+def test_a_later_plain_line_overrides_an_earlier_negation(tmp_path):
+    """Last match wins: `!x` before `x` re-includes nothing."""
+    kept, reasons = _ignoring(tmp_path, "!x\nx\n", ["x", "y"])
+    assert reasons["x"] == "gitignored"
+    assert "y" in kept
+
+
+# A .gitignore saved with a UTF-8 byte-order mark (Windows Notepad, some
+# editors) once kept the mark on its first pattern, `﻿.env`, which matched
+# nothing: a bug scout's corpus catalogued `.env` while `git status --ignored`
+# showed it ignored. Git drops one leading mark, and so must we.
+
+
+def test_a_byte_order_mark_does_not_hide_the_first_gitignore_line(tmp_path):
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / ".gitignore").write_bytes(b"\xef\xbb\xbf.env\nsecrets/\n")
+    (root / ".env").write_text("TOKEN=placeholder\n", encoding="utf-8")
+    (root / "secrets").mkdir()
+    (root / "secrets" / "key.txt").write_text("k\n", encoding="utf-8")
+    (root / "README.md").write_text("# Target\n", encoding="utf-8")
+    assert survey._gitignore_patterns(root) == [".env", "secrets/"]
+    kept, excluded = survey.walk_corpus([root])
+    reasons = _reasons(excluded)
+    assert reasons[".env"] == "gitignored"
+    assert reasons["secrets/key.txt"] == "gitignored"
+    assert "README.md" in {p.relative_to(root).as_posix() for p in kept}
+
+
+def test_a_gitignore_without_a_byte_order_mark_reads_the_same(tmp_path):
+    kept, reasons = _ignoring(tmp_path, ".env\nsecrets/\n", [".env", "secrets/k.txt", "a.md"])
+    assert reasons[".env"] == "gitignored"
+    assert reasons["secrets/k.txt"] == "gitignored"
+    assert "a.md" in kept
+
+
+def test_only_one_leading_byte_order_mark_is_dropped(tmp_path):
+    """Git strips one mark at the start of the file, not one inside a line."""
+    root = tmp_path / "corpus"
+    root.mkdir()
+    (root / ".gitignore").write_bytes(b"\xef\xbb\xbf.env\n\xef\xbb\xbfx\n")
+    assert survey._gitignore_patterns(root) == [".env", "﻿x"]

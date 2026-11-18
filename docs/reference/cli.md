@@ -25,6 +25,10 @@ Required: `--corpus PATH` (repeatable), `--runs-dir RUNS_DIR`, `--target-name
 TARGET_NAME`, `--target-interface TARGET_INTERFACE`, `--objective
 {breadth,depth}`.
 
+A blank (empty or whitespace-only) `--corpus`, `--runs-dir` — here and on `intake --input` — or `--run` on any subcommand exits 2 rather than meaning the current folder.
+
+The same holds for `intake --input`, `check-skills --skills-dir`, and `--output` on `run-summary` and `target-brief`: a blank value exits 2 and writes nothing.
+
 Optional: `--objective-note OBJECTIVE_NOTE`, `--scope-note SCOPE_NOTE`,
 `--exclude GLOB` (repeatable), `--max-rounds MAX_ROUNDS`, `--max-scenarios
 MAX_SCENARIOS`, `--max-candidates MAX_CANDIDATES`, `--max-catalogue-bytes
@@ -50,6 +54,32 @@ same `request` copied verbatim into its own shard, and the value rides in
 model that will do its best with an unfamiliar word.
 Intake is code and no repair prompt can rewrite a manifest, so the value a run
 is minted with is the value it keeps.
+
+**`--corpus` takes a folder or a single file.** A folder is walked whole, with
+the filters `excluded` records. A file is catalogued as named: its folder joins
+`request.corpus_roots` so `intake` resolves it like any other candidate, only the
+named files under that folder are catalogued, and the file is listed in
+`request.seed_files`. Every `--corpus` path is made absolute before it is
+recorded, so `request.corpus_roots` and `request.seed_files` hold absolute paths
+and `intake` finds the same files whichever folder it runs from. A named file skips the filters that judge a file by where it
+sits — version control, vendored folders, `.gitignore`, `--exclude` — because a
+human pointed at it; it still goes through the ones that judge what it is, so a
+named binary or lockfile is recorded in `excluded` rather than catalogued. A
+`--corpus` path that is neither a file nor a folder, or a named file that cannot
+be opened, exits 2. An empty or whitespace-only `--corpus` value exits 2 as well
+and mints no run, rather than being read as the current folder — an unset
+variable in a caller's script would otherwise catalogue wherever it ran from.
+So does a `--corpus` path that is, or sits inside, a `.git`,
+`.hg` or `.svn` folder — `--corpus repo/.git` would otherwise catalogue the
+repository's own `config` (where remote credentials live) as evidence. The check
+reads the path as given and the path it resolves to, so a symlink into such a
+folder is refused too. Version-control folder names are matched regardless of
+capital letters, here and in the walk's `vcs_metadata` filter, because on a
+case-insensitive volume `.GIT` is the same folder as `.git`. Inside a walked folder, a
+symlinked file whose target lies outside that folder is not read; it is recorded
+in `excluded` as `symlink_outside_root`. A symlink to a file inside the folder is
+kept. A named file that is itself a symlink is resolved first, and its target is
+catalogued as the named file, under the target's own folder.
 
 Prints the new run directory.
 

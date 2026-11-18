@@ -426,19 +426,41 @@ def test_prompt_steps_are_refused_without_a_dispatch_script(tmp_path, intake_run
     assert "repository checkout" in extract.reason
 
 
-def test_create_run_by_intake(tmp_path, fake):
+def test_create_run_from_a_folder_and_a_loose_file(tmp_path, fake):
+    """One way in: files and folders together are the seed, and triage is next."""
     toy = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "toy"
+    folder = tmp_path / "docs"
+    folder.mkdir()
+    (folder / "notes.md").write_bytes((toy / "notes.md").read_bytes())
     console = _console(tmp_path, tmp_path / "runs", fake)
     name, _, _ = console.create_run(
         {
-            "mode": "intake",
+            "mode": "survey",
             "target_name": "toy",
             "target_interface": "http",
-            "inputs": [str(p) for p in sorted(toy.iterdir()) if p.is_file()],
+            "corpus": [str(folder), str(toy / "api.json")],
         }
     )
     assert name in console.list_runs()
-    assert pipeline.next_step(console.steps(name)).id == "extract"
+    catalogue = json.loads(console.run_paths(name).catalogue.read_text())
+    assert sorted(c["path"] for c in catalogue["candidates"] if c["origin"] == "corpus") == [
+        "api.json",
+        "notes.md",
+    ]
+    assert pipeline.next_step(console.steps(name)).id.startswith("triage")
+    # Read back without the console's own record, the seed is what was given.
+    (console._state(name).home / "spec.json").unlink()
+    spec = console.run_spec(name)
+    assert spec["corpus"] == [str(folder), str(toy / "api.json")]
+    assert spec["seed_files"] == [str(toy / "api.json")]
+
+
+def test_create_run_refuses_intake(tmp_path, fake):
+    console = _console(tmp_path, tmp_path / "runs", fake)
+    with pytest.raises(ConsoleError, match="survey"):
+        console.create_run(
+            {"mode": "intake", "target_name": "t", "target_interface": "x", "inputs": ["a"]}
+        )
 
 
 def test_create_run_refuses_an_empty_spec(tmp_path, fake):
@@ -560,10 +582,11 @@ def test_a_console_made_run_keeps_its_selection(tmp_path, fake):
     }
     name, _, _ = console.create_run(
         {
-            "mode": "intake",
+            "mode": "survey",
             "target_name": "toy",
             "target_interface": "http",
-            "inputs": [str(toy / "api.json"), str(toy / "notes.md")],
+            "corpus": [str(toy)],
+            "exclude": ["trace.json"],
             "selection": selection,
             "extra_exclude": [],
             "max_rounds": 3,
@@ -591,9 +614,9 @@ def test_the_credentials_file_is_never_a_run_input(tmp_path, fake):
     with pytest.raises(ConsoleError, match="credentials"):
         console.create_run(
             {
-                "mode": "intake",
+                "mode": "survey",
                 "target_name": "t",
                 "target_interface": "x",
-                "inputs": [str(console.credentials.path)],
+                "corpus": [str(console.credentials.path)],
             }
         )

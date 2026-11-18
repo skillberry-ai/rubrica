@@ -30,10 +30,22 @@ that writes them.
 Every candidate a survey found in a corpus, each with a bounded digest rather
 than its own bytes — `sha256`, `bytes`, `kind`, and a `digest` object, never a
 copy of the source content. It also carries the survey `request` (target,
-objective, corpus roots, limits) and the `policy` that governed digesting and
+objective, corpus roots, limits, and `seed_files` when single files were named)
+and the `policy` that governed digesting and
 exclusion, so a later reader can see what the survey was told to look for
 without re-deriving it. `excluded` records every path the survey chose not to
 catalogue, with a `reason` (`gitignored`, `binary`, `duplicate`, and the like).
+`unreadable` names either a file that could not be read or a folder below a
+corpus root that could not be listed; for a folder the `path` is the folder's own,
+because the files inside it cannot be named, and the entry stands for all of them.
+One of those reasons, `symlink_outside_root`, marks a symlinked file whose target
+lies outside the corpus root it was found in (or cannot be resolved at all): its
+target is never opened, so a link to a credentials file elsewhere on the machine
+is recorded as declined rather than read. A symlink to a file inside the root is
+kept and judged like any other file, by its target's location as well as its own:
+the version-control, vendored, lockfile, `--exclude` and `.gitignore` checks each
+look at both the link's path and its target's path within the root, and the link
+is dropped with that check's reason if either matches.
 
 Fields worth knowing: `candidates[].origin` (`corpus`, `container_element`, or
 `projection` — a candidate exploded out of a container file, or manufactured
