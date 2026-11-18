@@ -91,19 +91,8 @@ def generated_tasks(run: RunPaths) -> list[dict[str, Any]]:
     stability.comparability makes the same distinction for the same reason --
     absence must not read as agreement.
     """
-    scenarios = _load_scenarios(run)
+    scenarios = scenarios_by_id(run)
     return [scenarios[sid] for sid in run.scenario_ids_with_tasks() if sid in scenarios]
-
-
-def _load_scenarios(run: RunPaths) -> dict[str, dict[str, Any]]:
-    """The scenarios by id. Raises ArtifactError if 02-scenarios.json is unreadable.
-
-    Also when it parses but is the wrong shape -- `[]`, a string entry, an entry
-    with no `id`. Those used to escape as AttributeError/TypeError/KeyError, which
-    cli.py reported as an [internal] finding naming the run folder rather than
-    this file (T-69). review.scenarios_by_id is the one guard both tools share.
-    """
-    return scenarios_by_id(run)
 
 
 def _pair_score(gold_task: dict[str, Any], scenario: dict[str, Any]) -> float | None:

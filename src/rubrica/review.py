@@ -171,7 +171,7 @@ def scenarios_by_id(run: RunPaths) -> dict[str, dict[str, Any]]:
     """02-scenarios.json's scenarios by id. Raises ArtifactError naming the file.
 
     Raised both when the file cannot be read and when it parses but does not meet
-    its schema, so a caller gives the two the same outcome. recall._load_scenarios
+    its schema, so a caller gives the two the same outcome. recall.generated_tasks
     (compare-gold) uses this too: it had the same unguarded shape (T-69).
     """
     # The schema is loaded before 02-scenarios.json is read, and a fault in it is

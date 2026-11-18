@@ -564,7 +564,7 @@ def test_the_novel_finding_names_only_the_spurious_entries_not_every_novel_one(t
 
 
 # T-69: a 02-scenarios.json that parses but is the wrong shape escaped
-# _load_scenarios as AttributeError/TypeError/KeyError -- an [internal] line naming
+# recall.generated_tasks as AttributeError/TypeError/KeyError -- an [internal] line naming
 # the run folder, not the file. It must give the same outcome as one that does not
 # parse at all.
 def _with_hop_depths(doc, depths):
