@@ -23,6 +23,7 @@ from rubrica.artifacts import ArtifactError, read_json, sha256_of, write_json
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths
+from rubrica.validate import validate_artifact
 
 # Fixed, so review is a trend line rather than a fresh opinion each time.
 RUBRIC = ("fair", "unambiguous", "correctly_labeled", "non_trivial")
@@ -169,31 +170,34 @@ def _probe(run: RunPaths, path: Path) -> tuple[bool, str | None]:
 def scenarios_by_id(run: RunPaths) -> dict[str, dict[str, Any]]:
     """02-scenarios.json's scenarios by id. Raises ArtifactError naming the file.
 
-    Raised both when the file cannot be read and when it parses but is the wrong
-    shape, so a caller gives the two the same outcome. recall._load_scenarios
+    Raised both when the file cannot be read and when it parses but does not meet
+    its schema, so a caller gives the two the same outcome. recall._load_scenarios
     (compare-gold) uses this too: it had the same unguarded shape (T-69).
     """
     document = read_json(run.scenarios)
-    # Parsed is not the same as usable. `[]`, a string entry, or an entry with no
-    # `id` used to escape as AttributeError/TypeError/KeyError, which cli.py
-    # reported as an [internal] finding naming the run folder rather than this
-    # file (T-68). Each is raised here so the caller names 02-scenarios.json.
+    # Parsed is not the same as usable. T-68 and T-69 guarded the shape field by
+    # field -- not an object, `scenarios` not a list, an entry not an object, no
+    # string `id` -- and the next field along, a hop_depth that was a list or
+    # null, still escaped stratified() as a TypeError, which cli.py reported as an
+    # [internal] finding naming the run folder rather than this file. Patching one
+    # field at a time does not end, so the whole document is held to
+    # scenarios-0.1.json instead (T-70), and the first finding is quoted so the
+    # reader knows what is wrong, not only where.
+    #
+    # The schema covers every field this module and recall read: T-68's four shape
+    # checks, and hop_depth as `"type": "integer"` with a 1..5 range. That
+    # also rejects a bool hop_depth, which the code could not stratify sensibly:
+    # jsonschema's integer type excludes bool even though Python's int does not
+    # (measured). It admits 1.0, which compares and hashes as 1, so no explicit
+    # check is kept.
     label = _label(run, run.scenarios)
-    if not isinstance(document, dict):
-        raise ArtifactError(f"{label} is a {_json_kind(document)}, not an object")
-    listed = document.get("scenarios", [])
-    if not isinstance(listed, list):
-        raise ArtifactError(f"{label}: `scenarios` is a {_json_kind(listed)}, not a list")
-    scenarios: dict[str, dict[str, Any]] = {}
-    for index, scenario in enumerate(listed):
-        if not isinstance(scenario, dict):
-            raise ArtifactError(
-                f"{label}: scenarios[{index}] is a {_json_kind(scenario)}, not an object"
-            )
-        if not isinstance(scenario.get("id"), str):
-            raise ArtifactError(f"{label}: scenarios[{index}] has no string `id`")
-        scenarios[scenario["id"]] = scenario
-    return scenarios
+    findings = validate_artifact(run.scenarios, "scenarios")
+    if findings:
+        first = findings[0]
+        where = f" at {first.pointer}" if first.pointer else ""
+        more = f" (and {len(findings) - 1} more)" if len(findings) > 1 else ""
+        raise ArtifactError(f"{label} does not match its schema{where}: {first.message}{more}")
+    return {scenario["id"]: scenario for scenario in document["scenarios"]}
 
 
 def candidates(run: RunPaths) -> list[dict[str, Any]]:

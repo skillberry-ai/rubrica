@@ -520,6 +520,20 @@ def _sample_cli(run, capsys):
     return code, capsys.readouterr().out
 
 
+def _with_hop_depths(doc, depths):
+    """`doc` with its scenarios' hop_depths set to `depths`, in order.
+
+    The emit-state run lists one scenario, so a depth past the first is set on a
+    copy of it under the next id (scn-002, ...); every other field stays valid.
+    """
+    listed = [dict(scenario) for scenario in doc["scenarios"]]
+    while len(listed) < len(depths):
+        listed.append({**listed[0], "id": f"scn-{len(listed) + 1:03d}"})
+    for scenario, depth in zip(listed, depths, strict=False):
+        scenario["hop_depth"] = depth
+    return {**doc, "scenarios": listed}
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -530,8 +544,22 @@ def _sample_cli(run, capsys):
             "scenarios": [{k: v for k, v in doc["scenarios"][0].items() if k != "id"}],
         },
         lambda doc: {**doc, "scenarios": "oops"},
+        # T-70: fields past the four shape checks. A hop_depth that is a list or
+        # null crashed stratified() (dict key, sort) as an [internal] TypeError;
+        # the null one sits beside an int so the sort really compares the two.
+        lambda doc: _with_hop_depths(doc, [[1]]),
+        lambda doc: _with_hop_depths(doc, [None, 2]),
+        lambda doc: _with_hop_depths(doc, [True]),
     ],
-    ids=["list-document", "string-entry", "entry-without-id", "scenarios-not-a-list"],
+    ids=[
+        "list-document",
+        "string-entry",
+        "entry-without-id",
+        "scenarios-not-a-list",
+        "hop-depth-list",
+        "hop-depth-null-beside-int",
+        "hop-depth-bool",
+    ],
 )
 def test_a_malformed_scenario_list_is_named_like_an_unreadable_one(tmp_path, capsys, mutate):
     baseline = build_state(tmp_path / "baseline", "emit")
@@ -554,6 +582,43 @@ def test_a_malformed_scenario_list_is_named_like_an_unreadable_one(tmp_path, cap
 
     _, findings = sample_run(run, DEFAULT_SAMPLE_SIZE)
     assert len(findings) == 1 and findings[0].artifact == run.scenarios
+
+
+def test_a_null_hop_depth_beside_an_emitted_int_is_named_not_internal(tmp_path, capsys):
+    """Two emitted tasks, depths null and 2, so stratified() really sorts the pair.
+
+    On the code before T-70 this is the `sorted(strata)` TypeError (None < int),
+    reported as an [internal] line naming the run folder.
+    """
+    baseline = build_state(tmp_path / "baseline", "emit")
+    baseline.scenarios.write_text("{not json", encoding="utf-8")
+    want_code, _ = _sample_cli(baseline, capsys)
+
+    run = _two_task_run(tmp_path)
+    write_json(run.scenarios, _with_hop_depths(read_json(run.scenarios), [None, 2]))
+    assert sorted(run.scenario_ids_with_tasks()) == [SID, OTHER]
+    code, out = _sample_cli(run, capsys)
+    assert code == want_code, out
+    assert "[internal]" not in out
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert len(lines) == 1 and lines[0].startswith(f"[review] {run.scenarios}: "), out
+    assert not run.review_packet.exists()
+
+
+def test_a_schema_finding_is_quoted_in_the_scenario_list_finding(tmp_path, capsys):
+    """The reader is told which field is wrong, not only which file (T-70)."""
+    run = build_state(tmp_path, "emit")
+    write_json(run.scenarios, _with_hop_depths(read_json(run.scenarios), [[1]]))
+    _, out = _sample_cli(run, capsys)
+    assert "/scenarios/0/hop_depth" in out, out
+    assert "[1] is not of type 'integer'" in out, out
+
+
+def test_a_valid_scenario_list_still_samples(tmp_path, capsys):
+    run = build_state(tmp_path, "emit")
+    code, out = _sample_cli(run, capsys)
+    assert code == 0, out
+    assert run.review_packet.exists()
 
 
 def _seed_digest_block(section):

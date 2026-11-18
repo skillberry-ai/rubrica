@@ -458,7 +458,13 @@ def _scenario_doc(sid, refs):
         "capability_refs": [{"capability_id": c, "outcome_class_id": o} for c, o in refs],
         "discriminating_fact": "fact",
         "status": "active",
-        "provenance": {"hole_refs": [], "claim_ids": ["clm-001"], "round": 1},
+        # A real hole ref, not []: 02-scenarios.json is held to its schema before
+        # compare-gold uses it (T-70), and the schema wants at least one.
+        "provenance": {
+            "hole_refs": [f"cell:{c}/{o}" for c, o in refs],
+            "claim_ids": ["clm-001"],
+            "round": 1,
+        },
     }
 
 
@@ -534,6 +540,20 @@ def test_the_novel_finding_names_only_the_spurious_entries_not_every_novel_one(t
 # _load_scenarios as AttributeError/TypeError/KeyError -- an [internal] line naming
 # the run folder, not the file. It must give the same outcome as one that does not
 # parse at all.
+def _with_hop_depths(doc, depths):
+    """`doc` with its scenarios' hop_depths set to `depths`, in order.
+
+    The emit-state run lists one scenario, so a depth past the first is set on a
+    copy of it under the next id (scn-002, ...); every other field stays valid.
+    """
+    listed = [dict(scenario) for scenario in doc["scenarios"]]
+    while len(listed) < len(depths):
+        listed.append({**listed[0], "id": f"scn-{len(listed) + 1:03d}"})
+    for scenario, depth in zip(listed, depths, strict=False):
+        scenario["hop_depth"] = depth
+    return {**doc, "scenarios": listed}
+
+
 def _compare_cli(run, gold, capsys):
     from rubrica.cli import main
 
@@ -550,8 +570,11 @@ def _compare_cli(run, gold, capsys):
             **doc,
             "scenarios": [{k: v for k, v in doc["scenarios"][0].items() if k != "id"}],
         },
+        # T-70: fields past the shape checks, caught by the scenarios schema.
+        lambda doc: _with_hop_depths(doc, [[1]]),
+        lambda doc: _with_hop_depths(doc, [None, 2]),
     ],
-    ids=["list-document", "string-entry", "entry-without-id"],
+    ids=["list-document", "string-entry", "entry-without-id", "hop-depth-list", "hop-depth-null"],
 )
 def test_a_malformed_scenario_list_is_named_like_an_unreadable_one(tmp_path, capsys, mutate):
     from rubrica.artifacts import read_json
