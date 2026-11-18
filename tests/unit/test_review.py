@@ -367,3 +367,104 @@ def test_sample_run_is_idempotent(tmp_path):
     first = run.review_packet.read_text()
     sample_run(run, DEFAULT_SAMPLE_SIZE)
     assert run.review_packet.read_text() == first
+
+
+# -- damaged task files: stated in the packet, never an [internal] exit 1 ------
+#
+# These files are emit's, instantiate's and challenge's output, so a bad one is a
+# hand edit or damage, not a stage defect. Before the fix one non-UTF-8 byte in an
+# instruction.md reached cli.py's catch-all as `[internal] ... raised
+# UnicodeDecodeError` at exit 1, naming no file and writing no packet.
+
+OTHER = "scn-002"
+OTHER_INSTRUCTION = "Second task, intact: find the failed job on prod1."
+
+
+def _two_task_run(tmp_path):
+    """The emit state plus a second, undamaged task, so 'every other section intact'
+    has something to check."""
+    run = build_state(tmp_path / "run", "emit")
+    shutil.copytree(run.task_dir(SID), run.task_dir(OTHER))
+    shutil.copytree(run.instance_dir(SID), run.instance_dir(OTHER))
+    shutil.copyfile(run.verdict(SID), run.verdict(OTHER))
+    (run.task_dir(OTHER) / "instruction.md").write_text(OTHER_INSTRUCTION, "utf-8")
+    return run
+
+
+def _sample(run, capsys):
+    from rubrica.cli import main
+
+    code = main(["sample-for-review", "--run", str(run.root), "--size", "5"])
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert "[internal]" not in out
+    text = run.review_packet.read_text("utf-8")
+    assert f"## `{OTHER}`" in text and OTHER_INSTRUCTION in text, "the other task's section"
+    return text
+
+
+def _section_of(text, sid):
+    start = text.index(f"## `{sid}`")
+    nxt = text.find("\n## `", start + 1)
+    return text[start : nxt if nxt != -1 else len(text)]
+
+
+def _no_root(reason="chmod 000 does not stop root from reading"):
+    return pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason=reason)
+
+
+def test_a_non_utf8_instruction_is_shown_with_replacements_and_named(tmp_path, capsys):
+    run = _two_task_run(tmp_path)
+    (run.task_dir(SID) / "instruction.md").write_bytes(b"hi \xff\xfe")
+    section = _section_of(_sample(run, capsys), SID)
+    assert "instruction.md is not valid UTF-8" in section
+    assert "hi �" in section, "the readable part is still shown"
+    assert "### Adversary notes" in section, "the rest of the damaged task's section"
+
+
+def test_a_non_utf8_rationale_is_shown_with_replacements_and_named(tmp_path, capsys):
+    run = _two_task_run(tmp_path)
+    run.rationale(SID).write_bytes(b"Chose 90420 \xff because")
+    section = _section_of(_sample(run, capsys), SID)
+    assert "rationale.md is not valid UTF-8" in section
+    assert "Chose 90420 � because" in section
+
+
+@_no_root()
+@pytest.mark.parametrize("which", ["instruction", "rationale"])
+def test_an_unreadable_text_file_is_named_in_the_packet(tmp_path, capsys, which):
+    run = _two_task_run(tmp_path)
+    path = run.task_dir(SID) / "instruction.md" if which == "instruction" else run.rationale(SID)
+    if which == "rationale":
+        path.write_text("why", "utf-8")
+    path.chmod(0)
+    try:
+        section = _section_of(_sample(run, capsys), SID)
+    finally:
+        path.chmod(0o644)
+    assert f"{path.name} could not be read" in section
+    assert "ermission" in section, "the reason is stated"
+
+
+@pytest.mark.parametrize("which", ["verdict", "expected"])
+def test_a_non_utf8_verdict_or_expected_is_named_not_shown_as_none(tmp_path, capsys, which):
+    run = _two_task_run(tmp_path)
+    path = run.verdict(SID) if which == "verdict" else run.expected(SID)
+    path.write_bytes(b"{\xff}")
+    section = _section_of(_sample(run, capsys), SID)
+    assert f"{path.name} could not be read" in section
+    assert "not UTF-8" in section
+
+
+@_no_root()
+@pytest.mark.parametrize("which", ["verdict", "expected"])
+def test_an_unreadable_verdict_or_expected_is_named_not_exit_two(tmp_path, capsys, which):
+    run = _two_task_run(tmp_path)
+    path = run.verdict(SID) if which == "verdict" else run.expected(SID)
+    path.chmod(0)
+    try:
+        section = _section_of(_sample(run, capsys), SID)
+    finally:
+        path.chmod(0o644)
+    assert f"{path.name} could not be read" in section
+    assert "ermission" in section

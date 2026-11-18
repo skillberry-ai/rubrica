@@ -16,9 +16,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
-from rubrica.artifacts import ArtifactError, read_json, read_json_or_none, sha256_of, write_json
+from rubrica.artifacts import ArtifactError, read_json, sha256_of, write_json
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths
@@ -55,9 +56,60 @@ def confidence_band(verdict: dict[str, Any] | None) -> str:
     return "high" if unqualified else "low"
 
 
-# Only ArtifactError reads as absence; a PermissionError still reaches cli.py's
-# exit-2 path. See artifacts.read_json_or_none.
-_load = read_json_or_none
+# The packet is a report for a human reader, so a file it cannot read is stated in
+# the packet rather than refused. Every file below is emit's, instantiate's or
+# challenge's output, so a non-UTF-8 byte or a chmod-000 file there is a hand edit
+# or damage, not a stage defect a re-dispatch could repair. Before these helpers
+# one non-UTF-8 byte in an instruction.md reached cli.py's catch-all as
+# `[internal] ... raised UnicodeDecodeError` at exit 1: no file named, and no
+# packet written, so one bad task cost the reader every other task's section.
+# T-55 and T-63 closed the same hole in other code.
+
+
+def _label(run: RunPaths, path: Path) -> str:
+    """The path as a reader of this run would name it: relative to the run root."""
+    try:
+        return path.relative_to(run.root).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _read_text(run: RunPaths, path: Path) -> tuple[str, str | None]:
+    """-> (text, note). Never raises for an unreadable or non-UTF-8 file.
+
+    Non-UTF-8 bytes are decoded with replacement characters and shown, with a
+    note saying so: the reader can still see what the agent receives, and
+    knows the odd glyphs are damage rather than content. An OSError (a
+    chmod-000 file above all) yields no text and a note naming the reason.
+    """
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return "", f"({_label(run, path)} could not be read: {exc.strerror or exc})"
+    try:
+        return raw.decode("utf-8"), None
+    except UnicodeDecodeError:
+        note = f"({_label(run, path)} is not valid UTF-8; shown with replacement characters)"
+        return raw.decode("utf-8", errors="replace"), note
+
+
+def _load(run: RunPaths, path: Path) -> tuple[Any | None, str | None]:
+    """-> (document, note). An absent file is (None, None): that is a state, not damage.
+
+    A present file that is not UTF-8, not JSON, or not readable at all is
+    (None, note), and the note goes into the packet. read_json_or_none used to
+    turn the first two into a silent None -- a verdict shown as "None" with
+    nothing saying why -- and let the third reach cli.py's exit-2 path, which
+    wrote no packet at all.
+    """
+    try:
+        return read_json(path), None
+    except ArtifactError as exc:
+        if not path.exists():
+            return None, None
+        return None, f"({_label(run, path)} could not be read: {exc})"
+    except OSError as exc:
+        return None, f"({_label(run, path)} could not be read: {exc.strerror or exc})"
 
 
 def candidates(run: RunPaths) -> list[dict[str, Any]]:
@@ -80,7 +132,7 @@ def candidates(run: RunPaths) -> list[dict[str, Any]]:
         entries.append(
             {
                 "scenario_id": sid,
-                "band": confidence_band(_load(run.verdict(sid))),
+                "band": confidence_band(_load(run, run.verdict(sid))[0]),
                 "hop_depth": scenario.get("hop_depth", 0),
             }
         )
@@ -128,14 +180,23 @@ def stratified(entries: list[dict[str, Any]], size: int) -> list[dict[str, Any]]
 def _section(run: RunPaths, entry: dict[str, Any]) -> list[str]:
     sid = entry["scenario_id"]
     task = run.task_dir(sid)
-    verdict = _load(run.verdict(sid)) or {}
-    expected = _load(run.expected(sid)) or {}
-    instruction = (
-        (task / "instruction.md").read_text(encoding="utf-8").strip()
-        if (task / "instruction.md").is_file()
-        else "(no instruction.md in the emitted package)"
-    )
-    digest = sha256_of(run.seed(sid)) if run.seed(sid).is_file() else "(no seed.json)"
+    verdict, verdict_note = _load(run, run.verdict(sid))
+    expected, expected_note = _load(run, run.expected(sid))
+    verdict = verdict if isinstance(verdict, dict) else {}
+    expected = expected if isinstance(expected, dict) else {}
+    instruction_path = task / "instruction.md"
+    if instruction_path.is_file():
+        text, note = _read_text(run, instruction_path)
+        instruction = "\n\n".join(part for part in (note, text.strip()) if part)
+    else:
+        instruction = "(no instruction.md in the emitted package)"
+    if run.seed(sid).is_file():
+        try:
+            digest = sha256_of(run.seed(sid))
+        except OSError as exc:
+            digest = f"({_label(run, run.seed(sid))} could not be read: {exc.strerror or exc})"
+    else:
+        digest = "(no seed.json)"
     lines = [
         f"## `{sid}` — confidence band: **{entry['band']}**, hop depth {entry['hop_depth']}",
         "",
@@ -150,6 +211,7 @@ def _section(run: RunPaths, entry: dict[str, Any]) -> list[str]:
         "",
         "### Reference answer and assertions",
         "",
+        *([expected_note, ""] if expected_note else []),
         "```json",
         json.dumps(
             {
@@ -164,15 +226,14 @@ def _section(run: RunPaths, entry: dict[str, Any]) -> list[str]:
         "",
     ]
     if run.rationale(sid).is_file():
-        lines += [
-            "### Why the instantiate stage chose this world",
-            "",
-            run.rationale(sid).read_text(encoding="utf-8").strip(),
-            "",
-        ]
+        text, note = _read_text(run, run.rationale(sid))
+        lines += ["### Why the instantiate stage chose this world", ""]
+        lines += [part for part in (note, text.strip()) if part]
+        lines.append("")
     lines += [
         "### Adversary notes",
         "",
+        *([verdict_note, ""] if verdict_note else []),
         f"- **Verdict:** {verdict.get('verdict')}",
         f"- **Uniquely determined:** {verdict.get('uniquely_determined')}",
         f"- **Derivable without guessing:** {verdict.get('derivable_without_guessing')}",
