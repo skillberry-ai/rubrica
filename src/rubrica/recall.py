@@ -20,6 +20,7 @@ from typing import Any
 from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.errors import UsageError
 from rubrica.findings import Finding, format_findings
+from rubrica.manifest import read_run_id
 from rubrica.metrics import jaccard
 from rubrica.paths import RunPaths
 from rubrica.validate import validate_artifact
@@ -223,12 +224,13 @@ def compare(run: RunPaths, gold: dict[str, Any]) -> dict[str, Any]:
     02-scenarios.json could not be read -- `unreadable` then carries why, and
     compare_run turns it into a finding naming the artifact.
 
-    manifest.json is read first and indexed directly, the way smoke_run reads it:
-    a directory without one is not a run, the ArtifactError becomes exit 2, and
+    manifest.json is read first, through manifest.read_run_id the way smoke_run
+    reads it: a directory without a usable one is not a run, the refusal becomes
+    exit 2, and
     compare_run must not write measurement/recall.json into a directory that is
     not a run.
     """
-    run_id = read_json(run.manifest)["run_id"]
+    run_id = read_run_id(run)
     gold_tasks = gold.get("tasks", [])
     denominator = len(gold_tasks)
     # A format tag, not a schema_version: no JSON Schema gates this file,

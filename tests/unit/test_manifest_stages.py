@@ -588,3 +588,40 @@ def test_record_stage_writes_a_manifest_layer_one_accepts_for_every_stage(tmp_pa
     skill = _skill(tmp_path)
     record_stage(run, stage=stage, model="claude-opus-4", effort="high", skill=skill)
     assert validate_artifact(run.manifest, "manifest") == []
+
+
+@pytest.mark.parametrize("document", [[1, 2], "not a manifest"])
+def test_a_manifest_that_is_not_an_object_reaches_the_cli_as_exit_two(tmp_path, document, capsys):
+    """One level up from the corrupt-`stages` guard: a manifest.json that parses
+    but is a list or a string once raised AttributeError, which cli.py's
+    catch-all turned into an exit-1 `[internal]` finding -- and the orchestrator
+    calls record-stage after every dispatch, so that would spend its one repair
+    attempt on a stage that did nothing wrong. Exit 2, one stderr line, nothing
+    on stdout, manifest untouched."""
+    run = _run(tmp_path)
+    write_json(run.manifest, document)
+    before = run.manifest.read_bytes()
+    skill = _skill(tmp_path)
+
+    code = main(
+        [
+            "record-stage",
+            "--run",
+            str(run.root),
+            "--stage",
+            "extract",
+            "--model",
+            "claude-sonnet-5",
+            "--effort",
+            "high",
+            "--skill",
+            str(skill),
+        ]
+    )
+
+    out, err = capsys.readouterr()
+    assert code == 2
+    assert out == ""
+    assert len(err.strip().splitlines()) == 1
+    assert "manifest.json" in err and "not an object" in err
+    assert run.manifest.read_bytes() == before

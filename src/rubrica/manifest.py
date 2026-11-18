@@ -39,6 +39,45 @@ def utc_stamp(now: datetime | None = None) -> str:
     return now.astimezone(UTC).strftime(UTC_FORMAT)
 
 
+def read_manifest(run: RunPaths) -> dict:
+    """manifest.json as a JSON object, or a UsageError naming it.
+
+    manifest.json is intake's code output, so no stage re-dispatch can repair a
+    corrupt one: a list, a string or a number here is the harness pointed at
+    something it cannot act on, which cli.py maps to exit 2. Left unguarded, the
+    caller's first `.get` or `[...]` raised TypeError/AttributeError into cli.py's
+    catch-all and became an exit-1 `[internal]` finding telling the reader to run
+    `validate` -- which never looks at this file.
+    """
+    manifest = read_json(run.manifest)
+    if not isinstance(manifest, dict):
+        raise UsageError(
+            f"manifest.json is a {type(manifest).__name__}, not an object; "
+            f"the manifest at {run.manifest} is corrupt"
+        )
+    return manifest
+
+
+def read_run_id(run: RunPaths) -> str:
+    """The run's `run_id`, refusing a manifest that cannot supply one as exit 2.
+
+    The one door smoke, sample-for-review and compare-gold read the run id
+    through. Each used to index `read_json(run.manifest)["run_id"]` bare, so
+    `[]` or `"hi"` raised TypeError and `{}` raised KeyError -- both exit-1
+    `[internal]` findings, where their own docstrings promised that a directory
+    that is not a run exits 2. A missing file still raises the ArtifactError
+    read_json raises, which cli.py already maps to 2.
+    """
+    manifest = read_manifest(run)
+    run_id = manifest.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        raise UsageError(
+            f"manifest.json has no usable run_id (found {run_id!r}); "
+            f"the manifest at {run.manifest} is corrupt"
+        )
+    return run_id
+
+
 def record_stage(run: RunPaths, *, stage: str, model: str, effort: str, skill: Path) -> None:
     """Merge one stage's model, effort, and skill digest into the manifest.
 
@@ -74,7 +113,13 @@ def record_stage(run: RunPaths, *, stage: str, model: str, effort: str, skill: P
         )
     if not Path(skill).is_file():
         raise UsageError(f"skill file does not exist: {skill}")
-    manifest = read_json(run.manifest)
+    # One level up from the `stages` guard below, and the same reasoning: a
+    # manifest.json that parses but is not an object (a list, a string, a
+    # number) has no `.get`, so the AttributeError fell through to cli.py's
+    # internal-error branch and became exit 1 -- an `[internal]` finding that
+    # spends the orchestrator's one repair attempt on a stage that did nothing
+    # wrong. This is the harness pointed at a manifest it cannot act on: exit 2.
+    manifest = read_manifest(run)
     raw_stages = manifest.get("stages")
     # A hand-edited or corrupt manifest.stages that is present but not a
     # mapping (a list, a string) would make `dict(raw_stages or {})` either
@@ -183,7 +228,11 @@ def set_limit(
             "set_limit's reason cannot contain a newline; decisions.md is one line per entry"
         )
 
-    manifest = read_json(run.manifest)
+    # The whole-document form of the `limits` guard below, as in `record_stage`:
+    # a manifest.json that is a list, string or number has no `.get`, and the
+    # AttributeError became an exit-1 `[internal]` finding through cli.py's
+    # catch-all. Refused here, before anything is written, as exit 2.
+    manifest = read_manifest(run)
     raw_limits = manifest.get("limits")
     # The same guard `record_stage` applies to `manifest.stages`, for the same
     # reason: a hand-edited or corrupt `limits` that is present but not a mapping
