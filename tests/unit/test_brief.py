@@ -507,6 +507,92 @@ def test_gate_one_still_says_no_world_model_yet_when_it_is_missing(tmp_path):
     assert "could not be read" not in block
 
 
+SWEEP_HEADER = "Reconcile sweep"
+VERDICT_HEADER = "Verdict tallies"
+
+
+@pytest.mark.parametrize("label", ["malformed", "locked-file"])
+def test_gate_three_names_an_unreadable_verdict_file_instead_of_dropping_it(tmp_path, label):
+    """Gate 3 used to skip a verdict that was not a readable JSON object, so a
+    corrupt `scn-open.json` turned "4 instances challenged / accept: 4" into a
+    clean-looking "3 ... / accept: 3" with nothing else -- while `validate
+    --stage challenge` named the broken file. The tally still counts only what it
+    read; the brief must now say what it could not."""
+    if label != "malformed" and os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs")
+    target = run.verdict("scn-open")
+    assert target.is_file()
+    if label == "malformed":
+        target.write_text("{trunc\n", encoding="utf-8")
+    else:
+        target.chmod(0o000)
+    try:
+        text = brief.gate_brief(run, 3)
+        block = _section(text, VERDICT_HEADER)
+        assert (
+            "\nVerdict tallies (3 instances challenged; 1 verdict file unreadable, not counted)\n"
+            in text
+        ), text
+        assert "accept: 3" in block
+        assert (
+            "05-verdicts/scn-open.json is present but could not be read -- "
+            "`rubrica validate --stage challenge` names the defect"
+        ) in block, block
+        assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "3"]) == 0
+    finally:
+        target.chmod(0o644)
+
+
+def test_gate_three_with_every_verdict_readable_names_nothing_unreadable(tmp_path):
+    """The other direction: the clean toy run keeps its old header byte for byte,
+    so the new wording is not simply always printed."""
+    run = build_toy_run(tmp_path / "runs")
+    text = brief.gate_brief(run, 3)
+    block = _section(text, VERDICT_HEADER)
+    assert "\nVerdict tallies (4 instances challenged)\n" in text
+    assert "could not be read" not in block
+    assert "unreadable" not in block
+
+
+def test_gate_one_says_a_malformed_subject_cover_is_unreadable_not_absent(tmp_path):
+    """The sweep's first line said "no subject cover yet" for a broken
+    01-subjects.json, directly above a line still counting the subjects swept
+    from it -- which tells a reader to run a pass whose output wants repair."""
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    run.subjects.write_text("{not valid json", encoding="utf-8")
+    block = _section(brief.gate_brief(run, 1), SWEEP_HEADER)
+    assert "no subject cover yet" not in block, block
+    assert (
+        "01-subjects.json is present but could not be read -- "
+        "`rubrica validate --stage reconcile-subjects` names the defect"
+    ) in block, block
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+
+
+def test_gate_one_still_says_no_subject_cover_yet_when_it_is_missing(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    run.subjects.unlink()
+    block = _section(brief.gate_brief(run, 1), SWEEP_HEADER)
+    assert "(no subject cover yet; nothing to report)" in block
+    assert "could not be read" not in block
+
+
+def test_gate_one_names_missing_claims_files_rather_than_a_missing_world_model(tmp_path):
+    """With a world model that reads fine and an empty 01-claims/, the utilisation
+    block said "no world model yet" -- pointing the reader at a seal that had
+    already run. What is missing is the claims, so that is what it must say."""
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    assert isinstance(read_json(run.world_model), dict)
+    for path in list_json(run.claims_dir):
+        path.unlink()
+    block = _section(brief.gate_brief(run, 1), UTILISATION_HEADER)
+    assert "no world model yet" not in block, block
+    assert "could not be read" not in block
+    assert "(no claims files in 01-claims/; nothing to report)" in block
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+
+
 def test_a_surveyed_but_untriaged_run_is_not_told_it_was_minted_by_intake_input(tmp_path):
     """The absent-triage message had two causes and named only one.
 

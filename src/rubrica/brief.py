@@ -1315,7 +1315,8 @@ def _gate_1(run: RunPaths) -> str:
     # non-zero `unresolved` is what should send a reader into 01-contradictions/
     # before reading the world model built on top of it -- this report points at
     # the parts, it does not reproduce them.
-    cover = _mapping(_quietly(run.subjects))
+    cover_payload = _quietly(run.subjects)
+    cover = _mapping(cover_payload)
     subjects = _dicts(cover.get("subjects"))
     covered = {
         cid
@@ -1335,8 +1336,22 @@ def _gate_1(run: RunPaths) -> str:
     lines.append("Reconcile sweep")
     if subjects:
         lines.append(f"  {len(subjects)} subjects over {len(covered)} claims")
-    else:
+    elif _presence(run.subjects) == "absent":
         lines.append("  (no subject cover yet; nothing to report)")
+    elif not isinstance(cover_payload, dict):
+        # Split on presence for `_presence`'s reason: a broken 01-subjects.json
+        # rendered "no subject cover yet" directly above a line that still counted
+        # the subjects swept from it, telling the reader to run a pass whose
+        # output is on disk and wants repairing instead.
+        lines.append(
+            "  ("
+            + _unreadable_line("01-subjects.json", _presence(run.subjects), "reconcile-subjects")
+            + ")"
+        )
+    else:
+        # Read fine and named no usable subject: neither "not yet" nor
+        # "unreadable" is true of it, so say what the file actually holds.
+        lines.append("  (01-subjects.json names no readable subject; nothing to report)")
 
     swept, found = 0, []
     for path in list_json(run.contradictions_dir):
@@ -1396,8 +1411,20 @@ def _gate_1(run: RunPaths) -> str:
             lines.append(
                 "  (" + _unreadable_line("01-world-model.json", presence, "reconcile-seal") + ")"
             )
-        else:
+        elif presence == "absent":
             lines.append("  (no world model yet; nothing to report)")
+        elif not list_json(run.claims_dir):
+            # The world model read fine, so "no world model yet" would send the
+            # reader to a seal that already ran. What is missing is the other half
+            # of the ratio: there is no claims file to count citations against.
+            lines.append("  (no claims files in 01-claims/; nothing to report)")
+        else:
+            # Claims files are listed but none read as a JSON object, which
+            # claim_utilisation skips silently -- so this is the line that says so.
+            lines.append(
+                "  (no file in 01-claims/ could be read -- "
+                "`rubrica validate --stage extract` names the defect)"
+            )
     lines.append("")
 
     # Per pass, not per input, and that distinction is the whole point: the block
@@ -1595,9 +1622,23 @@ def _gate_3(run: RunPaths) -> str:
     lines = [f"GATE 3 -- {run.root}", ""]
     lines.extend(_waiver_lines(run))
     tallies: dict[str, int] = {}
+    # Every verdict file that is listed but did not read as a JSON object. These
+    # used to be skipped in silence, so one corrupt verdict turned "4 instances
+    # challenged / accept: 4" into "3 ... / accept: 3" -- a clean-looking tally
+    # over a broken file, while `validate --stage challenge` named the defect. The
+    # tally stays a count of what was read; these lines say what it left out.
+    unreadable: list[str] = []
     for path in list_json(run.verdicts_dir):
         payload = _quietly(path)
-        if isinstance(payload, dict):
+        if not isinstance(payload, dict):
+            unreadable.append(
+                "  ("
+                + _unreadable_line(
+                    f"{run.verdicts_dir.name}/{path.name}", _presence(path), "challenge"
+                )
+                + ")"
+            )
+        else:
             # str() on the key: `tallies` is grouped on and then `sorted`, so a
             # non-string verdict would either be unhashable or make the sort
             # compare str to int -- the same reason gate 0's reason_code key is
@@ -1607,11 +1648,18 @@ def _gate_3(run: RunPaths) -> str:
             tallies[verdict] = tallies.get(verdict, 0) + 1
 
     total = sum(tallies.values())
-    lines.append(f"Verdict tallies ({total} instance{'s' if total != 1 else ''} challenged)")
+    header = f"Verdict tallies ({total} instance{'s' if total != 1 else ''} challenged"
+    if unreadable:
+        # In the header too, not only below it: the count in this line is what a
+        # reader takes as the size of the challenge, so it must not read complete.
+        n = len(unreadable)
+        header += f"; {n} verdict file{'s' if n != 1 else ''} unreadable, not counted"
+    lines.append(header + ")")
     if tallies:
         for verdict in sorted(tallies):
             lines.append(f"  {verdict}: {tallies[verdict]}")
-    else:
+    elif not unreadable:
         lines.append("  (none)")
+    lines.extend(unreadable)
 
     return "\n".join(lines) + "\n"
