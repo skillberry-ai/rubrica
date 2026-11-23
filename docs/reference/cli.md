@@ -768,7 +768,12 @@ first and shown even at zero. Both sweep numbers print either way: "12 subjects
 swept, 0 contradictions" is a strong claim about the corpus and has to be legible
 as one rather than rendered as silence. The sweep reports counts, not the
 contradictions themselves, so a non-zero `unresolved` is the cue to open
-`01-contradictions/`. The world model's gaps and triage's open deficiencies
+`01-contradictions/`. A `01-subjects.json` that is present but unreadable is
+said to be unreadable, naming `rubrica validate --stage reconcile-subjects`,
+rather than rendered as "no subject cover yet"; the same split holds at gate 3,
+where a verdict file that does not read as a JSON object is named beneath the
+tally and counted in its header as not counted, so the tally never looks
+complete over a broken verdict. The world model's gaps and triage's open deficiencies
 follow, each listed by its id and its prose statement, since pairing them is a
 human's call and no mechanical check exists for it. One block per **service**
 closes the content, described in its own paragraph below. The brief then closes by
@@ -908,7 +913,13 @@ rubrica gate-brief --run runs/run-20260806-123005 --gate 1
 ### `rubrica claim-utilisation`
 
 Reports each input artifact's share of claims the world model actually
-cites — cited count, total count, and percent, per artifact.
+cites — cited count, total count, and percent, per artifact. A claims file
+that is listed but does not read as a JSON object (broken JSON, a top-level
+array, a file that cannot be opened) gets no row; its file name goes in an
+`unreadable` list instead, so the input is named rather than silently missing.
+That key appears only when some file was unreadable, and gate 1's brief shows
+the same files under its utilisation block, pointing at
+`rubrica validate --stage extract`.
 
 Required: `--run RUN`.
 

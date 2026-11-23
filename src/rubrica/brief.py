@@ -255,6 +255,40 @@ def _quietly(path):
     return read_json_or_none(path, quiet=True)
 
 
+def _presence(path) -> str:
+    """Whether `path` is "absent", "present" or "unknown", without reading it.
+
+    `_quietly` returns None for a missing file, a locked one and broken JSON
+    alike, so a brief that branched on None alone told a reader holding a
+    malformed `03-coverage/latest.json` that it was absent -- while `validate`
+    named the defect. That is the wrong question to hand a human: "run the stage"
+    rather than "repair what the stage wrote". `Path.is_file()` is not enough to
+    split the two either, because it answers False when a locked parent folder
+    stops `stat` from looking, which would turn "could not be read" back into
+    "absent". So `stat` is called directly and only a not-found error counts as
+    absence; any other OS error is "unknown", which the caller renders as
+    unreadable. Never raises: this is a report, not a gate.
+    """
+    try:
+        path.stat()
+    except (FileNotFoundError, NotADirectoryError):
+        return "absent"
+    except OSError:
+        return "unknown"
+    return "present"
+
+
+def _unreadable_line(name: str, presence: str, stage: str) -> str:
+    """The wording for a document that is on disk (or may be) and was not read.
+
+    Shared so gates 1 and 2 say it the way gate 0 already does, naming the
+    `validate` run that reports the actual defect rather than restating it here,
+    where it would be counted twice.
+    """
+    where = "is present but could not be read" if presence == "present" else "could not be read"
+    return f"{name} {where} -- `rubrica validate --stage {stage}` names the defect"
+
+
 def _mapping(value) -> dict:
     """`value` if it is a dict, else `{}`.
 
@@ -1281,7 +1315,8 @@ def _gate_1(run: RunPaths) -> str:
     # non-zero `unresolved` is what should send a reader into 01-contradictions/
     # before reading the world model built on top of it -- this report points at
     # the parts, it does not reproduce them.
-    cover = _mapping(_quietly(run.subjects))
+    cover_payload = _quietly(run.subjects)
+    cover = _mapping(cover_payload)
     subjects = _dicts(cover.get("subjects"))
     covered = {
         cid
@@ -1301,8 +1336,22 @@ def _gate_1(run: RunPaths) -> str:
     lines.append("Reconcile sweep")
     if subjects:
         lines.append(f"  {len(subjects)} subjects over {len(covered)} claims")
-    else:
+    elif _presence(run.subjects) == "absent":
         lines.append("  (no subject cover yet; nothing to report)")
+    elif not isinstance(cover_payload, dict):
+        # Split on presence for `_presence`'s reason: a broken 01-subjects.json
+        # rendered "no subject cover yet" directly above a line that still counted
+        # the subjects swept from it, telling the reader to run a pass whose
+        # output is on disk and wants repairing instead.
+        lines.append(
+            "  ("
+            + _unreadable_line("01-subjects.json", _presence(run.subjects), "reconcile-subjects")
+            + ")"
+        )
+    else:
+        # Read fine and named no usable subject: neither "not yet" nor
+        # "unreadable" is true of it, so say what the file actually holds.
+        lines.append("  (01-subjects.json names no readable subject; nothing to report)")
 
     swept, found = 0, []
     for path in list_json(run.contradictions_dir):
@@ -1344,16 +1393,57 @@ def _gate_1(run: RunPaths) -> str:
     lines.extend(_excluded_lines(run, world))
     lines.append("")
 
-    lines.append("Claim utilisation, per input")
     utilisation = claim_utilisation(run)
+    # Claims files that are listed but did not read as a JSON object. These used
+    # to vanish: one truncated `notes-md.json` removed its row and changed nothing
+    # else, so the block read as complete over a broken input -- gate 3's verdict
+    # defect, one gate earlier. The rows stay a count of what was read; the
+    # header and these lines say what they left out.
+    unreadable = [name for name in utilisation.get("unreadable", []) if isinstance(name, str)]
+    header = "Claim utilisation, per input"
+    if unreadable and utilisation["artifacts"]:
+        # In the header, not only below it, for gate 3's reason: the row count is
+        # what a reader takes as the number of inputs, so it must not read complete.
+        n = len(unreadable)
+        header += f" ({n} claims file{'s' if n != 1 else ''} unreadable, not counted)"
+    lines.append(header)
     if utilisation["artifacts"]:
         for entry in utilisation["artifacts"]:
             lines.append(
                 f"  {entry['artifact_id']}: {entry['cited']}/{entry['total']} claims cited "
                 f"({entry['percent']}%)"
             )
+        for name in unreadable:
+            path = run.claims_dir / name
+            lines.append(
+                "  ("
+                + _unreadable_line(f"{run.claims_dir.name}/{name}", _presence(path), "extract")
+                + ")"
+            )
     else:
-        lines.append("  (no world model yet; nothing to report)")
+        # An empty report has two meanings and they want different actions: no
+        # world model yet means "run the seal", a broken one means "repair it".
+        # `world` is the single read above, so an empty mapping here is a file
+        # that was absent, unreadable, or not a JSON object.
+        presence = _presence(run.world_model)
+        if presence != "absent" and not world:
+            lines.append(
+                "  (" + _unreadable_line("01-world-model.json", presence, "reconcile-seal") + ")"
+            )
+        elif presence == "absent":
+            lines.append("  (no world model yet; nothing to report)")
+        elif not list_json(run.claims_dir):
+            # The world model read fine, so "no world model yet" would send the
+            # reader to a seal that already ran. What is missing is the other half
+            # of the ratio: there is no claims file to count citations against.
+            lines.append("  (no claims files in 01-claims/; nothing to report)")
+        else:
+            # Claims files are listed but none read as a JSON object, which
+            # claim_utilisation skips silently -- so this is the line that says so.
+            lines.append(
+                "  (no file in 01-claims/ could be read -- "
+                "`rubrica validate --stage extract` names the defect)"
+            )
     lines.append("")
 
     # Per pass, not per input, and that distinction is the whole point: the block
@@ -1504,7 +1594,18 @@ def _gate_2(run: RunPaths) -> str:
     lines.extend(_waiver_lines(run))
     coverage = _quietly(run.coverage_latest)
     if coverage is None:
-        lines.append("No coverage report yet (03-coverage/latest.json is absent).")
+        # None covers missing, locked and malformed alike; only the first is
+        # "not yet". A score-seal that wrote broken JSON has run, and telling the
+        # reader otherwise sends them to re-run a stage instead of repairing it.
+        presence = _presence(run.coverage_latest)
+        if presence == "absent":
+            lines.append("No coverage report yet (03-coverage/latest.json is absent).")
+        else:
+            lines.append(
+                "No coverage report to show ("
+                + _unreadable_line("03-coverage/latest.json", presence, "score-seal")
+                + ")."
+            )
         return "\n".join(lines) + "\n"
 
     coverage = _mapping(coverage)
@@ -1540,9 +1641,23 @@ def _gate_3(run: RunPaths) -> str:
     lines = [f"GATE 3 -- {run.root}", ""]
     lines.extend(_waiver_lines(run))
     tallies: dict[str, int] = {}
+    # Every verdict file that is listed but did not read as a JSON object. These
+    # used to be skipped in silence, so one corrupt verdict turned "4 instances
+    # challenged / accept: 4" into "3 ... / accept: 3" -- a clean-looking tally
+    # over a broken file, while `validate --stage challenge` named the defect. The
+    # tally stays a count of what was read; these lines say what it left out.
+    unreadable: list[str] = []
     for path in list_json(run.verdicts_dir):
         payload = _quietly(path)
-        if isinstance(payload, dict):
+        if not isinstance(payload, dict):
+            unreadable.append(
+                "  ("
+                + _unreadable_line(
+                    f"{run.verdicts_dir.name}/{path.name}", _presence(path), "challenge"
+                )
+                + ")"
+            )
+        else:
             # str() on the key: `tallies` is grouped on and then `sorted`, so a
             # non-string verdict would either be unhashable or make the sort
             # compare str to int -- the same reason gate 0's reason_code key is
@@ -1552,11 +1667,18 @@ def _gate_3(run: RunPaths) -> str:
             tallies[verdict] = tallies.get(verdict, 0) + 1
 
     total = sum(tallies.values())
-    lines.append(f"Verdict tallies ({total} instance{'s' if total != 1 else ''} challenged)")
+    header = f"Verdict tallies ({total} instance{'s' if total != 1 else ''} challenged"
+    if unreadable:
+        # In the header too, not only below it: the count in this line is what a
+        # reader takes as the size of the challenge, so it must not read complete.
+        n = len(unreadable)
+        header += f"; {n} verdict file{'s' if n != 1 else ''} unreadable, not counted"
+    lines.append(header + ")")
     if tallies:
         for verdict in sorted(tallies):
             lines.append(f"  {verdict}: {tallies[verdict]}")
-    else:
+    elif not unreadable:
         lines.append("  (none)")
+    lines.extend(unreadable)
 
     return "\n".join(lines) + "\n"
