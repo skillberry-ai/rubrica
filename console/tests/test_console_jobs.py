@@ -17,6 +17,7 @@ import shutil
 import stat
 import textwrap
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,7 @@ from rubrica_console.jobs import (
     ConsoleError,
     Job,
     Options,
+    _Stop,
 )
 
 from tests.toy import build_toy_run
@@ -893,3 +895,73 @@ def test_create_run_passes_a_string_limit_to_survey_as_a_number(tmp_path, fake):
     )
     catalogue = json.loads(console.run_paths(name).catalogue.read_text())
     assert catalogue["request"]["limits"] == {"max_rounds": 4, "max_scenarios": 7}
+
+
+# -- routing a fan-out repair ---------------------------------------------------
+
+
+def _split(tmp_path, root: str, members: list[str], lines: list[str]) -> dict[str, list[str]]:
+    """Console._split_findings on a findings file, with only the state it touches stubbed."""
+    findings = tmp_path / "findings.txt"
+    findings.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    home = tmp_path / "home"
+    stub = types.SimpleNamespace(_state=lambda run: types.SimpleNamespace(home=home))
+    job = types.SimpleNamespace(run="r1", id="j1")
+    step = types.SimpleNamespace(members_done=members, members_todo=[])
+    ids, per = Console._split_findings(stub, job, findings, step, Path(root))
+    return {m: per[m].read_text(encoding="utf-8").splitlines() for m in ids}
+
+
+def test_a_run_folder_naming_a_member_does_not_steal_its_siblings_findings(tmp_path):
+    """The lab folder `notes-app` once sent trace's findings to notes."""
+    root = "/Users/me/notes-app/runs/r1"
+    notes = f"[schema] {root}/01-claims/notes.json#/claims/0: 'kind' is a required property"
+    trace = f"[refs] {root}/01-claims/trace.json#/claims/2: no such claim"
+    routed = _split(tmp_path, root, ["api", "notes", "trace"], [notes, trace])
+    assert routed == {"notes": [notes], "trace": [trace]}
+
+
+def test_equal_length_and_prefix_ids_route_by_their_own_path(tmp_path):
+    # The run folder names the longest id, which longest-first substring matching
+    # would hand every line to.
+    root = "/labs/orphan2/runs/r1"
+    lines = {
+        "orphan": f"[refs] {root}/04-instances/orphan/seed.json#/x: bad seed",
+        "orphan2": f"[refs] {root}/04-instances/orphan2/seed.json#/x: bad seed",
+        "s1": f"[refs] {root}/05-verdicts/s1.json: verdict for s1, which has no instance",
+        "s2": f"[schema] {root}/05-verdicts/s2.json#/v: not valid",
+    }
+    routed = _split(tmp_path, root, list(lines), list(lines.values()))
+    assert routed == {m: [ln] for m, ln in lines.items()}
+
+
+def test_a_message_naming_a_sibling_goes_to_the_paths_member_only(tmp_path):
+    root = "/runs/r1"
+    line = (
+        f"[refs] {root}/02-scenarios/round-1/b1.json#/scenarios/0: "
+        "duplicates a scenario in b2 and cites b2.json"
+    )
+    # b2 listed first: a first-match on the whole line would hand b1's finding to it.
+    assert _split(tmp_path, root, ["b2", "b1"], [line]) == {"b1": [line]}
+
+
+def test_a_missing_slice_reported_on_the_directory_still_reaches_its_member(tmp_path):
+    """refs reports a missing slice against the directory, with the id in the message."""
+    root = "/Users/me/notes-app/runs/r1"
+    line = (
+        f"[refs] {root}/01-claims: input trace has no claims file on disk; every "
+        "registered input needs one"
+    )
+    assert _split(tmp_path, root, ["api", "notes", "trace"], [line]) == {"trace": [line]}
+
+
+def test_findings_naming_no_member_still_stop_the_repair(tmp_path):
+    root = "/Users/me/notes-app/runs/r1"
+    lines = [
+        f"[schema] {root}: stage 'extract' produced no claims artifact",
+        f"[refs] {root}/01-world-model.json#/capabilities/0: cites notes-c1, no such claim",
+    ]
+    with pytest.raises(_Stop) as stop:
+        _split(tmp_path, root, ["api", "notes", "trace"], lines)
+    assert stop.value.status == FAILED
+    assert "name no member" in stop.value.message

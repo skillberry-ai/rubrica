@@ -58,6 +58,65 @@ QUEUED, RUNNING, SUCCEEDED, FAILED, HALTED, CANCELLED, INTERRUPTED = (
 )
 _ACTIVE = (QUEUED, RUNNING)
 
+# The directories a fan-out member writes its own slice into, relative to the run
+# root: `<dir>/<id>.json`, or `04-instances/<id>/` for instantiate. A repair is
+# routed by the slice named here, never by an id found anywhere in the line: every
+# finding line starts with the artifact's full path, run folder included, so a lab
+# folder called `notes-app` once sent the findings on both 01-claims/notes.json and
+# 01-claims/trace.json to `notes`, and `trace` was never repaired.
+_SLICE_DIR = re.compile(
+    r"(?P<dir>00-dispositions|01-claims|01-contradictions|02-scenarios/round-\d+"
+    r"|04-instances|05-verdicts)(?:/(?P<slice>[^/#:\s]+))?(?=[/#]|: )"
+)
+# findings.Finding.__str__: `[waived] ` (optional), then `[<layer>] `, then the path.
+_FINDING_HEAD = re.compile(r"^(?:\[waived\] )?\[[^\]\s]*\] ")
+
+
+def _named_in(message: str, member: str) -> bool:
+    """`member` appears in `message` as a whole id (optionally `<id>.json`), not inside one.
+
+    Ids carry letters, digits, dots, dashes and underscores (paths.is_safe_segment),
+    so `orphan` inside `orphan2`, or `notes` inside the claim id `notes-c1`, is not a
+    mention. A trailing sentence full stop still is.
+    """
+    pattern = rf"(?<![\w.\-]){re.escape(member)}(?:\.json)?(?![\w\-]|\.\w)"
+    return re.search(pattern, message) is not None
+
+
+def _finding_owners(line: str, root: Path, members: list[str]) -> list[str]:
+    """The members a finding line belongs to, read from the artifact path it names.
+
+    A line whose path is a member's own slice (`01-claims/<id>.json`,
+    `04-instances/<id>/seed.json`) belongs to that member alone, whatever ids its
+    message mentions: a member must never receive a sibling's material. A line
+    whose path is the slice directory itself is how refs reports a *missing* slice
+    ("input notes has no claims file on disk"), and there the id lives only in the
+    message, so the members it names as whole ids own it. Anything else -- a path
+    outside the run, outside the slice directories, or a slice that is no member --
+    belongs to nobody, and the caller says so rather than guessing.
+    """
+    head = _FINDING_HEAD.match(line)
+    if head is None:
+        return []
+    prefix = f"{root}/"
+    rest = line[head.end() :]
+    if not rest.startswith(prefix):
+        return []
+    found = _SLICE_DIR.match(rest, len(prefix))
+    if found is None:
+        return []
+    slice_part = found["slice"]
+    if slice_part is not None:
+        for candidate in (slice_part, slice_part.removesuffix(".json")):
+            if candidate in members:
+                return [candidate]
+        return []
+    # The directory itself: the message follows the path (and any pointer).
+    _, sep, message = rest[found.end() :].partition(": ")
+    if not sep:
+        return []
+    return [m for m in members if _named_in(message, m)]
+
 
 class ConsoleError(Exception):
     """A request the console refuses: shown to the human, never a crash."""
@@ -637,7 +696,7 @@ class Console:
             ids = op["ids"]
             per_member: dict[str, Path] = {}
             if findings_from:
-                ids, per_member = self._split_findings(job, Path(findings_from), step)
+                ids, per_member = self._split_findings(job, Path(findings_from), step, run.root)
             self._dispatch_members(job, run, op["stage"], ids, opts, per_member=per_member)
         elif kind == "cli":
             self._gate(job, [*op["args"], *rid], op["args"][0])
@@ -736,24 +795,25 @@ class Console:
             self._gate(job, ["validate", "--stage", "score-seal", *rid], "validate score-seal")
         self._gate(job, ["check-refs", *rid], "check-refs")
 
-    def _split_findings(self, job, findings: Path, step) -> tuple[list[str], dict[str, Path]]:
+    def _split_findings(
+        self, job, findings: Path, step, root: Path | None = None
+    ) -> tuple[list[str], dict[str, Path]]:
         """A fan-out repair goes to the members its findings name, each with its own lines.
 
-        A member is named by a finding line that contains its id. Lines that name no
-        member cannot be routed to one, and the repair says so rather than guessing.
+        A member is named by the artifact path of a finding line -- its own slice in
+        the stage's slice directory -- see _finding_owners. Lines that name no member
+        cannot be routed to one, and the repair says so rather than guessing.
         """
         try:
             lines = findings.read_text(encoding="utf-8").splitlines()
         except OSError as exc:
             raise _Stop(HALTED, f"cannot read the findings to repair from: {exc}") from exc
+        if root is None:
+            root = self.run_paths(job.run).root
         members = step.members_done + step.members_todo
-        # Longest first, so an id that is a prefix of another (orphan / orphan2)
-        # does not claim its sibling's lines.
-        ordered = sorted(members, key=len, reverse=True)
         routed: dict[str, list[str]] = {}
         for line in lines:
-            owner = next((m for m in ordered if m in line), None)
-            if owner:
+            for owner in _finding_owners(line, root, members):
                 routed.setdefault(owner, []).append(line)
         if not routed:
             raise _Stop(
