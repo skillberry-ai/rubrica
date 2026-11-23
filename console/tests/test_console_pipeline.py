@@ -150,6 +150,21 @@ def test_a_gate_line_in_a_documented_form_counts(tmp_path, line, gate):
     assert pipeline.approved_gates(run) == {gate}
 
 
+def test_a_non_utf8_byte_in_decisions_md_drops_no_approval(tmp_path):
+    # decisions.md is hand-edited, so a line saved as Latin-1 (byte 0xe9 for "e
+    # acute") is something a reviewer can produce. Before T-81 that one byte made
+    # the whole file read as empty, and every gate approved earlier showed as
+    # waiting again. Now only the bad byte is replaced: the other lines still
+    # count, and the bad line counts too when it is otherwise an approval.
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.decisions.write_bytes(
+        b"- 2026-11-18T09:00Z human gate 1 (console): world model reads right\n"
+        b"- 2026-11-18T10:00Z human gate 2 (console): ok caf\xe9\n"
+    )
+    assert pipeline.approved_gates(run) == {1, 2}
+    assert pipeline.find(pipeline.steps(run), "gate-1").status == DONE
+
+
 def test_a_gate_is_inferred_passed_when_a_later_stage_ran(tmp_path):
     run = build_toy_run(tmp_path, upto="propose")
     gate = pipeline.find(pipeline.steps(run), "gate-1")

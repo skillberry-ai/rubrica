@@ -1110,10 +1110,9 @@ class Console:
     def gate_history(self, name: str, gate: int) -> list[str]:
         """Every decisions.md line about this gate: approvals and feedback alike."""
         run = self.run_paths(name)
-        try:
-            lines = run.decisions.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            return []
+        # Through pipeline's reader, so a non-UTF-8 byte in this hand-edited file
+        # is replaced here exactly as it is for approved_gates (T-81).
+        lines = pipeline.decision_lines(run)
         pattern = re.compile(rf"\bgate {gate}\b", re.IGNORECASE)
         return [ln[2:] if ln.startswith("- ") else ln for ln in lines if pattern.search(ln)]
 

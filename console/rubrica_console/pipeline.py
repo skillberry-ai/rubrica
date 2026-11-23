@@ -225,16 +225,24 @@ def _ids(document, key: str, field_name: str = "id") -> list[str]:
     return out
 
 
-def _decision_lines(run: RunPaths) -> list[str]:
+def decision_lines(run: RunPaths) -> list[str]:
+    """decisions.md as lines, or [] when it is missing or unreadable.
+
+    The one reader of decisions.md in the console, shared with `jobs.gate_history`
+    so the two cannot disagree again (T-81). decisions.md is hand-edited (cf. T-62's
+    .gitignore fix), so a line saved as Latin-1 is a real input: a byte that is not
+    UTF-8 is replaced rather than failing the read. Failing it made one stray byte
+    either drop every recorded approval here or answer 500 from the gate panel.
+    """
     try:
-        return run.decisions.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
+        return run.decisions.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
         return []
 
 
 def approved_gates(run: RunPaths) -> set[int]:
     gates = set()
-    for line in _decision_lines(run):
+    for line in decision_lines(run):
         match = _GATE_LINE.match(line)
         if not match:
             continue
@@ -245,7 +253,7 @@ def approved_gates(run: RunPaths) -> set[int]:
 
 
 def _rounds_marked(run: RunPaths, pattern: re.Pattern) -> set[int]:
-    return {int(m.group(1)) for line in _decision_lines(run) if (m := pattern.match(line))}
+    return {int(m.group(1)) for line in decision_lines(run) if (m := pattern.match(line))}
 
 
 def _non_empty_dir(path: Path) -> bool:

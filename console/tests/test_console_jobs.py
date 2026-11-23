@@ -424,6 +424,33 @@ def test_a_gate_cannot_be_run_only_approved_with_a_note(tmp_path, fake):
     assert _status(console, name)["gate-1"] == pipeline.DONE
 
 
+def test_gate_history_survives_a_non_utf8_byte_and_an_unreadable_file(tmp_path, fake):
+    # decisions.md is hand-edited, so one Latin-1 byte must not turn the gate
+    # panel into a 500: the bad byte is replaced and the gate's lines still show.
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    console = _console(tmp_path, run.root.parent, fake)
+    name = run.root.name
+    run.decisions.write_bytes(
+        b"- 2026-11-18T09:00Z human gate 1 (console): world model reads right\n"
+        b"- 2026-11-18T10:00Z gate 1 note: caf\xe9 grouping checked\n"
+        b"- 2026-11-18T11:00Z human gate 2 (console): ok\n"
+    )
+    history = console.gate_history(name, 1)
+    assert history == [
+        "2026-11-18T09:00Z human gate 1 (console): world model reads right",
+        "2026-11-18T10:00Z gate 1 note: caf\ufffd grouping checked",
+    ]
+    run.decisions.chmod(0)
+    try:
+        if os.access(run.decisions, os.R_OK):
+            pytest.skip("running as a user that can read a mode-000 file")
+        assert console.gate_history(name, 1) == []
+    finally:
+        run.decisions.chmod(0o644)
+    run.decisions.unlink()
+    assert console.gate_history(name, 1) == []
+
+
 def test_gate_0_approval_admits_the_inputs_and_records_the_triage_passes(tmp_path, fake):
     run = build_toy_run(tmp_path / "runs", upto="triage-seal")
     console = _console(tmp_path, run.root.parent, fake)
