@@ -1185,6 +1185,9 @@ longer be attributed to a stage.
 
 Prints one task directory per emitted scenario, then findings (if any) on
 exit 1.
+A missing or unreadable suite template (`verify.py` or `test.sh` in the
+folder `RUBRICA_SUITE_DIR` names, or in the installed package data) is exit 2,
+and emit checks it before touching anything, so nothing in `06-suite/` changes.
 
 ```bash
 rubrica emit --run runs/run-20260806-123005

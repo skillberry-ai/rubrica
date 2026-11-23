@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import tomllib
+from pathlib import Path
+
+import pytest
 
 from rubrica.artifacts import write_json
 from rubrica.emit import emit_run, suite_template_dir
@@ -479,3 +484,85 @@ def test_emit_is_byte_stable_across_runs(tmp_path):
         if p.is_file()
     }
     assert first == second
+
+
+# --- A bad suite template folder is a setup error, and must touch nothing -----
+#
+# emit used to delete a package and write six of its eight files before it ever
+# looked at the template folder, so a re-emit with RUBRICA_SUITE_DIR pointing at
+# the wrong place exited 2 (right) having left a half-written package behind
+# (wrong). check-refs then exited 1 naming 06-suite/<sid> as a defect in emit's
+# output, when the cause was a setup problem no re-dispatch can fix. These tests
+# re-emit over a good suite and require 06-suite to be byte-for-byte unchanged.
+
+
+def _suite_snapshot(run: RunPaths) -> dict[str, bytes | None]:
+    """Every path under 06-suite/, with file contents (None for a directory)."""
+    return {
+        str(p.relative_to(run.suite_dir)): (p.read_bytes() if p.is_file() else None)
+        for p in sorted(run.suite_dir.rglob("*"))
+    }
+
+
+def _emitted_toy_run(tmp_path) -> RunPaths:
+    from rubrica.cli import main
+    from tests.toy import build_toy_run
+
+    run = build_toy_run(tmp_path / "runs", upto="challenge")
+    assert main(["emit", "--run", str(run.root)]) == 0
+    assert main(["check-refs", "--run", str(run.root)]) == 0
+    return run
+
+
+def _assert_bad_template_touches_nothing(monkeypatch, run: RunPaths, template: Path, capsys):
+    from rubrica.cli import main
+
+    before = _suite_snapshot(run)
+    assert before, "the clean emit wrote nothing, so the comparison would be vacuous"
+    capsys.readouterr()
+    monkeypatch.setenv("RUBRICA_SUITE_DIR", str(template))
+    assert main(["emit", "--run", str(run.root)]) == 2
+    err = capsys.readouterr().err
+    monkeypatch.delenv("RUBRICA_SUITE_DIR")
+    assert _suite_snapshot(run) == before
+    assert str(template) in err and "RUBRICA_SUITE_DIR" in err
+    assert main(["check-refs", "--run", str(run.root)]) == 0
+
+
+def test_an_empty_suite_template_folder_exits_two_and_leaves_the_suite_untouched(
+    monkeypatch, tmp_path, capsys
+):
+    run = _emitted_toy_run(tmp_path)
+    template = tmp_path / "empty-template"
+    template.mkdir()
+    _assert_bad_template_touches_nothing(monkeypatch, run, template, capsys)
+
+
+def test_a_template_folder_missing_only_test_sh_exits_two_and_leaves_the_suite_untouched(
+    monkeypatch, tmp_path, capsys
+):
+    """Catches a check of verify.py alone: the second file must be checked too."""
+    run = _emitted_toy_run(tmp_path)
+    template = tmp_path / "half-template"
+    template.mkdir()
+    shutil.copyfile(suite_template_dir() / "verify.py", template / "verify.py")
+    _assert_bad_template_touches_nothing(monkeypatch, run, template, capsys)
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="chmod 000 does not stop root from reading",
+)
+def test_an_unreadable_template_file_exits_two_and_leaves_the_suite_untouched(
+    monkeypatch, tmp_path, capsys
+):
+    run = _emitted_toy_run(tmp_path)
+    template = tmp_path / "locked-template"
+    template.mkdir()
+    for name in ("verify.py", "test.sh"):
+        shutil.copyfile(suite_template_dir() / name, template / name)
+    (template / "test.sh").chmod(0o000)
+    try:
+        _assert_bad_template_touches_nothing(monkeypatch, run, template, capsys)
+    finally:
+        (template / "test.sh").chmod(0o644)
