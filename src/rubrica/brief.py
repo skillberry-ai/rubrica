@@ -1393,13 +1393,32 @@ def _gate_1(run: RunPaths) -> str:
     lines.extend(_excluded_lines(run, world))
     lines.append("")
 
-    lines.append("Claim utilisation, per input")
     utilisation = claim_utilisation(run)
+    # Claims files that are listed but did not read as a JSON object. These used
+    # to vanish: one truncated `notes-md.json` removed its row and changed nothing
+    # else, so the block read as complete over a broken input -- gate 3's verdict
+    # defect, one gate earlier. The rows stay a count of what was read; the
+    # header and these lines say what they left out.
+    unreadable = [name for name in utilisation.get("unreadable", []) if isinstance(name, str)]
+    header = "Claim utilisation, per input"
+    if unreadable and utilisation["artifacts"]:
+        # In the header, not only below it, for gate 3's reason: the row count is
+        # what a reader takes as the number of inputs, so it must not read complete.
+        n = len(unreadable)
+        header += f" ({n} claims file{'s' if n != 1 else ''} unreadable, not counted)"
+    lines.append(header)
     if utilisation["artifacts"]:
         for entry in utilisation["artifacts"]:
             lines.append(
                 f"  {entry['artifact_id']}: {entry['cited']}/{entry['total']} claims cited "
                 f"({entry['percent']}%)"
+            )
+        for name in unreadable:
+            path = run.claims_dir / name
+            lines.append(
+                "  ("
+                + _unreadable_line(f"{run.claims_dir.name}/{name}", _presence(path), "extract")
+                + ")"
             )
     else:
         # An empty report has two meanings and they want different actions: no

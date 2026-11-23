@@ -15,7 +15,11 @@ promote that trivia into the world model.
 from __future__ import annotations
 
 import json
+import os
 
+import pytest
+
+from rubrica import cli
 from rubrica.artifacts import read_json, write_json
 from rubrica.paths import RunPaths
 from rubrica.refs import check_claim_utilisation
@@ -174,3 +178,46 @@ def test_a_claim_cited_only_on_a_child_element_counts_as_cited(tmp_path):
     assert "clm-api-005" in cited, "an outcome class's own claims are not counted"
     assert "clm-notes-005" in cited, "an invariant's own claims are not counted"
     assert "clm-notes-006" in cited, "a gap's own claims are not counted"
+
+
+@pytest.mark.parametrize("label", ["malformed", "non-object", "locked-file"])
+def test_a_claims_file_that_does_not_read_as_an_object_is_named_not_dropped(
+    tmp_path, capsys, label
+):
+    """A listed claims file `_quietly` could not turn into a JSON object used to be
+    skipped in silence: `claim-utilisation` listed the other two inputs and said
+    nothing about the third, while `validate --stage extract` named the defect.
+    It is now named under `unreadable`, and the other rows are untouched."""
+    if label == "locked-file" and os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs")
+    target = run.claims_dir / "notes-md.json"
+    if label == "malformed":
+        target.write_text("{trunc\n", encoding="utf-8")
+    elif label == "non-object":
+        target.write_text("[]\n", encoding="utf-8")
+    else:
+        target.chmod(0o000)
+    try:
+        report = claim_utilisation(run)
+        assert report["unreadable"] == ["notes-md.json"]
+        assert sorted(e["artifact_id"] for e in report["artifacts"]) == [
+            "api-json",
+            "trace-json",
+        ]
+        # The zero-utilisation finding reads `artifacts` only, so the new key
+        # neither adds a finding nor removes one.
+        assert check_claim_utilisation(run) == []
+        capsys.readouterr()
+        assert cli.main(["claim-utilisation", "--run", str(run.root)]) == 0
+        printed = json.loads(capsys.readouterr().out)
+        assert printed["unreadable"] == ["notes-md.json"]
+    finally:
+        target.chmod(0o644)
+
+
+def test_a_fully_readable_run_reports_no_unreadable_key(tmp_path):
+    """The other direction: over a run whose every claims file reads, the report
+    keeps its old shape exactly, so the printed JSON does not change."""
+    run = build_toy_run(tmp_path / "runs")
+    assert set(claim_utilisation(run)) == {"format", "artifacts"}

@@ -26,8 +26,16 @@ def claim_utilisation(run: RunPaths) -> dict:
     An absent or unreadable world model yields no artifacts rather than every
     claim counted as uncited: `check-refs` runs at every stage gate, and a run
     stopped at extract legitimately has claims and no world model.
+
+    A claims file that is listed but does not read as a JSON object -- broken
+    JSON, a top-level array, a file the process may not open -- is named under
+    `unreadable` rather than skipped. Skipping it was silent: gate 1 lost the
+    input's row and nothing else changed, while `validate --stage extract` named
+    the defect. The key is present only when something was unreadable, so the
+    report over a fully readable run is byte-for-byte what it was before.
     """
     artifacts: list[dict] = []
+    unreadable: list[str] = []
     cited = _cited_claim_ids(run)
     if cited is None:
         return {"format": FORMAT, "artifacts": artifacts}
@@ -35,6 +43,9 @@ def claim_utilisation(run: RunPaths) -> dict:
     for path in list_json(run.claims_dir):
         payload = _quietly(path)
         if not isinstance(payload, dict):
+            # The file name, not a guessed artifact id: there is no readable
+            # `artifact_id` to take, and the name is what a reader opens next.
+            unreadable.append(path.name)
             continue
         # Deliberately *not* guarded, unlike the world-model reads in
         # `_cited_claim_ids` below. A malformed `01-claims/` member raises here --
@@ -67,7 +78,10 @@ def claim_utilisation(run: RunPaths) -> dict:
                 "percent": (100 * used // len(ids)) if ids else 0,
             }
         )
-    return {"format": FORMAT, "artifacts": artifacts}
+    report: dict = {"format": FORMAT, "artifacts": artifacts}
+    if unreadable:
+        report["unreadable"] = unreadable
+    return report
 
 
 def _cited_claim_ids(run: RunPaths) -> set[str] | None:

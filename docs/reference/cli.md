@@ -913,7 +913,13 @@ rubrica gate-brief --run runs/run-20260806-123005 --gate 1
 ### `rubrica claim-utilisation`
 
 Reports each input artifact's share of claims the world model actually
-cites — cited count, total count, and percent, per artifact.
+cites — cited count, total count, and percent, per artifact. A claims file
+that is listed but does not read as a JSON object (broken JSON, a top-level
+array, a file that cannot be opened) gets no row; its file name goes in an
+`unreadable` list instead, so the input is named rather than silently missing.
+That key appears only when some file was unreadable, and gate 1's brief shows
+the same files under its utilisation block, pointing at
+`rubrica validate --stage extract`.
 
 Required: `--run RUN`.
 

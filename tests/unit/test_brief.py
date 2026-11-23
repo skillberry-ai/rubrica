@@ -555,6 +555,54 @@ def test_gate_three_with_every_verdict_readable_names_nothing_unreadable(tmp_pat
     assert "unreadable" not in block
 
 
+@pytest.mark.parametrize("label", ["malformed", "non-object", "locked-file"])
+def test_gate_one_names_an_unreadable_claims_file_instead_of_dropping_its_row(tmp_path, label):
+    """Gate 1 used to lose a claims file that was not a readable JSON object: a
+    truncated `notes-md.json` removed the `notes-md: 8/8` row and changed nothing
+    else, so the block read as complete -- while `validate --stage extract` named
+    the defect. The rows still count only what was read; the header and a line
+    beneath them now say what was left out."""
+    if label == "locked-file" and os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs")
+    target = run.claims_dir / "notes-md.json"
+    if label == "malformed":
+        target.write_text("{trunc\n", encoding="utf-8")
+    elif label == "non-object":
+        target.write_text("[]\n", encoding="utf-8")
+    else:
+        target.chmod(0o000)
+    try:
+        text = brief.gate_brief(run, 1)
+        assert "\nClaim utilisation, per input (1 claims file unreadable, not counted)\n" in text, (
+            text
+        )
+        block = _section(text, UTILISATION_HEADER)
+        assert "api-json: 9/10 claims cited (90%)" in block
+        assert "trace-json: 2/2 claims cited (100%)" in block
+        assert "notes-md: " not in block, block
+        assert (
+            "01-claims/notes-md.json is present but could not be read -- "
+            "`rubrica validate --stage extract` names the defect"
+        ) in block, block
+        assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+    finally:
+        target.chmod(0o644)
+
+
+def test_gate_one_with_every_claims_file_readable_names_nothing_unreadable(tmp_path):
+    """The other direction: the clean toy run keeps its utilisation block byte for
+    byte, so the new wording is not simply always printed."""
+    run = build_toy_run(tmp_path / "runs")
+    text = brief.gate_brief(run, 1)
+    assert (
+        "\nClaim utilisation, per input\n"
+        "  api-json: 9/10 claims cited (90%)\n"
+        "  notes-md: 8/8 claims cited (100%)\n"
+        "  trace-json: 2/2 claims cited (100%)\n\n"
+    ) in text, text
+
+
 def test_gate_one_says_a_malformed_subject_cover_is_unreadable_not_absent(tmp_path):
     """The sweep's first line said "no subject cover yet" for a broken
     01-subjects.json, directly above a line still counting the subjects swept
