@@ -59,11 +59,16 @@ _RECONCILE_PASSES = (
 # mentioned mid-sentence ("... Gate 2 passed without review ...") is not read as
 # that gate's approval -- a later stage having run is what proves that one, and
 # `inferred` says so.
-_GATE_LINE = re.compile(r"^- \S+ (?:human )?gate ([0-3])(?: \(console\))?:\s*(.*)", re.IGNORECASE)
-# A line in an approving form can still say no: "Gate 1: changes requested ...".
-# The text right after the colon starting with one of these means the gate is not
-# passed. Kept short on purpose -- it catches the plain refusals a reviewer types,
-# and a longer list of guesses would start matching real approvals.
+_GATE_LINE = re.compile(r"^- \S+ (?:human )?gate ([0-3])( \(console\))?:\s*(.*)", re.IGNORECASE)
+# A hand-written line in an approving form can still say no: "Gate 1: changes
+# requested ...". The text right after the colon starting with one of these means
+# the gate is not passed. Kept short on purpose -- it catches the plain refusals a
+# reviewer types, and a longer list of guesses would start matching real approvals.
+# The `human gate N (console):` form is exempt: only the Approve button writes it,
+# and the click is the approval, so its note is never read as a refusal. Checking
+# it made Approve with the gate-3 note "Rejected tests look right, approve" report
+# success while the gate stayed open (T-80); feedback that does not approve is
+# written as `console: feedback on gate N, not approved: ...`, which never matches.
 _GATE_REFUSALS = ("not approved", "rejected", "changes requested", "not passed")
 _NO_HOLES_LINE = re.compile(r"^- \S+ round (\d+): no closable holes", re.IGNORECASE)
 _STOP_LINE = re.compile(r"^- \S+ round loop stopped after round (\d+)", re.IGNORECASE)
@@ -231,7 +236,10 @@ def approved_gates(run: RunPaths) -> set[int]:
     gates = set()
     for line in _decision_lines(run):
         match = _GATE_LINE.match(line)
-        if match and not match.group(2).lower().startswith(_GATE_REFUSALS):
+        if not match:
+            continue
+        by_console, note = match.group(2), match.group(3)
+        if by_console or not note.lower().startswith(_GATE_REFUSALS):
             gates.add(int(match.group(1)))
     return gates
 

@@ -174,10 +174,13 @@ A gate counts as passed when `decisions.md` has a line starting
 `human gate N (console):` (what **Approve** writes) or `Gate N:` (the form
 hand-written decisions have used), or when a later stage has already run. The
 colon is required, so a note such as `gate 2 not approved: ...` or
-`gate 3 is still open` does not pass the gate. Nor does a line in one of those
-forms whose text after the colon starts with `not approved`, `rejected`,
-`changes requested` or `not passed` — `Gate 1: changes requested ...` leaves
-gate 1 open.
+`gate 3 is still open` does not pass the gate. Nor does a hand-written
+`Gate N:` or `human gate N:` line whose text after the colon starts with
+`not approved`, `rejected`, `changes requested` or `not passed` —
+`Gate 1: changes requested ...` leaves gate 1 open. A
+`human gate N (console):` line always counts, whatever its note says: only
+**Approve** writes it, and clicking Approve is the approval, so a note such as
+`rejected tests look right, approve` at gate 3 does not undo it.
 
 ## Where things are kept
 

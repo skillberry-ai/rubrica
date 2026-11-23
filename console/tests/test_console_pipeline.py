@@ -115,7 +115,7 @@ def test_a_free_text_gate_line_counts_and_a_mid_sentence_mention_does_not(tmp_pa
         "- 2026-11-18T00:00:00Z gate 2 not approved: rework scn-003 first",
         "- 2026-11-18T00:00:00Z Gate 1: changes requested, services grouping is wrong",
         "- 2026-11-18T00:00:00Z gate 3 is still open, waiting on the owner",
-        "- 2026-11-18T00:00:00Z human gate 2 (console): Rejected, scn-003 is wrong",
+        "- 2026-11-18T00:00:00Z human gate 2: not approved, scn-003 is wrong",
         "- 2026-11-18T00:00:00Z Gate 1: NOT PASSED yet",
         "- 2026-11-18T00:00:00Z console: feedback on gate 2, not approved: redo it",
     ],
@@ -135,6 +135,13 @@ def test_a_gate_line_that_is_not_an_approval_passes_no_gate(tmp_path, line):
         ("- 2026-11-18T00:00:00Z Gate 1: user approved the world model", 1),
         ("- 2026-11-18T00:00:00Z gate 3: verdicts read", 3),
         ("- 2026-11-18T00:00:00Z human gate 0: triage reads right", 0),
+        # The `(console)` form is written only by the Approve button, and clicking
+        # Approve is the approval, so the note after the colon is never read as a
+        # refusal -- "Rejected tests look right" is a natural gate-3 note, since gate 3
+        # reviews which tests were redone or rejected. (T-79 had the second case
+        # below as a non-approval; that left a clicked Approve with the gate open.)
+        ("- 2026-11-18T10:00Z human gate 3 (console): rejected tests look right, approve", 3),
+        ("- 2026-11-18T00:00:00Z human gate 2 (console): Rejected, scn-003 is wrong", 2),
     ],
 )
 def test_a_gate_line_in_a_documented_form_counts(tmp_path, line, gate):
