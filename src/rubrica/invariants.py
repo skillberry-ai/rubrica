@@ -159,11 +159,31 @@ def _join(m: dict[str, Any], collections: dict[str, Any]) -> list[str]:
     return out
 
 
+def _frozen(value: Any) -> Any:
+    """A hashable stand-in for a seed value, equal exactly when the values are.
+
+    The seed schema only requires records to be objects, so a field `unique`
+    reads can hold a list or an object, and putting either into a set or a
+    dict key raises TypeError. That error once escaped `check-refs` as a lone
+    `[internal]` line which hid every real finding in the run and named no
+    seed. Lists become tuples and objects become frozensets of their items,
+    recursively, so equality is still Python's `==` (as `values.count` used)
+    rather than a JSON string's, which would split `1` from `1.0`.
+    """
+    if isinstance(value, list):
+        return tuple(_frozen(v) for v in value)
+    if isinstance(value, dict):
+        return frozenset((k, _frozen(v)) for k, v in value.items())
+    return value
+
+
 def _unique(m: dict[str, Any], collections: dict[str, Any]) -> list[str]:
     out: list[str] = []
     coll, field = m["collection"], m["field"]
     within = m.get("within")
-    groups: dict[Any, list[Any]] = {}
+    # Keyed on the frozen group key; each entry keeps the original key so
+    # messages show the value as the seed wrote it, not its frozen form.
+    groups: dict[Any, tuple[Any, list[Any]]] = {}
     for i, record in enumerate(_records(collections, coll)):
         value = _field(record, field)
         if value is MISSING:
@@ -175,14 +195,19 @@ def _unique(m: dict[str, Any], collections: dict[str, Any]) -> list[str]:
             if key is MISSING:
                 out.append(f"{coll}[{i}] has no field {within!r}")
                 continue
-        groups.setdefault(key, []).append(value)
+        groups.setdefault(_frozen(key), (key, []))[1].append(value)
 
     # Groups are walked in a repr-sorted order so messages are identical
     # across runs; diff-runs would otherwise report ordering as variance.
-    for key in sorted(groups, key=repr):
-        values = groups[key]
+    for key, values in sorted(groups.values(), key=lambda g: repr(g[0])):
         where = f" within {within}=={key!r}" if within is not None else ""
-        duplicates = sorted({v for v in values if values.count(v) > 1}, key=repr)
+        counts: dict[Any, int] = {}
+        originals: dict[Any, Any] = {}
+        for v in values:
+            f = _frozen(v)
+            counts[f] = counts.get(f, 0) + 1
+            originals.setdefault(f, v)
+        duplicates = sorted((originals[f] for f, n in counts.items() if n > 1), key=repr)
         if duplicates:
             out.append(f"{coll}.{field} has duplicate value(s) {duplicates}{where}")
         if m.get("increasing"):
