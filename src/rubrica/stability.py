@@ -43,14 +43,45 @@ _STAGE_FIELDS = ("model", "effort", "skill_sha256")
 _load = read_json_or_none
 
 
-def input_digests(run: RunPaths) -> frozenset[tuple[str, str]]:
-    """(artifact_id, sha256) for every registered input."""
+def _input_entries(run: RunPaths) -> list[Any]:
+    """The manifest's `inputs` list as written, or empty when it is not a list."""
     manifest = _load(run.manifest)
     if not isinstance(manifest, dict):
-        return frozenset()
-    return frozenset(
-        (entry["artifact_id"], entry["sha256"]) for entry in manifest.get("inputs", [])
+        return []
+    inputs = manifest.get("inputs", [])
+    return inputs if isinstance(inputs, list) else []
+
+
+def _is_input_digest(entry: Any) -> bool:
+    # Both values must be strings, not merely present: an unhashable `sha256`
+    # (a hand-edited list, say) would raise TypeError building the frozenset.
+    return (
+        isinstance(entry, dict)
+        and isinstance(entry.get("artifact_id"), str)
+        and isinstance(entry.get("sha256"), str)
     )
+
+
+def input_digests(run: RunPaths) -> frozenset[tuple[str, str]]:
+    """(artifact_id, sha256) for every registered input that records both.
+
+    An entry that is not an object, or lacks either string, is skipped rather
+    than indexed: indexing it raised KeyError or AttributeError, which cli.py's
+    catch-all turned into an `[internal]` line at exit 1 -- a finding-shaped
+    answer from a command whose exit code is 0. Skipping alone would let two
+    runs with the same broken entry agree *because* nothing was read, so
+    `comparability` counts the skipped entries and names each side that has one.
+    """
+    return frozenset(
+        (entry["artifact_id"], entry["sha256"])
+        for entry in _input_entries(run)
+        if _is_input_digest(entry)
+    )
+
+
+def _unpinned_inputs(run: RunPaths) -> int:
+    """How many of the manifest's inputs `input_digests` had to skip."""
+    return sum(1 for entry in _input_entries(run) if not _is_input_digest(entry))
 
 
 def stage_config(run: RunPaths) -> dict[str, dict[str, Any]]:
@@ -70,13 +101,30 @@ def stage_config(run: RunPaths) -> dict[str, dict[str, Any]]:
     return stages if isinstance(stages, dict) else {}
 
 
+def _entries(document: Any, key: str) -> list[dict[str, Any]]:
+    """The object entries of `document[key]`, skipping anything else.
+
+    The stage sets below are data, not a precondition, so a malformed entry is
+    skipped rather than raised on: an AttributeError or KeyError here escaped to
+    cli.py's catch-all as an `[internal]` exit 1, where diff-runs promises a JSON
+    report at exit 0. A skipped entry cannot read as agreement: it is missing
+    from that run's set, so a run whose twin kept it shows it under `only_a` or
+    `only_b`, and the set sizes say how much each side contributed.
+    """
+    if not isinstance(document, dict):
+        return []
+    entries = document.get(key, [])
+    if not isinstance(entries, list):
+        return []
+    return [entry for entry in entries if isinstance(entry, dict)]
+
+
 def capability_ids(run: RunPaths) -> frozenset[str]:
     """The reconcile family's product: what the world model says the target can do."""
-    world = _load(run.world_model)
-    if not isinstance(world, dict):
-        return frozenset()
     return frozenset(
-        capability["id"] for capability in world.get("capabilities", []) if "id" in capability
+        capability["id"]
+        for capability in _entries(_load(run.world_model), "capabilities")
+        if isinstance(capability.get("id"), str)
     )
 
 
@@ -85,17 +133,23 @@ def goal_cell_claims(run: RunPaths) -> frozenset[tuple[str, str, str]]:
 
     Only scenarios the pipeline has not discarded. A `duplicate` or `rejected`
     scenario produced no test, so counting its claims would report stability in
-    coverage the run did not deliver.
+    coverage the run did not deliver. A scenario or ref that is not an object, or
+    whose ids are not strings, is skipped for the reason `_entries` gives -- and a
+    non-string `status` is never tested against OPEN_STATUSES, since an
+    unhashable one raises TypeError on a frozenset membership test.
     """
-    document = _load(run.scenarios)
-    if not isinstance(document, dict):
-        return frozenset()
-    return frozenset(
-        (scenario["goal_id"], ref["capability_id"], ref["outcome_class_id"])
-        for scenario in document.get("scenarios", [])
-        if scenario.get("status") in OPEN_STATUSES
-        for ref in scenario.get("capability_refs", [])
-    )
+    claims: set[tuple[str, str, str]] = set()
+    for scenario in _entries(_load(run.scenarios), "scenarios"):
+        status, goal = scenario.get("status"), scenario.get("goal_id")
+        if not isinstance(status, str) or status not in OPEN_STATUSES:
+            continue
+        if not isinstance(goal, str):
+            continue
+        for ref in _entries(scenario, "capability_refs"):
+            capability, outcome = ref.get("capability_id"), ref.get("outcome_class_id")
+            if isinstance(capability, str) and isinstance(outcome, str):
+                claims.add((goal, capability, outcome))
+    return frozenset(claims)
 
 
 def emitted_task_ids(run: RunPaths) -> frozenset[str]:
@@ -136,6 +190,17 @@ def comparability(a: RunPaths, b: RunPaths) -> list[str]:
             "the two runs read different input bytes, so any stability number below measures "
             "the inputs rather than the pipeline"
         )
+    # Absence must not read as agreement, at the depth of one input entry:
+    # input_digests skips an entry it cannot pin, so two runs carrying the same
+    # broken entry would otherwise compare equal on what is left.
+    for run, label in ((a, "a"), (b, "b")):
+        unpinned = _unpinned_inputs(run)
+        if unpinned:
+            reasons.append(
+                f"run {label} has {unpinned} input entr{'y' if unpinned == 1 else 'ies'} in "
+                "manifest.json without a string artifact_id and sha256, so its input bytes "
+                "cannot be pinned"
+            )
 
     stages_a, stages_b = stage_config(a), stage_config(b)
     # The same principle the manifest check above implements, one artifact
@@ -156,6 +221,23 @@ def comparability(a: RunPaths, b: RunPaths) -> list[str]:
         if stage not in stages_a or stage not in stages_b:
             present = "a" if stage in stages_a else "b"
             reasons.append(f"stage {stage!r} is recorded only in run {present}")
+            continue
+        # A stage entry that is not an object (a hand-edited `"extract": "oops"`)
+        # has no model, effort or skill hash to read; calling .get on it raised
+        # AttributeError and surfaced as an `[internal]` exit 1. Named per side
+        # rather than compared, because two identical broken entries are equal
+        # strings and comparing them would read absence as agreement.
+        malformed = [
+            label
+            for stages, label in ((stages_a, "a"), (stages_b, "b"))
+            if not isinstance(stages[stage], dict)
+        ]
+        for label in malformed:
+            reasons.append(
+                f"stage {stage!r} in run {label} is not an object in manifest.json, so no "
+                "model, effort or skill hash can be pinned"
+            )
+        if malformed:
             continue
         for field in _STAGE_FIELDS:
             if stages_a[stage].get(field) != stages_b[stage].get(field):

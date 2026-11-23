@@ -31,6 +31,7 @@ from typing import Any
 import tomli_w
 
 from rubrica.artifacts import read_json_or_none, write_json
+from rubrica.errors import UsageError
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths
 from rubrica.suite.verify import CONTRACT, DATA_KINDS, DEFAULT_WEIGHTS, TRAJECTORY_KINDS
@@ -55,6 +56,38 @@ def suite_template_dir() -> Path:
     if override:
         return Path(override)
     return Path(__file__).resolve().parent / "suite"
+
+
+# Every file emit copies out of suite_template_dir() into each package's tests/.
+TEMPLATE_FILES: tuple[str, ...] = ("verify.py", "test.sh")
+
+
+def _read_templates() -> dict[str, bytes]:
+    """Read every template file up front, or raise UsageError naming the gap.
+
+    This runs before emit deletes or writes anything, and that ordering is the
+    point. The copy used to happen last, after the package had been removed and
+    six of its eight files rewritten, so a RUBRICA_SUITE_DIR pointing at an empty
+    folder exited 2 having left a half-written package behind -- and check-refs
+    then exited 1 naming 06-suite/<sid> as a defect in emit's output, when the
+    cause was a setup problem no re-dispatch can fix. Reading the bytes here,
+    rather than only checking that the files exist, also catches a file that
+    exists but cannot be read, and means the per-package write cannot fail on
+    the template half-way through the suite.
+    """
+    folder = suite_template_dir()
+    contents: dict[str, bytes] = {}
+    for name in TEMPLATE_FILES:
+        try:
+            contents[name] = (folder / name).read_bytes()
+        except OSError as exc:
+            raise UsageError(
+                f"suite template folder {folder} has no readable {name} "
+                f"({exc.strerror or type(exc).__name__}); emit copies {', '.join(TEMPLATE_FILES)} "
+                "from it into every package. Check RUBRICA_SUITE_DIR, or the installed "
+                "rubrica/suite package data if it is unset. Nothing in 06-suite was changed"
+            ) from exc
+    return contents
 
 
 def bindings(world: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -314,6 +347,9 @@ def emit_run(run: RunPaths) -> tuple[list[str], list[Finding]]:
     if scenarios_doc is None:
         return [], [Finding(run.root, "emit", "", "no scenario list: emit needs 02-scenarios.json")]
     by_id = {s["id"]: s for s in scenarios_doc.get("scenarios", [])}
+    # Before the loop below deletes or writes anything: a bad template folder is
+    # a setup error (exit 2), and it must leave 06-suite exactly as it was.
+    templates = _read_templates()
 
     emitted: list[str] = []
     findings: list[Finding] = []
@@ -389,8 +425,8 @@ def emit_run(run: RunPaths) -> tuple[list[str], list[Finding]]:
             _provenance(scenario, expected, verdict), encoding="utf-8"
         )
         write_json(task / "tests" / "expected.json", contract)
-        for name in ("verify.py", "test.sh"):
-            shutil.copyfile(suite_template_dir() / name, task / "tests" / name)
+        for name, content in templates.items():
+            (task / "tests" / name).write_bytes(content)
         (task / "tests" / "test.sh").chmod(0o755)
         emitted.append(sid)
 

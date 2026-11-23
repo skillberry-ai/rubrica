@@ -224,6 +224,42 @@ def test_increasing_reports_a_descending_sequence():
     assert "increasing" in violations[0]
 
 
+# -- unique over list and object values ----------------------------------
+# The seed schema only requires records to be objects, so a field `unique`
+# reads may hold a list or an object. Both are unhashable, and a set built
+# from them once raised TypeError out of check-refs.
+def test_unique_reports_duplicate_list_values():
+    m = {"form": "unique", "collection": "tickets", "field": "ticket_id"}
+    collections = {"tickets": [{"ticket_id": ["T-1"]}, {"ticket_id": ["T-1"]}]}
+    assert evaluate(m, collections) == ["tickets.ticket_id has duplicate value(s) [['T-1']]"]
+
+
+def test_unique_reports_duplicate_object_values():
+    m = {"form": "unique", "collection": "tickets", "field": "ticket_id"}
+    collections = {
+        "tickets": [{"ticket_id": {"a": 1, "b": [2]}}, {"ticket_id": {"b": [2], "a": 1}}]
+    }
+    violations = evaluate(m, collections)
+    assert len(violations) == 1
+    assert "duplicate" in violations[0]
+    assert "{'a': 1, 'b': [2]}" in violations[0]
+
+
+def test_unique_holds_for_distinct_list_values():
+    m = {"form": "unique", "collection": "tickets", "field": "ticket_id"}
+    collections = {"tickets": [{"ticket_id": ["T-1"]}, {"ticket_id": ["T-2"]}]}
+    assert evaluate(m, collections) == []
+
+
+@pytest.mark.parametrize("group", [["q-1"], {"queue": "q-1"}])
+def test_unique_groups_on_a_list_or_object_within_key(group):
+    m = {"form": "unique", "collection": "events", "field": "n", "within": "queue"}
+    distinct = {"events": [{"queue": group, "n": 1}, {"queue": group, "n": 2}]}
+    assert evaluate(m, distinct) == []
+    repeated = {"events": [{"queue": group, "n": 1}, {"queue": group, "n": 1}]}
+    assert evaluate(m, repeated) == [f"events.n has duplicate value(s) [1] within queue=={group!r}"]
+
+
 # -- boundaries ---------------------------------------------------------
 def test_an_absent_collection_yields_no_violations():
     """Collection presence is refs.py's job, not this module's.

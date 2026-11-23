@@ -126,8 +126,34 @@ def append_decision(path: Path | str, entry: str) -> None:
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # A person hand-editing decisions.md can save it without a final newline, and a
+    # plain append then glues the new entry onto their last line -- the console's
+    # gate reader needs each entry to start its own line with `- `, so an Approve
+    # written that way left the gate open. Only the last byte is read, in binary:
+    # decoding the whole file would make one non-UTF-8 byte a human typed (T-81)
+    # fail every later append.
+    lead = "" if _ends_cleanly(path) else "\n"
     with path.open("a", encoding="utf-8") as fh:
-        fh.write(entry.rstrip("\n") + "\n")
+        fh.write(lead + entry.rstrip("\n") + "\n")
+
+
+def _ends_cleanly(path: Path) -> bool:
+    """True when appending to `path` needs no leading newline.
+
+    That is: the file is missing, empty, or already ends with "\\n". A file that
+    cannot be read (write-only, say) is treated as clean, so this check never
+    turns an append that would have succeeded into a failure; the open for append
+    that follows still reports a real permission problem as before.
+    """
+    try:
+        with path.open("rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            if fh.tell() == 0:
+                return True
+            fh.seek(-1, os.SEEK_END)
+            return fh.read(1) == b"\n"
+    except OSError:
+        return True
 
 
 # The two type guards every reader of an artifact's *elements* needs. They live
