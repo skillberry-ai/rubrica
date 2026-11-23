@@ -170,9 +170,14 @@ to 3 you can also **waive** a finding (`rubrica waive`) or **change a limit**
 (`rubrica set-limit`). After a round's coverage is sealed you can **stop the round
 loop** there.
 
-A gate counts as passed when `decisions.md` has a line starting `human gate N` or
-`Gate N:` (the form hand-written decisions have used), or when a later stage has
-already run.
+A gate counts as passed when `decisions.md` has a line starting
+`human gate N (console):` (what **Approve** writes) or `Gate N:` (the form
+hand-written decisions have used), or when a later stage has already run. The
+colon is required, so a note such as `gate 2 not approved: ...` or
+`gate 3 is still open` does not pass the gate. Nor does a line in one of those
+forms whose text after the colon starts with `not approved`, `rejected`,
+`changes requested` or `not passed` — `Gate 1: changes requested ...` leaves
+gate 1 open.
 
 ## Where things are kept
 

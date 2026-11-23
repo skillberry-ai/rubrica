@@ -49,12 +49,22 @@ _RECONCILE_PASSES = (
     "reconcile-services",
 )
 
-# decisions.md lines. The first form is what this console writes; the second is
-# what a human or `rb-orchestrate` has written by hand in real runs ("Gate 1: user
-# approved ..."). Anchored after the timestamp so a gate mentioned mid-sentence
-# ("... Gate 2 passed without review ...") is not read as that gate's approval --
-# a later stage having run is what proves that one, and `inferred` says so.
-_GATE_LINE = re.compile(r"^- \S+ (?:human )?gate ([0-3])\b", re.IGNORECASE)
+# decisions.md lines. Only two forms approve a gate, each ending in its colon:
+# `human gate N (console):`, which is what this console writes, and `Gate N:`, what
+# a human or `rb-orchestrate` has written by hand in real runs ("Gate 1: user
+# approved ..."; `human gate N:` is accepted too). Requiring the colon is what keeps
+# free text recorded through "Record a decision" -- "gate 2 not approved: ...",
+# "gate 3 is still open" -- from passing a gate, and with it "Run to next gate"
+# from going on into paid dispatches. Anchored after the timestamp so a gate
+# mentioned mid-sentence ("... Gate 2 passed without review ...") is not read as
+# that gate's approval -- a later stage having run is what proves that one, and
+# `inferred` says so.
+_GATE_LINE = re.compile(r"^- \S+ (?:human )?gate ([0-3])(?: \(console\))?:\s*(.*)", re.IGNORECASE)
+# A line in an approving form can still say no: "Gate 1: changes requested ...".
+# The text right after the colon starting with one of these means the gate is not
+# passed. Kept short on purpose -- it catches the plain refusals a reviewer types,
+# and a longer list of guesses would start matching real approvals.
+_GATE_REFUSALS = ("not approved", "rejected", "changes requested", "not passed")
 _NO_HOLES_LINE = re.compile(r"^- \S+ round (\d+): no closable holes", re.IGNORECASE)
 _STOP_LINE = re.compile(r"^- \S+ round loop stopped after round (\d+)", re.IGNORECASE)
 
@@ -221,7 +231,7 @@ def approved_gates(run: RunPaths) -> set[int]:
     gates = set()
     for line in _decision_lines(run):
         match = _GATE_LINE.match(line)
-        if match:
+        if match and not match.group(2).lower().startswith(_GATE_REFUSALS):
             gates.add(int(match.group(1)))
     return gates
 

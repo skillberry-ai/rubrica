@@ -109,6 +109,40 @@ def test_a_free_text_gate_line_counts_and_a_mid_sentence_mention_does_not(tmp_pa
     assert pipeline.find(pipeline.steps(run), "gate-1").status == DONE
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        "- 2026-11-18T00:00:00Z gate 2 not approved: rework scn-003 first",
+        "- 2026-11-18T00:00:00Z Gate 1: changes requested, services grouping is wrong",
+        "- 2026-11-18T00:00:00Z gate 3 is still open, waiting on the owner",
+        "- 2026-11-18T00:00:00Z human gate 2 (console): Rejected, scn-003 is wrong",
+        "- 2026-11-18T00:00:00Z Gate 1: NOT PASSED yet",
+        "- 2026-11-18T00:00:00Z console: feedback on gate 2, not approved: redo it",
+    ],
+)
+def test_a_gate_line_that_is_not_an_approval_passes_no_gate(tmp_path, line):
+    # "Record a decision" writes free text as `- <ts> <text>`, so a reviewer typing
+    # "gate 2 not approved" must not open the way for "Run to next gate".
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.decisions.write_text(line + "\n", encoding="utf-8")
+    assert pipeline.approved_gates(run) == set()
+
+
+@pytest.mark.parametrize(
+    ("line", "gate"),
+    [
+        ("- 2026-11-18T00:00:00Z human gate 2 (console): looks good", 2),
+        ("- 2026-11-18T00:00:00Z Gate 1: user approved the world model", 1),
+        ("- 2026-11-18T00:00:00Z gate 3: verdicts read", 3),
+        ("- 2026-11-18T00:00:00Z human gate 0: triage reads right", 0),
+    ],
+)
+def test_a_gate_line_in_a_documented_form_counts(tmp_path, line, gate):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.decisions.write_text(line + "\n", encoding="utf-8")
+    assert pipeline.approved_gates(run) == {gate}
+
+
 def test_a_gate_is_inferred_passed_when_a_later_stage_ran(tmp_path):
     run = build_toy_run(tmp_path, upto="propose")
     gate = pipeline.find(pipeline.steps(run), "gate-1")
