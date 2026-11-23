@@ -367,3 +367,495 @@ def test_sample_run_is_idempotent(tmp_path):
     first = run.review_packet.read_text()
     sample_run(run, DEFAULT_SAMPLE_SIZE)
     assert run.review_packet.read_text() == first
+
+
+# -- damaged task files: stated in the packet, never an [internal] exit 1 ------
+#
+# These files are emit's, instantiate's and challenge's output, so a bad one is a
+# hand edit or damage, not a stage defect. Before the fix one non-UTF-8 byte in an
+# instruction.md reached cli.py's catch-all as `[internal] ... raised
+# UnicodeDecodeError` at exit 1, naming no file and writing no packet.
+
+OTHER = "scn-002"
+OTHER_INSTRUCTION = "Second task, intact: find the failed job on prod1."
+
+
+def _two_task_run(tmp_path):
+    """The emit state plus a second, undamaged task, so 'every other section intact'
+    has something to check."""
+    run = build_state(tmp_path / "run", "emit")
+    shutil.copytree(run.task_dir(SID), run.task_dir(OTHER))
+    shutil.copytree(run.instance_dir(SID), run.instance_dir(OTHER))
+    shutil.copyfile(run.verdict(SID), run.verdict(OTHER))
+    (run.task_dir(OTHER) / "instruction.md").write_text(OTHER_INSTRUCTION, "utf-8")
+    return run
+
+
+def _sample(run, capsys):
+    from rubrica.cli import main
+
+    code = main(["sample-for-review", "--run", str(run.root), "--size", "5"])
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert "[internal]" not in out
+    text = run.review_packet.read_text("utf-8")
+    assert f"## `{OTHER}`" in text and OTHER_INSTRUCTION in text, "the other task's section"
+    return text
+
+
+def _section_of(text, sid):
+    start = text.index(f"## `{sid}`")
+    nxt = text.find("\n## `", start + 1)
+    return text[start : nxt if nxt != -1 else len(text)]
+
+
+def _no_root(reason="chmod 000 does not stop root from reading"):
+    return pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason=reason)
+
+
+def test_a_non_utf8_instruction_is_shown_with_replacements_and_named(tmp_path, capsys):
+    run = _two_task_run(tmp_path)
+    (run.task_dir(SID) / "instruction.md").write_bytes(b"hi \xff\xfe")
+    section = _section_of(_sample(run, capsys), SID)
+    assert "instruction.md is not valid UTF-8" in section
+    assert "hi �" in section, "the readable part is still shown"
+    assert "### Adversary notes" in section, "the rest of the damaged task's section"
+
+
+def test_a_non_utf8_rationale_is_shown_with_replacements_and_named(tmp_path, capsys):
+    run = _two_task_run(tmp_path)
+    run.rationale(SID).write_bytes(b"Chose 90420 \xff because")
+    section = _section_of(_sample(run, capsys), SID)
+    assert "rationale.md is not valid UTF-8" in section
+    assert "Chose 90420 � because" in section
+
+
+@_no_root()
+@pytest.mark.parametrize("which", ["instruction", "rationale"])
+def test_an_unreadable_text_file_is_named_in_the_packet(tmp_path, capsys, which):
+    run = _two_task_run(tmp_path)
+    path = run.task_dir(SID) / "instruction.md" if which == "instruction" else run.rationale(SID)
+    if which == "rationale":
+        path.write_text("why", "utf-8")
+    path.chmod(0)
+    try:
+        section = _section_of(_sample(run, capsys), SID)
+    finally:
+        path.chmod(0o644)
+    assert f"{path.name} could not be read" in section
+    assert "ermission" in section, "the reason is stated"
+
+
+@pytest.mark.parametrize("which", ["verdict", "expected"])
+def test_a_non_utf8_verdict_or_expected_is_named_not_shown_as_none(tmp_path, capsys, which):
+    run = _two_task_run(tmp_path)
+    path = run.verdict(SID) if which == "verdict" else run.expected(SID)
+    path.write_bytes(b"{\xff}")
+    section = _section_of(_sample(run, capsys), SID)
+    assert f"{path.name} could not be read" in section
+    assert "not UTF-8" in section
+
+
+@_no_root()
+@pytest.mark.parametrize("which", ["verdict", "expected"])
+def test_an_unreadable_verdict_or_expected_is_named_not_exit_two(tmp_path, capsys, which):
+    run = _two_task_run(tmp_path)
+    path = run.verdict(SID) if which == "verdict" else run.expected(SID)
+    path.chmod(0)
+    try:
+        section = _section_of(_sample(run, capsys), SID)
+    finally:
+        path.chmod(0o644)
+    assert f"{path.name} could not be read" in section
+    assert "ermission" in section
+
+
+# T-67: a locked *folder*, not just a locked file. On Python 3.13 Path.is_file()
+# raises PermissionError when the folder cannot be entered, which reached cli.py as
+# exit 2 with no packet; on 3.14 it returns False, which would have said "no
+# instruction.md" and dropped the rationale silently.
+@_no_root()
+@pytest.mark.parametrize(
+    ("which", "names"),
+    [("suite", ["instruction.md"]), ("instances", ["seed.json", "expected.json"])],
+)
+def test_an_unreachable_task_folder_is_named_in_the_packet(tmp_path, capsys, which, names):
+    run = _two_task_run(tmp_path)
+    folder = run.task_dir(SID) if which == "suite" else run.instance_dir(SID)
+    folder.chmod(0)
+    try:
+        section = _section_of(_sample(run, capsys), SID)
+    finally:
+        folder.chmod(0o755)
+    for name in names:
+        assert f"{name} could not be read" in section, name
+    assert "ermission" in section, "the reason is stated"
+    assert "(no instruction.md in the emitted package)" not in section
+    assert "(no seed.json)" not in section
+    assert "### Adversary notes" in section, "the rest of the damaged task's section"
+
+
+@pytest.mark.parametrize(
+    ("which", "content", "kind"),
+    [("verdict", "[]", "list"), ("expected", '"oops"', "string")],
+)
+def test_a_verdict_or_expected_that_is_not_an_object_is_named(
+    tmp_path, capsys, which, content, kind
+):
+    run = _two_task_run(tmp_path)
+    path = run.verdict(SID) if which == "verdict" else run.expected(SID)
+    path.write_text(content, "utf-8")
+    section = _section_of(_sample(run, capsys), SID)
+    label = path.relative_to(run.root).as_posix()
+    assert f"({label} is a {kind}, not an object)" in section
+
+
+# T-68: a 02-scenarios.json that parses but is the wrong shape escaped candidates()
+# as AttributeError/TypeError/KeyError -- an [internal] line naming the run folder,
+# not the file. It must give the same outcome as one that does not parse at all.
+def _sample_cli(run, capsys):
+    from rubrica.cli import main
+
+    code = main(["sample-for-review", "--run", str(run.root), "--size", "5"])
+    return code, capsys.readouterr().out
+
+
+def _with_hop_depths(doc, depths):
+    """`doc` with its scenarios' hop_depths set to `depths`, in order.
+
+    The emit-state run lists one scenario, so a depth past the first is set on a
+    copy of it under the next id (scn-002, ...); every other field stays valid.
+    """
+    listed = [dict(scenario) for scenario in doc["scenarios"]]
+    while len(listed) < len(depths):
+        listed.append({**listed[0], "id": f"scn-{len(listed) + 1:03d}"})
+    for scenario, depth in zip(listed, depths, strict=False):
+        scenario["hop_depth"] = depth
+    return {**doc, "scenarios": listed}
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda doc: [],
+        lambda doc: {**doc, "scenarios": ["scn-001", *doc["scenarios"]]},
+        lambda doc: {
+            **doc,
+            "scenarios": [{k: v for k, v in doc["scenarios"][0].items() if k != "id"}],
+        },
+        lambda doc: {**doc, "scenarios": "oops"},
+        # T-70: fields past the four shape checks. A hop_depth that is a list or
+        # null crashed stratified() (dict key, sort) as an [internal] TypeError;
+        # the null one sits beside an int so the sort really compares the two.
+        lambda doc: _with_hop_depths(doc, [[1]]),
+        lambda doc: _with_hop_depths(doc, [None, 2]),
+        lambda doc: _with_hop_depths(doc, [True]),
+    ],
+    ids=[
+        "list-document",
+        "string-entry",
+        "entry-without-id",
+        "scenarios-not-a-list",
+        "hop-depth-list",
+        "hop-depth-null-beside-int",
+        "hop-depth-bool",
+    ],
+)
+def test_a_malformed_scenario_list_is_named_like_an_unreadable_one(tmp_path, capsys, mutate):
+    baseline = build_state(tmp_path / "baseline", "emit")
+    baseline.scenarios.write_text("{not json", encoding="utf-8")
+    want_code, want_out = _sample_cli(baseline, capsys)
+
+    run = build_state(tmp_path / "run", "emit")
+    write_json(run.scenarios, mutate(read_json(run.scenarios)))
+    code, out = _sample_cli(run, capsys)
+
+    assert code == want_code, out
+    assert "[internal]" not in out
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert len(lines) == 1, out
+    # Same check tag and same artifact as the unparseable case, path for path.
+    assert lines[0].startswith(f"[review] {run.scenarios}: "), lines[0]
+    assert want_out.startswith(f"[review] {baseline.scenarios}: "), want_out
+    assert not run.review_packet.exists()
+    assert not run.review_sample.exists()
+
+    _, findings = sample_run(run, DEFAULT_SAMPLE_SIZE)
+    assert len(findings) == 1 and findings[0].artifact == run.scenarios
+
+
+def test_a_null_hop_depth_beside_an_emitted_int_is_named_not_internal(tmp_path, capsys):
+    """Two emitted tasks, depths null and 2, so stratified() really sorts the pair.
+
+    On the code before T-70 this is the `sorted(strata)` TypeError (None < int),
+    reported as an [internal] line naming the run folder.
+    """
+    baseline = build_state(tmp_path / "baseline", "emit")
+    baseline.scenarios.write_text("{not json", encoding="utf-8")
+    want_code, _ = _sample_cli(baseline, capsys)
+
+    run = _two_task_run(tmp_path)
+    write_json(run.scenarios, _with_hop_depths(read_json(run.scenarios), [None, 2]))
+    assert sorted(run.scenario_ids_with_tasks()) == [SID, OTHER]
+    code, out = _sample_cli(run, capsys)
+    assert code == want_code, out
+    assert "[internal]" not in out
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert len(lines) == 1 and lines[0].startswith(f"[review] {run.scenarios}: "), out
+    assert not run.review_packet.exists()
+
+
+def test_a_schema_finding_is_quoted_in_the_scenario_list_finding(tmp_path, capsys):
+    """The reader is told which field is wrong, not only which file (T-70)."""
+    run = build_state(tmp_path, "emit")
+    write_json(run.scenarios, _with_hop_depths(read_json(run.scenarios), [[1]]))
+    _, out = _sample_cli(run, capsys)
+    assert "/scenarios/0/hop_depth" in out, out
+    assert "[1] is not of type 'integer'" in out, out
+
+
+def test_a_valid_scenario_list_still_samples(tmp_path, capsys):
+    run = build_state(tmp_path, "emit")
+    code, out = _sample_cli(run, capsys)
+    assert code == 0, out
+    assert run.review_packet.exists()
+
+
+def _seed_digest_block(section):
+    start = section.index("### Seed digest")
+    return section[start : section.index("The seed itself", start)]
+
+
+def test_a_missing_seed_is_a_plain_note_not_a_digest(tmp_path, capsys):
+    run = _two_task_run(tmp_path)
+    run.seed(SID).unlink()
+    block = _seed_digest_block(_section_of(_sample(run, capsys), SID))
+    assert "(no seed.json)" in block
+    assert "sha256:" not in block
+
+
+@_no_root()
+def test_an_unreadable_seed_is_a_plain_note_not_a_digest(tmp_path, capsys):
+    run = _two_task_run(tmp_path)
+    run.seed(SID).chmod(0)
+    try:
+        section = _section_of(_sample(run, capsys), SID)
+    finally:
+        run.seed(SID).chmod(0o644)
+    block = _seed_digest_block(section)
+    assert "seed.json could not be read" in block
+    assert "sha256:" not in block
+
+
+def test_a_readable_seed_still_shows_its_digest_in_a_code_span(tmp_path, capsys):
+    from rubrica.artifacts import sha256_of
+
+    run = _two_task_run(tmp_path)
+    block = _seed_digest_block(_section_of(_sample(run, capsys), SID))
+    assert f"`sha256:{sha256_of(run.seed(SID))}`" in block
+
+
+# T-69: a verdict that could not be read is sampled as low, but it is not evidence
+# that the adversary qualified anything. A chmod 000 on 05-verdicts/ used to yield
+# "every accept was qualified by the adversary" against a run whose only verdict
+# was a clean accept.
+_QUALIFIED_CLAIM = "every accept was qualified by the adversary"
+
+
+def _damage_verdicts(run, how):
+    if how == "folder-locked":
+        run.verdict(SID).parent.chmod(0)
+        return run.verdict(SID).parent
+    if how == "file-locked":
+        run.verdict(SID).chmod(0)
+        return run.verdict(SID)
+    run.verdict(SID).write_text("[]", "utf-8")
+    return run.verdict(SID)
+
+
+@_no_root()
+@pytest.mark.parametrize("how", ["folder-locked", "file-locked", "list"])
+def test_a_damaged_verdict_is_not_claimed_as_qualified_by_the_adversary(tmp_path, capsys, how):
+    run = build_state(tmp_path, "emit")
+    code, out = _sample_cli(run, capsys)
+    assert code == 0, out  # the clean accept, untouched, is high confidence
+
+    locked = _damage_verdicts(run, how)
+    try:
+        code, out = _sample_cli(run, capsys)
+    finally:
+        locked.chmod(0o755 if locked.is_dir() else 0o644)
+    assert "[internal]" not in out
+    assert _QUALIFIED_CLAIM not in out
+    assert "adversary qualified" not in out.replace("not counted as an accept the adversary", "")
+    label = run.verdict(SID).relative_to(run.root).as_posix()
+    named = [line for line in out.splitlines() if line.startswith(f"[review] {run.verdict(SID)}")]
+    assert len(named) == 1, out
+    assert label in named[0]
+    assert any(
+        line.startswith(f"[review] {run.review_sample}") and label in line
+        for line in out.splitlines()
+    ), out
+    # The packet is still written, and still names the damaged verdict in its section.
+    assert label in _section_of(run.review_packet.read_text("utf-8"), SID)
+
+
+def test_a_damaged_verdict_beside_a_qualified_one_names_both(tmp_path, capsys):
+    run = _two_task_run(tmp_path)
+    write_json(run.verdict(OTHER), minimal_verdict(flags=["difficulty_overstated"]))
+    run.verdict(SID).write_text("[]", "utf-8")
+    code, out = _sample_cli(run, capsys)
+    assert code == 1, out
+    assert _QUALIFIED_CLAIM not in out
+    assert "every readable accept was qualified by the adversary" in out
+    assert f"[review] {run.verdict(SID)}: " in out
+    assert run.verdict(OTHER).relative_to(run.root).as_posix() not in out
+
+
+@pytest.mark.parametrize(
+    "qualified",
+    [
+        {"flags": ["difficulty_overstated"]},
+        {"derivable_without_guessing": False},
+        {
+            "uniquely_determined": False,
+            "alternative_answers": [{"answer": "b", "world_consistent_reason": "both fit"}],
+        },
+    ],
+)
+def test_a_really_qualified_verdict_still_gets_the_adversary_finding(tmp_path, capsys, qualified):
+    # A schema-valid accept the adversary qualified: the one case the claim is about.
+    run = build_state(tmp_path, "emit")
+    write_json(run.verdict(SID), minimal_verdict(**qualified))
+    code, out = _sample_cli(run, capsys)
+    assert code == 1, out
+    assert _QUALIFIED_CLAIM in out
+    assert f"[review] {run.review_sample}: " in out
+    assert f"[review] {run.verdict(SID)}" not in out
+
+
+# T-73: a verdict that parses as an object but is not a schema-valid accept is in
+# the low band too, and used to fall under "every accept was qualified by the
+# adversary". emit ships only accepts, so each of these is damage after emit.
+def _accept_missing_uniquely_determined():
+    verdict = minimal_verdict()
+    del verdict["uniquely_determined"]
+    return verdict
+
+
+@pytest.mark.parametrize(
+    ("doc", "quoted"),
+    [
+        ({}, "does not match its schema"),
+        ({"verdict": "reject"}, "does not match its schema"),
+        (_accept_missing_uniquely_determined(), "'uniquely_determined' is a required property"),
+        (minimal_verdict(verdict="reject", notes="ambiguous"), "is not an accept"),
+    ],
+    ids=["empty", "bare-reject", "accept-missing-field", "valid-reject"],
+)
+def test_a_verdict_that_is_not_a_schema_valid_accept_is_named(tmp_path, capsys, doc, quoted):
+    run = build_state(tmp_path, "emit")
+    write_json(run.verdict(SID), doc)
+    code, out = _sample_cli(run, capsys)
+    assert code == 1, out
+    assert "[internal]" not in out
+    assert _QUALIFIED_CLAIM not in out
+    label = run.verdict(SID).relative_to(run.root).as_posix()
+    named = [line for line in out.splitlines() if line.startswith(f"[review] {run.verdict(SID)}")]
+    assert len(named) == 1, out
+    assert label in named[0]
+    assert quoted in named[0]
+    assert any(
+        line.startswith(f"[review] {run.review_sample}") and label in line
+        for line in out.splitlines()
+    ), out
+    # The sampling is unchanged: the task is still in the packet, as low confidence.
+    assert read_json(run.review_sample)["sampled"][0]["band"] == "low"
+
+
+@pytest.mark.parametrize("how", ["missing", "unresolvable-ref"])
+def test_an_unusable_verdict_schema_is_exit_two_not_a_verdict_finding(
+    tmp_path, capsys, monkeypatch, how
+):
+    from rubrica.cli import main
+
+    run = build_state(tmp_path, "emit")
+    write_json(run.verdict(SID), minimal_verdict(flags=["difficulty_overstated"]))
+    root = tmp_path / f"schemas-{how}"
+    shutil.copytree(schema_dir(), root)
+    path = root / ARTIFACT_SCHEMAS["verdict"]
+    if how == "missing":
+        path.unlink()
+    else:
+        text = path.read_text("utf-8")
+        assert '"#/$defs/id"' in text
+        path.write_text(text.replace('"#/$defs/id"', '"absent-0.1.json#/x"'), "utf-8")
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(root))
+    code = main(["sample-for-review", "--run", str(run.root), "--size", "5"])
+    captured = capsys.readouterr()
+    assert code == 2, captured
+    assert captured.out == "", captured.out
+    errors = [line for line in captured.err.splitlines() if line.strip()]
+    assert len(errors) == 1, captured.err
+    assert str(root) in errors[0]
+    assert "RUBRICA_SCHEMA_DIR" in errors[0]
+    assert not run.review_dir.exists()
+
+
+# T-72: a scenarios schema that cannot be loaded is a misconfigured run, not a
+# fault in 02-scenarios.json. It used to come out as exit 1 with a finding
+# naming 02-scenarios.json, which sends a repair at a file that was fine.
+def _broken_schema_dir(tmp_path, how):
+    """A copy of the schema directory with the scenarios schema missing or unusable."""
+    root = tmp_path / f"schemas-{how}"
+    shutil.copytree(schema_dir(), root)
+    path = root / ARTIFACT_SCHEMAS["scenarios"]
+    if how == "missing":
+        path.unlink()
+    else:
+        # A $ref into a file the directory does not hold. It only fails once
+        # validation walks to it, inside validate_artifact.
+        text = path.read_text("utf-8")
+        assert '"#/$defs/scenario"' in text
+        path.write_text(text.replace('"#/$defs/scenario"', '"absent-0.1.json#/x"'), "utf-8")
+    return root
+
+
+@pytest.mark.parametrize("how", ["missing", "unresolvable-ref"])
+def test_an_unusable_scenarios_schema_is_exit_two_and_writes_nothing(
+    tmp_path, capsys, monkeypatch, how
+):
+    from rubrica.cli import main
+
+    run = build_state(tmp_path, "emit")
+    root = _broken_schema_dir(tmp_path, how)
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(root))
+    code = main(["sample-for-review", "--run", str(run.root), "--size", "5"])
+    captured = capsys.readouterr()
+    assert code == 2, captured
+    assert captured.out == "", captured.out
+    errors = [line for line in captured.err.splitlines() if line.strip()]
+    assert len(errors) == 1, captured.err
+    assert str(root) in errors[0]
+    assert "02-scenarios.json" not in errors[0]
+    assert not run.review_dir.exists()
+
+
+def test_a_missing_verdict_is_not_claimed_as_qualified_by_the_adversary(tmp_path, capsys):
+    run = build_state(tmp_path, "emit")
+    run.verdict(SID).unlink()
+    code, out = _sample_cli(run, capsys)
+    assert code == 1, out
+    assert "[internal]" not in out
+    assert _QUALIFIED_CLAIM not in out
+    label = run.verdict(SID).relative_to(run.root).as_posix()
+    named = [line for line in out.splitlines() if line.startswith(f"[review] {run.verdict(SID)}")]
+    assert len(named) == 1, out
+    assert f"{label} is missing" in named[0]
+    assert any(
+        line.startswith(f"[review] {run.review_sample}") and label in line
+        for line in out.splitlines()
+    ), out
+    # The sampling is unchanged: the task is still in the packet, as low confidence.
+    assert run.review_packet.exists()
+    assert read_json(run.review_sample)["sampled"][0]["band"] == "low"

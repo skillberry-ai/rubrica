@@ -22,6 +22,7 @@ from rubrica.errors import UsageError
 from rubrica.findings import Finding, format_findings
 from rubrica.metrics import jaccard
 from rubrica.paths import RunPaths
+from rubrica.review import scenarios_by_id
 from rubrica.validate import validate_artifact
 
 # Cell-overlap at or above this proposes a pair, once the goals already match.
@@ -46,9 +47,26 @@ def load_gold(path: Path | str) -> dict[str, Any]:
         findings = validate_artifact(Path(path), "gold")
         if findings:
             raise UsageError(f"unusable gold task list:\n{format_findings(findings)}")
-        return read_json(path)
+        gold = read_json(path)
     except (OSError, UnicodeDecodeError, ArtifactError) as exc:
         raise UsageError(f"unusable gold task list: {path}: {exc}") from exc
+    # Ids must be unique, and the check is here because JSON Schema cannot say
+    # "this property is unique across array items". assign_matches keys the gold
+    # side by id, so once one copy of a repeated id matched, every copy counted as
+    # matched while the denominator still counted them all: a report reading
+    # "Recall: 0.50" over "nothing unmatched", exiting 0. A person wrote the file,
+    # so a repeat is a usage error, not a finding.
+    seen: set[str] = set()
+    repeated: list[str] = []
+    for task in gold["tasks"]:
+        if task["id"] in seen and task["id"] not in repeated:
+            repeated.append(task["id"])
+        seen.add(task["id"])
+    if repeated:
+        raise UsageError(
+            f"unusable gold task list: {path}: task id(s) repeated: {', '.join(repeated)}"
+        )
+    return gold
 
 
 def cells(capability_refs: list[dict[str, Any]]) -> frozenset[tuple[str, str]]:
@@ -73,14 +91,8 @@ def generated_tasks(run: RunPaths) -> list[dict[str, Any]]:
     stability.comparability makes the same distinction for the same reason --
     absence must not read as agreement.
     """
-    scenarios = _load_scenarios(run)
+    scenarios = scenarios_by_id(run)
     return [scenarios[sid] for sid in run.scenario_ids_with_tasks() if sid in scenarios]
-
-
-def _load_scenarios(run: RunPaths) -> dict[str, dict[str, Any]]:
-    """The scenarios by id. Raises ArtifactError if 02-scenarios.json is unreadable."""
-    document = read_json(run.scenarios)
-    return {s["id"]: s for s in document.get("scenarios", [])}
 
 
 def _pair_score(gold_task: dict[str, Any], scenario: dict[str, Any]) -> float | None:
@@ -96,6 +108,110 @@ def _pair_score(gold_task: dict[str, Any], scenario: dict[str, Any]) -> float | 
     return score if score >= MATCH_JACCARD_FLOOR else None
 
 
+def _max_weight(
+    rows: list[str], columns: list[str], weight: dict[tuple[str, str], int]
+) -> dict[str, str]:
+    """A largest-total-weight one-to-one matching of rows to columns. -> {row: column}.
+
+    Only the pairs in `weight` may be matched, every weight is positive, and every
+    row may go unmatched. The Hungarian method over a cost matrix in which every
+    row is assigned a column: a pair outside `weight` costs 0, the same value as
+    leaving that row unmatched, so such a pair is read back as unmatched. When
+    there are fewer columns than rows, zero-cost "unmatched" columns pad the
+    matrix so every row has one. All arithmetic is integer (Python ints of any
+    size), so two equal totals compare equal and the tie-break in assign_matches
+    is exact.
+    """
+    n = len(rows)
+    if n == 0:
+        return {}
+    # Padding only up to `n`: a column per row beyond that would only add width,
+    # and width is the inner loop. Any matching of real pairs still extends to a
+    # full assignment at no cost, through columns no real pair uses.
+    padding = max(0, n - len(columns))
+    width = len(columns) + padding
+    cost = [[-weight.get((row, column), 0) for column in columns] + [0] * padding for row in rows]
+    # A sentinel only: it is compared and replaced, never summed into a total, so
+    # every number the answer depends on stays an exact integer.
+    unreached = float("inf")
+    # Standard O(n^2 * width) potentials formulation, 1-indexed with a sentinel
+    # row and column 0.
+    u = [0] * (n + 1)
+    v = [0] * (width + 1)
+    owner = [0] * (width + 1)
+    way = [0] * (width + 1)
+    for i in range(1, n + 1):
+        owner[0] = i
+        j0 = 0
+        minv = [unreached] * (width + 1)
+        used = [False] * (width + 1)
+        while True:
+            used[j0] = True
+            i0 = owner[j0]
+            row_cost = cost[i0 - 1]
+            u_i0 = u[i0]
+            delta = unreached
+            j1 = 0
+            for j in range(1, width + 1):
+                if used[j]:
+                    continue
+                current = row_cost[j - 1] - u_i0 - v[j]
+                if current < minv[j]:
+                    minv[j] = current
+                    way[j] = j0
+                if minv[j] < delta:
+                    delta = minv[j]
+                    j1 = j
+            for j in range(width + 1):
+                if used[j]:
+                    u[owner[j]] += delta
+                    v[j] -= delta
+                else:
+                    minv[j] -= delta
+            j0 = j1
+            if owner[j0] == 0:
+                break
+        while j0:
+            j1 = way[j0]
+            owner[j0] = owner[j1]
+            j0 = j1
+    matched: dict[str, str] = {}
+    for j in range(1, len(columns) + 1):
+        if owner[j]:
+            row, column = rows[owner[j] - 1], columns[j - 1]
+            if (row, column) in weight:
+                matched[row] = column
+    return matched
+
+
+def _components(pairs: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
+    """Split candidate pairs into groups that share no gold task and no scenario.
+
+    A choice in one group never limits a choice in another, so each group can be
+    solved on its own and the answers joined. Pairs only form within a goal, so a
+    group is never wider than one goal. Groups come out in a fixed order (by
+    their smallest pair), so the result does not depend on input order.
+    """
+    parent: dict[tuple[str, str], tuple[str, str]] = {}
+
+    def find(node: tuple[str, str]) -> tuple[str, str]:
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    for gold_id, scenario_id in pairs:
+        for node in (("g", gold_id), ("s", scenario_id)):
+            parent.setdefault(node, node)
+        a, b = find(("g", gold_id)), find(("s", scenario_id))
+        if a != b:
+            parent[max(a, b)] = min(a, b)
+    groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for pair in sorted(pairs):
+        groups.setdefault(find(("g", pair[0])), []).append(pair)
+    return sorted(groups.values())
+
+
 def assign_matches(
     gold_tasks: list[dict[str, Any]], generated: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], list[str], list[dict[str, Any]]]:
@@ -105,29 +221,70 @@ def assign_matches(
     paraphrases of one test would each be credited against the same bench task and
     recall would exceed what the suite covers.
 
-    Greedy on descending overlap, with ties broken by (gold id, scenario id) so
-    the assignment is a function of the inputs alone. A non-deterministic
-    assignment would make recall appear to move between two runs of the same data,
-    which is the one thing this number must not do.
+    The assignment is the one-to-one matching with the **most pairs**, among pairs
+    that pass `_pair_score`; ties go to the largest total overlap, then to the
+    smallest (gold id, scenario id) pairs in order. It used to be greedy on
+    descending overlap, and greedy is one-to-one but not largest: a gold task could
+    lose its only possible scenario to a gold task that had another option, so a
+    task that *could* be matched was reported unmatched, recall read low, and the
+    stranded scenario was labelled `spurious` with a reason that was false. The
+    count comes first because recall is the count; overlap only decides between
+    matchings that credit the same number of tasks.
+
+    The tie-break by id is what makes the assignment a function of the inputs
+    alone, never of their order. A non-deterministic assignment would make recall
+    appear to move between two runs of the same data, which is the one thing this
+    number must not do.
+
+    Cost: all three levels are folded into one integer weight per pair, so each
+    group of linked pairs is solved once -- about n^2 * (n + m) steps for n gold
+    tasks and m scenarios in a group. An earlier version re-solved once per
+    candidate pair to apply the id tie-break, which grew about with N^4: 80 gold
+    tasks against 80 scenarios took 2.6s and 160 did not finish in two minutes.
     """
-    candidates = []
+    scores: dict[tuple[str, str], float] = {}
     for gold_task in gold_tasks:
         for scenario in generated:
             score = _pair_score(gold_task, scenario)
             if score is not None:
-                candidates.append((score, gold_task["id"], scenario["id"]))
-    candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
+                scores[(gold_task["id"], scenario["id"])] = score
 
-    matches: list[dict[str, Any]] = []
-    taken_gold: set[str] = set()
-    taken_scenarios: set[str] = set()
-    for score, gold_id, scenario_id in candidates:
-        if gold_id in taken_gold or scenario_id in taken_scenarios:
-            continue
-        taken_gold.add(gold_id)
-        taken_scenarios.add(scenario_id)
-        matches.append({"gold_id": gold_id, "scenario_id": scenario_id, "jaccard": score})
-    matches.sort(key=lambda match: match["gold_id"])
+    # One integer weight per pair, so a single maximum-weight search ranks by
+    # count first and overlap second: `pair_bonus` exceeds any possible total of
+    # overlaps, so one more pair always outweighs any gain in overlap. jaccard is
+    # already rounded to six places, so the overlap converts to an exact integer.
+    scale = 10**6
+    pair_bonus = (len(gold_tasks) + 1) * scale
+
+    chosen: list[tuple[str, str]] = []
+    for group in _components(list(scores)):
+        rows = sorted({g for g, _ in group})
+        columns = sorted({s for _, s in group})
+        # The id tie-break as a third, lowest level of the same weight. Read the
+        # matching as one digit per gold task, in id order and base `base`: the
+        # digit is `len(columns) - rank` of its scenario in id order, or 0 when
+        # unmatched. Comparing two totals at this level is then comparing those
+        # digit strings left to right -- the first gold task (by id) that differs
+        # decides, a smaller scenario id beats a larger one, and any scenario beats
+        # none. That is the order a one-gold-at-a-time "smallest scenario that
+        # still leaves an optimum" search yields. The whole level sums below
+        # base**len(rows), and the count-and-overlap part is scaled by exactly
+        # that, so it can only decide between matchings equal on the first two.
+        base = len(columns) + 1
+        top = base ** len(rows)
+        row_place = {g: base ** (len(rows) - 1 - i) for i, g in enumerate(rows)}
+        column_digit = {s: len(columns) - i for i, s in enumerate(columns)}
+        weight = {
+            (g, s): (pair_bonus + round(scores[(g, s)] * scale)) * top
+            + column_digit[s] * row_place[g]
+            for g, s in group
+        }
+        chosen.extend(_max_weight(rows, columns, weight).items())
+    chosen.sort()
+
+    taken_gold = {g for g, _ in chosen}
+    taken_scenarios = {s for _, s in chosen}
+    matches = [{"gold_id": g, "scenario_id": s, "jaccard": scores[(g, s)]} for g, s in chosen]
     return (
         matches,
         sorted(task["id"] for task in gold_tasks if task["id"] not in taken_gold),

@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
-from rubrica.artifacts import ArtifactError, read_json, read_json_or_none, sha256_of, write_json
+from rubrica.artifacts import ArtifactError, read_json, sha256_of, write_json
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths
+from rubrica.validate import _validator_for, schema_dir, validate_artifact
 
 # Fixed, so review is a trend line rather than a fresh opinion each time.
 RUBRIC = ("fair", "unambiguous", "correctly_labeled", "non_trivial")
@@ -55,9 +57,170 @@ def confidence_band(verdict: dict[str, Any] | None) -> str:
     return "high" if unqualified else "low"
 
 
-# Only ArtifactError reads as absence; a PermissionError still reaches cli.py's
-# exit-2 path. See artifacts.read_json_or_none.
-_load = read_json_or_none
+# The packet is a report for a human reader, so a file it cannot read is stated in
+# the packet rather than refused. Every file below is emit's, instantiate's or
+# challenge's output, so a non-UTF-8 byte or a chmod-000 file there is a hand edit
+# or damage, not a stage defect a re-dispatch could repair. Before these helpers
+# one non-UTF-8 byte in an instruction.md reached cli.py's catch-all as
+# `[internal] ... raised UnicodeDecodeError` at exit 1: no file named, and no
+# packet written, so one bad task cost the reader every other task's section.
+# T-55 and T-63 closed the same hole in other code.
+
+
+def _label(run: RunPaths, path: Path) -> str:
+    """The path as a reader of this run would name it: relative to the run root."""
+    try:
+        return path.relative_to(run.root).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _read_text(run: RunPaths, path: Path) -> tuple[str, str | None]:
+    """-> (text, note). Never raises for an unreadable or non-UTF-8 file.
+
+    Non-UTF-8 bytes are decoded with replacement characters and shown, with a
+    note saying so: the reader can still see what the agent receives, and
+    knows the odd glyphs are damage rather than content. An OSError (a
+    chmod-000 file above all) yields no text and a note naming the reason.
+    """
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return "", f"({_label(run, path)} could not be read: {exc.strerror or exc})"
+    try:
+        return raw.decode("utf-8"), None
+    except UnicodeDecodeError:
+        note = f"({_label(run, path)} is not valid UTF-8; shown with replacement characters)"
+        return raw.decode("utf-8", errors="replace"), note
+
+
+def _json_kind(doc: Any) -> str:
+    """The JSON name of a parsed value's type, for a note a reader can act on."""
+    if doc is None:
+        return "null"
+    if isinstance(doc, bool):
+        return "boolean"
+    if isinstance(doc, list):
+        return "list"
+    if isinstance(doc, str):
+        return "string"
+    return "number"
+
+
+def _load(run: RunPaths, path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """-> (object, note). An absent file is (None, None): that is a state, not damage.
+
+    A present file that is not UTF-8, not JSON, not a JSON object, or not
+    readable at all is (None, note), and the note goes into the packet.
+    read_json_or_none used to turn the first two into a silent None -- a
+    verdict shown as "None" with nothing saying why -- and let the fourth reach
+    cli.py's exit-2 path, which wrote no packet at all. The third was the same
+    silent None one step later: a verdict of `[]` parsed, was swapped for `{}`,
+    and showed as "Verdict: None" with no note (T-67).
+    """
+    try:
+        doc = read_json(path)
+    except ArtifactError as exc:
+        try:
+            present = path.exists()
+        except OSError:
+            # Unreachable rather than absent; read_json only raises
+            # ArtifactError for a missing file when the stat said ENOENT, so
+            # this is belt and braces, but a guess of "absent" here would be
+            # exactly the silent None this function exists to remove.
+            present = True
+        if not present:
+            return None, None
+        return None, f"({_label(run, path)} could not be read: {exc})"
+    except OSError as exc:
+        return None, f"({_label(run, path)} could not be read: {exc.strerror or exc})"
+    if not isinstance(doc, dict):
+        return None, f"({_label(run, path)} is a {_json_kind(doc)}, not an object)"
+    return doc, None
+
+
+def _probe(run: RunPaths, path: Path) -> tuple[bool, str | None]:
+    """-> (is_file, note). Never raises.
+
+    On Python 3.13 Path.is_file() raises PermissionError when the *folder* holding
+    the file cannot be entered (chmod 000 on 06-suite/<sid> or 04-instances/<sid>),
+    which reached cli.py as exit 2 with no packet; 3.14 returns False instead, which
+    would print "(no instruction.md ...)" and drop the rationale silently. Either
+    way the reader was told the wrong thing, so an unreachable file is reported as
+    present-but-unreadable, with the reason, like a chmod-000 file.
+    """
+    try:
+        if path.is_file():
+            return True, None
+    except OSError as exc:
+        return True, f"({_label(run, path)} could not be read: {exc.strerror or exc})"
+    try:
+        # is_file() is False both for a file that is not there and, on 3.14, for
+        # one behind a folder that cannot be entered. Listing the folder tells
+        # the two apart without depending on which Python is running.
+        path.parent.stat()
+        list(path.parent.iterdir())
+    except FileNotFoundError:
+        return False, None
+    except OSError as exc:
+        return True, f"({_label(run, path)} could not be read: {exc.strerror or exc})"
+    return False, None
+
+
+def scenarios_by_id(run: RunPaths) -> dict[str, dict[str, Any]]:
+    """02-scenarios.json's scenarios by id. Raises ArtifactError naming the file.
+
+    Raised both when the file cannot be read and when it parses but does not meet
+    its schema, so a caller gives the two the same outcome. recall.generated_tasks
+    (compare-gold) uses this too: it had the same unguarded shape (T-69).
+    """
+    # The schema is loaded before 02-scenarios.json is read, and a fault in it is
+    # a UsageError (exit 2) naming the schema, not an ArtifactError: both callers
+    # catch ArtifactError as a fault in 02-scenarios.json. Measured before this
+    # split (T-72), with RUBRICA_SCHEMA_DIR holding only manifest-0.1.json:
+    # sample-for-review exited 1 with "[review] R/02-scenarios.json: missing
+    # artifact: <dir>/scenarios-0.1.json", and compare-gold also wrote a
+    # recall.md telling the reader to "Repair 02-scenarios.json". Nothing in the
+    # run was wrong, and no repair of it could help.
+    root = schema_dir()
+    try:
+        _validator_for("scenarios", root)
+    except ArtifactError as exc:
+        raise UsageError(
+            f"the scenarios schema in RUBRICA_SCHEMA_DIR ({root}) cannot be loaded: {exc}"
+        ) from exc
+    document = read_json(run.scenarios)
+    # Parsed is not the same as usable. T-68 and T-69 guarded the shape field by
+    # field -- not an object, `scenarios` not a list, an entry not an object, no
+    # string `id` -- and the next field along, a hop_depth that was a list or
+    # null, still escaped stratified() as a TypeError, which cli.py reported as an
+    # [internal] finding naming the run folder rather than this file. Patching one
+    # field at a time does not end, so the whole document is held to
+    # scenarios-0.1.json instead (T-70), and the first finding is quoted so the
+    # reader knows what is wrong, not only where.
+    #
+    # The schema covers every field this module and recall read: T-68's four shape
+    # checks, and hop_depth as `"type": "integer"` with a 1..5 range. That
+    # also rejects a bool hop_depth, which the code could not stratify sensibly:
+    # jsonschema's integer type excludes bool even though Python's int does not
+    # (measured). It admits 1.0, which compares and hashes as 1, so no explicit
+    # check is kept.
+    label = _label(run, run.scenarios)
+    try:
+        findings = validate_artifact(run.scenarios, "scenarios")
+    except ArtifactError as exc:
+        # validate_artifact turns a fault in the document into findings, so an
+        # ArtifactError out of it is about the schemas: a $ref that does not
+        # resolve, which only shows up once validation walks to it.
+        raise UsageError(
+            f"the scenarios schema in RUBRICA_SCHEMA_DIR ({root}) cannot be used: {exc}"
+        ) from exc
+    if findings:
+        first = findings[0]
+        where = f" at {first.pointer}" if first.pointer else ""
+        more = f" (and {len(findings) - 1} more)" if len(findings) > 1 else ""
+        raise ArtifactError(f"{label} does not match its schema{where}: {first.message}{more}")
+    return {scenario["id"]: scenario for scenario in document["scenarios"]}
 
 
 def candidates(run: RunPaths) -> list[dict[str, Any]]:
@@ -72,15 +235,14 @@ def candidates(run: RunPaths) -> list[dict[str, Any]]:
     depth, written at exit 0 with no finding, looking exactly like a suite that
     really is flat. recall.generated_tasks makes the same distinction.
     """
-    document = read_json(run.scenarios)
-    scenarios = {s["id"]: s for s in document.get("scenarios", [])}
+    scenarios = scenarios_by_id(run)
     entries = []
     for sid in run.scenario_ids_with_tasks():
         scenario = scenarios.get(sid, {})
         entries.append(
             {
                 "scenario_id": sid,
-                "band": confidence_band(_load(run.verdict(sid))),
+                "band": confidence_band(_load(run, run.verdict(sid))[0]),
                 "hop_depth": scenario.get("hop_depth", 0),
             }
         )
@@ -128,14 +290,31 @@ def stratified(entries: list[dict[str, Any]], size: int) -> list[dict[str, Any]]
 def _section(run: RunPaths, entry: dict[str, Any]) -> list[str]:
     sid = entry["scenario_id"]
     task = run.task_dir(sid)
-    verdict = _load(run.verdict(sid)) or {}
-    expected = _load(run.expected(sid)) or {}
-    instruction = (
-        (task / "instruction.md").read_text(encoding="utf-8").strip()
-        if (task / "instruction.md").is_file()
-        else "(no instruction.md in the emitted package)"
-    )
-    digest = sha256_of(run.seed(sid)) if run.seed(sid).is_file() else "(no seed.json)"
+    verdict, verdict_note = _load(run, run.verdict(sid))
+    expected, expected_note = _load(run, run.expected(sid))
+    verdict = verdict or {}
+    expected = expected or {}
+    instruction_path = task / "instruction.md"
+    present, probe_note = _probe(run, instruction_path)
+    if probe_note:
+        instruction = probe_note
+    elif present:
+        text, note = _read_text(run, instruction_path)
+        instruction = "\n\n".join(part for part in (note, text.strip()) if part)
+    else:
+        instruction = "(no instruction.md in the emitted package)"
+    # Only a real digest goes inside the `sha256:` code span; a note printed there
+    # read as if it were the digest of a seed that does not exist (T-68).
+    present, probe_note = _probe(run, run.seed(sid))
+    if probe_note:
+        digest = probe_note
+    elif present:
+        try:
+            digest = f"`sha256:{sha256_of(run.seed(sid))}`"
+        except OSError as exc:
+            digest = f"({_label(run, run.seed(sid))} could not be read: {exc.strerror or exc})"
+    else:
+        digest = "(no seed.json)"
     lines = [
         f"## `{sid}` — confidence band: **{entry['band']}**, hop depth {entry['hop_depth']}",
         "",
@@ -143,13 +322,14 @@ def _section(run: RunPaths, entry: dict[str, Any]) -> list[str]:
         "",
         instruction,
         "",
-        f"### Seed digest\n\n`sha256:{digest}`\n",
+        f"### Seed digest\n\n{digest}\n",
         "The seed itself is deliberately not inlined: the digest is what confirms which world",
         "this label was authored against, and the whole simulated backend would bury the four",
         "questions below.",
         "",
         "### Reference answer and assertions",
         "",
+        *([expected_note, ""] if expected_note else []),
         "```json",
         json.dumps(
             {
@@ -163,16 +343,16 @@ def _section(run: RunPaths, entry: dict[str, Any]) -> list[str]:
         "```",
         "",
     ]
-    if run.rationale(sid).is_file():
-        lines += [
-            "### Why the instantiate stage chose this world",
-            "",
-            run.rationale(sid).read_text(encoding="utf-8").strip(),
-            "",
-        ]
+    present, probe_note = _probe(run, run.rationale(sid))
+    if present:
+        text, note = ("", probe_note) if probe_note else _read_text(run, run.rationale(sid))
+        lines += ["### Why the instantiate stage chose this world", ""]
+        lines += [part for part in (note, text.strip()) if part]
+        lines.append("")
     lines += [
         "### Adversary notes",
         "",
+        *([verdict_note, ""] if verdict_note else []),
         f"- **Verdict:** {verdict.get('verdict')}",
         f"- **Uniquely determined:** {verdict.get('uniquely_determined')}",
         f"- **Derivable without guessing:** {verdict.get('derivable_without_guessing')}",
@@ -201,6 +381,105 @@ def packet(run: RunPaths, entries: list[dict[str, Any]]) -> str:
     for entry in entries:
         lines += _section(run, entry)
     return "\n".join(lines)
+
+
+def _no_high_confidence_findings(run: RunPaths, pool: list[dict[str, Any]]) -> list[Finding]:
+    """What to say when no entry in the pool is in the high band.
+
+    A verdict that is missing, could not be read, is not an object, or is not a
+    schema-valid accept, is sampled as low --
+    the packet names it in that task's section -- but it is not evidence that the
+    adversary qualified anything. Counting it as such once turned a chmod 000 on
+    05-verdicts/ into "every accept was qualified by the adversary" against a
+    suite whose only verdict was a clean accept (T-69). So each damaged verdict
+    is named on its own line, and the claim about the adversary is made only
+    about the verdicts that could actually be read.
+    """
+    # The verdict schema is loaded before any verdict is judged against it, and a
+    # fault in it is a UsageError (exit 2) naming RUBRICA_SCHEMA_DIR -- the split
+    # scenarios_by_id makes for the scenarios schema (T-72). Without it a missing
+    # verdict-0.1.json would be reported against every verdict file in the suite.
+    root = schema_dir()
+    try:
+        _validator_for("verdict", root)
+    except ArtifactError as exc:
+        raise UsageError(
+            f"the verdict schema in RUBRICA_SCHEMA_DIR ({root}) cannot be loaded: {exc}"
+        ) from exc
+    damaged: list[tuple[Path, str]] = []
+    for entry in pool:
+        path = run.verdict(entry["scenario_id"])
+        label = _label(run, path)
+        doc, note = _load(run, path)
+        if note is not None:
+            damaged.append((path, note.removeprefix("(").removesuffix(")")))
+            continue
+        if doc is None:
+            # Absent. _load calls that a state, not damage, and the packet shows
+            # it so -- but it is no more evidence of an adversary's qualification
+            # than a damaged file is. Left out of `damaged`, deleting a suite's
+            # only verdict produced "every accept was qualified by the adversary"
+            # (T-72).
+            damaged.append((path, f"{label} is missing"))
+            continue
+        # Read is not the same as an accept the adversary qualified. confidence_band
+        # puts every dict that is not a clean accept in the low band, so `{}`,
+        # `{"verdict": "reject"}` or an accept with no `uniquely_determined` all
+        # used to fall under "every accept was qualified by the adversary" (T-73).
+        # Rather than guard field by field, the verdict is held to its schema, as
+        # scenarios_by_id holds 02-scenarios.json (T-70), and only a schema-valid
+        # accept counts as one the adversary could have qualified. emit ships only
+        # accepts, so anything else here is a hand edit or damage after emit.
+        try:
+            problems = validate_artifact(path, "verdict")
+        except ArtifactError as exc:
+            # validate_artifact turns a fault in the document into findings, so
+            # an ArtifactError out of it is about the schemas (an unresolvable $ref).
+            raise UsageError(
+                f"the verdict schema in RUBRICA_SCHEMA_DIR ({root}) cannot be used: {exc}"
+            ) from exc
+        if problems:
+            first = problems[0]
+            where = f" at {first.pointer}" if first.pointer else ""
+            more = f" (and {len(problems) - 1} more)" if len(problems) > 1 else ""
+            damaged.append(
+                (path, f"{label} does not match its schema{where}: {first.message}{more}")
+            )
+        elif doc.get("verdict") != "accept":
+            damaged.append((path, f"{label} is not an accept (verdict: {doc.get('verdict')})"))
+    findings = [
+        Finding(
+            path,
+            "review",
+            "",
+            f"{note}; its confidence band is unknown, so it was sampled as low confidence "
+            "and is not counted as an accept the adversary qualified",
+        )
+        for path, note in damaged
+    ]
+    if not damaged:
+        message = (
+            "no high-confidence accept exists in this suite, so the packet cannot look "
+            "where a correlated labeler/adversary blind spot would hide; every accept was "
+            "qualified by the adversary"
+        )
+    elif len(damaged) < len(pool):
+        message = (
+            "no high-confidence accept exists among the verdicts that could be read, so the "
+            "packet cannot look where a correlated labeler/adversary blind spot would hide; "
+            "every readable accept was qualified by the adversary, and "
+            f"{len(damaged)} verdict(s) are missing, could not be read, or are not a "
+            "schema-valid accept: " + ", ".join(_label(run, path) for path, _ in damaged)
+        )
+    else:
+        message = (
+            "no verdict in this suite could be read as a schema-valid accept, so it is unknown "
+            "whether any "
+            "high-confidence accept exists and the packet may not look where a correlated "
+            "labeler/adversary blind spot would hide; missing, unreadable or not a "
+            "schema-valid accept: " + ", ".join(_label(run, path) for path, _ in damaged)
+        )
+    return [Finding(run.review_sample, "review", "", message), *findings]
 
 
 def sample_run(run: RunPaths, size: int = DEFAULT_SAMPLE_SIZE) -> tuple[list[dict], list[Finding]]:
@@ -252,16 +531,7 @@ def sample_run(run: RunPaths, size: int = DEFAULT_SAMPLE_SIZE) -> tuple[list[dic
     sampled = stratified(pool, size)
     findings: list[Finding] = []
     if not any(entry["band"] == "high" for entry in pool):
-        findings.append(
-            Finding(
-                run.review_sample,
-                "review",
-                "",
-                "no high-confidence accept exists in this suite, so the packet cannot look "
-                "where a correlated labeler/adversary blind spot would hide; every accept was "
-                "qualified by the adversary",
-            )
-        )
+        findings += _no_high_confidence_findings(run, pool)
     run.review_dir.mkdir(parents=True, exist_ok=True)
     run.review_packet.write_text(packet(run, sampled), encoding="utf-8")
     write_json(

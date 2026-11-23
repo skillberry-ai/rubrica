@@ -8,6 +8,8 @@ those are what make the number mean anything, not the number itself.
 from __future__ import annotations
 
 import json
+import random
+import time
 
 import pytest
 
@@ -18,6 +20,7 @@ from rubrica.paths import RunPaths
 from rubrica.recall import (
     MATCH_JACCARD_FLOOR,
     NOVELTY_KINDS,
+    _pair_score,
     assign_matches,
     cells,
     classify_novelty,
@@ -81,6 +84,33 @@ def test_an_empty_gold_list_is_allowed(tmp_path):
     """ "We have no bench tasks yet" is a real state, and refusing it would make
     compare-gold unusable on a second target before anyone authored one."""
     assert load_gold(_gold_file(tmp_path, minimal_gold(tasks=[])))["tasks"] == []
+
+
+def test_a_gold_file_with_a_repeated_task_id_is_refused_and_nothing_is_written(tmp_path, capsys):
+    """T-71: assign_matches keys gold by id, so a repeated id once read as
+    "Recall: 0.50" beside "nothing unmatched" and exited 0. A person wrote the
+    file, so the repeat is a usage error (exit 2) naming the id, before any
+    measurement is written."""
+    from rubrica.cli import main
+
+    gold = _gold_file(tmp_path, minimal_gold(tasks=[_gold("bench-001"), _gold("bench-001")]))
+    run = build_state(tmp_path / "run", "emit")
+    code = main(["compare-gold", "--run", str(run.root), "--gold", str(gold)])
+    captured = capsys.readouterr()
+
+    assert code == 2, captured
+    assert captured.out == ""
+    errors = [line for line in captured.err.splitlines() if line.startswith("error:")]
+    assert len(errors) == 1, captured.err
+    assert "bench-001" in errors[0] and "repeated" in errors[0]
+    assert not run.recall.exists()
+    assert not run.recall_md.exists()
+
+
+def test_a_gold_file_with_unique_ids_still_loads(tmp_path):
+    gold = minimal_gold(tasks=[_gold("bench-001"), _gold("bench-002")])
+    loaded = load_gold(_gold_file(tmp_path, gold))
+    assert [task["id"] for task in loaded["tasks"]] == ["bench-001", "bench-002"]
 
 
 # -- generated_tasks ---------------------------------------------------------
@@ -198,7 +228,7 @@ def test_one_scenario_matches_at_most_one_gold_task():
 
 
 def test_the_best_available_pair_wins_and_the_assignment_is_deterministic():
-    """Greedy on descending overlap, ties broken by id.
+    """Among matchings of equal size the larger total overlap wins, ties by id.
 
     Without a total order the same inputs could produce two different match sets
     across runs, and recall would look like it moved when nothing did.
@@ -230,6 +260,75 @@ def test_ties_are_broken_by_id_not_input_order():
             ("bench-a", "scn-x"),
             ("bench-b", "scn-y"),
         ]
+
+
+def _ab_case():
+    """T-76: the case a greedy assignment got wrong, all under one goal.
+
+    Gold A = {c1,c2}, gold B = {c1,c2,c3}; scenario s1 = {c1,c2}, s2 = {c1}.
+    Greedy took A->s1 (1.0) first and stranded B, whose only other option, s2,
+    sits below the floor for B (1/3). A->s2 (0.5) and B->s1 (2/3) pairs both.
+    """
+    c1, c2, c3 = ("cap-1", "oc-1"), ("cap-2", "oc-1"), ("cap-3", "oc-1")
+    gold = [_gold("bench-a", refs=(c1, c2)), _gold("bench-b", refs=(c1, c2, c3))]
+    generated = [_generated("scn-1", refs=(c1, c2)), _generated("scn-2", refs=(c1,))]
+    return gold, generated
+
+
+def test_the_largest_matching_wins_so_a_matchable_gold_task_is_never_unmatched():
+    gold, generated = _ab_case()
+    matches, unmatched_gold, unmatched_generated = assign_matches(gold, generated)
+    assert [(m["gold_id"], m["scenario_id"]) for m in matches] == [
+        ("bench-a", "scn-2"),
+        ("bench-b", "scn-1"),
+    ]
+    assert [m["jaccard"] for m in matches] == [pytest.approx(0.5), pytest.approx(2 / 3)]
+    assert (unmatched_gold, unmatched_generated) == ([], [])
+
+
+def test_the_stranded_scenario_is_no_longer_labelled_spurious():
+    """Under greedy, scn-2 was left over and classify_novelty filed it as
+    `spurious` -- "no single authored task overlapped it enough to pair", which
+    is false: bench-a pairs with it. The first assertion shows the label was a
+    real outcome for this scenario, so the second is not vacuous."""
+    gold, generated = _ab_case()
+    stranded = generated[1]
+    assert classify_novelty(stranded, gold)[0] == "spurious"
+    _, _, unmatched_generated = assign_matches(gold, generated)
+    assert [classify_novelty(s, gold)[0] for s in unmatched_generated] == []
+    assert stranded["id"] not in {s["id"] for s in unmatched_generated}
+
+
+def test_input_order_does_not_change_the_largest_matching():
+    gold, generated = _ab_case()
+    results = set()
+    for gold_order in (gold, gold[::-1]):
+        for generated_order in (generated, generated[::-1]):
+            matches, unmatched_gold, unmatched_generated = assign_matches(
+                gold_order, generated_order
+            )
+            results.add(
+                (
+                    tuple((m["gold_id"], m["scenario_id"], m["jaccard"]) for m in matches),
+                    tuple(unmatched_gold),
+                    tuple(s["id"] for s in unmatched_generated),
+                )
+            )
+    assert len(results) == 1
+
+
+def test_a_larger_total_overlap_breaks_a_tie_in_size():
+    """Two two-pair matchings exist; the one with more overlap wins even though
+    the other uses the smaller scenario id for the first gold task."""
+    c1, c2, c3 = ("cap-1", "oc-1"), ("cap-2", "oc-1"), ("cap-3", "oc-1")
+    gold = [_gold("bench-a", refs=(c1, c2)), _gold("bench-b", refs=(c1, c2, c3))]
+    generated = [_generated("scn-1", refs=(c1, c2, c3)), _generated("scn-2", refs=(c1, c2))]
+    matches, _, _ = assign_matches(gold, generated)
+    # a->1 (2/3) + b->2 (2/3) = 4/3 against a->2 (1.0) + b->1 (1.0) = 2.
+    assert [(m["gold_id"], m["scenario_id"]) for m in matches] == [
+        ("bench-a", "scn-2"),
+        ("bench-b", "scn-1"),
+    ]
 
 
 # -- classify_novelty --------------------------------------------------------
@@ -458,7 +557,13 @@ def _scenario_doc(sid, refs):
         "capability_refs": [{"capability_id": c, "outcome_class_id": o} for c, o in refs],
         "discriminating_fact": "fact",
         "status": "active",
-        "provenance": {"hole_refs": [], "claim_ids": ["clm-001"], "round": 1},
+        # A real hole ref, not []: 02-scenarios.json is held to its schema before
+        # compare-gold uses it (T-70), and the schema wants at least one.
+        "provenance": {
+            "hole_refs": [f"cell:{c}/{o}" for c, o in refs],
+            "claim_ids": ["clm-001"],
+            "round": 1,
+        },
     }
 
 
@@ -528,3 +633,209 @@ def test_the_novel_finding_names_only_the_spurious_entries_not_every_novel_one(t
     assert len(novel_findings) == 1
     assert "scn-spurious" in novel_findings[0].message
     assert "scn-new-cap" not in novel_findings[0].message
+
+
+# T-69: a 02-scenarios.json that parses but is the wrong shape escaped
+# recall.generated_tasks as AttributeError/TypeError/KeyError -- an [internal] line naming
+# the run folder, not the file. It must give the same outcome as one that does not
+# parse at all.
+def _with_hop_depths(doc, depths):
+    """`doc` with its scenarios' hop_depths set to `depths`, in order.
+
+    The emit-state run lists one scenario, so a depth past the first is set on a
+    copy of it under the next id (scn-002, ...); every other field stays valid.
+    """
+    listed = [dict(scenario) for scenario in doc["scenarios"]]
+    while len(listed) < len(depths):
+        listed.append({**listed[0], "id": f"scn-{len(listed) + 1:03d}"})
+    for scenario, depth in zip(listed, depths, strict=False):
+        scenario["hop_depth"] = depth
+    return {**doc, "scenarios": listed}
+
+
+def _compare_cli(run, gold, capsys):
+    from rubrica.cli import main
+
+    code = main(["compare-gold", "--run", str(run.root), "--gold", str(gold)])
+    return code, capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda doc: [],
+        lambda doc: {**doc, "scenarios": ["scn-001", *doc["scenarios"]]},
+        lambda doc: {
+            **doc,
+            "scenarios": [{k: v for k, v in doc["scenarios"][0].items() if k != "id"}],
+        },
+        # T-70: fields past the shape checks, caught by the scenarios schema.
+        lambda doc: _with_hop_depths(doc, [[1]]),
+        lambda doc: _with_hop_depths(doc, [None, 2]),
+    ],
+    ids=["list-document", "string-entry", "entry-without-id", "hop-depth-list", "hop-depth-null"],
+)
+def test_a_malformed_scenario_list_is_named_like_an_unreadable_one(tmp_path, capsys, mutate):
+    from rubrica.artifacts import read_json
+
+    gold = _gold_file(tmp_path)
+    baseline = build_state(tmp_path / "baseline", "emit")
+    baseline.scenarios.write_text("{not json", encoding="utf-8")
+    want_code, want_out = _compare_cli(baseline, gold, capsys)
+
+    run = build_state(tmp_path / "run", "emit")
+    write_json(run.scenarios, mutate(read_json(run.scenarios)))
+    code, out = _compare_cli(run, gold, capsys)
+
+    assert code == want_code, out
+    assert "[internal]" not in out
+    named = [line for line in out.splitlines() if line.startswith(f"[recall] {run.scenarios}: ")]
+    assert len(named) == 1, out
+    want = f"[recall] {baseline.scenarios}: "
+    assert any(line.startswith(want) for line in want_out.splitlines()), want_out
+
+    report = read_json(run.recall)
+    assert report["recall"] is None
+    assert "02-scenarios.json" in report["unreadable"]
+
+
+# T-72: a scenarios schema that cannot be loaded is a misconfigured run. It used
+# to be reported as a fault in 02-scenarios.json -- exit 1, and a recall.md on
+# disk saying "Repair 02-scenarios.json" about a file that was fine.
+@pytest.mark.parametrize("how", ["missing", "unresolvable-ref"])
+def test_an_unusable_scenarios_schema_is_exit_two_and_writes_nothing(
+    tmp_path, capsys, monkeypatch, how
+):
+    import shutil
+
+    from rubrica.validate import ARTIFACT_SCHEMAS, schema_dir
+
+    gold = _gold_file(tmp_path)
+    run = build_state(tmp_path / "run", "emit")
+    root = tmp_path / "schemas"
+    shutil.copytree(schema_dir(), root)
+    path = root / ARTIFACT_SCHEMAS["scenarios"]
+    if how == "missing":
+        path.unlink()
+    else:
+        text = path.read_text("utf-8")
+        assert '"#/$defs/scenario"' in text
+        path.write_text(text.replace('"#/$defs/scenario"', '"absent-0.1.json#/x"'), "utf-8")
+    monkeypatch.setenv("RUBRICA_SCHEMA_DIR", str(root))
+
+    from rubrica.cli import main
+
+    code = main(["compare-gold", "--run", str(run.root), "--gold", str(gold)])
+    captured = capsys.readouterr()
+    assert code == 2, captured
+    assert captured.out == "", captured.out
+    errors = [line for line in captured.err.splitlines() if line.strip()]
+    assert len(errors) == 1, captured.err
+    assert str(root) in errors[0]
+    assert "02-scenarios.json" not in errors[0]
+    assert not run.recall.exists()
+    assert not run.recall_md.exists()
+
+
+def test_a_valid_run_still_compares_with_the_normal_schemas(tmp_path, capsys):
+    gold = _gold_file(tmp_path)
+    run = build_state(tmp_path / "run", "emit")
+    code, out = _compare_cli(run, gold, capsys)
+    assert code in (0, 1), out
+    assert f"[recall] {run.scenarios}" not in out
+    assert run.recall.exists()
+
+
+# -- T-77: the largest-matching step stays fast and keeps the same answer -----
+
+
+def _brute_force(gold, generated):
+    """Every one-to-one matching, ranked by the three documented levels.
+
+    Most pairs, then the largest total overlap (summed as the same exact
+    six-place integers the code uses, so float addition cannot reorder a tie),
+    then -- reading gold tasks in id order -- the smallest scenario id for the
+    first gold task that differs, where any scenario beats none.
+    -> (the winning pairs, how many matchings tie it on size and overlap).
+    """
+    candidates = {}
+    for g in gold:
+        for s in generated:
+            score = _pair_score(g, s)
+            if score is not None:
+                candidates.setdefault(g["id"], []).append((s["id"], score))
+    gold_ids = sorted(candidates)
+    ranked = []
+
+    def walk(index, used, picked):
+        if index == len(gold_ids):
+            key = (
+                -len(picked),
+                -sum(round(score * 10**6) for _, _, score in picked),
+                tuple(
+                    (0, dict((g, s) for g, s, _ in picked)[g])
+                    if g in {p[0] for p in picked}
+                    else (1, "")
+                    for g in gold_ids
+                ),
+            )
+            ranked.append((key, sorted((g, s) for g, s, _ in picked)))
+            return
+        gold_id = gold_ids[index]
+        walk(index + 1, used, picked)
+        for scenario_id, score in candidates[gold_id]:
+            if scenario_id not in used:
+                walk(index + 1, used | {scenario_id}, [*picked, (gold_id, scenario_id, score)])
+
+    walk(0, frozenset(), [])
+    key, pairs = min(ranked)
+    return pairs, sum(other[:2] == key[:2] for other, _ in ranked)
+
+
+def test_the_matching_equals_a_brute_force_search_over_every_one_to_one_matching():
+    """T-77 folded the id tie-break into the weights and solves each linked group
+    once, instead of re-solving per candidate pair. This pins that the answer did
+    not move: on many small random cases -- a tiny cell pool and two goals, so
+    equal sizes and equal overlaps are common -- it equals an exhaustive search.
+    """
+    rng = random.Random(77)
+    pool = [(f"cap-{c}", "oc-1") for c in "abc"]
+    ties = 0
+    for _ in range(600):
+
+        def task(make, tid):
+            refs = tuple(rng.sample(pool, rng.randint(1, 2)))
+            return make(tid, goal_id=rng.choice(("goal-1", "goal-2")), refs=refs)
+
+        gold = [task(_gold, f"bench-{i}") for i in range(rng.randint(0, 5))]
+        generated = [task(_generated, f"scn-{i}") for i in range(rng.randint(0, 5))]
+        rng.shuffle(gold)
+        rng.shuffle(generated)
+        expected, tied = _brute_force(gold, generated)
+        matches, unmatched_gold, unmatched_generated = assign_matches(gold, generated)
+        assert [(m["gold_id"], m["scenario_id"]) for m in matches] == expected
+        assert unmatched_gold == sorted({g["id"] for g in gold} - {g for g, _ in expected})
+        assert [s["id"] for s in unmatched_generated] == sorted(
+            {s["id"] for s in generated} - {s for _, s in expected}
+        )
+        ties += tied > 1
+    assert ties > 100, "the random cases must actually exercise the tie-breaks"
+
+
+def test_a_large_single_goal_bench_and_suite_match_quickly():
+    """T-76 re-solved once per candidate pair, which grew about with N^4: 80 gold
+    tasks against 80 scenarios took 2.6s and 160 did not finish in 120s, while a
+    real emitted suite had 282 tests. Here 150 same-goal gold tasks meet 300
+    scenarios whose three-of-five cells overlap enough to pair densely.
+    """
+    rng = random.Random(150)
+    pool = [(f"cap-{c}", "oc-1") for c in "abcde"]
+    gold = [_gold(f"bench-{i:03}", refs=tuple(rng.sample(pool, 3))) for i in range(150)]
+    generated = [_generated(f"scn-{i:03}", refs=tuple(rng.sample(pool, 3))) for i in range(300)]
+    started = time.perf_counter()
+    matches, unmatched_gold, _ = assign_matches(gold, generated)
+    elapsed = time.perf_counter() - started
+    assert len(matches) == 150 and unmatched_gold == []
+    # Measured about 0.9s on a laptop; the old code did not finish in 60s. The
+    # limit is over ten times the measured time so a loaded machine stays green.
+    assert elapsed < 10, f"assign_matches took {elapsed:.2f}s"
