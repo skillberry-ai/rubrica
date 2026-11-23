@@ -109,6 +109,62 @@ def test_a_free_text_gate_line_counts_and_a_mid_sentence_mention_does_not(tmp_pa
     assert pipeline.find(pipeline.steps(run), "gate-1").status == DONE
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        "- 2026-11-18T00:00:00Z gate 2 not approved: rework scn-003 first",
+        "- 2026-11-18T00:00:00Z Gate 1: changes requested, services grouping is wrong",
+        "- 2026-11-18T00:00:00Z gate 3 is still open, waiting on the owner",
+        "- 2026-11-18T00:00:00Z human gate 2: not approved, scn-003 is wrong",
+        "- 2026-11-18T00:00:00Z Gate 1: NOT PASSED yet",
+        "- 2026-11-18T00:00:00Z console: feedback on gate 2, not approved: redo it",
+    ],
+)
+def test_a_gate_line_that_is_not_an_approval_passes_no_gate(tmp_path, line):
+    # "Record a decision" writes free text as `- <ts> <text>`, so a reviewer typing
+    # "gate 2 not approved" must not open the way for "Run to next gate".
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.decisions.write_text(line + "\n", encoding="utf-8")
+    assert pipeline.approved_gates(run) == set()
+
+
+@pytest.mark.parametrize(
+    ("line", "gate"),
+    [
+        ("- 2026-11-18T00:00:00Z human gate 2 (console): looks good", 2),
+        ("- 2026-11-18T00:00:00Z Gate 1: user approved the world model", 1),
+        ("- 2026-11-18T00:00:00Z gate 3: verdicts read", 3),
+        ("- 2026-11-18T00:00:00Z human gate 0: triage reads right", 0),
+        # The `(console)` form is written only by the Approve button, and clicking
+        # Approve is the approval, so the note after the colon is never read as a
+        # refusal -- "Rejected tests look right" is a natural gate-3 note, since gate 3
+        # reviews which tests were redone or rejected. (T-79 had the second case
+        # below as a non-approval; that left a clicked Approve with the gate open.)
+        ("- 2026-11-18T10:00Z human gate 3 (console): rejected tests look right, approve", 3),
+        ("- 2026-11-18T00:00:00Z human gate 2 (console): Rejected, scn-003 is wrong", 2),
+    ],
+)
+def test_a_gate_line_in_a_documented_form_counts(tmp_path, line, gate):
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.decisions.write_text(line + "\n", encoding="utf-8")
+    assert pipeline.approved_gates(run) == {gate}
+
+
+def test_a_non_utf8_byte_in_decisions_md_drops_no_approval(tmp_path):
+    # decisions.md is hand-edited, so a line saved as Latin-1 (byte 0xe9 for "e
+    # acute") is something a reviewer can produce. Before T-81 that one byte made
+    # the whole file read as empty, and every gate approved earlier showed as
+    # waiting again. Now only the bad byte is replaced: the other lines still
+    # count, and the bad line counts too when it is otherwise an approval.
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.decisions.write_bytes(
+        b"- 2026-11-18T09:00Z human gate 1 (console): world model reads right\n"
+        b"- 2026-11-18T10:00Z human gate 2 (console): ok caf\xe9\n"
+    )
+    assert pipeline.approved_gates(run) == {1, 2}
+    assert pipeline.find(pipeline.steps(run), "gate-1").status == DONE
+
+
 def test_a_gate_is_inferred_passed_when_a_later_stage_ran(tmp_path):
     run = build_toy_run(tmp_path, upto="propose")
     gate = pipeline.find(pipeline.steps(run), "gate-1")

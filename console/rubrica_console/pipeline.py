@@ -49,12 +49,27 @@ _RECONCILE_PASSES = (
     "reconcile-services",
 )
 
-# decisions.md lines. The first form is what this console writes; the second is
-# what a human or `rb-orchestrate` has written by hand in real runs ("Gate 1: user
-# approved ..."). Anchored after the timestamp so a gate mentioned mid-sentence
-# ("... Gate 2 passed without review ...") is not read as that gate's approval --
-# a later stage having run is what proves that one, and `inferred` says so.
-_GATE_LINE = re.compile(r"^- \S+ (?:human )?gate ([0-3])\b", re.IGNORECASE)
+# decisions.md lines. Only two forms approve a gate, each ending in its colon:
+# `human gate N (console):`, which is what this console writes, and `Gate N:`, what
+# a human or `rb-orchestrate` has written by hand in real runs ("Gate 1: user
+# approved ..."; `human gate N:` is accepted too). Requiring the colon is what keeps
+# free text recorded through "Record a decision" -- "gate 2 not approved: ...",
+# "gate 3 is still open" -- from passing a gate, and with it "Run to next gate"
+# from going on into paid dispatches. Anchored after the timestamp so a gate
+# mentioned mid-sentence ("... Gate 2 passed without review ...") is not read as
+# that gate's approval -- a later stage having run is what proves that one, and
+# `inferred` says so.
+_GATE_LINE = re.compile(r"^- \S+ (?:human )?gate ([0-3])( \(console\))?:\s*(.*)", re.IGNORECASE)
+# A hand-written line in an approving form can still say no: "Gate 1: changes
+# requested ...". The text right after the colon starting with one of these means
+# the gate is not passed. Kept short on purpose -- it catches the plain refusals a
+# reviewer types, and a longer list of guesses would start matching real approvals.
+# The `human gate N (console):` form is exempt: only the Approve button writes it,
+# and the click is the approval, so its note is never read as a refusal. Checking
+# it made Approve with the gate-3 note "Rejected tests look right, approve" report
+# success while the gate stayed open (T-80); feedback that does not approve is
+# written as `console: feedback on gate N, not approved: ...`, which never matches.
+_GATE_REFUSALS = ("not approved", "rejected", "changes requested", "not passed")
 _NO_HOLES_LINE = re.compile(r"^- \S+ round (\d+): no closable holes", re.IGNORECASE)
 _STOP_LINE = re.compile(r"^- \S+ round loop stopped after round (\d+)", re.IGNORECASE)
 
@@ -210,24 +225,35 @@ def _ids(document, key: str, field_name: str = "id") -> list[str]:
     return out
 
 
-def _decision_lines(run: RunPaths) -> list[str]:
+def decision_lines(run: RunPaths) -> list[str]:
+    """decisions.md as lines, or [] when it is missing or unreadable.
+
+    The one reader of decisions.md in the console, shared with `jobs.gate_history`
+    so the two cannot disagree again (T-81). decisions.md is hand-edited (cf. T-62's
+    .gitignore fix), so a line saved as Latin-1 is a real input: a byte that is not
+    UTF-8 is replaced rather than failing the read. Failing it made one stray byte
+    either drop every recorded approval here or answer 500 from the gate panel.
+    """
     try:
-        return run.decisions.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
+        return run.decisions.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
         return []
 
 
 def approved_gates(run: RunPaths) -> set[int]:
     gates = set()
-    for line in _decision_lines(run):
+    for line in decision_lines(run):
         match = _GATE_LINE.match(line)
-        if match:
+        if not match:
+            continue
+        by_console, note = match.group(2), match.group(3)
+        if by_console or not note.lower().startswith(_GATE_REFUSALS):
             gates.add(int(match.group(1)))
     return gates
 
 
 def _rounds_marked(run: RunPaths, pattern: re.Pattern) -> set[int]:
-    return {int(m.group(1)) for line in _decision_lines(run) if (m := pattern.match(line))}
+    return {int(m.group(1)) for line in decision_lines(run) if (m := pattern.match(line))}
 
 
 def _non_empty_dir(path: Path) -> bool:

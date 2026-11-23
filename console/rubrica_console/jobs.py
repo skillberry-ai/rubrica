@@ -38,7 +38,6 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from rubrica import skills
 from rubrica.paths import RunPaths
 from rubrica_console import credentials as credentials_mod
 from rubrica_console import dispatch, pipeline
@@ -59,9 +58,89 @@ QUEUED, RUNNING, SUCCEEDED, FAILED, HALTED, CANCELLED, INTERRUPTED = (
 )
 _ACTIVE = (QUEUED, RUNNING)
 
+# The directories a fan-out member writes its own slice into, relative to the run
+# root: `<dir>/<id>.json`, or `04-instances/<id>/` for instantiate. A repair is
+# routed by the slice named here, never by an id found anywhere in the line: every
+# finding line starts with the artifact's full path, run folder included, so a lab
+# folder called `notes-app` once sent the findings on both 01-claims/notes.json and
+# 01-claims/trace.json to `notes`, and `trace` was never repaired.
+_SLICE_DIR = re.compile(
+    r"(?P<dir>00-dispositions|01-claims|01-contradictions|02-scenarios/round-\d+"
+    r"|04-instances|05-verdicts)(?:/(?P<slice>[^/#:\s]+))?(?=[/#]|: )"
+)
+# findings.Finding.__str__: `[waived] ` (optional), then `[<layer>] `, then the path.
+_FINDING_HEAD = re.compile(r"^(?:\[waived\] )?\[[^\]\s]*\] ")
+
+
+def _named_in(message: str, member: str) -> bool:
+    """`member` appears in `message` as a whole id (optionally `<id>.json`), not inside one.
+
+    Ids carry letters, digits, dots, dashes and underscores (paths.is_safe_segment),
+    so `orphan` inside `orphan2`, or `notes` inside the claim id `notes-c1`, is not a
+    mention. A trailing sentence full stop still is.
+    """
+    pattern = rf"(?<![\w.\-]){re.escape(member)}(?:\.json)?(?![\w\-]|\.\w)"
+    return re.search(pattern, message) is not None
+
+
+def _finding_owners(line: str, root: Path, members: list[str]) -> list[str]:
+    """The members a finding line belongs to, read from the artifact path it names.
+
+    A line whose path is a member's own slice (`01-claims/<id>.json`,
+    `04-instances/<id>/seed.json`) belongs to that member alone, whatever ids its
+    message mentions: a member must never receive a sibling's material. A line
+    whose path is the slice directory itself is how refs reports a *missing* slice
+    ("input notes has no claims file on disk"), and there the id lives only in the
+    message, so the members it names as whole ids own it. Anything else -- a path
+    outside the run, outside the slice directories, or a slice that is no member --
+    belongs to nobody, and the caller says so rather than guessing.
+    """
+    head = _FINDING_HEAD.match(line)
+    if head is None:
+        return []
+    prefix = f"{root}/"
+    rest = line[head.end() :]
+    if not rest.startswith(prefix):
+        return []
+    found = _SLICE_DIR.match(rest, len(prefix))
+    if found is None:
+        return []
+    slice_part = found["slice"]
+    if slice_part is not None:
+        for candidate in (slice_part, slice_part.removesuffix(".json")):
+            if candidate in members:
+                return [candidate]
+        return []
+    # The directory itself: the message follows the path (and any pointer).
+    _, sep, message = rest[found.end() :].partition(": ")
+    if not sep:
+        return []
+    return [m for m in members if _named_in(message, m)]
+
 
 class ConsoleError(Exception):
     """A request the console refuses: shown to the human, never a crash."""
+
+
+def _whole_positive(key: str, value: object) -> str:
+    """A limit as the digits `rubrica` is given, or a ConsoleError naming it.
+
+    Only an int or a string of digits is a limit. `int()` alone was the check
+    before, and it was both too loose and too strict: 2.9 and True passed as 2
+    and 1, so decisions.md recorded a number nobody typed, while "abc", NaN or a
+    list escaped as a 500 with a traceback instead of a refusal the human reads.
+    """
+    if isinstance(value, bool):
+        number = None
+    elif isinstance(value, int):
+        number = value
+    elif isinstance(value, str) and value.strip().isascii() and value.strip().isdigit():
+        number = int(value.strip())
+    else:
+        number = None
+    if number is None or number < 1:
+        raise ConsoleError(f"{key} must be a whole number of at least 1, not {value!r}")
+    return str(number)
 
 
 class _Stop(Exception):
@@ -169,12 +248,10 @@ class _RunState:
             "attempts": {},
             "used": {},
         }
-        try:
-            loaded = json.loads(self.ledger_path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                self.data.update({k: v for k, v in loaded.items() if k in self.data})
-        except (OSError, ValueError):
-            pass
+        # A missing or corrupt ledger reads as empty, as it always has.
+        loaded = pipeline._quietly(self.ledger_path)
+        if isinstance(loaded, dict):
+            self.data.update({k: v for k, v in loaded.items() if k in self.data})
 
     def save(self) -> None:
         # Callers hold Console._lock, so one writer at a time.
@@ -271,14 +348,54 @@ class Console:
         except credentials_mod.CredentialError:
             return credentials_mod.Credentials()
 
+    @property
+    def skills_dir(self) -> Path:
+        """The skill set the dispatch script actually dispatches.
+
+        `dispatch-stage.sh` reads `$REPO/src/rubrica/skills/rb-<stage>/SKILL.md`,
+        where `$REPO` is the parent of the script's own directory, and it ignores
+        `RUBRICA_SKILLS_DIR`. So the digest record-stage writes and the set
+        check-skills checks must come from here, not from `skills.skills_dir()`:
+        otherwise a run records (and preflights) one skill and runs another,
+        which breaks "record-stage hashes the skill file the run actually used".
+        """
+        return self.dispatch_script.parent.parent / "src" / "rubrica" / "skills"
+
+    def _skills_dir_conflict(self) -> str | None:
+        """A reason to refuse prompt steps when RUBRICA_SKILLS_DIR names another set.
+
+        The console cannot honour the override -- the script would run its own
+        checkout's skills anyway -- and silently ignoring it would let a person
+        probing a candidate set believe the candidate is what ran.
+        """
+        override = os.environ.get("RUBRICA_SKILLS_DIR")
+        if not override:
+            return None
+        if Path(override).resolve() == self.skills_dir.resolve():
+            return None
+        return (
+            f"RUBRICA_SKILLS_DIR is {override}, but the dispatch script "
+            f"{self.dispatch_script} runs the skills in {self.skills_dir}; "
+            "unset RUBRICA_SKILLS_DIR, or point --dispatch-script at the checkout "
+            "that holds the skills you want to run"
+        )
+
     def prompt_ready(self) -> bool:
-        return self.dispatch_script.is_file() and self.bash is not None and self._creds().configured
+        return (
+            self.dispatch_script.is_file()
+            and self.bash is not None
+            and self._skills_dir_conflict() is None
+            and self._creds().configured
+        )
 
     def prompt_unavailable_reason(self) -> str:
         if not self.dispatch_script.is_file():
             return f"Needs a repository checkout: {self.dispatch_script} does not exist"
         if self.bash is None:
             return "Needs bash 4 or newer (macOS: brew install bash)"
+        conflict = self._skills_dir_conflict()
+        if conflict:
+            return conflict
         return "Set up model access in Settings first: the console uses its own credentials"
 
     def ledger_view(self, name: str) -> dict:
@@ -490,7 +607,10 @@ class Console:
                 # The marker, not entries[-1]: the recipe appended its own entries.
                 marker.status = status
                 if status != SUCCEEDED:
-                    raise _Stop(status, f"stopped: {step.title} ended {status}")
+                    # Keep the step's own reason: a fail-fast stop carries the model's
+                    # error (a 401, say), and "ended halted" alone hides what to fix.
+                    why = f": {job.message}" if job.message else ""
+                    raise _Stop(status, f"stopped: {step.title} ended {status}{why}")
                 ran += 1
             job.status = SUCCEEDED
         except _Stop as stop:
@@ -555,7 +675,11 @@ class Console:
         """B0, once per server: a broken skill contract halts before any dispatch."""
         if self._skills_checked:
             return
-        code, out = self._cli(job, ["check-skills"], "check-skills")
+        # The set the dispatch script runs, named explicitly: inheriting the
+        # environment would check RUBRICA_SKILLS_DIR's set instead.
+        code, out = self._cli(
+            job, ["check-skills", "--skills-dir", str(self.skills_dir)], "check-skills"
+        )
         if code != CLEAN:
             raise _Stop(HALTED, "check-skills reported problems; no stage can be dispatched")
         self._skills_checked = True
@@ -572,7 +696,7 @@ class Console:
             ids = op["ids"]
             per_member: dict[str, Path] = {}
             if findings_from:
-                ids, per_member = self._split_findings(job, Path(findings_from), step)
+                ids, per_member = self._split_findings(job, Path(findings_from), step, run.root)
             self._dispatch_members(job, run, op["stage"], ids, opts, per_member=per_member)
         elif kind == "cli":
             self._gate(job, [*op["args"], *rid], op["args"][0])
@@ -581,7 +705,7 @@ class Console:
         elif kind == "check-refs":
             self._gate(job, ["check-refs", *rid], "check-refs")
         elif kind == "record":
-            skill = skills.skills_dir() / f"rb-{op['stage']}" / "SKILL.md"
+            skill = self.skills_dir / f"rb-{op['stage']}" / "SKILL.md"
             self._gate(
                 job,
                 [
@@ -671,24 +795,23 @@ class Console:
             self._gate(job, ["validate", "--stage", "score-seal", *rid], "validate score-seal")
         self._gate(job, ["check-refs", *rid], "check-refs")
 
-    def _split_findings(self, job, findings: Path, step) -> tuple[list[str], dict[str, Path]]:
+    def _split_findings(
+        self, job, findings: Path, step, root: Path
+    ) -> tuple[list[str], dict[str, Path]]:
         """A fan-out repair goes to the members its findings name, each with its own lines.
 
-        A member is named by a finding line that contains its id. Lines that name no
-        member cannot be routed to one, and the repair says so rather than guessing.
+        A member is named by the artifact path of a finding line -- its own slice in
+        the stage's slice directory -- see _finding_owners. Lines that name no member
+        cannot be routed to one, and the repair says so rather than guessing.
         """
         try:
             lines = findings.read_text(encoding="utf-8").splitlines()
         except OSError as exc:
             raise _Stop(HALTED, f"cannot read the findings to repair from: {exc}") from exc
         members = step.members_done + step.members_todo
-        # Longest first, so an id that is a prefix of another (orphan / orphan2)
-        # does not claim its sibling's lines.
-        ordered = sorted(members, key=len, reverse=True)
         routed: dict[str, list[str]] = {}
         for line in lines:
-            owner = next((m for m in ordered if m in line), None)
-            if owner:
+            for owner in _finding_owners(line, root, members):
                 routed.setdefault(owner, []).append(line)
         if not routed:
             raise _Stop(
@@ -794,13 +917,20 @@ class Console:
         # Settings applies from the next step.
         creds_env = self._creds().env()
         threads = []
+        # This fan-out's own members. A chain is one job, so job.members also holds
+        # every earlier step's members; fail-fast must judge only this fan-out's, or
+        # one earlier success keeps every later fan-out from ever stopping early.
+        keys: list[str] = []
         for member_id in ids:
-            key = f"{stage}:{member_id}" if member_id else stage
-            log = state.logs_dir / job.id / f"{key.replace(':', '-')}.log"
-            log.parent.mkdir(parents=True, exist_ok=True)
-            member = Member(id=key, log=str(log))
             with self._lock:
+                key = self._member_key(job, stage, member_id)
+                # "#" becomes "." in the file name so the name stays one plain token.
+                name = key.replace(":", "-").replace("#", ".")
+                log = state.logs_dir / job.id / f"{name}.log"
+                member = Member(id=key, log=str(log))
                 job.members[key] = member
+            log.parent.mkdir(parents=True, exist_ok=True)
+            keys.append(key)
             env = dispatch.env_for(
                 credentials=creds_env,
                 lab=self.lab,
@@ -814,7 +944,9 @@ class Console:
             argv = [self.bash or "bash", str(self.dispatch_script), stage, str(run.root)]
             if member_id:
                 argv.append(member_id)
-            t = threading.Thread(target=self._member, args=(job, member, argv, env), daemon=True)
+            t = threading.Thread(
+                target=self._member, args=(job, member, argv, env, keys), daemon=True
+            )
             threads.append(t)
         self._persist(job)
         for t in threads:
@@ -825,7 +957,9 @@ class Console:
             raise _Stop(HALTED, self._failfast.pop(job.id))
         if job.id in self._cancel:
             raise _Stop(CANCELLED, "cancelled")
-        failed = [m for m in job.members.values() if m.id.startswith(stage) and m.status == HALTED]
+        # This dispatch's own members only: an earlier round's halted `score` is
+        # still in job.members and says nothing about this one.
+        failed = [job.members[k] for k in keys if job.members[k].status == HALTED]
         if any(m.exit == USAGE for m in failed):
             raise _Stop(HALTED, f"{stage}: the dispatch script refused (exit 2); see its log")
         if failed:
@@ -834,7 +968,29 @@ class Console:
             job.message = f"{len(failed)} {stage} dispatch(es) did not finish"
         self._persist(job)
 
-    def _member(self, job: Job, member: Member, argv: list[str], env: dict) -> None:
+    @staticmethod
+    def _member_key(job: Job, stage: str, member_id: str | None) -> str:
+        """A key no earlier dispatch in this job holds.
+
+        A chain crossing rounds dispatches `score` (no member id) once a round, and a
+        re-seed can dispatch one instance twice. Keyed on the stage and slice alone,
+        the later dispatch replaced the earlier's record and overwrote its log, so the
+        job showed one dispatch and half the spend. The first dispatch keeps the plain
+        key (`score`, `propose:r1-b01`); a repeat gets `#N` on the stage part
+        (`score#2`, `instantiate#2:S01`), so the slice id after the colon -- which the
+        page matches fan-out squares on -- is unchanged.
+        """
+        n = 1
+        while True:
+            head = stage if n == 1 else f"{stage}#{n}"
+            key = f"{head}:{member_id}" if member_id else head
+            if key not in job.members:
+                return key
+            n += 1
+
+    def _member(
+        self, job: Job, member: Member, argv: list[str], env: dict, keys: list[str]
+    ) -> None:
         with self._sem:
             if job.id in self._cancel:
                 member.status = CANCELLED
@@ -868,9 +1024,9 @@ class Console:
             else:
                 member.status = SUCCEEDED if proc.returncode == 0 else HALTED
             self._persist(job)
-            self._maybe_fail_fast(job)
+            self._maybe_fail_fast(job, keys)
 
-    def _maybe_fail_fast(self, job: Job) -> None:
+    def _maybe_fail_fast(self, job: Job, keys: list[str]) -> None:
         """Stop a fan-out whose first dispatches all failed without spending anything.
 
         Measured: with the gateway refusing every call, a 114-member extract ran 102
@@ -878,11 +1034,16 @@ class Console:
         that cost nothing are failures to *reach* the model -- credentials, gateway,
         model id -- and every remaining member would fail the same way. A member
         that spent money and then failed is a different case and does not count.
+
+        Only `keys`, the current fan-out's members, are judged: inside "Run to next
+        gate" an earlier step's successes say nothing about whether this one can
+        reach the model.
         """
         with self._lock:
             if job.id in self._cancel:
                 return
-            ended = [m for m in job.members.values() if m.status in (SUCCEEDED, HALTED)]
+            mine = [job.members[k] for k in keys if k in job.members]
+            ended = [m for m in mine if m.status in (SUCCEEDED, HALTED)]
             if len(ended) < _FAIL_FAST_AFTER or any(m.status == SUCCEEDED for m in ended):
                 return
             if any((m.cost or 0) > 0 for m in ended):
@@ -959,7 +1120,7 @@ class Console:
             used = self._state(name).data["used"]
             for stage in ("triage-objective", "triage-rule", "triage-audit"):
                 if stage in used:
-                    skill = skills.skills_dir() / f"rb-{stage}" / "SKILL.md"
+                    skill = self.skills_dir / f"rb-{stage}" / "SKILL.md"
                     commands.append(
                         [
                             "record-stage",
@@ -1007,10 +1168,9 @@ class Console:
     def gate_history(self, name: str, gate: int) -> list[str]:
         """Every decisions.md line about this gate: approvals and feedback alike."""
         run = self.run_paths(name)
-        try:
-            lines = run.decisions.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            return []
+        # Through pipeline's reader, so a non-UTF-8 byte in this hand-edited file
+        # is replaced here exactly as it is for approved_gates (T-81).
+        lines = pipeline.decision_lines(run)
         pattern = re.compile(rf"\bgate {gate}\b", re.IGNORECASE)
         return [ln[2:] if ln.startswith("- ") else ln for ln in lines if pattern.search(ln)]
 
@@ -1125,7 +1285,7 @@ class Console:
         for key, value in limits.items():
             if key not in flags:
                 raise ConsoleError(f"unknown limit {key}")
-            args += [flags[key], str(int(value))]
+            args += [flags[key], _whole_positive(key, value)]
         if len(args) == 6:
             raise ConsoleError("no limit given")
         return self._human(name, "Change a limit", [args])
@@ -1176,9 +1336,22 @@ class Console:
         corpus = [c for c in spec.get("corpus") or [] if c]
         if not corpus:
             raise ConsoleError("pick at least one file or folder")
+        # A seed that is the credentials file, or any folder above it (~/.config,
+        # ~/.config/rubrica, $HOME, /), would let survey catalogue the file as a
+        # candidate that can reach a model dispatch. Refusing is chosen over a
+        # silent `--exclude`: an exclude glob is matched by survey against its own
+        # relative paths, so its exactness depends on code outside this check, and a
+        # human who picked ~/.config should learn why rather than find one file
+        # quietly missing. Both sides are resolved, so a symlink to the file or to
+        # any of its folders is caught too.
         secret = self.credentials.path.expanduser().resolve()
-        if any(Path(c).expanduser().resolve() == secret for c in corpus):
-            raise ConsoleError("the console's credentials file cannot be read by a run")
+        for c in corpus:
+            seed = Path(c).expanduser().resolve()
+            if seed == secret or seed in secret.parents:
+                raise ConsoleError(
+                    f"{c} is or contains the console's credentials file, which a run "
+                    "cannot read; pick a folder that does not contain it"
+                )
         objective = spec.get("objective") or "breadth"
         args: list[str] = [
             "survey",
@@ -1200,8 +1373,8 @@ class Console:
             if spec.get(key):
                 args += [f"--{key.replace('_', '-')}", spec[key]]
         for key in ("max_rounds", "max_scenarios"):
-            if spec.get(key):
-                args += [f"--{key.replace('_', '-')}", str(int(spec[key]))]
+            if spec.get(key) not in (None, ""):
+                args += [f"--{key.replace('_', '-')}", _whole_positive(key, spec[key])]
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         # bandit B603 -- the same list-form `rubrica` call as _cli; the user's target
         # name and input paths arrive as single arguments, never through a shell.
@@ -1234,13 +1407,10 @@ class Console:
         """
         run = self.run_paths(name)
         stored = self._state(name).home / "spec.json"
-        try:
-            spec = json.loads(stored.read_text(encoding="utf-8"))
-            if isinstance(spec, dict):
-                spec["source"] = "console"
-                return spec
-        except (OSError, ValueError):
-            pass
+        stored_spec = pipeline._quietly(stored)
+        if isinstance(stored_spec, dict):
+            stored_spec["source"] = "console"
+            return stored_spec
         spec: dict = {"source": "derived"}
         catalogue = pipeline._quietly(run.catalogue)
         manifest = pipeline._quietly(run.manifest)

@@ -170,9 +170,17 @@ to 3 you can also **waive** a finding (`rubrica waive`) or **change a limit**
 (`rubrica set-limit`). After a round's coverage is sealed you can **stop the round
 loop** there.
 
-A gate counts as passed when `decisions.md` has a line starting `human gate N` or
-`Gate N:` (the form hand-written decisions have used), or when a later stage has
-already run.
+A gate counts as passed when `decisions.md` has a line starting
+`human gate N (console):` (what **Approve** writes) or `Gate N:` (the form
+hand-written decisions have used), or when a later stage has already run. The
+colon is required, so a note such as `gate 2 not approved: ...` or
+`gate 3 is still open` does not pass the gate. Nor does a hand-written
+`Gate N:` or `human gate N:` line whose text after the colon starts with
+`not approved`, `rejected`, `changes requested` or `not passed` —
+`Gate 1: changes requested ...` leaves gate 1 open. A
+`human gate N (console):` line always counts, whatever its note says: only
+**Approve** writes it, and clicking Approve is the approval, so a note such as
+`rejected tests look right, approve` at gate 3 does not undo it.
 
 ## Where things are kept
 
@@ -199,8 +207,13 @@ protection on its own: any page open in your browser can send requests to
 - Requests whose `Host` or `Origin` names some other site are refused, which stops
   a hostile domain from pointing itself at your machine.
 - The file picker stays under `--root` (default: your home directory), and run
-  files are served only from inside the run. An HTML file inside a run is shown as
-  text, never run as a page.
+  files are served only from inside the run.
+- Run files are sent as inert data. Only plain text, JSON, and PNG, JPEG, GIF and
+  WebP images keep their own type. Everything else, including HTML, SVG, XHTML,
+  XML and unknown types, is sent as plain text (or as raw bytes if it is not valid
+  text), so the browser shows it and never runs it as a page. Every run file also
+  carries a `Content-Security-Policy: sandbox` header, which tells the browser to
+  treat it as a locked-down page even if it were to open one.
 
 ## Options and exit codes
 
@@ -212,6 +225,14 @@ browse; default your home directory), `--lab` (the console's own records; defaul
 `--model` (default `$RUBRICA_MODEL`, else `sonnet`), `--effort` (default `medium`),
 `--dispatch-script` (default this checkout's `scripts/dispatch-stage.sh`),
 `--credentials` (default `~/.config/rubrica/console-credentials.json`).
+
+The skills the console checks (with `check-skills`) and records (the
+`skill_sha256` in `manifest.stages`) are the ones the dispatch script actually
+runs: `src/rubrica/skills/` in the checkout that holds `--dispatch-script`. The
+script ignores `RUBRICA_SKILLS_DIR`, so if that variable points at a different
+folder the console refuses every model step, naming both folders, rather than
+recording one skill set while running another. To try a candidate skill set,
+point `--dispatch-script` at a checkout that holds it.
 
 It exits `0` when interrupted and `2` for a runs folder or run that does not exist,
 a port that cannot be bound, or a bad argument. It never exits `1`: the work it

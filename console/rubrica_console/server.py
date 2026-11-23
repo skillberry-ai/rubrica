@@ -24,6 +24,7 @@ runs the `rubrica` CLI or `scripts/dispatch-stage.sh` as a subprocess.
 from __future__ import annotations
 
 import json
+import math
 import mimetypes
 import os
 import secrets
@@ -35,7 +36,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from rubrica import brief, summary, survey, target_brief, validate, waivers
 from rubrica.paths import RunPaths
@@ -52,6 +53,12 @@ _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 # A client that went away mid-request. Not ConnectionError as a whole: a refused
 # outbound connection is a different thing and should still be reported.
 _GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
+# How long one read or write on a request socket may wait. Without it, a valid
+# Content-Length whose body never arrives held its handler thread until the client
+# hung up. Every page and API call sends its whole body at once and gets a quick
+# answer (the log view polls, it does not hold a request open), so ten seconds of
+# silence on loopback means a stalled client, not a slow one.
+_SOCKET_TIMEOUT = 10.0
 # How much of a log one poll returns. A dispatch log is a stream-json transcript
 # and can run to megabytes; the UI asks for the tail and then follows it.
 _LOG_CHUNK = 256 * 1024
@@ -115,24 +122,132 @@ def _gate_page(run: RunPaths, gate: int) -> str:
     )
 
 
+def _whole(query: dict[str, str], name: str, default: int) -> int:
+    """A query parameter as an int, or a 409 that names it.
+
+    A bare `int()` here let `?offset=undefined` -- a front-end bug, not a server
+    fault -- reach `_handle`'s catch-all as a 500 with a traceback.
+    """
+    raw = query.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        raise ConsoleError(f"{name} must be a whole number") from None
+
+
+def _budget(raw: object) -> str | None:
+    """A request's budget as the clean number `claude --max-budget-usd` gets, or None.
+
+    Parsed once and checked with `isfinite`: the old `float(raw) <= 0` test let
+    "nan", "inf" and "1e999" through (every comparison with nan is False, and inf
+    is not <= 0), so a run the human thought was capped could have no ceiling. The
+    parsed value is what is forwarded, not the raw text, so " 5 " becomes "5". A
+    JSON `true` is refused rather than read as one dollar.
+    """
+    if raw is None or raw == "":
+        return None
+    try:
+        if isinstance(raw, bool):
+            raise TypeError
+        value = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ConsoleError("a budget is a positive number of dollars") from None
+    if not (math.isfinite(value) and value > 0):
+        raise ConsoleError("a budget is a positive number of dollars")
+    text = repr(value)
+    return text[:-2] if text.endswith(".0") else text
+
+
 def _opts(console: Console, body: dict) -> Options:
     effort = body.get("effort") or console.defaults.effort
     if effort not in validate.manifest_stage_efforts():
         raise ConsoleError(f"effort must be one of {validate.manifest_stage_efforts()}")
-    budget = body.get("budget")
-    if budget not in (None, ""):
-        try:
-            if float(budget) <= 0:
-                raise ValueError
-        except (TypeError, ValueError):
-            raise ConsoleError("a budget is a positive number of dollars") from None
-        budget = str(budget)
-    else:
-        budget = None
+    budget = _budget(body.get("budget"))
     model = (body.get("model") or console.defaults.model).strip()
     if not model or any(c.isspace() for c in model):
         raise ConsoleError("a model id has no spaces")
     return Options(model=model, effort=effort, budget=budget, agents=body.get("agents") or None)
+
+
+def _is_continuation(byte: int) -> bool:
+    return byte & 0b1100_0000 == 0b1000_0000
+
+
+def _char_start(data: bytes, pos: int) -> int:
+    """Move `pos` forward past at most three UTF-8 continuation bytes, the most a
+    character can carry, so a run of stray ones in a broken file is not skipped."""
+    for _ in range(3):
+        if pos < len(data) and _is_continuation(data[pos]):
+            pos += 1
+    return pos
+
+
+def _char_end(data: bytes, start: int, end: int) -> int:
+    """Pull `end` back to just before a character the cut leaves incomplete.
+
+    Only a valid lead byte followed by fewer continuation bytes than it needs
+    counts as cut; anything else is left for the decoder to replace. When pulling
+    back would leave nothing although the rest of the character is in `data`
+    (a chunk smaller than one character), `end` is pushed forward over it
+    instead, so the reader always makes progress."""
+    for back in range(1, 4):
+        lead = end - back
+        if lead < start:
+            break
+        byte = data[lead]
+        if _is_continuation(byte):
+            continue
+        if 0xC2 <= byte <= 0xDF:
+            need = 2
+        elif 0xE0 <= byte <= 0xEF:
+            need = 3
+        elif 0xF0 <= byte <= 0xF4:
+            need = 4
+        else:
+            break
+        if back >= need:
+            break
+        if lead > start:
+            return lead
+        full = lead + need
+        if full <= len(data) and all(_is_continuation(b) for b in data[end:full]):
+            return full
+        return lead
+    return end
+
+
+# Types served as what they are, because no browser runs script in them. Everything
+# else -- text/html, image/svg+xml, application/xhtml+xml, any XML (which can pull in
+# XHTML or an XSLT), and anything unknown -- goes out as plain text or raw bytes.
+# An allow-list, not a deny-list: a corpus file is copied into the run as-is, and the
+# run summary links straight to it, so one missed scripting type is script on the
+# console's own origin. Measured before this list: an .svg came back image/svg+xml.
+_INERT_TYPES = {
+    "text/plain": "text/plain; charset=utf-8",
+    "application/json": "application/json; charset=utf-8",
+    "image/png": "image/png",
+    "image/jpeg": "image/jpeg",
+    "image/gif": "image/gif",
+    "image/webp": "image/webp",
+}
+
+
+def _inert_content_type(name: str, body: bytes) -> str:
+    """The Content-Type a run file is served with: its own if inert, else text or bytes."""
+    guessed = mimetypes.guess_type(name)[0]
+    if guessed in _INERT_TYPES:
+        return _INERT_TYPES[guessed]
+    try:
+        body.decode("utf-8")
+    except UnicodeDecodeError:
+        return "application/octet-stream"
+    return "text/plain; charset=utf-8"
+
+
+class _Stalled(Exception):
+    """The client stopped sending mid-body: drop the connection, answer nothing."""
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -142,6 +257,11 @@ class Handler(BaseHTTPRequestHandler):
     bound_host: str
 
     server_version = "rubrica-console"
+    # StreamRequestHandler.setup applies this to the connection's socket. A timed
+    # out request line is already handled by the stdlib (it closes the connection);
+    # a timed out body read is turned into _Stalled in _body, and a timed out
+    # write is caught in _send.
+    timeout = _SOCKET_TIMEOUT
 
     def log_message(self, format, *args):
         # Quiet: the UI polls every two seconds per open tab, and one line per
@@ -151,10 +271,19 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- plumbing ------------------------------------------------------------
 
-    def _send(self, status: HTTPStatus, body: bytes, content_type: str, head: bool = False):
+    def _send(
+        self,
+        status: HTTPStatus,
+        body: bytes,
+        content_type: str,
+        head: bool = False,
+        extra_headers: dict[str, str] | None = None,
+    ):
         try:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
+            for key, value in (extra_headers or {}).items():
+                self.send_header(key, value)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
@@ -162,8 +291,9 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             if not head:
                 self.wfile.write(body)
-        except _GONE:
-            # The browser stopped waiting -- a closed picker, a page left, a newer
+        except (*_GONE, TimeoutError):
+            # The browser stopped waiting (or stopped reading, until the socket
+            # timeout ran out) -- a closed picker, a page left, a newer
             # count superseding this one. Normal, not an error: there is nobody to
             # answer, so stop. Measured before this catch: the write raised
             # BrokenPipeError, _handle's catch-all then tried to send a 500 down the
@@ -194,16 +324,38 @@ class Handler(BaseHTTPRequestHandler):
         # Split before unquoting, so a step id carrying an encoded "/" (round-1/propose)
         # stays one segment.
         raw = urlsplit(self.path).path
-        return [unquote(s) for s in raw.split("/") if s]
+        # `surrogateescape`, not unquote's default `replace`: a folder listing links
+        # a non-UTF-8 file name by its raw bytes, and decoding them this way gives
+        # back the very string `iterdir` returned (`os.fsdecode`), so `_file` opens
+        # that file. `replace` turned the byte into U+FFFD, a name nothing has.
+        return [unquote(s, errors="surrogateescape") for s in raw.split("/") if s]
 
     def _query(self) -> dict[str, str]:
         return {k: v[-1] for k, v in parse_qs(urlsplit(self.path).query).items()}
 
     def _body(self) -> dict:
-        length = int(self.headers.get("Content-Length") or 0)
+        raw_length = (self.headers.get("Content-Length") or "0").strip()
+        # ASCII digits only. A bare `int()` turned "abc" into a 500 with a
+        # traceback, and let "-5" past the size check into `rfile.read(-5)`,
+        # which reads until the client hangs up and so held the handler thread.
+        # `int()` also takes "+5", "1_0" and non-ASCII digits, none of which is
+        # a Content-Length a well-behaved client sends.
+        if not (raw_length.isascii() and raw_length.isdigit()):
+            # The body's extent is unknown, so the connection cannot be reused.
+            self.close_connection = True
+            raise ConsoleError("Content-Length must be a non-negative whole number")
+        length = int(raw_length)
         if length > _MAX_BODY:
+            # The unread body would be parsed as the next request on this connection.
+            self.close_connection = True
             raise ConsoleError("request body too large")
-        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            raw = self.rfile.read(length) if length else b"{}"
+        except TimeoutError:
+            # A valid length whose body never (fully) arrived. Only the read is
+            # caught, so a timeout raised by anything else stays a reported 500.
+            self.close_connection = True
+            raise _Stalled from None
         try:
             data = json.loads(raw or b"{}")
         except ValueError:
@@ -234,8 +386,9 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET":
                 return self._get(head)
             return self._post()
-        except _GONE:
+        except (*_GONE, _Stalled):
             # Raised while reading the request body, before any reply: same case.
+            # A stalled body gets no reply either: the client is not reading one.
             self.close_connection = True
             return None
         except ConsoleError as exc:
@@ -383,7 +536,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ConsoleError("no such member in this job")
             path = Path(member.log)
         else:
-            index = int(q.get("entry", -1))
+            index = _whole(q, "entry", -1)
             if not job.entries or not -len(job.entries) <= index < len(job.entries):
                 raise ConsoleError("no such entry in this job")
             path = Path(job.entries[index].log)
@@ -391,11 +544,18 @@ class Handler(BaseHTTPRequestHandler):
             data = path.read_bytes()
         except OSError:
             data = b""
-        offset = int(q.get("offset", -1))
+        offset = _whole(q, "offset", -1)
         if offset < 0 or offset > len(data):
-            offset = max(0, len(data) - _LOG_CHUNK)
-        chunk = data[offset : offset + _LOG_CHUNK]
-        return {"text": chunk.decode("utf-8", errors="replace"), "next": offset + len(chunk)}
+            # A computed tail start can land inside a multi-byte character; step
+            # past its continuation bytes so the chunk opens on a whole one.
+            offset = _char_start(data, max(0, len(data) - _LOG_CHUNK))
+        end = _char_end(data, offset, min(len(data), offset + _LOG_CHUNK))
+        chunk = data[offset:end]
+        # `next` is the byte after what was decoded, so a character cut by the
+        # chunk edge (or by a write still in progress) is re-read whole next poll
+        # instead of showing as U+FFFD. A genuinely invalid byte still decodes
+        # as U+FFFD: only cut-induced ones are held back.
+        return {"text": chunk.decode("utf-8", errors="replace"), "next": end}
 
     def _fs(self, raw: str, hidden: bool = False) -> dict:
         root = self.root.resolve()
@@ -412,8 +572,17 @@ class Handler(BaseHTTPRequestHandler):
             raise ConsoleError(f"cannot list {target}: {exc}") from exc
         for child in children:
             # Dot-entries are hidden unless asked for, like a file manager; the
-            # credentials file is never listed either way.
-            if (child.name.startswith(".") and not hidden) or child.resolve() == secret:
+            # credentials file is never listed either way, and nor is VCS metadata
+            # (`survey._is_vcs_name`, case-blind so `.GIT` on a case-insensitive
+            # volume is caught as the `.git` it is). A ticked `.git` becomes a survey root, and
+            # survey's VCS filter only looks at path parts *below* a root, so it
+            # would catalogue git config, which can hold a remote URL with a token.
+            # This matches `_expand`'s `shown()`.
+            if (
+                (child.name.startswith(".") and not hidden)
+                or survey._is_vcs_name(child.name)
+                or child.resolve() == secret
+            ):
                 continue
             try:
                 is_dir = child.is_dir()
@@ -470,7 +639,8 @@ class Handler(BaseHTTPRequestHandler):
         hidden = body.get("hidden") is True
 
         def shown(name: str) -> bool:
-            return not name.startswith(".") or (hidden and name not in survey._VCS_DIRS)
+            # Case-blind like survey, so `.GIT` is skipped as `.git` is.
+            return not name.startswith(".") or (hidden and not survey._is_vcs_name(name))
 
         include = [inside(p) for p in body.get("include") or []]
         exclude = {inside(p).resolve() for p in body.get("exclude") or []}
@@ -581,16 +751,73 @@ class Handler(BaseHTTPRequestHandler):
         """
         root = run.root.resolve()
         target = root.joinpath(*rest).resolve()
+        if target.is_relative_to(root) and target.is_dir():
+            return self._folder(root, target, run.root.name, head)
         if not target.is_relative_to(root) or not target.is_file():
             return self._json(HTTPStatus.NOT_FOUND, {"error": "no such file in this run"}, head)
-        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        if content_type.startswith("text/") or content_type == "application/json":
-            content_type += "; charset=utf-8"
-        # Served as data, never as a page from this origin: an HTML file in a corpus
-        # copy must not run script with access to the console's token.
-        if content_type.startswith("text/html"):
-            content_type = "text/plain; charset=utf-8"
-        return self._send(HTTPStatus.OK, target.read_bytes(), content_type, head)
+        body = target.read_bytes()
+        content_type = _inert_content_type(target.name, body)
+        # The sandbox policy is the second lock: even if a browser ever renders one
+        # of these as a document, it runs with no script and an opaque origin, so it
+        # cannot read the console's token or call its API.
+        return self._send(
+            HTTPStatus.OK,
+            body,
+            content_type,
+            head,
+            extra_headers={"Content-Security-Policy": "sandbox"},
+        )
+
+    def _folder(self, root: Path, target: Path, name: str, head: bool):
+        """A folder under the run directory, as a small listing page built here.
+
+        run-summary links `04-instances/<id>/` and `06-suite/<id>/`. Opened from
+        disk a browser lists the folder itself; through the console nothing would,
+        so those links answered 404. The page is built from names alone, each one
+        escaped, and links are absolute paths under this run so they resolve with
+        or without a trailing slash. An entry that resolves outside the run (a
+        symlink pointing out) is left off the list, since `_file` would refuse it
+        anyway. Served under the same sandbox policy as a run file: no script runs
+        in it whatever a file name contains.
+        """
+        rel = target.relative_to(root).parts
+        # Links are quoted from each name's raw bytes (`os.fsencode`). A name that is
+        # not valid UTF-8 -- an orphaned temp file, say -- comes back from `iterdir`
+        # with lone surrogates, which `quote(str)` cannot encode: it raised, and the
+        # whole folder answered 500 over one odd file. `_segments` decodes the bytes
+        # back with `surrogateescape`, so the link reaches the same path.
+        base = "/runs/" + "/".join(quote(os.fsencode(p), safe="") for p in (name, *rel))
+        try:
+            entries = sorted(target.iterdir(), key=lambda e: e.name)
+        except OSError:
+            return self._json(HTTPStatus.NOT_FOUND, {"error": "cannot read this folder"}, head)
+        items = []
+        for entry in entries:
+            resolved = entry.resolve()
+            if not resolved.is_relative_to(root):
+                continue
+            is_dir = resolved.is_dir()
+            if not is_dir and not resolved.is_file():
+                continue
+            href = f"{base}/{quote(os.fsencode(entry.name), safe='')}" + ("/" if is_dir else "")
+            label = entry.name + ("/" if is_dir else "")
+            items.append(f'<li><a href="{escape(href)}">{escape(label)}</a></li>')
+        if rel:
+            up = "/runs/" + "/".join(quote(os.fsencode(p), safe="") for p in (name, *rel[:-1]))
+            up += "/"
+            items.insert(0, f'<li><a href="{escape(up)}">../</a></li>')
+        listing = f"<ul>{''.join(items)}</ul>" if items else "<p>This folder is empty.</p>"
+        page = _text_page("/".join(rel) + "/", listing)
+        return self._send(
+            HTTPStatus.OK,
+            # `backslashreplace`, as `rubrica.summary.esc` does for the same names: a
+            # lone surrogate in a label or the title shows as `\udcff`, the escape
+            # `os.fsdecode` made, instead of making `.encode` raise.
+            page.encode("utf-8", "backslashreplace"),
+            "text/html; charset=utf-8",
+            head,
+            extra_headers={"Content-Security-Policy": "sandbox"},
+        )
 
     def _credentials_post(self, action: list[str], body: dict):
         store = self.console.credentials
@@ -657,7 +884,10 @@ class Handler(BaseHTTPRequestHandler):
                 body.get("reason", ""),
             )
         elif action == ["set-limit"]:
-            limits = {k: v for k, v in (body.get("limits") or {}).items() if v not in (None, "")}
+            raw = body.get("limits") or {}
+            if not isinstance(raw, dict):
+                raise ConsoleError("limits must be an object of limit names to numbers")
+            limits = {k: v for k, v in raw.items() if v not in (None, "")}
             job = c.set_limit(name, limits, body.get("reason", ""))
         else:
             raise ConsoleError("no such API path")
