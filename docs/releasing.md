@@ -17,6 +17,9 @@ prepends a `CHANGELOG.md` section built from Conventional Commit subjects since
 the previous tag, commits `chore(release): v0.2.0`, creates a signed annotated
 tag, pushes, and creates the GitHub Release.
 
+It needs bash 4 or newer on `PATH`; macOS ships bash 3.2 as `/bin/bash`, so install a
+current one first (`brew install bash`).
+
 The re-lock is not a nicety. CI runs `uv sync --locked`, so a bump that left the
 lockfile behind would have the release break the build it had just tagged. The
 check for `uv` happens in preflight, before anything in the worktree is touched.
