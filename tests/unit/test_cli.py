@@ -633,14 +633,14 @@ def test_every_subcommand_turns_an_unexpected_exception_into_a_finding(
     assert "Traceback" in captured.err
 
 
-def test_diff_runs_over_a_malformed_scenario_reports_a_finding_not_an_empty_exit_one(
-    tmp_path, capsys
-):
+def test_diff_runs_over_a_malformed_scenario_reports_json_at_exit_zero(tmp_path, capsys):
     """The reproduction, without monkeypatching anything.
 
-    A scenario missing goal_id is a repairable propose-stage defect, and
-    stability.goal_cell_claims indexes it directly -- the layer-1 precondition
-    refs.py and emit.py both document. It must arrive as a finding line.
+    A scenario missing goal_id used to raise KeyError in
+    stability.goal_cell_claims, which the catch-all turned into an `[internal]`
+    line at exit 1. diff-runs promises a JSON report at exit 0, so the entry is
+    now skipped as data: it drops out of that run's goal-cell set rather than
+    being raised on, and the set sizes show what each side contributed.
     """
     run = build_state(tmp_path / "run", "emit")
     scenarios = read_json(run.scenarios)
@@ -649,10 +649,11 @@ def test_diff_runs_over_a_malformed_scenario_reports_a_finding_not_an_empty_exit
 
     code = main(["diff-runs", "--a", str(run.root), "--b", str(run.root)])
     captured = capsys.readouterr()
-    assert code == 1
-    assert "[internal]" in captured.out
-    assert "KeyError" in captured.out
-    assert str(run.root) in captured.out, "the line must name the run it is about"
+    assert code == 0, captured.out
+    assert "[internal]" not in captured.out
+    report = json.loads(captured.out)
+    assert report["format"] == "rubrica-stability/1"
+    assert "2_goal_cell_claims" in report["stages"]
 
 
 @pytest.mark.parametrize("command", ["smoke", "compare-gold", "sample-for-review"])

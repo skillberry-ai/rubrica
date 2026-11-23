@@ -232,6 +232,107 @@ def test_a_stages_key_that_is_not_a_mapping_is_read_as_no_stages(tmp_path):
     assert any("run b records no stages" in reason for reason in comparability(a, b))
 
 
+# -- malformed entries: a report at exit 0, never an `[internal]` exit 1 ------
+#
+# Each shape below once escaped stability.py as AttributeError, KeyError or
+# TypeError, which cli.py's catch-all prints as an `[internal]` line at exit 1.
+# diff-runs promises a JSON report at exit 0, so these go through `main` and
+# read that report back, rather than calling the module function alone.
+
+
+def _diff_runs_report(a, b, capsys):
+    import json
+
+    from rubrica.cli import main
+
+    capsys.readouterr()
+    code = main(["diff-runs", "--a", str(a.root), "--b", str(b.root)])
+    out = capsys.readouterr().out
+    assert code == 0, out
+    return json.loads(out)
+
+
+def _edit(path, change):
+    document = read_json(path)
+    change(document)
+    write_json(path, document)
+
+
+def test_a_stage_entry_that_is_not_an_object_makes_the_pair_incomparable(tmp_path, capsys):
+    a, b = _pair(tmp_path)
+    _edit(a.manifest, lambda m: m["stages"].__setitem__("reconcile-subjects", "oops"))
+    report = _diff_runs_report(a, b, capsys)
+    assert report["comparable"] is False
+    assert any(
+        "stage 'reconcile-subjects' in run a is not an object" in reason
+        for reason in report["incomparable_reasons"]
+    )
+
+
+def test_the_same_broken_stage_entry_on_both_sides_is_not_agreement(tmp_path, capsys):
+    a, b = _pair(tmp_path)
+    for run in (a, b):
+        _edit(run.manifest, lambda m: m["stages"].__setitem__("reconcile-subjects", "oops"))
+    report = _diff_runs_report(a, b, capsys)
+    assert report["comparable"] is False
+    assert sum("is not an object" in reason for reason in report["incomparable_reasons"]) == 2
+
+
+def test_an_input_entry_without_sha256_makes_the_pair_incomparable(tmp_path, capsys):
+    """Skipped by input_digests, and named -- even when both sides carry it."""
+    a, b = _pair(tmp_path)
+    for run in (a, b):
+        _edit(run.manifest, lambda m: m["inputs"].append({"artifact_id": "z"}))
+    report = _diff_runs_report(a, b, capsys)
+    assert report["comparable"] is False
+    assert sorted(
+        reason for reason in report["incomparable_reasons"] if "cannot be pinned" in reason
+    ) == [
+        "run a has 1 input entry in manifest.json without a string artifact_id and sha256, "
+        "so its input bytes cannot be pinned",
+        "run b has 1 input entry in manifest.json without a string artifact_id and sha256, "
+        "so its input bytes cannot be pinned",
+    ]
+
+
+def test_an_input_entry_that_is_not_an_object_makes_the_pair_incomparable(tmp_path, capsys):
+    a, b = _pair(tmp_path)
+    _edit(b.manifest, lambda m: m["inputs"].append("not-an-entry"))
+    assert input_digests(b) == input_digests(a)
+    report = _diff_runs_report(a, b, capsys)
+    assert report["comparable"] is False
+    assert any("run b has 1 input entry" in reason for reason in report["incomparable_reasons"])
+
+
+def test_a_malformed_world_model_capability_is_skipped_not_raised_on(tmp_path, capsys):
+    a, b = _pair(tmp_path)
+    _edit(b.world_model, lambda w: w["capabilities"].extend(["oops", {"id": ["x"]}]))
+    _edit(a.world_model, lambda w: w["capabilities"].__setitem__(0, "oops"))
+    report = _diff_runs_report(a, b, capsys)
+    stage = report["stages"]["1b_capabilities"]
+    # Run a lost its only capability to the malformed entry; run b kept it.
+    # The difference shows, rather than both sides agreeing on what was left.
+    assert (stage["a_size"], stage["b_size"]) == (0, 1)
+    assert stage["only_b"] == ["cap-find-jobs"]
+    assert stage["jaccard"] == 0.0
+
+
+def test_a_malformed_scenario_entry_is_skipped_not_raised_on(tmp_path, capsys):
+    a, b = _pair(tmp_path)
+
+    def break_scenarios(document):
+        document["scenarios"][0]["capability_refs"].append({"capability_id": "cap-x"})
+        document["scenarios"][0]["capability_refs"].append("oops")
+        document["scenarios"].extend(["oops", {"status": ["active"]}, {"status": "active"}])
+
+    _edit(b.scenarios, break_scenarios)
+    _edit(a.scenarios, lambda d: d["scenarios"][0].__setitem__("capability_refs", "oops"))
+    report = _diff_runs_report(a, b, capsys)
+    stage = report["stages"]["2_goal_cell_claims"]
+    assert (stage["a_size"], stage["b_size"]) == (0, 1)
+    assert stage["only_b"] == ["goal-triage/cap-find-jobs/oc-success"]
+
+
 # -- diff_runs ---------------------------------------------------------------
 
 
