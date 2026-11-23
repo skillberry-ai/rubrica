@@ -225,7 +225,7 @@ def test_one_scenario_matches_at_most_one_gold_task():
 
 
 def test_the_best_available_pair_wins_and_the_assignment_is_deterministic():
-    """Greedy on descending overlap, ties broken by id.
+    """Among matchings of equal size the larger total overlap wins, ties by id.
 
     Without a total order the same inputs could produce two different match sets
     across runs, and recall would look like it moved when nothing did.
@@ -257,6 +257,75 @@ def test_ties_are_broken_by_id_not_input_order():
             ("bench-a", "scn-x"),
             ("bench-b", "scn-y"),
         ]
+
+
+def _ab_case():
+    """T-76: the case a greedy assignment got wrong, all under one goal.
+
+    Gold A = {c1,c2}, gold B = {c1,c2,c3}; scenario s1 = {c1,c2}, s2 = {c1}.
+    Greedy took A->s1 (1.0) first and stranded B, whose only other option, s2,
+    sits below the floor for B (1/3). A->s2 (0.5) and B->s1 (2/3) pairs both.
+    """
+    c1, c2, c3 = ("cap-1", "oc-1"), ("cap-2", "oc-1"), ("cap-3", "oc-1")
+    gold = [_gold("bench-a", refs=(c1, c2)), _gold("bench-b", refs=(c1, c2, c3))]
+    generated = [_generated("scn-1", refs=(c1, c2)), _generated("scn-2", refs=(c1,))]
+    return gold, generated
+
+
+def test_the_largest_matching_wins_so_a_matchable_gold_task_is_never_unmatched():
+    gold, generated = _ab_case()
+    matches, unmatched_gold, unmatched_generated = assign_matches(gold, generated)
+    assert [(m["gold_id"], m["scenario_id"]) for m in matches] == [
+        ("bench-a", "scn-2"),
+        ("bench-b", "scn-1"),
+    ]
+    assert [m["jaccard"] for m in matches] == [pytest.approx(0.5), pytest.approx(2 / 3)]
+    assert (unmatched_gold, unmatched_generated) == ([], [])
+
+
+def test_the_stranded_scenario_is_no_longer_labelled_spurious():
+    """Under greedy, scn-2 was left over and classify_novelty filed it as
+    `spurious` -- "no single authored task overlapped it enough to pair", which
+    is false: bench-a pairs with it. The first assertion shows the label was a
+    real outcome for this scenario, so the second is not vacuous."""
+    gold, generated = _ab_case()
+    stranded = generated[1]
+    assert classify_novelty(stranded, gold)[0] == "spurious"
+    _, _, unmatched_generated = assign_matches(gold, generated)
+    assert [classify_novelty(s, gold)[0] for s in unmatched_generated] == []
+    assert stranded["id"] not in {s["id"] for s in unmatched_generated}
+
+
+def test_input_order_does_not_change_the_largest_matching():
+    gold, generated = _ab_case()
+    results = set()
+    for gold_order in (gold, gold[::-1]):
+        for generated_order in (generated, generated[::-1]):
+            matches, unmatched_gold, unmatched_generated = assign_matches(
+                gold_order, generated_order
+            )
+            results.add(
+                (
+                    tuple((m["gold_id"], m["scenario_id"], m["jaccard"]) for m in matches),
+                    tuple(unmatched_gold),
+                    tuple(s["id"] for s in unmatched_generated),
+                )
+            )
+    assert len(results) == 1
+
+
+def test_a_larger_total_overlap_breaks_a_tie_in_size():
+    """Two two-pair matchings exist; the one with more overlap wins even though
+    the other uses the smaller scenario id for the first gold task."""
+    c1, c2, c3 = ("cap-1", "oc-1"), ("cap-2", "oc-1"), ("cap-3", "oc-1")
+    gold = [_gold("bench-a", refs=(c1, c2)), _gold("bench-b", refs=(c1, c2, c3))]
+    generated = [_generated("scn-1", refs=(c1, c2, c3)), _generated("scn-2", refs=(c1, c2))]
+    matches, _, _ = assign_matches(gold, generated)
+    # a->1 (2/3) + b->2 (2/3) = 4/3 against a->2 (1.0) + b->1 (1.0) = 2.
+    assert [(m["gold_id"], m["scenario_id"]) for m in matches] == [
+        ("bench-a", "scn-2"),
+        ("bench-b", "scn-1"),
+    ]
 
 
 # -- classify_novelty --------------------------------------------------------

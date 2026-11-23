@@ -1311,6 +1311,13 @@ parser is affected. Exits 1, with one summary line per cause, if any of these ho
 - one or more generated tasks are `spurious`, meaning they add no coverage axis
   beyond the gold set, even if every gold task matched.
 
+A gold task and a generated task can pair only when they share a goal and their
+capability cells overlap by at least half. Each pairs with at most one
+partner, and the pairing chosen is the one that matches the **most** gold tasks
+— not the first good pair found — so a gold task that could be matched is never
+reported unmatched. Among pairings of equal size the larger total overlap wins,
+then the smaller ids, so the same inputs always give the same result.
+
 Task ids in the gold file must be unique: a file that repeats one is refused
 with exit 2, naming the repeated id, and nothing is written.
 

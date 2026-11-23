@@ -108,6 +108,62 @@ def _pair_score(gold_task: dict[str, Any], scenario: dict[str, Any]) -> float | 
     return score if score >= MATCH_JACCARD_FLOOR else None
 
 
+def _max_weight(rows: list[str], columns: list[str], weight: dict[tuple[str, str], int]) -> int:
+    """The largest total weight of a one-to-one matching of rows to columns.
+
+    Only the pairs in `weight` may be matched, and every row may go unmatched.
+    The Hungarian method over a square cost matrix: each row also gets a private
+    "unmatched" column at cost 0, and a pair outside `weight` costs 0 too, which
+    is the same value as leaving that row unmatched. All arithmetic is integer, so
+    two equal totals compare equal and the tie-break in assign_matches is exact.
+    """
+    n = len(rows)
+    if n == 0:
+        return 0
+    width = len(columns) + n
+    cost = [[-weight.get((row, column), 0) for column in columns] + [0] * n for row in rows]
+    # Standard O(n^2 * width) potentials formulation, 1-indexed with a sentinel
+    # row and column 0.
+    u = [0] * (n + 1)
+    v = [0] * (width + 1)
+    owner = [0] * (width + 1)
+    way = [0] * (width + 1)
+    for i in range(1, n + 1):
+        owner[0] = i
+        j0 = 0
+        minv = [None] * (width + 1)
+        used = [False] * (width + 1)
+        while True:
+            used[j0] = True
+            i0 = owner[j0]
+            delta = None
+            j1 = 0
+            for j in range(1, width + 1):
+                if used[j]:
+                    continue
+                current = cost[i0 - 1][j - 1] - u[i0] - v[j]
+                if minv[j] is None or current < minv[j]:
+                    minv[j] = current
+                    way[j] = j0
+                if delta is None or minv[j] < delta:
+                    delta = minv[j]
+                    j1 = j
+            for j in range(width + 1):
+                if used[j]:
+                    u[owner[j]] += delta
+                    v[j] -= delta
+                else:
+                    minv[j] -= delta
+            j0 = j1
+            if owner[j0] == 0:
+                break
+        while j0:
+            j1 = way[j0]
+            owner[j0] = owner[j1]
+            j0 = j1
+    return -sum(cost[owner[j] - 1][j - 1] for j in range(1, width + 1) if owner[j])
+
+
 def assign_matches(
     gold_tasks: list[dict[str, Any]], generated: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], list[str], list[dict[str, Any]]]:
@@ -117,29 +173,67 @@ def assign_matches(
     paraphrases of one test would each be credited against the same bench task and
     recall would exceed what the suite covers.
 
-    Greedy on descending overlap, with ties broken by (gold id, scenario id) so
-    the assignment is a function of the inputs alone. A non-deterministic
-    assignment would make recall appear to move between two runs of the same data,
-    which is the one thing this number must not do.
+    The assignment is the one-to-one matching with the **most pairs**, among pairs
+    that pass `_pair_score`; ties go to the largest total overlap, then to the
+    smallest (gold id, scenario id) pairs in order. It used to be greedy on
+    descending overlap, and greedy is one-to-one but not largest: a gold task could
+    lose its only possible scenario to a gold task that had another option, so a
+    task that *could* be matched was reported unmatched, recall read low, and the
+    stranded scenario was labelled `spurious` with a reason that was false. The
+    count comes first because recall is the count; overlap only decides between
+    matchings that credit the same number of tasks.
+
+    The tie-break by id is what makes the assignment a function of the inputs
+    alone, never of their order. A non-deterministic assignment would make recall
+    appear to move between two runs of the same data, which is the one thing this
+    number must not do.
     """
-    candidates = []
+    scores: dict[tuple[str, str], float] = {}
     for gold_task in gold_tasks:
         for scenario in generated:
             score = _pair_score(gold_task, scenario)
             if score is not None:
-                candidates.append((score, gold_task["id"], scenario["id"]))
-    candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
+                scores[(gold_task["id"], scenario["id"])] = score
 
-    matches: list[dict[str, Any]] = []
-    taken_gold: set[str] = set()
-    taken_scenarios: set[str] = set()
-    for score, gold_id, scenario_id in candidates:
-        if gold_id in taken_gold or scenario_id in taken_scenarios:
-            continue
-        taken_gold.add(gold_id)
-        taken_scenarios.add(scenario_id)
-        matches.append({"gold_id": gold_id, "scenario_id": scenario_id, "jaccard": score})
-    matches.sort(key=lambda match: match["gold_id"])
+    # One integer weight per pair, so a single maximum-weight search ranks by
+    # count first and overlap second: `pair_bonus` exceeds any possible total of
+    # overlaps, so one more pair always outweighs any gain in overlap. jaccard is
+    # already rounded to six places, so the overlap converts to an exact integer.
+    scale = 10**6
+    pair_bonus = (len(gold_tasks) + 1) * scale
+    weight = {pair: pair_bonus + round(score * scale) for pair, score in scores.items()}
+
+    def best(fixed_gold: set[str], fixed_scenarios: set[str]) -> int:
+        rows = sorted({g for g, _ in weight if g not in fixed_gold})
+        columns = sorted({s for g, s in weight if g in rows and s not in fixed_scenarios})
+        sub = {(g, s): w for (g, s), w in weight.items() if g in rows and s in columns}
+        return _max_weight(rows, columns, sub)
+
+    # Fix the matching one gold task at a time, in id order: give each the
+    # smallest scenario id that still leaves an optimal total reachable, or leave
+    # it unmatched if none does. That yields the optimum whose pairs, in order,
+    # are smallest -- the (gold id, scenario id) tie-break.
+    optimum = best(set(), set())
+    chosen: list[tuple[str, str]] = []
+    fixed_gold: set[str] = set()
+    fixed_scenarios: set[str] = set()
+    so_far = 0
+    for gold_id in sorted({g for g, _ in weight}):
+        fixed_gold.add(gold_id)
+        for scenario_id in sorted(s for g, s in weight if g == gold_id):
+            if scenario_id in fixed_scenarios:
+                continue
+            pair_weight = weight[(gold_id, scenario_id)]
+            fixed_scenarios.add(scenario_id)
+            if so_far + pair_weight + best(fixed_gold, fixed_scenarios) == optimum:
+                chosen.append((gold_id, scenario_id))
+                so_far += pair_weight
+                break
+            fixed_scenarios.discard(scenario_id)
+
+    taken_gold = {g for g, _ in chosen}
+    taken_scenarios = {s for _, s in chosen}
+    matches = [{"gold_id": g, "scenario_id": s, "jaccard": scores[(g, s)]} for g, s in chosen]
     return (
         matches,
         sorted(task["id"] for task in gold_tasks if task["id"] not in taken_gold),
