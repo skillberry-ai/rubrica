@@ -8,6 +8,8 @@ those are what make the number mean anything, not the number itself.
 from __future__ import annotations
 
 import json
+import random
+import time
 
 import pytest
 
@@ -18,6 +20,7 @@ from rubrica.paths import RunPaths
 from rubrica.recall import (
     MATCH_JACCARD_FLOOR,
     NOVELTY_KINDS,
+    _pair_score,
     assign_matches,
     cells,
     classify_novelty,
@@ -741,3 +744,98 @@ def test_a_valid_run_still_compares_with_the_normal_schemas(tmp_path, capsys):
     assert code in (0, 1), out
     assert f"[recall] {run.scenarios}" not in out
     assert run.recall.exists()
+
+
+# -- T-77: the largest-matching step stays fast and keeps the same answer -----
+
+
+def _brute_force(gold, generated):
+    """Every one-to-one matching, ranked by the three documented levels.
+
+    Most pairs, then the largest total overlap (summed as the same exact
+    six-place integers the code uses, so float addition cannot reorder a tie),
+    then -- reading gold tasks in id order -- the smallest scenario id for the
+    first gold task that differs, where any scenario beats none.
+    -> (the winning pairs, how many matchings tie it on size and overlap).
+    """
+    candidates = {}
+    for g in gold:
+        for s in generated:
+            score = _pair_score(g, s)
+            if score is not None:
+                candidates.setdefault(g["id"], []).append((s["id"], score))
+    gold_ids = sorted(candidates)
+    ranked = []
+
+    def walk(index, used, picked):
+        if index == len(gold_ids):
+            key = (
+                -len(picked),
+                -sum(round(score * 10**6) for _, _, score in picked),
+                tuple(
+                    (0, dict((g, s) for g, s, _ in picked)[g])
+                    if g in {p[0] for p in picked}
+                    else (1, "")
+                    for g in gold_ids
+                ),
+            )
+            ranked.append((key, sorted((g, s) for g, s, _ in picked)))
+            return
+        gold_id = gold_ids[index]
+        walk(index + 1, used, picked)
+        for scenario_id, score in candidates[gold_id]:
+            if scenario_id not in used:
+                walk(index + 1, used | {scenario_id}, [*picked, (gold_id, scenario_id, score)])
+
+    walk(0, frozenset(), [])
+    key, pairs = min(ranked)
+    return pairs, sum(other[:2] == key[:2] for other, _ in ranked)
+
+
+def test_the_matching_equals_a_brute_force_search_over_every_one_to_one_matching():
+    """T-77 folded the id tie-break into the weights and solves each linked group
+    once, instead of re-solving per candidate pair. This pins that the answer did
+    not move: on many small random cases -- a tiny cell pool and two goals, so
+    equal sizes and equal overlaps are common -- it equals an exhaustive search.
+    """
+    rng = random.Random(77)
+    pool = [(f"cap-{c}", "oc-1") for c in "abc"]
+    ties = 0
+    for _ in range(600):
+
+        def task(make, tid):
+            refs = tuple(rng.sample(pool, rng.randint(1, 2)))
+            return make(tid, goal_id=rng.choice(("goal-1", "goal-2")), refs=refs)
+
+        gold = [task(_gold, f"bench-{i}") for i in range(rng.randint(0, 5))]
+        generated = [task(_generated, f"scn-{i}") for i in range(rng.randint(0, 5))]
+        rng.shuffle(gold)
+        rng.shuffle(generated)
+        expected, tied = _brute_force(gold, generated)
+        matches, unmatched_gold, unmatched_generated = assign_matches(gold, generated)
+        assert [(m["gold_id"], m["scenario_id"]) for m in matches] == expected
+        assert unmatched_gold == sorted({g["id"] for g in gold} - {g for g, _ in expected})
+        assert [s["id"] for s in unmatched_generated] == sorted(
+            {s["id"] for s in generated} - {s for _, s in expected}
+        )
+        ties += tied > 1
+    assert ties > 100, "the random cases must actually exercise the tie-breaks"
+
+
+def test_a_large_single_goal_bench_and_suite_match_quickly():
+    """T-76 re-solved once per candidate pair, which grew about with N^4: 80 gold
+    tasks against 80 scenarios took 2.6s and 160 did not finish in 120s, while a
+    real emitted suite had 282 tests. Here 150 same-goal gold tasks meet 300
+    scenarios whose three-of-five cells overlap enough to pair densely.
+    """
+    rng = random.Random(150)
+    pool = [(f"cap-{c}", "oc-1") for c in "abcde"]
+    gold = [_gold(f"bench-{i:03}", refs=tuple(rng.sample(pool, 3))) for i in range(150)]
+    generated = [_generated(f"scn-{i:03}", refs=tuple(rng.sample(pool, 3))) for i in range(300)]
+    started = time.perf_counter()
+    matches, unmatched_gold, _ = assign_matches(gold, generated)
+    elapsed = time.perf_counter() - started
+    assert len(matches) == 150 and unmatched_gold == []
+    # Measured about 0.9s on a laptop; the old code did not finish in 60s. The
+    # limit is over ten times the measured time so a loaded machine stays green.
+    assert elapsed < 10, f"assign_matches took {elapsed:.2f}s"

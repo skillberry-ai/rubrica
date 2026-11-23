@@ -108,20 +108,32 @@ def _pair_score(gold_task: dict[str, Any], scenario: dict[str, Any]) -> float | 
     return score if score >= MATCH_JACCARD_FLOOR else None
 
 
-def _max_weight(rows: list[str], columns: list[str], weight: dict[tuple[str, str], int]) -> int:
-    """The largest total weight of a one-to-one matching of rows to columns.
+def _max_weight(
+    rows: list[str], columns: list[str], weight: dict[tuple[str, str], int]
+) -> dict[str, str]:
+    """A largest-total-weight one-to-one matching of rows to columns. -> {row: column}.
 
-    Only the pairs in `weight` may be matched, and every row may go unmatched.
-    The Hungarian method over a square cost matrix: each row also gets a private
-    "unmatched" column at cost 0, and a pair outside `weight` costs 0 too, which
-    is the same value as leaving that row unmatched. All arithmetic is integer, so
-    two equal totals compare equal and the tie-break in assign_matches is exact.
+    Only the pairs in `weight` may be matched, every weight is positive, and every
+    row may go unmatched. The Hungarian method over a cost matrix in which every
+    row is assigned a column: a pair outside `weight` costs 0, the same value as
+    leaving that row unmatched, so such a pair is read back as unmatched. When
+    there are fewer columns than rows, zero-cost "unmatched" columns pad the
+    matrix so every row has one. All arithmetic is integer (Python ints of any
+    size), so two equal totals compare equal and the tie-break in assign_matches
+    is exact.
     """
     n = len(rows)
     if n == 0:
-        return 0
-    width = len(columns) + n
-    cost = [[-weight.get((row, column), 0) for column in columns] + [0] * n for row in rows]
+        return {}
+    # Padding only up to `n`: a column per row beyond that would only add width,
+    # and width is the inner loop. Any matching of real pairs still extends to a
+    # full assignment at no cost, through columns no real pair uses.
+    padding = max(0, n - len(columns))
+    width = len(columns) + padding
+    cost = [[-weight.get((row, column), 0) for column in columns] + [0] * padding for row in rows]
+    # A sentinel only: it is compared and replaced, never summed into a total, so
+    # every number the answer depends on stays an exact integer.
+    unreached = float("inf")
     # Standard O(n^2 * width) potentials formulation, 1-indexed with a sentinel
     # row and column 0.
     u = [0] * (n + 1)
@@ -131,21 +143,23 @@ def _max_weight(rows: list[str], columns: list[str], weight: dict[tuple[str, str
     for i in range(1, n + 1):
         owner[0] = i
         j0 = 0
-        minv = [None] * (width + 1)
+        minv = [unreached] * (width + 1)
         used = [False] * (width + 1)
         while True:
             used[j0] = True
             i0 = owner[j0]
-            delta = None
+            row_cost = cost[i0 - 1]
+            u_i0 = u[i0]
+            delta = unreached
             j1 = 0
             for j in range(1, width + 1):
                 if used[j]:
                     continue
-                current = cost[i0 - 1][j - 1] - u[i0] - v[j]
-                if minv[j] is None or current < minv[j]:
+                current = row_cost[j - 1] - u_i0 - v[j]
+                if current < minv[j]:
                     minv[j] = current
                     way[j] = j0
-                if delta is None or minv[j] < delta:
+                if minv[j] < delta:
                     delta = minv[j]
                     j1 = j
             for j in range(width + 1):
@@ -161,7 +175,41 @@ def _max_weight(rows: list[str], columns: list[str], weight: dict[tuple[str, str
             j1 = way[j0]
             owner[j0] = owner[j1]
             j0 = j1
-    return -sum(cost[owner[j] - 1][j - 1] for j in range(1, width + 1) if owner[j])
+    matched: dict[str, str] = {}
+    for j in range(1, len(columns) + 1):
+        if owner[j]:
+            row, column = rows[owner[j] - 1], columns[j - 1]
+            if (row, column) in weight:
+                matched[row] = column
+    return matched
+
+
+def _components(pairs: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
+    """Split candidate pairs into groups that share no gold task and no scenario.
+
+    A choice in one group never limits a choice in another, so each group can be
+    solved on its own and the answers joined. Pairs only form within a goal, so a
+    group is never wider than one goal. Groups come out in a fixed order (by
+    their smallest pair), so the result does not depend on input order.
+    """
+    parent: dict[tuple[str, str], tuple[str, str]] = {}
+
+    def find(node: tuple[str, str]) -> tuple[str, str]:
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    for gold_id, scenario_id in pairs:
+        for node in (("g", gold_id), ("s", scenario_id)):
+            parent.setdefault(node, node)
+        a, b = find(("g", gold_id)), find(("s", scenario_id))
+        if a != b:
+            parent[max(a, b)] = min(a, b)
+    groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for pair in sorted(pairs):
+        groups.setdefault(find(("g", pair[0])), []).append(pair)
+    return sorted(groups.values())
 
 
 def assign_matches(
@@ -187,6 +235,12 @@ def assign_matches(
     alone, never of their order. A non-deterministic assignment would make recall
     appear to move between two runs of the same data, which is the one thing this
     number must not do.
+
+    Cost: all three levels are folded into one integer weight per pair, so each
+    group of linked pairs is solved once -- about n^2 * (n + m) steps for n gold
+    tasks and m scenarios in a group. An earlier version re-solved once per
+    candidate pair to apply the id tie-break, which grew about with N^4: 80 gold
+    tasks against 80 scenarios took 2.6s and 160 did not finish in two minutes.
     """
     scores: dict[tuple[str, str], float] = {}
     for gold_task in gold_tasks:
@@ -201,35 +255,32 @@ def assign_matches(
     # already rounded to six places, so the overlap converts to an exact integer.
     scale = 10**6
     pair_bonus = (len(gold_tasks) + 1) * scale
-    weight = {pair: pair_bonus + round(score * scale) for pair, score in scores.items()}
 
-    def best(fixed_gold: set[str], fixed_scenarios: set[str]) -> int:
-        rows = sorted({g for g, _ in weight if g not in fixed_gold})
-        columns = sorted({s for g, s in weight if g in rows and s not in fixed_scenarios})
-        sub = {(g, s): w for (g, s), w in weight.items() if g in rows and s in columns}
-        return _max_weight(rows, columns, sub)
-
-    # Fix the matching one gold task at a time, in id order: give each the
-    # smallest scenario id that still leaves an optimal total reachable, or leave
-    # it unmatched if none does. That yields the optimum whose pairs, in order,
-    # are smallest -- the (gold id, scenario id) tie-break.
-    optimum = best(set(), set())
     chosen: list[tuple[str, str]] = []
-    fixed_gold: set[str] = set()
-    fixed_scenarios: set[str] = set()
-    so_far = 0
-    for gold_id in sorted({g for g, _ in weight}):
-        fixed_gold.add(gold_id)
-        for scenario_id in sorted(s for g, s in weight if g == gold_id):
-            if scenario_id in fixed_scenarios:
-                continue
-            pair_weight = weight[(gold_id, scenario_id)]
-            fixed_scenarios.add(scenario_id)
-            if so_far + pair_weight + best(fixed_gold, fixed_scenarios) == optimum:
-                chosen.append((gold_id, scenario_id))
-                so_far += pair_weight
-                break
-            fixed_scenarios.discard(scenario_id)
+    for group in _components(list(scores)):
+        rows = sorted({g for g, _ in group})
+        columns = sorted({s for _, s in group})
+        # The id tie-break as a third, lowest level of the same weight. Read the
+        # matching as one digit per gold task, in id order and base `base`: the
+        # digit is `len(columns) - rank` of its scenario in id order, or 0 when
+        # unmatched. Comparing two totals at this level is then comparing those
+        # digit strings left to right -- the first gold task (by id) that differs
+        # decides, a smaller scenario id beats a larger one, and any scenario beats
+        # none. That is the order a one-gold-at-a-time "smallest scenario that
+        # still leaves an optimum" search yields. The whole level sums below
+        # base**len(rows), and the count-and-overlap part is scaled by exactly
+        # that, so it can only decide between matchings equal on the first two.
+        base = len(columns) + 1
+        top = base ** len(rows)
+        row_place = {g: base ** (len(rows) - 1 - i) for i, g in enumerate(rows)}
+        column_digit = {s: len(columns) - i for i, s in enumerate(columns)}
+        weight = {
+            (g, s): (pair_bonus + round(scores[(g, s)] * scale)) * top
+            + column_digit[s] * row_place[g]
+            for g, s in group
+        }
+        chosen.extend(_max_weight(rows, columns, weight).items())
+    chosen.sort()
 
     taken_gold = {g for g, _ in chosen}
     taken_scenarios = {s for _, s in chosen}
