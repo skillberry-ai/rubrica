@@ -255,6 +255,40 @@ def _quietly(path):
     return read_json_or_none(path, quiet=True)
 
 
+def _presence(path) -> str:
+    """Whether `path` is "absent", "present" or "unknown", without reading it.
+
+    `_quietly` returns None for a missing file, a locked one and broken JSON
+    alike, so a brief that branched on None alone told a reader holding a
+    malformed `03-coverage/latest.json` that it was absent -- while `validate`
+    named the defect. That is the wrong question to hand a human: "run the stage"
+    rather than "repair what the stage wrote". `Path.is_file()` is not enough to
+    split the two either, because it answers False when a locked parent folder
+    stops `stat` from looking, which would turn "could not be read" back into
+    "absent". So `stat` is called directly and only a not-found error counts as
+    absence; any other OS error is "unknown", which the caller renders as
+    unreadable. Never raises: this is a report, not a gate.
+    """
+    try:
+        path.stat()
+    except (FileNotFoundError, NotADirectoryError):
+        return "absent"
+    except OSError:
+        return "unknown"
+    return "present"
+
+
+def _unreadable_line(name: str, presence: str, stage: str) -> str:
+    """The wording for a document that is on disk (or may be) and was not read.
+
+    Shared so gates 1 and 2 say it the way gate 0 already does, naming the
+    `validate` run that reports the actual defect rather than restating it here,
+    where it would be counted twice.
+    """
+    where = "is present but could not be read" if presence == "present" else "could not be read"
+    return f"{name} {where} -- `rubrica validate --stage {stage}` names the defect"
+
+
 def _mapping(value) -> dict:
     """`value` if it is a dict, else `{}`.
 
@@ -1353,7 +1387,17 @@ def _gate_1(run: RunPaths) -> str:
                 f"({entry['percent']}%)"
             )
     else:
-        lines.append("  (no world model yet; nothing to report)")
+        # An empty report has two meanings and they want different actions: no
+        # world model yet means "run the seal", a broken one means "repair it".
+        # `world` is the single read above, so an empty mapping here is a file
+        # that was absent, unreadable, or not a JSON object.
+        presence = _presence(run.world_model)
+        if presence != "absent" and not world:
+            lines.append(
+                "  (" + _unreadable_line("01-world-model.json", presence, "reconcile-seal") + ")"
+            )
+        else:
+            lines.append("  (no world model yet; nothing to report)")
     lines.append("")
 
     # Per pass, not per input, and that distinction is the whole point: the block
@@ -1504,7 +1548,18 @@ def _gate_2(run: RunPaths) -> str:
     lines.extend(_waiver_lines(run))
     coverage = _quietly(run.coverage_latest)
     if coverage is None:
-        lines.append("No coverage report yet (03-coverage/latest.json is absent).")
+        # None covers missing, locked and malformed alike; only the first is
+        # "not yet". A score-seal that wrote broken JSON has run, and telling the
+        # reader otherwise sends them to re-run a stage instead of repairing it.
+        presence = _presence(run.coverage_latest)
+        if presence == "absent":
+            lines.append("No coverage report yet (03-coverage/latest.json is absent).")
+        else:
+            lines.append(
+                "No coverage report to show ("
+                + _unreadable_line("03-coverage/latest.json", presence, "score-seal")
+                + ")."
+            )
         return "\n".join(lines) + "\n"
 
     coverage = _mapping(coverage)

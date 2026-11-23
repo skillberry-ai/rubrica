@@ -438,6 +438,75 @@ def test_gate_two_does_not_raise_on_a_present_but_malformed_world_model(tmp_path
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "2"]) == 0
 
 
+UTILISATION_HEADER = "Claim utilisation, per input"
+
+
+@pytest.mark.parametrize("label", ["malformed", "locked-file", "locked-folder"])
+def test_gate_two_says_an_unreadable_coverage_report_is_unreadable_not_absent(tmp_path, label):
+    """`_quietly` returns None for missing, locked and malformed alike, and gate 2
+    used to render all three as "latest.json is absent" -- while `validate --stage
+    score-seal` named the broken JSON. A reader told "absent" re-runs the stage;
+    a reader told "could not be read" repairs what it wrote. The locked-folder
+    case is the one `Path.is_file()` alone would get wrong: it answers False when
+    `stat` is refused, which would put "absent" straight back."""
+    if label != "malformed" and os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs")
+    if label == "malformed":
+        run.coverage_latest.write_text("{truncated", encoding="utf-8")
+        locked = None
+    elif label == "locked-file":
+        locked, mode = run.coverage_latest, 0o644
+    else:
+        locked, mode = run.coverage_dir, 0o755
+    if locked is not None:
+        locked.chmod(0o000)
+    try:
+        text = brief.gate_brief(run, 2)
+        assert "is absent" not in text, text
+        assert "03-coverage/latest.json" in text
+        assert "could not be read" in text
+        assert "`rubrica validate --stage score-seal`" in text
+        if label != "locked-folder":
+            assert "is present but could not be read" in text
+        assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "2"]) == 0
+    finally:
+        if locked is not None:
+            locked.chmod(mode)
+
+
+def test_gate_two_still_says_a_missing_coverage_report_is_absent(tmp_path):
+    """The other direction of the test above: a run that never sealed a score
+    keeps the "not yet" wording, so the split is not "always say unreadable"."""
+    run = build_toy_run(tmp_path / "runs")
+    run.coverage_latest.unlink()
+    text = brief.gate_brief(run, 2)
+    assert "No coverage report yet (03-coverage/latest.json is absent)." in text
+    assert "could not be read" not in text
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "2"]) == 0
+
+
+def test_gate_one_says_a_malformed_world_model_is_unreadable_not_absent(tmp_path):
+    """Gate 1's utilisation block, same defect as gate 2's coverage line: a
+    broken 01-world-model.json rendered "no world model yet", which points the
+    reader at the seal as if it had never run."""
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    run.world_model.write_text("{not valid json", encoding="utf-8")
+    block = _section(brief.gate_brief(run, 1), UTILISATION_HEADER)
+    assert "no world model yet" not in block, block
+    assert "01-world-model.json is present but could not be read" in block
+    assert "`rubrica validate --stage reconcile-seal`" in block
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "1"]) == 0
+
+
+def test_gate_one_still_says_no_world_model_yet_when_it_is_missing(tmp_path):
+    run = build_toy_run(tmp_path / "runs", upto="extract")
+    assert not run.world_model.exists()
+    block = _section(brief.gate_brief(run, 1), UTILISATION_HEADER)
+    assert "(no world model yet; nothing to report)" in block
+    assert "could not be read" not in block
+
+
 def test_a_surveyed_but_untriaged_run_is_not_told_it_was_minted_by_intake_input(tmp_path):
     """The absent-triage message had two causes and named only one.
 
