@@ -796,7 +796,7 @@ class Console:
         self._gate(job, ["check-refs", *rid], "check-refs")
 
     def _split_findings(
-        self, job, findings: Path, step, root: Path | None = None
+        self, job, findings: Path, step, root: Path
     ) -> tuple[list[str], dict[str, Path]]:
         """A fan-out repair goes to the members its findings name, each with its own lines.
 
@@ -808,8 +808,6 @@ class Console:
             lines = findings.read_text(encoding="utf-8").splitlines()
         except OSError as exc:
             raise _Stop(HALTED, f"cannot read the findings to repair from: {exc}") from exc
-        if root is None:
-            root = self.run_paths(job.run).root
         members = step.members_done + step.members_todo
         routed: dict[str, list[str]] = {}
         for line in lines:

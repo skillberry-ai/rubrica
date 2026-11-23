@@ -912,6 +912,15 @@ def _split(tmp_path, root: str, members: list[str], lines: list[str]) -> dict[st
     return {m: per[m].read_text(encoding="utf-8").splitlines() for m in ids}
 
 
+def test_split_findings_requires_the_run_root():
+    """`root` has no default: a fallback that re-derived it from the job never ran,
+    since the only caller already holds the run's root."""
+    import inspect
+
+    param = inspect.signature(Console._split_findings).parameters["root"]
+    assert param.default is inspect.Parameter.empty
+
+
 def test_a_run_folder_naming_a_member_does_not_steal_its_siblings_findings(tmp_path):
     """The lab folder `notes-app` once sent trace's findings to notes."""
     root = "/Users/me/notes-app/runs/r1"
