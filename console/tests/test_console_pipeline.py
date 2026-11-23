@@ -109,6 +109,19 @@ def test_a_free_text_gate_line_counts_and_a_mid_sentence_mention_does_not(tmp_pa
     assert pipeline.find(pipeline.steps(run), "gate-1").status == DONE
 
 
+def test_an_approve_after_a_file_with_no_final_newline_is_found(tmp_path):
+    # A reviewer hand-edits decisions.md and saves it without a final newline. The
+    # Approve button writes through `decide`; before T-82 that entry was glued onto
+    # the hand-written line, so it did not start with `- ` and the gate stayed open.
+    from rubrica.manifest import decide
+
+    run = build_toy_run(tmp_path, upto="reconcile-seal")
+    run.decisions.write_bytes(b"- 2026-11-18T10:00:00Z hand note without newline")
+    decide(run, "human gate 1 (console): looks good")
+    assert pipeline.approved_gates(run) == {1}
+    assert pipeline.find(pipeline.steps(run), "gate-1").status == DONE
+
+
 def test_a_gate_is_inferred_passed_when_a_later_stage_ran(tmp_path):
     run = build_toy_run(tmp_path, upto="propose")
     gate = pipeline.find(pipeline.steps(run), "gate-1")
