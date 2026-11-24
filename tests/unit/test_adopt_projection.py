@@ -257,6 +257,33 @@ def test_a_projection_id_differing_only_in_case_from_a_candidate_is_suffixed(tmp
     assert refs.check_catalogue(run) == []
 
 
+def test_a_suffixed_projection_id_at_the_length_limit_stays_within_it(tmp_path):
+    """Measured before the fix: candidate `"p"*128` beside projection `"P"*128`
+    adopted with no findings and a 130-character candidate_id, so
+    00-catalogue.json and 00-adoptions.json then failed their own schema
+    (maxLength 128). _unique_artifact_id now trims the base to fit the suffix."""
+    from rubrica import validate
+
+    long_id = "p" * 128
+    run = _run_with_projection(tmp_path)
+    catalogue = read_json(run.catalogue)
+    catalogue["candidates"][0]["candidate_id"] = long_id
+    write_json(run.catalogue, catalogue)
+    record = read_json(run.triage)
+    record["dispositions"][0]["candidate_id"] = long_id
+    record["objective_review"]["surfaces"][0]["evidence"] = [long_id]
+    record["projections"][0]["projection_id"] = long_id.upper()
+    record["projections"][0]["sources"][0]["candidate_id"] = long_id
+    write_json(run.triage, record)
+
+    assert triage.adopt_projection(run, projection_id=long_id.upper(), source=_good(tmp_path)) == []
+    ids = [c["candidate_id"] for c in read_json(run.catalogue)["candidates"]]
+    assert ids == [long_id, "P" * 126 + "-2"]
+    assert validate.validate_artifact(run.catalogue, "catalogue") == []
+    assert validate.validate_artifact(run.adoptions, "adoptions") == []
+    assert refs.check_catalogue(run) == []
+
+
 def test_a_missing_required_string_is_one_finding_per_failed_check(tmp_path):
     """Exit 1 with findings the worker reads and retries against -- and the same
     findings a future rb-project member would read as its gate."""

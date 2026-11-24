@@ -29,6 +29,12 @@ from rubrica.refs import check_triage, resolve_pointer
 _SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".go", ".rs", ".java", ".rb"}
 _DOC_SUFFIXES = {".md", ".rst", ".txt", ".adoc"}
 
+# The `maxLength` every id schema shares (catalogue-0.1.json, triage-0.1.json,
+# manifest-0.1.json). `_unique_artifact_id` budgets its collision suffix
+# against it, because a base already at the limit plus "-2" is an id the very
+# artifact it is written into then fails layer 1 on.
+MAX_ID_LENGTH = 128
+
 
 def slug(value: str) -> str:
     """Turn an arbitrary path or name into a safe artifact id.
@@ -188,6 +194,18 @@ def _unique_artifact_id(base: str, used: dict[str, int]) -> str:
     repeat starts after the second's. A caller reserving ids it did not mint
     here (adopt-projection, for the catalogue's existing candidates) stores
     `segment_key(id): 1`.
+
+    A suffixed id never exceeds `MAX_ID_LENGTH`: the base is trimmed just
+    enough to make room for the suffix. Measured: adopt-projection on a
+    128-character projection id colliding with a 128-character candidate
+    minted a 130-character candidate_id, exited clean, and left
+    00-catalogue.json and 00-adoptions.json failing their own schema. The
+    trim happens only when it is needed, so any id that fits comes out exactly
+    as before. Trimming can make two bases share a stem, which is why the loop
+    tests every candidate against `used` rather than trusting the counter.
+    refs.check_admitted_inputs recovers a candidate_id by replaying this
+    function forwards, not by parsing a suffix off, so a trimmed id maps back
+    to its candidate the same way an untrimmed one does.
     """
     key = segment_key(base)
     if key not in used:
@@ -196,7 +214,13 @@ def _unique_artifact_id(base: str, used: dict[str, int]) -> str:
     count = used[key]
     while True:
         count += 1
-        candidate = f"{base}-{count}"
+        suffix = f"-{count}"
+        room = MAX_ID_LENGTH - len(suffix)
+        # rstrip so a cut landing on a separator does not double it against the
+        # suffix's "-". Every id schema requires an alphanumeric first
+        # character, so the trimmed stem is never empty.
+        stem = base if len(base) <= room else base[:room].rstrip("-._")
+        candidate = f"{stem}{suffix}"
         if segment_key(candidate) not in used:
             break
     used[key] = count

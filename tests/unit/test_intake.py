@@ -242,6 +242,43 @@ def test_unique_artifact_id_compares_under_segment_key():
     ]
 
 
+def test_unique_artifact_id_never_exceeds_the_id_length_limit():
+    """The id schemas cap ids at 128 characters. A base at the limit is trimmed
+    just enough to fit its suffix; ids that already fit are untouched; and two
+    long bases that trim onto one stem still come out distinct."""
+    from rubrica.intake import MAX_ID_LENGTH, _unique_artifact_id
+
+    used: dict[str, int] = {}
+    long_id = "a" * MAX_ID_LENGTH
+    out = [_unique_artifact_id(b, used) for b in [long_id] * 12]
+    assert out[0] == long_id
+    assert out[1] == "a" * 126 + "-2"
+    assert out[11] == "a" * 125 + "-12"
+    assert all(len(i) <= MAX_ID_LENGTH for i in out)
+    assert len({i.casefold() for i in out}) == len(out)
+
+    # Two different long bases sharing their first 126 characters trim onto the
+    # same stem; the second must still get an id of its own.
+    used = {}
+    a, b = "x" * 126 + "ab", "x" * 126 + "cd"
+    out = [_unique_artifact_id(i, used) for i in [a, a, b, b]]
+    assert out == [a, "x" * 126 + "-2", b, "x" * 126 + "-3"]
+
+    # A trim landing on a separator does not double it against the suffix.
+    used = {}
+    sep = "y" * 125 + "-zz"
+    assert _unique_artifact_id(sep, used) == sep
+    assert _unique_artifact_id(sep, used) == "y" * 125 + "-2"
+
+    # Short ids are exactly what they always were.
+    used = {}
+    assert [_unique_artifact_id(i, used) for i in ["x-md", "x-md", "x-md-2"]] == [
+        "x-md",
+        "x-md-2",
+        "x-md-2-2",
+    ]
+
+
 def test_a_case_only_pair_of_filenames_gets_distinct_ids(tmp_path):
     run = intake(
         inputs=[_write(tmp_path / "p", "A.md", "# A\n"), _write(tmp_path / "q", "a.md", "# a\n")],
