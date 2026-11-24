@@ -1007,8 +1007,11 @@ could apply), or `inconclusive` (too few scoreable tasks to say anything).
   skill declares it in `reads` or `writes`
 - **Read by:** `check-refs`, through `waivers.load`, which schema-validates it
   and raises — that is what decides whether a waived finding sets the exit code;
-  and `gate-brief`, which reads the file *directly* and does not validate it, so
-  that a report can never become a second gate
+  `gate-brief`, which reads the file *directly* and does not validate it, so
+  that a report can never become a second gate, and renders the waivers in force;
+  and `run-summary`, through `waivers.waived_subjects_quietly`, which takes the
+  inputs a human waived for `claim-utilisation` out of its `uncited-artifacts`
+  flag and lists them as waived instead
 - **Path:** `waivers.json`, at the run root beside `manifest.json` and
   `decisions.md`
 
@@ -1037,9 +1040,13 @@ run.
 A malformed or unreadable `waivers.json` is a **usage error (exit 2), not a
 finding**, wherever a check reads it — the same ruling the two configs below
 carry, and for their reason: a person wrote the file, so there is no stage to
-hand a repair prompt to. `gate-brief` is the one reader that does not raise on
-it, and that is not an exception to the ruling but the standing one for a report:
-it renders a line saying the file could not be read and still exits 0.
+hand a repair prompt to. The two reports, `gate-brief` and `run-summary`, read it
+without failing, and that is not an exception to the ruling but the standing one
+for a report: each still exits 0. They differ in what they show. `gate-brief`
+says so — it prints `Waivers: waivers.json could not be read.` — while
+`run-summary` says nothing and simply treats the run as having no waivers, so a
+waived input shows up again under `uncited-artifacts`. Nothing goes unreported
+either way, because `check-refs` exits 2 on the same file.
 
 Fields worth knowing: `remedy` — where the fix would have to land, any stage
 name in `paths.STAGES` plus `outside-the-run` and `none`, where `none` means the
