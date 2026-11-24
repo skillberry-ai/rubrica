@@ -1546,3 +1546,172 @@ def test_scratch_state_inside_the_run_is_a_usage_error(tmp_path, var):
     run.mkdir()
     proc = _dispatch(tmp_path, "propose", str(run), run=run, **{var: str(run / "scratch")})
     assert proc.returncode == 2, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+
+
+def test_orchestrate_is_refused_as_a_stage_without_dispatching_a_model(tmp_path):
+    """`dispatch-stage.sh orchestrate` must exit 2 rather than run a crippled dispatch.
+
+    `rb-orchestrate/SKILL.md` exists, so the skill-file check alone accepted it, and
+    the dispatch that followed had no subagent ability and a deny list naming every
+    skill it exists to hand out. Run against the stub `claude` and outside
+    print-settings mode, so a refusal that came too late would show up as a stub
+    invocation on record.
+    """
+    proc, record = _dispatch_with_stub_claude(
+        tmp_path, "orchestrate", str(tmp_path / "run"), expect_exit=2
+    )
+    assert "orchestrate is not a stage" in proc.stderr
+    assert "docs/getting-started.md" in proc.stderr
+    assert not record.exists(), "the stub claude ran: a model would have been dispatched"
+    assert not (tmp_path / "lab" / "transcripts").exists()
+
+
+# ---------------------------------------------------------------------------
+# One skill, resolved once through the package.
+#
+# Under RUBRICA_SKILLS_DIR the script used to prompt from the repository's
+# SKILL.md, list and deny the repository's siblings and --add-dir the
+# repository's skill directory, while stage-write-scope.py read the candidate's
+# contract. Each assertion below names the copy, so a hard-coded repository path
+# left in any one of those places turns it red.
+
+SHIPPED_SKILLS = REPO / "src" / "rubrica" / "skills"
+
+
+def _candidate(tmp_path):
+    """A modified copy of the shipped skills: rb-propose writes a score part.
+
+    The write change is what makes the write scope's source visible -- the
+    shipped contract grants 02-scenarios/, the copy's does not.
+    """
+    copy = (tmp_path / "candidate-skills").resolve()
+    shutil.copytree(SHIPPED_SKILLS, copy)
+    skill = copy / "rb-propose" / "SKILL.md"
+    text = skill.read_text(encoding="utf-8")
+    assert 'writes = ["scenario_part"]' in text
+    skill.write_text(text.replace('writes = ["scenario_part"]', 'writes = ["score_part"]'))
+    return copy
+
+
+def test_a_skills_dir_override_names_the_copy_in_prompt_deny_list_and_write_scope(tmp_path):
+    copy = _candidate(tmp_path)
+    run = tmp_path / "run"
+    run.mkdir()
+    proc = _dispatch(tmp_path, "propose", str(run), run=run, RUBRICA_SKILLS_DIR=str(copy))
+    perms, sandbox, prompt = _paths(proc)
+    run = run.resolve()
+
+    prompt_text = Path(prompt).read_text()
+    assert f"Your skill:    {copy}/rb-propose/SKILL.md" in prompt_text
+    assert str(SHIPPED_SKILLS) not in prompt_text
+
+    allow = perms["permissions"]["allow"]
+    deny = perms["permissions"]["deny"]
+    assert f"Read(/{copy}/rb-propose/**)" in allow
+    # The copy's siblings are denied, and so is every shipped skill -- the
+    # shipped rb-propose most of all, since it is what the copy is measured against.
+    assert f"Read(/{copy}/rb-extract/**)" in deny
+    assert f"Read(/{copy}/rb-propose/**)" not in deny
+    assert f"Read(/{SHIPPED_SKILLS}/rb-propose/**)" in deny
+
+    # The write scope came from the copy's contract, not the shipped one.
+    writes = [rule for rule in allow if rule.startswith("Write(")]
+    assert writes
+    assert not any("02-scenarios" in rule for rule in writes), writes
+
+    fs = sandbox["sandbox"]["filesystem"]
+    assert f"{copy}/rb-propose" in fs["allowRead"]
+    assert str(copy) in fs["denyRead"]
+
+
+def test_a_skills_dir_override_reaches_add_dir_and_the_closing_summary(tmp_path):
+    copy = _candidate(tmp_path)
+    run = tmp_path / "run"
+    run.mkdir()
+    proc, _ = _dispatch_with_stub_claude(
+        tmp_path, "propose", str(run), run=run, RUBRICA_SKILLS_DIR=str(copy)
+    )
+    argv = _stub_argv(tmp_path)
+    add_dirs = [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
+    assert f"{copy}/rb-propose" in add_dirs
+    assert f"{SHIPPED_SKILLS}/rb-propose" not in add_dirs
+
+    from rubrica.skills import skill_sha256
+
+    skill = copy / "rb-propose" / "SKILL.md"
+    assert _summary_field(proc, "skill ") == str(skill)
+    assert _summary_field(proc, "sha256") == skill_sha256(skill)
+    assert skill_sha256(skill) != skill_sha256(SHIPPED_SKILLS / "rb-propose" / "SKILL.md")
+
+
+def test_without_the_override_the_dispatch_names_the_shipped_skill(tmp_path, monkeypatch):
+    monkeypatch.delenv("RUBRICA_SKILLS_DIR", raising=False)
+    run = tmp_path / "run"
+    run.mkdir()
+    proc, _ = _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run)
+    argv = _stub_argv(tmp_path)
+    assert f"{SHIPPED_SKILLS}/rb-propose" in argv
+    assert _summary_field(proc, "skill ") == str(SHIPPED_SKILLS / "rb-propose" / "SKILL.md")
+
+
+# ---------------------------------------------------------------------------
+# A checkout reached through a symlink.
+#
+# REPO used to come from a plain `pwd`, which keeps symlinks, while SKILLS_ROOT
+# comes from Python's `.resolve()`, which removes them. Through a symlinked
+# checkout (anything under /tmp on macOS) the two spellings differed with no
+# override in force, so the "another skills folder is in use" loop fired and
+# denied the stage's own skill folder under the symlinked spelling while the
+# allow list granted it under the resolved one.
+
+
+def _dispatch_through_symlink(tmp_path, stage, **env):
+    link = tmp_path / "linked-repo"
+    link.symlink_to(REPO, target_is_directory=True)
+    run = tmp_path / "run"
+    run.mkdir()
+    env.setdefault("PATH", _path_with(_bwrap_dir(tmp_path, works=True)))
+    proc = subprocess.run(
+        [str(link / "scripts" / "dispatch-stage.sh"), stage, str(run)],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "RUBRICA_LAB": str(tmp_path / "lab"),
+            "RUBRICA_PRINT_SETTINGS": "1",
+            **env,
+        },
+    )
+    return link, proc
+
+
+def test_a_symlinked_checkout_never_denies_the_stages_own_skill_folder(tmp_path, monkeypatch):
+    monkeypatch.delenv("RUBRICA_SKILLS_DIR", raising=False)
+    link, proc = _dispatch_through_symlink(tmp_path, "score")
+    perms, sandbox, _ = _paths(proc)
+    deny = perms["permissions"]["deny"]
+    own = [rule for rule in deny if "/rb-score/" in rule or rule.rstrip(")").endswith("/rb-score")]
+    assert not own, own
+    assert f"Read(/{SHIPPED_SKILLS}/rb-score/**)" in perms["permissions"]["allow"]
+    assert f"{SHIPPED_SKILLS}/rb-score" not in sandbox["sandbox"]["filesystem"]["denyRead"]
+    # One spelling throughout: the symlinked path appears in no rule at all.
+    assert not any(str(link) in rule for rule in deny), deny
+
+
+def test_without_the_override_the_extra_repository_deny_loop_does_not_fire(tmp_path, monkeypatch):
+    monkeypatch.delenv("RUBRICA_SKILLS_DIR", raising=False)
+    _, proc = _dispatch_through_symlink(tmp_path, "score")
+    perms, _, _ = _paths(proc)
+    # Each denied folder yields two rules (the folder and its `/**`), so count
+    # the rules each folder got rather than the rules overall.
+    marker = f"/{SHIPPED_SKILLS.name}/rb-"
+    skill_rules = [r for r in perms["permissions"]["deny"] if marker in r]
+    per_folder = {}
+    for rule in skill_rules:
+        folder = rule.removeprefix("Read(/").removesuffix(")").removesuffix("/**")
+        per_folder.setdefault(folder, []).append(rule)
+    # Each sibling exactly once, and nothing more: the second loop would add
+    # every repository skill folder again, the stage's own among them.
+    siblings = {str(d) for d in SHIPPED_SKILLS.glob("rb-*") if d.name != "rb-score"}
+    assert set(per_folder) == siblings, sorted(set(per_folder) ^ siblings)
+    assert all(len(rules) == 2 for rules in per_folder.values()), per_folder

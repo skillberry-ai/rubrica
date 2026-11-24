@@ -54,7 +54,14 @@
 #                        overridable here so a probe needs no file edit.
 set -euo pipefail
 
-REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# `pwd -P`, not `pwd`: SKILLS_ROOT below is resolved by Python's `.resolve()`,
+# which removes symlinks, and every path this script builds must use that one
+# spelling. With a plain `pwd`, a checkout reached through a symlink (anything
+# under /tmp on macOS) made "$SKILLS_ROOT" differ from "$REPO/src/rubrica/skills"
+# with no override in force, so the "another skills folder" deny loop below fired
+# and denied this stage's own skill folder under the symlinked spelling while the
+# allow list granted it under the resolved one.
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 LAB=${RUBRICA_LAB:-${TMPDIR:-/tmp}/rubrica-lab}
 
 for tool in claude jq; do
@@ -70,11 +77,39 @@ if [ -z "$STAGE" ] || [ -z "$RUN_ARG" ]; then
 fi
 RUN=$(cd "$RUN_ARG" 2>/dev/null && pwd) || { echo "no such run directory: $RUN_ARG" >&2; exit 2; }
 
-SKILL_DIR="$REPO/src/rubrica/skills/rb-$STAGE"
+# rb-orchestrate has a SKILL.md, so the existence check below would accept it, and
+# what came back was a crippled dispatch rather than a refusal: this harness grants
+# no subagent ability and denies every sibling skill directory, so an orchestrator
+# run through it can neither read nor hand out the skills it exists to dispatch.
+# Exit 2, because no retry of this command can make it work.
+if [ "$STAGE" = "orchestrate" ]; then
+  echo "orchestrate is not a stage and cannot be dispatched by this script; see 'The same run in one step' in docs/getting-started.md" >&2
+  exit 2
+fi
+
+# The skills root is resolved once, by the package, and every use below reads
+# this one value: the prompt, the stage listing, the sibling deny list, --add-dir
+# and the write scope. This used to be a hard-coded
+# `$REPO/src/rubrica/skills` here while stage-write-scope.py went through
+# `skills_dir()`, which honours RUBRICA_SKILLS_DIR -- so under the override a
+# dispatch was prompted from the repository's SKILL.md and granted writes by the
+# candidate's contract, and the console recorded the candidate's digest against a
+# prompt that never named it. Asking the package rather than re-reading the
+# variable here keeps one owner of the rule.
+#
+# Fatal on failure, exit 2: without the package there is no skill to point at,
+# and no re-dispatch can change that.
+SKILLS_ROOT=$("$REPO/.venv/bin/python" -c \
+  'from rubrica.skills import skills_dir; print(skills_dir().resolve())') || {
+  echo "error: could not resolve the skills directory -- run 'make setup' first" >&2
+  exit 2
+}
+SKILL_DIR="$SKILLS_ROOT/rb-$STAGE"
 SKILL="$SKILL_DIR/SKILL.md"
 if [ ! -f "$SKILL" ]; then
-  echo "no skill for stage '$STAGE'. Stages with a skill:" >&2
-  for d in "$REPO"/src/rubrica/skills/rb-*; do
+  echo "no skill for stage '$STAGE' under $SKILLS_ROOT. Stages with a skill:" >&2
+  for d in "$SKILLS_ROOT"/rb-*; do
+    [ -f "$d/SKILL.md" ] || continue
     name=$(basename "$d")
     [ "$name" = "rb-orchestrate" ] && continue   # it dispatches stages; it is not one
     echo "  ${name#rb-}" >&2
@@ -437,7 +472,12 @@ if [ -n "$SANDBOX_OFF_REASON" ]; then
   echo "  probe output: $PROBE_LOG" >&2
   echo '{}' > "$CLAUDE_CONFIG_DIR/settings.json"
 else
+  # The resolved skills root is denied beside the repository's: under
+  # RUBRICA_SKILLS_DIR it may sit outside the repo, and its siblings are this
+  # dispatch's answer key exactly as the repository's are. allowRead names this
+  # stage's own directory, and the more specific path wins in this scope.
   jq -n --arg repo "$REPO" --arg run "$RUN" --arg skilldir "$SKILL_DIR" \
+    --arg skillsroot "$SKILLS_ROOT" \
     --argjson rundeny "$(printf '%s\n' "${RUN_DENY[@]}" | jq -R . | jq -s .)" \
     --argjson harnessdeny "$(printf '%s\n' "${HARNESS_DENY[@]}" | jq -R . | jq -s .)" \
     '{sandbox: {
@@ -446,7 +486,10 @@ else
         failIfUnavailable: true,
         filesystem: {
           allowRead: [$repo, $run, $skilldir],
-          denyRead: ([$repo + "/docs", $repo + "/tests", $repo + "/src/rubrica/skills"] + $rundeny + $harnessdeny),
+          denyRead: ([$repo + "/docs", $repo + "/tests", $repo + "/src/rubrica/skills"]
+                     + (if $skillsroot == $repo + "/src/rubrica/skills" then []
+                        else [$skillsroot] end)
+                     + $rundeny + $harnessdeny),
           allowWrite: [$run]
         },
         network: { allowedDomains: [] }
@@ -475,9 +518,24 @@ DENY=("$REPO/docs" "$REPO/tests" "$REPO/CLAUDE.md" "$REPO/README.md" "${RUN_DENY
 # which is what defeats the name match -- a permission-only block would still
 # advertise the tool and still be intercepted.
 WS_DENY=("WebSearch")
-for d in "$REPO"/src/rubrica/skills/rb-*; do
+# Siblings come from the resolved root, so a candidate tree's siblings are the
+# ones denied. The repository's own skills are denied as well when the root is
+# somewhere else: each is a sibling of this stage's skill too, and the
+# repository's copy of *this* stage's skill is the very file a candidate is being
+# measured against.
+for d in "$SKILLS_ROOT"/rb-*; do
   [ "$d" = "$SKILL_DIR" ] || DENY+=("$d")
 done
+# Both sides resolved, so "is another skills folder in use?" is asked of the
+# folders rather than of how their paths happen to be spelled. The stage's own
+# folder is skipped here too, in case the two roots still name one tree.
+REPO_SKILLS=$(cd "$REPO/src/rubrica/skills" 2>/dev/null && pwd -P) ||
+  REPO_SKILLS="$REPO/src/rubrica/skills"
+if [ "$SKILLS_ROOT" != "$REPO_SKILLS" ]; then
+  for d in "$REPO_SKILLS"/rb-*; do
+    [ "$d" = "$SKILL_DIR" ] || DENY+=("$d")
+  done
+fi
 
 # `Write` is scoped to the run, and was a bare "Write" until 2026-08-14. MEASURED
 # on the parsec run: the `rb-emit` dispatch wrote /home/.../rubrica/check_prune.py
@@ -509,7 +567,12 @@ done
 # A failure here is fatal on purpose. Falling back to the old blanket grant would
 # reinstate the hole at exactly the moment something was wrong, which is the shape
 # of a mitigation that is worse than none.
-mapfile -t WRITE_PATHS < <("$REPO/.venv/bin/python" "$REPO/scripts/stage-write-scope.py" \
+#
+# RUBRICA_SKILLS_DIR is pinned to the root resolved above rather than inherited,
+# so the contract read here is the SKILL.md the prompt names -- the same file,
+# not a second resolution that happens to agree.
+mapfile -t WRITE_PATHS < <(RUBRICA_SKILLS_DIR="$SKILLS_ROOT" \
+  "$REPO/.venv/bin/python" "$REPO/scripts/stage-write-scope.py" \
   "$RUN" "$STAGE" ${SLICE:+"$SLICE"}) || {
   echo "error: could not resolve the write scope for stage '$STAGE'" >&2
   exit 2
@@ -867,9 +930,23 @@ dispatch    ERRORED -- $OUTCOME
 EOF
 fi
 
+# The skill line is the path the prompt named, and the console reads it back to
+# pass to `record-stage --skill`, so the digest recorded is the digest of the
+# prompt that was sent. The sha256 is printed beside it, computed by
+# the same function record-stage uses, so a reader can compare the two without
+# trusting either. Hashed after the dispatch rather than before: the stage cannot
+# write the skill, so the file is the same either way, and a digest that differs
+# from the recorded one later is the change-after-the-run signal record-stage
+# exists for.
+SKILL_SHA=$("$REPO/.venv/bin/python" -c \
+  'import sys; from rubrica.skills import skill_sha256; print(skill_sha256(sys.argv[1]))' \
+  "$SKILL" 2>/dev/null || echo "unreadable")
+
 cat <<EOF
 
 transcript  $TRANSCRIPT
+skill       $SKILL
+sha256      $SKILL_SHA
 cost        $SPENT
 sandbox     $SANDBOX_LINE
 gates       rubrica validate --stage $STAGE --run "$RUN"

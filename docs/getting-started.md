@@ -590,18 +590,7 @@ variance, and five identical runs cannot exist if a human intervenes in each.
 [`docs/concepts/pipeline.md`](concepts/pipeline.md) is where the flag is
 documented, together with the cost of leaving it prompt-level.
 
-**This is not `./scripts/dispatch-stage.sh orchestrate`.** The script takes
-that invocation without complaint — `rb-orchestrate/SKILL.md` exists, so nothing
-about it exits `2` — and what comes back is a crippled dispatch rather than a
-refusal. That script grants no subagent capability — its
-`permissions.allow` is `Read`/`Edit`/`Write` scoped to the run directory,
-`Read` on one skill directory, and `Bash(rubrica *)` — and its deny list
-enumerates every sibling `rb-*` skill directory one at a time. Both are
-deliberate: they are what makes a single-stage dispatch measure that skill
-rather than that skill plus a briefing. An orchestrator dispatched through it
-could therefore neither read nor hand out the skills it exists to dispatch.
-Guide §4 and §6 are the mechanics of that isolation and what only looks
-enforced.
+**This is not `./scripts/dispatch-stage.sh orchestrate`**, which the script refuses with exit `2`.
 
 ## The same run from a browser
 

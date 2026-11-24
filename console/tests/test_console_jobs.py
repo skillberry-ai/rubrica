@@ -31,6 +31,7 @@ from rubrica_console.jobs import (
     Options,
 )
 
+from rubrica import skills
 from tests.toy import build_toy_run
 
 # Where each stage's output lives, so the fake can copy it from the reference run.
@@ -110,6 +111,9 @@ _FAKE = textwrap.dedent(
     use = {"type": "tool_use", "name": "Write", "input": {"file_path": str(dst)}}
     print(json.dumps({"type": "assistant", "message": {"content": [use]}}))
     print("transcript  /dev/null")
+    if os.environ.get("FAKE_SKILLS_DIR"):
+        # The summary line the real script prints: the SKILL.md the prompt named.
+        print(f"skill       {os.environ['FAKE_SKILLS_DIR']}/rb-{stage}/SKILL.md")
     print("cost        $0.25 over 3 turns, ceiling none")
     """
 )
@@ -138,6 +142,7 @@ def fake(tmp_path, reference, monkeypatch) -> dict:
         "FAKE_EXIT2",
         "FAKE_SLEEP",
         "FAKE_EXIT1_AFTER_SPEND",
+        "FAKE_SKILLS_DIR",
     ):
         monkeypatch.delenv(var, raising=False)
     return {"script": script, "log": log}
@@ -200,6 +205,61 @@ def test_run_to_gate_drives_the_world_model_band_and_stops_at_gate_1(tmp_path, f
     inputs = [i["artifact_id"] for i in json.loads(intake_run.manifest.read_text())["inputs"]]
     assert sorted(members) == sorted(inputs)
     assert job.cost == pytest.approx(0.25 * len(_calls(fake)))
+
+
+def _candidate_skills(tmp_path) -> Path:
+    """A copy of the shipped skills with every SKILL.md changed, so its digests differ."""
+    copy = tmp_path / "candidate-skills"
+    shutil.copytree(skills.skills_dir(), copy)
+    for path in copy.glob("rb-*/SKILL.md"):
+        path.write_text(path.read_text(encoding="utf-8") + "\n<!-- candidate -->\n")
+    return copy
+
+
+def test_record_stage_hashes_the_skill_the_dispatch_said_it_prompted_from(
+    tmp_path, fake, intake_run, monkeypatch
+):
+    """The recorded digest must describe the prompt that was sent.
+
+    The dispatch reports a candidate tree's SKILL.md while the console's own
+    process sees no RUBRICA_SKILLS_DIR, so a console still resolving the path for
+    itself records the shipped file's digest and this goes red.
+    """
+    copy = _candidate_skills(tmp_path)
+    monkeypatch.setenv("FAKE_SKILLS_DIR", str(copy))
+    monkeypatch.delenv("RUBRICA_SKILLS_DIR", raising=False)
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    job = console.wait(console.run_step(intake_run.root.name, "extract", OPTS).id, timeout=60)
+    assert job.status == SUCCEEDED, (job.message, [(e.label, e.status) for e in job.entries])
+    recorded = json.loads(intake_run.manifest.read_text())["stages"]["extract"]["skill_sha256"]
+    assert recorded == skills.skill_sha256(copy / "rb-extract" / "SKILL.md")
+    assert recorded != skills.skill_sha256(skills.skills_dir() / "rb-extract" / "SKILL.md")
+
+
+def test_without_a_reported_skill_the_console_records_the_shipped_one(
+    tmp_path, fake, intake_run, monkeypatch
+):
+    """The fallback: a dispatch that printed no `skill` line records as before."""
+    monkeypatch.delenv("RUBRICA_SKILLS_DIR", raising=False)
+    console = _console(tmp_path, intake_run.root.parent, fake)
+    job = console.wait(console.run_step(intake_run.root.name, "extract", OPTS).id, timeout=60)
+    assert job.status == SUCCEEDED, job.message
+    recorded = json.loads(intake_run.manifest.read_text())["stages"]["extract"]["skill_sha256"]
+    assert recorded == skills.skill_sha256(skills.skills_dir() / "rb-extract" / "SKILL.md")
+
+
+def test_gate_0_records_a_triage_pass_against_the_skill_it_was_dispatched_with(tmp_path, fake):
+    run = build_toy_run(tmp_path / "runs", upto="triage-seal")
+    copy = _candidate_skills(tmp_path)
+    console = _console(tmp_path, run.root.parent, fake)
+    name = run.root.name
+    state = console._state(name)
+    state.data["used"]["triage-objective"] = {"model": "m1", "effort": "low"}
+    state.data["skills"]["triage-objective"] = str(copy / "rb-triage-objective" / "SKILL.md")
+    job = console.approve_gate(name, 0, "admit what triage chose")
+    assert job.status == SUCCEEDED, (job.message, [(e.label, e.exit) for e in job.entries])
+    entry = json.loads(run.manifest.read_text())["stages"]["triage-objective"]
+    assert entry["skill_sha256"] == skills.skill_sha256(copy / "rb-triage-objective" / "SKILL.md")
 
 
 def test_a_fan_out_runs_only_its_missing_members(tmp_path, fake, intake_run, reference):

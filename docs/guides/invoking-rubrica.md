@@ -121,7 +121,7 @@ are probing behaviour:
 | Variable | Read by | What it moves |
 |---|---|---|
 | `RUBRICA_SCHEMA_DIR` | `validate.py` | the directory layer 1 loads its schemas from |
-| `RUBRICA_SKILLS_DIR` | `skills.py` | the directory `discover()` and `check-skills` read skills from |
+| `RUBRICA_SKILLS_DIR` | `skills.py` | the directory every skill is read from: `discover()` and `check-skills`, and also `dispatch-stage.sh`, which asks `skills_dir()` once and uses that one path for the prompt, the sibling deny list, `--add-dir` and the write scope, then prints the path and its sha256 in its closing summary (the console passes that path to `record-stage --skill`) |
 | `RUBRICA_SUITE_DIR` | `emit.py` | the suite template (`verify.py`, `test.sh`) `emit` compiles from |
 | `RUBRICA_LIVE` | `tests/conftest.py` | whether the `live`-marked tests run (§8) |
 
@@ -180,9 +180,14 @@ dependency of the `rubrica` package, and `make setup` does not install either.
 ```
 
 - **`<stage>`** is a `paths.STAGES` name with no `rb-` prefix; the script resolves
-  it to `src/rubrica/skills/rb-<stage>/SKILL.md`. A stage with no skill file
-  exits `2` and prints every stage that has one, `rb-orchestrate` excluded
-  because it dispatches stages rather than being one.
+  it to `rb-<stage>/SKILL.md` under the package's `skills_dir()`, which is
+  `src/rubrica/skills/` unless `RUBRICA_SKILLS_DIR` moves it (§2). `orchestrate`
+  is refused first, with its own exit `2` message: the script gives a dispatch no
+  way to hand out subagents and denies every sibling skill, so an orchestrator run
+  through it could not do its job — run it as described in
+  [`docs/getting-started.md`](../getting-started.md) instead. Any other stage with
+  no skill file exits `2` and prints every stage that has one, `rb-orchestrate`
+  excluded because it dispatches stages rather than being one.
 - **`<run-dir>`** is resolved to an absolute path, and becomes the dispatch's
   *cwd* — the run directory, deliberately not the repository, so that
   `manifest.inputs[].source_path`, which is repo-relative, cannot resolve back to
@@ -311,9 +316,11 @@ because that is the path the closing summary prints and `audit-reads.sh` is
 pointed at.
 
 That summary is the script's last output. It names the `transcript` path, the
-`cost` line below, whether the `sandbox` was `on` or `off -- <reason>`, the two
-`gates` commands to run next (`rubrica validate --stage <stage>` and `rubrica
-check-refs`), and the `read audit` invocation.
+`skill` file the prompt named and its `sha256` (computed the way `record-stage`
+computes it, so the two can be compared), the `cost` line below, whether the
+`sandbox` was `on` or `off -- <reason>`, the two `gates` commands to run next
+(`rubrica validate --stage <stage>` and `rubrica check-refs`), and the `read
+audit` invocation.
 
 **A `dispatch  ERRORED` banner sits above all of that when the dispatch reported
 an error**, carrying the `terminal_reason` in brackets and the message verbatim.
