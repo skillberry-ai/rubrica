@@ -453,3 +453,29 @@ def test_a_manifest_with_provenance_validates(tmp_path):
     provenance = schema["properties"]["inputs"]["items"]["properties"]["provenance"]
     assert "provenance" not in schema["properties"]["inputs"]["items"]["required"]
     assert provenance["oneOf"]
+
+
+def test_survey_and_intake_mint_the_same_run_id_for_the_same_now(tmp_path):
+    """Both now share intake's helpers, so the same `now` names the same run.
+
+    Two hand copies of the run-id format could drift apart silently; this pins
+    survey's run id (and the catalogue's run_id field) to mint_run's.
+    """
+    from rubrica.survey import survey
+
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "api.json").write_text(json.dumps({"tools": []}), encoding="utf-8")
+    surveyed = survey(
+        corpus_roots=[corpus],
+        runs_dir=tmp_path / "survey-runs",
+        target_name="t",
+        target_interface="i",
+        objective="breadth",
+        max_rounds=1,
+        max_scenarios=1,
+        now=NOW,
+    )
+    minted, _ = intake.mint_run(tmp_path / "intake-runs", now=NOW)
+    assert surveyed.root.name == minted.root.name
+    assert read_json(surveyed.catalogue)["run_id"] == minted.root.name

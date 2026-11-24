@@ -401,15 +401,16 @@ def test_the_tally_counts_every_exclusion_including_ones_whose_paths_are_dropped
 
 
 def test_only_reasons_carrying_a_judgment_keep_their_paths():
-    """The four disputable reasons keep paths; the four mechanical ones do not.
+    """The five disputable reasons keep paths; the four mechanical ones do not.
 
     Asserted as set equality over both halves rather than "duplicate is kept",
-    so adding a ninth exclusion_reason without ruling on which side it falls
+    so adding a tenth exclusion_reason without ruling on which side it falls
     fails here instead of silently defaulting to dropped.
     """
     every = [
         "duplicate",
         "operator_excluded",
+        "symlink_outside_root",
         "unreadable",
         "vendored",
         "gitignored",
@@ -417,15 +418,30 @@ def test_only_reasons_carrying_a_judgment_keep_their_paths():
         "binary",
         "lockfile",
     ]
+    # Pinned to survey's own list, because without it this test did not do what
+    # its docstring says: `symlink_outside_root` was added to survey and this
+    # list stayed at eight, so the new reason fell to "dropped" unnoticed.
+    assert set(every) == set(survey.EXCLUSION_REASONS)
     summary = slices.excluded_summary([_excl(r) for r in every])
-    assert summary["total"] == 8
+    assert summary["total"] == 9
     assert {e["reason"] for e in summary["entries"]} == set(slices.DISPUTABLE_EXCLUSION_REASONS)
     assert set(slices.DISPUTABLE_EXCLUSION_REASONS) == {
         "duplicate",
         "operator_excluded",
+        "symlink_outside_root",
         "unreadable",
         "vendored",
     }
+
+
+def test_a_symlink_outside_the_root_keeps_its_path_for_gate_zero():
+    """A link the operator may have placed on purpose is a decline they can
+    dispute, so its path reaches the objective pass beside the binaries' tally
+    rather than being folded into a count."""
+    link = {"path": "docs/key.md", "reason": "symlink_outside_root"}
+    summary = slices.excluded_summary([link, _excl("binary")])
+    assert summary["entries"] == [link]
+    assert summary["by_reason"] == {"binary": 1, "symlink_outside_root": 1}
 
 
 def test_by_reason_is_sorted_so_two_runs_produce_one_byte_shape():

@@ -20,11 +20,12 @@ development run -- a full-pipeline run over a large real-world corpus, called
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import hashlib
 import json
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -32,11 +33,18 @@ from rubrica import digest as digest_module
 from rubrica import slices as slices_module
 from rubrica.artifacts import canonical_bytes, sha256_of, write_json
 from rubrica.errors import UsageError
-from rubrica.intake import _unique_artifact_id, classify, slug
+from rubrica.intake import (
+    _unique_artifact_id,
+    classify,
+    create_run_dir,
+    resolve_stamp,
+    run_id_for,
+    slug,
+)
 from rubrica.manifest import utc_stamp
 from rubrica.paths import RunPaths
 
-# Same eight strings as catalogue-0.1.json's exclusion_reason enum. Kept here
+# Same nine strings as catalogue-0.1.json's exclusion_reason enum. Kept here
 # too because walk_corpus emits them and a test pins the two lists identical --
 # they drifted in exactly this shape once before, for validate.CONFIG_KINDS.
 EXCLUSION_REASONS: tuple[str, ...] = (
@@ -48,6 +56,7 @@ EXCLUSION_REASONS: tuple[str, ...] = (
     "duplicate",
     "unreadable",
     "operator_excluded",
+    "symlink_outside_root",
 )
 
 DEFAULT_MAX_CANDIDATES = 500
@@ -89,27 +98,211 @@ _LOCKFILES = frozenset(
 _BINARY_SNIFF_BYTES = 8192
 
 
-def _gitignore_patterns(root: Path) -> list[str]:
-    """Patterns from `root/.gitignore`, one level only.
+def _is_vcs_name(part: str) -> bool:
+    """Whether one path part names a version-control folder, ignoring case.
 
-    Deliberately not a full gitignore implementation: nested ignore files,
-    negations and directory semantics are a library's job, and getting them
-    subtly wrong would drop evidence *silently*, which is the one failure this
-    module exists to prevent. What it does catch is the common case -- a
-    top-level ignore listing generated and secret files -- and anything it
-    misses stays in the catalogue where triage and a human can see it.
+    Case-blind on purpose: on a case-insensitive volume -- the macOS default --
+    `.GIT` *is* the `.git` folder, so an exact match let it through the walk and
+    the seed check alike. `casefold` rather than `lower` so the comparison is the
+    one Python documents for caseless matching.
+    """
+    return part.casefold() in _VCS_DIRS
+
+
+def _vcs_part_of(path: Path) -> str | None:
+    """The first VCS folder name in `path` or the path it resolves to, if any.
+
+    Both spellings are checked: the path as given catches `repo/.git` named
+    directly, and the resolved one catches a symlink or `..` that lands inside a
+    VCS folder while its own spelling does not mention one.
+    """
+    candidates = [Path(path).absolute()]
+    # A resolve failure (a symlink loop) leaves the spelled path to judge;
+    # whether the seed is readable at all is decided by the caller.
+    with contextlib.suppress(OSError, RuntimeError):
+        candidates.append(Path(path).resolve())
+    for candidate in candidates:
+        for part in candidate.parts:
+            if _is_vcs_name(part):
+                return part
+    return None
+
+
+def _gitignore_patterns(root: Path) -> list[str]:
+    """Patterns from `root/.gitignore`, one level only, as written.
+
+    Deliberately not a full gitignore implementation: nested ignore files are
+    a library's job, and getting them subtly wrong would drop evidence
+    *silently*, which is the one failure this module exists to prevent. What
+    it does catch is the common case -- a top-level ignore listing generated
+    and secret files -- and anything it misses stays in the catalogue where
+    triage and a human can see it.
+
+    Lines come back in file order, a `!` line with its `!` still on, because
+    order is what a `!` line means: `_gitignored` lets the last matching line
+    decide. Before that, every `!` line was skipped while the broad line it
+    narrowed still applied, so the common "ignore everything, keep a few"
+    file (`*`, `!*/`, `!*.py`, ...) dropped every file git keeps -- a bug
+    scout's corpus came out empty, the exact failure this module exists to
+    prevent.
+
+    These shapes are honoured (see `_gitignored` for how each matches):
+
+    - plain, `x` or `*.log` -- a file, or a folder on the file's path, with
+      that name at any depth, so `secrets` drops `a/secrets/k.txt`;
+    - anchored, `/x` -- only the path from the root, never a same-named file
+      or folder deeper down;
+    - folder, `x/` -- every file under a folder matching `x` at any depth, or
+      under the one folder at that path when the pattern also starts with `/`
+      or has another `/` in it;
+    - `**` as a whole segment -- any number of folder levels, as in
+      `**/.env`, `logs/**` and `a/**/b`.
+
+    Before the anchored and folder shapes were honoured, `/.env` and
+    `secrets/` -- two of the commonest top-level lines -- excluded nothing, and
+    a `.env` and a `secrets/key.txt` were catalogued as evidence. When they
+    first were, `**` shrank to a single `*` and `secrets` without its slash
+    still excluded nothing inside the folder, so a nested `a/b/.env` and
+    `secrets/key.txt` were catalogued again.
     """
     ignore = root / ".gitignore"
+    # `utf-8-sig` drops one leading byte-order mark, as git does. Read as plain
+    # `utf-8`, a file saved with one (Windows Notepad, some editors) kept the
+    # mark on its first pattern -- `str.strip()` does not remove U+FEFF -- so
+    # `\ufeff.env` matched nothing and a `.env` git ignores was catalogued.
     try:
-        text = ignore.read_text(encoding="utf-8")
+        text = ignore.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return []
     patterns = []
     for raw in text.splitlines():
         line = raw.strip()
-        if line and not line.startswith("#") and not line.startswith("!"):
-            patterns.append(line.rstrip("/"))
+        # A line that is only slashes names no file; kept, it would strip to an
+        # empty pattern, which matches nothing useful at best and everything
+        # under the root at worst. The same holds after a `!`, so a bare `!`
+        # or `!/` is skipped too.
+        if line.startswith("#") or not line.removeprefix("!").strip("/"):
+            continue
+        patterns.append(line)
     return patterns
+
+
+def _segments_match(segments: Sequence[str], pattern: Sequence[str]) -> bool:
+    """`segments` match `pattern` one folder level per segment, `**` aside.
+
+    Segment by segment rather than one fnmatch over the joined path, because
+    fnmatch's `*` crosses `/`: `/*.env` over the whole path would also drop
+    `sub/x.env`, which an anchored pattern exists precisely not to do.
+
+    A segment that is exactly `**` stands for any number of folder levels, as
+    in git: zero or more at the start or in the middle (`**/.env` drops `.env`
+    and `a/b/.env`; `a/**/b` drops `a/b/f`), one or more at the end (`logs/**`
+    drops everything inside `logs` but not a file called `logs`). Before this,
+    `**` was a single `*`, and a nested `a/b/.env` was catalogued as evidence.
+
+    A table rather than recursion: a hostile `.gitignore` full of `**` lines
+    would make naive backtracking exponential in the path depth, and this runs
+    once per file in the corpus. The table is len(segments) x len(pattern).
+    """
+    n, m = len(segments), len(pattern)
+    # reach[j] -- whether the first i segments match the first j pattern parts.
+    reach = [False] * (m + 1)
+    reach[0] = True
+    for j in range(1, m + 1):
+        # A `**` that is not the last part may match zero segments.
+        reach[j] = reach[j - 1] and pattern[j - 1] == "**" and j < m
+    for i in range(1, n + 1):
+        nxt = [False] * (m + 1)
+        for j in range(1, m + 1):
+            part = pattern[j - 1]
+            if part == "**":
+                # Take this segment into the `**` (staying on it, or entering
+                # it from before), or -- unless last -- let it match nothing.
+                nxt[j] = reach[j] or reach[j - 1] or (j < m and nxt[j - 1])
+            else:
+                nxt[j] = reach[j - 1] and fnmatch.fnmatch(segments[i - 1], part)
+        reach = nxt
+    return reach[m]
+
+
+def _gitignored(relative: str, patterns: Sequence[str], *, folder: bool = False) -> bool:
+    """Whether `relative` (a corpus-relative POSIX path) is matched by `patterns`.
+
+    `folder` says `relative` names a folder rather than a file, so a
+    folder-only pattern (`secret/`) may match its last segment too. Only the
+    walk's unlistable-folder branch passes it; every file check leaves it off.
+
+    What is honoured, each as git does it:
+
+    - a pattern matches the file itself, or any folder on the file's path --
+      so `secrets` and `/creds` drop every file inside a folder of that name,
+      and `x/` matches folders only, never a file called `x`;
+    - a pattern with no `/` but a trailing one matches at any depth; a leading
+      `/`, or a `/` anywhere but the end, ties it to the root (`/creds` drops
+      `creds/t.txt`, not `sub/creds/t.txt`);
+    - `*`, `?` and `[...]` stay within one folder level; `**` as a whole
+      segment spans any number of them (see `_segments_match`).
+
+    - a line starting with `!` re-includes what it matches, and the last line
+      that matches decides, so `docs/*` then `!docs/api.md` keeps `api.md`
+      while `!x` then `x` still drops `x`.
+
+    One git rule is deliberately not honoured: git cannot re-include a file
+    whose parent folder is excluded, so under `*` then `!*/` it still drops
+    `docs/other.txt` (the file itself matches `*`), where this keeps it
+    because `!*/` was the last line to match something on its path. Leaving
+    that rule out only ever errs toward *keeping* a file, which is this
+    module's safe side: a file kept by mistake is seen at gate 0, a file
+    dropped by mistake is gone. Nested `.gitignore` files are not honoured.
+    """
+    parts = [part for part in relative.split("/") if part]
+    ignored = False
+    for line in patterns:
+        negate = line.startswith("!")
+        pattern = line[1:] if negate else line
+        folder_only = pattern.endswith("/")
+        body = pattern.strip("/")
+        # As in git: a leading `/`, or a `/` anywhere but the end, ties the
+        # pattern to the root instead of letting it match at any depth.
+        anchored = pattern.startswith("/") or "/" in body
+        segments = [segment for segment in body.split("/") if segment]
+        if not segments:
+            continue
+        if not anchored:
+            # An unanchored name is an anchored one under any number of folders.
+            segments = ["**", *segments]
+        # Each folder on the path, as its path from the root; then the file
+        # itself, unless the pattern names folders only. A file is ignored when
+        # it, or any folder it sits in, is.
+        last = len(parts) - 1 if folder_only and not folder else len(parts)
+        matched = any(_segments_match(parts[:k], segments) for k in range(1, last + 1))
+        if not matched and folder and not folder_only and set(segments[-1]) == {"*"}:
+            # A folder that could not be listed: `data/*` and `logs/**` match
+            # only what is inside, never the folder's own path, yet they cover
+            # every file it could hold -- so they count when what comes before
+            # the trailing stars matches the folder or one it sits in. The
+            # same idea as `_folder_operator_excluded`. A pattern covering
+            # only some files (`data/*.md`) ends in more than stars and does
+            # not count, and nor does `data/*/`, which skips files directly
+            # inside `data`. File mode never takes this branch.
+            #
+            # `data/**/*` too: its `**` may match zero levels, so it covers the
+            # files directly inside `data` as well, yet a trailing `**` in
+            # `_segments_match` must match at least one level, so a stem of
+            # `["data", "**"]` would never match `data` itself. Only `**` is
+            # dropped from the stem: a `*` there (`data/*/*`) is one whole
+            # level, which skips the files directly inside `data`.
+            stem = segments[:-1]
+            while stem and stem[-1] == "**":
+                stem = stem[:-1]
+            matched = bool(stem) and any(
+                _segments_match(parts[:k], stem) for k in range(1, len(parts) + 1)
+            )
+        if matched:
+            # Last match wins, as in git; with no `!` lines this is "any line
+            # matches", exactly the rule before negation was honoured.
+            ignored = not negate
+    return ignored
 
 
 def _looks_binary(path: Path) -> bool:
@@ -124,11 +317,36 @@ def _matches_any(relative: str, patterns: Sequence[str]) -> bool:
     )
 
 
+def _folder_operator_excluded(relative: str, patterns: Sequence[str]) -> bool:
+    """Whether every file a folder at `relative` could hold matches `patterns`.
+
+    For a folder that could not be listed, so its files cannot be named. A
+    glob written for files, like `private/*`, never matches the folder's own
+    path, so testing the folder with `_matches_any` would miss it; and testing
+    one made-up child would let `private/*.md` claim files it may not cover.
+    The rule chosen: a glob counts only when it ends in `*` and what comes
+    before the trailing stars matches some leading part of `<folder>/` --
+    then fnmatch's `*`, which crosses `/`, matches every file underneath, so
+    `_matches_any` would have dropped each one as `operator_excluded`. Any
+    other glob leaves the folder `unreadable`, which errs toward saying we
+    could not read it rather than claiming a reason we cannot check.
+    """
+    prefix_of = f"{relative}/"
+    for pattern in patterns:
+        stem = pattern.rstrip("*")
+        if stem == pattern:
+            continue
+        if any(fnmatch.fnmatch(prefix_of[:k], stem) for k in range(len(prefix_of) + 1)):
+            return True
+    return False
+
+
 def walk_corpus(
     roots: Sequence[Path],
     *,
     operator_globs: Sequence[str] = (),
     seen: dict[str, Path] | None = None,
+    only: Sequence[Path] | None = None,
 ) -> tuple[list[Path], list[dict]]:
     """Every file worth cataloguing, and every one dropped with its reason.
 
@@ -143,11 +361,29 @@ def walk_corpus(
     still caught as `duplicate` even though each root gets its own call (for
     `root_index`); without a shared dict, each call started from empty and a
     cross-root duplicate was admitted twice with no finding anywhere.
+
+    `only` is the files a human named one by one, all under the single root
+    passed with it, and replaces the walk of that root. A named file skips the
+    filters that judge a file by *where* it sits -- version control, vendored
+    folders, the root's .gitignore, `--exclude` -- because the human pointed at
+    it on purpose and those filters exist to drop what nobody chose. It keeps
+    the ones that judge *what* it is (lockfile, binary, unreadable, duplicate),
+    each still recorded, so a named file that cannot be a candidate is visible
+    as declined rather than missing. A named file inside a version-control
+    folder never reaches here from survey(): `_seed_roots` refuses it first.
     """
     kept: list[Path] = []
     excluded: list[dict] = []
     if seen is None:
         seen = {}
+
+    if only is not None:
+        if len(roots) != 1:
+            raise UsageError("walk_corpus takes `only` with exactly one root")
+        root = Path(roots[0])
+        for path in sorted(Path(p) for p in only):
+            _keep_or_drop(path, path.relative_to(root).as_posix(), kept, excluded, seen)
+        return kept, excluded
 
     for root in roots:
         root = Path(root)
@@ -162,7 +398,7 @@ def walk_corpus(
             # comment already warned about. Forcing one iterdir() first makes
             # that failure visible before rglob can hide it.
             list(root.iterdir())
-            walked = sorted(p for p in root.rglob("*") if p.is_file())
+            walked, unlistable = _walk_files(root)
         except OSError as exc:
             # An unreadable *root* is the harness pointed at something it cannot
             # read, which is exit 2 -- the same call paths.list_dir makes, and
@@ -171,6 +407,33 @@ def walk_corpus(
             raise UsageError(f"cannot read corpus root: {root} ({exc})") from exc
 
         ignore_patterns = _gitignore_patterns(root)
+        resolved_root = _resolve_or_none(root)
+
+        # A folder below the root that could not be listed is recorded rather
+        # than skipped: rglob used to swallow its PermissionError, so every
+        # file inside was in neither `kept` nor `excluded` -- measured on
+        # `c/locked/spec.md` under a `chmod 000 c/locked`, which came back as
+        # ([a.md], []). Its path is the folder's, since its files cannot be
+        # named, and a folder inside version control or a vendored tree keeps
+        # the reason its files would have got, so the tally does not change
+        # meaning when a mode bit does. The checks run in the file loop's
+        # order below, minus `lockfile`, which names a file and never a folder.
+        # A gitignore `!` line re-including a file inside an ignored folder
+        # cannot be seen from here, so such a folder still reads `gitignored`.
+        for folder in unlistable:
+            folder_relative = folder.relative_to(root).as_posix()
+            folder_parts = set(folder.relative_to(root).parts)
+            if any(_is_vcs_name(part) for part in folder_parts):
+                reason = "vcs_metadata"
+            elif folder_parts & _VENDOR_DIRS:
+                reason = "vendored"
+            elif operator_globs and _folder_operator_excluded(folder_relative, operator_globs):
+                reason = "operator_excluded"
+            elif ignore_patterns and _gitignored(folder_relative, ignore_patterns, folder=True):
+                reason = "gitignored"
+            else:
+                reason = "unreadable"
+            excluded.append({"path": folder_relative, "reason": reason})
 
         for path in walked:
             relative = path.relative_to(root).as_posix()
@@ -179,39 +442,185 @@ def walk_corpus(
             def drop(reason: str, rel: str = relative) -> None:
                 excluded.append({"path": rel, "reason": reason})
 
-            if parts & _VCS_DIRS:
+            # rglob does not descend into a symlinked folder, but is_file()
+            # follows a symlinked *file*, so a link in the corpus pointing at
+            # ~/.ssh/id_rsa or a credentials file was read, hashed and
+            # catalogued as evidence. A link whose target lands outside this
+            # root is declined before anything opens it -- recorded, not
+            # dropped silently, because the corpus owner may have meant it.
+            # A link to a file inside the root is kept, but judged by where its
+            # target sits as well as by its own spelling, so `notes -> .git/config`
+            # is still `vcs_metadata` and `notes.md -> .env` is still `gitignored`
+            # when `.env` is.
+            if path.is_symlink():
+                target = _resolve_or_none(path)
+                if (
+                    target is None
+                    or resolved_root is None
+                    or not target.is_relative_to(resolved_root)
+                ):
+                    drop("symlink_outside_root")
+                    continue
+                target_relative = target.relative_to(resolved_root)
+                parts |= set(target_relative.parts)
+                # The name-and-path checks below must see the target too, not
+                # only the link's own spelling: before this, `notes.md -> .env`
+                # catalogued a gitignored `.env`'s contents as `notes.md`, and
+                # `alias.txt -> real.md` got past `--exclude real.md`. The
+                # reason recorded is still the one an ordinary file would get.
+                spellings = [relative, target_relative.as_posix()]
+            else:
+                spellings = [relative]
+
+            if any(_is_vcs_name(part) for part in parts):
                 drop("vcs_metadata")
                 continue
             if parts & _VENDOR_DIRS:
                 drop("vendored")
                 continue
-            if path.name in _LOCKFILES:
+            if any(Path(rel).name in _LOCKFILES for rel in spellings):
                 drop("lockfile")
                 continue
-            if operator_globs and _matches_any(relative, operator_globs):
+            if operator_globs and any(_matches_any(rel, operator_globs) for rel in spellings):
                 drop("operator_excluded")
                 continue
-            if ignore_patterns and _matches_any(relative, ignore_patterns):
+            if ignore_patterns and any(_gitignored(rel, ignore_patterns) for rel in spellings):
                 drop("gitignored")
                 continue
-            try:
-                if _looks_binary(path):
-                    drop("binary")
-                    continue
-                digest = sha256_of(path)
-            except OSError:
-                # One bad mode in a user tree must not abort the inventory. The
-                # file is recorded as declined, so it is visible rather than
-                # absent -- which is the whole rule this module is built on.
-                drop("unreadable")
-                continue
-            if digest in seen:
-                drop("duplicate")
-                continue
-            seen[digest] = path
-            kept.append(path)
+            _keep_or_drop(path, relative, kept, excluded, seen, lockfile_checked=True)
 
     return kept, excluded
+
+
+def _walk_files(root: Path) -> tuple[list[Path], list[Path]]:
+    """Every file under `root`, sorted, and every folder below it that could not be listed.
+
+    os.walk rather than rglob because rglob gives no way to learn that it
+    skipped a folder it could not list. `followlinks=False` keeps rglob's rule
+    that a symlinked folder is never descended into; a symlinked *file* still
+    appears and is_file() still follows it, so the symlink checks the caller
+    makes see exactly what they saw before. The sort is over the same Path
+    objects rglob produced, so the order -- and so which of two identical
+    files is the `duplicate` -- is unchanged.
+    """
+    unlistable: list[Path] = []
+
+    def note(exc: OSError) -> None:
+        if exc.filename is not None:
+            unlistable.append(Path(exc.filename))
+
+    files: list[Path] = []
+    for folder, _dirnames, filenames in root.walk(on_error=note, follow_symlinks=False):
+        # A symlinked folder is listed without being entered; rglob yielded it
+        # too and is_file() rejected it, so the filter below drops it the same way.
+        files.extend(folder / name for name in filenames)
+    walked = sorted(p for p in files if p.is_file())
+    # The root's own listing failure is the caller's exit 2, raised by its
+    # forced iterdir() before this runs; anything left here is below it.
+    return walked, sorted(p for p in unlistable if p != root)
+
+
+def _resolve_or_none(path: Path) -> Path | None:
+    """`path` with every symlink followed, or None when that cannot be done.
+
+    None (a loop, a vanished target) is treated by the caller as a target it
+    cannot place inside the root, which is the safe side to fail on.
+    """
+    try:
+        return Path(path).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+
+
+def _keep_or_drop(
+    path: Path,
+    relative: str,
+    kept: list[Path],
+    excluded: list[dict],
+    seen: dict[str, Path],
+    *,
+    lockfile_checked: bool = False,
+) -> None:
+    """The checks on what a file *is*, shared by the walk and by a named file."""
+    if not lockfile_checked and path.name in _LOCKFILES:
+        excluded.append({"path": relative, "reason": "lockfile"})
+        return
+    try:
+        if _looks_binary(path):
+            excluded.append({"path": relative, "reason": "binary"})
+            return
+        digest = sha256_of(path)
+    except OSError:
+        # One bad mode in a user tree must not abort the inventory. The
+        # file is recorded as declined, so it is visible rather than
+        # absent -- which is the whole rule this module is built on.
+        excluded.append({"path": relative, "reason": "unreadable"})
+        return
+    if digest in seen:
+        excluded.append({"path": relative, "reason": "duplicate"})
+        return
+    seen[digest] = path
+    kept.append(path)
+
+
+def _seed_roots(seeds: Sequence[Path]) -> list[tuple[Path, list[Path] | None]]:
+    """Each `--corpus` path as a (root, named files) pair, in the order given.
+
+    A folder is a root walked whole (`None`). Files are grouped under their
+    parent folder, which becomes a root walked over exactly those files, so
+    `request.corpus_roots` stays a list of folders and every reader that joins
+    `roots[root_index] / path` -- intake above all -- resolves a named file
+    unchanged. A path that is neither, or a file that cannot be opened, is the
+    harness pointed at something it cannot read: exit 2 before any run exists,
+    like an unreadable folder root.
+
+    A seed that is, or sits inside, a version-control folder is refused the
+    same way. A named file skips the walk's VCS filter on purpose, and a folder
+    seed is filtered only on the parts *below* it, so without this check
+    `--corpus repo/.git` catalogued `config`, `HEAD` and the hooks as evidence --
+    and `.git/config` is where remote credentials live. Refusing rather than
+    recording a decline because the seed is the whole request: there is no
+    run worth minting from a VCS folder, and exit 2 is what an unreadable root
+    already gets. The name match ignores case, as the walk's does.
+    """
+    out: list[tuple[Path, list[Path] | None]] = []
+    by_parent: dict[Path, list[Path]] = {}
+    for seed in seeds:
+        # Absolute once, here, before anything is grouped or recorded: the
+        # catalogue outlives the folder survey ran from, and intake joins
+        # `corpus_roots[i] / path` against its *own* cwd. A relative root --
+        # `.` for a bare `--corpus notes.md` -- then failed with a bare
+        # FileNotFoundError, or read a different same-named file. `absolute()`
+        # rather than `resolve()` so a symlinked folder root is recorded as
+        # spelled; a symlinked named file is still resolved below.
+        seed = Path(seed).absolute()
+        vcs = _vcs_part_of(seed)
+        if vcs is not None:
+            raise UsageError(
+                f"corpus path is or sits inside a version-control folder ({vcs}): {seed}"
+            )
+        if seed.is_dir():
+            out.append((seed, None))
+            continue
+        if not seed.is_file():
+            raise UsageError(f"corpus path is neither a file nor a directory: {seed}")
+        if seed.is_symlink():
+            target = _resolve_or_none(seed)
+            if target is None:
+                raise UsageError(f"cannot resolve corpus file symlink: {seed}")
+            seed = target
+        try:
+            with seed.open("rb"):
+                pass
+        except OSError as exc:
+            raise UsageError(f"cannot read corpus file: {seed} ({exc})") from exc
+        parent = seed.parent
+        if parent not in by_parent:
+            by_parent[parent] = []
+            out.append((parent, by_parent[parent]))
+        if seed not in by_parent[parent]:
+            by_parent[parent].append(seed)
+    return out
 
 
 def classify_payload(payload: Any) -> str:
@@ -373,12 +782,7 @@ def survey(
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             raise UsageError(f"survey needs {label} to be an integer >= 1, got {value!r}")
 
-    if now is None:
-        stamp = datetime.now(UTC)
-    elif now.tzinfo is None:
-        raise UsageError("survey needs a timezone-aware datetime, got a naive one")
-    else:
-        stamp = now.astimezone(UTC)
+    stamp = resolve_stamp(now, command="survey")
 
     candidates: list[dict] = []
     excluded: list[dict] = []
@@ -393,8 +797,11 @@ def survey(
     # `walk_corpus([Path(root)], ...)` call (a fresh, private `seen` each
     # time) would silently admit twice.
     seen: dict[str, Path] = {}
-    for root_index, root in enumerate(corpus_roots):
-        kept, root_excluded = walk_corpus([Path(root)], operator_globs=operator_globs, seen=seen)
+    roots = _seed_roots(corpus_roots)
+    for root_index, (root, named) in enumerate(roots):
+        kept, root_excluded = walk_corpus(
+            [root], operator_globs=operator_globs, seen=seen, only=named
+        )
         excluded.extend(root_excluded)
 
         for path in kept:
@@ -519,14 +926,19 @@ def survey(
             "could never be dispatched over it"
         )
 
-    run_id = f"run-{stamp:%Y%m%d-%H%M%S}"
+    run_id = run_id_for(stamp)
 
     request = {
         "target": {"name": target_name.strip(), "interface": target_interface.strip()},
         "objective": objective,
-        "corpus_roots": [str(Path(root)) for root in corpus_roots],
+        "corpus_roots": [str(root) for root, _ in roots],
         "limits": {"max_rounds": max_rounds, "max_scenarios": max_scenarios},
     }
+    # What a human named file by file, so a root that is only a named file's
+    # folder does not read as "this whole folder was surveyed".
+    seed_files = [str(path) for _, named in roots for path in named or []]
+    if seed_files:
+        request["seed_files"] = seed_files
     if objective_note:
         request["objective_note"] = objective_note
     if scope_note:
@@ -563,10 +975,7 @@ def survey(
             "triage dispatch's context"
         )
 
-    run = RunPaths(Path(runs_dir) / run_id)
-    if run.root.exists():
-        raise FileExistsError(f"run directory already exists: {run.root}")
-    run.root.mkdir(parents=True)
+    run = create_run_dir(runs_dir, run_id)
 
     write_json(run.catalogue, payload)
     return run

@@ -55,8 +55,8 @@ _GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 # How much of a log one poll returns. A dispatch log is a stream-json transcript
 # and can run to megabytes; the UI asks for the tail and then follows it.
 _LOG_CHUNK = 256 * 1024
-# The most file paths one expansion returns. Each hand-picked file is one extract
-# dispatch, so a selection past this is a corpus, and survey is the mode for it.
+# The most file paths one expansion returns. The picker only shows a count, so
+# this bounds the response, not what a run may read.
 _EXPAND_CAP = 5000
 # How long and how far one count may walk before it answers "at least N".
 _EXPAND_SECONDS = 3.0
@@ -299,7 +299,8 @@ class Handler(BaseHTTPRequestHandler):
         if len(seg) == 3 and seg[0] == "jobs" and seg[2] == "log":
             return self._log(seg[1])
         if seg == ["fs"]:
-            return self._fs(self._query().get("path") or str(self.root))
+            q = self._query()
+            return self._fs(q.get("path") or str(self.root), hidden=q.get("hidden") == "1")
         raise ConsoleError("no such API path")
 
     def _credentials_view(self) -> dict:
@@ -396,7 +397,7 @@ class Handler(BaseHTTPRequestHandler):
         chunk = data[offset : offset + _LOG_CHUNK]
         return {"text": chunk.decode("utf-8", errors="replace"), "next": offset + len(chunk)}
 
-    def _fs(self, raw: str) -> dict:
+    def _fs(self, raw: str, hidden: bool = False) -> dict:
         root = self.root.resolve()
         target = Path(raw).expanduser().resolve()
         if not target.is_relative_to(root):
@@ -410,7 +411,9 @@ class Handler(BaseHTTPRequestHandler):
         except OSError as exc:
             raise ConsoleError(f"cannot list {target}: {exc}") from exc
         for child in children:
-            if child.name.startswith(".") or child.resolve() == secret:
+            # Dot-entries are hidden unless asked for, like a file manager; the
+            # credentials file is never listed either way.
+            if (child.name.startswith(".") and not hidden) or child.resolve() == secret:
                 continue
             try:
                 is_dir = child.is_dir()
@@ -437,9 +440,10 @@ class Handler(BaseHTTPRequestHandler):
         skips (`node_modules`, `dist`, ...), and nothing outside the picker's root
         is ever read. A walk that runs out of time or files answers with
         `partial: true`, and the page never uses a partial list as inputs.
-        Hand-pick mode uses the file list as intake's inputs; survey mode only
-        shows the count, since `survey` walks the roots
-        itself and also drops VCS, vendored, lock and gitignored files.
+        With `hidden: true` (the picker's "Show hidden files"), dot-files and
+        dot-directories are walked too, except VCS metadata, which survey drops.
+        The picker only shows the count, since `survey` reads the seeds itself
+        and also drops VCS, vendored, lock and gitignored files from a folder.
         """
         root = self.root.resolve()
         # The separator is part of the prefix, so `/home/al` does not admit `/home/alex`.
@@ -463,6 +467,11 @@ class Handler(BaseHTTPRequestHandler):
             return Path(resolved)
 
         secret = self.console.credentials.path.expanduser().resolve()
+        hidden = body.get("hidden") is True
+
+        def shown(name: str) -> bool:
+            return not name.startswith(".") or (hidden and name not in survey._VCS_DIRS)
+
         include = [inside(p) for p in body.get("include") or []]
         exclude = {inside(p).resolve() for p in body.get("exclude") or []}
 
@@ -498,11 +507,9 @@ class Handler(BaseHTTPRequestHandler):
                     dirnames[:] = sorted(
                         d
                         for d in dirnames
-                        if not d.startswith(".")
-                        and d not in survey._VENDOR_DIRS
-                        and not excluded(here / d)
+                        if shown(d) and d not in survey._VENDOR_DIRS and not excluded(here / d)
                     )
-                    candidates += [here / f for f in sorted(filenames) if not f.startswith(".")]
+                    candidates += [here / f for f in sorted(filenames) if shown(f)]
             else:
                 continue
             for path in candidates:

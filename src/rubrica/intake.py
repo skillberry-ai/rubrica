@@ -176,29 +176,49 @@ def admit_sort_key(disposition: dict) -> tuple[int, str]:
     return (priority, repr(disposition.get("candidate_id")))
 
 
-def mint_run(runs_dir: Path, *, now: datetime | None = None) -> tuple[RunPaths, datetime]:
-    """Create the run directory and return it with its resolved UTC stamp.
+def resolve_stamp(now: datetime | None, *, command: str = "intake") -> datetime:
+    """Return `now` as a UTC datetime, or the current UTC time when it is None.
 
-    Split out of intake() so `survey` can mint a run before anything is admitted.
-    The manifest is still written by register(), which is what keeps
-    manifest-0.1.json's inputs.minItems at 1: the manifest appears only when
-    there are inputs to name.
-
-    A naive datetime is refused rather than interpreted, for the reason intake()
-    already refused it: .astimezone() assumes the host zone, so the same call on
-    two machines would mint two different run ids.
+    A naive datetime is refused rather than interpreted: .astimezone() assumes
+    the host zone, so the same call on two machines would mint two different run
+    ids. `command` only names the caller in the refusal, so `survey` can say
+    "survey needs ..." while sharing the rule.
     """
     if now is None:
-        stamp = datetime.now(UTC)
-    elif now.tzinfo is None:
-        raise UsageError("intake needs a timezone-aware datetime, got a naive one")
-    else:
-        stamp = now.astimezone(UTC)
-    run = RunPaths(Path(runs_dir) / f"run-{stamp:%Y%m%d-%H%M%S}")
+        return datetime.now(UTC)
+    if now.tzinfo is None:
+        raise UsageError(f"{command} needs a timezone-aware datetime, got a naive one")
+    return now.astimezone(UTC)
+
+
+def run_id_for(stamp: datetime) -> str:
+    """The run id for a UTC stamp. One spelling, so survey and intake cannot drift."""
+    return f"run-{stamp:%Y%m%d-%H%M%S}"
+
+
+def create_run_dir(runs_dir: Path, run_id: str) -> RunPaths:
+    """Create `runs_dir/run_id` and return it; refuse one that already exists."""
+    run = RunPaths(Path(runs_dir) / run_id)
     if run.root.exists():
         raise FileExistsError(f"run directory already exists: {run.root}")
     run.root.mkdir(parents=True)
-    return run, stamp
+    return run
+
+
+def mint_run(runs_dir: Path, *, now: datetime | None = None) -> tuple[RunPaths, datetime]:
+    """Create the run directory and return it with its resolved UTC stamp.
+
+    The composition of resolve_stamp, run_id_for and create_run_dir, in that
+    order. intake() calls it directly. `survey` calls the three helpers itself
+    rather than this function, because it needs the stamp early (run_id and
+    created_utc go into the catalogue) but must create the directory late --
+    only after its max_catalogue_bytes check, so a rejected run leaves no
+    directory behind. The manifest is still written by register(), which is
+    what keeps manifest-0.1.json's inputs.minItems at 1: the manifest appears
+    only when there are inputs to name.
+    """
+    stamp = resolve_stamp(now)
+    return create_run_dir(runs_dir, run_id_for(stamp)), stamp
 
 
 def register(
