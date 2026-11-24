@@ -25,7 +25,7 @@ rendering would be branching on a rendering.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from html import escape
 from pathlib import Path
 
@@ -775,6 +775,13 @@ class Utilisation:
     # the waiver design refuses -- it just must not be listed as an open problem.
     waived: list[str]
     per_artifact: list[dict]
+    # The `01-claims/` file names `claim_utilisation` listed under `unreadable`:
+    # present, and not readable as a JSON object, so their claims are in neither
+    # `cited` nor `total`. Carried rather than dropped because dropping them was
+    # measured: one truncated `notes-md.json` left this page reading "11 of 12
+    # claims cited, every input contributed" while `gate-brief --gate 1` on the
+    # same run said one claims file was not counted. Empty on a readable run.
+    unreadable: list[str] = field(default_factory=list)
 
 
 def utilisation(run: RunPaths) -> Utilisation | Marker:
@@ -847,13 +854,34 @@ def utilisation(run: RunPaths) -> Utilisation | Marker:
     The absence names both artifacts because either can be the unreadable one, and
     the reading is different from the no-world-model absence above: there, nothing
     is wrong with the run; here, something in it could not be read.
+
+    **A claims file that is listed but does not read as a JSON object** is not one
+    of those raising shapes: `claim_utilisation` skips it and names it under the
+    report's `unreadable` key. Some readable, some not, and the numbers stand over
+    what was read, with the skipped files carried in `Utilisation.unreadable` so
+    the page says what the total left out -- `gate-brief --gate 1`'s reading of the
+    same key. Every one unreadable, and the report holds no artifacts while the
+    world model is there: that is `Malformed`, naming the files, and never "no
+    world model yet", which a reader would take as "run the seal" on a page whose
+    own world-model section shows the seal's output. It is the "Present but
+    unreadable" marker's existing meaning -- the claims are on disk and nothing
+    could be read out of them -- not a new one.
     """
     try:
         report = _mapping(claim_utilisation(run))
     except Exception:  # deliberate: the 01-claims/ shapes named in the docstring
         return Malformed("claim utilisation", "01-claims/ or 01-world-model.json unreadable")
     artifacts = _dicts(report.get("artifacts"))
+    unreadable = _strings(report.get("unreadable"))
     if not artifacts:
+        if unreadable:
+            # Only reachable with a readable world model: `claim_utilisation`
+            # returns before walking `01-claims/` when it has none, so a non-empty
+            # `unreadable` already says the seal ran.
+            return Malformed(
+                "claim utilisation",
+                "no claims file in 01-claims/ could be read: " + ", ".join(unreadable),
+            )
         return Absent("claim utilisation", "no world model yet")
     # _as_int over both columns: these come from claim_utilisation, which builds
     # them itself, but they are summed here and a summed column must not raise --
@@ -897,6 +925,7 @@ def utilisation(run: RunPaths) -> Utilisation | Marker:
         # page disagree with the `claim-utilisation` subcommand a reader runs
         # beside it.
         per_artifact=artifacts,
+        unreadable=unreadable,
     )
 
 
