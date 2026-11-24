@@ -308,6 +308,74 @@ def test_main_refuses_weights_that_do_not_sum_to_one(tmp_path):
     assert "1.8" in error
 
 
+# -- a refusal into an --out an earlier run already scored --------------------
+#
+# A re-run that refused used to leave the earlier run's reward.txt (1.0 in the
+# repro) beside the error, so the platform read the old score instead of a
+# missing reward.
+
+
+def _score_full_marks(expected, logs, out):
+    (logs / "transcript.jsonl").write_text(_FULL_MARKS_TRANSCRIPT)
+    assert main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)]) == 0
+    assert (out / "reward.txt").read_text() == "1.0"
+    assert (out / "reward.json").exists()
+
+
+def _assert_refused_without_reward(expected, logs, out, expect_in_error):
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    assert not (out / "reward.txt").exists(), "an earlier score must not survive a refusal"
+    assert not (out / "reward.json").exists()
+    error = json.loads((out / "reward-detail.json").read_text())["error"]
+    assert expect_in_error in error, error
+
+
+def test_a_log_refusal_removes_an_earlier_runs_reward(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    _score_full_marks(expected, logs, out)
+    (logs / "transcript.jsonl").unlink()
+    _assert_refused_without_reward(expected, logs, out, "holds no")
+
+
+def test_a_contract_refusal_removes_an_earlier_runs_reward(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    _score_full_marks(expected, logs, out)
+    expected.write_text(json.dumps(_contract(contract="bench/v2")))
+    _assert_refused_without_reward(expected, logs, out, "bench/v2")
+
+
+def test_a_leftover_reward_that_cannot_be_removed_is_named_in_the_refusal(tmp_path):
+    """A failed removal must keep the refusal (exit 2, an error), not crash."""
+    expected, logs, out = _write_run(tmp_path, _contract(contract="bench/v2"), "")
+    (out / "reward.txt").mkdir(parents=True)
+    (out / "reward.txt" / "x").write_text("")
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    error = json.loads((out / "reward-detail.json").read_text())["error"]
+    assert "bench/v2" in error
+    assert "could not be removed" in error, error
+
+
+_FULL_MARKS_TRANSCRIPT = "\n".join(
+    [
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "tool_use", "name": "query_aap2", "input": {"action": "find_jobs"}}
+                    ]
+                },
+            }
+        ),
+        json.dumps(
+            {"type": "result", "subtype": "success", "is_error": False, "result": "Job 90420."}
+        ),
+    ]
+)
+
+
 # -- the refuse path: an agent log this verifier could not read ---------------
 #
 # Each case used to score: a missing or transcript-less --agent-logs as 0.0 with

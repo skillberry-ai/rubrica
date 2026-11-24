@@ -774,7 +774,17 @@ def main(argv=None):
         # directory this verifier could not read is a mis-mounted or broken
         # log, not an agent that failed, for the same reason. No
         # reward.txt is written, so the platform sees a missing reward
-        # instead of a real one.
+        # instead of a real one -- and any reward.txt / reward.json an earlier
+        # run left in this --out is removed first, because a re-run that refuses
+        # was measured leaving the previous 1.0 in place for the platform to
+        # read. A removal that fails is added to the reason and the run still
+        # refuses: crashing here would lose reward-detail.json too.
+        problems = list(problems)
+        for name in ("reward.txt", "reward.json"):
+            try:
+                (out / name).unlink(missing_ok=True)
+            except OSError as exc:
+                problems.append(f"a leftover {out / name} could not be removed: {exc}")
         message = "; ".join(problems)
         (out / "reward-detail.json").write_text(json.dumps({"error": message}, indent=2))
         print(f"verify.py: {message}", file=sys.stderr)
