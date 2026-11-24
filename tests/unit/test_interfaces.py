@@ -423,6 +423,90 @@ def test_a_tool_name_repeated_across_services_is_refused(tmp_path):
     assert "query_tickets" in findings[0].message
 
 
+def _services_part_findings_from_check_refs(run):
+    """check-refs' findings against 01-services.json, as (pointer, message) pairs."""
+    from rubrica.refs import check_all
+
+    return [(f.pointer, f.message) for f in check_all(run) if f.artifact == run.services_part]
+
+
+def test_a_service_id_used_twice_is_refused_at_the_repeat_and_nothing_is_written(tmp_path, capsys):
+    """Measured before: a copy of svc-tickets with its tool renamed exited 0 and
+    wrote one svc-tickets.json holding only the copy's grouping, while check-refs
+    called the part defective -- the all-or-nothing promise broken by a collision
+    on run.interface()'s path rather than by a malformed sibling.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+
+    def add_copy(part):
+        copy = json.loads(json.dumps(part["services"][0]))
+        copy["tools"][0]["name"] = "query_tickets_v2"
+        part["services"].append(copy)
+
+    _rewrite_services(run, add_copy)
+    written, findings = synthesise(run)
+    assert written == []
+    assert not run.interfaces_dir.exists(), "all-or-nothing: nothing may be written"
+    assert [(f.artifact, f.pointer) for f in findings] == [(run.services_part, "/services/1/id")]
+    assert findings[0].message.startswith("more than one service is named svc-tickets:")
+    assert {f.layer for f in findings} == {LAYER}
+
+    # check-refs still reports it, as before, at /services and in the same words.
+    assert ("/services", findings[0].message) in _services_part_findings_from_check_refs(run)
+
+    capsys.readouterr()
+    assert main(["synthesise-interfaces", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert "more than one service is named svc-tickets" in out
+    assert "/services/1/id" in out
+    assert not run.interfaces_dir.exists()
+
+
+def test_a_bad_id_and_a_repeated_tool_name_are_both_reported_as_check_refs_does(tmp_path):
+    """Measured before: synthesise recorded a tool name only after its service
+    passed the id check, so service 0 with id `bad/id` plus a copy `svc-twin` gave
+    only the bad-id finding, while check-refs also reported `query_tickets` twice.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+
+    def bad_and_twin(part):
+        twin = json.loads(json.dumps(part["services"][0]))
+        twin["id"] = "svc-twin"
+        part["services"][0]["id"] = "bad/id"
+        part["services"].append(twin)
+
+    _rewrite_services(run, bad_and_twin)
+    written, findings = synthesise(run)
+    assert written == []
+    assert [f.pointer for f in findings] == ["/services/0/id", "/services/1/tools/0/name"]
+    assert "/services/0/tools/0/name" in findings[1].message
+
+    refs_pointers = {pointer for pointer, _ in _services_part_findings_from_check_refs(run)}
+    assert "/services/1/tools/0/name" in refs_pointers
+
+
+def test_a_repeated_tool_name_that_fails_sanitisation_is_still_counted(tmp_path):
+    """A name refused for sanitisation still occupies the name, as in check-refs."""
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+
+    def twin_with_bad_names(part):
+        part["services"][0]["tools"][0]["name"] = "_query_tickets"
+        twin = json.loads(json.dumps(part["services"][0]))
+        twin["id"] = "svc-twin"
+        part["services"].append(twin)
+
+    _rewrite_services(run, twin_with_bad_names)
+    _, findings = synthesise(run)
+    repeats = [f.pointer for f in findings if "already declared" in f.message]
+    assert repeats == ["/services/1/tools/0/name"]
+    refs_repeats = [
+        pointer
+        for pointer, message in _services_part_findings_from_check_refs(run)
+        if "already declared" in message
+    ]
+    assert refs_repeats == repeats
+
+
 def test_a_schema_claim_resolving_to_nothing_is_a_finding(tmp_path):
     """An id no claim carries *is* the part's defect, so this one names the part.
 

@@ -29,7 +29,13 @@ from typing import Any
 
 from rubrica.artifacts import ArtifactError, read_json, sha256_of
 from rubrica.findings import Finding
-from rubrica.interfaces import TOOL_NAME, claims_shape_problem
+from rubrica.interfaces import (
+    TOOL_NAME,
+    claims_shape_problem,
+    duplicate_service_id_message,
+    duplicate_service_ids,
+    repeated_tool_names,
+)
 from rubrica.invariants import InvariantForm
 from rubrica.invariants import evaluate as evaluate_invariant
 from rubrica.paths import RunPaths, is_safe_segment, list_json
@@ -2593,24 +2599,6 @@ def _payload_findings(
     return []
 
 
-def _duplicate_service_ids(part: dict) -> set[str]:
-    """Every `services[].id` the part declares more than once.
-
-    One home, two readers: check_services reports it, and check_interfaces stays
-    silent about the documents such a pair collapses onto. Two computations of the
-    same set would be two answers free to drift, and the second reader's silence is
-    only correct while it is silent about exactly the ids the first reports.
-
-    Non-string ids are dropped rather than counted: an unhashable one would raise
-    out of the set, and layer 1 owns the shape.
-    """
-    ids = [
-        service.get("id") for service in _as_list(part.get("services")) if isinstance(service, dict)
-    ]
-    declared = [service_id for service_id in ids if isinstance(service_id, str)]
-    return {service_id for service_id in declared if declared.count(service_id) > 1}
-
-
 def check_services(run: RunPaths) -> list[Finding]:
     """The tool grouping in 01-services.json, against the claims it cites.
 
@@ -2625,13 +2613,14 @@ def check_services(run: RunPaths) -> list[Finding]:
     A tool claim in two services is two simulators serving one tool name, which is
     one database the agent under test sees two conflicting views of. Two services
     with one id is the same hazard arriving by a different route, and it is worth
-    its own clause because of where the alternative surfaces: `interfaces.synthesise`
-    accepts the part and writes one document, last grouping wins, and
-    check_interfaces then reports both directions of the difference against
-    `01-interfaces/<id>.json` -- a 1 naming a derived file that is byte-for-byte
-    what synthesis wrote, for a defect living in the part, unclearable by
-    re-dispatching either stage. Nothing else reports it: services-part-0.1.json
-    carries no uniqueness constraint and synthesis has no opinion.
+    its own clause because of where the alternative surfaces: before T-129
+    `interfaces.synthesise` accepted the part and wrote one document, last grouping
+    wins, and check_interfaces then reported both directions of the difference
+    against `01-interfaces/<id>.json` -- a 1 naming a derived file that is
+    byte-for-byte what synthesis wrote, for a defect living in the part. Synthesis
+    now refuses such a part, using the same rule (interfaces.duplicate_service_ids)
+    and wording; this clause still has to hold for a part hand-corrected at gate 1
+    after synthesis ran. services-part-0.1.json carries no uniqueness constraint.
 
     The orphan side of the partition is deliberately absent; see the comment on
     the clause itself.
@@ -2775,19 +2764,14 @@ def check_services(run: RunPaths) -> list[Finding]:
             # not the hazard the duplicate clause reports.
             references.setdefault(claim_id, []).append(label)
 
-    for service_id in sorted(_duplicate_service_ids(part)):
+    for service_id in sorted(duplicate_service_ids(part)):
         # Named here and *only* here: run.interface() derives one path from the id,
         # so two services with one id collapse onto one file, and the difference
         # would otherwise be reported against a derived document that faithfully
         # carries the last grouping -- a 1 naming a file with no defect in it.
         # check_interfaces skips these services for that reason, so this is the one
         # line a repair can act on.
-        report(
-            "/services",
-            f"more than one service is named {service_id}: they share the one document "
-            f"01-interfaces/{service_id}.json, so the groupings after the first are lost and "
-            "the tools in them have no simulator",
-        )
+        report("/services", duplicate_service_id_message(service_id))
 
     # The duplicate side of the claim-level partition only. The orphan side -- a `tool` claim
     # no service references -- is deliberately NOT reported here, because
@@ -2838,19 +2822,15 @@ def check_services(run: RunPaths) -> list[Finding]:
     # first, so a repair knows both places. Exact comparison, because
     # rb-reconcile-services copies names exactly; and string names only, since a
     # non-string one is the sanitisation clause's below.
-    first_named: dict[str, str] = {}
-    for pointer, name in names:
-        if not isinstance(name, str):
-            continue
-        if name in first_named:
-            report(
-                pointer,
-                f"tool name {name!r} is already declared at {first_named[name]}: one name "
-                "the agent calls would be served by two simulators or two input schemas, "
-                "and only one of them can answer it",
-            )
-        else:
-            first_named[name] = pointer
+    # The walk is interfaces.repeated_tool_names, shared with synthesise so the
+    # two commands report the same repeats at the same pointers.
+    for pointer, name, first in repeated_tool_names(part):
+        report(
+            pointer,
+            f"tool name {name!r} is already declared at {first}: one name "
+            "the agent calls would be served by two simulators or two input schemas, "
+            "and only one of them can answer it",
+        )
 
     for pointer, name in names:
         if not isinstance(name, str) or not TOOL_NAME.match(name):
@@ -2952,7 +2932,7 @@ def check_interfaces(run: RunPaths) -> list[Finding]:
     missing: list[Finding] = []
     mismatched: list[Finding] = []
     expected: set[Path] = set()
-    duplicated = _duplicate_service_ids(part)
+    duplicated = duplicate_service_ids(part)
     for i, service in enumerate(_as_list(part.get("services"))):
         if not isinstance(service, dict):
             continue

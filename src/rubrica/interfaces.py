@@ -72,6 +72,82 @@ def claims_shape_problem(payload: object) -> str | None:
     return None
 
 
+def duplicate_service_ids(part: dict) -> set[str]:
+    """Every `services[].id` the part declares more than once.
+
+    One home, three readers: refs.check_services reports it, refs.check_interfaces
+    stays silent about the documents such a pair collapses onto, and synthesise
+    below refuses to write. Two computations of the same set would be two answers
+    free to drift, and check_interfaces' silence is only correct while it is silent
+    about exactly the ids the others report. It lives here rather than in refs
+    because refs already imports this module, as claims_shape_problem does.
+
+    Every service that is an object counts, including one refused for an unsafe
+    id or a broken `tools` value, so synthesise and check-refs report the same
+    duplicates. Non-string ids are dropped rather than counted: an unhashable one
+    would raise out of the set, and layer 1 owns the shape.
+    """
+    services = part.get("services")
+    if not isinstance(services, list):
+        return set()
+    declared = [
+        service.get("id")
+        for service in services
+        if isinstance(service, dict) and isinstance(service.get("id"), str)
+    ]
+    return {service_id for service_id in declared if declared.count(service_id) > 1}
+
+
+def duplicate_service_id_message(service_id: str) -> str:
+    """The one wording for a repeated service id, so both commands say the same."""
+    return (
+        f"more than one service is named {service_id}: they share the one document "
+        f"01-interfaces/{service_id}.json, so the groupings after the first are lost and "
+        "the tools in them have no simulator"
+    )
+
+
+def repeated_tool_names(part: dict) -> list[tuple[str, str, str]]:
+    """`(pointer, name, first_pointer)` for every tool name declared again.
+
+    One home for the walk, shared by refs.check_services and synthesise, for the
+    reason duplicate_service_ids is shared. Measured before: synthesise recorded a
+    name only once its service had passed the id and `tools` checks and the name
+    had passed sanitisation, so a service with id `bad/id` followed by a copy of it
+    gave only the bad-id finding, while check-refs also reported the repeated tool
+    name -- two commands disagreeing on what was wrong with one part.
+
+    Every tool object in every service object counts, whatever else is wrong with
+    either. String names only, since a non-string one is the sanitisation
+    finding's; compared exactly, because rb-reconcile-services copies names
+    exactly. The pointer is the repeat's own `.../name`, and the first is named so
+    a repair knows both places.
+    """
+    services = part.get("services")
+    if not isinstance(services, list):
+        return []
+    first_named: dict[str, str] = {}
+    repeats: list[tuple[str, str, str]] = []
+    for i, service in enumerate(services):
+        if not isinstance(service, dict):
+            continue
+        tools = service.get("tools")
+        if not isinstance(tools, list):
+            continue
+        for j, tool in enumerate(tools):
+            if not isinstance(tool, dict):
+                continue
+            name = tool.get("name")
+            if not isinstance(name, str):
+                continue
+            pointer = f"/services/{i}/tools/{j}/name"
+            if name in first_named:
+                repeats.append((pointer, name, first_named[name]))
+            else:
+                first_named[name] = pointer
+    return repeats
+
+
 class _Claim(NamedTuple):
     """Where one claim was read from, and its payload when that payload is usable.
 
@@ -232,14 +308,40 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
     planned: list[tuple[Path, dict]] = []
     # The unresolved-id findings, the only ones a broken claims file can explain.
     held_back: list[Finding] = []
-    # Tool name -> the pointer of its first declaration, across every service.
-    first_named: dict[str, str] = {}
+    # Both duplicate rules are computed over the whole part up front, not inside
+    # the walk below, because the walk skips a service refused for its id or its
+    # `tools` and a tool refused for its name -- and refs.check_services counts
+    # every one of those. Their findings are appended after the walk.
+    repeated_ids = duplicate_service_ids(part)
+    seen_ids: set[str] = set()
+    repeated_names = repeated_tool_names(part)
+    repeat_pointers = {pointer for pointer, _, _ in repeated_names}
     for index, service in enumerate(services):
         pointer = f"/services/{index}"
         if not isinstance(service, dict):
             findings.append(Finding(run.services_part, LAYER, pointer, "not an object"))
             continue
         service_id = service.get("id")
+        # isinstance first: an unhashable id (a list, an object) would raise
+        # TypeError out of the set membership test.
+        if isinstance(service_id, str) and service_id in repeated_ids:
+            if service_id in seen_ids:
+                # At the repeat, before the id's other checks so an unsafe id
+                # repeated still reports both. Measured before: a copy of
+                # svc-tickets with its tool renamed exited 0 and wrote one
+                # svc-tickets.json holding only the copy's grouping, because both
+                # services planned the same run.interface() path -- while
+                # check-refs called the part defective. Refusing is what keeps
+                # the write all-or-nothing.
+                findings.append(
+                    Finding(
+                        run.services_part,
+                        LAYER,
+                        f"{pointer}/id",
+                        duplicate_service_id_message(service_id),
+                    )
+                )
+            seen_ids.add(service_id)
         if not isinstance(service_id, str) or not is_safe_segment(service_id):
             # is_safe_segment, not safe_segment: see this module's tests. A bad id
             # in a stage's own output is repairable and owes a finding, whereas
@@ -285,25 +387,15 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
                 )
                 ok = False
                 continue
-            if name in first_named:
-                # Refused rather than written. Within one service `_document`
-                # keys `paths` by `/<name>`, so the second schema silently
-                # overwrote the first while `x-rubrica.tools` still listed both;
-                # across services two documents both served one `operationId`,
-                # two simulators answering one name. Same message shape as
-                # refs.check_services' clause, so the two commands agree on the
-                # defect and on the pointer it is reported at.
-                findings.append(
-                    Finding(
-                        run.services_part,
-                        LAYER,
-                        f"{tool_pointer}/name",
-                        f"tool name {name!r} is already declared at {first_named[name]}",
-                    )
-                )
+            if f"{tool_pointer}/name" in repeat_pointers:
+                # Refused rather than written; the finding itself is appended
+                # after the walk (see repeated_tool_names). Within one service
+                # `_document` keys `paths` by `/<name>`, so the second schema
+                # silently overwrote the first while `x-rubrica.tools` still
+                # listed both; across services two documents both served one
+                # `operationId`, two simulators answering one name.
                 ok = False
                 continue
-            first_named[name] = f"{tool_pointer}/name"
             schema_claim = tool.get("schema_claim")
             # A missing or non-string `schema_claim` is the part's defect whatever
             # the claims files hold -- no claims file can carry an id that is not a
@@ -355,6 +447,18 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
                 ok = False
         if ok:
             planned.append((run.interface(service_id), _document(service, claims)))
+
+    # Same message shape and pointer as refs.check_services' clause, so the two
+    # commands agree on the defect and on where it is reported.
+    for name_pointer, name, first in repeated_names:
+        findings.append(
+            Finding(
+                run.services_part,
+                LAYER,
+                name_pointer,
+                f"tool name {name!r} is already declared at {first}",
+            )
+        )
 
     if misshapen:
         # A claims file that could not be indexed may be exactly where a
