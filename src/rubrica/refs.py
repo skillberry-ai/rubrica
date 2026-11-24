@@ -45,6 +45,7 @@ from rubrica.paths import (
     is_safe_segment,
     list_json,
     scenario_case_collision_message,
+    segment_key,
 )
 from rubrica.slices import candidate_bytes_index, excluded_summary, row_bytes
 from rubrica.suite.verify import DATA_KINDS, TRAJECTORY_KINDS
@@ -1509,6 +1510,32 @@ def check_inputs(run: RunPaths) -> list[Finding]:
     if manifest is None:
         return []
     out: list[Finding] = []
+    # A repeated stored_as is one file recorded twice: the later copy replaced
+    # the earlier, so one of the two sha256s below can never match, and the
+    # mismatch finding alone would blame an edit nobody made. Compared under
+    # segment_key, because `orders.json` and `Orders.json` are one file on a
+    # case-insensitive disk. Reported here, before the per-entry checks, so the
+    # line naming the real cause comes first.
+    taken: dict[str, tuple[int, str]] = {}
+    for i, entry in enumerate(manifest["inputs"]):
+        stored_as = entry["stored_as"]
+        if not isinstance(stored_as, str):
+            continue
+        key = segment_key(stored_as)
+        if key in taken:
+            first_index, first_name = taken[key]
+            case = "" if first_name == stored_as else " (differing only in case)"
+            out.append(
+                Finding(
+                    run.manifest,
+                    "refs",
+                    f"/inputs/{i}/stored_as",
+                    f"{entry['artifact_id']!r} is stored as {stored_as!r}, the same file as "
+                    f"/inputs/{first_index}{case}; one copy replaced the other at intake",
+                )
+            )
+        else:
+            taken[key] = (i, stored_as)
     for i, entry in enumerate(manifest["inputs"]):
         artifact_id = entry["artifact_id"]
         stored_as = entry["stored_as"]

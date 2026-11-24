@@ -52,6 +52,18 @@ already taken, compared ignoring case, gets the lowest `-2`, `-3`, … suffix
 that is still free, so a suffixed id never lands on another candidate's id.
 Where nothing collides, ids are unchanged.
 
+A unique id is **not** by itself a unique file. The name in `00-inputs/` is the
+id plus the source's suffix, and an id may contain a dot, so `capture-json-0`
+stored from a `.json` file and a suffix-less `capture-json-0.json` are the same
+`00-inputs/capture-json-0.json` (and `orders` from `orders.json` beside
+`Orders.json` are one file on a case-insensitive disk). `intake` works out
+every stored name before copying anything and, if two would be one file
+ignoring case, copies nothing: `intake --run` reports it as a finding against
+this file (exit 1), `intake --input` as a usage error (exit 2).
+`adopt-projection` refuses a projection id whose stored name would land on an
+existing candidate's, and `check-refs` reports a `manifest.inputs[].stored_as`
+that repeats an earlier one, ignoring case.
+
 ## `triage`
 
 - **Schema:** `src/rubrica/schema/triage-0.1.json`

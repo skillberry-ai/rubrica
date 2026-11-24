@@ -443,3 +443,135 @@ def test_classify_leaves_a_list_of_non_message_records_alone(tmp_path):
     producer a payload with no field it can read."""
     payload = [{"id": 1, "value": "a"}, {"id": 2, "value": "b"}, {"id": 3, "value": "c"}]
     assert classify(_write(tmp_path, "records.json", payload)) == "other"
+
+
+# --- T-136: a unique artifact id is not a unique stored file name -------------------------
+
+# The two pairs measured to collide: an id containing a dot beside a suffixed
+# one, and a case-only pair that is one file on a case-insensitive disk.
+_STORED_NAME_PAIRS = [
+    (("capture-json-0", "container-element.json"), ("capture-json-0.json", "tool")),
+    (("orders", "orders.json"), ("Orders.json", "tool")),
+]
+
+
+@pytest.mark.parametrize("first,repeat", _STORED_NAME_PAIRS)
+def test_the_measured_pairs_collide_under_segment_key(first, repeat):
+    from pathlib import Path
+
+    from rubrica.intake import stored_name, stored_name_collisions
+
+    named = [(aid, stored_name(aid, Path(src))) for aid, src in (first, repeat)]
+    collisions = stored_name_collisions(named)
+    assert [(c[0], c[2]) for c in collisions] == [(first[0], repeat[0])]
+
+
+def test_distinct_stored_names_are_not_collisions():
+    from rubrica.intake import stored_name_collisions
+
+    assert stored_name_collisions([("a", "a.json"), ("a-json", "a-json.json"), ("b", "b")]) == []
+
+
+def test_intake_input_refuses_a_stored_name_collision_and_mints_nothing(tmp_path, monkeypatch):
+    """slug() leaves no dot in an id, so the --input path is reached here by
+    forcing the ids; the guard is what keeps a future slug() change from
+    reopening the silent overwrite. A UsageError, like a missing input."""
+    import rubrica.intake as intake_module
+    from rubrica.errors import UsageError
+
+    one = _write(tmp_path / "src", "a.json", {"tools": []})
+    two = _write(tmp_path / "src", "b", "plain")
+    monkeypatch.setattr(intake_module, "_unique_ids", lambda inputs: ["orders", "Orders.json"])
+    runs = tmp_path / "runs"
+    with pytest.raises(UsageError, match=r"'orders' and 'Orders\.json'.*00-inputs/orders\.json"):
+        intake(
+            inputs=[one, two],
+            runs_dir=runs,
+            target_name="t",
+            target_interface="mcp",
+            max_rounds=2,
+            max_scenarios=8,
+            now=NOW,
+        )
+    assert not runs.exists() or not any(runs.iterdir())
+
+
+def _add_admitted_candidate(run, candidate_id, path):
+    from rubrica.artifacts import write_json
+
+    catalogue = read_json(run.catalogue)
+    template = next(c for c in catalogue["candidates"] if c["origin"] == "corpus")
+    catalogue["candidates"].append(
+        {**template, "candidate_id": candidate_id, "path": path, "kind": "other"}
+    )
+    write_json(run.catalogue, catalogue)
+    record = read_json(run.triage)
+    record["dispositions"].append(
+        {
+            "candidate_id": candidate_id,
+            "disposition": "admit",
+            "reason": "carries evidence of the target's shape",
+            "authority": "triage",
+        }
+    )
+    write_json(run.triage, record)
+
+
+@pytest.mark.parametrize("first,repeat", _STORED_NAME_PAIRS)
+def test_intake_run_refuses_admits_that_share_a_stored_file(tmp_path, first, repeat):
+    """The reproduction: two admitted candidates whose ids differ but whose
+    stored names are one file. Refused as findings against the catalogue
+    (exit 1, like intake --run's other catalogue refusals), nothing copied."""
+    from rubrica import intake as intake_module
+    from rubrica import refs
+    from tests.unit.test_admit import _surveyed_and_triaged
+
+    run = _surveyed_and_triaged(tmp_path)
+    if first[0] != "capture-json-0":  # capture-json-0 is already an admitted container element
+        _add_admitted_candidate(run, first[0], first[1])
+    _add_admitted_candidate(run, repeat[0], repeat[1])
+    assert refs.check_triage(run) == []
+
+    findings = intake_module.admit_from_triage(run)
+    assert len(findings) == 1
+    assert findings[0].artifact == run.catalogue
+    assert repr(first[0]) in findings[0].message and repr(repeat[0]) in findings[0].message
+    assert not run.inputs_dir.exists()
+    assert not run.manifest.exists()
+
+
+def test_intake_run_without_collisions_is_unchanged(tmp_path):
+    from rubrica import intake as intake_module
+    from tests.unit.test_admit import _surveyed_and_triaged
+
+    run = _surveyed_and_triaged(tmp_path)
+    assert intake_module.admit_from_triage(run) == []
+    names = sorted(e["stored_as"] for e in read_json(run.manifest)["inputs"])
+    assert names == ["capture-json-0.json", "capture-json-1.json", "readme-md.md"]
+
+
+@pytest.mark.parametrize("case_only", [False, True])
+def test_check_inputs_reports_a_repeated_stored_as(tmp_path, case_only):
+    from rubrica import refs
+    from rubrica.artifacts import write_json
+
+    one = _write(tmp_path / "src", "a.json", {"tools": []})
+    two = _write(tmp_path / "src", "b.json", {"tools": [1]})
+    run = intake(
+        inputs=[one, two],
+        runs_dir=tmp_path / "runs",
+        target_name="t",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=NOW,
+    )
+    assert refs.check_inputs(run) == []
+    manifest = read_json(run.manifest)
+    first = manifest["inputs"][0]["stored_as"]
+    manifest["inputs"][1]["stored_as"] = first.upper() if case_only else first
+    write_json(run.manifest, manifest)
+    repeats = [f for f in refs.check_inputs(run) if f.pointer == "/inputs/1/stored_as"]
+    assert len(repeats) == 1
+    assert "the same file as /inputs/0" in repeats[0].message
+    assert ("differing only in case" in repeats[0].message) is case_only

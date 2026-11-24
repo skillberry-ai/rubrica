@@ -680,3 +680,48 @@ def test_a_catalogue_that_is_not_an_object_is_a_finding_not_a_traceback(tmp_path
     assert findings, "a non-object catalogue produced no finding at all"
     assert all(f.message for f in findings)
     assert [f.artifact for f in findings] == [run.catalogue]
+
+
+@pytest.mark.parametrize(
+    "existing_id,existing_path,projection_id",
+    [
+        ("capture-json-0", "capture.json", "capture-json-0.json"),
+        ("orders", "orders.json", "Orders.json"),
+    ],
+)
+def test_a_projection_id_whose_stored_name_collides_is_a_finding(
+    tmp_path, existing_id, existing_path, projection_id
+):
+    """Unique candidate ids are not unique files in 00-inputs/: a projection id
+    with a dot, adopted from a suffix-less file, lands on the name an existing
+    candidate is stored under (and `Orders.json` is `orders.json` on macOS).
+    Refused against the triage record that minted the id, writing nothing."""
+    run = _run_with_projection(tmp_path)
+    catalogue = read_json(run.catalogue)
+    catalogue["candidates"][0]["candidate_id"] = existing_id
+    catalogue["candidates"][0]["path"] = existing_path
+    write_json(run.catalogue, catalogue)
+    record = read_json(run.triage)
+    record["dispositions"][0]["candidate_id"] = existing_id
+    record["objective_review"]["surfaces"][0]["evidence"] = [existing_id]
+    record["projections"][0]["projection_id"] = projection_id
+    record["projections"][0]["sources"][0]["candidate_id"] = existing_id
+    write_json(run.triage, record)
+    source = tmp_path / "tool"
+    source.write_text(_good(tmp_path).read_text(encoding="utf-8"), encoding="utf-8")
+    before = run.catalogue.read_bytes()
+
+    findings = triage.adopt_projection(run, projection_id=projection_id, source=source)
+    assert len(findings) == 1
+    assert findings[0].artifact == run.triage
+    assert findings[0].pointer == "/projections/0/projection_id"
+    assert repr(existing_id) in findings[0].message
+    assert run.catalogue.read_bytes() == before
+    assert not run.adoptions.exists()
+
+
+def test_a_suffix_less_projection_with_a_distinct_stored_name_is_still_adopted(tmp_path):
+    run = _run_with_projection(tmp_path)
+    source = tmp_path / "tool"
+    source.write_text(_good(tmp_path).read_text(encoding="utf-8"), encoding="utf-8")
+    assert triage.adopt_projection(run, projection_id="prj-tools", source=source) == []

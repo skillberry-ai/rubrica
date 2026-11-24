@@ -84,6 +84,13 @@ Prints the run directory on success; on the `--run` path, a non-empty result
 from checking the triage record against the catalogue prints as findings on
 exit 1 instead.
 
+Before copying anything, intake works out the name each input will be stored
+under in `00-inputs/` and refuses the whole intake if two of those names are
+one file ignoring case — copying both would let the second replace the first.
+On `--run` that is a finding against `00-catalogue.json` (exit 1); on
+`--input`, a usage error (exit 2), like a missing input. Either way nothing is
+copied.
+
 ```bash
 rubrica intake \
   --input path/to/api.json \
@@ -118,9 +125,17 @@ asked for is still a human's call.
 The adopted candidate's `candidate_id` is the projection id, suffixed `-2`,
 `-3`, … if the catalogue already holds that id **ignoring case** — so a
 projection `Orders-Capture` beside a surveyed `orders-capture` is adopted as
-`Orders-Capture-2`, not as a second name for the same file in `00-inputs/`.
+`Orders-Capture-2`, not as a second id for the same candidate.
 `intake` uses the same rule when it turns candidate ids and file names into
 artifact ids, and never hands out a suffixed id another input already has.
+
+A unique id does not by itself give a unique file: the stored name adds the
+file's suffix, and a projection id may contain a dot, so a projection
+`capture-json-0.json` adopted from a suffix-less file would be stored as the
+same `00-inputs/capture-json-0.json` as an existing `capture-json-0`. That is
+refused with a finding against `00-triage.json` (exit 1), and nothing is
+written. `intake` checks the same thing for every admitted input before it
+copies anything.
 
 ```bash
 rubrica adopt-projection --run runs/run-20260806-123005 \
