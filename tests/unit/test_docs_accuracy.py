@@ -264,6 +264,73 @@ def test_the_waivers_entry_states_which_registries_it_is_in_and_out_of():
         assert name in section, f"the waivers entry does not say where it sits in {name}"
 
 
+# Each module that imports from `rubrica.waivers`, and the command a reader of
+# artifacts.md knows it by. `cli` is the one that writes the file (`rubrica
+# waive`), so it is held to the `Written by` bullet rather than `Read by`. `brief`
+# imports only `remedy_choices` and reads waivers.json directly, but it is a
+# reader all the same, so the import is a sound proxy for "touches the file".
+# The dict is hand-kept on purpose: a new importer fails below until someone says
+# which command it is and puts that command in the section.
+_WAIVERS_IMPORTERS = {
+    "refs": ("Read by", "check-refs"),
+    "brief": ("Read by", "gate-brief"),
+    "summary": ("Read by", "run-summary"),
+    "cli": ("Written by", "rubrica waive"),
+}
+
+
+def _modules_importing_waivers() -> set[str]:
+    """Module stems under src/rubrica/ that import from `rubrica.waivers`.
+
+    Read with `ast` rather than grep, so a mention in a comment or docstring does
+    not count, and both spellings (`from rubrica.waivers import x` and
+    `from rubrica import waivers`) do.
+    """
+    import ast
+
+    found: set[str] = set()
+    for path in sorted((REPO_ROOT / "src" / "rubrica").glob("*.py")):
+        if path.stem == "waivers":
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if node.module == "rubrica.waivers" or (
+                node.module == "rubrica" and any(a.name == "waivers" for a in node.names)
+            ):
+                found.add(path.stem)
+    return found
+
+
+def _waivers_bullet(label: str) -> str:
+    """The text of one `- **<label>:**` bullet in the waivers section."""
+    section = _artifacts_section("## `waivers`")
+    start = section.index(f"- **{label}:**")
+    end = section.find("\n- **", start + 1)
+    return section[start : end if end != -1 else len(section)]
+
+
+def test_every_module_that_imports_waivers_is_named_in_the_waivers_entry():
+    """artifacts.md once named `gate-brief` as the one tolerant reader and left
+    `run-summary` out, while cli.md said `run-summary` reads the file too. Tying
+    the bullet to the importers means a new reader cannot be added without the
+    entry naming it. Scoped to the bullet, not the section, because the section's
+    prose may mention a command for another reason.
+
+    Measured both ways: with `run-summary` removed from the `Read by` bullet this
+    goes red; rewording the rest of the bullet stays green.
+    """
+    importers = _modules_importing_waivers()
+    unmapped = importers - _WAIVERS_IMPORTERS.keys()
+    assert not unmapped, f"modules import rubrica.waivers with no documented command: {unmapped}"
+    for module in sorted(importers):
+        label, command = _WAIVERS_IMPORTERS[module]
+        assert f"`{command}`" in _waivers_bullet(label), (
+            f"{module}.py imports rubrica.waivers, but the waivers entry's "
+            f"{label!r} bullet does not name `{command}`"
+        )
+
+
 # Policy predicates. Unlike the four above, these do not check that a document
 # names something the code owns -- they enforce a decision about what a document
 # may contain. All were motivated by measurement, recorded here because a future
