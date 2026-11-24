@@ -230,6 +230,8 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
             )
 
     planned: list[tuple[Path, dict]] = []
+    # The unresolved-id findings, the only ones a broken claims file can explain.
+    held_back: list[Finding] = []
     for index, service in enumerate(services):
         pointer = f"/services/{index}"
         if not isinstance(service, dict):
@@ -282,7 +284,24 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
                 ok = False
                 continue
             schema_claim = tool.get("schema_claim")
-            claim = claims.get(schema_claim) if isinstance(schema_claim, str) else None
+            # A missing or non-string `schema_claim` is the part's defect whatever
+            # the claims files hold -- no claims file can carry an id that is not a
+            # string -- so it gets its own message and is never held back below.
+            # Measured before T-126: it came out as `no claim in 01-claims/ has id
+            # None` and was dropped beside a broken claims file, hiding a second
+            # defect until the next repair round.
+            if not isinstance(schema_claim, str):
+                findings.append(
+                    Finding(
+                        run.services_part,
+                        LAYER,
+                        f"{tool_pointer}/schema_claim",
+                        f"schema_claim must be a claim id string, got {schema_claim!r}",
+                    )
+                )
+                ok = False
+                continue
+            claim = claims.get(schema_claim)
             # Two defects, two artifacts. Which file a 1 names is the whole point
             # of the split: an id nothing carries is this part's defect, while a
             # claim with no usable payload is the claims file's, and naming the
@@ -290,14 +309,16 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
             # correct -- rb-reconcile-services is instructed to name the claim
             # anyway in exactly that case, so it would write the same thing again.
             if claim is None:
-                findings.append(
-                    Finding(
-                        run.services_part,
-                        LAYER,
-                        f"{tool_pointer}/schema_claim",
-                        f"no claim in 01-claims/ has id {schema_claim!r}",
-                    )
+                unresolved = Finding(
+                    run.services_part,
+                    LAYER,
+                    f"{tool_pointer}/schema_claim",
+                    f"no claim in 01-claims/ has id {schema_claim!r}",
                 )
+                findings.append(unresolved)
+                # Tagged here, where the reason is known, rather than recognised
+                # later by its pointer: only this finding depends on the index.
+                held_back.append(unresolved)
                 ok = False
             elif claim.payload is None:
                 findings.append(
@@ -320,12 +341,11 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
         # against the services part. Held back, as check_all's short-circuit holds
         # back refs' knock-on findings, so the only file a repair is pointed at is
         # the claims file. Everything else against the part still prints: those
-        # defects do not depend on the index.
-        findings = [
-            f
-            for f in findings
-            if not (f.artifact == run.services_part and f.pointer.endswith("/schema_claim"))
-        ]
+        # defects do not depend on the index -- a missing or non-string
+        # `schema_claim` included. Filtered by identity, not equality, so only the
+        # findings tagged at creation go.
+        dropped = {id(f) for f in held_back}
+        findings = [f for f in findings if id(f) not in dropped]
 
     if findings:
         return [], findings

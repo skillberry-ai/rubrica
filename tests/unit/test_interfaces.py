@@ -409,6 +409,52 @@ def test_a_schema_claim_resolving_to_nothing_is_a_finding(tmp_path):
     assert {f.layer for f in findings} == {LAYER}
 
 
+@pytest.mark.parametrize("value", ["<absent>", None, 7, ["clm-api-tool"]])
+def test_a_missing_or_non_string_schema_claim_has_its_own_message(tmp_path, value):
+    """No claims file can carry an id that is not a string, so the message says
+    what is wrong with the part instead of `no claim ... has id None`."""
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    part = json.loads(run.services_part.read_text(encoding="utf-8"))
+    tool = part["services"][0]["tools"][0]
+    if value == "<absent>":
+        del tool["schema_claim"]
+    else:
+        tool["schema_claim"] = value
+    run.services_part.write_text(json.dumps(part), encoding="utf-8")
+    written, findings = synthesise(run)
+    assert written == []
+    shown = None if value == "<absent>" else value
+    assert [(f.artifact, f.pointer, f.message) for f in findings] == [
+        (
+            run.services_part,
+            "/services/0/tools/0/schema_claim",
+            f"schema_claim must be a claim id string, got {shown!r}",
+        )
+    ]
+
+
+def test_a_missing_schema_claim_still_prints_beside_a_broken_claims_file(tmp_path, capsys):
+    """Measured before T-126: the hold-back dropped every `/schema_claim` finding,
+    so this one vanished and only the claims file was named -- a second defect
+    hidden until the next repair round. A broken claims file cannot explain it."""
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    part = json.loads(run.services_part.read_text(encoding="utf-8"))
+    del part["services"][0]["tools"][0]["schema_claim"]
+    run.services_part.write_text(json.dumps(part), encoding="utf-8")
+    run.claims("api-json").write_text("{}", encoding="utf-8")
+    written, findings = synthesise(run)
+    assert written == []
+    pairs = [(f.artifact, f.pointer) for f in findings]
+    assert (run.claims("api-json"), "") in pairs
+    assert (run.services_part, "/services/0/tools/0/schema_claim") in pairs
+    assert not any("no claim in 01-claims/" in f.message for f in findings)
+
+    capsys.readouterr()
+    assert main(["synthesise-interfaces", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert "schema_claim must be a claim id string" in out
+
+
 @pytest.mark.parametrize(
     "payload",
     [None, "an object with properties", []],
