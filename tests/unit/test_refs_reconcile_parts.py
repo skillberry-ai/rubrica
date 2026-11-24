@@ -90,6 +90,28 @@ def test_a_duplicate_subject_id_is_reported(tmp_path):
     assert any("duplicate" in f.message for f in refs.check_subjects(run))
 
 
+def test_subject_ids_differing_only_in_case_are_a_duplicate(tmp_path):
+    # A subject id is the name of 01-contradictions/<subject_id>.json, so on a
+    # case-insensitive disk `X` and `x` are one part and one sweep is lost.
+    run, parts = _seeded(tmp_path)
+    copy = dict(parts["subjects"]["subjects"][0])
+    first = copy["id"]
+    copy["id"] = first.upper()
+    assert copy["id"] != first
+    parts["subjects"]["subjects"].append(copy)
+    write_json(run.subjects, parts["subjects"])
+    hits = [f for f in refs.check_subjects(run) if f.pointer == "/subjects"]
+    assert len(hits) == 1
+    assert hits[0].artifact == run.subjects
+    assert first in hits[0].message and copy["id"] in hits[0].message
+    assert "differ only in case" in hits[0].message
+
+
+def test_distinct_subject_ids_draw_no_duplicate_finding(tmp_path):
+    run, _ = _seeded(tmp_path)
+    assert [f for f in refs.check_subjects(run) if f.pointer == "/subjects"] == []
+
+
 def test_every_subject_visited_is_clean(tmp_path):
     run, _ = _seeded(tmp_path)
     assert refs.check_contradiction_parts(run) == []

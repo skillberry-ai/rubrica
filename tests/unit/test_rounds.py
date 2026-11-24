@@ -1051,6 +1051,30 @@ def test_the_seal_refuses_two_parts_claiming_one_scenario_id(tmp_path):
     assert any("sc-001" in f.message for f in findings)
 
 
+def test_the_seal_refuses_two_parts_whose_scenario_ids_differ_only_in_case(tmp_path):
+    # Each id becomes an 04-instances/ folder and a 05-verdicts/ file, and on a
+    # case-insensitive disk `sc-001` and `SC-001` are the same one.
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-001")])
+    _part(run, 1, "b02", [_scenario("SC-001")])
+    findings = _refuse(run)
+    assert not run.scenarios.exists()
+    hits = [f for f in findings if f.pointer == "/scenarios/0/id"]
+    assert len(hits) == 1
+    assert hits[0].artifact == run.scenario_part(1, "b02")
+    assert "sc-001" in hits[0].message and "SC-001" in hits[0].message
+    assert "differ only in case" in hits[0].message
+
+
+def test_the_seal_accepts_scenario_ids_that_differ_by_more_than_case(tmp_path):
+    run = _run_with_world(tmp_path, _world())
+    _part(run, 1, "b01", [_scenario("sc-001")])
+    _part(run, 1, "b02", [_scenario("sc-002")])
+    path, findings = rounds.seal_scenarios(run)
+    assert findings == []
+    assert [s["id"] for s in read_json(run.scenarios)["scenarios"]] == ["sc-001", "sc-002"]
+
+
 def test_the_seal_refuses_a_ruling_for_a_scenario_no_part_wrote(tmp_path):
     run = _run_with_world(tmp_path, _world())
     _part(run, 1, "b01", [_scenario("sc-b01-001")])

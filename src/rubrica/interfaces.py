@@ -14,7 +14,13 @@ from typing import NamedTuple
 
 from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.findings import Finding
-from rubrica.paths import RunPaths, is_safe_segment, list_json
+from rubrica.paths import (
+    RunPaths,
+    duplicate_id_pairs,
+    is_safe_segment,
+    list_json,
+    segment_key,
+)
 
 # The predicate a tool name must satisfy for the harness to return it unchanged,
 # which is what "the agent's tool contract is preserved" reduces to.
@@ -109,18 +115,7 @@ def duplicate_service_id_pairs(part: dict) -> list[tuple[str, str]]:
     services = part.get("services")
     if not isinstance(services, list):
         return []
-    first_spelling: dict[str, str] = {}
-    pairs: set[tuple[str, str]] = set()
-    for service in services:
-        if not isinstance(service, dict) or not isinstance(service.get("id"), str):
-            continue
-        service_id = service["id"]
-        key = service_id.casefold()
-        if key in first_spelling:
-            pairs.add((first_spelling[key], service_id))
-        else:
-            first_spelling[key] = service_id
-    return sorted(pairs)
+    return duplicate_id_pairs([s.get("id") for s in services if isinstance(s, dict)])
 
 
 def duplicate_service_id_message(service_id: str, first: str | None = None) -> str:
@@ -363,7 +358,7 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
         # isinstance first: an unhashable id (a list, an object) would raise
         # TypeError out of the set membership test.
         if isinstance(service_id, str) and service_id in repeated_ids:
-            key = service_id.casefold()
+            key = segment_key(service_id)
             if key in seen_ids:
                 # At the repeat, before the id's other checks so an unsafe id
                 # repeated still reports both. Measured before: a copy of

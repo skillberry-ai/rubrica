@@ -39,7 +39,13 @@ from rubrica.interfaces import (
 )
 from rubrica.invariants import InvariantForm
 from rubrica.invariants import evaluate as evaluate_invariant
-from rubrica.paths import RunPaths, is_safe_segment, list_json
+from rubrica.paths import (
+    RunPaths,
+    duplicate_id_pairs,
+    is_safe_segment,
+    list_json,
+    scenario_case_collision_message,
+)
 from rubrica.slices import candidate_bytes_index, excluded_summary, row_bytes
 from rubrica.suite.verify import DATA_KINDS, TRAJECTORY_KINDS
 from rubrica.utilisation import claim_utilisation
@@ -1846,8 +1852,19 @@ def check_subjects(run: RunPaths) -> list[Finding]:
         out.append(Finding(run.subjects, "refs", pointer, message))
 
     subjects = _as_list(cover.get("subjects"))
-    for dupe in _dupes([s["id"] for s in subjects if isinstance(s, dict)]):
-        report("/subjects", f"duplicate subject id {dupe!r}")
+    # By paths.segment_key, not exactly: a subject id becomes
+    # 01-contradictions/<subject_id>.json, so on a case-insensitive disk `s-auth`
+    # and `S-AUTH` are one part and one sweep member overwrites the other.
+    for first, repeat in duplicate_id_pairs([s.get("id") for s in subjects if isinstance(s, dict)]):
+        if first == repeat:
+            report("/subjects", f"duplicate subject id {first!r}")
+        else:
+            report(
+                "/subjects",
+                f"subject ids {first!r} and {repeat!r} differ only in case: on a "
+                f"case-insensitive filesystem they would share the one file "
+                f"01-contradictions/{first}.json, so one subject's sweep overwrites the other's",
+            )
 
     known = _claim_ids(run)
     covered: set[str] = set()
@@ -3605,8 +3622,13 @@ def check_scenarios(run: RunPaths) -> list[Finding]:
             f"world model is at {world_version}",
         )
 
-    for dupe in _dupes([s["id"] for s in scenarios]):
-        report("/scenarios", f"duplicate scenario id {dupe!r}")
+    # By paths.segment_key, not exactly: a scenario id becomes a folder or file
+    # name three times over, so a case-only repeat collides on macOS.
+    for first, repeat in duplicate_id_pairs([s["id"] for s in scenarios]):
+        if first == repeat:
+            report("/scenarios", f"duplicate scenario id {first!r}")
+        else:
+            report("/scenarios", scenario_case_collision_message(first, repeat))
 
     for i, scenario in enumerate(scenarios):
         if scenario["goal_id"] not in goal_ids:

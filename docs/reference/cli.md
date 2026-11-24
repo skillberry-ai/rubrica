@@ -492,7 +492,9 @@ Exits 1, one finding per line on stdout, naming the part at fault: a part that i
 unparseable, not a JSON object, or carrying no `scenarios` array; a scenario that
 is not an object or has no string id; two parts claiming one scenario id, which
 has to be caught here because members mint their own ids and the merged array
-would simply carry the collision twice; a score part that is unparseable, is not
+would simply carry the collision twice — compared ignoring case, since each id
+becomes a folder and file name and on a case-insensitive filesystem `sc-001` and
+`SC-001` are one, so a case-only repeat is the same finding, worded to say so; a score part that is unparseable, is not
 an object, or carries no `rulings` array; and a ruling that is not an object, has
 no string `scenario_id`, carries a status outside the ruling enum, omits the field
 that status requires, or names a scenario no propose part wrote. Two rulings for

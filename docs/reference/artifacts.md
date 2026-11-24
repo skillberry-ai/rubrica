@@ -395,7 +395,12 @@ holds the cover to totality, so every claim id in the run appears here.
 
 Fields worth knowing: `subjects[].claims` (a `claim_refs` array, so it can
 never be empty); `subjects[].note` (optional, for why a claim was assigned
-where a reader would not expect it).
+where a reader would not expect it); and `subjects[].id`, which must be unique
+across the array — each becomes the name of `01-contradictions/<subject_id>.json`.
+`check-refs` compares the ids ignoring case, because on a case-insensitive
+filesystem such as macOS's `s-auth` and `S-AUTH` are one file, so a case-only
+repeat is the same finding against this file, worded to say the ids differ only
+in case.
 
 ## `contradictions-part`
 
@@ -865,7 +870,11 @@ Fields worth knowing: `capability_refs[]` (each pairs a `capability_id` with
 an `outcome_class_id` — the coverage cell this scenario is meant to close);
 `duplicate_of` (required when `status` is `duplicate`); `rejected_reason`
 (required when `status` is `rejected` — one of five fixed values, including
-`blocked_by_gap`).
+`blocked_by_gap`). `id` must be unique across the document, compared ignoring
+case: each id becomes an `04-instances/` folder, a `05-verdicts/` file and a suite
+task folder, and on a case-insensitive filesystem `sc-001` and `SC-001` are the
+same one. `propose-seal` refuses such a pair across parts, and `check-refs` reports
+it against this document, worded to say the ids differ only in case.
 
 ## `coverage`
 

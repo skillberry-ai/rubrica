@@ -39,7 +39,7 @@ from pathlib import Path
 from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
-from rubrica.paths import RunPaths
+from rubrica.paths import RunPaths, scenario_case_collision_message, segment_key
 
 # `_cells` is private and reached from here deliberately, named in the import line
 # rather than through the module so the coupling is visible where a reader looks
@@ -611,7 +611,7 @@ def collect_scenarios(run: RunPaths) -> tuple[list[dict], list[Finding]]:
     """
     scenarios: list[dict] = []
     findings: list[Finding] = []
-    seen: dict[str, str] = {}
+    seen: dict[str, tuple[str, str]] = {}
     for round_n in run.scenario_part_rounds():
         for name in run.unsafe_scenario_part_names(round_n):
             findings.append(
@@ -657,19 +657,27 @@ def collect_scenarios(run: RunPaths) -> tuple[list[dict], list[Finding]]:
                     continue
                 sid = scenario["id"]
                 where = f"round {round_n} batch {batch_id}"
-                if sid in seen:
-                    findings.append(
-                        Finding(
-                            path,
-                            "rounds",
-                            f"/scenarios/{i}/id",
-                            f"scenario id {sid} is already claimed by {seen[sid]}; members "
+                # Keyed by paths.segment_key, so a case-only repeat (`sc-1` then
+                # `SC-1`) is refused like an exact one: each becomes an
+                # 04-instances/ folder and a 05-verdicts/ file, and on macOS the
+                # two are one.
+                key = segment_key(sid)
+                if key in seen:
+                    first_sid, first_where = seen[key]
+                    if first_sid == sid:
+                        message = (
+                            f"scenario id {sid} is already claimed by {first_where}; members "
                             "mint their own ids, so a collision has to be caught here -- the "
-                            "merged array would simply carry it twice",
+                            "merged array would simply carry it twice"
                         )
-                    )
+                    else:
+                        message = (
+                            f"{scenario_case_collision_message(first_sid, sid)} "
+                            f"({first_sid} is claimed by {first_where})"
+                        )
+                    findings.append(Finding(path, "rounds", f"/scenarios/{i}/id", message))
                     continue
-                seen[sid] = where
+                seen[key] = (sid, where)
                 # Copied, not aliased, and this is NOT redundant with read_json
                 # re-parsing: _apply_rulings folds statuses in PLACE, and
                 # seal_scenarios runs twice per round (after propose so score has
