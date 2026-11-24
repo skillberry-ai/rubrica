@@ -23,6 +23,7 @@ import math
 import os
 import re
 import sys
+import traceback
 from decimal import Decimal
 from pathlib import Path
 
@@ -705,11 +706,18 @@ def read_contract(path):
     exists to keep an authoring failure from being scored as a zero never
     engaged, and the platform saw a crashed verifier rather than a stated
     refusal. A gate cannot defend a file it did not manage to parse.
+
+    The file is decoded as UTF-8 explicitly, not with the locale's default, and
+    a byte that is not valid UTF-8 is a refusal too: a stray \\xff used to raise
+    UnicodeDecodeError past the OSError handler, so the verifier crashed with a
+    traceback and wrote no reward-detail.json at all.
     """
     try:
-        text = Path(path).read_text()
+        text = Path(path).read_text(encoding="utf-8")
     except OSError as exc:
         return None, [f"contract at {path} could not be read: {exc}"]
+    except UnicodeDecodeError as exc:
+        return None, [f"contract at {path} is not valid UTF-8: {exc}"]
     try:
         contract = json.loads(text)
     except (ValueError, RecursionError) as exc:
@@ -775,22 +783,78 @@ def main(argv=None):
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    # Any reward.txt / reward.json an earlier run left in this --out is removed
-    # before anything else can fail. It used to be removed only on the refusal
-    # path, so an unexpected crash (a transcript line nested 100,000 deep raised
-    # RecursionError) was measured leaving the previous 0.8 in place for the
-    # platform to read. Cleared here, no exit path -- score, refusal or crash --
-    # can show an earlier run's score. A removal that fails is a refusal that
-    # names it: the stale score cannot be hidden, so it must not be trusted.
-    # reward-detail.json is not removed: every normal path overwrites it.
-    # Its reason is appended after any contract or log problem, as before.
+    # Any reward.txt / reward.json / reward-detail.json an earlier run left in
+    # this --out is removed before anything else can fail. The rewards used to
+    # be removed only on the refusal path, so an unexpected crash (a transcript
+    # line nested 100,000 deep raised RecursionError) was measured leaving the
+    # previous 0.8 in place for the platform to read. reward-detail.json was
+    # once kept on the grounds that every normal path overwrites it, but a crash
+    # is not a normal path: a non-UTF-8 contract was measured leaving the
+    # previous run's full-marks detail beside no reward at all. Cleared here, no
+    # exit path -- score, refusal or crash -- can show an earlier run's result.
+    # A removal that fails is a refusal that names it: the stale file cannot be
+    # hidden, so it must not be trusted. Its reason is appended after any
+    # contract or log problem, as before.
     removal_problems = []
-    for name in ("reward.txt", "reward.json"):
+    for name in _OUTPUTS:
         try:
             (out / name).unlink(missing_ok=True)
         except OSError as exc:
             removal_problems.append(f"a leftover {out / name} could not be removed: {exc}")
 
+    # The safety net. Every input this verifier is known to choke on has its own
+    # stated refusal, but each of those was found one crash at a time; anything
+    # still unforeseen goes down the same refusal path rather than ending in a
+    # bare traceback (exit 1, no reward-detail.json) that a platform cannot tell
+    # from a verifier that was never run. KeyboardInterrupt and SystemExit are
+    # BaseException, not Exception, so they still pass through untouched. The
+    # traceback is still printed to stderr, because an internal error is a bug
+    # in this file and whoever fixes it needs to see where.
+    try:
+        return _score(args, out, removal_problems)
+    except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
+        # A crash part-way through the scoring writes may have left reward.txt
+        # or reward.json behind; a refusal must leave neither, and one it cannot
+        # remove is named, as at start-up.
+        problems = [f"internal error: {type(exc).__name__}: {exc}"]
+        for name in ("reward.txt", "reward.json"):
+            try:
+                (out / name).unlink(missing_ok=True)
+            except OSError as removal_exc:
+                problems.append(f"a partial {out / name} could not be removed: {removal_exc}")
+        return _refuse(out, problems)
+
+
+# The three files main() writes into --out, and clears at start.
+_OUTPUTS = ("reward.txt", "reward.json", "reward-detail.json")
+
+
+def _refuse(out, problems):
+    """Write the stated refusal: no reward.txt, the reason in reward-detail.json. -> 2.
+
+    Refuse rather than write a misleading 0 -- or, for a weights problem, an
+    inflated reward that looks like a normal score. A contract this verifier
+    cannot read is a bypassed authoring gate, not a bad agent run, and scoring
+    it would invert that conclusion; a log directory this verifier could not
+    read is a mis-mounted or broken log, not an agent that failed, for the same
+    reason. No reward.txt is written, so the platform sees a missing reward
+    instead of a real one; any reward.txt / reward.json an earlier run left was
+    already removed at the start of main().
+    """
+    message = "; ".join(problems)
+    try:
+        (out / "reward-detail.json").write_text(json.dumps({"error": message}, indent=2))
+    except OSError as exc:
+        # The refusal still stands -- exit 2, no reward.txt -- and stderr is
+        # the only place left to say why.
+        print(f"verify.py: could not write reward-detail.json: {exc}", file=sys.stderr)
+    print(f"verify.py: {message}", file=sys.stderr)
+    return 2
+
+
+def _score(args, out, removal_problems):
+    """The body of main() after start-up. -> exit code."""
     contract, problems = read_contract(args.expected)
     if not problems:
         problems = _contract_problems(contract)
@@ -803,19 +867,7 @@ def main(argv=None):
         transcript, problems = _read_logs(args.agent_logs)
     problems = list(problems) + removal_problems
     if problems:
-        # Refuse rather than write a misleading 0 -- or, for a weights
-        # problem, an inflated reward that looks like a normal score. A
-        # contract this verifier cannot read is a bypassed authoring gate, not
-        # a bad agent run, and scoring it would invert that conclusion; a log
-        # directory this verifier could not read is a mis-mounted or broken
-        # log, not an agent that failed, for the same reason. No
-        # reward.txt is written, so the platform sees a missing reward
-        # instead of a real one; any reward.txt / reward.json an earlier run
-        # left was already removed at the start of main().
-        message = "; ".join(problems)
-        (out / "reward-detail.json").write_text(json.dumps({"error": message}, indent=2))
-        print(f"verify.py: {message}", file=sys.stderr)
-        return 2
+        return _refuse(out, problems)
 
     calls, answer, ok, notes = parse_transcript(transcript)
     reward, detail = compute_reward(contract, calls, answer, ok)

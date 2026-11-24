@@ -982,7 +982,7 @@ The verifier **refuses rather than scores** when it cannot trust its inputs:
 it writes no `reward.txt` (so the platform sees a missing reward, not a 0),
 writes `reward-detail.json` as `{"error": "<reason>"}`, prints the same reason
 to stderr, and exits `2`. It refuses on a contract it cannot read or trust —
-unreadable or unparseable `expected.json`, a `contract` other than
+unreadable, not valid UTF-8, or unparseable `expected.json`, a `contract` other than
 `rubrica/v1`, or any field its scoring reads being absent or mistyped — and on
 an agent log it cannot read: an `--agent-logs` directory that does not exist,
 one holding no `*.jsonl` or `*.txt` transcript file, or a transcript file that
@@ -990,6 +990,15 @@ cannot be read (a permissions failure, or a directory named `*.jsonl`). A
 contract problem is named in preference to a log problem. A transcript file
 that exists and is empty is **not** a refusal: an agent that ran and printed
 nothing scores normally.
+
+Two more refusals guard against a stale or missing result. Before reading
+anything, the verifier removes any `reward.txt`, `reward.json` and
+`reward-detail.json` an earlier run left in `--out`; one it cannot remove is a
+refusal that names it. And any unexpected error inside the verifier itself is a
+refusal too, with `reward-detail.json` reading
+`{"error": "internal error: <type>: <message>"}` and the traceback printed to
+stderr — so no input, foreseen or not, ends in a bare crash beside an earlier
+run's files. An interrupt (`KeyboardInterrupt`, `SystemExit`) is not caught.
 
 ## `report`
 

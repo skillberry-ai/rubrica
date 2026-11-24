@@ -428,9 +428,103 @@ def test_a_crash_after_start_up_leaves_no_earlier_reward(tmp_path, monkeypatch):
         raise RuntimeError("simulated scorer crash")
 
     monkeypatch.setattr(verify, "compute_reward", boom)
-    with pytest.raises(RuntimeError, match="simulated scorer crash"):
-        main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    # The safety net turns the crash into a stated refusal, not a traceback.
+    assert code == 2
     assert not (out / "reward.txt").exists(), "a crash must not leave an earlier score behind"
+    assert not (out / "reward.json").exists()
+    detail = json.loads((out / "reward-detail.json").read_text())
+    assert detail == {"error": "internal error: RuntimeError: simulated scorer crash"}, detail
+
+
+def test_an_internal_error_still_prints_its_traceback(tmp_path, monkeypatch, capsys):
+    import rubrica.suite.verify as verify
+
+    expected, logs, out = _write_run(tmp_path, _contract(), _FULL_MARKS_TRANSCRIPT)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("simulated scorer crash")
+
+    monkeypatch.setattr(verify, "compute_reward", boom)
+    assert main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)]) == 2
+    err = capsys.readouterr().err
+    assert "Traceback" in err and "in boom" in err, err
+
+
+def test_a_crash_after_the_reward_is_written_removes_it(tmp_path, monkeypatch):
+    """A crash part-way through the writes must not leave this run's reward either."""
+    import rubrica.suite.verify as verify
+
+    expected, logs, out = _write_run(tmp_path, _contract(), _FULL_MARKS_TRANSCRIPT)
+    real_dumps = verify.json.dumps
+
+    def dumps(obj, **kwargs):
+        if kwargs.get("default") is str:  # the reward-detail.json write
+            raise RuntimeError("simulated detail crash")
+        return real_dumps(obj, **kwargs)
+
+    monkeypatch.setattr(verify.json, "dumps", dumps)
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    assert not (out / "reward.txt").exists()
+    assert not (out / "reward.json").exists()
+    detail = json.loads((out / "reward-detail.json").read_text())
+    assert "internal error: RuntimeError: simulated detail crash" in detail["error"]
+
+
+@pytest.mark.parametrize("exc", [KeyboardInterrupt, SystemExit])
+def test_an_interrupt_is_not_swallowed_by_the_safety_net(tmp_path, monkeypatch, exc):
+    import rubrica.suite.verify as verify
+
+    expected, logs, out = _write_run(tmp_path, _contract(), _FULL_MARKS_TRANSCRIPT)
+
+    def boom(*_args, **_kwargs):
+        raise exc
+
+    monkeypatch.setattr(verify, "compute_reward", boom)
+    with pytest.raises(exc):
+        main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+
+
+def test_a_non_utf8_contract_after_a_good_run_leaves_only_the_new_error(tmp_path):
+    """The reported crash: \\xff in expected.json, over a --out holding full marks."""
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    _score_full_marks(expected, logs, out)
+    expected.write_bytes(b'{"contract": "rubrica/v1\xff"}')
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    assert not (out / "reward.txt").exists()
+    assert not (out / "reward.json").exists()
+    detail = json.loads((out / "reward-detail.json").read_text())
+    assert list(detail) == ["error"], "the earlier run's detail must be gone"
+    assert "not valid UTF-8" in detail["error"], detail
+
+
+def test_a_leftover_reward_detail_is_cleared_at_start(tmp_path, monkeypatch):
+    """Even if the refusal's own write fails, the old detail must not survive."""
+    import rubrica.suite.verify as verify
+
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    _score_full_marks(expected, logs, out)
+    assert (out / "reward-detail.json").exists()
+    seen = {}
+
+    def score(args, out_dir, removal_problems):
+        seen["detail_exists"] = (out_dir / "reward-detail.json").exists()
+        return 0
+
+    monkeypatch.setattr(verify, "_score", score)
+    main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert seen == {"detail_exists": False}
+
+
+def test_a_leftover_reward_detail_that_cannot_be_removed_is_a_refusal(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), _FULL_MARKS_TRANSCRIPT)
+    (out / "reward-detail.json").mkdir(parents=True)
+    (out / "reward-detail.json" / "x").write_text("")
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    assert not (out / "reward.txt").exists()
     assert not (out / "reward.json").exists()
 
 

@@ -42,6 +42,17 @@ def test_a_too_deeply_nested_contract_is_refused_rather_than_crashing(tmp_path):
     assert "not parseable JSON" in json.loads((out / "reward-detail.json").read_text())["error"]
 
 
+def test_a_contract_that_is_not_utf8_is_refused_rather_than_crashing(tmp_path):
+    """A \\xff byte raised UnicodeDecodeError past the OSError handler."""
+    argv, out = _package(tmp_path, "")
+    (tmp_path / "expected.json").write_bytes(b'{"contract": "rubrica/v1\xff"}')
+    assert main(argv) == 2
+    assert not (out / "reward.txt").exists()
+    assert "not valid UTF-8" in json.loads((out / "reward-detail.json").read_text())["error"]
+    _, problems = read_contract(tmp_path / "expected.json")
+    assert problems and "not valid UTF-8" in problems[0]
+
+
 def test_a_too_deeply_nested_transcript_line_is_skipped_and_counted():
     _, answer, _, notes = parse_transcript(
         '{"type": "result", "result": "ok"}\n' + "[" * 100_000 + "]" * 100_000
