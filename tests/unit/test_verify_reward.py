@@ -396,6 +396,55 @@ def test_a_leftover_reward_that_cannot_be_removed_is_named_in_the_refusal(tmp_pa
     assert "could not be removed" in error, error
 
 
+# -- a stale reward on a path that is not a refusal ---------------------------
+#
+# T-119 cleared an earlier reward only on the refusal path, so an unexpected
+# crash -- a transcript line nested 100,000 deep raised RecursionError -- left
+# the previous 0.8 for the platform to read. Clearing now happens first.
+
+_TOO_DEEP_LINE = "[" * 100_000 + "]" * 100_000
+
+
+def test_a_too_deeply_nested_transcript_line_is_skipped_and_replaces_the_old_reward(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    out.mkdir()
+    (out / "reward.txt").write_text("0.8")
+    (out / "reward.json").write_text(json.dumps({"reward": 0.8}))
+    (logs / "transcript.jsonl").write_text(_FULL_MARKS_TRANSCRIPT + "\n" + _TOO_DEEP_LINE)
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 0
+    assert (out / "reward.txt").read_text() == "1.0"
+    detail = json.loads((out / "reward-detail.json").read_text())
+    assert any("skipped 1" in note for note in detail["transcript_notes"]), detail
+
+
+def test_a_crash_after_start_up_leaves_no_earlier_reward(tmp_path, monkeypatch):
+    import rubrica.suite.verify as verify
+
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    _score_full_marks(expected, logs, out)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("simulated scorer crash")
+
+    monkeypatch.setattr(verify, "compute_reward", boom)
+    with pytest.raises(RuntimeError, match="simulated scorer crash"):
+        main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert not (out / "reward.txt").exists(), "a crash must not leave an earlier score behind"
+    assert not (out / "reward.json").exists()
+
+
+def test_a_leftover_reward_that_cannot_be_removed_refuses_a_healthy_run(tmp_path):
+    """Removal now runs first, so it must refuse even when nothing else is wrong."""
+    expected, logs, out = _write_run(tmp_path, _contract(), _FULL_MARKS_TRANSCRIPT)
+    (out / "reward.txt").mkdir(parents=True)
+    (out / "reward.txt" / "x").write_text("")
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    error = json.loads((out / "reward-detail.json").read_text())["error"]
+    assert "could not be removed" in error, error
+
+
 _FULL_MARKS_TRANSCRIPT = "\n".join(
     [
         json.dumps(

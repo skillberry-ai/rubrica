@@ -84,7 +84,10 @@ def parse_transcript(text):
             continue
         try:
             event = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
+        # RecursionError too: a line nested ~100,000 deep exhausts the C
+        # parser's recursion limit, and letting it escape crashed the verifier
+        # (exit 1, traceback) instead of counting one more unparseable line.
+        except (json.JSONDecodeError, ValueError, RecursionError):
             skipped += 1
             continue
         if not isinstance(event, dict):
@@ -709,7 +712,9 @@ def read_contract(path):
         return None, [f"contract at {path} could not be read: {exc}"]
     try:
         contract = json.loads(text)
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
+        # RecursionError: a contract nested too deep for the parser is as
+        # unreadable as a truncated one, and gets the same stated refusal.
         return None, [f"contract at {path} is not parseable JSON: {exc}"]
     if not isinstance(contract, dict):
         return None, [
@@ -770,6 +775,22 @@ def main(argv=None):
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
+    # Any reward.txt / reward.json an earlier run left in this --out is removed
+    # before anything else can fail. It used to be removed only on the refusal
+    # path, so an unexpected crash (a transcript line nested 100,000 deep raised
+    # RecursionError) was measured leaving the previous 0.8 in place for the
+    # platform to read. Cleared here, no exit path -- score, refusal or crash --
+    # can show an earlier run's score. A removal that fails is a refusal that
+    # names it: the stale score cannot be hidden, so it must not be trusted.
+    # reward-detail.json is not removed: every normal path overwrites it.
+    # Its reason is appended after any contract or log problem, as before.
+    removal_problems = []
+    for name in ("reward.txt", "reward.json"):
+        try:
+            (out / name).unlink(missing_ok=True)
+        except OSError as exc:
+            removal_problems.append(f"a leftover {out / name} could not be removed: {exc}")
+
     contract, problems = read_contract(args.expected)
     if not problems:
         problems = _contract_problems(contract)
@@ -780,6 +801,7 @@ def main(argv=None):
         # over a log this verifier never read is as misleading as one over a
         # contract it could not trust.
         transcript, problems = _read_logs(args.agent_logs)
+    problems = list(problems) + removal_problems
     if problems:
         # Refuse rather than write a misleading 0 -- or, for a weights
         # problem, an inflated reward that looks like a normal score. A
@@ -788,17 +810,8 @@ def main(argv=None):
         # directory this verifier could not read is a mis-mounted or broken
         # log, not an agent that failed, for the same reason. No
         # reward.txt is written, so the platform sees a missing reward
-        # instead of a real one -- and any reward.txt / reward.json an earlier
-        # run left in this --out is removed first, because a re-run that refuses
-        # was measured leaving the previous 1.0 in place for the platform to
-        # read. A removal that fails is added to the reason and the run still
-        # refuses: crashing here would lose reward-detail.json too.
-        problems = list(problems)
-        for name in ("reward.txt", "reward.json"):
-            try:
-                (out / name).unlink(missing_ok=True)
-            except OSError as exc:
-                problems.append(f"a leftover {out / name} could not be removed: {exc}")
+        # instead of a real one; any reward.txt / reward.json an earlier run
+        # left was already removed at the start of main().
         message = "; ".join(problems)
         (out / "reward-detail.json").write_text(json.dumps({"error": message}, indent=2))
         print(f"verify.py: {message}", file=sys.stderr)

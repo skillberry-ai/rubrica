@@ -34,6 +34,22 @@ def test_a_truncated_contract_is_refused_rather_than_crashing(tmp_path):
     assert "not parseable JSON" in detail["error"]
 
 
+def test_a_too_deeply_nested_contract_is_refused_rather_than_crashing(tmp_path):
+    """json.loads raises RecursionError, not ValueError, on 100,000 levels."""
+    argv, out = _package(tmp_path, "[" * 100_000 + "]" * 100_000)
+    assert main(argv) == 2
+    assert not (out / "reward.txt").exists()
+    assert "not parseable JSON" in json.loads((out / "reward-detail.json").read_text())["error"]
+
+
+def test_a_too_deeply_nested_transcript_line_is_skipped_and_counted():
+    _, answer, _, notes = parse_transcript(
+        '{"type": "result", "result": "ok"}\n' + "[" * 100_000 + "]" * 100_000
+    )
+    assert answer == "ok"
+    assert any("skipped 1" in note for note in notes)
+
+
 def test_a_contract_that_is_not_an_object_is_refused(tmp_path):
     """json.loads("[]") parses fine and then every .get() call would raise."""
     argv, out = _package(tmp_path, "[]")
