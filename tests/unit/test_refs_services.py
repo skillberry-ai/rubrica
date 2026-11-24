@@ -261,6 +261,27 @@ def test_two_services_with_one_id_are_reported_once_and_only_here(tmp_path):
     assert check_interfaces(run) == [], "the collapse must not be reported against the document"
 
 
+def test_service_ids_differing_only_in_case_are_reported_once_and_only_here(tmp_path):
+    """`svc-tickets` and `SVC-TICKETS` are one file on a case-insensitive disk, so
+    a hand edit at gate 1 adding the second is the same collapse as an exact
+    repeat. Measured before: check-refs reported it against
+    `01-interfaces/svc-tickets.json#/paths` and not against the part.
+    """
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+    part = _services(run)
+    second = json.loads(json.dumps(part["services"][0]))
+    second["id"] = "SVC-TICKETS"
+    second["tools"] = [
+        {"name": "query_tickets_b", "claims": ["clm-api-010"], "schema_claim": "clm-api-010"}
+    ]
+    part["services"].append(second)
+    _rewrite(run, part)
+    findings = [f for f in check_services(run) if "differ only in case" in f.message]
+    assert [(f.artifact, f.pointer) for f in findings] == [(run.services_part, "/services")]
+    assert "svc-tickets" in findings[0].message and "SVC-TICKETS" in findings[0].message
+    assert check_interfaces(run) == [], "the collapse must not be reported against the document"
+
+
 def test_correcting_a_duplicate_id_and_re_deriving_clears_it(tmp_path):
     """The property that makes the clause worth having: the finding is clearable.
 
@@ -290,6 +311,68 @@ def test_one_tool_cited_twice_inside_one_service_is_not_a_duplicate(tmp_path):
     part["services"][0]["tools"].append({**tool, "name": "query_tickets_readonly"})
     _rewrite(run, part)
     assert check_services(run) == []
+
+
+def test_a_tool_name_declared_in_two_services_is_reported_at_the_repeat(tmp_path):
+    """Two simulators answering one name, arriving without a shared claim.
+
+    The second service cites a *copy* of the tool claim under its own id, so the
+    shared-claim clause cannot see it. Measured before this clause: synthesis,
+    check-refs and layer 1 all came back clean, and two documents both served
+    `operationId: query_tickets`.
+    """
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+    path, document = _claims(run)
+    copy = json.loads(json.dumps(_claim(document, "clm-api-010")))
+    copy["id"] = "clm-api-011"
+    document["claims"].append(copy)
+    _rewrite_claims(run, path, document)
+    part = _services(run)
+    second = json.loads(json.dumps(part["services"][0]))
+    second["id"] = "svc-tickets-again"
+    second["tools"] = [
+        {"name": "query_tickets", "claims": ["clm-api-011"], "schema_claim": "clm-api-011"}
+    ]
+    part["services"].append(second)
+    _rewrite(run, part)
+    findings = check_services(run)
+    assert [(f.artifact, f.pointer) for f in findings] == [
+        (run.services_part, "/services/1/tools/0/name")
+    ], findings
+    assert "query_tickets" in findings[0].message
+    assert "/services/0/tools/0/name" in findings[0].message
+
+
+def test_a_tool_name_declared_twice_in_one_service_is_reported_at_the_repeat(tmp_path):
+    """The within-service form: synthesis keyed `paths` by name, so the second
+    schema overwrote the first while `x-rubrica.tools` still listed both.
+    """
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+    _two_services(run)
+    part = _services(run)
+    tool = part["services"][1]["tools"][0]
+    part["services"][1]["tools"] = [tool, dict(tool)]
+    _rewrite(run, part)
+    findings = check_services(run)
+    assert [(f.artifact, f.pointer) for f in findings] == [
+        (run.services_part, "/services/1/tools/1/name")
+    ], findings
+    assert "close_ticket" in findings[0].message
+    assert "/services/1/tools/0/name" in findings[0].message
+
+
+def test_a_repeated_name_is_reported_once_per_repeat(tmp_path):
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+    part = _services(run)
+    tool = part["services"][0]["tools"][0]
+    part["services"][0]["tools"] = [tool, dict(tool), dict(tool)]
+    _rewrite(run, part)
+    findings = check_services(run)
+    assert [f.pointer for f in findings] == [
+        "/services/0/tools/1/name",
+        "/services/0/tools/2/name",
+    ], findings
+    assert all("/services/0/tools/0/name" in f.message for f in findings)
 
 
 def test_a_payload_edited_away_from_its_input_is_reported(tmp_path):

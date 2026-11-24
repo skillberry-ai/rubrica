@@ -601,21 +601,42 @@ the file behind and not to a re-derivation.
 mistaking them costs the run's repair attempt on nothing.** A `1` against
 `01-services.json` names something `rb-reconcile-services` wrote -- a service id
 that is not usable as a filename, a tool name the simulator would rewrite, a
-`schema_claim` no claim in `01-claims/` has an id for -- so spend the repair on
-*that pass*, with the findings appended verbatim, never on the synthesis.
+`schema_claim` that is missing or not a string, a `schema_claim` no claim in
+`01-claims/` has an id for -- so spend the repair on *that pass*, with the
+findings appended verbatim, never on the synthesis.
 
-**A `1` against `01-claims/<artifact_id>.json` is a different case, and it is no
-repair of yours.** The reachable one is a tool claim whose `payload` is not a
-schema synthesis can use: `rb-extract` wrote that claim, and
+**A `1` against `01-claims/<artifact_id>.json` names a claims file, not the
+part, and there are two kinds; they take different actions, so tell them apart by
+the finding's text before you act.**
+
+The first is a claims file that cannot be read, will not parse, is not a JSON
+object, or has the wrong shape. This is `rb-extract`'s defect, and `check-refs`
+holds the file to the same rule, so it names the same file and should already have
+stopped you at B2. Its repair is that input's `rb-extract` member, re-dispatched
+with the findings appended verbatim -- never `rb-reconcile-services`, and never the
+synthesis. No `reconcile-*` pass could read a single claim out of that file, so
+every one of them, from `rb-reconcile-subjects` on, was built without that input:
+after the repair, run B3 again from its first pass, not just the synthesis. While
+such a file is present, the command also holds back every "no claim in
+`01-claims/` has id" finding against `01-services.json`, since the broken file may
+be where that id lives. A held-back finding is not a cleared one: a run that shows
+only the claims-file finding has not shown that `01-services.json` is clean, so
+read the synthesis result only from a run made after the file is fixed.
+
+The second is a tool claim whose `payload` is not a schema synthesis can use, and
+it is no repair of yours. `rb-extract` wrote that claim, and
 `rb-reconcile-services` is instructed to cite it as the `schema_claim` anyway and
 say in the service's `statement` that the schema is unusable -- so its artifact is
 what it should be and re-dispatching it buys the same bytes back. Do not
-re-dispatch that input's `rb-extract` member either: it would rewrite a claims
+re-dispatch that input's `rb-extract` member for this one either, unlike the first
+kind: here the file is well formed, so it would rewrite a claims
 file every `reconcile-*` pass has already read, leaving seven partials describing
 claims that no longer exist, which is a wider defect than the one you started
-with. Record it with `decide`, run the seal, and carry the finding into gate 1 --
-the service is not simulatable as it stands, and which of the two a human would
-rather have is their ruling to make, not a repair's. A `2` is the filesystem:
+with. Record this one with `decide`, run the seal, and carry the finding into
+gate 1 -- the service is not simulatable as it stands, and which of the two a human
+would rather have is their ruling to make, not a repair's.
+
+A `2` is the filesystem:
 `01-interfaces/` cannot be written, or the run directory cannot be read. No
 re-dispatch of any prompt fixes that, so it consumes no repair attempt and it is
 not a stage defect -- report it and halt, exactly as B0's rule says.

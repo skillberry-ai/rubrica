@@ -270,7 +270,36 @@ def test_a_claims_file_that_is_not_an_object_names_that_file(tmp_path):
         run.claims("api-json"),
         "claims file is not a JSON object",
     )
+    # Measured before T-125: a `schema_claim` finding against a correct
+    # 01-services.json printed beside this one. check-refs names only the claims file.
+    assert run.services_part not in [f.artifact for f in findings]
     assert {f.layer for f in findings} == {LAYER}
+
+
+@pytest.mark.parametrize("text", ["{}", '{"claims": "x"}', '{"claims": 7}', '{"claims": [1]}'])
+def test_a_misshapen_claims_file_names_that_file_and_not_the_services_part(tmp_path, capsys, text):
+    """A claims file that parses to an object the index cannot read.
+
+    Measured before the shared shape check: `{}` and `{"claims": "x"}` came back as
+    one `no claim in 01-claims/ has id` against a correct 01-services.json and named
+    no claims file, and `{"claims": 7}` raised TypeError -- an `[internal]` 1. Both
+    send the one repair at reconcile-services, whose output was never the problem.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    target = run.claims("api-json")
+    target.write_text(text, encoding="utf-8")
+    written, findings = synthesise(run)
+    assert written == []
+    assert [f.artifact for f in findings] == [target]
+    assert {f.layer for f in findings} == {LAYER}
+    assert not list_json(run.interfaces_dir)
+
+    capsys.readouterr()
+    assert main(["synthesise-interfaces", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert str(target) in out or target.name in out
+    assert "[internal]" not in out
+    assert run.services_part.name not in out
 
 
 def test_a_service_that_is_not_an_object_names_its_index(tmp_path):
@@ -357,6 +386,181 @@ def test_a_tool_name_that_would_not_survive_sanitisation_is_a_finding(tmp_path):
     assert {f.layer for f in findings} == {LAYER}
 
 
+def test_a_tool_name_repeated_within_one_service_is_refused_not_overwritten(tmp_path):
+    """Measured before: exit 0, `paths` held only the second schema, and
+    `x-rubrica.tools` listed both -- one schema silently lost.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    tool = json.loads(run.services_part.read_text(encoding="utf-8"))["services"][0]["tools"][0]
+    _rewrite_services(run, lambda p: p["services"][0]["tools"].append(dict(tool)))
+    written, findings = synthesise(run)
+    assert written == []
+    assert not run.interfaces_dir.exists(), "all-or-nothing: nothing may be written"
+    assert [(f.artifact, f.pointer) for f in findings] == [
+        (run.services_part, "/services/0/tools/1/name")
+    ]
+    assert "/services/0/tools/0/name" in findings[0].message
+    assert {f.layer for f in findings} == {LAYER}
+
+
+def test_a_tool_name_repeated_across_services_is_refused(tmp_path):
+    """Two documents both serving one `operationId` is two simulators answering
+    one name; refused here as check-refs reports it, so the commands agree.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+
+    def add_twin(part):
+        twin = json.loads(json.dumps(part["services"][0]))
+        twin["id"] = "svc-tickets-again"
+        part["services"].append(twin)
+
+    _rewrite_services(run, add_twin)
+    written, findings = synthesise(run)
+    assert written == []
+    assert [(f.artifact, f.pointer) for f in findings] == [
+        (run.services_part, "/services/1/tools/0/name")
+    ]
+    assert "query_tickets" in findings[0].message
+
+
+def _services_part_findings_from_check_refs(run):
+    """check-refs' findings against 01-services.json, as (pointer, message) pairs."""
+    from rubrica.refs import check_all
+
+    return [(f.pointer, f.message) for f in check_all(run) if f.artifact == run.services_part]
+
+
+def test_a_service_id_used_twice_is_refused_at_the_repeat_and_nothing_is_written(tmp_path, capsys):
+    """Measured before: a copy of svc-tickets with its tool renamed exited 0 and
+    wrote one svc-tickets.json holding only the copy's grouping, while check-refs
+    called the part defective -- the all-or-nothing promise broken by a collision
+    on run.interface()'s path rather than by a malformed sibling.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+
+    def add_copy(part):
+        copy = json.loads(json.dumps(part["services"][0]))
+        copy["tools"][0]["name"] = "query_tickets_v2"
+        part["services"].append(copy)
+
+    _rewrite_services(run, add_copy)
+    written, findings = synthesise(run)
+    assert written == []
+    assert not run.interfaces_dir.exists(), "all-or-nothing: nothing may be written"
+    assert [(f.artifact, f.pointer) for f in findings] == [(run.services_part, "/services/1/id")]
+    assert findings[0].message.startswith("more than one service is named svc-tickets:")
+    assert {f.layer for f in findings} == {LAYER}
+
+    # check-refs still reports it, as before, at /services and in the same words.
+    assert ("/services", findings[0].message) in _services_part_findings_from_check_refs(run)
+
+    capsys.readouterr()
+    assert main(["synthesise-interfaces", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert "more than one service is named svc-tickets" in out
+    assert "/services/1/id" in out
+    assert not run.interfaces_dir.exists()
+
+
+def test_service_ids_differing_only_in_case_are_a_repeat(tmp_path, capsys):
+    """Measured before, on macOS's case-insensitive disk: a copy of svc-tickets
+    with id `SVC-TICKETS` and tool `query_tickets_b` exited 0 with only
+    svc-tickets.json on disk, one grouping lost, and check-refs then exited 1
+    against `01-interfaces/svc-tickets.json#/paths` -- a code-written file with no
+    defect in it. Both commands now name the part, and nothing is written.
+    """
+    from rubrica.refs import check_all
+
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+
+    def add_case_twin(part):
+        copy = json.loads(json.dumps(part["services"][0]))
+        copy["id"] = "SVC-TICKETS"
+        copy["tools"][0]["name"] = "query_tickets_b"
+        part["services"].append(copy)
+
+    _rewrite_services(run, add_case_twin)
+    written, findings = synthesise(run)
+    assert written == []
+    assert not run.interfaces_dir.exists(), "all-or-nothing: nothing may be written"
+    assert [(f.artifact, f.pointer) for f in findings] == [(run.services_part, "/services/1/id")]
+    message = findings[0].message
+    assert "svc-tickets" in message and "SVC-TICKETS" in message
+    assert "differ only in case" in message
+    assert "case-insensitive filesystem" in message
+
+    every = check_all(run)
+    assert ("/services", message) in _services_part_findings_from_check_refs(run)
+    assert not any("01-interfaces" in str(f.artifact) for f in every), every
+
+    capsys.readouterr()
+    assert main(["synthesise-interfaces", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert "differ only in case" in out
+    assert not run.interfaces_dir.exists()
+
+
+def test_distinct_service_ids_are_not_a_repeat(tmp_path):
+    """The other direction: ids that differ by more than case stay two services."""
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+
+    def add_distinct(part):
+        copy = json.loads(json.dumps(part["services"][0]))
+        copy["id"] = "svc-tickets-b"
+        copy["tools"][0]["name"] = "query_tickets_b"
+        part["services"].append(copy)
+
+    _rewrite_services(run, add_distinct)
+    written, findings = synthesise(run)
+    assert findings == [], findings
+    assert sorted(p.name for p in written) == ["svc-tickets-b.json", "svc-tickets.json"]
+
+
+def test_a_bad_id_and_a_repeated_tool_name_are_both_reported_as_check_refs_does(tmp_path):
+    """Measured before: synthesise recorded a tool name only after its service
+    passed the id check, so service 0 with id `bad/id` plus a copy `svc-twin` gave
+    only the bad-id finding, while check-refs also reported `query_tickets` twice.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+
+    def bad_and_twin(part):
+        twin = json.loads(json.dumps(part["services"][0]))
+        twin["id"] = "svc-twin"
+        part["services"][0]["id"] = "bad/id"
+        part["services"].append(twin)
+
+    _rewrite_services(run, bad_and_twin)
+    written, findings = synthesise(run)
+    assert written == []
+    assert [f.pointer for f in findings] == ["/services/0/id", "/services/1/tools/0/name"]
+    assert "/services/0/tools/0/name" in findings[1].message
+
+    refs_pointers = {pointer for pointer, _ in _services_part_findings_from_check_refs(run)}
+    assert "/services/1/tools/0/name" in refs_pointers
+
+
+def test_a_repeated_tool_name_that_fails_sanitisation_is_still_counted(tmp_path):
+    """A name refused for sanitisation still occupies the name, as in check-refs."""
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+
+    def twin_with_bad_names(part):
+        part["services"][0]["tools"][0]["name"] = "_query_tickets"
+        twin = json.loads(json.dumps(part["services"][0]))
+        twin["id"] = "svc-twin"
+        part["services"].append(twin)
+
+    _rewrite_services(run, twin_with_bad_names)
+    _, findings = synthesise(run)
+    repeats = [f.pointer for f in findings if "already declared" in f.message]
+    assert repeats == ["/services/1/tools/0/name"]
+    refs_repeats = [
+        pointer
+        for pointer, message in _services_part_findings_from_check_refs(run)
+        if "already declared" in message
+    ]
+    assert refs_repeats == repeats
+
+
 def test_a_schema_claim_resolving_to_nothing_is_a_finding(tmp_path):
     """An id no claim carries *is* the part's defect, so this one names the part.
 
@@ -378,6 +582,52 @@ def test_a_schema_claim_resolving_to_nothing_is_a_finding(tmp_path):
         )
     ]
     assert {f.layer for f in findings} == {LAYER}
+
+
+@pytest.mark.parametrize("value", ["<absent>", None, 7, ["clm-api-tool"]])
+def test_a_missing_or_non_string_schema_claim_has_its_own_message(tmp_path, value):
+    """No claims file can carry an id that is not a string, so the message says
+    what is wrong with the part instead of `no claim ... has id None`."""
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    part = json.loads(run.services_part.read_text(encoding="utf-8"))
+    tool = part["services"][0]["tools"][0]
+    if value == "<absent>":
+        del tool["schema_claim"]
+    else:
+        tool["schema_claim"] = value
+    run.services_part.write_text(json.dumps(part), encoding="utf-8")
+    written, findings = synthesise(run)
+    assert written == []
+    shown = None if value == "<absent>" else value
+    assert [(f.artifact, f.pointer, f.message) for f in findings] == [
+        (
+            run.services_part,
+            "/services/0/tools/0/schema_claim",
+            f"schema_claim must be a claim id string, got {shown!r}",
+        )
+    ]
+
+
+def test_a_missing_schema_claim_still_prints_beside_a_broken_claims_file(tmp_path, capsys):
+    """Measured before T-126: the hold-back dropped every `/schema_claim` finding,
+    so this one vanished and only the claims file was named -- a second defect
+    hidden until the next repair round. A broken claims file cannot explain it."""
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    part = json.loads(run.services_part.read_text(encoding="utf-8"))
+    del part["services"][0]["tools"][0]["schema_claim"]
+    run.services_part.write_text(json.dumps(part), encoding="utf-8")
+    run.claims("api-json").write_text("{}", encoding="utf-8")
+    written, findings = synthesise(run)
+    assert written == []
+    pairs = [(f.artifact, f.pointer) for f in findings]
+    assert (run.claims("api-json"), "") in pairs
+    assert (run.services_part, "/services/0/tools/0/schema_claim") in pairs
+    assert not any("no claim in 01-claims/" in f.message for f in findings)
+
+    capsys.readouterr()
+    assert main(["synthesise-interfaces", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert "schema_claim must be a claim id string" in out
 
 
 @pytest.mark.parametrize(
@@ -427,38 +677,56 @@ def test_a_payload_less_claim_in_an_unreadable_claims_file_is_not_blamed_twice(t
     """The guard discipline: a file the index could not read is absent, not blamed.
 
     A malformed claims file already owes its own finding, and its claims are not in
-    the index -- so the `schema_claim` into it comes back as an id nothing carries,
-    named against the part. That is the right pair: the part's citation cannot be
-    resolved and the file that would resolve it will not parse. What must not happen
-    is a `/claims/N/payload` pointer into a document nobody could index.
+    the index -- so the `schema_claim` into it would come back as an id nothing
+    carries. That finding is held back: the file that would resolve the citation
+    will not parse, so the citation is not yet evidence against the part, and
+    check-refs names only the claims file here. What must not happen either is a
+    `/claims/N/payload` pointer into a document nobody could index.
 
-    A shape pin rather than a discriminator, and measured as one: the payload index
-    this replaced produced exactly this pair too, so the test is green against
-    either. It is here because the claim index is the thing that *could* blame a
-    file it never read, and nothing else would notice if it began to.
+    It is here because the claim index is the thing that *could* blame a file it
+    never read, and nothing else would notice if it began to.
     """
     run = build_toy_run(tmp_path, upto="reconcile-services")
     target = run.claims("api-json")
     target.write_text("{ not json", encoding="utf-8")
     written, findings = synthesise(run)
     assert written == []
-    assert sorted((str(f.artifact), f.pointer) for f in findings) == sorted(
-        [(str(target), ""), (str(run.services_part), "/services/0/tools/0/schema_claim")]
-    )
+    assert [(f.artifact, f.pointer) for f in findings] == [(target, "")]
     assert {f.layer for f in findings} == {LAYER}
 
 
-def test_a_malformed_claims_file_is_a_finding_against_that_file(tmp_path):
+@pytest.mark.parametrize(
+    "text",
+    ["{ not json", None],
+    ids=["malformed", "truncated"],
+)
+def test_a_malformed_claims_file_is_a_finding_against_that_file(tmp_path, capsys, text):
     """A 1 naming the right artifact. A claims file is `extract`'s output, so a
     malformed one is repairable by re-dispatching that one input's extractor --
     and the finding has to name the file, not the services part that cited it.
+
+    Measured before T-125: both cases also printed `no claim in 01-claims/ has id`
+    against a correct 01-services.json, so the one repair could go to
+    reconcile-services. `None` is the real file cut off halfway, the shape an
+    interrupted write leaves.
     """
     run = build_toy_run(tmp_path, upto="reconcile-services")
-    run.claims("api-json").write_text("{ not json", encoding="utf-8")
+    target = run.claims("api-json")
+    if text is None:
+        whole = target.read_text(encoding="utf-8")
+        text = whole[: len(whole) // 2]
+    target.write_text(text, encoding="utf-8")
     written, findings = synthesise(run)
     assert written == []
-    assert run.claims("api-json") in [f.artifact for f in findings]
+    assert [f.artifact for f in findings] == [target]
+    assert run.services_part not in [f.artifact for f in findings]
     assert {f.layer for f in findings} == {LAYER}
+
+    capsys.readouterr()
+    assert main(["synthesise-interfaces", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert target.name in out
+    assert run.services_part.name not in out
 
 
 def test_an_unreadable_claims_file_raises_rather_than_becoming_a_finding(tmp_path):

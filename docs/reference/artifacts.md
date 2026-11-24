@@ -601,11 +601,22 @@ and a code rule for picking a winner would bury the judgment, with
 — the one kind this pass is accountable for); and `services[].id`, which must be
 unique across the array although the schema cannot say so — the document path is
 derived from it, so two services sharing an id collapse onto one file and the
-groupings after the first are lost. `check-refs` reports that here and nowhere
-else: it holds the shared document to neither grouping, because that document is
-byte-for-byte what synthesis wrote from the last of them and a finding against it
-would send a repair at a file with no defect in it. One line, in the file the
-repair belongs in.
+groupings after the first are lost. Uniqueness is compared ignoring case: on a
+case-insensitive filesystem such as macOS's, `svc-tickets` and `SVC-TICKETS` are
+one file too, so a case-only repeat is the same finding, worded to say the ids
+differ only in case. The schema still allows capitals; only the repeat is refused. Tool names must be unique across the whole
+part too, within one service and across services, because each becomes an
+`operationId` the agent calls and only one simulator can answer it. Both
+`synthesise-interfaces` and `check-refs` report either repeat against this part,
+counting every service and tool even one refused for another reason, so the two
+commands name the same duplicates. For a repeated service id `check-refs` reports
+it here and nowhere else: it holds the shared document to neither grouping.
+Synthesis writes nothing for a part with a repeated id, so a document beside
+one can only be left from an earlier synthesis, of the grouping before a hand
+edit at gate 1 introduced the repeat. That document is byte-for-byte what
+synthesis wrote from that earlier, unduplicated grouping, and a finding against
+it would send a repair at a file with no defect in it. One line, in the file the repair
+belongs in.
 
 ## `interface`
 
