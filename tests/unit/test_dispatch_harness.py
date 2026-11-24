@@ -1652,3 +1652,66 @@ def test_without_the_override_the_dispatch_names_the_shipped_skill(tmp_path, mon
     argv = _stub_argv(tmp_path)
     assert f"{SHIPPED_SKILLS}/rb-propose" in argv
     assert _summary_field(proc, "skill ") == str(SHIPPED_SKILLS / "rb-propose" / "SKILL.md")
+
+
+# ---------------------------------------------------------------------------
+# A checkout reached through a symlink.
+#
+# REPO used to come from a plain `pwd`, which keeps symlinks, while SKILLS_ROOT
+# comes from Python's `.resolve()`, which removes them. Through a symlinked
+# checkout (anything under /tmp on macOS) the two spellings differed with no
+# override in force, so the "another skills folder is in use" loop fired and
+# denied the stage's own skill folder under the symlinked spelling while the
+# allow list granted it under the resolved one.
+
+
+def _dispatch_through_symlink(tmp_path, stage, **env):
+    link = tmp_path / "linked-repo"
+    link.symlink_to(REPO, target_is_directory=True)
+    run = tmp_path / "run"
+    run.mkdir()
+    env.setdefault("PATH", _path_with(_bwrap_dir(tmp_path, works=True)))
+    proc = subprocess.run(
+        [str(link / "scripts" / "dispatch-stage.sh"), stage, str(run)],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "RUBRICA_LAB": str(tmp_path / "lab"),
+            "RUBRICA_PRINT_SETTINGS": "1",
+            **env,
+        },
+    )
+    return link, proc
+
+
+def test_a_symlinked_checkout_never_denies_the_stages_own_skill_folder(tmp_path, monkeypatch):
+    monkeypatch.delenv("RUBRICA_SKILLS_DIR", raising=False)
+    link, proc = _dispatch_through_symlink(tmp_path, "score")
+    perms, sandbox, _ = _paths(proc)
+    deny = perms["permissions"]["deny"]
+    own = [rule for rule in deny if "/rb-score/" in rule or rule.rstrip(")").endswith("/rb-score")]
+    assert not own, own
+    assert f"Read(/{SHIPPED_SKILLS}/rb-score/**)" in perms["permissions"]["allow"]
+    assert f"{SHIPPED_SKILLS}/rb-score" not in sandbox["sandbox"]["filesystem"]["denyRead"]
+    # One spelling throughout: the symlinked path appears in no rule at all.
+    assert not any(str(link) in rule for rule in deny), deny
+
+
+def test_without_the_override_the_extra_repository_deny_loop_does_not_fire(tmp_path, monkeypatch):
+    monkeypatch.delenv("RUBRICA_SKILLS_DIR", raising=False)
+    _, proc = _dispatch_through_symlink(tmp_path, "score")
+    perms, _, _ = _paths(proc)
+    # Each denied folder yields two rules (the folder and its `/**`), so count
+    # the rules each folder got rather than the rules overall.
+    marker = f"/{SHIPPED_SKILLS.name}/rb-"
+    skill_rules = [r for r in perms["permissions"]["deny"] if marker in r]
+    per_folder = {}
+    for rule in skill_rules:
+        folder = rule.removeprefix("Read(/").removesuffix(")").removesuffix("/**")
+        per_folder.setdefault(folder, []).append(rule)
+    # Each sibling exactly once, and nothing more: the second loop would add
+    # every repository skill folder again, the stage's own among them.
+    siblings = {str(d) for d in SHIPPED_SKILLS.glob("rb-*") if d.name != "rb-score"}
+    assert set(per_folder) == siblings, sorted(set(per_folder) ^ siblings)
+    assert all(len(rules) == 2 for rules in per_folder.values()), per_folder

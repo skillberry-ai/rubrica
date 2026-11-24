@@ -54,7 +54,14 @@
 #                        overridable here so a probe needs no file edit.
 set -euo pipefail
 
-REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# `pwd -P`, not `pwd`: SKILLS_ROOT below is resolved by Python's `.resolve()`,
+# which removes symlinks, and every path this script builds must use that one
+# spelling. With a plain `pwd`, a checkout reached through a symlink (anything
+# under /tmp on macOS) made "$SKILLS_ROOT" differ from "$REPO/src/rubrica/skills"
+# with no override in force, so the "another skills folder" deny loop below fired
+# and denied this stage's own skill folder under the symlinked spelling while the
+# allow list granted it under the resolved one.
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 LAB=${RUBRICA_LAB:-${TMPDIR:-/tmp}/rubrica-lab}
 
 for tool in claude jq; do
@@ -519,9 +526,14 @@ WS_DENY=("WebSearch")
 for d in "$SKILLS_ROOT"/rb-*; do
   [ "$d" = "$SKILL_DIR" ] || DENY+=("$d")
 done
-if [ "$SKILLS_ROOT" != "$REPO/src/rubrica/skills" ]; then
-  for d in "$REPO"/src/rubrica/skills/rb-*; do
-    DENY+=("$d")
+# Both sides resolved, so "is another skills folder in use?" is asked of the
+# folders rather than of how their paths happen to be spelled. The stage's own
+# folder is skipped here too, in case the two roots still name one tree.
+REPO_SKILLS=$(cd "$REPO/src/rubrica/skills" 2>/dev/null && pwd -P) ||
+  REPO_SKILLS="$REPO/src/rubrica/skills"
+if [ "$SKILLS_ROOT" != "$REPO_SKILLS" ]; then
+  for d in "$REPO_SKILLS"/rb-*; do
+    [ "$d" = "$SKILL_DIR" ] || DENY+=("$d")
   done
 fi
 
