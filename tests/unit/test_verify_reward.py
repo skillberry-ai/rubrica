@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -86,6 +87,48 @@ def test_exact_set_accepts_the_same_calls_in_any_order():
     }
     score, _ = score_trajectory(calls, trajectory)
     assert score == 1.0
+
+
+# A loose operation (same tool, fewer args) must not take the one call a stricter
+# operation needed. Greedy first-fit scored the first order below 0.5 / 0.0 and the
+# second 1.0 / 1.0; a largest one-to-one matching scores both the same.
+_LOOSE_THEN_STRICT = [_op("get_job"), _op("get_job", job_id=7)]
+_CALL_7 = ("get_job", {"job_id": 7})
+_CALL_9 = ("get_job", {"job_id": 9})
+
+
+@pytest.mark.parametrize("calls", [[_CALL_7, _CALL_9], [_CALL_9, _CALL_7]])
+@pytest.mark.parametrize("match", ["subset", "exact-set"])
+def test_unordered_modes_match_a_loose_operation_without_stealing(calls, match):
+    score, detail = score_trajectory(calls, {"match": match, "operations": _LOOSE_THEN_STRICT})
+    assert score == 1.0
+    assert detail["unmatched"] == []
+    assert detail["extra_calls"] == 0
+
+
+@pytest.mark.parametrize(
+    "calls",
+    [
+        [("get_job", {"job_id": 7, "verbose": True}), ("get_job", {"job_id": 7}), _CALL_9],
+        [_CALL_9, ("get_job", {"job_id": 7}), ("get_job", {"job_id": 7, "verbose": True})],
+        [("get_job", {"job_id": 7}), _CALL_9, ("get_job", {"job_id": 7, "verbose": True})],
+    ],
+)
+def test_three_operations_on_one_tool_match_in_any_call_order(calls):
+    operations = [_op("get_job"), _op("get_job", job_id=7), _op("get_job", job_id=7, verbose=True)]
+    for match in ("subset", "exact-set"):
+        score, detail = score_trajectory(calls, {"match": match, "operations": operations})
+        assert score == 1.0, (match, calls)
+        assert detail["unmatched"] == []
+
+
+def test_three_operations_on_one_tool_score_partially_when_a_call_is_missing():
+    operations = [_op("get_job"), _op("get_job", job_id=7), _op("get_job", job_id=7, verbose=True)]
+    calls = [("get_job", {"job_id": 7, "verbose": True}), _CALL_9]
+    score, _ = score_trajectory(calls, {"match": "subset", "operations": operations})
+    assert score == 2 / 3
+    score, _ = score_trajectory(calls, {"match": "exact-set", "operations": operations})
+    assert score == 0.0
 
 
 def test_exact_sequence_rejects_the_wrong_order():
@@ -231,6 +274,45 @@ def test_main_writes_the_three_reward_files(tmp_path):
     assert "weights" in json.loads((out / "reward-detail.json").read_text())
 
 
+def test_main_scores_a_call_whose_argument_decimal_cannot_hold(tmp_path):
+    """An agent-supplied "1e9999999999999999999" once raised InvalidOperation
+    out of the scorer, exiting 1 and leaving no reward for the platform."""
+    contract = _contract(
+        trajectory={"match": "subset", "operations": [_op(action="find_jobs", job_id=90420)]}
+    )
+    transcript = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "name": "query_aap2",
+                                "input": {
+                                    "action": "find_jobs",
+                                    "job_id": "1e9999999999999999999",
+                                },
+                            }
+                        ]
+                    },
+                }
+            ),
+            json.dumps(
+                {"type": "result", "subtype": "success", "is_error": False, "result": "Job 90420."}
+            ),
+        ]
+    )
+    expected, logs, out = _write_run(tmp_path, contract, transcript)
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 0
+    assert (out / "reward.txt").exists()
+    assert (out / "reward-detail.json").exists()
+    # The answer is right; the call's job_id is not, so the trajectory is unmet.
+    assert json.loads((out / "reward.json").read_text())["reward"] == pytest.approx(0.8)
+
+
 def test_main_refuses_an_unreadable_contract_rather_than_scoring_zero(tmp_path):
     """A zero would report a bypassed authoring gate as a bad agent run."""
     expected, logs, out = _write_run(tmp_path, _contract(contract="bench/v2"), "")
@@ -263,6 +345,299 @@ def test_main_refuses_weights_that_do_not_sum_to_one(tmp_path):
     error = json.loads((out / "reward-detail.json").read_text())["error"]
     assert "weights" in error
     assert "1.8" in error
+
+
+# -- a refusal into an --out an earlier run already scored --------------------
+#
+# A re-run that refused used to leave the earlier run's reward.txt (1.0 in the
+# repro) beside the error, so the platform read the old score instead of a
+# missing reward.
+
+
+def _score_full_marks(expected, logs, out):
+    (logs / "transcript.jsonl").write_text(_FULL_MARKS_TRANSCRIPT)
+    assert main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)]) == 0
+    assert (out / "reward.txt").read_text() == "1.0"
+    assert (out / "reward.json").exists()
+
+
+def _assert_refused_without_reward(expected, logs, out, expect_in_error):
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    assert not (out / "reward.txt").exists(), "an earlier score must not survive a refusal"
+    assert not (out / "reward.json").exists()
+    error = json.loads((out / "reward-detail.json").read_text())["error"]
+    assert expect_in_error in error, error
+
+
+def test_a_log_refusal_removes_an_earlier_runs_reward(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    _score_full_marks(expected, logs, out)
+    (logs / "transcript.jsonl").unlink()
+    _assert_refused_without_reward(expected, logs, out, "holds no")
+
+
+def test_a_contract_refusal_removes_an_earlier_runs_reward(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    _score_full_marks(expected, logs, out)
+    expected.write_text(json.dumps(_contract(contract="bench/v2")))
+    _assert_refused_without_reward(expected, logs, out, "bench/v2")
+
+
+def test_a_leftover_reward_that_cannot_be_removed_is_named_in_the_refusal(tmp_path):
+    """A failed removal must keep the refusal (exit 2, an error), not crash."""
+    expected, logs, out = _write_run(tmp_path, _contract(contract="bench/v2"), "")
+    (out / "reward.txt").mkdir(parents=True)
+    (out / "reward.txt" / "x").write_text("")
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    error = json.loads((out / "reward-detail.json").read_text())["error"]
+    assert "bench/v2" in error
+    assert "could not be removed" in error, error
+
+
+# -- a stale reward on a path that is not a refusal ---------------------------
+#
+# T-119 cleared an earlier reward only on the refusal path, so an unexpected
+# crash -- a transcript line nested 100,000 deep raised RecursionError -- left
+# the previous 0.8 for the platform to read. Clearing now happens first.
+
+_TOO_DEEP_LINE = "[" * 100_000 + "]" * 100_000
+
+
+def test_a_too_deeply_nested_transcript_line_is_skipped_and_replaces_the_old_reward(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    out.mkdir()
+    (out / "reward.txt").write_text("0.8")
+    (out / "reward.json").write_text(json.dumps({"reward": 0.8}))
+    (logs / "transcript.jsonl").write_text(_FULL_MARKS_TRANSCRIPT + "\n" + _TOO_DEEP_LINE)
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 0
+    assert (out / "reward.txt").read_text() == "1.0"
+    detail = json.loads((out / "reward-detail.json").read_text())
+    assert any("skipped 1" in note for note in detail["transcript_notes"]), detail
+
+
+def test_a_crash_after_start_up_leaves_no_earlier_reward(tmp_path, monkeypatch):
+    import rubrica.suite.verify as verify
+
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    _score_full_marks(expected, logs, out)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("simulated scorer crash")
+
+    monkeypatch.setattr(verify, "compute_reward", boom)
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    # The safety net turns the crash into a stated refusal, not a traceback.
+    assert code == 2
+    assert not (out / "reward.txt").exists(), "a crash must not leave an earlier score behind"
+    assert not (out / "reward.json").exists()
+    detail = json.loads((out / "reward-detail.json").read_text())
+    assert detail == {"error": "internal error: RuntimeError: simulated scorer crash"}, detail
+
+
+def test_an_internal_error_still_prints_its_traceback(tmp_path, monkeypatch, capsys):
+    import rubrica.suite.verify as verify
+
+    expected, logs, out = _write_run(tmp_path, _contract(), _FULL_MARKS_TRANSCRIPT)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("simulated scorer crash")
+
+    monkeypatch.setattr(verify, "compute_reward", boom)
+    assert main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)]) == 2
+    err = capsys.readouterr().err
+    assert "Traceback" in err and "in boom" in err, err
+
+
+def test_a_crash_after_the_reward_is_written_removes_it(tmp_path, monkeypatch):
+    """A crash part-way through the writes must not leave this run's reward either."""
+    import rubrica.suite.verify as verify
+
+    expected, logs, out = _write_run(tmp_path, _contract(), _FULL_MARKS_TRANSCRIPT)
+    real_dumps = verify.json.dumps
+
+    def dumps(obj, **kwargs):
+        if kwargs.get("default") is str:  # the reward-detail.json write
+            raise RuntimeError("simulated detail crash")
+        return real_dumps(obj, **kwargs)
+
+    monkeypatch.setattr(verify.json, "dumps", dumps)
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    assert not (out / "reward.txt").exists()
+    assert not (out / "reward.json").exists()
+    detail = json.loads((out / "reward-detail.json").read_text())
+    assert "internal error: RuntimeError: simulated detail crash" in detail["error"]
+
+
+@pytest.mark.parametrize("exc", [KeyboardInterrupt, SystemExit])
+def test_an_interrupt_is_not_swallowed_by_the_safety_net(tmp_path, monkeypatch, exc):
+    import rubrica.suite.verify as verify
+
+    expected, logs, out = _write_run(tmp_path, _contract(), _FULL_MARKS_TRANSCRIPT)
+
+    def boom(*_args, **_kwargs):
+        raise exc
+
+    monkeypatch.setattr(verify, "compute_reward", boom)
+    with pytest.raises(exc):
+        main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+
+
+def test_a_non_utf8_contract_after_a_good_run_leaves_only_the_new_error(tmp_path):
+    """The reported crash: \\xff in expected.json, over a --out holding full marks."""
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    _score_full_marks(expected, logs, out)
+    expected.write_bytes(b'{"contract": "rubrica/v1\xff"}')
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    assert not (out / "reward.txt").exists()
+    assert not (out / "reward.json").exists()
+    detail = json.loads((out / "reward-detail.json").read_text())
+    assert list(detail) == ["error"], "the earlier run's detail must be gone"
+    assert "not valid UTF-8" in detail["error"], detail
+
+
+def test_a_leftover_reward_detail_is_cleared_at_start(tmp_path, monkeypatch):
+    """Even if the refusal's own write fails, the old detail must not survive."""
+    import rubrica.suite.verify as verify
+
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    _score_full_marks(expected, logs, out)
+    assert (out / "reward-detail.json").exists()
+    seen = {}
+
+    def score(args, out_dir, removal_problems):
+        seen["detail_exists"] = (out_dir / "reward-detail.json").exists()
+        return 0
+
+    monkeypatch.setattr(verify, "_score", score)
+    main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert seen == {"detail_exists": False}
+
+
+def test_a_leftover_reward_detail_that_cannot_be_removed_is_a_refusal(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), _FULL_MARKS_TRANSCRIPT)
+    (out / "reward-detail.json").mkdir(parents=True)
+    (out / "reward-detail.json" / "x").write_text("")
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    assert not (out / "reward.txt").exists()
+    assert not (out / "reward.json").exists()
+
+
+def test_a_leftover_reward_that_cannot_be_removed_refuses_a_healthy_run(tmp_path):
+    """Removal now runs first, so it must refuse even when nothing else is wrong."""
+    expected, logs, out = _write_run(tmp_path, _contract(), _FULL_MARKS_TRANSCRIPT)
+    (out / "reward.txt").mkdir(parents=True)
+    (out / "reward.txt" / "x").write_text("")
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    error = json.loads((out / "reward-detail.json").read_text())["error"]
+    assert "could not be removed" in error, error
+
+
+_FULL_MARKS_TRANSCRIPT = "\n".join(
+    [
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "tool_use", "name": "query_aap2", "input": {"action": "find_jobs"}}
+                    ]
+                },
+            }
+        ),
+        json.dumps(
+            {"type": "result", "subtype": "success", "is_error": False, "result": "Job 90420."}
+        ),
+    ]
+)
+
+
+# -- the refuse path: an agent log this verifier could not read ---------------
+#
+# Each case used to score: a missing or transcript-less --agent-logs as 0.0 with
+# no note (so a mis-mounted log read as an agent that failed every task), and an
+# unreadable transcript as a traceback with no reward-detail.json at all.
+
+
+def _refuses_logs(expected, logs, out, expect_in_error):
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2, "a log this verifier could not read must refuse, not score"
+    assert not (out / "reward.txt").exists(), "the platform must see a missing reward"
+    assert not (out / "reward.json").exists()
+    error = json.loads((out / "reward-detail.json").read_text())["error"]
+    assert expect_in_error in error, error
+    assert str(logs) in error, error
+    return error
+
+
+def test_main_refuses_a_missing_agent_log_directory(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    missing = logs.parent / "nonexistent"
+    _refuses_logs(expected, missing, out, "does not exist")
+
+
+def test_main_refuses_an_agent_log_directory_with_no_transcript(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    (logs / "transcript.jsonl").unlink()
+    (logs / "unrelated.log").write_text("not a transcript the verifier reads")
+    _refuses_logs(expected, logs, out, "holds no")
+
+
+def test_main_refuses_a_transcript_that_is_a_directory(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    (logs / "transcript.jsonl").unlink()
+    (logs / "x.jsonl").mkdir()
+    _refuses_logs(expected, logs, out, "could not be read")
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)"
+)
+def test_main_refuses_an_unreadable_transcript(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), WRONG_ANSWER_TRANSCRIPT)
+    transcript = logs / "transcript.jsonl"
+    transcript.chmod(0)
+    try:
+        _refuses_logs(expected, logs, out, "could not be read")
+    finally:
+        transcript.chmod(0o644)
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)"
+)
+def test_main_refuses_an_unlistable_agent_log_directory_as_unreadable(tmp_path):
+    """Path.glob returns nothing on a folder it cannot list; that is not "holds no"."""
+    expected, logs, out = _write_run(tmp_path, _contract(), WRONG_ANSWER_TRANSCRIPT)
+    logs.chmod(0)
+    try:
+        error = _refuses_logs(expected, logs, out, "could not be read")
+    finally:
+        logs.chmod(0o755)
+    assert "holds no" not in error, error
+
+
+def test_main_still_scores_an_empty_transcript_file(tmp_path):
+    """An agent that ran and printed nothing is a real, low score -- not a refusal."""
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 0
+    assert (out / "reward.txt").is_file()
+
+
+def test_a_contract_problem_is_named_ahead_of_a_log_problem(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(contract="bench/v2"), "")
+    code = main(
+        ["--expected", str(expected), "--agent-logs", str(logs / "gone"), "--out", str(out)]
+    )
+    assert code == 2
+    assert "bench/v2" in json.loads((out / "reward-detail.json").read_text())["error"]
 
 
 # -- the refuse path: every field compute_reward reads ----------------------
@@ -745,3 +1120,47 @@ def test_test_sh_invokes_the_verifier_and_propagates_its_exit_code():
     assert "/tests/verify.py" in script
     assert "/logs/verifier" in script
     assert "exit $?" in script
+
+
+# -- transcript encoding and an --out that cannot be created -----------------
+
+
+def test_a_non_ascii_answer_scores_under_a_non_utf8_default_encoding(tmp_path, monkeypatch):
+    """Transcripts are read as UTF-8 whatever the machine's default encoding is.
+
+    Under LC_ALL=en_US.ISO8859-1 PYTHONUTF8=0 the UTF-8 "café" used to read as
+    "cafÃ©", so the expected answer never matched and the run quietly scored 0.
+    A locale cannot be switched reliably in-process (the C layer picks the
+    default, and Linux images often lack the locale), so the non-UTF-8 default
+    is simulated by making every read that names no encoding use latin-1.
+    """
+    real_read_text = Path.read_text
+
+    def latin1_by_default(self, encoding=None, errors=None, newline=None):
+        return real_read_text(self, encoding=encoding or "latin-1", errors=errors, newline=newline)
+
+    contract = _contract(
+        assertions=[_answer_assertion("answer_contains", "café")],
+        trajectory={"match": "subset", "operations": []},
+    )
+    expected, logs, out = _write_run(tmp_path, contract, "")
+    result = {"type": "result", "subtype": "success", "is_error": False, "result": "Le café."}
+    (logs / "transcript.jsonl").write_text(json.dumps(result, ensure_ascii=False), "utf-8")
+    monkeypatch.setattr(Path, "read_text", latin1_by_default)
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    monkeypatch.undo()
+    assert code == 0
+    assert json.loads((out / "reward.json").read_text())["reward"] == 1.0
+
+
+def test_an_out_that_is_an_existing_file_is_a_refusal_on_stderr(tmp_path, capsys):
+    """mkdir used to raise FileExistsError before the safety net: traceback, exit 1."""
+    expected, logs, _ = _write_run(tmp_path, _contract(), _FULL_MARKS_TRANSCRIPT)
+    out = tmp_path / "out-file"
+    out.write_text("not a directory")
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "could not be created" in err and str(out) in err, err
+    assert "Traceback" not in err, err
+    assert out.read_text() == "not a directory", "the file in the way is left untouched"

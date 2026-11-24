@@ -17,9 +17,14 @@ the executed file cannot differ.
 """
 
 import argparse
+import decimal
 import json
 import math
+import os
+import re
 import sys
+import traceback
+from decimal import Decimal
 from pathlib import Path
 
 CONTRACT = "rubrica/v1"
@@ -80,7 +85,10 @@ def parse_transcript(text):
             continue
         try:
             event = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
+        # RecursionError too: a line nested ~100,000 deep exhausts the C
+        # parser's recursion limit, and letting it escape crashed the verifier
+        # (exit 1, traceback) instead of counting one more unparseable line.
+        except (json.JSONDecodeError, ValueError, RecursionError):
             skipped += 1
             continue
         if not isinstance(event, dict):
@@ -142,14 +150,53 @@ def parse_transcript(text):
     return calls, answer, ok, notes
 
 
+# JSON's own number grammar, ASCII digits only. float() and int() also accept
+# underscores ("1_000"), surrounding whitespace, "inf"/"nan", leading zeros and
+# non-ASCII digits; none of those is a number a JSON tool argument could carry,
+# so a string that needs any of them to parse is compared as a string.
+_JSON_NUMBER = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?", re.ASCII)
+
+
+# A fixed context so parsing does not depend on whatever context the caller set
+# up: the widest exponent range decimal supports, and InvalidOperation still
+# trapped so an unparseable exponent raises rather than quietly becoming NaN.
+_DECIMAL_CONTEXT = decimal.Context(
+    Emax=decimal.MAX_EMAX, Emin=decimal.MIN_EMIN, traps=[decimal.InvalidOperation]
+)
+
+
 def _as_number(value):
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
-            return None
+    """A JSON scalar as an exact Decimal, or None when it is not a number.
+
+    Every number becomes a Decimal so that one exact comparison covers every
+    case. Through float(), only integers up to 2**53 survive: neighbouring
+    64-bit ids (9007199254740992 and 9007199254740993) became the same float,
+    and any numeric string past a float's range became inf, so "1e500" equalled
+    "2e500" and an agent that fetched the wrong record passed tool_called.
+    Decimal equality is exact at any size and never builds the full digits, so
+    "1e999999999" against 1 costs nothing. Booleans are not numbers here
+    (values_equal handles them before calling this).
+    """
+    if isinstance(value, bool):
+        return None
+    try:
+        with decimal.localcontext(_DECIMAL_CONTEXT):
+            if isinstance(value, int):
+                # Exact for any size.
+                return Decimal(value)
+            if isinstance(value, float):
+                # Via repr, the shortest text that round-trips, so 0.1 equals
+                # "0.1" rather than the float's full binary expansion. NaN stays
+                # unequal to everything and inf equal only to inf, as Decimal's
+                # == does for its own NaN and Infinity without signalling.
+                return Decimal(repr(value))
+            if isinstance(value, str) and _JSON_NUMBER.fullmatch(value):
+                return Decimal(value)
+    except ArithmeticError:
+        # An exponent past decimal's limits ("1e9999999999999999999") raises
+        # InvalidOperation. The string comes from the agent's own transcript,
+        # so it must not crash the scorer; it is compared as text instead.
+        return None
     return None
 
 
@@ -158,9 +205,10 @@ def values_equal(want, got):
 
     Numbers compare numerically and a numeric string equals a number: an agent
     that serialises job_id as "90420" still chose the right job, so penalising
-    it would measure serialisation style rather than tool use. Booleans are
-    never equal to numbers, because failed_only=true and failed_only=1 are
-    different intents.
+    it would measure serialisation style rather than tool use. The comparison
+    is exact, never a tolerance: 1 equals 1.0, but 9007199254740993 does not
+    equal 9007199254740992 (see _as_number). Booleans are never equal to
+    numbers, because failed_only=true and failed_only=1 are different intents.
     """
     if isinstance(want, bool) or isinstance(got, bool):
         return isinstance(want, bool) and isinstance(got, bool) and want == got
@@ -292,21 +340,39 @@ def score_assertions(answer, calls, assertions):
 
 
 def _match_unordered(operations, calls):
-    """-> the set of expected-operation indices satisfied, greedily.
+    """-> the set of expected-operation indices in a largest one-to-one matching.
 
     Each actual call is consumed by at most one expected operation. Without
     that, a single call would satisfy a two-operation trajectory and hop depth
     -- the whole difficulty signal -- would stop being measured.
+
+    The matching is the largest possible, found by augmenting paths, not
+    greedy. Greedy let a loose operation (same tool, fewer args) take the one
+    call a stricter operation needed: expected [get_job {}, get_job {job_id: 7}]
+    against calls [get_job(7), get_job(9)] scored subset 0.5, and 1.0 with the
+    calls reversed. With a largest matching the score depends only on which
+    calls exist, never on their order. Trajectories are short, so the
+    O(operations * edges) cost does not matter.
     """
-    used, matched = set(), set()
-    for i, operation in enumerate(operations):
-        for j, call in enumerate(calls):
-            if j in used or not call_matches(operation, call):
+    fits = [
+        [j for j, call in enumerate(calls) if call_matches(operation, call)]
+        for operation in operations
+    ]
+    owner = {}  # call index -> operation index holding it
+
+    def augment(i, seen):
+        for j in fits[i]:
+            if j in seen:
                 continue
-            used.add(j)
-            matched.add(i)
-            break
-    return matched
+            seen.add(j)
+            if j not in owner or augment(owner[j], seen):
+                owner[j] = i
+                return True
+        return False
+
+    for i in range(len(operations)):
+        augment(i, set())
+    return set(owner.values())
 
 
 def score_trajectory(calls, trajectory):
@@ -483,7 +549,9 @@ def _contract_problems(contract):
       fail and a crashed agent scored as a completed one. A one-character typo
       in a two-value enum must not do that.
     - Weights that don't sum to 1.0 produce a reward outside [0, 1] that looks
-      like a normal, if unusually high, score. NaN reaches the same place through
+      like a normal, if unusually high, score. So do weights that sum to 1.0
+      but leave [0, 1] one by one: assertions=2.0, trajectory=-1.0 scored 2.0,
+      so each weight is range-checked too. NaN reaches the same place through
       the sum check itself -- see _is_number.
 
     All of these are bypassed-authoring-gate problems, not agent problems, so
@@ -612,8 +680,15 @@ def _contract_problems(contract):
         bad = [(name, value) for name, value in pairs if not _is_number(value)]
         for name, value in bad:
             problems.append(f"weights.{name} must be a finite number, got {value!r}")
+        # The sum alone does not keep the reward in [0, 1]: assertions=2.0 with
+        # trajectory=-1.0 sums to 1.0 and was measured scoring a passing run 2.0,
+        # which a platform reads as an ordinary score. Each weight must itself lie
+        # in [0, 1]; with the sum check, that bounds the combined score.
+        for name, value in pairs:
+            if _is_number(value) and not 0.0 <= float(value) <= 1.0:
+                problems.append(f"weights.{name} must be between 0 and 1, got {value!r}")
         if not bad:
-            total = float(pairs[0][1]) + float(pairs[1][1])
+            total = sum(float(value) for _, value in pairs)
             if abs(total - 1.0) > 1e-9:
                 problems.append(
                     f"weights must sum to 1.0, got assertions={pairs[0][1]!r} + "
@@ -631,14 +706,23 @@ def read_contract(path):
     exists to keep an authoring failure from being scored as a zero never
     engaged, and the platform saw a crashed verifier rather than a stated
     refusal. A gate cannot defend a file it did not manage to parse.
+
+    The file is decoded as UTF-8 explicitly, not with the locale's default, and
+    a byte that is not valid UTF-8 is a refusal too: a stray \\xff used to raise
+    UnicodeDecodeError past the OSError handler, so the verifier crashed with a
+    traceback and wrote no reward-detail.json at all.
     """
     try:
-        text = Path(path).read_text()
+        text = Path(path).read_text(encoding="utf-8")
     except OSError as exc:
         return None, [f"contract at {path} could not be read: {exc}"]
+    except UnicodeDecodeError as exc:
+        return None, [f"contract at {path} is not valid UTF-8: {exc}"]
     try:
         contract = json.loads(text)
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
+        # RecursionError: a contract nested too deep for the parser is as
+        # unreadable as a truncated one, and gets the same stated refusal.
         return None, [f"contract at {path} is not parseable JSON: {exc}"]
     if not isinstance(contract, dict):
         return None, [
@@ -649,16 +733,46 @@ def read_contract(path):
 
 
 def _read_logs(agent_logs):
-    """Concatenate every transcript file in the agent log directory.
+    """Concatenate every transcript file in the agent log directory. -> (text, problems).
 
     Globs *.jsonl and *.txt, so --out must not point at --agent-logs: a second
     run would otherwise read its own reward.txt back as transcript input.
+
+    Three log conditions are problems rather than an empty transcript, and
+    main() refuses on them exactly as it does on a contract problem: a log
+    directory that does not exist or cannot be listed, one holding no transcript
+    file at all, and a transcript that cannot be read (a permissions failure, or a directory named
+    `*.jsonl`). Each used to be scored -- the first two as 0.0 with no note, the
+    third as a traceback with no reward-detail.json -- so a mis-mounted
+    --agent-logs (its default is a container path) read as an agent that failed
+    every task. A transcript *file* that exists and is empty is not a problem:
+    an agent that ran and printed nothing still scores, honestly, as nothing.
     """
-    parts = []
-    for pattern in ("*.jsonl", "*.txt"):
-        for path in sorted(Path(agent_logs).glob(pattern)):
-            parts.append(path.read_text(errors="replace"))
-    return "\n".join(parts)
+    logs = Path(agent_logs)
+    if not logs.is_dir():
+        return "", [f"agent log directory {logs} does not exist or is not a directory"]
+    # Path.glob swallows a listing failure and yields nothing, so a folder with
+    # no read permission would otherwise be reported as holding no transcript --
+    # the wrong cause. Listing it once first surfaces the OS error itself.
+    try:
+        with os.scandir(logs):
+            pass
+    except OSError as exc:
+        return "", [f"agent log directory {logs} could not be read: {exc}"]
+    paths = [path for pattern in ("*.jsonl", "*.txt") for path in sorted(logs.glob(pattern))]
+    if not paths:
+        return "", [f"agent log directory {logs} holds no *.jsonl or *.txt transcript"]
+    parts, problems = [], []
+    for path in paths:
+        try:
+            # UTF-8 explicitly, as the contract is read: under a non-UTF-8 locale
+            # the default decoding read UTF-8 "café" as "cafÃ©", so a correct
+            # non-ASCII answer never matched and quietly scored 0. errors="replace"
+            # stays, so one bad byte in a transcript cannot crash the scoring.
+            parts.append(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError as exc:
+            problems.append(f"agent transcript {path} could not be read: {exc}")
+    return "\n".join(parts), problems
 
 
 def main(argv=None):
@@ -671,24 +785,109 @@ def main(argv=None):
     # out is created before the contract is read: a refusal has to be able to
     # write reward-detail.json, and an absent contract is one of the refusals.
     out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
+    # A --out that cannot be created -- an existing file, or a parent with no
+    # write permission -- used to raise here, before the safety net below, so it
+    # ended in a bare traceback and exit 1. It is a refusal like any other (exit
+    # 2, no reward.txt), but nothing can be written into --out, so stderr is the
+    # only channel left to say why; _refuse is not called, since its
+    # reward-detail.json write could only fail too.
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(
+            f"verify.py: output directory {out} could not be created: {exc}; "
+            "nothing could be written to --out, so this is reported on stderr only",
+            file=sys.stderr,
+        )
+        return 2
 
+    # Any reward.txt / reward.json / reward-detail.json an earlier run left in
+    # this --out is removed before anything else can fail. The rewards used to
+    # be removed only on the refusal path, so an unexpected crash (a transcript
+    # line nested 100,000 deep raised RecursionError) was measured leaving the
+    # previous 0.8 in place for the platform to read. reward-detail.json was
+    # once kept on the grounds that every normal path overwrites it, but a crash
+    # is not a normal path: a non-UTF-8 contract was measured leaving the
+    # previous run's full-marks detail beside no reward at all. Cleared here, no
+    # exit path -- score, refusal or crash -- can show an earlier run's result.
+    # A removal that fails is a refusal that names it: the stale file cannot be
+    # hidden, so it must not be trusted. Its reason is appended after any
+    # contract or log problem, as before.
+    removal_problems = []
+    for name in _OUTPUTS:
+        try:
+            (out / name).unlink(missing_ok=True)
+        except OSError as exc:
+            removal_problems.append(f"a leftover {out / name} could not be removed: {exc}")
+
+    # The safety net. Every input this verifier is known to choke on has its own
+    # stated refusal, but each of those was found one crash at a time; anything
+    # still unforeseen goes down the same refusal path rather than ending in a
+    # bare traceback (exit 1, no reward-detail.json) that a platform cannot tell
+    # from a verifier that was never run. KeyboardInterrupt and SystemExit are
+    # BaseException, not Exception, so they still pass through untouched. The
+    # traceback is still printed to stderr, because an internal error is a bug
+    # in this file and whoever fixes it needs to see where.
+    try:
+        return _score(args, out, removal_problems)
+    except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
+        # A crash part-way through the scoring writes may have left reward.txt
+        # or reward.json behind; a refusal must leave neither, and one it cannot
+        # remove is named, as at start-up.
+        problems = [f"internal error: {type(exc).__name__}: {exc}"]
+        for name in ("reward.txt", "reward.json"):
+            try:
+                (out / name).unlink(missing_ok=True)
+            except OSError as removal_exc:
+                problems.append(f"a partial {out / name} could not be removed: {removal_exc}")
+        return _refuse(out, problems)
+
+
+# The three files main() writes into --out, and clears at start.
+_OUTPUTS = ("reward.txt", "reward.json", "reward-detail.json")
+
+
+def _refuse(out, problems):
+    """Write the stated refusal: no reward.txt, the reason in reward-detail.json. -> 2.
+
+    Refuse rather than write a misleading 0 -- or, for a weights problem, an
+    inflated reward that looks like a normal score. A contract this verifier
+    cannot read is a bypassed authoring gate, not a bad agent run, and scoring
+    it would invert that conclusion; a log directory this verifier could not
+    read is a mis-mounted or broken log, not an agent that failed, for the same
+    reason. No reward.txt is written, so the platform sees a missing reward
+    instead of a real one; any reward.txt / reward.json an earlier run left was
+    already removed at the start of main().
+    """
+    message = "; ".join(problems)
+    try:
+        (out / "reward-detail.json").write_text(json.dumps({"error": message}, indent=2))
+    except OSError as exc:
+        # The refusal still stands -- exit 2, no reward.txt -- and stderr is
+        # the only place left to say why.
+        print(f"verify.py: could not write reward-detail.json: {exc}", file=sys.stderr)
+    print(f"verify.py: {message}", file=sys.stderr)
+    return 2
+
+
+def _score(args, out, removal_problems):
+    """The body of main() after start-up. -> exit code."""
     contract, problems = read_contract(args.expected)
     if not problems:
         problems = _contract_problems(contract)
+    transcript = ""
+    if not problems:
+        # Read only once the contract is sound, so a refusal names the contract
+        # first; a log problem is refused on the same path below, because a 0.0
+        # over a log this verifier never read is as misleading as one over a
+        # contract it could not trust.
+        transcript, problems = _read_logs(args.agent_logs)
+    problems = list(problems) + removal_problems
     if problems:
-        # Refuse rather than write a misleading 0 -- or, for a weights
-        # problem, an inflated reward that looks like a normal score. A
-        # contract this verifier cannot read is a bypassed authoring gate, not
-        # a bad agent run, and scoring it would invert that conclusion. No
-        # reward.txt is written, so the platform sees a missing reward
-        # instead of a real one.
-        message = "; ".join(problems)
-        (out / "reward-detail.json").write_text(json.dumps({"error": message}, indent=2))
-        print(f"verify.py: {message}", file=sys.stderr)
-        return 2
+        return _refuse(out, problems)
 
-    calls, answer, ok, notes = parse_transcript(_read_logs(args.agent_logs))
+    calls, answer, ok, notes = parse_transcript(transcript)
     reward, detail = compute_reward(contract, calls, answer, ok)
     if notes:
         detail["transcript_notes"] = notes

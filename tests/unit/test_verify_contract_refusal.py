@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from rubrica.suite.verify import main, parse_transcript, read_contract
+from rubrica.suite.verify import _contract_problems, main, parse_transcript, read_contract
 from tests.builders import minimal_suite_expected
 
 
@@ -34,6 +34,33 @@ def test_a_truncated_contract_is_refused_rather_than_crashing(tmp_path):
     assert "not parseable JSON" in detail["error"]
 
 
+def test_a_too_deeply_nested_contract_is_refused_rather_than_crashing(tmp_path):
+    """json.loads raises RecursionError, not ValueError, on 100,000 levels."""
+    argv, out = _package(tmp_path, "[" * 100_000 + "]" * 100_000)
+    assert main(argv) == 2
+    assert not (out / "reward.txt").exists()
+    assert "not parseable JSON" in json.loads((out / "reward-detail.json").read_text())["error"]
+
+
+def test_a_contract_that_is_not_utf8_is_refused_rather_than_crashing(tmp_path):
+    """A \\xff byte raised UnicodeDecodeError past the OSError handler."""
+    argv, out = _package(tmp_path, "")
+    (tmp_path / "expected.json").write_bytes(b'{"contract": "rubrica/v1\xff"}')
+    assert main(argv) == 2
+    assert not (out / "reward.txt").exists()
+    assert "not valid UTF-8" in json.loads((out / "reward-detail.json").read_text())["error"]
+    _, problems = read_contract(tmp_path / "expected.json")
+    assert problems and "not valid UTF-8" in problems[0]
+
+
+def test_a_too_deeply_nested_transcript_line_is_skipped_and_counted():
+    _, answer, _, notes = parse_transcript(
+        '{"type": "result", "result": "ok"}\n' + "[" * 100_000 + "]" * 100_000
+    )
+    assert answer == "ok"
+    assert any("skipped 1" in note for note in notes)
+
+
 def test_a_contract_that_is_not_an_object_is_refused(tmp_path):
     """json.loads("[]") parses fine and then every .get() call would raise."""
     argv, out = _package(tmp_path, "[]")
@@ -53,6 +80,50 @@ def test_a_well_formed_contract_still_scores(tmp_path):
     argv, out = _package(tmp_path, json.dumps(minimal_suite_expected()))
     assert main(argv) == 0
     assert (out / "reward.txt").read_text() == "0.0"
+
+
+# -- a weight outside [0, 1] --------------------------------------------------
+#
+# The sum check alone let assertions=2.0, trajectory=-1.0 through (it sums to
+# 1.0), and a passing run then scored reward 2.0 -- a number a platform reads as
+# an ordinary score. Each weight is now range-checked on its own.
+
+
+def _weighted(assertions, trajectory):
+    contract = minimal_suite_expected()
+    contract["weights"] = {"assertions": assertions, "trajectory": trajectory}
+    return contract
+
+
+def _refused_with(tmp_path, contract):
+    argv, out = _package(tmp_path, json.dumps(contract))
+    assert main(argv) == 2
+    assert not (out / "reward.txt").exists(), "an out-of-range weight must not be scored"
+    return json.loads((out / "reward-detail.json").read_text())["error"]
+
+
+def test_a_negative_weight_is_refused(tmp_path):
+    error = _refused_with(tmp_path, _weighted(0.8, -0.2))
+    assert "weights.trajectory must be between 0 and 1" in error
+
+
+def test_a_weight_above_one_is_refused(tmp_path):
+    error = _refused_with(tmp_path, _weighted(1.5, 0.2))
+    assert "weights.assertions must be between 0 and 1" in error
+
+
+def test_weights_that_sum_to_one_but_leave_the_range_are_refused(tmp_path):
+    """The reproduced case: 2.0 + -1.0 == 1.0 passed the sum check alone."""
+    assert _contract_problems(_weighted(2.0, -1.0)) != []
+    error = _refused_with(tmp_path, _weighted(2.0, -1.0))
+    assert "weights.assertions must be between 0 and 1" in error
+    assert "weights.trajectory must be between 0 and 1" in error
+
+
+def test_the_end_points_of_the_range_are_accepted():
+    """0 and 1 are legal weights; the check must not be off by one at the edges."""
+    assert _contract_problems(_weighted(1.0, 0.0)) == []
+    assert _contract_problems(_weighted(0, 1)) == []
 
 
 def test_read_contract_returns_the_document_when_it_is_fine(tmp_path):

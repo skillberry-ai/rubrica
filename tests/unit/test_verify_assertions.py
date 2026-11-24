@@ -105,6 +105,77 @@ def test_values_equal_compares_numbers_numerically_and_bools_strictly(want, got,
     assert values_equal(want, got) is expected
 
 
+@pytest.mark.parametrize(
+    ("want", "got", "expected"),
+    [
+        # Neighbouring 64-bit ids that float() collapses into one value.
+        (1234567890123456789, 1234567890123456790, False),
+        (9007199254740993, 9007199254740992, False),
+        ("1234567890123456789", 1234567890123456700, False),
+        ("9007199254740993", 9007199254740992, False),
+        (1234567890123456789, "1234567890123456789", True),
+        ("12345678901234567890.0", 12345678901234567890, True),
+        # The cross-type rule that must survive the exact comparison.
+        (1, 1.0, True),
+        ("7", 7, True),
+        ("1.5", 1.5, True),
+        # float() accepts these; a JSON number never would.
+        ("1_000", "1000", False),
+        ("1_000", 1000, False),
+        (" 7", 7, False),
+        ("inf", float("inf"), False),
+        ("007", 7, False),
+        ("1e3", 1000, True),
+        ("0.1", 0.1, True),
+        # Past a float's range: these once all became inf and matched.
+        ("1e500", "2e500", False),
+        ("1e401", "9e999", False),
+        ("1e999999", "2e999999", False),
+        (10**500, "1e500", True),
+        ("1e500", "1e500", True),
+    ],
+)
+def test_values_equal_compares_whole_numbers_exactly(want, got, expected):
+    """Above 2**53 a float cannot hold every integer, so comparing through
+    float() made an agent that fetched the wrong record pass tool_called."""
+    assert values_equal(want, got) is expected
+
+
+_HUGE_EXPONENTS = ["1e9999999999999999999", "1e-9999999999999999999", "0e999999999999999999999"]
+
+
+@pytest.mark.parametrize("huge", _HUGE_EXPONENTS)
+@pytest.mark.parametrize("number", [0, 1, 0.0, 1.5, float("inf"), "0", "1", "1e3"])
+def test_a_string_decimal_cannot_hold_is_not_a_number(huge, number):
+    """Decimal raises InvalidOperation on these, and the string comes from the
+    agent's transcript, so it once crashed the scorer. It is compared as text:
+    it never equals a number, in either argument position."""
+    assert values_equal(huge, number) is False
+    assert values_equal(number, huge) is False
+
+
+def test_a_string_decimal_cannot_hold_still_equals_itself_as_text():
+    assert values_equal("1e9999999999999999999", "1e9999999999999999999") is True
+    # Not via float: both would be inf, and two different strings would match.
+    assert values_equal("1e9999999999999999999", "2e9999999999999999999") is False
+
+
+def test_a_huge_exponent_is_compared_without_building_its_digits():
+    """A billion-digit number must not be built to compare it with 1."""
+    import time
+
+    start = time.monotonic()
+    assert values_equal("1e999999999", 1) is False
+    assert values_equal(1, "1e999999999") is False
+    assert time.monotonic() - start < 1.0
+
+
+def test_a_call_naming_a_neighbouring_large_id_does_not_match():
+    spec = {"tool": "get_order", "args": {"order_id": 9007199254740993}}
+    assert not call_matches(spec, ("get_order", {"order_id": 9007199254740992}))
+    assert call_matches(spec, ("get_order", {"order_id": "9007199254740993"}))
+
+
 def test_a_call_matches_on_an_argument_subset():
     call = ("query_aap2", {"action": "find_jobs", "controller": "prod0", "max_results": 50})
     assert call_matches({"tool": "query_aap2", "args": {"action": "find_jobs"}}, call)
