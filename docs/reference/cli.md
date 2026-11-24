@@ -1170,6 +1170,19 @@ longer be attributed to a stage.
 Prints one task directory per emitted scenario, then findings (if any) on
 exit 1.
 
+Each finding names the upstream artifact to change, and an instance with any
+finding gets no package. Against `04-instances/<sid>/expected.json`, a
+`tool_called` assertion or a trajectory operation is refused when its capability
+declares no binding (`declares no binding`), or — when the world model carries
+`services` — when its `binding.tool` is not exactly a `services[].tools[].name`
+(`bound to a tool the agent does not have`). The second uses the same rule as the
+coverage denominator, as a backstop for a scenario that claims such a capability
+anyway or a gate-1 hand edit that let one through: a test for an HTTP route or a
+function is one no agent can pass. A world model with no `services` key is not
+held to it, and a `tool_not_called` assertion is not either, since asserting the
+agent never calls a tool it does not have is trivially true rather than wrong.
+Both are exit `1`, a repairable stage defect.
+
 ```bash
 rubrica emit --run runs/run-20260806-123005
 ```

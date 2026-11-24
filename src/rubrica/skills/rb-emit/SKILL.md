@@ -143,7 +143,9 @@ Four steps.
      a harness problem (refusal condition 3).
 
    Emit's findings are always about an *upstream* artifact -- a capability
-   with no `binding` in the world model, an oracle that no longer parses, an
+   with no `binding` in the world model, one bound to a tool the agent does
+   not have (a `binding.tool` that is not a tool in the world model's
+   `services`), an oracle that no longer parses, an
    instance with no verdict, an instance still marked `re-seed`. Read each
    one for which artifact it names, because that is who has to change.
 

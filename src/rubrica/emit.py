@@ -33,6 +33,7 @@ import tomli_w
 from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths
+from rubrica.refs import binding_is_drivable, service_tool_names
 from rubrica.suite.verify import CONTRACT, DATA_KINDS, DEFAULT_WEIGHTS, TRAJECTORY_KINDS
 
 # Harbor task metadata. Pinned rather than discovered: a suite emitted against
@@ -107,6 +108,35 @@ def to_contract(
             )
         )
 
+    # The same rule the coverage denominator uses (refs.binding_is_drivable), not a
+    # second copy, so emit can never ship a test for a cell the denominator already
+    # excluded. It is a backstop: a scenario can claim an undrivable capability next
+    # to a drivable one, or a gate-1 hand edit can let one through, and a test whose
+    # tool_called or trajectory names a route like `GET /x` is one no agent can pass
+    # (verify.py's call_matches compares tool names exactly). With no `services` key
+    # `tools` is None and binding_is_drivable keeps the older any-binding.tool rule,
+    # so such world models emit exactly as before. tool_not_called is deliberately
+    # not held to it: asserting an agent never calls a tool it does not have is
+    # trivially true, not wrong.
+    tools = service_tool_names(world)
+
+    def not_a_tool(pointer: str, capability_id: str, binding: dict[str, Any]) -> bool:
+        # `tools is None` first: without a services list there is nothing to hold a
+        # tool name against, and binding_is_drivable would otherwise also catch a
+        # binding with no `tool` -- a different defect under a wrong message.
+        if tools is None or binding_is_drivable({"binding": binding}, tools):
+            return False
+        problems.append(
+            (
+                pointer,
+                f"capability {capability_id!r} is bound to a tool the agent does not have "
+                f"({binding.get('tool')!r} is not a tool name in the world model's services), "
+                "so no agent can make this call; point binding.tool at the exact name of a "
+                "services tool, or drop this capability from the scenario",
+            )
+        )
+        return True
+
     assertions: list[dict[str, Any]] = []
     for i, assertion in enumerate(expected.get("assertions", [])):
         kind = assertion["kind"]
@@ -127,6 +157,10 @@ def to_contract(
             if binding is None:
                 unbound(f"/assertions/{i}/capability_id", capability_id)
                 continue
+            if kind == "tool_called" and not_a_tool(
+                f"/assertions/{i}/capability_id", capability_id, binding
+            ):
+                continue
             entry.update(call_spec(binding, {}))
             assertions.append(entry)
             continue
@@ -145,6 +179,8 @@ def to_contract(
         binding = bound.get(capability_id)
         if binding is None:
             unbound(f"/trajectory/operations/{i}/capability_id", capability_id)
+            continue
+        if not_a_tool(f"/trajectory/operations/{i}/capability_id", capability_id, binding):
             continue
         operations.append(call_spec(binding, operation.get("args", {})))
 
