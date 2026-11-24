@@ -360,7 +360,16 @@ belongs in what you report back to the orchestrator, which records it in
    "Can be driven on" is a judgment with a mechanical basis you can read off
    the same file: `emit` turns a capability's `binding.tool` into the tool call
    a test makes, so a capability declaring no `binding.tool` gives every
-   scenario on it nothing to call. Those cells are real -- the world model
+   scenario on it nothing to call. Declaring one is not enough on its own.
+   When the world model has a `services` key, a capability is drivable only if
+   its `binding.tool` is exactly one of the tool names listed under
+   `services[].tools[].name` -- spelled the same, same case, no prefix
+   matching -- because a test's tool call is compared to the transcript
+   exactly. A `binding.tool` such as `POST /api/sessions` or `calculateCost`
+   names an HTTP route or an internal function, not a tool the agent calls, so
+   its cells are undrivable however confidently the binding is written. Only
+   when the world model has no `services` key at all does any non-empty
+   `binding.tool` count. Those undrivable cells are real -- the world model
    declares them, and some are genuine surfaces nobody can reach through this
    interface -- but they are not rows to score. `score-seal` writes one computed
    `unreachable` hole for each of them, so the report still accounts for every
@@ -428,8 +437,10 @@ belongs in what you report back to the orchestrator, which records it in
      round to try, so it is the only one that keeps the loop running.
    - `unreachable` -- no scenario could exercise this row against this
      target at all. One case of it is mechanical rather than a matter of
-     taste: the row's capability declares no `binding.tool`, so `emit` has no
-     call to make and no shipped test could ever reach the cell.
+     taste: the row's capability declares no `binding.tool`, or -- when the
+     world model has `services` -- declares one that is not exactly a tool
+     name listed there, so `emit` has no call an agent could make and no
+     shipped test could ever reach the cell.
      `not_yet_attempted` is the one wrong answer on such a row, because it tells
      the next round to work a cell no scenario can close. `rounds.closable_holes`
      filters such a hole out of the worklist, so the cost is not a wasted batch
@@ -525,13 +536,16 @@ belongs in what you report back to the orchestrator, which records it in
 
 1. The capability rows you reason over are exactly the world model's drivable
    pairs: one per capability x outcome-class pair it declares whose capability
-   also declares a `binding.tool` -- no pair of the denominator missing, none
-   naming a capability or outcome class the world model does not declare, and
-   none naming a cell no tool call can reach. Enumerate them from
+   also declares a `binding.tool` that is, when the world model has
+   `services`, exactly one of the tool names listed under its services -- no
+   pair of the denominator missing, none naming a capability or outcome class
+   the world model does not declare, and none naming a cell no tool call can
+   reach. A `binding.tool` that names an HTTP route or a function rather than a
+   listed tool is undrivable. Enumerate them from
    `capabilities` and their `outcome_classes`, never from the scenario list:
    `score-seal` enumerates that same drivable subset from the same file, so a
    hole set derived from the scenarios instead -- or a row set that scores the
-   pairs no `binding.tool` can reach -- disagrees with the matrices it has to
+   pairs no listed tool can reach -- disagrees with the matrices it has to
    pair up with, and `refs.check_coverage` reports every direction by name. The
    cells you leave out here are not dropped: `score-seal` writes a computed
    `unreachable` hole for each one, which is what keeps the narrowed surface an

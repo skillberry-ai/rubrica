@@ -961,3 +961,37 @@ def test_the_gaps_audit_step_records_what_it_finds_wrong_and_not_what_is_absent(
     window = method[ref : ref + 1100]
     assert "knowledge about the *target*" in window, window
     assert any(k in window for k in ("run's own progress", "absent partial")), window
+
+
+def test_capabilities_binds_only_tools_the_agent_calls():
+    """The pass once bound HTTP routes and functions as if they were tools.
+
+    Measured on a real run: of 117 bound capabilities, 110 carried a `binding.tool`
+    like `POST /api/sessions` -- a route the web app calls, not a tool the agent
+    calls -- and every one of them was then scored and given tests. This pass runs
+    before `reconcile-services` and cannot read a tool list, so the guard is the
+    prose: step 3 must say what "the tool name a transcript will show" means and
+    what to do when the claims give only a route or function, and §5 must carry the
+    same case as a condition with an action.
+
+    Located by the route example, which only the owning paragraph and bullet carry.
+    Measured both ways in a RUBRICA_SKILLS_DIR copy: blanking the step-3 paragraph,
+    or the §5 bullet, turns the test red (the locator finds no unit); dropping just
+    "leave `binding` off" from either turns it red on the action; rewording each
+    ("the agent's own tool calls", "omit `binding`") keeps it green.
+    """
+    method = _paragraph_carrying("reconcile-capabilities", "3. Method", "post /api/sessions")
+    assert "agent" in method, "step 3 no longer says the binding is a tool the agent calls"
+    assert "route" in method and "function" in method, (
+        "step 3 no longer names HTTP routes and internal functions as not being agent tools"
+    )
+    assert any(k in method for k in ("`binding` off", "omit `binding`")), (
+        "step 3 names routes and functions as non-tools but gives no action for them"
+    )
+
+    refusal = _bullet_carrying("reconcile-capabilities", "5. Refusal conditions", "/api/sessions")
+    assert "binding.tool" in refusal, refusal
+    assert any(k in refusal for k in ("`binding` off", "omit `binding`")), (
+        "the route-or-function refusal condition has no stated action, which makes it "
+        "decorative by CLAUDE.md's rule for section 5"
+    )
