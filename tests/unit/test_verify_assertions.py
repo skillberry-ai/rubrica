@@ -132,6 +132,25 @@ def test_values_equal_compares_whole_numbers_exactly(want, got, expected):
     assert values_equal(want, got) is expected
 
 
+_HUGE_EXPONENTS = ["1e9999999999999999999", "1e-9999999999999999999", "0e999999999999999999999"]
+
+
+@pytest.mark.parametrize("huge", _HUGE_EXPONENTS)
+@pytest.mark.parametrize("number", [0, 1, 0.0, 1.5, float("inf"), "0", "1", "1e3"])
+def test_a_string_decimal_cannot_hold_is_not_a_number(huge, number):
+    """Decimal raises InvalidOperation on these, and the string comes from the
+    agent's transcript, so it once crashed the scorer. It is compared as text:
+    it never equals a number, in either argument position."""
+    assert values_equal(huge, number) is False
+    assert values_equal(number, huge) is False
+
+
+def test_a_string_decimal_cannot_hold_still_equals_itself_as_text():
+    assert values_equal("1e9999999999999999999", "1e9999999999999999999") is True
+    # Not via float: both would be inf, and two different strings would match.
+    assert values_equal("1e9999999999999999999", "2e9999999999999999999") is False
+
+
 def test_a_call_naming_a_neighbouring_large_id_does_not_match():
     spec = {"tool": "get_order", "args": {"order_id": 9007199254740993}}
     assert not call_matches(spec, ("get_order", {"order_id": 9007199254740992}))

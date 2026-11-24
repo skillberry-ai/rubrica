@@ -274,6 +274,45 @@ def test_main_writes_the_three_reward_files(tmp_path):
     assert "weights" in json.loads((out / "reward-detail.json").read_text())
 
 
+def test_main_scores_a_call_whose_argument_decimal_cannot_hold(tmp_path):
+    """An agent-supplied "1e9999999999999999999" once raised InvalidOperation
+    out of the scorer, exiting 1 and leaving no reward for the platform."""
+    contract = _contract(
+        trajectory={"match": "subset", "operations": [_op(action="find_jobs", job_id=90420)]}
+    )
+    transcript = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "name": "query_aap2",
+                                "input": {
+                                    "action": "find_jobs",
+                                    "job_id": "1e9999999999999999999",
+                                },
+                            }
+                        ]
+                    },
+                }
+            ),
+            json.dumps(
+                {"type": "result", "subtype": "success", "is_error": False, "result": "Job 90420."}
+            ),
+        ]
+    )
+    expected, logs, out = _write_run(tmp_path, contract, transcript)
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 0
+    assert (out / "reward.txt").exists()
+    assert (out / "reward-detail.json").exists()
+    # The answer is right; the call's job_id is not, so the trajectory is unmet.
+    assert json.loads((out / "reward.json").read_text())["reward"] == pytest.approx(0.8)
+
+
 def test_main_refuses_an_unreadable_contract_rather_than_scoring_zero(tmp_path):
     """A zero would report a bypassed authoring gate as a bad agent run."""
     expected, logs, out = _write_run(tmp_path, _contract(contract="bench/v2"), "")

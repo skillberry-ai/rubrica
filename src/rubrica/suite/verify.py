@@ -173,11 +173,19 @@ def _as_number(value):
             return None
         # Decimal parses the text exactly, so "12345678901234567890.0" stays
         # whole and exact instead of passing through a float first.
-        exact = Decimal(value)
-        # The magnitude cap keeps "1e999999999" from building a billion-digit
-        # int; past any float's range, the float comparison is no less exact.
-        if exact.adjusted() <= 400 and exact == exact.to_integral_value():
-            return int(exact)
+        try:
+            exact = Decimal(value)
+            # The magnitude cap keeps "1e999999999" from building a billion-digit
+            # int; past any float's range, the float comparison is no less exact.
+            if exact.adjusted() <= 400 and exact == exact.to_integral_value():
+                return int(exact)
+        except ArithmeticError:
+            # An exponent past decimal's context ("1e9999999999999999999")
+            # raises InvalidOperation. The string comes from the agent's own
+            # transcript, so it must not crash the scorer; it is compared as
+            # text. Not via float(): two different such strings would both
+            # become inf and compare equal, the false match exact ints removed.
+            return None
         return float(value)
     return None
 
