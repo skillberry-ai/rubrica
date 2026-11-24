@@ -124,6 +124,15 @@ def test_values_equal_compares_numbers_numerically_and_bools_strictly(want, got,
         ("1_000", 1000, False),
         (" 7", 7, False),
         ("inf", float("inf"), False),
+        ("007", 7, False),
+        ("1e3", 1000, True),
+        ("0.1", 0.1, True),
+        # Past a float's range: these once all became inf and matched.
+        ("1e500", "2e500", False),
+        ("1e401", "9e999", False),
+        ("1e999999", "2e999999", False),
+        (10**500, "1e500", True),
+        ("1e500", "1e500", True),
     ],
 )
 def test_values_equal_compares_whole_numbers_exactly(want, got, expected):
@@ -149,6 +158,16 @@ def test_a_string_decimal_cannot_hold_still_equals_itself_as_text():
     assert values_equal("1e9999999999999999999", "1e9999999999999999999") is True
     # Not via float: both would be inf, and two different strings would match.
     assert values_equal("1e9999999999999999999", "2e9999999999999999999") is False
+
+
+def test_a_huge_exponent_is_compared_without_building_its_digits():
+    """A billion-digit number must not be built to compare it with 1."""
+    import time
+
+    start = time.monotonic()
+    assert values_equal("1e999999999", 1) is False
+    assert values_equal(1, "1e999999999") is False
+    assert time.monotonic() - start < 1.0
 
 
 def test_a_call_naming_a_neighbouring_large_id_does_not_match():

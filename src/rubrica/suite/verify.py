@@ -17,6 +17,7 @@ the executed file cannot differ.
 """
 
 import argparse
+import decimal
 import json
 import math
 import os
@@ -152,41 +153,46 @@ def parse_transcript(text):
 _JSON_NUMBER = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?", re.ASCII)
 
 
-def _as_number(value):
-    """A JSON scalar as an exact int when it is whole, a float when it is not.
+# A fixed context so parsing does not depend on whatever context the caller set
+# up: the widest exponent range decimal supports, and InvalidOperation still
+# trapped so an unparseable exponent raises rather than quietly becoming NaN.
+_DECIMAL_CONTEXT = decimal.Context(
+    Emax=decimal.MAX_EMAX, Emin=decimal.MIN_EMIN, traps=[decimal.InvalidOperation]
+)
 
-    Whole numbers come back as int so that comparison is exact: float() holds
-    every integer only up to 2**53, and above that neighbouring 64-bit ids
-    (9007199254740992 and 9007199254740993) become the same float, so an agent
-    that fetched the wrong record would pass tool_called. Only a true decimal
-    is compared as a float. Booleans are not numbers here (values_equal handles
-    them before calling this).
+
+def _as_number(value):
+    """A JSON scalar as an exact Decimal, or None when it is not a number.
+
+    Every number becomes a Decimal so that one exact comparison covers every
+    case. Through float(), only integers up to 2**53 survive: neighbouring
+    64-bit ids (9007199254740992 and 9007199254740993) became the same float,
+    and any numeric string past a float's range became inf, so "1e500" equalled
+    "2e500" and an agent that fetched the wrong record passed tool_called.
+    Decimal equality is exact at any size and never builds the full digits, so
+    "1e999999999" against 1 costs nothing. Booleans are not numbers here
+    (values_equal handles them before calling this).
     """
     if isinstance(value, bool):
         return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value) if value.is_integer() else value
-    if isinstance(value, str):
-        if not _JSON_NUMBER.fullmatch(value):
-            return None
-        # Decimal parses the text exactly, so "12345678901234567890.0" stays
-        # whole and exact instead of passing through a float first.
-        try:
-            exact = Decimal(value)
-            # The magnitude cap keeps "1e999999999" from building a billion-digit
-            # int; past any float's range, the float comparison is no less exact.
-            if exact.adjusted() <= 400 and exact == exact.to_integral_value():
-                return int(exact)
-        except ArithmeticError:
-            # An exponent past decimal's context ("1e9999999999999999999")
-            # raises InvalidOperation. The string comes from the agent's own
-            # transcript, so it must not crash the scorer; it is compared as
-            # text. Not via float(): two different such strings would both
-            # become inf and compare equal, the false match exact ints removed.
-            return None
-        return float(value)
+    try:
+        with decimal.localcontext(_DECIMAL_CONTEXT):
+            if isinstance(value, int):
+                # Exact for any size.
+                return Decimal(value)
+            if isinstance(value, float):
+                # Via repr, the shortest text that round-trips, so 0.1 equals
+                # "0.1" rather than the float's full binary expansion. NaN stays
+                # unequal to everything and inf equal only to inf, as Decimal's
+                # == does for its own NaN and Infinity without signalling.
+                return Decimal(repr(value))
+            if isinstance(value, str) and _JSON_NUMBER.fullmatch(value):
+                return Decimal(value)
+    except ArithmeticError:
+        # An exponent past decimal's limits ("1e9999999999999999999") raises
+        # InvalidOperation. The string comes from the agent's own transcript,
+        # so it must not crash the scorer; it is compared as text instead.
+        return None
     return None
 
 
