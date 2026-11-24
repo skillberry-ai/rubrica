@@ -709,7 +709,17 @@ Composes the existing reports into the reading surface at one of the four
 human gates: the objective verdict and grouped declines at gate 0; the reconcile
 sweep, the capabilities the coverage denominator excludes, claim utilisation per
 input, read coverage per reconcile pass, the implied suite size and one block per
-service at gate 1; the coverage matrix at gate 2; the verdict tally at gate 3.
+service at gate 1; the coverage matrix and the drivability counts at gate 2; the
+verdict tally at gate 3.
+
+Gate 2's **drivability** block splits the world model's capabilities three ways —
+drivable (bound to a tool an agent has), bound but not to an agent tool, and
+unbound — and gives each class in capabilities and in cells, so a reader approving
+the matrix sees how much of it an agent can actually drive rather than finding the
+skew in the emitted suite. It uses the same rule as gate 1's excluded-capability
+block and the coverage denominator, so the three cannot disagree. A world model
+that is missing, not JSON, or unreadable prints "not computed" in place of the
+numbers, and the brief still exits 0.
 
 Gate 0 renders more than the others because it is the one gate held before any
 downstream stage has read the corpus: the objective verdict, then the waivers in
@@ -925,7 +935,10 @@ holds the full detail: the smoke result (verdict, mean reward per role, the
 agents, the tasks the reference agent did not pass, and every task's rewards);
 the challenge tally and emitted packages; one line per scenario joined to its
 verdict and package; the coverage progression with both of `latest.json`'s
-matrices &mdash; capability cells, and goals by hop depth; world-model counts;
+matrices &mdash; capability cells, and goals by hop depth &mdash; preceded by the
+same drivable / bound-but-not-to-an-agent-tool / unbound counts gate 2 shows, in
+capabilities and cells, read from the world model ("not computed" when it cannot
+be read); world-model counts;
 claim utilisation; gaps; contradictions; the manifest's inputs; the objective
 verdict; grouped dispositions; deficiencies; `decisions.md`; the run record
 (limits and the per-stage model, effort and skill hash); the stage spine; and a

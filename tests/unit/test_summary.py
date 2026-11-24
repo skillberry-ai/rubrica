@@ -5673,3 +5673,56 @@ def test_clipped_marks_one_character_past_the_boundary_and_not_the_boundary(tmp_
     assert "&hellip;" not in summary_html._clipped(exact), "a cell that fits is not clipped"
     assert summary_html._clipped(exact) == exact
     assert "&hellip;" in summary_html._clipped(over)
+
+
+def test_coverage_carries_the_three_drivability_counts(tmp_path):
+    """The coverage section says how much of the matrix an agent can
+    drive, in capabilities and cells, by the same rule gate 1 and gate 2 use."""
+    from rubrica import brief
+    from rubrica.artifacts import read_json, write_json
+
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
+    world = read_json(run.world_model)
+    caps = {cap["id"]: cap for cap in world["capabilities"]}
+    caps["cap-get-ticket"]["binding"] = {"tool": "GET /tickets/{id}", "fixed_args": {}}
+    extra = dict(caps["cap-find-tickets"], id="cap-unbound-extra", binding=None)
+    extra["outcome_classes"] = extra["outcome_classes"][:1]
+    world["capabilities"].append(extra)
+    write_json(run.world_model, world)
+
+    got = summary.coverage(run).drivability
+    assert got == [
+        (brief.DRIVABLE, 1, len(caps["cap-find-tickets"]["outcome_classes"])),
+        (brief.OFF_TOOL, 1, len(caps["cap-get-ticket"]["outcome_classes"])),
+        (brief.UNBOUND, 1, 1),
+    ]
+    assert got == brief.drivability_counts(read_json(run.world_model))
+
+    html = summary.run_summary(run)
+    assert "<h3>Drivability</h3>" in html
+    assert "bound, but not to an agent tool" in html
+    assert "Drivability not computed" not in html
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    ["not json", "[]", None],
+    ids=["bad-json", "not-an-object", "unreadable"],
+)
+def test_coverage_drivability_is_not_computed_on_an_unreadable_world_model(tmp_path, corrupt):
+    """A report: a world model it cannot read costs the drivability table, never
+    the page and never the exit code, and is said rather than rendered as zeros."""
+    if corrupt is None and os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
+    if corrupt is None:
+        run.world_model.chmod(0o000)
+    else:
+        run.world_model.write_text(corrupt)
+    out = tmp_path / "page.html"
+    try:
+        assert summary.coverage(run).drivability is None
+        assert cli.main(["run-summary", "--run", str(run.root), "-o", str(out)]) == 0
+    finally:
+        run.world_model.chmod(0o644)
+    assert "Drivability not computed: no readable world model." in out.read_text()

@@ -366,6 +366,95 @@ def _cell_counts(world: dict) -> tuple[int, int] | None:
         return None
 
 
+# The three classes a capability falls into once `services` exists, in the order
+# every surface prints them. The labels are the reader's wording, not field names,
+# because gate 2 and the run summary print them as-is.
+DRIVABLE = "drivable (bound to an agent tool)"
+OFF_TOOL = "bound, but not to an agent tool"
+UNBOUND = "unbound (no binding.tool)"
+DRIVABILITY_CLASSES: tuple[str, ...] = (DRIVABLE, OFF_TOOL, UNBOUND)
+
+
+def _drivability_class(cap: dict, tools: set[str] | None) -> str:
+    """Which of `DRIVABILITY_CLASSES` one capability is in.
+
+    The one spelling of the three-way split in this build: gate 1's excluded block,
+    gate 2's drivability lines and the run summary's coverage section all call it,
+    so no two of them can disagree about which capabilities a reader is told are
+    out. The drivable half is `refs.binding_is_drivable`, the same predicate the
+    denominator and `seal_score`'s injected holes use; the only thing added here
+    is telling the two excluded causes apart, because the actions differ -- an
+    unbound capability needs a tool added, an off-tool one needs its binding
+    pointed at a tool `services` lists.
+    """
+    if binding_is_drivable(cap, tools):
+        return DRIVABLE
+    if _mapping(cap.get("binding")).get("tool"):
+        return OFF_TOOL
+    return UNBOUND
+
+
+def drivability_counts(world: dict) -> list[tuple[str, int, int]] | None:
+    """(class, capabilities, cells) for each of `DRIVABILITY_CLASSES`, or None.
+
+    Cells are distinct (capability id, outcome-class id) pairs within each class,
+    for `drivable_cells`' reason: a repeated id is one cell in the denominator, so
+    counting array lengths would print a number no other surface agrees with. So
+    on a well-formed world model the drivable cell count here equals
+    `len(drivable_cells(world))`.
+
+    None means "could not be counted", for `_cell_counts`' reason. Every read below
+    is guarded already (`_dicts`, `_mapping`, `service_tool_names`' per-element
+    guards), so the catch is a backstop: a report must not exit 1 with a
+    fabricated `[internal]` finding on a hand-edited world model it can otherwise
+    read.
+    """
+    try:
+        tools = service_tool_names(world)
+        caps: dict[str, int] = dict.fromkeys(DRIVABILITY_CLASSES, 0)
+        cells: dict[str, set[tuple[str, str]]] = {c: set() for c in DRIVABILITY_CLASSES}
+        for cap in _dicts(world.get("capabilities")):
+            klass = _drivability_class(cap, tools)
+            caps[klass] += 1
+            cap_id = cap.get("id")
+            if not isinstance(cap_id, str):
+                continue
+            for oc in _dicts(cap.get("outcome_classes")):
+                if isinstance(oc.get("id"), str):
+                    cells[klass].add((cap_id, oc["id"]))
+        return [(c, caps[c], len(cells[c])) for c in DRIVABILITY_CLASSES]
+    except Exception:  # deliberate, matching _quietly's reasoning
+        return None
+
+
+def drivability_lines(world_doc) -> list[str]:
+    """Gate 2's drivability block: the three classes, in capabilities and cells.
+
+    `world_doc` is whatever `_quietly(run.world_model)` returned, so None is "no
+    readable world model" and is said rather than rendered as zeros -- three rows
+    of 0 read as a world model that declares nothing, which is a claim about the
+    target this report does not have.
+
+    Gate 2 is where a reader approves the matrix, so the skew between what the
+    matrix counts and what an agent can actually drive has to be visible there
+    rather than first discovered in the emitted suite.
+    """
+    lines = ["Drivability (from 01-world-model.json)"]
+    if not isinstance(world_doc, dict):
+        lines.append("  (no readable world model; not computed)")
+        return lines
+    counts = drivability_counts(world_doc)
+    if counts is None:
+        lines.append("  (could not be counted; run `rubrica validate --stage reconcile-seal`)")
+        return lines
+    for klass, n_caps, n_cells in counts:
+        lines.append(
+            f"  {klass}: {n_caps} {'capability' if n_caps == 1 else 'capabilities'}, "
+            f"{n_cells} {'cell' if n_cells == 1 else 'cells'}"
+        )
+    return lines
+
+
 def _claim_sources(run: RunPaths) -> dict[str, str]:
     """claim id -> the input id that asserted it, for every readable claims file.
 
@@ -421,9 +510,13 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
     # binding.tool" of a world model where they do: on hermes run-20261110-150134
     # 117 capabilities declared one and 110 of them named an HTTP route or a
     # function rather than a tool in `services`.
+    #
+    # Both lists come from `_drivability_class`, the one spelling of the split that
+    # gate 2 and the run summary also read, kept in document order.
     tools = service_tool_names(world)
-    excluded = [cap for cap in capabilities if not binding_is_drivable(cap, tools)]
-    unbound = [cap for cap in excluded if not _mapping(cap.get("binding")).get("tool")]
+    classes = [(cap, _drivability_class(cap, tools)) for cap in capabilities]
+    excluded = [cap for cap, klass in classes if klass != DRIVABLE]
+    unbound = [cap for cap, klass in classes if klass == UNBOUND]
     off_tool = len(excluded) - len(unbound)
     drivable = len(capabilities) - len(excluded)
 
@@ -1622,6 +1715,11 @@ def _gate_2(run: RunPaths) -> str:
         lines.append(
             f"  implied suite size: {size['implied']} (ceiling {size['ceiling']}{binding_note})"
         )
+
+    # Read from the world model rather than the coverage document, which records
+    # covered/total but not why a cell can never be covered.
+    lines.append("")
+    lines.extend(drivability_lines(_quietly(run.world_model)))
 
     return "\n".join(lines) + "\n"
 

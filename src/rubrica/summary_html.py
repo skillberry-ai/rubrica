@@ -941,6 +941,31 @@ def _coverage(run: RunPaths):
             '<p class="absent">Implied suite size not computed: no world model, or '
             "an artifact it needs could not be read.</p>"
         )
+    # Before the matrix, because it is how to read the matrix: a cell no agent tool
+    # can drive stays uncovered whatever the loop does.
+    parts.append("<h3>Drivability</h3>")
+    if got.drivability is not None:
+        parts.append(
+            _table(
+                ("capability class", "capabilities", "cells"),
+                [
+                    "<tr>"
+                    f"<td>{esc(klass)}</td>"
+                    f'<td class="num">{esc(n_caps)}</td>'
+                    f'<td class="num">{esc(n_cells)}</td>'
+                    "</tr>"
+                    for klass, n_caps, n_cells in got.drivability
+                ],
+                num=("capabilities", "cells"),
+            )
+        )
+        parts.append(
+            '<p class="note">Read from 01-world-model.json. Only the drivable cells '
+            "can be exercised by an agent; the other two classes are cells the suite "
+            "cannot reach.</p>"
+        )
+    else:
+        parts.append('<p class="absent">Drivability not computed: no readable world model.</p>')
     parts.append(f"<h3>Capability matrix ({esc(len(got.cells))} cells)</h3>")
     if got.cells:
         parts.append(_matrix(got.cells))
