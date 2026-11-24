@@ -26,7 +26,7 @@ from rubrica.artifacts import ArtifactError, read_json, sha256_of, write_json
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
 from rubrica.intake import _unique_artifact_id, classify
-from rubrica.paths import RunPaths
+from rubrica.paths import RunPaths, segment_key
 from rubrica.refs import UNSET, resolve_pointer
 
 # The core semantic point of this module, said in the one place a human
@@ -424,8 +424,11 @@ def adopt_projection(
     # collide with `projection_id` (which _unique_artifact_id compares as a
     # string) so dropping it from the collision map loses nothing, and
     # check_catalogue already reports it as a finding of its own.
+    # Keyed by segment_key, the form _unique_artifact_id compares under: a
+    # model-minted `Orders-Capture` beside survey's `orders-capture` was kept
+    # as is, and intake then copied both into one file on macOS.
     used = {
-        c["candidate_id"]: 1
+        segment_key(c["candidate_id"]): 1
         for c in candidates
         if isinstance(c, dict) and isinstance(c.get("candidate_id"), str)
     }

@@ -495,8 +495,20 @@ def check_catalogue(run: RunPaths) -> list[Finding]:
         return []
 
     ids = [c.get("candidate_id") for c in candidates if isinstance(c, dict)]
-    for duplicate in _dupes([i for i in ids if isinstance(i, str)]):
-        report("/candidates", f"duplicate candidate_id {duplicate!r}")
+    # By paths.segment_key, not exactly: an admitted candidate_id becomes an
+    # artifact id and a file under 00-inputs/, so on a case-insensitive disk
+    # `orders-capture` and `Orders-Capture` are one file and intake's second
+    # copy overwrites the first. Reported here, against the catalogue that
+    # carries both, rather than later against a manifest no stage can repair.
+    for first, repeat in duplicate_id_pairs(ids):
+        if first == repeat:
+            report("/candidates", f"duplicate candidate_id {first!r}")
+        else:
+            report(
+                "/candidates",
+                f"candidate_ids {first!r} and {repeat!r} differ only in case: on a "
+                "case-insensitive filesystem they would share one file in 00-inputs/",
+            )
     known = {i for i in ids if isinstance(i, str)}
 
     for index, candidate in enumerate(candidates):

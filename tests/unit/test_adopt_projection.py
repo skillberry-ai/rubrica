@@ -233,6 +233,30 @@ def test_the_adopted_run_still_passes_check_all(tmp_path):
     assert projection["satisfied_by"] == adopted["candidate_id"]
 
 
+def test_a_projection_id_differing_only_in_case_from_a_candidate_is_suffixed(tmp_path):
+    """rb-triage-audit mints projection_id and may capitalise it. Measured:
+    `Orders-Capture` beside survey's `orders-capture` was kept as is, and intake
+    then copied both into one file on a case-insensitive disk. The used-set is
+    keyed by paths.segment_key, so the adopted candidate now gets a suffix."""
+    run = _run_with_projection(tmp_path)
+    catalogue = read_json(run.catalogue)
+    catalogue["candidates"][0]["candidate_id"] = "orders-capture"
+    write_json(run.catalogue, catalogue)
+    record = read_json(run.triage)
+    record["dispositions"][0]["candidate_id"] = "orders-capture"
+    record["objective_review"]["surfaces"][0]["evidence"] = ["orders-capture"]
+    record["projections"][0]["projection_id"] = "Orders-Capture"
+    record["projections"][0]["sources"][0]["candidate_id"] = "orders-capture"
+    write_json(run.triage, record)
+
+    assert (
+        triage.adopt_projection(run, projection_id="Orders-Capture", source=_good(tmp_path)) == []
+    )
+    ids = [c["candidate_id"] for c in read_json(run.catalogue)["candidates"]]
+    assert ids == ["orders-capture", "Orders-Capture-2"]
+    assert refs.check_catalogue(run) == []
+
+
 def test_a_missing_required_string_is_one_finding_per_failed_check(tmp_path):
     """Exit 1 with findings the worker reads and retries against -- and the same
     findings a future rb-project member would read as its gate."""

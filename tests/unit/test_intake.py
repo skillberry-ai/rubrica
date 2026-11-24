@@ -200,6 +200,63 @@ def test_intake_disambiguates_colliding_artifact_ids(tmp_path):
     assert ids == ["api-json", "api-json-2"]
 
 
+def test_a_suffix_never_lands_on_an_id_another_input_already_has(tmp_path):
+    """Measured: `d1/x.md d2/x.md x-md-2` gave ids `x-md`, `x-md-2`, `x-md-2`,
+    intake exited 0, and check-refs then named manifest.json -- which no stage
+    can repair. Every id handed out is now remembered, suffixed ones too."""
+    from rubrica.refs import check_all
+
+    inputs = [
+        _write(tmp_path / "d1", "x.md", "# one\n"),
+        _write(tmp_path / "d2", "x.md", "# two\n"),
+        _write(tmp_path / "d3", "x-md-2", "# three\n"),
+    ]
+    run = intake(
+        inputs=inputs,
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=NOW,
+    )
+    ids = [e["artifact_id"] for e in read_json(run.manifest)["inputs"]]
+    assert len(set(ids)) == 3, ids
+    assert ids[:2] == ["x-md", "x-md-2"]
+    assert len(list(run.inputs_dir.iterdir())) == 3
+    assert check_all(run) == []
+
+
+def test_unique_artifact_id_compares_under_segment_key():
+    """Case-only repeats share one file on macOS, so they are repeats here too.
+    Plain lower-case runs keep exactly the ids they always had."""
+    from rubrica.intake import _unique_artifact_id
+
+    used: dict[str, int] = {}
+    assert [_unique_artifact_id(b, used) for b in ["a", "a", "a", "b"]] == ["a", "a-2", "a-3", "b"]
+    used = {}
+    assert [_unique_artifact_id(b, used) for b in ["Orders", "orders", "ORDERS-2"]] == [
+        "Orders",
+        "orders-2",
+        "ORDERS-2-2",
+    ]
+
+
+def test_a_case_only_pair_of_filenames_gets_distinct_ids(tmp_path):
+    run = intake(
+        inputs=[_write(tmp_path / "p", "A.md", "# A\n"), _write(tmp_path / "q", "a.md", "# a\n")],
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=NOW,
+    )
+    ids = [e["artifact_id"] for e in read_json(run.manifest)["inputs"]]
+    assert len({i.casefold() for i in ids}) == 2, ids
+    assert len(list(run.inputs_dir.iterdir())) == 2
+
+
 def test_intake_records_the_limits_the_orchestrator_will_enforce(tmp_path):
     run = intake(
         inputs=[_write(tmp_path / "src", "api.json", {"tools": []})],

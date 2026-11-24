@@ -89,6 +89,23 @@ def test_a_duplicate_candidate_id_is_a_finding(tmp_path):
     assert findings and "cap-json" in str(findings[0])
 
 
+def test_a_candidate_id_repeated_only_in_case_is_a_finding_against_the_catalogue(tmp_path):
+    """`Cap-JSON` and `cap-json` become one file in 00-inputs/ on macOS, so the
+    repeat is reported here, by paths.segment_key, not left for a manifest
+    finding no stage can repair."""
+
+    def mutate(c):
+        c["candidates"][1]["candidate_id"] = "Cap-JSON"
+        c["candidates"][1]["container"]["candidate_id"] = "cap-json"
+
+    run = _run_with(tmp_path, mutate)
+    findings = refs.check_catalogue(run)
+    case = [f for f in findings if "differ only in case" in f.message]
+    assert len(case) == 1
+    assert case[0].artifact == run.catalogue
+    assert "'cap-json'" in case[0].message and "'Cap-JSON'" in case[0].message
+
+
 def test_an_absent_catalogue_is_not_a_finding(tmp_path):
     """A run built through `intake --input` never had one, and spec §7.1 rules
     that its absence is not a finding -- the same ruling that makes intake's and

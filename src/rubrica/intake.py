@@ -23,7 +23,7 @@ from rubrica.digest import is_message_list
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
 from rubrica.manifest import utc_stamp
-from rubrica.paths import RunPaths, is_safe_segment, safe_segment
+from rubrica.paths import RunPaths, is_safe_segment, safe_segment, segment_key
 from rubrica.refs import check_triage, resolve_pointer
 
 _SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".go", ".rs", ".java", ".rb"}
@@ -125,10 +125,37 @@ def _unique_artifact_id(base: str, used: dict[str, int]) -> str:
     refs.check_admitted_inputs reverses this exact rule to recover a
     candidate_id from a manifest artifact_id, and two independent spellings
     of "suffix on collision" would make that reversal ambiguous.
+
+    `used` is keyed by `paths.segment_key`, not by exact text, and records
+    every id handed out -- suffixed ones too -- not only the bases. Both
+    halves were measured defects. Keyed on the base alone, `--input d1/x.md
+    d2/x.md x-md-2` gave the second `x.md` the suffix `x-md-2` and then kept
+    the literal `x-md-2` as is: two inputs with one id, intake exiting 0, and
+    the check-refs finding naming manifest.json, which no stage can repair.
+    Keyed on exact text, adopt-projection kept a model-minted `Orders-Capture`
+    beside survey's `orders-capture`, and intake then copied both into one
+    file on a case-insensitive disk. So a repeat takes the lowest suffix whose
+    key is still free. Where nothing collides the ids are exactly the old ones
+    (`x`, `x-2`, `x-3` ...), so existing runs and fixtures do not move.
+
+    The value under a base's key is the last suffix tried for it, so a third
+    repeat starts after the second's. A caller reserving ids it did not mint
+    here (adopt-projection, for the catalogue's existing candidates) stores
+    `segment_key(id): 1`.
     """
-    count = used.get(base, 0) + 1
-    used[base] = count
-    return base if count == 1 else f"{base}-{count}"
+    key = segment_key(base)
+    if key not in used:
+        used[key] = 1
+        return base
+    count = used[key]
+    while True:
+        count += 1
+        candidate = f"{base}-{count}"
+        if segment_key(candidate) not in used:
+            break
+    used[key] = count
+    used[segment_key(candidate)] = 1
+    return candidate
 
 
 def _unique_ids(inputs: list[Path]) -> list[str]:

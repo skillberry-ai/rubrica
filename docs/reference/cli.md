@@ -115,6 +115,13 @@ to judge` on a clean pass, or findings on exit 1 — structural acceptance is
 necessary and never sufficient; whether the file means what the projection
 asked for is still a human's call.
 
+The adopted candidate's `candidate_id` is the projection id, suffixed `-2`,
+`-3`, … if the catalogue already holds that id **ignoring case** — so a
+projection `Orders-Capture` beside a surveyed `orders-capture` is adopted as
+`Orders-Capture-2`, not as a second name for the same file in `00-inputs/`.
+`intake` uses the same rule when it turns candidate ids and file names into
+artifact ids, and never hands out a suffixed id another input already has.
+
 ```bash
 rubrica adopt-projection --run runs/run-20260806-123005 \
   --projection proj-001 --file path/to/manufactured-tool-schema.json
