@@ -20,7 +20,9 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 CONTRACT = "rubrica/v1"
@@ -143,14 +145,40 @@ def parse_transcript(text):
     return calls, answer, ok, notes
 
 
+# JSON's own number grammar, ASCII digits only. float() and int() also accept
+# underscores ("1_000"), surrounding whitespace, "inf"/"nan", leading zeros and
+# non-ASCII digits; none of those is a number a JSON tool argument could carry,
+# so a string that needs any of them to parse is compared as a string.
+_JSON_NUMBER = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?", re.ASCII)
+
+
 def _as_number(value):
-    if isinstance(value, (int, float)):
-        return float(value)
+    """A JSON scalar as an exact int when it is whole, a float when it is not.
+
+    Whole numbers come back as int so that comparison is exact: float() holds
+    every integer only up to 2**53, and above that neighbouring 64-bit ids
+    (9007199254740992 and 9007199254740993) become the same float, so an agent
+    that fetched the wrong record would pass tool_called. Only a true decimal
+    is compared as a float. Booleans are not numbers here (values_equal handles
+    them before calling this).
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else value
     if isinstance(value, str):
-        try:
-            return float(value)
-        except ValueError:
+        if not _JSON_NUMBER.fullmatch(value):
             return None
+        # Decimal parses the text exactly, so "12345678901234567890.0" stays
+        # whole and exact instead of passing through a float first.
+        exact = Decimal(value)
+        # The magnitude cap keeps "1e999999999" from building a billion-digit
+        # int; past any float's range, the float comparison is no less exact.
+        if exact.adjusted() <= 400 and exact == exact.to_integral_value():
+            return int(exact)
+        return float(value)
     return None
 
 
@@ -159,9 +187,10 @@ def values_equal(want, got):
 
     Numbers compare numerically and a numeric string equals a number: an agent
     that serialises job_id as "90420" still chose the right job, so penalising
-    it would measure serialisation style rather than tool use. Booleans are
-    never equal to numbers, because failed_only=true and failed_only=1 are
-    different intents.
+    it would measure serialisation style rather than tool use. The comparison
+    is exact, never a tolerance: 1 equals 1.0, but 9007199254740993 does not
+    equal 9007199254740992 (see _as_number). Booleans are never equal to
+    numbers, because failed_only=true and failed_only=1 are different intents.
     """
     if isinstance(want, bool) or isinstance(got, bool):
         return isinstance(want, bool) and isinstance(got, bool) and want == got

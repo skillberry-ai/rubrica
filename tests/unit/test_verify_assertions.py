@@ -105,6 +105,39 @@ def test_values_equal_compares_numbers_numerically_and_bools_strictly(want, got,
     assert values_equal(want, got) is expected
 
 
+@pytest.mark.parametrize(
+    ("want", "got", "expected"),
+    [
+        # Neighbouring 64-bit ids that float() collapses into one value.
+        (1234567890123456789, 1234567890123456790, False),
+        (9007199254740993, 9007199254740992, False),
+        ("1234567890123456789", 1234567890123456700, False),
+        ("9007199254740993", 9007199254740992, False),
+        (1234567890123456789, "1234567890123456789", True),
+        ("12345678901234567890.0", 12345678901234567890, True),
+        # The cross-type rule that must survive the exact comparison.
+        (1, 1.0, True),
+        ("7", 7, True),
+        ("1.5", 1.5, True),
+        # float() accepts these; a JSON number never would.
+        ("1_000", "1000", False),
+        ("1_000", 1000, False),
+        (" 7", 7, False),
+        ("inf", float("inf"), False),
+    ],
+)
+def test_values_equal_compares_whole_numbers_exactly(want, got, expected):
+    """Above 2**53 a float cannot hold every integer, so comparing through
+    float() made an agent that fetched the wrong record pass tool_called."""
+    assert values_equal(want, got) is expected
+
+
+def test_a_call_naming_a_neighbouring_large_id_does_not_match():
+    spec = {"tool": "get_order", "args": {"order_id": 9007199254740993}}
+    assert not call_matches(spec, ("get_order", {"order_id": 9007199254740992}))
+    assert call_matches(spec, ("get_order", {"order_id": "9007199254740993"}))
+
+
 def test_a_call_matches_on_an_argument_subset():
     call = ("query_aap2", {"action": "find_jobs", "controller": "prod0", "max_results": 50})
     assert call_matches({"tool": "query_aap2", "args": {"action": "find_jobs"}}, call)
