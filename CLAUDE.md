@@ -253,10 +253,16 @@ are judgments rather than list entries:
   produce byte-identical documents. **Its failure surface splits across both exit
   codes, and the split is load-bearing.** A missing or non-object
   `01-services.json`, a service id that is not a usable filename, a tool name the
-  harness would rewrite, and a `schema_claim` no claim in `01-claims/` has an id
-  for are `1`s: re-dispatching `reconcile-services` repairs each. A `schema_claim`
-  naming a claim that exists and carries no usable `payload` is a `1` too, but
-  against `01-claims/<artifact_id>.json` and **not** repairable by that pass —
+  harness would rewrite, a missing or non-string `schema_claim`, and a
+  `schema_claim` no claim in `01-claims/` has an id for are `1`s: re-dispatching
+  `reconcile-services` repairs each. Two `1`s name a claims file instead. A claims
+  file that will not parse, is not an object, or has the wrong shape is a `1`
+  against that file, which its `extract` member repairs — and while one is
+  present the unresolved-id `schema_claim` findings against `01-services.json` are
+  **held back**, because the broken file may be where the cited id lives; every
+  other finding against the part still prints. A `schema_claim` naming a claim
+  that exists and carries no usable `payload` is a `1` against
+  `01-claims/<artifact_id>.json` and **not** repairable by `reconcile-services` —
   which is instructed to cite such a claim anyway — so it is a finding a human
   rules on at gate 1. An unwritable
   `01-interfaces/` is a `2`, because no prompt re-dispatch fixes a directory

@@ -241,12 +241,25 @@ missing or non-object `01-services.json`, a `services` key that is not an array,
 service id that is not usable as a filename, a tool name the harness's
 sanitisation would rewrite, a tool name already declared earlier in the part —
 by the same service or another — a service id already used by an earlier service,
-and a `schema_claim` no claim in `01-claims/` has
-an id for are all `1`s against that part — each is repaired by re-dispatching
-`reconcile-services`, which is what a `1` promises the orchestrator.
+a `schema_claim` that is missing or is not a string, and a `schema_claim` no claim
+in `01-claims/` has an id for are all `1`s against that part — each is repaired by
+re-dispatching `reconcile-services`, which is what a `1` promises the orchestrator.
 
-**A `schema_claim` whose claim exists and carries no usable `payload` is the one
-finding here that names a claims file instead**, at that claim's `payload`. The
+Two kinds of finding name a claims file instead of the part. The first is **a
+claims file that will not parse, is not a JSON object, or is an object of the wrong
+shape**: it is a `1` against that file, held to the same rule `check-refs` holds it
+to, so the two commands name the same broken file, and it is repaired by the
+`extract` member that wrote it. Such a file adds nothing to the index of claim ids,
+and it may be exactly where a cited id lives — so **while one is present, the
+"no claim in `01-claims/` has id" findings against `01-services.json` are held
+back**, since they are not yet evidence against the part. Only those are held back:
+every other finding against the part still prints, a missing or non-string
+`schema_claim` included, because no claims file can explain it. A held-back
+finding is not a cleared one; re-running the command once the claims file is fixed
+is what shows whether the part has one.
+
+The second is **a `schema_claim` whose claim exists and carries no usable
+`payload`**, a `1` against that claims file at that claim's `payload`. The
 payload is `rb-extract`'s output, and `rb-reconcile-services` is instructed to cite
 such a claim as the `schema_claim` anyway and say so in the service's `statement` —
 so the part is correct, re-dispatching that pass returns the same bytes, and a `1`
