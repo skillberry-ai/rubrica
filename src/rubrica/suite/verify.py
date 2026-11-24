@@ -765,7 +765,11 @@ def _read_logs(agent_logs):
     parts, problems = [], []
     for path in paths:
         try:
-            parts.append(path.read_text(errors="replace"))
+            # UTF-8 explicitly, as the contract is read: under a non-UTF-8 locale
+            # the default decoding read UTF-8 "café" as "cafÃ©", so a correct
+            # non-ASCII answer never matched and quietly scored 0. errors="replace"
+            # stays, so one bad byte in a transcript cannot crash the scoring.
+            parts.append(path.read_text(encoding="utf-8", errors="replace"))
         except OSError as exc:
             problems.append(f"agent transcript {path} could not be read: {exc}")
     return "\n".join(parts), problems
@@ -781,7 +785,21 @@ def main(argv=None):
     # out is created before the contract is read: a refusal has to be able to
     # write reward-detail.json, and an absent contract is one of the refusals.
     out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
+    # A --out that cannot be created -- an existing file, or a parent with no
+    # write permission -- used to raise here, before the safety net below, so it
+    # ended in a bare traceback and exit 1. It is a refusal like any other (exit
+    # 2, no reward.txt), but nothing can be written into --out, so stderr is the
+    # only channel left to say why; _refuse is not called, since its
+    # reward-detail.json write could only fail too.
+    try:
+        out.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(
+            f"verify.py: output directory {out} could not be created: {exc}; "
+            "nothing could be written to --out, so this is reported on stderr only",
+            file=sys.stderr,
+        )
+        return 2
 
     # Any reward.txt / reward.json / reward-detail.json an earlier run left in
     # this --out is removed before anything else can fail. The rewards used to

@@ -989,7 +989,11 @@ one holding no `*.jsonl` or `*.txt` transcript file, or a transcript file that
 cannot be read (a permissions failure, or a directory named `*.jsonl`). A
 contract problem is named in preference to a log problem. A transcript file
 that exists and is empty is **not** a refusal: an agent that ran and printed
-nothing scores normally.
+nothing scores normally. Transcripts are read as UTF-8 whatever the machine's
+locale, with a bad byte replaced rather than fatal, so a non-ASCII answer
+matches the UTF-8 contract. An `--out` that cannot be created (an existing
+file, say) is a refusal too, exit `2`, reported on stderr only, since nothing
+can be written to `--out`.
 
 Two more refusals guard against a stale or missing result. Before reading
 anything, the verifier removes any `reward.txt`, `reward.json` and

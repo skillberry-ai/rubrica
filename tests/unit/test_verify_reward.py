@@ -1120,3 +1120,47 @@ def test_test_sh_invokes_the_verifier_and_propagates_its_exit_code():
     assert "/tests/verify.py" in script
     assert "/logs/verifier" in script
     assert "exit $?" in script
+
+
+# -- transcript encoding and an --out that cannot be created -----------------
+
+
+def test_a_non_ascii_answer_scores_under_a_non_utf8_default_encoding(tmp_path, monkeypatch):
+    """Transcripts are read as UTF-8 whatever the machine's default encoding is.
+
+    Under LC_ALL=en_US.ISO8859-1 PYTHONUTF8=0 the UTF-8 "café" used to read as
+    "cafÃ©", so the expected answer never matched and the run quietly scored 0.
+    A locale cannot be switched reliably in-process (the C layer picks the
+    default, and Linux images often lack the locale), so the non-UTF-8 default
+    is simulated by making every read that names no encoding use latin-1.
+    """
+    real_read_text = Path.read_text
+
+    def latin1_by_default(self, encoding=None, errors=None, newline=None):
+        return real_read_text(self, encoding=encoding or "latin-1", errors=errors, newline=newline)
+
+    contract = _contract(
+        assertions=[_answer_assertion("answer_contains", "café")],
+        trajectory={"match": "subset", "operations": []},
+    )
+    expected, logs, out = _write_run(tmp_path, contract, "")
+    result = {"type": "result", "subtype": "success", "is_error": False, "result": "Le café."}
+    (logs / "transcript.jsonl").write_text(json.dumps(result, ensure_ascii=False), "utf-8")
+    monkeypatch.setattr(Path, "read_text", latin1_by_default)
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    monkeypatch.undo()
+    assert code == 0
+    assert json.loads((out / "reward.json").read_text())["reward"] == 1.0
+
+
+def test_an_out_that_is_an_existing_file_is_a_refusal_on_stderr(tmp_path, capsys):
+    """mkdir used to raise FileExistsError before the safety net: traceback, exit 1."""
+    expected, logs, _ = _write_run(tmp_path, _contract(), _FULL_MARKS_TRANSCRIPT)
+    out = tmp_path / "out-file"
+    out.write_text("not a directory")
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "could not be created" in err and str(out) in err, err
+    assert "Traceback" not in err, err
+    assert out.read_text() == "not a directory", "the file in the way is left untouched"
