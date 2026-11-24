@@ -41,6 +41,17 @@ credential are each the sort of statement that puts two tools behind one service
 The contradictions are a constraint, not background. Where a disagreement is
 recorded `unresolved`, do not group as though one side were settled.
 
+**Under a declared phase there is no sweep to honour, and the constraint does
+not lapse with it.** When `manifest.json` carries a `phase` block,
+`rb-reconcile-contradict` is not dispatched and `01-contradictions/` is absent
+-- §5 says why that is not a refusal. Its absence means no disagreement was
+ruled on, not that the claims agree: two admitted inputs can still contradict
+each other. So where you can see two claims disagree and nothing on disk
+resolves it, treat it as a disagreement recorded `unresolved` for every purpose
+of this skill, including each condition in §5 that names one. Settling it by
+whichever side reads better is the resolution without a record that the
+paragraph above forbids.
+
 Nothing else on disk is yours to read. In particular, no pass reads
 `01-world-model.json`: it does not exist yet when you run, and on a re-run of
 this family it is an answer some earlier run assembled rather than evidence about
@@ -316,6 +327,22 @@ choosing between two moves you are forbidden.
   either, because `check-refs` is not clean and saying it is would be the one
   claim nothing downstream can re-check. Stopping is the only move that is both
   honest and recoverable.
+
+- **`01-contradictions/` is absent, and `manifest.json` carries a `phase`
+  block.** That is not the condition below, and it is the only absence in this
+  family that is not. Under a declared phase the orchestrator dispatches neither
+  `rb-reconcile-subjects` nor `rb-reconcile-contradict`, so no sweep ran and
+  none is coming: there is nothing to wait for, and a refusal here is one no
+  re-dispatch could ever repair -- measured on one real phased run, three
+  dispatches of a pass in this family refused on exactly this and the run could
+  not reach gate 1. Write your partial. Read the absence as "no disagreement has
+  been ruled on", never as "the claims agree" -- §1 says what that obliges. Do
+  not record the absence in your artifact: the seal copies the `phase` block
+  onto the world model, and that is where a human reads that the sweep did not
+  run. The exception is that narrow and no wider: with no `phase` block the
+  absence is the condition below, under one every other input this contract
+  names still is, and a `01-contradictions/` that is present under a phase is
+  read exactly as it would be without one.
 
 - **An input this pass's contract names is absent from the run directory, or
   is unreadable.** Refuse, say which file and what happened, and stop. Do not

@@ -227,6 +227,7 @@ fan out rb-extract, one per input artifact   → validate --stage extract → ch
 rb-reconcile-subjects                        → validate --stage reconcile-subjects → check-refs
 fan out rb-reconcile-contradict, one per subject → validate --stage reconcile-contradict
     at most 3 members concurrently           → check-refs (after all members finish)
+    (both skipped entirely when manifest.json carries a `phase` block -- see below)
 rb-reconcile-capabilities                    → validate --stage reconcile-capabilities → check-refs
 rb-reconcile-outcomes                        → validate --stage reconcile-outcomes → check-refs
 rb-reconcile-entities                        → validate --stage reconcile-entities → check-refs
@@ -261,6 +262,23 @@ fan out rb-challenge per instantiated one    → validate --stage challenge → 
 rb-emit                                      → 06-suite/, via the rubrica emit it runs
 rubrica smoke --agents <roster>              → 07-report.json
 ```
+
+**If `manifest.json` carries a `phase` block**, do not dispatch
+`rb-reconcile-subjects` and do not fan out `rb-reconcile-contradict`. Both are the
+forensic half of the world model, both are the two slowest passes in the run, and
+with the declared kinds deferred they would sweep roughly half their material for
+the full price. `reconcile-seal` assembles a complete world model without them: it
+never reads `01-subjects.json`, and it iterates an absent `01-contradictions/` to an
+empty `contradictions` list. `check-refs` is clean over that run -- `check_subjects`
+and `check_contradiction_parts` both return nothing when the cover is absent -- so a
+finding against either is a defect to report, not a pass to go back and run.
+
+Record the skip in `decisions.md` with the phase number and the deferred kinds, and
+record **no** `manifest.stages` entry for either pass: a stage that was not
+dispatched has no model, effort or skill digest to hash, and an entry claiming
+otherwise would make `diff-runs` compare a pass that ran against one that did not.
+
+A `phase` block is a fact you read and act on, never one you set. See §5.
 
 Two readings of that block to correct before you start, because both are
 natural and both are wrong.
@@ -1007,6 +1025,17 @@ helpful orchestrator is trying to produce. But a finished run whose isolation
 was removed, whose repairs were unbounded, or whose gaps were papered over is
 worse than a halted one, because a halt is legible and those are not: they look
 exactly like the run you wanted.
+
+- **You are asked to declare, change, or reverse a phase.** Refuse, and say where
+  the decision lives: `--phase` and `--defer-kind` are `triage-slices`' arguments,
+  the operator's to pass before gate 0, and reversing a deferral is a re-run of that
+  code stage. Deferring an input kind decides what the run can ever know -- nothing
+  downstream of `intake` reads the corpus again -- and you hold gates 1 through 3. An
+  orchestrator that could narrow the evidence and then review the result of its own
+  narrowing would make those three gates unfalsifiable, which is gate 0's argument
+  applied to you. Reading `manifest.json`'s `phase` block and skipping the two passes
+  it implies (§3) is not declaring one: that block was written before you were
+  dispatched.
 
 - **`check-skills` reports findings.** Halt before dispatching anything. A
   skill whose contract is wrong will produce an artifact in the wrong place or

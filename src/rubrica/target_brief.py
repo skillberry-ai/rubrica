@@ -24,8 +24,39 @@ from dataclasses import dataclass
 # spelling of one rule is how two reports come to disagree about one run.
 from .brief import _dicts, _mapping, _quietly, _strings
 from .paths import RunPaths
+from .phase import deferred_kinds as _deferred_kinds
+from .phase import read as _read_phase
 from .refs import _claims_by_artifact
 from .summary import Marker, _absent_or_malformed
+
+# `kind` -> the words an owner reads, for all seven values of the schema's shared
+# `$defs/kind` enum (`catalogue-0.1.json`, `triage-0.1.json` and `manifest-0.1.json`
+# each spell the same seven). All seven rather than the ones runs have produced,
+# because the table is what stops a token shipping and a kind nobody has seen yet
+# is exactly the one nobody would notice shipping raw.
+#
+# It lives here rather than in target_brief_html, where it was, because
+# `completeness` below reads it too: the labels are what that reader returns, so the
+# renderer is not a second place a kind gets translated. target_brief_html imports
+# this module, so a map defined there and imported back would be a cycle -- and this
+# is the direction the data already flows.
+#
+# Read through `.get(kind, kind)`, for `_OUTCOME_LABELS`' reason: an off-schema
+# kind ships as its own token rather than as a label we invented for it.
+#
+# No label names the format the way the enum does -- "HTTP API description" rather
+# than "OpenAPI", "Recorded interactions" rather than "trace" -- because the
+# recipient is being asked whether we read the right things about their system, and
+# the kinds are our filing categories over their files.
+_KIND_LABELS = {
+    "openapi": "HTTP API description",
+    "mcp_tool_schema": "MCP tool definitions",
+    "entity_schema": "Data model definitions",
+    "trace": "Recorded interactions",
+    "design_doc": "Written documentation",
+    "source_code": "Source code",
+    "other": "Other material",
+}
 
 
 @dataclass(frozen=True)
@@ -375,6 +406,67 @@ def _refs(run: RunPaths) -> dict[str, SourceRef]:
     """
     index = source_index(run)
     return index if isinstance(index, dict) else {}
+
+
+@dataclass(frozen=True)
+class Completeness:
+    """What we did not read, in the labels the recipient's page already uses.
+
+    Holds labels rather than kinds deliberately: the renderer must not be a second
+    place a kind is translated, or one page ends up saying `trace` where another says
+    "Recorded interactions". The count is carried alongside because "we did not read
+    some of it" and "we did not read 68 files of it" are different statements, and the
+    second is the one an owner can act on.
+    """
+
+    kind_labels: tuple[str, ...]
+    count: int
+
+
+def completeness(run: RunPaths) -> Completeness | None:
+    """What this run declared it would not read, or None.
+
+    None on four shapes and the difference matters: a run that declared no phase, a
+    run whose world model could not be read, a run whose phase block is malformed,
+    and one whose block names no kind. All four produce no disclosure, and none of
+    them produces a statement that everything *was* read -- which is the one wrong
+    answer available here, and the reason this returns None rather than an empty
+    Completeness.
+
+    Raises nothing, following this module's rule: `target-brief` exits 0 where
+    claim-utilisation and gate-brief exit 2, because it has no number to be quietly
+    wrong. A page missing this sentence is a page that says less; a page asserting
+    completeness it cannot support is a page that misleads the people who own the
+    target.
+    """
+    payload = _world(run)
+    block = _read_phase(payload) if isinstance(payload, dict) else None
+    if block is None:
+        return None
+    kinds = _deferred_kinds(block)
+    if not kinds:
+        return None
+    count = block.get("deferred_count")
+    if not isinstance(count, int) or isinstance(count, bool):
+        # A count we cannot read drops to 0 rather than dropping the whole sentence:
+        # "we have not read your recorded interactions" is true and useful without a
+        # number, and suppressing it because the number is malformed would trade a
+        # complete disclosure for a missing one.
+        count = 0
+    # A kind with no label renders as itself, through the same `.get(kind, kind)` the
+    # renderer used. Dropping it would understate what went unread, which is the
+    # failure this whole sentence exists to prevent.
+    #
+    # Sorted on the LABEL rather than on the kind, because the label is what the
+    # recipient reads: sorting the kinds puts an unlabelled token wherever its raw
+    # spelling happens to fall, so a page listing "not_a_kind and recorded
+    # interactions" would be alphabetical in a vocabulary the reader cannot see. Both
+    # orders are deterministic, which is all the page needs; only one of them is
+    # deterministic in the order it prints.
+    return Completeness(
+        kind_labels=tuple(sorted(_KIND_LABELS.get(kind, kind) for kind in kinds)),
+        count=count,
+    )
 
 
 @dataclass(frozen=True)

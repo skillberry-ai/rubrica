@@ -51,6 +51,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from rubrica import phase
 from rubrica.artifacts import ArtifactError, read_json, sha256_of, write_json
 from rubrica.findings import Finding
 from rubrica.paths import RunPaths, list_json
@@ -378,6 +379,24 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
     # keys, so insertion order cannot move a byte of the result.
     if services is not None:
         world["services"] = services
+    # Carried verbatim from the manifest, which is the only artifact in this band
+    # that holds it -- the seal reads no triage record and no plan. Verbatim rather
+    # than recomputed for the reason every other carry in this chain is: the
+    # declaration was ratified at gate 0, and a re-derivation five stages later is a
+    # second answer to a settled question.
+    #
+    # Load-bearing rather than informational. A phase-1 model showing 85
+    # contradictions without stating that 119 more are unread would misrepresent the
+    # analysis to the people target-brief is written for, and until this field
+    # existed the tool had no way to say it. run-summary renders it for the same
+    # reason.
+    #
+    # Assigned after the literal for `services`' reason: write_json sorts keys, so
+    # insertion order cannot move a byte, and the seal's byte-identity guarantee is
+    # a verbatim copy's to keep rather than to weaken.
+    phase_block = phase.read(manifest)
+    if phase_block is not None:
+        world["phase"] = phase_block
     write_json(run.world_model, world)
     _record_partials(run, assembled)
     return run.world_model, []

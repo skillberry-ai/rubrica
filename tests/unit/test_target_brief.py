@@ -15,6 +15,7 @@ import pytest
 from rubrica import target_brief
 from rubrica.summary import Absent, Malformed
 from tests.toy import build_toy_run
+from tests.unit.test_phase_pipeline import phase_run_through_seal
 
 
 def test_source_index_resolves_a_claim_to_path_locator_and_kind(tmp_path):
@@ -882,3 +883,74 @@ def test_inputs_read_keeps_a_hash_that_belongs_to_the_filename(tmp_path):
     # shapes apart rather than switching the collapse off. parsec's 71 slices of one
     # capture are what that behaviour is for.
     assert (groups["trace"].files, groups["trace"].slices) == (("capture.json",), 1)
+
+
+def test_completeness_is_none_without_a_phase_and_reports_the_labels_with_one(tmp_path):
+    """The reader half. It returns the *recipient's* labels rather than the kinds,
+    because the renderer must not be the place a kind is translated -- a second
+    translation site is how one page ends up saying `trace` and another
+    "Recorded interactions"."""
+    plain = build_toy_run(tmp_path / "plain", upto="reconcile-seal")
+    assert target_brief.completeness(plain) is None
+    phased = phase_run_through_seal(tmp_path / "phased")
+    result = target_brief.completeness(phased)
+    assert result.kind_labels == ("Recorded interactions",)
+    assert result.count == 1
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        "one",
+        7,
+        None,
+        {"number": 1, "deferred_kinds": "trace"},
+        {"number": 1, "deferred_kinds": []},
+        {"number": 1},
+    ],
+)
+def test_completeness_is_none_for_a_phase_block_it_cannot_read(tmp_path, block):
+    """target-brief exits 0 on inputs the other two reports exit 2 on, because it has
+    no number to be quietly wrong. A phase block it cannot read is no disclosure --
+    never a claim that everything was read, which would be the one wrong answer.
+
+    A block naming no kind is in the list on the same argument: there is nothing to
+    tell the owner we did not read, and a sentence with an empty subject would read as
+    a rendering fault rather than as a fact."""
+    run = phase_run_through_seal(tmp_path)
+    world = json.loads(run.world_model.read_text())
+    world["phase"] = block
+    run.world_model.write_text(json.dumps(world))
+    assert target_brief.completeness(run) is None
+
+
+def test_completeness_reports_a_kind_with_no_label_as_itself(tmp_path):
+    """A kind the label map does not cover must render as itself rather than
+    vanishing: a disclosure that silently dropped one of two deferred kinds would
+    understate what went unread, which is the failure the disclosure exists to
+    prevent."""
+    run = phase_run_through_seal(tmp_path)
+    world = json.loads(run.world_model.read_text())
+    world["phase"] = {
+        "number": 1,
+        "deferred_kinds": ["trace", "not_a_kind"],
+        "deferred_count": 2,
+    }
+    run.world_model.write_text(json.dumps(world))
+    result = target_brief.completeness(run)
+    assert result.kind_labels == ("Recorded interactions", "not_a_kind")
+    assert result.count == 2
+
+
+def test_completeness_keeps_the_sentence_when_only_the_count_is_unreadable(tmp_path):
+    """The count is the part that degrades, not the disclosure. "We have not read your
+    recorded interactions" is true and useful without a number, so a malformed count
+    drops to 0 -- which the renderer reads as "say it without the number" -- rather
+    than suppressing the whole statement."""
+    run = phase_run_through_seal(tmp_path)
+    world = json.loads(run.world_model.read_text())
+    world["phase"] = {"number": 1, "deferred_kinds": ["trace"], "deferred_count": "lots"}
+    run.world_model.write_text(json.dumps(world))
+    result = target_brief.completeness(run)
+    assert result.kind_labels == ("Recorded interactions",)
+    assert result.count == 0

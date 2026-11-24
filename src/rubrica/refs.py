@@ -27,6 +27,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from rubrica import phase
 from rubrica.artifacts import ArtifactError, read_json, sha256_of
 from rubrica.findings import Finding
 from rubrica.interfaces import TOOL_NAME
@@ -489,6 +490,30 @@ def check_slices(run: RunPaths) -> list[Finding]:
         pointer = f"/slices/{index}"
         sid = _str_or_none(entry.get("id"))
         candidate_ids = [c for c in _as_list(entry.get("candidate_ids")) if isinstance(c, str)]
+        # The plan's own record of what its phase deferred. Read from the entry
+        # rather than recomputed from the catalogue and the phase block: what the
+        # three clauses below must agree with is the shard the *writer* produced,
+        # and recomputing would check the catalogue against itself while leaving a
+        # writer that ignored its own declaration undetected.
+        deferred_ids = [
+            c for c in _as_list(entry.get("deferred_candidate_ids")) if isinstance(c, str)
+        ]
+        expected_shard_ids = [c for c in candidate_ids if c not in set(deferred_ids)]
+
+        # Check 10: a deferred id must be one this slice actually owns. A plan
+        # naming a sibling's candidate here would subtract a row from the wrong
+        # shard, and check 6 below would then report the *shard* as wrong when the
+        # defect is in the plan. Ahead of every `continue` in this loop
+        # deliberately: a fully deferred slice leaves at the shard-presence
+        # branch, and that is exactly the entry whose stray id has removed a
+        # shard the plan still owes, so a clause sited after it could not see
+        # the one case where this is worse than untidy.
+        for j, cid in enumerate(deferred_ids):
+            if cid not in candidate_ids:
+                report(
+                    f"{pointer}/deferred_candidate_ids/{j}",
+                    f"{cid!r} is deferred by slice {sid!r} but is not one of its candidate_ids",
+                )
 
         if known_ids is not None:
             for j, cid in enumerate(candidate_ids):
@@ -522,6 +547,13 @@ def check_slices(run: RunPaths) -> list[Finding]:
         # verdict -- point at the thing that does exist and should hold it.
         shard_path = run.slice_shard(sid)
         if not shard_path.is_file():
+            # A fully deferred slice has no shard by declaration, not by omission:
+            # every candidate it owns is deferred, so there is nothing for a member
+            # to rule and dispositions-part-0.1.json's minItems: 1 would refuse the
+            # empty part anyway. Reported only when the plan does NOT account for
+            # the absence.
+            if not expected_shard_ids:
+                continue
             out.append(Finding(run.slices_dir, "refs", "", f"slice {sid} has no shard on disk"))
             continue
         try:
@@ -537,19 +569,24 @@ def check_slices(run: RunPaths) -> list[Finding]:
         # Check 6: shard candidates match candidate_ids, in order -- the same
         # ids in the same sequence, not merely the same set.
         shard_ids = [c.get("candidate_id") for c in shard_candidates]
-        if shard_ids != candidate_ids:
+        if shard_ids != expected_shard_ids:
             out.append(
                 Finding(
                     shard_path,
                     "refs",
                     "/candidates",
-                    f"shard candidates do not match slice {sid}'s candidate_ids, in order",
+                    f"shard candidates do not match slice {sid}'s candidate_ids minus its "
+                    "deferred_candidate_ids, in order",
                 )
             )
 
         # Check 5: bytes is arithmetic, not testimony -- recomputed from the
         # shard's own candidates via slices.row_bytes, the same function
-        # write_slices used to produce the number in the first place.
+        # write_slices used to produce the number in the first place. Unchanged by
+        # phasing, and the reason is worth stating: a deferred candidate is absent
+        # from the shard, so recomputing from the shard already yields the
+        # undeferred sum the writer declares. The number's meaning moved with the
+        # subtraction; its check did not.
         recomputed = sum(row_bytes(c) for c in shard_candidates)
         if isinstance(declared_bytes, int) and declared_bytes != recomputed:
             out.append(
@@ -714,11 +751,31 @@ def check_disposition_parts(run: RunPaths) -> list[Finding]:
                 c for c in _as_list(entry.get("candidate_ids")) if isinstance(c, str)
             }
 
+    # Slice id -> the subset of those candidates the run's declared phase defers.
+    # Read from the plan for check_slices' reason: it is the writer's own record of
+    # what it subtracted from the shards, and this checker must agree with what was
+    # dispatched rather than with what a re-resolution says should have been.
+    slice_deferred: dict[str, set[str]] = {}
+    for entry in slice_entries:
+        if not isinstance(entry, dict):
+            continue
+        sid = _str_or_none(entry.get("id"))
+        if sid is not None:
+            slice_deferred[sid] = {
+                c for c in _as_list(entry.get("deferred_candidate_ids")) if isinstance(c, str)
+            }
+
     have_parts = set(run.slice_ids_with_parts())
     out: list[Finding] = []
 
-    # Clause 1: every slice the plan declares has a part written for it.
-    missing_slices = sorted(set(slice_candidates) - have_parts)
+    # Clause 1: every slice the plan declares has a part written for it -- except
+    # one the plan declares fully deferred, which is never dispatched at all. Its
+    # rulings are triage-seal's to synthesise from the plan, so the absence here is
+    # accounted for rather than missing.
+    expected_parts = {
+        sid for sid, ids in slice_candidates.items() if ids - slice_deferred.get(sid, set())
+    }
+    missing_slices = sorted(expected_parts - have_parts)
     for sid in missing_slices:
         out.append(
             Finding(
@@ -820,6 +877,13 @@ def check_disposition_parts(run: RunPaths) -> list[Finding]:
         uncheckable: set[str] = set()
         for sid in missing_slices:
             uncheckable |= slice_candidates.get(sid, set())
+        # Deferred candidates are excluded for the reason a missing slice's are:
+        # no staged part can be responsible for them. Unlike a missing slice this
+        # is a declaration rather than a defect -- the plan says these were never
+        # dispatched -- and triage-seal is what puts a ruling on the record for
+        # each. Reporting them here would name 00-dispositions/ for a decision
+        # taken in 00-slices.json.
+        uncheckable |= {cid for ids in slice_deferred.values() for cid in ids}
         for sid in have_parts - readable_sids:
             uncheckable |= slice_candidates.get(sid, set())
         if adoptions_unreadable:
@@ -1155,9 +1219,30 @@ def check_triage(run: RunPaths) -> list[Finding]:
         seen.add(cid_str)
 
         code = entry.get("reason_code")
-        if entry.get("disposition") == "decline":
+        disposition = entry.get("disposition")
+        if disposition == "decline":
             if not code:
                 report(f"{pointer}/reason_code", "a decline must carry a reason_code")
+            elif code == phase.DEFER_REASON_CODE:
+                # The mirror of the defer clause below, and not symmetry for its
+                # own sake: this is the collapse the two dispositions were split
+                # to prevent, arriving from the other side. `deferred_to_phase`
+                # shares the decline enum for $ref economy -- `reason_code` is
+                # one field with one $ref -- so layer 1 cannot tell the halves
+                # apart, and this branch is where they were promised separated.
+                #
+                # What a decline wearing the defer code actually does: the
+                # manifest's `deferred_count` counts `disposition == "defer"`,
+                # so it reports zero deferrals, while the gate-0 brief files that
+                # input under a *decline* reason code. On the run that motivated
+                # phasing that is 68 inputs reported as judged useless -- the
+                # exact misreport `defer` was made a distinct value to prevent.
+                report(
+                    f"{pointer}/reason_code",
+                    f"reason_code {phase.DEFER_REASON_CODE!r} belongs to a defer, not a decline; "
+                    "a decline says this input has no evidence value, so wearing the defer code "
+                    "would report the input as judged useless and count it as no deferral at all",
+                )
             elif code == "digest_insufficient" and not deficiency_ids:
                 # Weak by necessity: triage-0.1.json's deficiencies[] has no
                 # candidate-reference field (deficiency_id, subject, statement,
@@ -1180,6 +1265,28 @@ def check_triage(run: RunPaths) -> list[Finding]:
                     f"{pointer}/reason_code",
                     "a needs_projection decline must be sourced by a projection naming this "
                     "candidate, or its remedy is unstated",
+                )
+        elif disposition == phase.DEFER:
+            # A defer is neither an admit nor a decline, and the branches either
+            # side of this one were each wrong about it. Before this clause
+            # existed a defer took the `else` below, which fabricated
+            # "reason_code names a decline; an admit has none" against a correct
+            # record -- exit 1 naming the wrong defect -- and counted the defer
+            # toward `admits`, masking the empty-admitted-set scoping check
+            # fifty lines down. Sending it to the decline branch instead would
+            # demand one of the decline codes for a ruling that is not one.
+            #
+            # Deliberately *not* also checked here: `admissible is False`. A
+            # container of a deferred kind is never deferred --
+            # phase.deferred_candidate_ids excludes it, so it stays in the shard
+            # for a member to decline -- and a second guard here would report a
+            # shape no writer in this package can produce.
+            if code != phase.DEFER_REASON_CODE:
+                report(
+                    f"{pointer}/reason_code",
+                    f"a defer must carry reason_code {phase.DEFER_REASON_CODE!r}, not {code!r}; "
+                    "a decline says this input has no evidence value and a defer says it has "
+                    "value this phase cannot spend, and only the second is a deferral",
                 )
         else:
             admits += 1
@@ -1622,6 +1729,34 @@ def check_admitted_inputs(run: RunPaths) -> list[Finding]:
                 "entered the run from outside the gate",
             )
         )
+
+    # The deferred count, recomputed. It is the only number in the phase block that
+    # intake derives rather than copies, so it is the only one that can be wrong
+    # without the plan being wrong too -- and a world model reporting that 68 inputs
+    # were deferred when the record shows 4 would misstate the analysis to the very
+    # people target-brief is written for.
+    #
+    # Silent when the manifest declares no phase: a run without one has nothing to
+    # recompute, and a clause that fired there would report against every manifest
+    # already on disk.
+    manifest_phase = phase.read(manifest)
+    if manifest_phase is not None:
+        declared = manifest_phase.get("deferred_count")
+        actual = sum(
+            1
+            for entry in _as_list(triage.get("dispositions"))
+            if isinstance(entry, dict) and entry.get("disposition") == phase.DEFER
+        )
+        if declared != actual:
+            out.append(
+                Finding(
+                    run.manifest,
+                    "refs",
+                    "/phase/deferred_count",
+                    f"the manifest declares deferred_count={declared} but {run.triage.name} "
+                    f"carries {actual} defer disposition(s)",
+                )
+            )
     return out
 
 
