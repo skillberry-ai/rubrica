@@ -161,7 +161,14 @@ from rubrica.paths import STAGES, RunPaths, is_safe_segment, list_json
 # gate's reading surface and the field it is describing come to disagree about what
 # a cell is. Both index unguarded (`cap["id"]`, `oc["id"]`), which is why
 # `_cell_counts` below wraps them rather than calling them straight.
-from rubrica.refs import PASS_OWN_KINDS, _as_list, _cells, drivable_cells
+from rubrica.refs import (
+    PASS_OWN_KINDS,
+    _as_list,
+    _cells,
+    binding_is_drivable,
+    drivable_cells,
+    service_tool_names,
+)
 from rubrica.sizing import implied_size
 from rubrica.utilisation import claim_utilisation
 
@@ -214,7 +221,7 @@ CLAIMS_READING_PASSES = tuple(
 # running before this gate is what would have made that fatal rather than merely
 # wrong: derived from A3 and A4, never observed, since no orchestrated run was
 # dispatched against an unbound world model to watch the halt.
-EXCLUDED_HEADER = "Capabilities excluded from the denominator (no tool binding)"
+EXCLUDED_HEADER = "Capabilities excluded from the denominator (not bound to an agent tool)"
 
 # Gate 1's services section header, named for the four above's reason: it is the
 # anchor a reader and a test both scope to, and an unscoped assertion here is
@@ -407,8 +414,18 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
     # reason drivable_cells records: an explicit `binding: null` is what a
     # hand-edit at this gate produces, and the second spelling returns None and
     # raises AttributeError on the chained `.get`.
-    unbound = [cap for cap in capabilities if not _mapping(cap.get("binding")).get("tool")]
-    drivable = len(capabilities) - len(unbound)
+    #
+    # `excluded` goes through refs.binding_is_drivable rather than a local test, so
+    # this list and the denominator cannot disagree about who is out. It is split
+    # in two for the banner below, which must never say "0 of N declare
+    # binding.tool" of a world model where they do: on hermes run-20261110-150134
+    # 117 capabilities declared one and 110 of them named an HTTP route or a
+    # function rather than a tool in `services`.
+    tools = service_tool_names(world)
+    excluded = [cap for cap in capabilities if not binding_is_drivable(cap, tools)]
+    unbound = [cap for cap in excluded if not _mapping(cap.get("binding")).get("tool")]
+    off_tool = len(excluded) - len(unbound)
+    drivable = len(capabilities) - len(excluded)
 
     if not capabilities:
         # Never "all 0 capabilities are drivable", which is what the branch below
@@ -426,15 +443,17 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
         lines.append(f"  ({state}; nothing to report)")
         return lines
 
-    if not unbound:
+    if not excluded:
         # Stated rather than omitted, for the reconcile sweep's reason: rendering
         # "every capability is drivable" as silence hides a strong claim.
         lines.append(f"  all {len(capabilities)} capabilities are drivable")
     elif drivable:
         lines.append(
             f"  {drivable} of {len(capabilities)} capabilities are drivable; "
-            f"{len(unbound)} are excluded below"
+            f"{len(excluded)} are excluded below"
         )
+        if off_tool:
+            lines.append(f"  ({off_tool} of them are bound, but not to any tool in services)")
     else:
         # The loudest thing this brief says, and the volume is the point: gate 1
         # precedes propose, so a reader here is the last person who can act before
@@ -469,10 +488,29 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
         # mid-paragraph at 80 and 120 columns and everything after the first visual
         # line read as prose -- which costs exactly the loudness these lines exist
         # for. How the warning splits across them is editorial; the fence is not.
-        lines.append(
-            f"  *** NOTHING IS DRIVABLE: 0 of {len(capabilities)} capabilities declare "
-            "binding.tool. ***"
-        )
+        #
+        # The first line names which of the two causes it is, and both when both
+        # apply, because the actions differ: an unbound capability needs a tool
+        # added, a bound one needs its binding pointed at a tool `services` lists
+        # (or `services` corrected). "0 of N declare binding.tool" is printed only
+        # when it is true.
+        if not off_tool:
+            lines.append(
+                f"  *** NOTHING IS DRIVABLE: 0 of {len(capabilities)} capabilities declare "
+                "binding.tool. ***"
+            )
+        elif not unbound:
+            lines.append(
+                f"  *** NOTHING IS DRIVABLE: all {len(capabilities)} capabilities are bound, "
+                "but not to any tool in services. ***"
+            )
+        else:
+            # Two lines, because one runs past 100 characters at three-digit counts.
+            lines.append(
+                f"  *** NOTHING IS DRIVABLE: {off_tool} of {len(capabilities)} capabilities "
+                "are bound, but not to any tool in services; ***"
+            )
+            lines.append(f"  *** the other {len(unbound)} declare no binding.tool at all. ***")
         lines.append(
             "  *** No cell is drivable, so no scenario can exercise a capability against "
             "the target. ***"
@@ -499,11 +537,11 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
             "toward the denominator"
         )
 
-    if not unbound:
+    if not excluded:
         return lines
 
     source = _claim_sources(run)
-    for cap in unbound:
+    for cap in excluded:
         raw_id = cap.get("id")
         # Rendered as an absence rather than as `None`: a row reading "None" reads
         # as an id, and layer 1 is what names a capability with no id.
@@ -526,6 +564,11 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
             f"  {cap_id}  {cells} {'cell' if cells == 1 else 'cells'}  [{', '.join(inputs) or '?'}]"
         )
         lines.append(f"    {operation if isinstance(operation, str) else '(no operation)'}")
+        # The bound name is printed for an off-tool capability, because it is the
+        # thing a reader corrects: without it "excluded" reads as "unbound".
+        tool = _mapping(cap.get("binding")).get("tool")
+        if tool:
+            lines.append(f"    bound to {tool!r}, which is not a tool in services")
 
     # The action, named where the only person who can still take it is reading.
     # emit.py's late report is the other place that names it, and it names the same
@@ -536,6 +579,11 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
         "binding.fixed_args to the capability, or accept the reduced surface and record "
         "that as a decision (rubrica decide)."
     )
+    if off_tool:
+        lines.append(
+            "  For a capability bound to something that is not a tool in services, point "
+            "binding.tool at the exact name of a tool services lists, or correct services."
+        )
     lines.append(
         "  Re-dispatching a reconcile pass will not add a binding -- "
         "rb-reconcile-capabilities is told to leave it off rather than guess a tool name."

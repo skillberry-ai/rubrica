@@ -386,7 +386,12 @@ capability × outcome-class cell and every goal, because round 1 has no coverage
 report and that is the normal shape rather than a missing file. Drivable, not
 declared: a capability with no `binding.tool` cannot be closed by proposing at
 all, since `emit.call_spec` has no tool name to build the call from, so offering
-the cell spends a round on a scenario `emit` will drop. Goals are not filtered,
+the cell spends a round on a scenario `emit` will drop. When the world model
+carries a `services` list (even `[]`), a `binding.tool` must also be exactly the
+name of a tool in `services[].tools[]` — no prefix or case folding — or the cell
+is undrivable too: a binding to an HTTP route or a function is a call no agent can
+make. A world model with no `services` key keeps the older any-`binding.tool`
+rule. Goals are not filtered,
 so a world model with no binding anywhere still has a worklist for as long as it
 declares a goal.
 
@@ -501,9 +506,12 @@ a second composition, so the two cannot drift.
 
 The hole list is the one place this command adds to what score wrote. The
 capability matrix scores the **drivable** cells only — those whose capability
-declares a `binding.tool` — so for every other declared cell this command writes
-a computed `unreachable` hole saying the capability declares none and `emit`
-cannot turn it into a tool call. Matrix plus holes therefore still account for
+declares a `binding.tool`, and, when the world model carries `services`, one that
+names a tool there exactly — so for every other declared cell this command writes
+a computed `unreachable` hole. Its justification says either that the capability
+declares no `binding.tool` and `emit` cannot turn it into a tool call, or that the
+binding names something that is not a tool in `services` (an HTTP route or a
+function, for example). Matrix plus holes therefore still account for
 every cell the world model declares, which is what keeps a narrowed denominator a
 denominator rather than a silent cap. It is computed rather than asked of the
 prompt because binding absence is a fact on disk and not a judgment, and a hole
@@ -766,8 +774,10 @@ or carries no readable rows is named as such rather than omitted, and a run with
 no partial carrying an accounting at all says so instead.
 
 Gate 1 also lists **the capabilities the coverage denominator excludes** — every
-capability declaring no `binding.tool`, with the cells it would have added, its
-`operation`, and the inputs whose claims it rests on. Its timing is what makes it
+capability declaring no `binding.tool`, or (when the world model carries
+`services`) bound to a name that is not a tool there, with the cells it would have
+added, its `operation`, the inputs whose claims it rests on, and for a bound one
+the name it is bound to. Its timing is what makes it
 matter, not uniqueness: the same exclusion surfaces twice more, and both are too
 late to act on. `score-seal` writes one `unreachable` hole per undrivable cell into
 the round's coverage document, which a reader meets at gate 2, and `emit` names a
@@ -800,8 +810,12 @@ shape cannot express, and telling those apart is semantic — so the operation a
 the citing inputs are printed and the grouping is left to the reader. The remedy
 is named, because a reader at this gate is the last person who can act on it: add
 `binding.tool` and `binding.fixed_args`, or accept the reduced surface and record
-that decision. A world model in which *nothing* is drivable is called out
-separately and loudly, in a fenced banner: with no binding anywhere and no goal
+that decision; for a capability bound to a name that is not a tool in
+`services`, point `binding.tool` at the exact name of one, or correct `services`.
+A world model in which *nothing* is drivable is called out
+separately and loudly, in a fenced banner, which says which of the two causes it
+is — "bound, but not to any tool in services" apart from "declares no
+`binding.tool`" — and never says none declare one when they do: with no binding anywhere and no goal
 left to close, `propose-batches` prints the same `no closable holes` a genuinely
 converged round prints and exits 0, and gate 1 is the last place a human can tell
 those two apart. The banner states that condition rather than asserting the halt,

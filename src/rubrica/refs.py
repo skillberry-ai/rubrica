@@ -278,11 +278,14 @@ def drivable_cells(world: dict) -> set[tuple[str, str]]:
     cell in the denominator", which is a narrower question with a different right
     answer.
 
-    Keyed on `binding.tool`, one notch tighter than `emit.bindings`' truthiness
-    test on the binding object (emit.py:67, the `if cap.get("binding")` clause of
-    its comprehension) because `emit.call_spec` then reads `binding["tool"]`
-    unguarded (emit.py:79) -- so the denominator equals what the
-    pipeline can actually ship, not merely what it retains. The two predicates
+    Keyed on `binding.tool` naming a tool in the world model's `services` (see
+    `binding_is_drivable`; a world model with no `services` key keeps the older
+    any-`binding.tool` rule). That older floor is one notch tighter than
+    `emit.bindings`' truthiness test on the binding object (the
+    `if cap.get("binding")` clause of its comprehension) because `emit.call_spec`
+    then reads `binding["tool"]` unguarded -- cited by function rather than by
+    line, since line numbers here went stale once already -- so the denominator
+    equals what the pipeline can actually ship, not merely what it retains. The two predicates
     disagree on exactly one shape, a binding present with no `tool`, and do not
     "align" them: that shape crashes call_spec, so it belongs outside the
     denominator rather than inside the suite.
@@ -296,20 +299,80 @@ def drivable_cells(world: dict) -> set[tuple[str, str]]:
     `binding`'s tool shape cannot express at all -- see docs/design/limitations.md
     on why that is recorded rather than fixed here.
 
-    `(cap.get("binding") or {})` rather than `cap.get("binding", {})`: an explicit
-    `binding: null` is what a hand-edit at gate 1 produces, and the second
-    spelling returns None and raises AttributeError on the chained `.get`.
+    The binding is read through an isinstance test rather than
+    `cap.get("binding", {})`: an explicit `binding: null` is what a hand-edit at
+    gate 1 produces, and that spelling returns None and raises AttributeError on
+    the chained `.get`.
 
     A set of distinct pairs, for _cells' reason: the seal writes len() of this and
     check_world_model recomputes it, so a sum of per-capability counts would
     diverge the moment an id repeated.
     """
+    tools = service_tool_names(world)
     return {
         (cap["id"], oc["id"])
         for cap in world.get("capabilities", [])
-        if (cap.get("binding") or {}).get("tool")
+        if binding_is_drivable(cap, tools)
         for oc in cap.get("outcome_classes", [])
     }
+
+
+def service_tool_names(world: dict) -> set[str] | None:
+    """Every `services[].tools[].name` the world model declares, or None.
+
+    None means the world model carries no `services` key at all, and that is a
+    different answer from an empty set on purpose. A world model sealed before the
+    services pass existed -- both committed `recorded/` world models, and every run
+    whose services pass never ran -- has no tool list to hold a binding against, so
+    `binding_is_drivable` keeps the older rule for it (any `binding.tool` counts)
+    rather than declaring its whole surface undrivable. A `services` key that is
+    present, even `[]`, is a pass's statement of which tools the agent has, and is
+    held to.
+
+    Guarded per element rather than trusting layer 1, for `_as_list`'s reason:
+    check_all has no ordering guarantee that a malformed `services` has been
+    rejected before this reads it, and the seal calls it on a partial layer 1 has
+    not seen yet. A present but malformed value narrows to the tool names that can
+    be read, so it can only ever count less, never invent a tool.
+    """
+    if "services" not in world:
+        return None
+    return {
+        tool["name"]
+        for service in _as_list(world["services"])
+        if isinstance(service, dict)
+        for tool in _as_list(service.get("tools"))
+        if isinstance(tool, dict) and isinstance(tool.get("name"), str)
+    }
+
+
+def binding_is_drivable(cap: dict, tools: set[str] | None) -> bool:
+    """Whether `cap`'s `binding.tool` names something an agent could call.
+
+    `tools` is `service_tool_names(world)`. With None (no `services` key) any
+    non-empty `binding.tool` counts, which is the rule every run had before this
+    narrowed. With a set, the name must be in it *exactly* -- no prefix or case
+    folding, because `suite/verify.py`'s `call_matches` compares tool names
+    exactly and rb-reconcile-capabilities is told to copy them exactly, so a
+    folded match would count a cell no emitted test could pass.
+
+    Measured on hermes run-20261110-150134: 117 capabilities bound, 7 of them to
+    one of the 21 tools its services listed (all spelled in full, like
+    `mcp__builtin__jira_search`); the other 110 were bound to strings like
+    `POST /api/sessions` -- an HTTP route or a function, which no agent tool call
+    can hit, yet every one of them sat in the denominator and got tests.
+
+    Shared with `brief._excluded_lines` and `rounds.seal_score`, so the brief's
+    excluded list, the injected `unreachable` holes and the denominator cannot
+    disagree about which capabilities are out.
+    """
+    binding = cap.get("binding")
+    tool = binding.get("tool") if isinstance(binding, dict) else None
+    if not tool:
+        return False
+    # isinstance before `in`: a non-string tool (a hand-edit, a list) would raise
+    # TypeError on an unhashable value, and it is not a tool name in any case.
+    return tools is None or (isinstance(tool, str) and tool in tools)
 
 
 def _dupes(values: list[str]) -> list[str]:

@@ -1355,16 +1355,42 @@ def seal_score(run: RunPaths, *, round_n: int) -> tuple[Path | None, list[Findin
     # drivable ones are scored, the rest are justified here. That pairing is what
     # keeps the narrowed denominator an honest denominator rather than a silent
     # cap. Measured on run-20260827-070444: 37 of 56 cells, all undrivable.
+    #
+    # Two justifications, because the world model has two ways to be undrivable
+    # and a gate-2 reader acts differently on each: a capability with no
+    # binding.tool at all, and one whose binding.tool names something that is not
+    # a tool in `services` (an HTTP route, a function) -- the second is what
+    # refs.binding_is_drivable added, measured at 110 of 117 bound capabilities
+    # on hermes run-20261110-150134. The first text is kept verbatim from before
+    # that narrowing, so a hole an older run wrote still reads the same.
     undrivable = sorted(_cells(world) - drivable_cells(world))
     undrivable_refs = {f"cell:{cap_id}/{oc_id}" for cap_id, oc_id in undrivable}
+    bound_tool = {
+        cap.get("id"): cap["binding"]["tool"]
+        for cap in world["capabilities"]
+        if isinstance(cap, dict)
+        and isinstance(cap.get("binding"), dict)
+        and cap["binding"].get("tool")
+    }
+
+    def _undrivable_justification(cap_id: str) -> str:
+        if cap_id in bound_tool:
+            return (
+                f"capability {cap_id!r} is bound to {bound_tool[cap_id]!r}, which is not a tool "
+                "in the world model's services (an HTTP route or a function, for example), so "
+                "no agent tool call can reach it and no scenario could exercise this row "
+                "against the target"
+            )
+        return (
+            f"capability {cap_id!r} declares no binding.tool, so emit cannot turn it into a "
+            "tool call and no scenario could exercise this row against the target"
+        )
+
     injected = [
         {
             "ref": f"cell:{cap_id}/{oc_id}",
             "reason": "unreachable",
-            "justification": (
-                f"capability {cap_id!r} declares no binding.tool, so emit cannot turn it into a "
-                "tool call and no scenario could exercise this row against the target"
-            ),
+            "justification": _undrivable_justification(cap_id),
         }
         for cap_id, oc_id in undrivable
         # Deduped against what score wrote, and score wins: seal_score's contract

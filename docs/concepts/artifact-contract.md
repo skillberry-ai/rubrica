@@ -197,8 +197,11 @@ it cannot reach another scenario's seed at all.
 `reconcile-seal`, must equal the real number of **drivable** capability ×
 outcome-class pairs the world model declares — the pairs whose capability also
 declares a `binding.tool`, which is what `emit` needs to turn the capability into
-a tool call. A cell on a capability with no binding is a scoring target no
-emitted test could ever hit, so counting it inflates the denominator the whole
+a tool call, and, when the world model carries a `services` list (even `[]`),
+whose `binding.tool` is exactly the name of one of `services[].tools[]`. A world
+model with no `services` key keeps the older rule, any `binding.tool`. A cell on
+a capability with no binding, or bound to something that is not an agent tool
+(an HTTP route, a function), is a scoring target no emitted test could ever hit, so counting it inflates the denominator the whole
 experiment is scored against; `score-seal` accounts for each one as a computed
 `unreachable` hole instead. A miscount here corrupts every coverage percentage
 computed downstream, and nothing else in the pipeline would notice — the numbers

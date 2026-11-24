@@ -358,7 +358,20 @@ def seal(run: RunPaths, *, denominator_version: int = 1) -> tuple[Path | None, l
             # agree only until a capability id or an outcome-class id repeats, at
             # which point a sum is simply the wrong number -- so do not "simplify"
             # this into sum(len(c["outcome_classes"]) for c in bound capabilities).
-            "capability_cells": len(drivable_cells({"capabilities": capabilities})),
+            #
+            # `services` goes in only when the part exists, for the same reason the
+            # world model omits the key then: drivable_cells keys its rule on the
+            # key's *presence* (absent keeps any-binding.tool, present holds each
+            # binding to a service tool name), so passing `[]` for a missing part
+            # would seal a number check_world_model, reading the omitted key, would
+            # not recompute.
+            "capability_cells": len(
+                drivable_cells(
+                    {"capabilities": capabilities}
+                    if services is None
+                    else {"capabilities": capabilities, "services": services}
+                )
+            ),
             "goals": len(parts["goals_part"]["goals"]),
         },
     }
