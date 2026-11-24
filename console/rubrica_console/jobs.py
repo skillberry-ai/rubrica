@@ -895,7 +895,7 @@ class Console:
         reported = self._state(name).data["skills"].get(stage)
         if reported:
             return Path(reported)
-        return skills.skills_dir() / f"rb-{stage}" / "SKILL.md"
+        return skills.skills_dir() / f"{skills.SKILL_PREFIX}{stage}" / "SKILL.md"
 
     def _member(self, job: Job, member: Member, argv: list[str], env: dict) -> None:
         with self._sem:
