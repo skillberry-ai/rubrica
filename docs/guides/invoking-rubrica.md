@@ -121,7 +121,7 @@ are probing behaviour:
 | Variable | Read by | What it moves |
 |---|---|---|
 | `RUBRICA_SCHEMA_DIR` | `validate.py` | the directory layer 1 loads its schemas from |
-| `RUBRICA_SKILLS_DIR` | `skills.py` | the directory `discover()` and `check-skills` read skills from |
+| `RUBRICA_SKILLS_DIR` | `skills.py` | the directory every skill is read from: `discover()` and `check-skills`, and also `dispatch-stage.sh`, which asks `skills_dir()` once and uses that one path for the prompt, the sibling deny list, `--add-dir` and the write scope, then prints the path and its sha256 in its closing summary (the console passes that path to `record-stage --skill`) |
 | `RUBRICA_SUITE_DIR` | `emit.py` | the suite template (`verify.py`, `test.sh`) `emit` compiles from |
 | `RUBRICA_LIVE` | `tests/conftest.py` | whether the `live`-marked tests run (§8) |
 

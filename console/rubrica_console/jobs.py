@@ -47,6 +47,11 @@ CLEAN, FINDINGS, USAGE = 0, 1, 2
 # How many dispatches of one fan-out must all fail, spending nothing, before the
 # rest are cancelled. Three is the dispatch cap: one full wave.
 _FAIL_FAST_AFTER = 3
+# The `skill` line of dispatch-stage.sh's closing summary: the SKILL.md the prompt
+# named. Read back so `record-stage --skill` hashes that file rather than one the
+# console resolved on its own: the two once disagreed under
+# RUBRICA_SKILLS_DIR and the recorded digest described a prompt nobody sent.
+_SKILL_LINE = re.compile(r"^skill\s+(/\S.*?)\s*$")
 
 QUEUED, RUNNING, SUCCEEDED, FAILED, HALTED, CANCELLED, INTERRUPTED = (
     "queued",
@@ -58,6 +63,20 @@ QUEUED, RUNNING, SUCCEEDED, FAILED, HALTED, CANCELLED, INTERRUPTED = (
     "interrupted",
 )
 _ACTIVE = (QUEUED, RUNNING)
+
+
+def _skill_from_log(log: Path) -> str | None:
+    """The last `skill` summary line in a dispatch log, or None if it has none."""
+    try:
+        text = log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    found = None
+    for line in text.splitlines():
+        match = _SKILL_LINE.match(line)
+        if match:
+            found = match.group(1)
+    return found
 
 
 class ConsoleError(Exception):
@@ -168,6 +187,8 @@ class _RunState:
             "accepted_findings": [],
             "attempts": {},
             "used": {},
+            # stage -> the SKILL.md path its last dispatch's summary named.
+            "skills": {},
         }
         try:
             loaded = json.loads(self.ledger_path.read_text(encoding="utf-8"))
@@ -581,7 +602,7 @@ class Console:
         elif kind == "check-refs":
             self._gate(job, ["check-refs", *rid], "check-refs")
         elif kind == "record":
-            skill = skills.skills_dir() / f"rb-{op['stage']}" / "SKILL.md"
+            skill = self._skill_used(job.run, op["stage"])
             self._gate(
                 job,
                 [
@@ -825,6 +846,7 @@ class Console:
             raise _Stop(HALTED, self._failfast.pop(job.id))
         if job.id in self._cancel:
             raise _Stop(CANCELLED, "cancelled")
+        self._note_skill(job, stage, ids)
         failed = [m for m in job.members.values() if m.id.startswith(stage) and m.status == HALTED]
         if any(m.exit == USAGE for m in failed):
             raise _Stop(HALTED, f"{stage}: the dispatch script refused (exit 2); see its log")
@@ -833,6 +855,47 @@ class Console:
             # will name it, and running the step again resumes only the missing ones.
             job.message = f"{len(failed)} {stage} dispatch(es) did not finish"
         self._persist(job)
+
+    def _note_skill(self, job: Job, stage: str, ids: list[str | None]) -> None:
+        """Keep the SKILL.md path this fan-out's dispatches said they prompted from.
+
+        Read off each member's closing summary. Two different paths in one
+        fan-out cannot both be described by the one digest `manifest.stages`
+        holds per stage, so that halts rather than recording either.
+        """
+        seen: set[str] = set()
+        for member_id in ids:
+            key = f"{stage}:{member_id}" if member_id else stage
+            member = job.members.get(key)
+            if member is None:
+                continue
+            path = _skill_from_log(Path(member.log))
+            if path:
+                seen.add(path)
+        if len(seen) > 1:
+            raise _Stop(
+                HALTED,
+                f"{stage}: its dispatches prompted from different skill files "
+                f"({', '.join(sorted(seen))}); one recorded digest cannot describe them",
+            )
+        if seen:
+            with self._lock:
+                state = self._state(job.run)
+                state.data["skills"][stage] = seen.pop()
+                state.save()
+
+    def _skill_used(self, name: str, stage: str) -> Path:
+        """The SKILL.md `record-stage` should hash for `stage` in run `name`.
+
+        The path the dispatch itself reported when there is one. The fallback is
+        the package's resolution, which is what the console did before the
+        dispatch reported its path, and is the same file whenever the dispatch
+        and the console see the same RUBRICA_SKILLS_DIR.
+        """
+        reported = self._state(name).data["skills"].get(stage)
+        if reported:
+            return Path(reported)
+        return skills.skills_dir() / f"rb-{stage}" / "SKILL.md"
 
     def _member(self, job: Job, member: Member, argv: list[str], env: dict) -> None:
         with self._sem:
@@ -959,7 +1022,7 @@ class Console:
             used = self._state(name).data["used"]
             for stage in ("triage-objective", "triage-rule", "triage-audit"):
                 if stage in used:
-                    skill = skills.skills_dir() / f"rb-{stage}" / "SKILL.md"
+                    skill = self._skill_used(name, stage)
                     commands.append(
                         [
                             "record-stage",

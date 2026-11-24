@@ -1564,3 +1564,91 @@ def test_orchestrate_is_refused_as_a_stage_without_dispatching_a_model(tmp_path)
     assert "docs/getting-started.md" in proc.stderr
     assert not record.exists(), "the stub claude ran: a model would have been dispatched"
     assert not (tmp_path / "lab" / "transcripts").exists()
+
+
+# ---------------------------------------------------------------------------
+# One skill, resolved once through the package.
+#
+# Under RUBRICA_SKILLS_DIR the script used to prompt from the repository's
+# SKILL.md, list and deny the repository's siblings and --add-dir the
+# repository's skill directory, while stage-write-scope.py read the candidate's
+# contract. Each assertion below names the copy, so a hard-coded repository path
+# left in any one of those places turns it red.
+
+SHIPPED_SKILLS = REPO / "src" / "rubrica" / "skills"
+
+
+def _candidate(tmp_path):
+    """A modified copy of the shipped skills: rb-propose writes a score part.
+
+    The write change is what makes the write scope's source visible -- the
+    shipped contract grants 02-scenarios/, the copy's does not.
+    """
+    copy = (tmp_path / "candidate-skills").resolve()
+    shutil.copytree(SHIPPED_SKILLS, copy)
+    skill = copy / "rb-propose" / "SKILL.md"
+    text = skill.read_text(encoding="utf-8")
+    assert 'writes = ["scenario_part"]' in text
+    skill.write_text(text.replace('writes = ["scenario_part"]', 'writes = ["score_part"]'))
+    return copy
+
+
+def test_a_skills_dir_override_names_the_copy_in_prompt_deny_list_and_write_scope(tmp_path):
+    copy = _candidate(tmp_path)
+    run = tmp_path / "run"
+    run.mkdir()
+    proc = _dispatch(tmp_path, "propose", str(run), run=run, RUBRICA_SKILLS_DIR=str(copy))
+    perms, sandbox, prompt = _paths(proc)
+    run = run.resolve()
+
+    prompt_text = Path(prompt).read_text()
+    assert f"Your skill:    {copy}/rb-propose/SKILL.md" in prompt_text
+    assert str(SHIPPED_SKILLS) not in prompt_text
+
+    allow = perms["permissions"]["allow"]
+    deny = perms["permissions"]["deny"]
+    assert f"Read(/{copy}/rb-propose/**)" in allow
+    # The copy's siblings are denied, and so is every shipped skill -- the
+    # shipped rb-propose most of all, since it is what the copy is measured against.
+    assert f"Read(/{copy}/rb-extract/**)" in deny
+    assert f"Read(/{copy}/rb-propose/**)" not in deny
+    assert f"Read(/{SHIPPED_SKILLS}/rb-propose/**)" in deny
+
+    # The write scope came from the copy's contract, not the shipped one.
+    writes = [rule for rule in allow if rule.startswith("Write(")]
+    assert writes
+    assert not any("02-scenarios" in rule for rule in writes), writes
+
+    fs = sandbox["sandbox"]["filesystem"]
+    assert f"{copy}/rb-propose" in fs["allowRead"]
+    assert str(copy) in fs["denyRead"]
+
+
+def test_a_skills_dir_override_reaches_add_dir_and_the_closing_summary(tmp_path):
+    copy = _candidate(tmp_path)
+    run = tmp_path / "run"
+    run.mkdir()
+    proc, _ = _dispatch_with_stub_claude(
+        tmp_path, "propose", str(run), run=run, RUBRICA_SKILLS_DIR=str(copy)
+    )
+    argv = _stub_argv(tmp_path)
+    add_dirs = [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
+    assert f"{copy}/rb-propose" in add_dirs
+    assert f"{SHIPPED_SKILLS}/rb-propose" not in add_dirs
+
+    from rubrica.skills import skill_sha256
+
+    skill = copy / "rb-propose" / "SKILL.md"
+    assert _summary_field(proc, "skill ") == str(skill)
+    assert _summary_field(proc, "sha256") == skill_sha256(skill)
+    assert skill_sha256(skill) != skill_sha256(SHIPPED_SKILLS / "rb-propose" / "SKILL.md")
+
+
+def test_without_the_override_the_dispatch_names_the_shipped_skill(tmp_path, monkeypatch):
+    monkeypatch.delenv("RUBRICA_SKILLS_DIR", raising=False)
+    run = tmp_path / "run"
+    run.mkdir()
+    proc, _ = _dispatch_with_stub_claude(tmp_path, "propose", str(run), run=run)
+    argv = _stub_argv(tmp_path)
+    assert f"{SHIPPED_SKILLS}/rb-propose" in argv
+    assert _summary_field(proc, "skill ") == str(SHIPPED_SKILLS / "rb-propose" / "SKILL.md")
