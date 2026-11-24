@@ -359,6 +359,20 @@ def test_main_refuses_an_unreadable_transcript(tmp_path):
         transcript.chmod(0o644)
 
 
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)"
+)
+def test_main_refuses_an_unlistable_agent_log_directory_as_unreadable(tmp_path):
+    """Path.glob returns nothing on a folder it cannot list; that is not "holds no"."""
+    expected, logs, out = _write_run(tmp_path, _contract(), WRONG_ANSWER_TRANSCRIPT)
+    logs.chmod(0)
+    try:
+        error = _refuses_logs(expected, logs, out, "could not be read")
+    finally:
+        logs.chmod(0o755)
+    assert "holds no" not in error, error
+
+
 def test_main_still_scores_an_empty_transcript_file(tmp_path):
     """An agent that ran and printed nothing is a real, low score -- not a refusal."""
     expected, logs, out = _write_run(tmp_path, _contract(), "")

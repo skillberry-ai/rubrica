@@ -19,6 +19,7 @@ the executed file cannot differ.
 import argparse
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -683,8 +684,8 @@ def _read_logs(agent_logs):
 
     Three log conditions are problems rather than an empty transcript, and
     main() refuses on them exactly as it does on a contract problem: a log
-    directory that does not exist, one holding no transcript file at all, and a
-    transcript that cannot be read (a permissions failure, or a directory named
+    directory that does not exist or cannot be listed, one holding no transcript
+    file at all, and a transcript that cannot be read (a permissions failure, or a directory named
     `*.jsonl`). Each used to be scored -- the first two as 0.0 with no note, the
     third as a traceback with no reward-detail.json -- so a mis-mounted
     --agent-logs (its default is a container path) read as an agent that failed
@@ -694,6 +695,14 @@ def _read_logs(agent_logs):
     logs = Path(agent_logs)
     if not logs.is_dir():
         return "", [f"agent log directory {logs} does not exist or is not a directory"]
+    # Path.glob swallows a listing failure and yields nothing, so a folder with
+    # no read permission would otherwise be reported as holding no transcript --
+    # the wrong cause. Listing it once first surfaces the OS error itself.
+    try:
+        with os.scandir(logs):
+            pass
+    except OSError as exc:
+        return "", [f"agent log directory {logs} could not be read: {exc}"]
     paths = [path for pattern in ("*.jsonl", "*.txt") for path in sorted(logs.glob(pattern))]
     if not paths:
         return "", [f"agent log directory {logs} holds no *.jsonl or *.txt transcript"]
