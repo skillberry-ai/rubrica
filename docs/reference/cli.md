@@ -167,6 +167,14 @@ and each `matrix scores undrivable cell` finding on those cells points at it
 rather than repeating it. `gate-brief --gate 2` prints one line saying the same.
 `score` is a prompt stage, so the fix costs a paid dispatch.
 
+A tool name declared more than once in `01-services.json`, within one service or
+across two, is one finding per repeat against that file, at the repeated tool's
+`name` and naming where the name was first declared. Names are compared exactly.
+It is a `1` repaired by re-dispatching `reconcile-services`: one name the agent
+calls would otherwise be served by two simulators, or lose one of its two input
+schemas when `synthesise-interfaces` builds the document — which refuses the same
+part for the same reason, so the two commands agree.
+
 ```bash
 rubrica check-refs --run runs/run-20260806-123005
 ```
@@ -231,8 +239,9 @@ Exits 0 clean, 1 with one finding per line on stdout, or 2 if the run directory
 cannot be read or `01-interfaces/` cannot be written. The split is deliberate. A
 missing or non-object `01-services.json`, a `services` key that is not an array, a
 service id that is not usable as a filename, a tool name the harness's
-sanitisation would rewrite, and a `schema_claim` no claim in `01-claims/` has an id
-for are all `1`s against that part — each is repaired by re-dispatching
+sanitisation would rewrite, a tool name already declared earlier in the part —
+by the same service or another — and a `schema_claim` no claim in `01-claims/` has
+an id for are all `1`s against that part — each is repaired by re-dispatching
 `reconcile-services`, which is what a `1` promises the orchestrator.
 
 **A `schema_claim` whose claim exists and carries no usable `payload` is the one

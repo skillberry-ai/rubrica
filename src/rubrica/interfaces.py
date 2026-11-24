@@ -232,6 +232,8 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
     planned: list[tuple[Path, dict]] = []
     # The unresolved-id findings, the only ones a broken claims file can explain.
     held_back: list[Finding] = []
+    # Tool name -> the pointer of its first declaration, across every service.
+    first_named: dict[str, str] = {}
     for index, service in enumerate(services):
         pointer = f"/services/{index}"
         if not isinstance(service, dict):
@@ -283,6 +285,25 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
                 )
                 ok = False
                 continue
+            if name in first_named:
+                # Refused rather than written. Within one service `_document`
+                # keys `paths` by `/<name>`, so the second schema silently
+                # overwrote the first while `x-rubrica.tools` still listed both;
+                # across services two documents both served one `operationId`,
+                # two simulators answering one name. Same message shape as
+                # refs.check_services' clause, so the two commands agree on the
+                # defect and on the pointer it is reported at.
+                findings.append(
+                    Finding(
+                        run.services_part,
+                        LAYER,
+                        f"{tool_pointer}/name",
+                        f"tool name {name!r} is already declared at {first_named[name]}",
+                    )
+                )
+                ok = False
+                continue
+            first_named[name] = f"{tool_pointer}/name"
             schema_claim = tool.get("schema_claim")
             # A missing or non-string `schema_claim` is the part's defect whatever
             # the claims files hold -- no claims file can carry an id that is not a

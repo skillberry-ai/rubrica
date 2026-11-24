@@ -386,6 +386,43 @@ def test_a_tool_name_that_would_not_survive_sanitisation_is_a_finding(tmp_path):
     assert {f.layer for f in findings} == {LAYER}
 
 
+def test_a_tool_name_repeated_within_one_service_is_refused_not_overwritten(tmp_path):
+    """Measured before: exit 0, `paths` held only the second schema, and
+    `x-rubrica.tools` listed both -- one schema silently lost.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    tool = json.loads(run.services_part.read_text(encoding="utf-8"))["services"][0]["tools"][0]
+    _rewrite_services(run, lambda p: p["services"][0]["tools"].append(dict(tool)))
+    written, findings = synthesise(run)
+    assert written == []
+    assert not run.interfaces_dir.exists(), "all-or-nothing: nothing may be written"
+    assert [(f.artifact, f.pointer) for f in findings] == [
+        (run.services_part, "/services/0/tools/1/name")
+    ]
+    assert "/services/0/tools/0/name" in findings[0].message
+    assert {f.layer for f in findings} == {LAYER}
+
+
+def test_a_tool_name_repeated_across_services_is_refused(tmp_path):
+    """Two documents both serving one `operationId` is two simulators answering
+    one name; refused here as check-refs reports it, so the commands agree.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+
+    def add_twin(part):
+        twin = json.loads(json.dumps(part["services"][0]))
+        twin["id"] = "svc-tickets-again"
+        part["services"].append(twin)
+
+    _rewrite_services(run, add_twin)
+    written, findings = synthesise(run)
+    assert written == []
+    assert [(f.artifact, f.pointer) for f in findings] == [
+        (run.services_part, "/services/1/tools/0/name")
+    ]
+    assert "query_tickets" in findings[0].message
+
+
 def test_a_schema_claim_resolving_to_nothing_is_a_finding(tmp_path):
     """An id no claim carries *is* the part's defect, so this one names the part.
 

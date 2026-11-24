@@ -2614,12 +2614,13 @@ def _duplicate_service_ids(part: dict) -> set[str]:
 def check_services(run: RunPaths) -> list[Finding]:
     """The tool grouping in 01-services.json, against the claims it cites.
 
-    Five clauses, reported in the order below so a repair reads resolution before
+    Six clauses, reported in the order below so a repair reads resolution before
     the grouping the resolution feeds: every id in a tool's `claims` resolves to a
     `tool` claim, every `schema_claim` is one of its own tool's ids, no two
-    services share a tool claim and no two share an id, every tool name survives
-    the harness's sanitisation unchanged, and every `schema_claim`'s payload equals
-    the input region its evidence names.
+    services share a tool claim and no two share an id, no tool name is declared
+    twice anywhere in the part, every tool name survives the harness's
+    sanitisation unchanged, and every `schema_claim`'s payload equals the input
+    region its evidence names.
 
     A tool claim in two services is two simulators serving one tool name, which is
     one database the agent under test sees two conflicting views of. Two services
@@ -2825,6 +2826,31 @@ def check_services(run: RunPaths) -> list[Finding]:
                 "simulators serving one tool name give the agent two conflicting views of one "
                 "database",
             )
+
+    # A tool name declared twice, within one service or across two. The claim
+    # clause above cannot see it: a second service whose tool is also
+    # `query_tickets`, citing a *copied* claim under its own id, passed every gate
+    # while two documents both served `operationId: query_tickets` -- two
+    # simulators answering one name. Within one service it was quieter still:
+    # interfaces._document keys `paths` by `/<name>`, so the second schema
+    # overwrote the first, and check_interfaces compares names as sets, so it saw
+    # nothing. One finding per repeat, at the repeat's own pointer and naming the
+    # first, so a repair knows both places. Exact comparison, because
+    # rb-reconcile-services copies names exactly; and string names only, since a
+    # non-string one is the sanitisation clause's below.
+    first_named: dict[str, str] = {}
+    for pointer, name in names:
+        if not isinstance(name, str):
+            continue
+        if name in first_named:
+            report(
+                pointer,
+                f"tool name {name!r} is already declared at {first_named[name]}: one name "
+                "the agent calls would be served by two simulators or two input schemas, "
+                "and only one of them can answer it",
+            )
+        else:
+            first_named[name] = pointer
 
     for pointer, name in names:
         if not isinstance(name, str) or not TOOL_NAME.match(name):
