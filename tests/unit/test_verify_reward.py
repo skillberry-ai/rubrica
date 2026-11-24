@@ -88,6 +88,48 @@ def test_exact_set_accepts_the_same_calls_in_any_order():
     assert score == 1.0
 
 
+# A loose operation (same tool, fewer args) must not take the one call a stricter
+# operation needed. Greedy first-fit scored the first order below 0.5 / 0.0 and the
+# second 1.0 / 1.0; a largest one-to-one matching scores both the same.
+_LOOSE_THEN_STRICT = [_op("get_job"), _op("get_job", job_id=7)]
+_CALL_7 = ("get_job", {"job_id": 7})
+_CALL_9 = ("get_job", {"job_id": 9})
+
+
+@pytest.mark.parametrize("calls", [[_CALL_7, _CALL_9], [_CALL_9, _CALL_7]])
+@pytest.mark.parametrize("match", ["subset", "exact-set"])
+def test_unordered_modes_match_a_loose_operation_without_stealing(calls, match):
+    score, detail = score_trajectory(calls, {"match": match, "operations": _LOOSE_THEN_STRICT})
+    assert score == 1.0
+    assert detail["unmatched"] == []
+    assert detail["extra_calls"] == 0
+
+
+@pytest.mark.parametrize(
+    "calls",
+    [
+        [("get_job", {"job_id": 7, "verbose": True}), ("get_job", {"job_id": 7}), _CALL_9],
+        [_CALL_9, ("get_job", {"job_id": 7}), ("get_job", {"job_id": 7, "verbose": True})],
+        [("get_job", {"job_id": 7}), _CALL_9, ("get_job", {"job_id": 7, "verbose": True})],
+    ],
+)
+def test_three_operations_on_one_tool_match_in_any_call_order(calls):
+    operations = [_op("get_job"), _op("get_job", job_id=7), _op("get_job", job_id=7, verbose=True)]
+    for match in ("subset", "exact-set"):
+        score, detail = score_trajectory(calls, {"match": match, "operations": operations})
+        assert score == 1.0, (match, calls)
+        assert detail["unmatched"] == []
+
+
+def test_three_operations_on_one_tool_score_partially_when_a_call_is_missing():
+    operations = [_op("get_job"), _op("get_job", job_id=7), _op("get_job", job_id=7, verbose=True)]
+    calls = [("get_job", {"job_id": 7, "verbose": True}), _CALL_9]
+    score, _ = score_trajectory(calls, {"match": "subset", "operations": operations})
+    assert score == 2 / 3
+    score, _ = score_trajectory(calls, {"match": "exact-set", "operations": operations})
+    assert score == 0.0
+
+
 def test_exact_sequence_rejects_the_wrong_order():
     calls = _calls(
         ("query_aap2", {"action": "get_job_log"}), ("query_aap2", {"action": "find_jobs"})

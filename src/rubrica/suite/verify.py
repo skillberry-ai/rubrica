@@ -292,21 +292,39 @@ def score_assertions(answer, calls, assertions):
 
 
 def _match_unordered(operations, calls):
-    """-> the set of expected-operation indices satisfied, greedily.
+    """-> the set of expected-operation indices in a largest one-to-one matching.
 
     Each actual call is consumed by at most one expected operation. Without
     that, a single call would satisfy a two-operation trajectory and hop depth
     -- the whole difficulty signal -- would stop being measured.
+
+    The matching is the largest possible, found by augmenting paths, not
+    greedy. Greedy let a loose operation (same tool, fewer args) take the one
+    call a stricter operation needed: expected [get_job {}, get_job {job_id: 7}]
+    against calls [get_job(7), get_job(9)] scored subset 0.5, and 1.0 with the
+    calls reversed. With a largest matching the score depends only on which
+    calls exist, never on their order. Trajectories are short, so the
+    O(operations * edges) cost does not matter.
     """
-    used, matched = set(), set()
-    for i, operation in enumerate(operations):
-        for j, call in enumerate(calls):
-            if j in used or not call_matches(operation, call):
+    fits = [
+        [j for j, call in enumerate(calls) if call_matches(operation, call)]
+        for operation in operations
+    ]
+    owner = {}  # call index -> operation index holding it
+
+    def augment(i, seen):
+        for j in fits[i]:
+            if j in seen:
                 continue
-            used.add(j)
-            matched.add(i)
-            break
-    return matched
+            seen.add(j)
+            if j not in owner or augment(owner[j], seen):
+                owner[j] = i
+                return True
+        return False
+
+    for i in range(len(operations)):
+        augment(i, set())
+    return set(owner.values())
 
 
 def score_trajectory(calls, trajectory):
