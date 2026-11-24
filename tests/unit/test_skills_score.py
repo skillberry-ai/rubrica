@@ -463,3 +463,52 @@ def test_the_capability_rows_are_conditioned_on_the_binding_where_they_are_defin
             f"{label} narrows the rows without saying the excluded cells are accounted for as "
             "`unreachable` holes, which turns the narrowed surface into a silent cap"
         )
+
+
+def _unreachable_bullet() -> str:
+    """Step 7's `unreachable` reason bullet, whitespace-normalised.
+
+    `method_step(7)` flattens the bullets into one line, so the bullet is cut out
+    on its own marker and ends at the next reason's marker -- scoped to the one
+    reason that defines the mechanical case, not to the step that lists all four.
+    """
+    step = method_step(7)
+    start = step.index("- `unreachable` --")
+    end = step.find(" - `", start + 1)
+    return step[start : end if end != -1 else len(step)]
+
+
+def test_drivable_means_a_tool_listed_under_services_not_any_binding():
+    """The drivable rule was narrowed in code, and this prose had to
+    follow it at all three places that define it.
+
+    `refs.binding_is_drivable` counts a cell only if its `binding.tool` is exactly
+    a `services[].tools[].name` when the world model has `services`. Measured on a
+    real run (117 bound capabilities, 7 to a listed tool): the other 110 were bound
+    to HTTP routes or functions. A score part written to the old "declares a
+    binding.tool" rule scores those cells as rows, which `refs.check_coverage`
+    then reports as undrivable -- a repair round spent on prose that was wrong.
+
+    One sentence per unit has to carry all three of `binding.tool`, `services` and
+    `exactly`: `services` names where the tool list lives, `exactly` names the
+    match rule (no prefix or case folding, since `call_matches` compares exactly),
+    and holding them to one sentence is what ties the rule to the binding. Scoped
+    to a sentence rather than the unit because a unit-wide check was measured
+    vacuous: with the rule deleted from step 4, its leftover "only when the world
+    model has no `services` key" sentence and an unrelated "exactly" elsewhere in
+    the step kept it green. Measured both ways in a RUBRICA_SKILLS_DIR copy:
+    deleting the rule from any one unit turns the test red; rewording it (another
+    sentence order, "listed under the world model's services" for "listed there")
+    keeps it green.
+    """
+    for label, text in (
+        ("Method step 4", method_step(4)),
+        ("the `unreachable` reason in step 7", _unreachable_bullet()),
+        ("Invariant 1", invariant(1)),
+    ):
+        sentences = re.split(r"(?<=[.:])\s+", text)
+        assert any("binding.tool" in s and "services" in s and "exactly" in s for s in sentences), (
+            f"{label} has no sentence holding `binding.tool` exactly to the tool names listed "
+            "under `services`; that, not declaring any `binding.tool`, is what "
+            "makes a cell drivable (refs.binding_is_drivable)"
+        )

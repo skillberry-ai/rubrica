@@ -37,7 +37,12 @@ from pathlib import Path
 # local copy would be a second spelling of a guard whose whole point is that
 # there is one, and half a module's worth of inconsistent isinstance checks is
 # the defect `_mapping` exists to have fixed.
-from rubrica.brief import _dicts, _mapping, _quietly, _strings
+#
+# `drivability_counts` is the three-way drivability split, imported for the same
+# reason: gate 1's excluded block and gate 2 already read it from `brief`, and a
+# third copy of the rule is how this page and the gate would come to disagree
+# about which capabilities an agent can drive.
+from rubrica.brief import _dicts, _mapping, _quietly, _strings, drivability_counts
 
 # The one sort in this module that is not local to it. `dispositions` lists the
 # admits in the order `admit_from_triage` will materialise them, and that order is
@@ -1073,6 +1078,11 @@ class Coverage:
     # sizing diagnostic's failure modes on a page that composes rather than
     # analyses.
     implied: dict | None
+    # (class, capabilities, cells) per `brief.DRIVABILITY_CLASSES`, read from the
+    # world model. None when there is no readable world model or it could not be
+    # counted -- the page says "not computed" rather than printing three zeros,
+    # which would read as a world model that declares nothing.
+    drivability: list[tuple[str, int, int]] | None = None
 
 
 def _round_row(doc: dict) -> RoundRow:
@@ -1209,6 +1219,8 @@ def coverage(run: RunPaths) -> Coverage | Marker:
         implied = implied_size(run)
     except Exception:  # deliberate: the non-numeric ceiling measured in the docstring
         implied = None
+    world = _quietly(run.world_model)
+    drivability = drivability_counts(world) if isinstance(world, dict) else None
     return Coverage(
         rounds=rows,
         # `latest`'s, never the last row's. They are the same on a run `score`
@@ -1220,6 +1232,7 @@ def coverage(run: RunPaths) -> Coverage | Marker:
         goals=goals,
         holes=holes,
         implied=implied,
+        drivability=drivability,
     )
 
 

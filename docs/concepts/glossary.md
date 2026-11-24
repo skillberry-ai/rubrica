@@ -30,8 +30,11 @@ way for goals. How many cells are *counted* is fixed by
 `denominator.capability_cells` before the first round runs, so "coverage" here
 always means a fraction of a frozen set — never a judgment that enough tests
 exist. **Declared and counted are not the same set.** Only the cells whose
-capability declares a `binding.tool` are drivable through the target, and only
-those are scored; the rest are declared, unscored, and accounted for as computed
+capability declares a `binding.tool` are drivable through the target — and, when
+the world model carries a `services` list (even `[]`), only those whose
+`binding.tool` is exactly the name of one of `services[].tools[]`; a world model
+with no `services` key keeps the older rule, any `binding.tool`. Only drivable
+cells are scored; the rest are declared, unscored, and accounted for as computed
 `unreachable` holes. A cell that is not covered is recorded as a `hole` either
 way, with a reason for why not.
 
@@ -94,7 +97,9 @@ about the corpus.
 The coverage denominator, computed once by `reconcile-seal` — code, not a
 prompt — and frozen at a `version` for the rest of the run.
 `denominator.capability_cells` counts the **drivable** capability × outcome-class
-pairs, those whose capability declares a `binding.tool`, and `denominator.goals`
+pairs, those whose capability declares a `binding.tool` that, when the world
+model carries a `services` list, is exactly the name of a tool in it (with no
+`services` key, any `binding.tool` counts), and `denominator.goals`
 counts goals (`src/rubrica/schema/world-model-0.1.json`). Goals are not narrowed:
 a goal is closable with no binding anywhere. Every later coverage report
 carries the same `denominator_version` it was computed against, so a round

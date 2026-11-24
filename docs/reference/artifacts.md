@@ -869,7 +869,8 @@ an `outcome_class_id` — the coverage cell this scenario is meant to close);
 
 One round's coverage report against the frozen `denominator`: a
 `capability_matrix` (the **drivable** capability × outcome-class cells — those
-whose capability declares a `binding.tool` — each `covered` or not, with the
+whose capability declares a `binding.tool` that, when the world model carries a
+`services` list, is exactly the name of a tool in it — each `covered` or not, with the
 `scenario_ids` that cover it), a `goal_matrix` (same shape, per goal), a list of
 uncovered `holes` (each with a `reason` — `not_yet_
 attempted`, `unreachable`, `out_of_scope`, or `blocked_by_gap`, the last

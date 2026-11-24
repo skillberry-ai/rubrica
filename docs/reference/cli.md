@@ -155,6 +155,18 @@ only remaining findings are waived exits 0 with those lines still on stdout. A
 finding: a person wrote that file, so there is no stage to hand a repair prompt
 to.
 
+A run sealed before the drivable rule narrowed to tools listed in `services`
+(see [`score-seal`](#rubrica-score-seal) for the rule) and whose world model has
+a `services` key fails here, exit 1, until it is re-sealed and re-scored: its
+sealed `denominator.capability_cells` still counts cells bound to a tool not
+listed in `services`, and its matrix still scores them. Such runs are not
+grandfathered. When the sealed number is exactly what the older rule gives, the
+one `/denominator/capability_cells` finding on `01-world-model.json` says so and
+names the fix — re-run `rubrica reconcile-seal`, then `score` and `score-seal` —
+and each `matrix scores undrivable cell` finding on those cells points at it
+rather than repeating it. `gate-brief --gate 2` prints one line saying the same.
+`score` is a prompt stage, so the fix costs a paid dispatch.
+
 ```bash
 rubrica check-refs --run runs/run-20260806-123005
 ```
@@ -386,7 +398,12 @@ capability × outcome-class cell and every goal, because round 1 has no coverage
 report and that is the normal shape rather than a missing file. Drivable, not
 declared: a capability with no `binding.tool` cannot be closed by proposing at
 all, since `emit.call_spec` has no tool name to build the call from, so offering
-the cell spends a round on a scenario `emit` will drop. Goals are not filtered,
+the cell spends a round on a scenario `emit` will drop. When the world model
+carries a `services` list (even `[]`), a `binding.tool` must also be exactly the
+name of a tool in `services[].tools[]` — no prefix or case folding — or the cell
+is undrivable too: a binding to an HTTP route or a function is a call no agent can
+make. A world model with no `services` key keeps the older any-`binding.tool`
+rule. Goals are not filtered,
 so a world model with no binding anywhere still has a worklist for as long as it
 declares a goal.
 
@@ -501,9 +518,12 @@ a second composition, so the two cannot drift.
 
 The hole list is the one place this command adds to what score wrote. The
 capability matrix scores the **drivable** cells only — those whose capability
-declares a `binding.tool` — so for every other declared cell this command writes
-a computed `unreachable` hole saying the capability declares none and `emit`
-cannot turn it into a tool call. Matrix plus holes therefore still account for
+declares a `binding.tool`, and, when the world model carries `services`, one that
+names a tool there exactly — so for every other declared cell this command writes
+a computed `unreachable` hole. Its justification says either that the capability
+declares no `binding.tool` and `emit` cannot turn it into a tool call, or that the
+binding names something that is not a tool in `services` (an HTTP route or a
+function, for example). Matrix plus holes therefore still account for
 every cell the world model declares, which is what keeps a narrowed denominator a
 denominator rather than a silent cap. It is computed rather than asked of the
 prompt because binding absence is a fact on disk and not a judgment, and a hole
@@ -701,7 +721,17 @@ Composes the existing reports into the reading surface at one of the four
 human gates: the objective verdict and grouped declines at gate 0; the reconcile
 sweep, the capabilities the coverage denominator excludes, claim utilisation per
 input, read coverage per reconcile pass, the implied suite size and one block per
-service at gate 1; the coverage matrix at gate 2; the verdict tally at gate 3.
+service at gate 1; the coverage matrix and the drivability counts at gate 2; the
+verdict tally at gate 3.
+
+Gate 2's **drivability** block splits the world model's capabilities three ways —
+drivable (bound to a tool an agent has), bound but not to an agent tool, and
+unbound — and gives each class in capabilities and in cells, so a reader approving
+the matrix sees how much of it an agent can actually drive rather than finding the
+skew in the emitted suite. It uses the same rule as gate 1's excluded-capability
+block and the coverage denominator, so the three cannot disagree. A world model
+that is missing, not JSON, or unreadable prints "not computed" in place of the
+numbers, and the brief still exits 0.
 
 Gate 0 renders more than the others because it is the one gate held before any
 downstream stage has read the corpus: the objective verdict, then the waivers in
@@ -766,8 +796,10 @@ or carries no readable rows is named as such rather than omitted, and a run with
 no partial carrying an accounting at all says so instead.
 
 Gate 1 also lists **the capabilities the coverage denominator excludes** — every
-capability declaring no `binding.tool`, with the cells it would have added, its
-`operation`, and the inputs whose claims it rests on. Its timing is what makes it
+capability declaring no `binding.tool`, or (when the world model carries
+`services`) bound to a name that is not a tool there, with the cells it would have
+added, its `operation`, the inputs whose claims it rests on, and for a bound one
+the name it is bound to. Its timing is what makes it
 matter, not uniqueness: the same exclusion surfaces twice more, and both are too
 late to act on. `score-seal` writes one `unreachable` hole per undrivable cell into
 the round's coverage document, which a reader meets at gate 2, and `emit` names a
@@ -800,8 +832,12 @@ shape cannot express, and telling those apart is semantic — so the operation a
 the citing inputs are printed and the grouping is left to the reader. The remedy
 is named, because a reader at this gate is the last person who can act on it: add
 `binding.tool` and `binding.fixed_args`, or accept the reduced surface and record
-that decision. A world model in which *nothing* is drivable is called out
-separately and loudly, in a fenced banner: with no binding anywhere and no goal
+that decision; for a capability bound to a name that is not a tool in
+`services`, point `binding.tool` at the exact name of one, or correct `services`.
+A world model in which *nothing* is drivable is called out
+separately and loudly, in a fenced banner, which says which of the two causes it
+is — "bound, but not to any tool in services" apart from "declares no
+`binding.tool`" — and never says none declare one when they do: with no binding anywhere and no goal
 left to close, `propose-batches` prints the same `no closable holes` a genuinely
 converged round prints and exits 0, and gate 1 is the last place a human can tell
 those two apart. The banner states that condition rather than asserting the halt,
@@ -911,7 +947,10 @@ holds the full detail: the smoke result (verdict, mean reward per role, the
 agents, the tasks the reference agent did not pass, and every task's rewards);
 the challenge tally and emitted packages; one line per scenario joined to its
 verdict and package; the coverage progression with both of `latest.json`'s
-matrices &mdash; capability cells, and goals by hop depth; world-model counts;
+matrices &mdash; capability cells, and goals by hop depth &mdash; preceded by the
+same drivable / bound-but-not-to-an-agent-tool / unbound counts gate 2 shows, in
+capabilities and cells, read from the world model ("not computed" when it cannot
+be read); world-model counts;
 claim utilisation; gaps; contradictions; the manifest's inputs; the objective
 verdict; grouped dispositions; deficiencies; `decisions.md`; the run record
 (limits and the per-stage model, effort and skill hash); the stage spine; and a
@@ -1155,6 +1194,19 @@ longer be attributed to a stage.
 
 Prints one task directory per emitted scenario, then findings (if any) on
 exit 1.
+
+Each finding names the upstream artifact to change, and an instance with any
+finding gets no package. Against `04-instances/<sid>/expected.json`, a
+`tool_called` assertion or a trajectory operation is refused when its capability
+declares no binding (`declares no binding`), or — when the world model carries
+`services` — when its `binding.tool` is not exactly a `services[].tools[].name`
+(`bound to a tool the agent does not have`). The second uses the same rule as the
+coverage denominator, as a backstop for a scenario that claims such a capability
+anyway or a gate-1 hand edit that let one through: a test for an HTTP route or a
+function is one no agent can pass. A world model with no `services` key is not
+held to it, and a `tool_not_called` assertion is not either, since asserting the
+agent never calls a tool it does not have is trivially true rather than wrong.
+Both are exit `1`, a repairable stage defect.
 
 ```bash
 rubrica emit --run runs/run-20260806-123005

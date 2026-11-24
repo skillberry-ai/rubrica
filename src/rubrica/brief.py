@@ -161,7 +161,16 @@ from rubrica.paths import STAGES, RunPaths, is_safe_segment, list_json
 # gate's reading surface and the field it is describing come to disagree about what
 # a cell is. Both index unguarded (`cap["id"]`, `oc["id"]`), which is why
 # `_cell_counts` below wraps them rather than calling them straight.
-from rubrica.refs import PASS_OWN_KINDS, _as_list, _cells, drivable_cells
+from rubrica.refs import (
+    PASS_OWN_KINDS,
+    RESEAL_FIX,
+    _as_list,
+    _cells,
+    binding_is_drivable,
+    drivable_cells,
+    narrowed_cells,
+    service_tool_names,
+)
 from rubrica.sizing import implied_size
 from rubrica.utilisation import claim_utilisation
 
@@ -214,7 +223,7 @@ CLAIMS_READING_PASSES = tuple(
 # running before this gate is what would have made that fatal rather than merely
 # wrong: derived from A3 and A4, never observed, since no orchestrated run was
 # dispatched against an unbound world model to watch the halt.
-EXCLUDED_HEADER = "Capabilities excluded from the denominator (no tool binding)"
+EXCLUDED_HEADER = "Capabilities excluded from the denominator (not bound to an agent tool)"
 
 # Gate 1's services section header, named for the four above's reason: it is the
 # anchor a reader and a test both scope to, and an unscoped assertion here is
@@ -359,6 +368,95 @@ def _cell_counts(world: dict) -> tuple[int, int] | None:
         return None
 
 
+# The three classes a capability falls into once `services` exists, in the order
+# every surface prints them. The labels are the reader's wording, not field names,
+# because gate 2 and the run summary print them as-is.
+DRIVABLE = "drivable (bound to an agent tool)"
+OFF_TOOL = "bound, but not to an agent tool"
+UNBOUND = "unbound (no binding.tool)"
+DRIVABILITY_CLASSES: tuple[str, ...] = (DRIVABLE, OFF_TOOL, UNBOUND)
+
+
+def _drivability_class(cap: dict, tools: set[str] | None) -> str:
+    """Which of `DRIVABILITY_CLASSES` one capability is in.
+
+    The one spelling of the three-way split in this build: gate 1's excluded block,
+    gate 2's drivability lines and the run summary's coverage section all call it,
+    so no two of them can disagree about which capabilities a reader is told are
+    out. The drivable half is `refs.binding_is_drivable`, the same predicate the
+    denominator and `seal_score`'s injected holes use; the only thing added here
+    is telling the two excluded causes apart, because the actions differ -- an
+    unbound capability needs a tool added, an off-tool one needs its binding
+    pointed at a tool `services` lists.
+    """
+    if binding_is_drivable(cap, tools):
+        return DRIVABLE
+    if _mapping(cap.get("binding")).get("tool"):
+        return OFF_TOOL
+    return UNBOUND
+
+
+def drivability_counts(world: dict) -> list[tuple[str, int, int]] | None:
+    """(class, capabilities, cells) for each of `DRIVABILITY_CLASSES`, or None.
+
+    Cells are distinct (capability id, outcome-class id) pairs within each class,
+    for `drivable_cells`' reason: a repeated id is one cell in the denominator, so
+    counting array lengths would print a number no other surface agrees with. So
+    on a well-formed world model the drivable cell count here equals
+    `len(drivable_cells(world))`.
+
+    None means "could not be counted", for `_cell_counts`' reason. Every read below
+    is guarded already (`_dicts`, `_mapping`, `service_tool_names`' per-element
+    guards), so the catch is a backstop: a report must not exit 1 with a
+    fabricated `[internal]` finding on a hand-edited world model it can otherwise
+    read.
+    """
+    try:
+        tools = service_tool_names(world)
+        caps: dict[str, int] = dict.fromkeys(DRIVABILITY_CLASSES, 0)
+        cells: dict[str, set[tuple[str, str]]] = {c: set() for c in DRIVABILITY_CLASSES}
+        for cap in _dicts(world.get("capabilities")):
+            klass = _drivability_class(cap, tools)
+            caps[klass] += 1
+            cap_id = cap.get("id")
+            if not isinstance(cap_id, str):
+                continue
+            for oc in _dicts(cap.get("outcome_classes")):
+                if isinstance(oc.get("id"), str):
+                    cells[klass].add((cap_id, oc["id"]))
+        return [(c, caps[c], len(cells[c])) for c in DRIVABILITY_CLASSES]
+    except Exception:  # deliberate, matching _quietly's reasoning
+        return None
+
+
+def drivability_lines(world_doc) -> list[str]:
+    """Gate 2's drivability block: the three classes, in capabilities and cells.
+
+    `world_doc` is whatever `_quietly(run.world_model)` returned, so None is "no
+    readable world model" and is said rather than rendered as zeros -- three rows
+    of 0 read as a world model that declares nothing, which is a claim about the
+    target this report does not have.
+
+    Gate 2 is where a reader approves the matrix, so the skew between what the
+    matrix counts and what an agent can actually drive has to be visible there
+    rather than first discovered in the emitted suite.
+    """
+    lines = ["Drivability (from 01-world-model.json)"]
+    if not isinstance(world_doc, dict):
+        lines.append("  (no readable world model; not computed)")
+        return lines
+    counts = drivability_counts(world_doc)
+    if counts is None:
+        lines.append("  (could not be counted; run `rubrica validate --stage reconcile-seal`)")
+        return lines
+    for klass, n_caps, n_cells in counts:
+        lines.append(
+            f"  {klass}: {n_caps} {'capability' if n_caps == 1 else 'capabilities'}, "
+            f"{n_cells} {'cell' if n_cells == 1 else 'cells'}"
+        )
+    return lines
+
+
 def _claim_sources(run: RunPaths) -> dict[str, str]:
     """claim id -> the input id that asserted it, for every readable claims file.
 
@@ -407,8 +505,22 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
     # reason drivable_cells records: an explicit `binding: null` is what a
     # hand-edit at this gate produces, and the second spelling returns None and
     # raises AttributeError on the chained `.get`.
-    unbound = [cap for cap in capabilities if not _mapping(cap.get("binding")).get("tool")]
-    drivable = len(capabilities) - len(unbound)
+    #
+    # `excluded` goes through refs.binding_is_drivable rather than a local test, so
+    # this list and the denominator cannot disagree about who is out. It is split
+    # in two for the banner below, which must never say "0 of N declare
+    # binding.tool" of a world model where they do: on hermes run-20261110-150134
+    # 117 capabilities declared one and 110 of them named an HTTP route or a
+    # function rather than a tool in `services`.
+    #
+    # Both lists come from `_drivability_class`, the one spelling of the split that
+    # gate 2 and the run summary also read, kept in document order.
+    tools = service_tool_names(world)
+    classes = [(cap, _drivability_class(cap, tools)) for cap in capabilities]
+    excluded = [cap for cap, klass in classes if klass != DRIVABLE]
+    unbound = [cap for cap, klass in classes if klass == UNBOUND]
+    off_tool = len(excluded) - len(unbound)
+    drivable = len(capabilities) - len(excluded)
 
     if not capabilities:
         # Never "all 0 capabilities are drivable", which is what the branch below
@@ -426,15 +538,17 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
         lines.append(f"  ({state}; nothing to report)")
         return lines
 
-    if not unbound:
+    if not excluded:
         # Stated rather than omitted, for the reconcile sweep's reason: rendering
         # "every capability is drivable" as silence hides a strong claim.
         lines.append(f"  all {len(capabilities)} capabilities are drivable")
     elif drivable:
         lines.append(
             f"  {drivable} of {len(capabilities)} capabilities are drivable; "
-            f"{len(unbound)} are excluded below"
+            f"{len(excluded)} are excluded below"
         )
+        if off_tool:
+            lines.append(f"  ({off_tool} of them are bound, but not to any tool in services)")
     else:
         # The loudest thing this brief says, and the volume is the point: gate 1
         # precedes propose, so a reader here is the last person who can act before
@@ -469,10 +583,29 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
         # mid-paragraph at 80 and 120 columns and everything after the first visual
         # line read as prose -- which costs exactly the loudness these lines exist
         # for. How the warning splits across them is editorial; the fence is not.
-        lines.append(
-            f"  *** NOTHING IS DRIVABLE: 0 of {len(capabilities)} capabilities declare "
-            "binding.tool. ***"
-        )
+        #
+        # The first line names which of the two causes it is, and both when both
+        # apply, because the actions differ: an unbound capability needs a tool
+        # added, a bound one needs its binding pointed at a tool `services` lists
+        # (or `services` corrected). "0 of N declare binding.tool" is printed only
+        # when it is true.
+        if not off_tool:
+            lines.append(
+                f"  *** NOTHING IS DRIVABLE: 0 of {len(capabilities)} capabilities declare "
+                "binding.tool. ***"
+            )
+        elif not unbound:
+            lines.append(
+                f"  *** NOTHING IS DRIVABLE: all {len(capabilities)} capabilities are bound, "
+                "but not to any tool in services. ***"
+            )
+        else:
+            # Two lines, because one runs past 100 characters at three-digit counts.
+            lines.append(
+                f"  *** NOTHING IS DRIVABLE: {off_tool} of {len(capabilities)} capabilities "
+                "are bound, but not to any tool in services; ***"
+            )
+            lines.append(f"  *** the other {len(unbound)} declare no binding.tool at all. ***")
         lines.append(
             "  *** No cell is drivable, so no scenario can exercise a capability against "
             "the target. ***"
@@ -499,11 +632,11 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
             "toward the denominator"
         )
 
-    if not unbound:
+    if not excluded:
         return lines
 
     source = _claim_sources(run)
-    for cap in unbound:
+    for cap in excluded:
         raw_id = cap.get("id")
         # Rendered as an absence rather than as `None`: a row reading "None" reads
         # as an id, and layer 1 is what names a capability with no id.
@@ -526,6 +659,11 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
             f"  {cap_id}  {cells} {'cell' if cells == 1 else 'cells'}  [{', '.join(inputs) or '?'}]"
         )
         lines.append(f"    {operation if isinstance(operation, str) else '(no operation)'}")
+        # The bound name is printed for an off-tool capability, because it is the
+        # thing a reader corrects: without it "excluded" reads as "unbound".
+        tool = _mapping(cap.get("binding")).get("tool")
+        if tool:
+            lines.append(f"    bound to {tool!r}, which is not a tool in services")
 
     # The action, named where the only person who can still take it is reading.
     # emit.py's late report is the other place that names it, and it names the same
@@ -536,6 +674,11 @@ def _excluded_lines(run: RunPaths, world: dict) -> list[str]:
         "binding.fixed_args to the capability, or accept the reduced surface and record "
         "that as a decision (rubrica decide)."
     )
+    if off_tool:
+        lines.append(
+            "  For a capability bound to something that is not a tool in services, point "
+            "binding.tool at the exact name of a tool services lists, or correct services."
+        )
     lines.append(
         "  Re-dispatching a reconcile pass will not add a binding -- "
         "rb-reconcile-capabilities is told to leave it off rather than guess a tool name."
@@ -1575,7 +1718,41 @@ def _gate_2(run: RunPaths) -> str:
             f"  implied suite size: {size['implied']} (ceiling {size['ceiling']}{binding_note})"
         )
 
+    world_doc = _quietly(run.world_model)
+    lines.extend(_predates_rule_lines(capability_matrix, world_doc))
+
+    # Read from the world model rather than the coverage document, which records
+    # covered/total but not why a cell can never be covered.
+    lines.append("")
+    lines.extend(drivability_lines(world_doc))
+
     return "\n".join(lines) + "\n"
+
+
+def _predates_rule_lines(capability_matrix: dict, world_doc) -> list[str]:
+    """One line when the matrix scores cells the current drivable rule excludes.
+
+    Specifically the cells bound to a tool not listed in `services`
+    (`refs.narrowed_cells`): those are what a run scored before the rule narrowed
+    carries, and on the five autotrade runs that predate it this page showed 0
+    drivable cells beside a matrix scoring 67 with nothing saying why. A report,
+    so any malformed shape yields no line rather than an error.
+    """
+    try:
+        narrowed = narrowed_cells(_mapping(world_doc))
+        scored = {
+            (c["capability_id"], c["outcome_class_id"])
+            for c in _dicts(capability_matrix.get("cells"))
+        }
+    except Exception:  # deliberate, matching _cell_counts' reasoning
+        return []
+    stale = len(scored & narrowed)
+    if not stale:
+        return []
+    return [
+        f"  *** The matrix scores {stale} cell(s) bound to a tool not listed in `services`: this "
+        f"run predates the narrowed drivable rule and needs re-sealing -- {RESEAL_FIX}."
+    ]
 
 
 def _gate_3(run: RunPaths) -> str:

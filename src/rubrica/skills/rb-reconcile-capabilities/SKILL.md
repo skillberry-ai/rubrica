@@ -195,6 +195,16 @@ that exists.
    it is how a later stage will ever recognize that this capability is the
    one a trace or a live call actually invoked.
 
+   "The tool name a transcript will show" means the name of a tool **the
+   agent itself calls** -- the name as it appears in a tool call the agent
+   makes, copied exactly. It is never an HTTP route that the web app or
+   another service calls (`POST /api/sessions`), never an internal function
+   (`calculateCost`), and never a script or infrastructure command
+   (`tilt up`). A claim can describe any of those accurately and still give
+   you no agent tool. For such a capability, leave `binding` off: a route or
+   function written into `binding.tool` matches no agent tool call, so every
+   test built on it would call something the agent cannot call.
+
 4. **Set `confidence` from the claims, not from how sure you feel.** A
    capability resting on one `reverse_engineered` claim from a single trace
    span is not `high` because you find it plausible.
@@ -282,6 +292,15 @@ difference.
   worse than a missing one: a missing binding is a finding `emit` reports by
   name, while a wrong one silently matches nothing in any transcript and
   makes every scenario built on that capability unverifiable.
+
+- **The only name the claims give for an operation is an HTTP route, an
+  internal function, or a script or infrastructure command** -- something
+  like `POST /api/sessions`, `calculateCost` or `tilt up`, which the web app,
+  another service or an operator calls rather than the agent. Do not put it
+  in `binding.tool`. Declare the capability, cite the claim, and leave
+  `binding` off, exactly as when no name is given at all. A route in
+  `binding.tool` looks like a binding and is not one: no agent tool call will
+  ever carry that name.
 
 - **You cannot support a `params` entry from any claim.** Leave it out. An
   invented required parameter propagates into every seed and every expected

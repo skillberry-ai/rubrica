@@ -1211,9 +1211,20 @@ for one run, with the reason recorded in `decisions.md`.
 `rounds.closable_holes` narrows the capability half of the worklist to
 `refs.drivable_cells`, and leaves the goal half unconditional — every goal the
 world model declares is open on round 1 whatever the bindings say. So the
-behaviour on a world model where *no* capability declares a `binding.tool`
-depends entirely on whether it also declares a goal, and the two outcomes are
-nothing like each other. **Measured, both directions, by running
+behaviour on a world model where *no* capability is drivable depends entirely on
+whether it also declares a goal, and the two outcomes are nothing like each other.
+
+**This shape stopped being rare when the drivable rule narrowed to service tools.** Before that, "nothing drivable"
+meant "no capability declares a `binding.tool`". Since then a world model that
+carries `services` counts a binding only when it names a tool listed there exactly,
+and a target whose capabilities were bound mostly to HTTP routes and functions
+lands here even though every capability declares a binding: on hermes
+`run-20261110-150134`, 7 of 117 bindings named one of its 21 service tools. The
+banner below distinguishes the two causes — "bound, but not to any tool in
+services" against "declares no `binding.tool`" — because the remedies differ, and
+it never says none declare one when they do. Everything else in this entry is
+unchanged by the narrowing, including the ruling against a `check-refs` finding.
+The measurement below was made on the older, unbound shape: **Measured, both directions, by running
 `propose-batches` against a one-capability world model with the binding
 removed:**
 
@@ -1242,7 +1253,7 @@ Method step 9 defines `converged` as "every hole left is `unreachable`,
 run that covers its goals can converge on a suite that drives nothing.
 
 The only thing standing between a run and that outcome is a human reading the
-fenced banner `gate-brief --gate 1` prints when no capability is bound. That is
+fenced banner `gate-brief --gate 1` prints when no capability is drivable. That is
 deliberate rather than an oversight, and the alternative was built and taken back
 out. **A `check-refs` finding at the seal was designed, implemented in `ae1b74e`,
 and reverted in `11a6c25`.** This is the live account of why it is not there, so
@@ -1720,12 +1731,15 @@ which is worth more than the line it costs.
 ### `binding` is tool-shaped, so real agent-level behaviour can be neither driven nor counted
 
 `capability.binding` is `{tool, fixed_args}`, and `binding.tool` is the predicate
-`refs.drivable_cells` keys the coverage denominator on. It is **one notch tighter
-than `emit.bindings`, not identical to it**, and the difference is worth stating
-because the obvious reading is wrong: `emit.bindings` tests the binding *object*'s
-truthiness (`emit.py:67`, the `if cap.get("binding")` clause of its comprehension)
-and drops the capability outright, while `emit.call_spec`
-then reads `binding["tool"]` unguarded (`emit.py:79`). The two therefore disagree
+`refs.drivable_cells` keys the coverage denominator on — now held to
+the tool names in the world model's `services` whenever that key is present (see
+"The drivable rule narrowed to tools listed in `services`" below). Even without
+`services` it is **one notch tighter than `emit.bindings`, not identical to it**,
+and the difference is worth stating because the obvious reading is wrong:
+`emit.bindings` tests the binding *object*'s truthiness (the `if cap.get("binding")`
+clause of its comprehension) and drops the capability outright, while
+`emit.call_spec` then reads `binding["tool"]` unguarded. Cited by function rather
+than by line, because line numbers here went stale once already. The two therefore disagree
 on exactly one shape — a binding present with no `tool` — and that shape crashes
 `call_spec`, so it belongs outside the denominator rather than inside the suite.
 Do not "align" them.
@@ -1767,8 +1781,9 @@ The consequence is that the pipeline structurally cannot emit a test for
 non-tool agent behaviour, and the narrowed denominator now excludes that
 behaviour rather than reporting that it cannot reach it. What keeps the exclusion
 visible is entirely report-shaped — **no gate reports it on a correctly sealed
-run.** `gate-brief --gate 1` lists every unbound capability with its cell count,
-its `operation` and the inputs its claims rest on; `score-seal` writes one
+run.** `gate-brief --gate 1` lists every excluded capability — unbound, or bound
+to a name that is not a tool in `services` — with its cell count, its `operation`
+and the inputs its claims rest on; `score-seal` writes one
 computed `unreachable` hole per undrivable cell into the round's coverage
 document, which a reader meets at gate 2. `refs.check_world_model` fires only
 when a *sealed* `capability_cells` disagrees with the drivable count, which is a
@@ -2582,6 +2597,67 @@ boundary is stated where the decision is made: `gate-brief --gate 1`'s services
 section ends by saying that no stage reads a selection and that coverage does not
 narrow from one, so a reader is told the limit before they act on the assumption
 that it does.
+
+### The drivable rule narrowed to tools listed in `services`
+
+Measured on hermes `run-20261110-150134` the world model bound 117 capabilities
+and its `services` listed 21 tools, every one named in full like
+`mcp__builtin__jira_search`; only 7 of the 117 bindings matched one of those names
+exactly, and the rest named things like `POST /api/sessions` — an HTTP route or a
+function. All 117 counted as drivable, so the loop proposed, and the suite shipped,
+tests for 110 capabilities no agent tool call can reach.
+
+**The change is a deliberate narrowing of the arithmetic every consumer narrows
+together**, the kind the entry above says a new exclusion must be, and it is made
+in one place for that reason: `refs.drivable_cells`, through
+`refs.binding_is_drivable`, now also requires a capability's `binding.tool` to be
+exactly the name of one of `services[].tools[]` whenever the world model carries
+a `services` key. Every consumer goes through that function and none keeps its own
+copy — the sealed denominator (`reconcile.seal`, which now passes the services it
+folds in), `refs.check_world_model` and `refs.check_coverage`, the worklist
+(`rounds.closable_holes`), the capability matrix, `score-seal`'s injected
+`unreachable` holes, and gate 1's counts and excluded list. Sizing reads the sealed
+number. Three rulings, by the owner on 2026-11-23:
+
+- **No `services` key keeps the older rule** — any `binding.tool` counts. The
+  rule applies whenever the key is present, even as `[]`, since a present list is
+  a pass's statement of which tools the agent has. This keeps the tau2 run and both
+  committed `recorded/` world models valid without a paid re-record; it also means
+  a run whose services pass never ran is still scored on the older, wider rule.
+- **The match is exact**, with no prefix stripping or case folding:
+  `suite/verify.py`'s `call_matches` compares tool names exactly and
+  `rb-reconcile-capabilities` is told to copy them exactly, so a folded match would
+  count a cell no emitted test can pass. A binding to `jira_search` against a
+  service tool `mcp__builtin__jira_search` is therefore excluded, and that is
+  intended — the remedy is to correct the binding at gate 1.
+- **An excluded cell stays accounted for**, as a computed `unreachable` hole whose
+  justification says the binding names something that is not a tool in `services`
+  (an HTTP route or a function, for example). An unbound capability keeps the older
+  "declares no `binding.tool`" text.
+
+What this does **not** add, on purpose: a `check-refs` finding for "nothing
+drivable" — the entry "A run with no drivable capability at all ..." records one
+built and reverted, and this change makes that shape more common, not more
+repairable by a re-dispatch. Exit codes are unchanged. Nor does it judge whether an
+off-tool binding is the right capability with the wrong name or a surface the agent
+genuinely cannot reach; that is semantic, and gate 1 prints the bound name beside
+each excluded capability so a human can tell.
+
+**Runs sealed before the change, with a `services` key, fail `check-refs` until
+they are re-sealed and re-scored.** Their sealed `capability_cells` is the older
+rule's count and their matrix scores the cells the rule now excludes, so
+`check_world_model` reports the count mismatch and `check_coverage` one
+`matrix scores undrivable cell` per such cell — 109 findings on autotrade
+`run-20261109-145034`, and every one of the five autotrade runs failed the same
+way, each sealed number matching the older rule exactly. The owner ruled on
+2026-11-23 to keep the rule strict and **not** grandfather those runs, but to make
+the cause and the fix plain: when the sealed number equals the older rule's count,
+the one `/denominator/capability_cells` finding says the run was sealed before the
+rule narrowed and names the fix (re-run `rubrica reconcile-seal`, then `score` and
+`score-seal`); each matrix finding on a narrowed cell points at that finding
+rather than repeating it, and none is suppressed; and `gate-brief --gate 2` adds
+one line saying the run predates the rule. Exit codes are unchanged. The fix is
+not free: `score` is a prompt stage, so re-scoring is a paid dispatch.
 
 ---
 

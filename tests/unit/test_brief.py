@@ -317,6 +317,91 @@ def test_gate_brief_covers_gates_two_and_three_without_raising(tmp_path):
     assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "3"]) == 0
 
 
+def _three_way_world(run: RunPaths) -> dict[str, tuple[int, int]]:
+    """Rewrite the toy world model so each drivability class holds one capability.
+
+    `cap-find-tickets` stays bound to `query_tickets` (drivable), `cap-get-ticket`
+    is pointed at an HTTP route `services` does not list (bound, not to an agent
+    tool), and a third capability with `binding: null` is added (unbound). Returns
+    the expected (capabilities, cells) per class, cells counted off the fixture
+    rather than hard-coded so a change to the toy's outcome classes does not make
+    this test lie.
+    """
+    world = read_json(run.world_model)
+    caps = {cap["id"]: cap for cap in world["capabilities"]}
+    caps["cap-get-ticket"]["binding"] = {"tool": "GET /tickets/{id}", "fixed_args": {}}
+    extra = dict(caps["cap-find-tickets"], id="cap-unbound-extra", binding=None)
+    extra["outcome_classes"] = extra["outcome_classes"][:1]
+    world["capabilities"].append(extra)
+    write_json(run.world_model, world)
+    return {
+        brief.DRIVABLE: (1, len(caps["cap-find-tickets"]["outcome_classes"])),
+        brief.OFF_TOOL: (1, len(caps["cap-get-ticket"]["outcome_classes"])),
+        brief.UNBOUND: (1, 1),
+    }
+
+
+def test_gate_two_shows_drivable_off_tool_and_unbound_counts(tmp_path, capsys):
+    """A reader approving the matrix at gate 2 sees how much of it an
+    agent can drive, in capabilities and in cells, for each of the three classes."""
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
+    expected = _three_way_world(run)
+    capsys.readouterr()
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "2"]) == 0
+    out = capsys.readouterr().out
+    assert "Drivability (from 01-world-model.json)" in out
+    for klass, (n_caps, n_cells) in expected.items():
+        caps_word = "capability" if n_caps == 1 else "capabilities"
+        cells_word = "cell" if n_cells == 1 else "cells"
+        assert f"  {klass}: {n_caps} {caps_word}, {n_cells} {cells_word}" in out
+
+
+def test_drivability_counts_agree_with_the_denominator_and_gate_one(tmp_path):
+    """One rule, not three: the drivable cell count equals `refs.drivable_cells`,
+    and the excluded count is what gate 1's excluded block reports."""
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
+    _three_way_world(run)
+    world = read_json(run.world_model)
+    counts = {klass: (caps, cells) for klass, caps, cells in brief.drivability_counts(world)}
+    assert counts[brief.DRIVABLE][1] == len(refs.drivable_cells(world))
+    total_cells = sum(cells for _, cells in counts.values())
+    assert total_cells == len(refs._cells(world))
+    gate_1 = brief.gate_brief(run, 1)
+    assert "1 of 3 capabilities are drivable; 2 are excluded below" in gate_1
+    assert "(1 of them are bound, but not to any tool in services)" in gate_1
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    ["not json", "[]", '{"capabilities": "nope", "services": 7}', None],
+    ids=["bad-json", "not-an-object", "wrong-shapes", "unreadable"],
+)
+def test_gate_two_drivability_survives_a_malformed_or_unreadable_world_model(
+    tmp_path, capsys, corrupt
+):
+    """Gate 2 is a report: a world model it cannot read costs the drivability
+    block its numbers, never the exit code."""
+    if corrupt is None and os.geteuid() == 0:
+        pytest.skip("chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)")
+    run = build_toy_run(tmp_path / "runs", upto="score-seal")
+    if corrupt is None:
+        run.world_model.chmod(0o000)
+    else:
+        run.world_model.write_text(corrupt)
+    try:
+        capsys.readouterr()
+        assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "2"]) == 0
+        out = capsys.readouterr().out
+    finally:
+        run.world_model.chmod(0o644)
+    assert "Drivability (from 01-world-model.json)" in out
+    if corrupt == '{"capabilities": "nope", "services": 7}':
+        # Readable and an object: every class counts zero rather than raising.
+        assert f"  {brief.DRIVABLE}: 0 capabilities, 0 cells" in out
+    else:
+        assert "(no readable world model; not computed)" in out
+
+
 def test_the_gate_argument_offers_exactly_the_gates_the_code_defines():
     """A consistency check, not a style one: it passes on any spelling of the set
     that agrees with brief.GATES and fails only when the two diverge, which is the

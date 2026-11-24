@@ -278,11 +278,14 @@ def drivable_cells(world: dict) -> set[tuple[str, str]]:
     cell in the denominator", which is a narrower question with a different right
     answer.
 
-    Keyed on `binding.tool`, one notch tighter than `emit.bindings`' truthiness
-    test on the binding object (emit.py:67, the `if cap.get("binding")` clause of
-    its comprehension) because `emit.call_spec` then reads `binding["tool"]`
-    unguarded (emit.py:79) -- so the denominator equals what the
-    pipeline can actually ship, not merely what it retains. The two predicates
+    Keyed on `binding.tool` naming a tool in the world model's `services` (see
+    `binding_is_drivable`; a world model with no `services` key keeps the older
+    any-`binding.tool` rule). That older floor is one notch tighter than
+    `emit.bindings`' truthiness test on the binding object (the
+    `if cap.get("binding")` clause of its comprehension) because `emit.call_spec`
+    then reads `binding["tool"]` unguarded -- cited by function rather than by
+    line, since line numbers here went stale once already -- so the denominator
+    equals what the pipeline can actually ship, not merely what it retains. The two predicates
     disagree on exactly one shape, a binding present with no `tool`, and do not
     "align" them: that shape crashes call_spec, so it belongs outside the
     denominator rather than inside the suite.
@@ -296,20 +299,127 @@ def drivable_cells(world: dict) -> set[tuple[str, str]]:
     `binding`'s tool shape cannot express at all -- see docs/design/limitations.md
     on why that is recorded rather than fixed here.
 
-    `(cap.get("binding") or {})` rather than `cap.get("binding", {})`: an explicit
-    `binding: null` is what a hand-edit at gate 1 produces, and the second
-    spelling returns None and raises AttributeError on the chained `.get`.
+    The binding is read through an isinstance test rather than
+    `cap.get("binding", {})`: an explicit `binding: null` is what a hand-edit at
+    gate 1 produces, and that spelling returns None and raises AttributeError on
+    the chained `.get`.
 
     A set of distinct pairs, for _cells' reason: the seal writes len() of this and
     check_world_model recomputes it, so a sum of per-capability counts would
     diverge the moment an id repeated.
     """
+    tools = service_tool_names(world)
     return {
         (cap["id"], oc["id"])
         for cap in world.get("capabilities", [])
-        if (cap.get("binding") or {}).get("tool")
+        if binding_is_drivable(cap, tools)
         for oc in cap.get("outcome_classes", [])
     }
+
+
+def service_tool_names(world: dict) -> set[str] | None:
+    """Every `services[].tools[].name` the world model declares, or None.
+
+    None means the world model carries no `services` key at all, and that is a
+    different answer from an empty set on purpose. A world model sealed before the
+    services pass existed -- both committed `recorded/` world models, and every run
+    whose services pass never ran -- has no tool list to hold a binding against, so
+    `binding_is_drivable` keeps the older rule for it (any `binding.tool` counts)
+    rather than declaring its whole surface undrivable. A `services` key that is
+    present, even `[]`, is a pass's statement of which tools the agent has, and is
+    held to.
+
+    Guarded per element rather than trusting layer 1, for `_as_list`'s reason:
+    check_all has no ordering guarantee that a malformed `services` has been
+    rejected before this reads it, and the seal calls it on a partial layer 1 has
+    not seen yet. A present but malformed value narrows to the tool names that can
+    be read, so it can only ever count less, never invent a tool.
+    """
+    if "services" not in world:
+        return None
+    return {
+        tool["name"]
+        for service in _as_list(world["services"])
+        if isinstance(service, dict)
+        for tool in _as_list(service.get("tools"))
+        if isinstance(tool, dict) and isinstance(tool.get("name"), str)
+    }
+
+
+def binding_is_drivable(cap: dict, tools: set[str] | None) -> bool:
+    """Whether `cap`'s `binding.tool` names something an agent could call.
+
+    `tools` is `service_tool_names(world)`. With None (no `services` key) any
+    non-empty `binding.tool` counts, which is the rule every run had before this
+    narrowed. With a set, the name must be in it *exactly* -- no prefix or case
+    folding, because `suite/verify.py`'s `call_matches` compares tool names
+    exactly and rb-reconcile-capabilities is told to copy them exactly, so a
+    folded match would count a cell no emitted test could pass.
+
+    Measured on hermes run-20261110-150134: 117 capabilities bound, 7 of them to
+    one of the 21 tools its services listed (all spelled in full, like
+    `mcp__builtin__jira_search`); the other 110 were bound to strings like
+    `POST /api/sessions` -- an HTTP route or a function, which no agent tool call
+    can hit, yet every one of them sat in the denominator and got tests.
+
+    Shared with `brief._excluded_lines` and `rounds.seal_score`, so the brief's
+    excluded list, the injected `unreachable` holes and the denominator cannot
+    disagree about which capabilities are out.
+    """
+    binding = cap.get("binding")
+    tool = binding.get("tool") if isinstance(binding, dict) else None
+    if not tool:
+        return False
+    # isinstance before `in`: a non-string tool (a hand-edit, a list) would raise
+    # TypeError on an unhashable value, and it is not a tool name in any case.
+    return tools is None or (isinstance(tool, str) and tool in tools)
+
+
+def narrowed_cells(world: dict) -> set[tuple[str, str]]:
+    """The cells the older drivable rule counted and the current one does not.
+
+    Empty unless the world model has a `services` key: without one,
+    `binding_is_drivable` still applies the older rule, so nothing narrowed. With
+    one, these are the cells whose `binding.tool` is non-empty but names no tool
+    in `services` -- the exact difference T-101's narrowing made.
+
+    Exists so a run sealed (or scored) before that narrowing can be told apart
+    from a run whose stage got the count wrong. Measured on the five autotrade
+    runs sealed before the change: every one failed check-refs with around a
+    hundred findings, none of which said the rule had moved or how to recover,
+    and every sealed `capability_cells` equalled the older rule's count exactly.
+    The owner ruled (2026-11-23) to keep the strict rule and name the cause and
+    the fix rather than grandfather such runs, so this feeds a message, never a
+    pass.
+    """
+    tools = service_tool_names(world)
+    if tools is None:
+        return set()
+    return {
+        (cap["id"], oc["id"])
+        for cap in world.get("capabilities", [])
+        if binding_is_drivable(cap, None) and not binding_is_drivable(cap, tools)
+        for oc in cap.get("outcome_classes", [])
+    }
+
+
+def sealed_before_narrowing(world: dict) -> bool:
+    """Whether the sealed `capability_cells` is the older rule's count, not today's.
+
+    True only when some cell narrowed and the declared number equals the current
+    count plus exactly those cells -- i.e. what the any-`binding.tool` rule gives.
+    A miscount that happens to differ from both rules stays an ordinary finding.
+    """
+    narrowed = narrowed_cells(world)
+    denominator = world.get("denominator")
+    declared = denominator.get("capability_cells") if isinstance(denominator, dict) else None
+    return bool(narrowed) and declared == len(drivable_cells(world)) + len(narrowed)
+
+
+# The fix, spelled once so the finding and gate-brief cannot drift apart on it.
+# `score` is the prompt stage (a paid dispatch); `reconcile-seal` and `score-seal`
+# are code.
+RESEAL_FIX = "re-run `rubrica reconcile-seal`, then `score` and `score-seal`"
 
 
 def _dupes(values: list[str]) -> list[str]:
@@ -2101,10 +2211,21 @@ def check_world_model(run: RunPaths) -> list[Finding]:
     # identity rather than two spellings that can drift.
     actual_cells = len(drivable_cells(world))
     if denominator.get("capability_cells") != actual_cells:
+        # Still one finding, still exit 1, still against this file: when the sealed
+        # number is exactly what the older any-`binding.tool` rule gives, the cause
+        # is the rule moving under a sealed run, not a stage miscounting, and the
+        # finding says so and names the fix (see narrowed_cells).
+        cause = ""
+        if sealed_before_narrowing(world):
+            cause = (
+                "; the declared number matches the older drivable rule, so this run was "
+                "sealed before cells bound to a tool not listed in `services` stopped "
+                f"counting as drivable -- {RESEAL_FIX}"
+            )
         report(
             "/denominator/capability_cells",
             f"declared capability_cells={denominator.get('capability_cells')} but the world "
-            f"model declares {actual_cells} drivable capability x outcome-class cells",
+            f"model declares {actual_cells} drivable capability x outcome-class cells{cause}",
         )
     actual_goals = len(world.get("goals", []))
     if denominator.get("goals") != actual_goals:
@@ -3624,11 +3745,24 @@ def check_coverage(run: RunPaths) -> list[Finding]:
     # `cells` is the wide set, so membership in it is exactly the partition:
     # inside, the world model declares the cell and the matrix scored a row it
     # should have left to the holes; outside, no capability declares the pair.
+    # On a run sealed before the drivable rule narrowed, every one of these rows
+    # is the same cause, so each points at the one world-model finding that
+    # explains it and names the fix, rather than repeating it ~100 times. Not
+    # suppressed: each row is still wrong until the run is re-scored.
+    old_seal = sealed_before_narrowing(world)
+    narrowed = narrowed_cells(world) if old_seal else set()
     for extra in sorted(seen - drivable):
         if extra in cells:
+            pointer_note = (
+                " (sealed before the drivable rule narrowed; see the "
+                "/denominator/capability_cells finding on 01-world-model.json)"
+                if extra in narrowed
+                else ""
+            )
             report(
                 "/capability_matrix/cells",
-                f"matrix scores undrivable cell {cell_ref(*extra)}; it belongs in the holes",
+                f"matrix scores undrivable cell {cell_ref(*extra)}; it belongs in the holes"
+                f"{pointer_note}",
             )
         else:
             report("/capability_matrix/cells", f"matrix invents cell {cell_ref(*extra)}")
