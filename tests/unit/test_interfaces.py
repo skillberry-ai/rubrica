@@ -270,6 +270,9 @@ def test_a_claims_file_that_is_not_an_object_names_that_file(tmp_path):
         run.claims("api-json"),
         "claims file is not a JSON object",
     )
+    # Measured before T-125: a `schema_claim` finding against a correct
+    # 01-services.json printed beside this one. check-refs names only the claims file.
+    assert run.services_part not in [f.artifact for f in findings]
     assert {f.layer for f in findings} == {LAYER}
 
 
@@ -453,38 +456,56 @@ def test_a_payload_less_claim_in_an_unreadable_claims_file_is_not_blamed_twice(t
     """The guard discipline: a file the index could not read is absent, not blamed.
 
     A malformed claims file already owes its own finding, and its claims are not in
-    the index -- so the `schema_claim` into it comes back as an id nothing carries,
-    named against the part. That is the right pair: the part's citation cannot be
-    resolved and the file that would resolve it will not parse. What must not happen
-    is a `/claims/N/payload` pointer into a document nobody could index.
+    the index -- so the `schema_claim` into it would come back as an id nothing
+    carries. That finding is held back: the file that would resolve the citation
+    will not parse, so the citation is not yet evidence against the part, and
+    check-refs names only the claims file here. What must not happen either is a
+    `/claims/N/payload` pointer into a document nobody could index.
 
-    A shape pin rather than a discriminator, and measured as one: the payload index
-    this replaced produced exactly this pair too, so the test is green against
-    either. It is here because the claim index is the thing that *could* blame a
-    file it never read, and nothing else would notice if it began to.
+    It is here because the claim index is the thing that *could* blame a file it
+    never read, and nothing else would notice if it began to.
     """
     run = build_toy_run(tmp_path, upto="reconcile-services")
     target = run.claims("api-json")
     target.write_text("{ not json", encoding="utf-8")
     written, findings = synthesise(run)
     assert written == []
-    assert sorted((str(f.artifact), f.pointer) for f in findings) == sorted(
-        [(str(target), ""), (str(run.services_part), "/services/0/tools/0/schema_claim")]
-    )
+    assert [(f.artifact, f.pointer) for f in findings] == [(target, "")]
     assert {f.layer for f in findings} == {LAYER}
 
 
-def test_a_malformed_claims_file_is_a_finding_against_that_file(tmp_path):
+@pytest.mark.parametrize(
+    "text",
+    ["{ not json", None],
+    ids=["malformed", "truncated"],
+)
+def test_a_malformed_claims_file_is_a_finding_against_that_file(tmp_path, capsys, text):
     """A 1 naming the right artifact. A claims file is `extract`'s output, so a
     malformed one is repairable by re-dispatching that one input's extractor --
     and the finding has to name the file, not the services part that cited it.
+
+    Measured before T-125: both cases also printed `no claim in 01-claims/ has id`
+    against a correct 01-services.json, so the one repair could go to
+    reconcile-services. `None` is the real file cut off halfway, the shape an
+    interrupted write leaves.
     """
     run = build_toy_run(tmp_path, upto="reconcile-services")
-    run.claims("api-json").write_text("{ not json", encoding="utf-8")
+    target = run.claims("api-json")
+    if text is None:
+        whole = target.read_text(encoding="utf-8")
+        text = whole[: len(whole) // 2]
+    target.write_text(text, encoding="utf-8")
     written, findings = synthesise(run)
     assert written == []
-    assert run.claims("api-json") in [f.artifact for f in findings]
+    assert [f.artifact for f in findings] == [target]
+    assert run.services_part not in [f.artifact for f in findings]
     assert {f.layer for f in findings} == {LAYER}
+
+    capsys.readouterr()
+    assert main(["synthesise-interfaces", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert target.name in out
+    assert run.services_part.name not in out
 
 
 def test_an_unreadable_claims_file_raises_rather_than_becoming_a_finding(tmp_path):

@@ -44,7 +44,7 @@ LAYER = "interfaces"
 def claims_shape_problem(payload: object) -> str | None:
     """Why a parsed 01-claims/ member cannot be indexed, or None when it can.
 
-    One home for the rule, shared by refs.check_parse and synthesise below. It
+    One home for the rule, shared by refs.check_readable and synthesise below. It
     lives here rather than in refs because refs already imports this module, so
     the other direction would be a cycle.
 
@@ -186,13 +186,13 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
     # file. Built once: a run with forty inputs and four services would otherwise
     # re-read every claims file per service.
     #
-    # An unreadable or non-dict claims file contributes nothing to the index, so a
-    # `schema_claim` into it comes back as an id no claim carries -- the finding
-    # against that file is already in `findings` and it is the one a repair acts
-    # on. The index never blames a file it could not read. A dict whose `claims`
-    # is missing, not a list, or holds a member with no string `id` is held to
-    # claims_shape_problem instead, and while one is present the unresolved
-    # `schema_claim` findings against the part are dropped (see below).
+    # A claims file that will not parse, parses to something other than an object,
+    # or is an object claims_shape_problem rejects contributes nothing to the index
+    # and owes its own finding. Any of the three may be exactly where a cited id
+    # lives, so while one is present the unresolved `schema_claim` findings against
+    # the part are dropped (see below): check-refs names only the claims file in all
+    # three cases, and the two commands must agree on which file is broken. The
+    # index never blames a file it could not read.
     claims: dict[str, _Claim] = {}
     misshapen = False
     for path in list_json(run.claims_dir):
@@ -200,9 +200,14 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
             document = read_json(path)
         except ArtifactError as exc:
             findings.append(Finding(path, LAYER, "", f"cannot read: {exc}"))
+            # Set here too, not only for the shape branch below. Measured before:
+            # a truncated or list-shaped claims file also printed `no claim in
+            # 01-claims/ has id` against a correct 01-services.json.
+            misshapen = True
             continue
         if not isinstance(document, dict):
             findings.append(Finding(path, LAYER, "", "claims file is not a JSON object"))
+            misshapen = True
             continue
         # The rule refs holds a claims file to, so the two commands agree on which
         # file is broken. Measured before this: `{}` and `{"claims": "x"}` left the
@@ -310,7 +315,7 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
             planned.append((run.interface(service_id), _document(service, claims)))
 
     if misshapen:
-        # A claims file that parses but cannot be indexed may be exactly where a
+        # A claims file that could not be indexed may be exactly where a
         # cited id lives, so an unresolved `schema_claim` is not yet evidence
         # against the services part. Held back, as check_all's short-circuit holds
         # back refs' knock-on findings, so the only file a repair is pointed at is
