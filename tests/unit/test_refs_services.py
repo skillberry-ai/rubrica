@@ -261,6 +261,27 @@ def test_two_services_with_one_id_are_reported_once_and_only_here(tmp_path):
     assert check_interfaces(run) == [], "the collapse must not be reported against the document"
 
 
+def test_service_ids_differing_only_in_case_are_reported_once_and_only_here(tmp_path):
+    """`svc-tickets` and `SVC-TICKETS` are one file on a case-insensitive disk, so
+    a hand edit at gate 1 adding the second is the same collapse as an exact
+    repeat. Measured before: check-refs reported it against
+    `01-interfaces/svc-tickets.json#/paths` and not against the part.
+    """
+    run = build_toy_run(tmp_path, upto="synthesise-interfaces")
+    part = _services(run)
+    second = json.loads(json.dumps(part["services"][0]))
+    second["id"] = "SVC-TICKETS"
+    second["tools"] = [
+        {"name": "query_tickets_b", "claims": ["clm-api-010"], "schema_claim": "clm-api-010"}
+    ]
+    part["services"].append(second)
+    _rewrite(run, part)
+    findings = [f for f in check_services(run) if "differ only in case" in f.message]
+    assert [(f.artifact, f.pointer) for f in findings] == [(run.services_part, "/services")]
+    assert "svc-tickets" in findings[0].message and "SVC-TICKETS" in findings[0].message
+    assert check_interfaces(run) == [], "the collapse must not be reported against the document"
+
+
 def test_correcting_a_duplicate_id_and_re_deriving_clears_it(tmp_path):
     """The property that makes the clause worth having: the finding is clearable.
 

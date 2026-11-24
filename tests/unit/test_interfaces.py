@@ -462,6 +462,60 @@ def test_a_service_id_used_twice_is_refused_at_the_repeat_and_nothing_is_written
     assert not run.interfaces_dir.exists()
 
 
+def test_service_ids_differing_only_in_case_are_a_repeat(tmp_path, capsys):
+    """Measured before, on macOS's case-insensitive disk: a copy of svc-tickets
+    with id `SVC-TICKETS` and tool `query_tickets_b` exited 0 with only
+    svc-tickets.json on disk, one grouping lost, and check-refs then exited 1
+    against `01-interfaces/svc-tickets.json#/paths` -- a code-written file with no
+    defect in it. Both commands now name the part, and nothing is written.
+    """
+    from rubrica.refs import check_all
+
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+
+    def add_case_twin(part):
+        copy = json.loads(json.dumps(part["services"][0]))
+        copy["id"] = "SVC-TICKETS"
+        copy["tools"][0]["name"] = "query_tickets_b"
+        part["services"].append(copy)
+
+    _rewrite_services(run, add_case_twin)
+    written, findings = synthesise(run)
+    assert written == []
+    assert not run.interfaces_dir.exists(), "all-or-nothing: nothing may be written"
+    assert [(f.artifact, f.pointer) for f in findings] == [(run.services_part, "/services/1/id")]
+    message = findings[0].message
+    assert "svc-tickets" in message and "SVC-TICKETS" in message
+    assert "differ only in case" in message
+    assert "case-insensitive filesystem" in message
+
+    every = check_all(run)
+    assert ("/services", message) in _services_part_findings_from_check_refs(run)
+    assert not any("01-interfaces" in str(f.artifact) for f in every), every
+
+    capsys.readouterr()
+    assert main(["synthesise-interfaces", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert "differ only in case" in out
+    assert not run.interfaces_dir.exists()
+
+
+def test_distinct_service_ids_are_not_a_repeat(tmp_path):
+    """The other direction: ids that differ by more than case stay two services."""
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+
+    def add_distinct(part):
+        copy = json.loads(json.dumps(part["services"][0]))
+        copy["id"] = "svc-tickets-b"
+        copy["tools"][0]["name"] = "query_tickets_b"
+        part["services"].append(copy)
+
+    _rewrite_services(run, add_distinct)
+    written, findings = synthesise(run)
+    assert findings == [], findings
+    assert sorted(p.name for p in written) == ["svc-tickets-b.json", "svc-tickets.json"]
+
+
 def test_a_bad_id_and_a_repeated_tool_name_are_both_reported_as_check_refs_does(tmp_path):
     """Measured before: synthesise recorded a tool name only after its service
     passed the id check, so service 0 with id `bad/id` plus a copy `svc-twin` gave

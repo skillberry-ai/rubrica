@@ -601,7 +601,10 @@ and a code rule for picking a winner would bury the judgment, with
 — the one kind this pass is accountable for); and `services[].id`, which must be
 unique across the array although the schema cannot say so — the document path is
 derived from it, so two services sharing an id collapse onto one file and the
-groupings after the first are lost. Tool names must be unique across the whole
+groupings after the first are lost. Uniqueness is compared ignoring case: on a
+case-insensitive filesystem such as macOS's, `svc-tickets` and `SVC-TICKETS` are
+one file too, so a case-only repeat is the same finding, worded to say the ids
+differ only in case. The schema still allows capitals; only the repeat is refused. Tool names must be unique across the whole
 part too, within one service and across services, because each becomes an
 `operationId` the agent calls and only one simulator can answer it. Both
 `synthesise-interfaces` and `check-refs` report either repeat against this part,

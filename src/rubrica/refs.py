@@ -33,6 +33,7 @@ from rubrica.interfaces import (
     TOOL_NAME,
     claims_shape_problem,
     duplicate_service_id_message,
+    duplicate_service_id_pairs,
     duplicate_service_ids,
     repeated_tool_names,
 )
@@ -2764,7 +2765,7 @@ def check_services(run: RunPaths) -> list[Finding]:
             # not the hazard the duplicate clause reports.
             references.setdefault(claim_id, []).append(label)
 
-    for service_id in sorted(duplicate_service_ids(part)):
+    for first, service_id in duplicate_service_id_pairs(part):
         # Named here and *only* here: run.interface() derives one path from the id,
         # so two services with one id collapse onto one file. Synthesis writes
         # nothing for such a part, so a document at that path can only be left
@@ -2772,8 +2773,9 @@ def check_services(run: RunPaths) -> list[Finding]:
         # added the repeat; reporting the difference against it would be a 1
         # naming a file with no defect in it.
         # check_interfaces skips these services for that reason, so this is the one
-        # line a repair can act on.
-        report("/services", duplicate_service_id_message(service_id))
+        # line a repair can act on. Ids differing only in case count as one id:
+        # on a case-insensitive filesystem they are one file too.
+        report("/services", duplicate_service_id_message(service_id, first))
 
     # The duplicate side of the claim-level partition only. The orphan side -- a `tool` claim
     # no service references -- is deliberately NOT reported here, because

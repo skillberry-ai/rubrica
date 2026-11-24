@@ -86,20 +86,56 @@ def duplicate_service_ids(part: dict) -> set[str]:
     id or a broken `tools` value, so synthesise and check-refs report the same
     duplicates. Non-string ids are dropped rather than counted: an unhashable one
     would raise out of the set, and layer 1 owns the shape.
+
+    Ids are compared by `str.casefold()`, and the set holds every spelling of a
+    colliding id. Measured before: on macOS's case-insensitive disk `svc-tickets`
+    and `SVC-TICKETS` are one `run.interface()` file, so synthesis exited 0 having
+    lost the first grouping and check-refs then blamed the code-written document
+    rather than this part. paths._SAFE_SEGMENT allows capitals and the schema has
+    no id pattern, so the guard has to live here.
+    """
+    return {spelling for pair in duplicate_service_id_pairs(part) for spelling in pair}
+
+
+def duplicate_service_id_pairs(part: dict) -> list[tuple[str, str]]:
+    """`(first, repeat)` for every service whose id an earlier service already took.
+
+    `first` is the spelling the earlier service used and `repeat` this one's; they
+    differ only when the two ids differ only in case. Deduplicated and sorted, so
+    check-refs reports one line per distinct pair while synthesise, which reports
+    at each repeat, uses the same words for it. Same counting rules as
+    duplicate_service_ids, which is derived from this.
     """
     services = part.get("services")
     if not isinstance(services, list):
-        return set()
-    declared = [
-        service.get("id")
-        for service in services
-        if isinstance(service, dict) and isinstance(service.get("id"), str)
-    ]
-    return {service_id for service_id in declared if declared.count(service_id) > 1}
+        return []
+    first_spelling: dict[str, str] = {}
+    pairs: set[tuple[str, str]] = set()
+    for service in services:
+        if not isinstance(service, dict) or not isinstance(service.get("id"), str):
+            continue
+        service_id = service["id"]
+        key = service_id.casefold()
+        if key in first_spelling:
+            pairs.add((first_spelling[key], service_id))
+        else:
+            first_spelling[key] = service_id
+    return sorted(pairs)
 
 
-def duplicate_service_id_message(service_id: str) -> str:
-    """The one wording for a repeated service id, so both commands say the same."""
+def duplicate_service_id_message(service_id: str, first: str | None = None) -> str:
+    """The one wording for a repeated service id, so both commands say the same.
+
+    `first` is the earlier service's spelling; when it differs from `service_id`
+    the two differ only in case, and the message says why that is still a repeat.
+    """
+    if first is not None and first != service_id:
+        return (
+            f"service ids {first} and {service_id} differ only in case: on a "
+            f"case-insensitive filesystem they would share the one document "
+            f"01-interfaces/{first}.json, so the groupings after the first are lost and "
+            "the tools in them have no simulator"
+        )
     return (
         f"more than one service is named {service_id}: they share the one document "
         f"01-interfaces/{service_id}.json, so the groupings after the first are lost and "
@@ -313,7 +349,9 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
     # `tools` and a tool refused for its name -- and refs.check_services counts
     # every one of those. Their findings are appended after the walk.
     repeated_ids = duplicate_service_ids(part)
-    seen_ids: set[str] = set()
+    # casefold key -> the first spelling seen, so a case-only repeat is named
+    # beside the spelling it collides with.
+    seen_ids: dict[str, str] = {}
     repeated_names = repeated_tool_names(part)
     repeat_pointers = {pointer for pointer, _, _ in repeated_names}
     for index, service in enumerate(services):
@@ -325,7 +363,8 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
         # isinstance first: an unhashable id (a list, an object) would raise
         # TypeError out of the set membership test.
         if isinstance(service_id, str) and service_id in repeated_ids:
-            if service_id in seen_ids:
+            key = service_id.casefold()
+            if key in seen_ids:
                 # At the repeat, before the id's other checks so an unsafe id
                 # repeated still reports both. Measured before: a copy of
                 # svc-tickets with its tool renamed exited 0 and wrote one
@@ -338,10 +377,11 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
                         run.services_part,
                         LAYER,
                         f"{pointer}/id",
-                        duplicate_service_id_message(service_id),
+                        duplicate_service_id_message(service_id, seen_ids[key]),
                     )
                 )
-            seen_ids.add(service_id)
+            else:
+                seen_ids[key] = service_id
         if not isinstance(service_id, str) or not is_safe_segment(service_id):
             # is_safe_segment, not safe_segment: see this module's tests. A bad id
             # in a stage's own output is repairable and owes a finding, whereas

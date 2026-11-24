@@ -240,7 +240,9 @@ cannot be read or `01-interfaces/` cannot be written. The split is deliberate. A
 missing or non-object `01-services.json`, a `services` key that is not an array, a
 service id that is not usable as a filename, a tool name the harness's
 sanitisation would rewrite, a tool name already declared earlier in the part —
-by the same service or another — a service id already used by an earlier service,
+by the same service or another — a service id already used by an earlier service
+(compared ignoring case, since `svc-tickets` and `SVC-TICKETS` would share one
+document on a case-insensitive filesystem such as macOS's, and the finding says so),
 a `schema_claim` that is missing or is not a string, and a `schema_claim` no claim
 in `01-claims/` has an id for are all `1`s against that part — each is repaired by
 re-dispatching `reconcile-services`, which is what a `1` promises the orchestrator.
