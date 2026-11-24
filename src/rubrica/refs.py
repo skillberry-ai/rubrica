@@ -29,7 +29,7 @@ from typing import Any
 
 from rubrica.artifacts import ArtifactError, read_json, sha256_of
 from rubrica.findings import Finding
-from rubrica.interfaces import TOOL_NAME
+from rubrica.interfaces import TOOL_NAME, claims_shape_problem
 from rubrica.invariants import InvariantForm
 from rubrica.invariants import evaluate as evaluate_invariant
 from rubrica.paths import RunPaths, is_safe_segment, list_json
@@ -187,37 +187,10 @@ def check_readable(run: RunPaths) -> list[Finding]:
             out.append(Finding(path, "refs", "", str(exc)))
             continue
         if path in claim_files:
-            problem = _claims_shape_problem(payload)
+            problem = claims_shape_problem(payload)
             if problem is not None:
                 out.append(Finding(path, "refs", "", problem))
     return out
-
-
-def _claims_shape_problem(payload: Any) -> str | None:
-    """Why a parsed 01-claims/ member cannot be indexed, or None when it can.
-
-    A claims file is the one artifact whose *shape* this module checks here as
-    well as its parse, because every claim-resolving checker reads the claims
-    index, and a member that parses to the wrong shape leaves that index short.
-    Measured before this existed: `[]` in place of the toy's api-json.json made
-    check-refs exit 1 with 28 `no such claim` findings against a correct world
-    model and its partials, none naming the broken file -- and `{}` raised a
-    KeyError out of _claim_index, an `[internal]` finding with no artifact.
-    Reporting it here rides check_all's short-circuit, so the knock-on findings
-    are held back exactly as they are for a truncated claims file.
-
-    Only the keys the index reads unguarded are held to (`claims` a list, each
-    member an object with a string `id`); anything finer is layer 1's.
-    """
-    if not isinstance(payload, dict):
-        return f"claims file is not a JSON object (top level is {type(payload).__name__})"
-    claims = payload.get("claims")
-    if not isinstance(claims, list):
-        return "claims file has no `claims` array"
-    for i, claim in enumerate(claims):
-        if not isinstance(claim, dict) or not isinstance(claim.get("id"), str):
-            return f"claims[{i}] is not an object with a string `id`"
-    return None
 
 
 def _claim_index(run: RunPaths) -> dict[str, list[Path]]:

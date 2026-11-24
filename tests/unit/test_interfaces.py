@@ -273,6 +273,32 @@ def test_a_claims_file_that_is_not_an_object_names_that_file(tmp_path):
     assert {f.layer for f in findings} == {LAYER}
 
 
+@pytest.mark.parametrize("text", ["{}", '{"claims": "x"}', '{"claims": 7}', '{"claims": [1]}'])
+def test_a_misshapen_claims_file_names_that_file_and_not_the_services_part(tmp_path, capsys, text):
+    """A claims file that parses to an object the index cannot read.
+
+    Measured before the shared shape check: `{}` and `{"claims": "x"}` came back as
+    one `no claim in 01-claims/ has id` against a correct 01-services.json and named
+    no claims file, and `{"claims": 7}` raised TypeError -- an `[internal]` 1. Both
+    send the one repair at reconcile-services, whose output was never the problem.
+    """
+    run = build_toy_run(tmp_path, upto="reconcile-services")
+    target = run.claims("api-json")
+    target.write_text(text, encoding="utf-8")
+    written, findings = synthesise(run)
+    assert written == []
+    assert [f.artifact for f in findings] == [target]
+    assert {f.layer for f in findings} == {LAYER}
+    assert not list_json(run.interfaces_dir)
+
+    capsys.readouterr()
+    assert main(["synthesise-interfaces", "--run", str(run.root)]) == 1
+    out = capsys.readouterr().out
+    assert str(target) in out or target.name in out
+    assert "[internal]" not in out
+    assert run.services_part.name not in out
+
+
 def test_a_service_that_is_not_an_object_names_its_index(tmp_path):
     """A string where a service belongs, so the pointer is the only thing that can
     say which element is wrong -- there is no id to quote.

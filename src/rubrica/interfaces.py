@@ -41,6 +41,37 @@ TOOL_NAME = re.compile(TOOL_NAME_PATTERN)
 LAYER = "interfaces"
 
 
+def claims_shape_problem(payload: object) -> str | None:
+    """Why a parsed 01-claims/ member cannot be indexed, or None when it can.
+
+    One home for the rule, shared by refs.check_parse and synthesise below. It
+    lives here rather than in refs because refs already imports this module, so
+    the other direction would be a cycle.
+
+    A claims file is the one artifact whose *shape* refs checks as well as its
+    parse, because every claim-resolving checker reads the claims index, and a
+    member that parses to the wrong shape leaves that index short.
+    Measured before this existed: `[]` in place of the toy's api-json.json made
+    check-refs exit 1 with 28 `no such claim` findings against a correct world
+    model and its partials, none naming the broken file -- and `{}` raised a
+    KeyError out of _claim_index, an `[internal]` finding with no artifact.
+    Reporting it in refs rides check_all's short-circuit, so the knock-on findings
+    are held back exactly as they are for a truncated claims file.
+
+    Only the keys the index reads unguarded are held to (`claims` a list, each
+    member an object with a string `id`); anything finer is layer 1's.
+    """
+    if not isinstance(payload, dict):
+        return f"claims file is not a JSON object (top level is {type(payload).__name__})"
+    claims = payload.get("claims")
+    if not isinstance(claims, list):
+        return "claims file has no `claims` array"
+    for i, claim in enumerate(claims):
+        if not isinstance(claim, dict) or not isinstance(claim.get("id"), str):
+            return f"claims[{i}] is not an object with a string `id`"
+    return None
+
+
 class _Claim(NamedTuple):
     """Where one claim was read from, and its payload when that payload is usable.
 
@@ -158,8 +189,12 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
     # An unreadable or non-dict claims file contributes nothing to the index, so a
     # `schema_claim` into it comes back as an id no claim carries -- the finding
     # against that file is already in `findings` and it is the one a repair acts
-    # on. The index never blames a file it could not read.
+    # on. The index never blames a file it could not read. A dict whose `claims`
+    # is missing, not a list, or holds a member with no string `id` is held to
+    # claims_shape_problem instead, and while one is present the unresolved
+    # `schema_claim` findings against the part are dropped (see below).
     claims: dict[str, _Claim] = {}
+    misshapen = False
     for path in list_json(run.claims_dir):
         try:
             document = read_json(path)
@@ -169,14 +204,25 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
         if not isinstance(document, dict):
             findings.append(Finding(path, LAYER, "", "claims file is not a JSON object"))
             continue
-        for index, claim in enumerate(document.get("claims", [])):
-            if isinstance(claim, dict) and isinstance(claim.get("id"), str):
-                payload = claim.get("payload")
-                claims[claim["id"]] = _Claim(
-                    path,
-                    f"/claims/{index}/payload",
-                    payload if isinstance(payload, dict) else None,
-                )
+        # The rule refs holds a claims file to, so the two commands agree on which
+        # file is broken. Measured before this: `{}` and `{"claims": "x"}` left the
+        # index short and came back as one `no claim in 01-claims/ has id` against
+        # a correct 01-services.json, naming no claims file at all, and
+        # `{"claims": 7}` raised TypeError -- an `[internal]` 1 with no artifact.
+        # Either way the orchestrator would spend its one repair on
+        # reconcile-services, whose output was never the problem.
+        problem = claims_shape_problem(document)
+        if problem is not None:
+            findings.append(Finding(path, LAYER, "", problem))
+            misshapen = True
+            continue
+        for index, claim in enumerate(document["claims"]):
+            payload = claim.get("payload")
+            claims[claim["id"]] = _Claim(
+                path,
+                f"/claims/{index}/payload",
+                payload if isinstance(payload, dict) else None,
+            )
 
     planned: list[tuple[Path, dict]] = []
     for index, service in enumerate(services):
@@ -262,6 +308,19 @@ def synthesise(run: RunPaths) -> tuple[list[Path], list[Finding]]:
                 ok = False
         if ok:
             planned.append((run.interface(service_id), _document(service, claims)))
+
+    if misshapen:
+        # A claims file that parses but cannot be indexed may be exactly where a
+        # cited id lives, so an unresolved `schema_claim` is not yet evidence
+        # against the services part. Held back, as check_all's short-circuit holds
+        # back refs' knock-on findings, so the only file a repair is pointed at is
+        # the claims file. Everything else against the part still prints: those
+        # defects do not depend on the index.
+        findings = [
+            f
+            for f in findings
+            if not (f.artifact == run.services_part and f.pointer.endswith("/schema_claim"))
+        ]
 
     if findings:
         return [], findings
