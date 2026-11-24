@@ -607,10 +607,13 @@ part too, within one service and across services, because each becomes an
 `synthesise-interfaces` and `check-refs` report either repeat against this part,
 counting every service and tool even one refused for another reason, so the two
 commands name the same duplicates. For a repeated service id `check-refs` reports
-it here and nowhere else: it holds the shared document to neither grouping, because that document is
-byte-for-byte what synthesis wrote from the last of them and a finding against it
-would send a repair at a file with no defect in it. One line, in the file the
-repair belongs in.
+it here and nowhere else: it holds the shared document to neither grouping.
+Synthesis writes nothing for a part with a repeated id, so a document beside
+one can only be left from an earlier synthesis, of the grouping before a hand
+edit at gate 1 introduced the repeat. That document is byte-for-byte what
+synthesis wrote from that earlier, unduplicated grouping, and a finding against
+it would send a repair at a file with no defect in it. One line, in the file the repair
+belongs in.
 
 ## `interface`
 

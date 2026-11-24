@@ -2766,9 +2766,11 @@ def check_services(run: RunPaths) -> list[Finding]:
 
     for service_id in sorted(duplicate_service_ids(part)):
         # Named here and *only* here: run.interface() derives one path from the id,
-        # so two services with one id collapse onto one file, and the difference
-        # would otherwise be reported against a derived document that faithfully
-        # carries the last grouping -- a 1 naming a file with no defect in it.
+        # so two services with one id collapse onto one file. Synthesis writes
+        # nothing for such a part, so a document at that path can only be left
+        # from synthesising the earlier grouping, before a hand edit at gate 1
+        # added the repeat; reporting the difference against it would be a 1
+        # naming a file with no defect in it.
         # check_interfaces skips these services for that reason, so this is the one
         # line a repair can act on.
         report("/services", duplicate_service_id_message(service_id))
@@ -2897,11 +2899,14 @@ def check_interfaces(run: RunPaths) -> list[Finding]:
     defects and a human shown one half would rename the wrong side back.
 
     Silent about a service whose id another service also declares. Those collapse
-    onto one document, so every clause here would report the collapse against a
-    file that is byte-for-byte what synthesis wrote, for a defect living in the
-    part -- and check_services names that defect once, where a repair can act on
-    it. The path is still counted as expected, or the document they share would come
-    back as one no service asked for.
+    onto one document. Synthesis writes nothing for a part with a repeated id, so
+    that document can only be left from synthesising the earlier grouping, before
+    a hand edit at gate 1 added the repeat. Every clause here would report the
+    collapse against a file that is byte-for-byte what synthesis wrote from that
+    grouping, for a defect living in the part -- and check_services names that
+    defect once, where a repair can act on it. The path is still counted as
+    expected, or the document they share would come back as one no service asked
+    for.
 
     The third is the check the rest of the lab design rests on. `operationId` is
     what the harness turns back into an MCP tool name, so the substitution the
