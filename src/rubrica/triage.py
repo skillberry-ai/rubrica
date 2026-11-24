@@ -167,6 +167,23 @@ def check_acceptance(path: Path, acceptance: dict) -> list[Finding]:
     return out
 
 
+def _admitted_candidate_ids(dispositions: object) -> set[str]:
+    """The candidate ids a list of dispositions admits -- the ones intake copies.
+
+    The same rule intake.admit_from_triage applies (`disposition == "admit"`),
+    read defensively because the list may come from an unvalidated record.
+    """
+    if not isinstance(dispositions, list):
+        return set()
+    return {
+        d["candidate_id"]
+        for d in dispositions
+        if isinstance(d, dict)
+        and d.get("disposition") == "admit"
+        and isinstance(d.get("candidate_id"), str)
+    }
+
+
 def adopt_projection(
     run: RunPaths, *, projection_id: str, source: Path, check_only: bool = False
 ) -> list[Finding]:
@@ -443,9 +460,24 @@ def adopt_projection(
     # it is a finding, not a usage error. Each existing candidate is judged by
     # the name its own candidate_id implies, which is what intake uses whenever
     # no admitted id repeats; intake's own check is the backstop for the rest.
+    #
+    # Only candidates intake will actually copy can collide, so only those are
+    # compared: intake.admit_from_triage copies every `admit` disposition and
+    # nothing else (the triage schema has no other copying kind). A projection
+    # is usually named after its own source, a candidate the triage family
+    # declined as needs_projection and so never copied -- comparing against
+    # every candidate refused exactly that usual shape. Admissions come from
+    # two places until triage-seal folds them together: the triage record's
+    # dispositions and the earlier adoptions in 00-adoptions.json.
+    copied = _admitted_candidate_ids(triage_record.get("dispositions"))
+    copied |= _admitted_candidate_ids(
+        [a.get("disposition") for a in adoptions_list if isinstance(a, dict)]
+    )
     implied = stored_name(candidate_id, source)
     for existing in candidates:
         if not (isinstance(existing, dict) and isinstance(existing.get("candidate_id"), str)):
+            continue
+        if existing["candidate_id"] not in copied:
             continue
         existing_name = planned_stored_name(existing, existing["candidate_id"])
         if segment_key(existing_name) == segment_key(implied):

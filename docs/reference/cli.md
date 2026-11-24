@@ -132,10 +132,13 @@ artifact ids, and never hands out a suffixed id another input already has.
 A unique id does not by itself give a unique file: the stored name adds the
 file's suffix, and a projection id may contain a dot, so a projection
 `capture-json-0.json` adopted from a suffix-less file would be stored as the
-same `00-inputs/capture-json-0.json` as an existing `capture-json-0`. That is
+same `00-inputs/capture-json-0.json` as an admitted `capture-json-0`. That is
 refused with a finding against `00-triage.json` (exit 1), and nothing is
-written. `intake` checks the same thing for every admitted input before it
-copies anything.
+written. Only candidates `intake` will copy are compared — those with an
+`admit` disposition in `00-triage.json` or an earlier adoption in
+`00-adoptions.json` — so a projection named after its own declined
+`needs_projection` source is adopted as usual. `intake` checks the same thing
+for every admitted input before it copies anything.
 
 ```bash
 rubrica adopt-projection --run runs/run-20260806-123005 \
