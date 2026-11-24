@@ -155,6 +155,18 @@ only remaining findings are waived exits 0 with those lines still on stdout. A
 finding: a person wrote that file, so there is no stage to hand a repair prompt
 to.
 
+A run sealed before the drivable rule narrowed to tools listed in `services`
+(see [`score-seal`](#rubrica-score-seal) for the rule) and whose world model has
+a `services` key fails here, exit 1, until it is re-sealed and re-scored: its
+sealed `denominator.capability_cells` still counts cells bound to a tool not
+listed in `services`, and its matrix still scores them. Such runs are not
+grandfathered. When the sealed number is exactly what the older rule gives, the
+one `/denominator/capability_cells` finding on `01-world-model.json` says so and
+names the fix — re-run `rubrica reconcile-seal`, then `score` and `score-seal` —
+and each `matrix scores undrivable cell` finding on those cells points at it
+rather than repeating it. `gate-brief --gate 2` prints one line saying the same.
+`score` is a prompt stage, so the fix costs a paid dispatch.
+
 ```bash
 rubrica check-refs --run runs/run-20260806-123005
 ```

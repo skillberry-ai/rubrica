@@ -2643,6 +2643,22 @@ off-tool binding is the right capability with the wrong name or a surface the ag
 genuinely cannot reach; that is semantic, and gate 1 prints the bound name beside
 each excluded capability so a human can tell.
 
+**Runs sealed before the change, with a `services` key, fail `check-refs` until
+they are re-sealed and re-scored.** Their sealed `capability_cells` is the older
+rule's count and their matrix scores the cells the rule now excludes, so
+`check_world_model` reports the count mismatch and `check_coverage` one
+`matrix scores undrivable cell` per such cell — 109 findings on autotrade
+`run-20261109-145034`, and every one of the five autotrade runs failed the same
+way, each sealed number matching the older rule exactly. The owner ruled on
+2026-11-23 to keep the rule strict and **not** grandfather those runs, but to make
+the cause and the fix plain: when the sealed number equals the older rule's count,
+the one `/denominator/capability_cells` finding says the run was sealed before the
+rule narrowed and names the fix (re-run `rubrica reconcile-seal`, then `score` and
+`score-seal`); each matrix finding on a narrowed cell points at that finding
+rather than repeating it, and none is suppressed; and `gate-brief --gate 2` adds
+one line saying the run predates the rule. Exit codes are unchanged. The fix is
+not free: `score` is a prompt stage, so re-scoring is a paid dispatch.
+
 ---
 
 ## Before you file a bug against the check layers or the CLI

@@ -240,3 +240,85 @@ def test_gate_one_counts_off_tool_capabilities_apart_from_unbound_ones(tmp_path)
     assert "1 of 2 capabilities are drivable" in section
     assert "bound, but not to any tool in services" in section
     assert "NOTHING IS DRIVABLE" not in section
+
+
+# -- a run sealed before the rule narrowed ------------------------------
+# Owner ruling (2026-11-23): such runs are not grandfathered, but check-refs and
+# gate 2 must name the cause and the fix. On the five autotrade runs sealed before
+# the change, check-refs printed ~100 findings and none of them said either.
+def _toy_sealed_under_the_old_rule(tmp_path) -> RunPaths:
+    """The route-bound toy run, sealed and scored as the older rule would have."""
+    run = _toy_with_a_route_bound_capability(tmp_path)
+    world = read_json(run.world_model)
+    services = world.pop("services")
+    # What the older rule wrote: the route cell counted too.
+    world["denominator"]["capability_cells"] = len(refs.drivable_cells(world))
+    assert world["denominator"]["capability_cells"] == 5
+    write_json(run.world_model, world)
+    # Under the older rule the route cell was scored, so score had to account
+    # for it; a hole is the cheapest honest account.
+    part = read_json(run.score_part(1))
+    part["holes"].append(
+        {"ref": "cell:cap-route/oc-found", "reason": "unreachable", "justification": "old rule"}
+    )
+    write_json(run.score_part(1), part)
+    _, findings = rounds.seal_score(run, round_n=1)
+    assert findings == []
+    world["services"] = services
+    write_json(run.world_model, world)
+    return run
+
+
+def _check_refs_lines(run: RunPaths, capsys) -> tuple[int, list[str]]:
+    capsys.readouterr()
+    code = cli.main(["check-refs", "--run", str(run.root)])
+    return code, capsys.readouterr().out.splitlines()
+
+
+def test_an_old_seal_names_the_rule_change_and_the_fix_in_one_finding(tmp_path, capsys):
+    run = _toy_sealed_under_the_old_rule(tmp_path)
+    code, lines = _check_refs_lines(run, capsys)
+    assert code == 1
+    cells = [line for line in lines if "declared capability_cells=" in line]
+    assert len(cells) == 1
+    finding = cells[0]
+    assert "01-world-model.json" in finding
+    assert "declared capability_cells=5" in finding
+    assert "sealed before" in finding and "services" in finding
+    assert "rubrica reconcile-seal" in finding
+    assert "`score`" in finding and "`score-seal`" in finding
+
+    # The matrix rows are not suppressed, but each points at that one finding.
+    undrivable = [line for line in lines if "matrix scores undrivable cell" in line]
+    assert undrivable
+    assert all("/denominator/capability_cells finding" in line for line in undrivable)
+
+
+def test_an_old_seal_gets_one_predates_line_at_gate_two(tmp_path, capsys):
+    run = _toy_sealed_under_the_old_rule(tmp_path)
+    text = brief.gate_brief(run, 2)
+    predates = [line for line in text.splitlines() if "predates" in line]
+    assert len(predates) == 1
+    assert "rubrica reconcile-seal" in predates[0]
+    assert cli.main(["gate-brief", "--run", str(run.root), "--gate", "2"]) == 0
+
+
+def test_a_run_sealed_under_the_new_rule_shows_neither(tmp_path, capsys):
+    run = _toy_with_a_route_bound_capability(tmp_path)
+    _, findings = rounds.seal_score(run, round_n=1)
+    assert findings == []
+    code, lines = _check_refs_lines(run, capsys)
+    assert code == 0
+    assert not any("sealed before" in line for line in lines)
+    assert "predates" not in brief.gate_brief(run, 2)
+
+
+def test_a_miscount_matching_neither_rule_does_not_blame_the_rule(tmp_path, capsys):
+    run = _toy_with_a_route_bound_capability(tmp_path)
+    world = read_json(run.world_model)
+    world["denominator"]["capability_cells"] = 9
+    write_json(run.world_model, world)
+    code, lines = _check_refs_lines(run, capsys)
+    assert code == 1
+    finding = next(line for line in lines if "declared capability_cells=" in line)
+    assert "sealed before" not in finding

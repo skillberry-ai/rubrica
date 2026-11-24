@@ -163,10 +163,12 @@ from rubrica.paths import STAGES, RunPaths, is_safe_segment, list_json
 # `_cell_counts` below wraps them rather than calling them straight.
 from rubrica.refs import (
     PASS_OWN_KINDS,
+    RESEAL_FIX,
     _as_list,
     _cells,
     binding_is_drivable,
     drivable_cells,
+    narrowed_cells,
     service_tool_names,
 )
 from rubrica.sizing import implied_size
@@ -1716,12 +1718,41 @@ def _gate_2(run: RunPaths) -> str:
             f"  implied suite size: {size['implied']} (ceiling {size['ceiling']}{binding_note})"
         )
 
+    world_doc = _quietly(run.world_model)
+    lines.extend(_predates_rule_lines(capability_matrix, world_doc))
+
     # Read from the world model rather than the coverage document, which records
     # covered/total but not why a cell can never be covered.
     lines.append("")
-    lines.extend(drivability_lines(_quietly(run.world_model)))
+    lines.extend(drivability_lines(world_doc))
 
     return "\n".join(lines) + "\n"
+
+
+def _predates_rule_lines(capability_matrix: dict, world_doc) -> list[str]:
+    """One line when the matrix scores cells the current drivable rule excludes.
+
+    Specifically the cells bound to a tool not listed in `services`
+    (`refs.narrowed_cells`): those are what a run scored before the rule narrowed
+    carries, and on the five autotrade runs that predate it this page showed 0
+    drivable cells beside a matrix scoring 67 with nothing saying why. A report,
+    so any malformed shape yields no line rather than an error.
+    """
+    try:
+        narrowed = narrowed_cells(_mapping(world_doc))
+        scored = {
+            (c["capability_id"], c["outcome_class_id"])
+            for c in _dicts(capability_matrix.get("cells"))
+        }
+    except Exception:  # deliberate, matching _cell_counts' reasoning
+        return []
+    stale = len(scored & narrowed)
+    if not stale:
+        return []
+    return [
+        f"  *** The matrix scores {stale} cell(s) bound to a tool not listed in `services`: this "
+        f"run predates the narrowed drivable rule and needs re-sealing -- {RESEAL_FIX}."
+    ]
 
 
 def _gate_3(run: RunPaths) -> str:

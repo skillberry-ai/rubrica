@@ -375,6 +375,53 @@ def binding_is_drivable(cap: dict, tools: set[str] | None) -> bool:
     return tools is None or (isinstance(tool, str) and tool in tools)
 
 
+def narrowed_cells(world: dict) -> set[tuple[str, str]]:
+    """The cells the older drivable rule counted and the current one does not.
+
+    Empty unless the world model has a `services` key: without one,
+    `binding_is_drivable` still applies the older rule, so nothing narrowed. With
+    one, these are the cells whose `binding.tool` is non-empty but names no tool
+    in `services` -- the exact difference T-101's narrowing made.
+
+    Exists so a run sealed (or scored) before that narrowing can be told apart
+    from a run whose stage got the count wrong. Measured on the five autotrade
+    runs sealed before the change: every one failed check-refs with around a
+    hundred findings, none of which said the rule had moved or how to recover,
+    and every sealed `capability_cells` equalled the older rule's count exactly.
+    The owner ruled (2026-11-23) to keep the strict rule and name the cause and
+    the fix rather than grandfather such runs, so this feeds a message, never a
+    pass.
+    """
+    tools = service_tool_names(world)
+    if tools is None:
+        return set()
+    return {
+        (cap["id"], oc["id"])
+        for cap in world.get("capabilities", [])
+        if binding_is_drivable(cap, None) and not binding_is_drivable(cap, tools)
+        for oc in cap.get("outcome_classes", [])
+    }
+
+
+def sealed_before_narrowing(world: dict) -> bool:
+    """Whether the sealed `capability_cells` is the older rule's count, not today's.
+
+    True only when some cell narrowed and the declared number equals the current
+    count plus exactly those cells -- i.e. what the any-`binding.tool` rule gives.
+    A miscount that happens to differ from both rules stays an ordinary finding.
+    """
+    narrowed = narrowed_cells(world)
+    denominator = world.get("denominator")
+    declared = denominator.get("capability_cells") if isinstance(denominator, dict) else None
+    return bool(narrowed) and declared == len(drivable_cells(world)) + len(narrowed)
+
+
+# The fix, spelled once so the finding and gate-brief cannot drift apart on it.
+# `score` is the prompt stage (a paid dispatch); `reconcile-seal` and `score-seal`
+# are code.
+RESEAL_FIX = "re-run `rubrica reconcile-seal`, then `score` and `score-seal`"
+
+
 def _dupes(values: list[str]) -> list[str]:
     return sorted({v for v in values if values.count(v) > 1})
 
@@ -2164,10 +2211,21 @@ def check_world_model(run: RunPaths) -> list[Finding]:
     # identity rather than two spellings that can drift.
     actual_cells = len(drivable_cells(world))
     if denominator.get("capability_cells") != actual_cells:
+        # Still one finding, still exit 1, still against this file: when the sealed
+        # number is exactly what the older any-`binding.tool` rule gives, the cause
+        # is the rule moving under a sealed run, not a stage miscounting, and the
+        # finding says so and names the fix (see narrowed_cells).
+        cause = ""
+        if sealed_before_narrowing(world):
+            cause = (
+                "; the declared number matches the older drivable rule, so this run was "
+                "sealed before cells bound to a tool not listed in `services` stopped "
+                f"counting as drivable -- {RESEAL_FIX}"
+            )
         report(
             "/denominator/capability_cells",
             f"declared capability_cells={denominator.get('capability_cells')} but the world "
-            f"model declares {actual_cells} drivable capability x outcome-class cells",
+            f"model declares {actual_cells} drivable capability x outcome-class cells{cause}",
         )
     actual_goals = len(world.get("goals", []))
     if denominator.get("goals") != actual_goals:
@@ -3687,11 +3745,24 @@ def check_coverage(run: RunPaths) -> list[Finding]:
     # `cells` is the wide set, so membership in it is exactly the partition:
     # inside, the world model declares the cell and the matrix scored a row it
     # should have left to the holes; outside, no capability declares the pair.
+    # On a run sealed before the drivable rule narrowed, every one of these rows
+    # is the same cause, so each points at the one world-model finding that
+    # explains it and names the fix, rather than repeating it ~100 times. Not
+    # suppressed: each row is still wrong until the run is re-scored.
+    old_seal = sealed_before_narrowing(world)
+    narrowed = narrowed_cells(world) if old_seal else set()
     for extra in sorted(seen - drivable):
         if extra in cells:
+            pointer_note = (
+                " (sealed before the drivable rule narrowed; see the "
+                "/denominator/capability_cells finding on 01-world-model.json)"
+                if extra in narrowed
+                else ""
+            )
             report(
                 "/capability_matrix/cells",
-                f"matrix scores undrivable cell {cell_ref(*extra)}; it belongs in the holes",
+                f"matrix scores undrivable cell {cell_ref(*extra)}; it belongs in the holes"
+                f"{pointer_note}",
             )
         else:
             report("/capability_matrix/cells", f"matrix invents cell {cell_ref(*extra)}")
