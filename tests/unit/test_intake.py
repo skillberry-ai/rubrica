@@ -608,7 +608,30 @@ def test_check_inputs_reports_a_repeated_stored_as(tmp_path, case_only):
     first = manifest["inputs"][0]["stored_as"]
     manifest["inputs"][1]["stored_as"] = first.upper() if case_only else first
     write_json(run.manifest, manifest)
-    repeats = [f for f in refs.check_inputs(run) if f.pointer == "/inputs/1/stored_as"]
+    at_pointer = [f for f in refs.check_inputs(run) if f.pointer == "/inputs/1/stored_as"]
+    # Picked by message, not by pointer alone: on a case-sensitive disk (Linux CI) the
+    # upper-cased name is also a file that does not exist, so check_inputs rightly
+    # adds a missing-copy finding at this same pointer. On macOS it is the same file.
+    repeats = [f for f in at_pointer if "the same file as /inputs/0" in f.message]
     assert len(repeats) == 1
-    assert "the same file as /inputs/0" in repeats[0].message
     assert ("differing only in case" in repeats[0].message) is case_only
+    others = [f for f in at_pointer if f not in repeats]
+    if case_only and _is_case_sensitive(tmp_path):
+        assert len(others) == 1
+        assert "has no stored copy" in others[0].message
+    else:
+        assert others == []
+
+
+def _is_case_sensitive(directory):
+    """Whether `directory` sits on a filesystem that tells `a` and `A` apart.
+
+    Probed rather than guessed from the platform: macOS can mount a case-sensitive
+    volume and Linux can mount a case-insensitive one.
+    """
+    probe = directory / "case-probe"
+    probe.write_text("", encoding="utf-8")
+    try:
+        return not (directory / "CASE-PROBE").exists()
+    finally:
+        probe.unlink()
