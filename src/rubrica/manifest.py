@@ -101,6 +101,23 @@ def record_stage(run: RunPaths, *, stage: str, model: str, effort: str, skill: P
     write_json(run.manifest, manifest)
 
 
+def has_line_break(text: str) -> bool:
+    """True if `text` holds any character `str.splitlines()` breaks a line at.
+
+    That is wider than `\\n`: `\\r`, `\\x0b`, `\\x0c`, `\\x1c`-`\\x1e`, `\\x85`,
+    U+2028 and U+2029 all count, and the console reads decisions.md with
+    `splitlines()`. A note refusing only `\\n` once let
+    `"not ready yet\\r- x gate 3 approved"` through, and the console then reported
+    a gate 3 approval nobody gave. Comparing against the joined split catches
+    every such character without keeping a list of them by hand.
+
+    Callers pass the *raw* text, before `strip()`: every one of those characters
+    is also whitespace to `strip()`, so testing the stripped text would turn a
+    trailing `\\r` into a silent pass rather than a refusal.
+    """
+    return "".join(text.splitlines()) != text
+
+
 def set_limit(
     run: RunPaths,
     *,
@@ -178,9 +195,9 @@ def set_limit(
     text = reason.strip()
     if not text:
         raise UsageError("set_limit's reason cannot be empty")
-    if "\n" in text:
+    if has_line_break(reason):
         raise UsageError(
-            "set_limit's reason cannot contain a newline; decisions.md is one line per entry"
+            "set_limit's reason cannot contain a line break; decisions.md is one line per entry"
         )
 
     manifest = read_json(run.manifest)
@@ -229,7 +246,22 @@ def set_limit(
     # write a blank note.
     write_json(run.manifest, manifest)
 
-    append_decision(run.decisions, f"- {utc_stamp(now)} set-limit: {'; '.join(changes)} -- {text}")
+    note = f"- {utc_stamp(now)} set-limit: {'; '.join(changes)} -- {text}"
+    try:
+        append_decision(run.decisions, note)
+    except OSError as exc:
+        # The order above is kept; what was wrong here was the silence, as in
+        # `waivers.record`. A read-only decisions.md once surfaced as a bare
+        # `[Errno 13] Permission denied`, exit 2, while the manifest already held
+        # the new limit -- a live, unrecorded change behind a message that reads
+        # as "nothing happened". So the failure names each change (old -> new)
+        # and the exact line a human has to add by hand. Still exit 2: the file
+        # is a human's, and no stage re-dispatch can append to it.
+        raise UsageError(
+            f"the limit WAS changed in {run.manifest} ({'; '.join(changes)}) and is in "
+            f"effect, but {run.decisions} could not be appended to: {exc}. The "
+            f"decisions.md note is missing; add this line by hand: {note}"
+        ) from exc
 
 
 def decide(run: RunPaths, note: str, *, now: datetime | None = None) -> None:
@@ -238,18 +270,19 @@ def decide(run: RunPaths, note: str, *, now: datetime | None = None) -> None:
     An empty note is refused rather than written: a blank entry records that a
     decision was made and not what it was, which is worse than no entry.
 
-    A note containing a newline is refused too. decisions.md is one entry per
-    line (every reader, including this module's own tests, parses it that
-    way), and append_decision only strips a *trailing* newline -- an embedded
-    one would split the entry across two physical lines, one of which has no
-    leading `- <timestamp>` and silently corrupts the append-only format for
-    every line written after it.
+    A note containing a line break is refused too -- any character
+    `str.splitlines()` breaks at, not only `\\n` (see `has_line_break`).
+    decisions.md is one entry per line (every reader, including this module's
+    own tests and the console, parses it that way), and append_decision only
+    strips a *trailing* newline -- an embedded one would split the entry across
+    two physical lines, one of which has no leading `- <timestamp>` and silently
+    corrupts the append-only format for every line written after it.
     """
     text = note.strip()
     if not text:
         raise UsageError("a decision note cannot be empty")
-    if "\n" in text:
+    if has_line_break(note):
         raise UsageError(
-            "a decision note cannot contain a newline; decisions.md is one line per entry"
+            "a decision note cannot contain a line break; decisions.md is one line per entry"
         )
     append_decision(run.decisions, f"- {utc_stamp(now)} {text}")

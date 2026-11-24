@@ -671,10 +671,12 @@ Appends one timestamped decision to the run's `decisions.md`.
 
 Required: `--run RUN`, `--note NOTE`.
 
-A note that is empty, whitespace-only, or contains a newline is refused at
+A note that is empty, whitespace-only, or contains a line break is refused at
 exit 2: a blank entry records that a decision was made and not what it was,
-and an embedded newline would corrupt a format every reader parses one line
-per entry.
+and a line break would corrupt a format every reader parses one line per
+entry. "Line break" means any character Python's `str.splitlines()` breaks at
+-- `\r`, `\x85` and U+2028 as well as `\n` -- because that is how the console
+reads `decisions.md`, and it counts at the end of the note too.
 
 Prints the `decisions.md` path.
 
@@ -1037,7 +1039,19 @@ and `diff-runs`, `run-summary` and `gate-brief` all read those. Absent means the
 default the batch partition uses, so setting it here is how a smaller budget for
 a probe run gets onto the record rather than into an argument nobody kept.
 
+`--reason` follows `decide`'s rule for a note: empty, whitespace-only, or
+containing a line break (any character `str.splitlines()` breaks at) is refused
+at exit 2, before anything is written.
+
 Prints the manifest path.
+
+The manifest is written first and `decisions.md` second, and the two writes are
+not transactional. If the `decisions.md` append fails — a read-only file, say —
+the new limit **is already in the manifest and in effect**, so the exit 2 names
+each limit with its old and new value, says the `decisions.md` note is missing,
+and prints the line to add by hand, rather than reading as "nothing happened".
+The order is deliberate: the other way round would leave `decisions.md`, which
+is append-only, asserting a change that never happened.
 
 ```bash
 rubrica set-limit --run runs/run-20260806-123005 --max-scenarios 200 \
@@ -1054,7 +1068,13 @@ screen. A waived finding a reader could no longer see would be a mute button
 rather than a record.
 
 Required: `--run RUN`, `--check CHECK`, `--subject SUBJECT`, `--remedy REMEDY`,
-`--reason REASON`. Prints the new waiver's id.
+`--reason REASON`. Prints the new waiver's id. A `--reason` that is empty,
+whitespace-only, or contains a line break is refused at exit 2 with nothing
+written, by the same rule `decide` applies to a note. A `--subject` that
+contains a line break is refused the same way, because it is written into the
+same `decisions.md` line; it is not stripped, since it is the key a finding is
+matched on. `--check` and `--remedy` are limited to fixed lists, so neither can
+carry one.
 
 `--check` accepts only the checks that consult the waiver registry —
 `waivers.WAIVABLE_CHECKS`, one row today, `claim-utilisation`. A check absent
