@@ -39,7 +39,14 @@ from rubrica.interfaces import (
 )
 from rubrica.invariants import InvariantForm
 from rubrica.invariants import evaluate as evaluate_invariant
-from rubrica.paths import RunPaths, is_safe_segment, list_json
+from rubrica.paths import (
+    RunPaths,
+    duplicate_id_pairs,
+    is_safe_segment,
+    list_json,
+    scenario_case_collision_message,
+    segment_key,
+)
 from rubrica.slices import candidate_bytes_index, excluded_summary, row_bytes
 from rubrica.suite.verify import DATA_KINDS, TRAJECTORY_KINDS
 from rubrica.utilisation import claim_utilisation
@@ -489,8 +496,20 @@ def check_catalogue(run: RunPaths) -> list[Finding]:
         return []
 
     ids = [c.get("candidate_id") for c in candidates if isinstance(c, dict)]
-    for duplicate in _dupes([i for i in ids if isinstance(i, str)]):
-        report("/candidates", f"duplicate candidate_id {duplicate!r}")
+    # By paths.segment_key, not exactly: an admitted candidate_id becomes an
+    # artifact id and a file under 00-inputs/, so on a case-insensitive disk
+    # `orders-capture` and `Orders-Capture` are one file and intake's second
+    # copy overwrites the first. Reported here, against the catalogue that
+    # carries both, rather than later against a manifest no stage can repair.
+    for first, repeat in duplicate_id_pairs(ids):
+        if first == repeat:
+            report("/candidates", f"duplicate candidate_id {first!r}")
+        else:
+            report(
+                "/candidates",
+                f"candidate_ids {first!r} and {repeat!r} differ only in case: on a "
+                "case-insensitive filesystem they would share one file in 00-inputs/",
+            )
     known = {i for i in ids if isinstance(i, str)}
 
     for index, candidate in enumerate(candidates):
@@ -1491,6 +1510,32 @@ def check_inputs(run: RunPaths) -> list[Finding]:
     if manifest is None:
         return []
     out: list[Finding] = []
+    # A repeated stored_as is one file recorded twice: the later copy replaced
+    # the earlier, so one of the two sha256s below can never match, and the
+    # mismatch finding alone would blame an edit nobody made. Compared under
+    # segment_key, because `orders.json` and `Orders.json` are one file on a
+    # case-insensitive disk. Reported here, before the per-entry checks, so the
+    # line naming the real cause comes first.
+    taken: dict[str, tuple[int, str]] = {}
+    for i, entry in enumerate(manifest["inputs"]):
+        stored_as = entry["stored_as"]
+        if not isinstance(stored_as, str):
+            continue
+        key = segment_key(stored_as)
+        if key in taken:
+            first_index, first_name = taken[key]
+            case = "" if first_name == stored_as else " (differing only in case)"
+            out.append(
+                Finding(
+                    run.manifest,
+                    "refs",
+                    f"/inputs/{i}/stored_as",
+                    f"{entry['artifact_id']!r} is stored as {stored_as!r}, the same file as "
+                    f"/inputs/{first_index}{case}; one copy replaced the other at intake",
+                )
+            )
+        else:
+            taken[key] = (i, stored_as)
     for i, entry in enumerate(manifest["inputs"]):
         artifact_id = entry["artifact_id"]
         stored_as = entry["stored_as"]
@@ -1846,8 +1891,19 @@ def check_subjects(run: RunPaths) -> list[Finding]:
         out.append(Finding(run.subjects, "refs", pointer, message))
 
     subjects = _as_list(cover.get("subjects"))
-    for dupe in _dupes([s["id"] for s in subjects if isinstance(s, dict)]):
-        report("/subjects", f"duplicate subject id {dupe!r}")
+    # By paths.segment_key, not exactly: a subject id becomes
+    # 01-contradictions/<subject_id>.json, so on a case-insensitive disk `s-auth`
+    # and `S-AUTH` are one part and one sweep member overwrites the other.
+    for first, repeat in duplicate_id_pairs([s.get("id") for s in subjects if isinstance(s, dict)]):
+        if first == repeat:
+            report("/subjects", f"duplicate subject id {first!r}")
+        else:
+            report(
+                "/subjects",
+                f"subject ids {first!r} and {repeat!r} differ only in case: on a "
+                f"case-insensitive filesystem they would share the one file "
+                f"01-contradictions/{first}.json, so one subject's sweep overwrites the other's",
+            )
 
     known = _claim_ids(run)
     covered: set[str] = set()
@@ -3605,8 +3661,13 @@ def check_scenarios(run: RunPaths) -> list[Finding]:
             f"world model is at {world_version}",
         )
 
-    for dupe in _dupes([s["id"] for s in scenarios]):
-        report("/scenarios", f"duplicate scenario id {dupe!r}")
+    # By paths.segment_key, not exactly: a scenario id becomes a folder or file
+    # name three times over, so a case-only repeat collides on macOS.
+    for first, repeat in duplicate_id_pairs([s["id"] for s in scenarios]):
+        if first == repeat:
+            report("/scenarios", f"duplicate scenario id {first!r}")
+        else:
+            report("/scenarios", scenario_case_collision_message(first, repeat))
 
     for i, scenario in enumerate(scenarios):
         if scenario["goal_id"] not in goal_ids:

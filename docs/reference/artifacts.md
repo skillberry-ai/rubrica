@@ -42,6 +42,28 @@ by `adopt-projection`, still gets its own entry here); `candidates[].kind`
 admissible` (a structural flag, not triage's disposition — a candidate can be
 admissible and still be declined).
 
+`candidates[].candidate_id` must be unique **ignoring case**, not just
+exactly: an admitted candidate's id becomes its artifact id and a file name in
+`00-inputs/`, so on a case-insensitive disk `orders-capture` and
+`Orders-Capture` are one file. `check-refs` reports a case-only repeat against
+this file, worded to say the ids differ only in case. Every writer (`survey`,
+`adopt-projection`, and `intake` minting artifact ids) uses one rule: an id
+already taken, compared ignoring case, gets the lowest `-2`, `-3`, … suffix
+that is still free, so a suffixed id never lands on another candidate's id.
+Where nothing collides, ids are unchanged.
+
+A unique id is **not** by itself a unique file. The name in `00-inputs/` is the
+id plus the source's suffix, and an id may contain a dot, so `capture-json-0`
+stored from a `.json` file and a suffix-less `capture-json-0.json` are the same
+`00-inputs/capture-json-0.json` (and `orders` from `orders.json` beside
+`Orders.json` are one file on a case-insensitive disk). `intake` works out
+every stored name before copying anything and, if two would be one file
+ignoring case, copies nothing: `intake --run` reports it as a finding against
+this file (exit 1), `intake --input` as a usage error (exit 2).
+`adopt-projection` refuses a projection id whose stored name would land on an
+existing candidate's, and `check-refs` reports a `manifest.inputs[].stored_as`
+that repeats an earlier one, ignoring case.
+
 ## `triage`
 
 - **Schema:** `src/rubrica/schema/triage-0.1.json`
@@ -395,7 +417,12 @@ holds the cover to totality, so every claim id in the run appears here.
 
 Fields worth knowing: `subjects[].claims` (a `claim_refs` array, so it can
 never be empty); `subjects[].note` (optional, for why a claim was assigned
-where a reader would not expect it).
+where a reader would not expect it); and `subjects[].id`, which must be unique
+across the array — each becomes the name of `01-contradictions/<subject_id>.json`.
+`check-refs` compares the ids ignoring case, because on a case-insensitive
+filesystem such as macOS's `s-auth` and `S-AUTH` are one file, so a case-only
+repeat is the same finding against this file, worded to say the ids differ only
+in case.
 
 ## `contradictions-part`
 
@@ -865,7 +892,11 @@ Fields worth knowing: `capability_refs[]` (each pairs a `capability_id` with
 an `outcome_class_id` — the coverage cell this scenario is meant to close);
 `duplicate_of` (required when `status` is `duplicate`); `rejected_reason`
 (required when `status` is `rejected` — one of five fixed values, including
-`blocked_by_gap`).
+`blocked_by_gap`). `id` must be unique across the document, compared ignoring
+case: each id becomes an `04-instances/` folder, a `05-verdicts/` file and a suite
+task folder, and on a case-insensitive filesystem `sc-001` and `SC-001` are the
+same one. `propose-seal` refuses such a pair across parts, and `check-refs` reports
+it against this document, worded to say the ids differ only in case.
 
 ## `coverage`
 

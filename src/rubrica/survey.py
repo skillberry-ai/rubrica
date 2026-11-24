@@ -244,6 +244,13 @@ _MAX_CANDIDATE_ID = 128
 # *after* this function returns and so cannot be accounted for inside it. Eight
 # characters carries "-9999999" -- far past the point DEFAULT_MAX_CANDIDATES
 # (500) allows a single base id to collide.
+#
+# `_unique_artifact_id` now trims its own base to keep a suffixed id within
+# intake.MAX_ID_LENGTH, so this room is no longer what keeps survey's ids
+# valid. It is kept anyway: removing it would lengthen every element id that
+# was budgeted against it, moving ids already written into existing catalogues
+# and triage records, and it still keeps the container prefix (the readable
+# half) intact on collision instead of letting the trim eat into the suffix.
 _COLLISION_SUFFIX_ROOM = 8
 
 

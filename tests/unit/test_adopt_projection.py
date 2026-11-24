@@ -233,6 +233,57 @@ def test_the_adopted_run_still_passes_check_all(tmp_path):
     assert projection["satisfied_by"] == adopted["candidate_id"]
 
 
+def test_a_projection_id_differing_only_in_case_from_a_candidate_is_suffixed(tmp_path):
+    """rb-triage-audit mints projection_id and may capitalise it. Measured:
+    `Orders-Capture` beside survey's `orders-capture` was kept as is, and intake
+    then copied both into one file on a case-insensitive disk. The used-set is
+    keyed by paths.segment_key, so the adopted candidate now gets a suffix."""
+    run = _run_with_projection(tmp_path)
+    catalogue = read_json(run.catalogue)
+    catalogue["candidates"][0]["candidate_id"] = "orders-capture"
+    write_json(run.catalogue, catalogue)
+    record = read_json(run.triage)
+    record["dispositions"][0]["candidate_id"] = "orders-capture"
+    record["objective_review"]["surfaces"][0]["evidence"] = ["orders-capture"]
+    record["projections"][0]["projection_id"] = "Orders-Capture"
+    record["projections"][0]["sources"][0]["candidate_id"] = "orders-capture"
+    write_json(run.triage, record)
+
+    assert (
+        triage.adopt_projection(run, projection_id="Orders-Capture", source=_good(tmp_path)) == []
+    )
+    ids = [c["candidate_id"] for c in read_json(run.catalogue)["candidates"]]
+    assert ids == ["orders-capture", "Orders-Capture-2"]
+    assert refs.check_catalogue(run) == []
+
+
+def test_a_suffixed_projection_id_at_the_length_limit_stays_within_it(tmp_path):
+    """Measured before the fix: candidate `"p"*128` beside projection `"P"*128`
+    adopted with no findings and a 130-character candidate_id, so
+    00-catalogue.json and 00-adoptions.json then failed their own schema
+    (maxLength 128). _unique_artifact_id now trims the base to fit the suffix."""
+    from rubrica import validate
+
+    long_id = "p" * 128
+    run = _run_with_projection(tmp_path)
+    catalogue = read_json(run.catalogue)
+    catalogue["candidates"][0]["candidate_id"] = long_id
+    write_json(run.catalogue, catalogue)
+    record = read_json(run.triage)
+    record["dispositions"][0]["candidate_id"] = long_id
+    record["objective_review"]["surfaces"][0]["evidence"] = [long_id]
+    record["projections"][0]["projection_id"] = long_id.upper()
+    record["projections"][0]["sources"][0]["candidate_id"] = long_id
+    write_json(run.triage, record)
+
+    assert triage.adopt_projection(run, projection_id=long_id.upper(), source=_good(tmp_path)) == []
+    ids = [c["candidate_id"] for c in read_json(run.catalogue)["candidates"]]
+    assert ids == [long_id, "P" * 126 + "-2"]
+    assert validate.validate_artifact(run.catalogue, "catalogue") == []
+    assert validate.validate_artifact(run.adoptions, "adoptions") == []
+    assert refs.check_catalogue(run) == []
+
+
 def test_a_missing_required_string_is_one_finding_per_failed_check(tmp_path):
     """Exit 1 with findings the worker reads and retries against -- and the same
     findings a future rb-project member would read as its gate."""
@@ -656,3 +707,117 @@ def test_a_catalogue_that_is_not_an_object_is_a_finding_not_a_traceback(tmp_path
     assert findings, "a non-object catalogue produced no finding at all"
     assert all(f.message for f in findings)
     assert [f.artifact for f in findings] == [run.catalogue]
+
+
+@pytest.mark.parametrize(
+    "existing_id,existing_path,projection_id",
+    [
+        ("capture-json-0", "capture.json", "capture-json-0.json"),
+        ("orders", "orders.json", "Orders.json"),
+    ],
+)
+def test_a_projection_id_whose_stored_name_collides_is_a_finding(
+    tmp_path, existing_id, existing_path, projection_id
+):
+    """Unique candidate ids are not unique files in 00-inputs/: a projection id
+    with a dot, adopted from a suffix-less file, lands on the name an admitted
+    candidate is stored under (and `Orders.json` is `orders.json` on macOS).
+    Refused against the triage record that minted the id, writing nothing."""
+    run = _run_with_projection(tmp_path)
+    catalogue = read_json(run.catalogue)
+    colliding = dict(catalogue["candidates"][0], candidate_id=existing_id, path=existing_path)
+    catalogue["candidates"].append(colliding)
+    write_json(run.catalogue, catalogue)
+    record = read_json(run.triage)
+    # Admitted, so intake would copy it into 00-inputs/ beside the projection.
+    record["dispositions"].append(
+        {
+            "candidate_id": existing_id,
+            "disposition": "admit",
+            "reason": "carries the trace",
+            "authority": "triage",
+        }
+    )
+    record["projections"][0]["projection_id"] = projection_id
+    write_json(run.triage, record)
+    source = tmp_path / "tool"
+    source.write_text(_good(tmp_path).read_text(encoding="utf-8"), encoding="utf-8")
+    before = run.catalogue.read_bytes()
+
+    findings = triage.adopt_projection(run, projection_id=projection_id, source=source)
+    assert len(findings) == 1
+    assert findings[0].artifact == run.triage
+    assert findings[0].pointer == "/projections/0/projection_id"
+    assert repr(existing_id) in findings[0].message
+    assert run.catalogue.read_bytes() == before
+    assert not run.adoptions.exists()
+
+
+def test_a_projection_named_after_its_declined_source_is_adopted(tmp_path):
+    """The usual shape: a projection named after the needs_projection source it
+    was made from. That source is declined, so intake never copies it, and
+    sharing its stored name cannot collide with anything."""
+    run = _run_with_projection(tmp_path)
+    catalogue = read_json(run.catalogue)
+    catalogue["candidates"][0]["candidate_id"] = "capture-json-0"
+    catalogue["candidates"][0]["path"] = "capture.json"
+    write_json(run.catalogue, catalogue)
+    record = read_json(run.triage)
+    record["dispositions"][0]["candidate_id"] = "capture-json-0"
+    record["objective_review"]["surfaces"][0]["evidence"] = ["capture-json-0"]
+    record["projections"][0]["projection_id"] = "capture-json-0.json"
+    record["projections"][0]["sources"][0]["candidate_id"] = "capture-json-0"
+    write_json(run.triage, record)
+    source = tmp_path / "tool"
+    source.write_text(_good(tmp_path).read_text(encoding="utf-8"), encoding="utf-8")
+
+    assert triage.adopt_projection(run, projection_id="capture-json-0.json", source=source) == []
+    adopted = [a["candidate_id"] for a in read_json(run.adoptions)["adoptions"]]
+    assert adopted == ["capture-json-0.json"]
+
+
+def test_a_projection_colliding_with_an_earlier_adoption_is_a_finding(tmp_path):
+    """An earlier adoption is admitted too, though it sits in 00-adoptions.json
+    until triage-seal folds it into the triage record."""
+    run = _run_with_projection(tmp_path)
+    catalogue = read_json(run.catalogue)
+    earlier = dict(catalogue["candidates"][0], candidate_id="orders", path="/abs/orders.json")
+    catalogue["candidates"].append(earlier)
+    write_json(run.catalogue, catalogue)
+    write_json(
+        run.adoptions,
+        {
+            "schema_version": "0.1",
+            "run_id": run.root.name,
+            "adoptions": [
+                {
+                    "candidate_id": "orders",
+                    "disposition": {
+                        "candidate_id": "orders",
+                        "disposition": "admit",
+                        "reason": "structural acceptance passed",
+                        "authority": "human",
+                    },
+                    "projection_id": "prj-orders",
+                    "closed_deficiency_ids": ["def-shapes"],
+                }
+            ],
+        },
+    )
+    record = read_json(run.triage)
+    record["projections"][0]["projection_id"] = "Orders.json"
+    write_json(run.triage, record)
+    source = tmp_path / "tool"
+    source.write_text(_good(tmp_path).read_text(encoding="utf-8"), encoding="utf-8")
+
+    findings = triage.adopt_projection(run, projection_id="Orders.json", source=source)
+    assert len(findings) == 1
+    assert findings[0].pointer == "/projections/0/projection_id"
+    assert "'orders'" in findings[0].message
+
+
+def test_a_suffix_less_projection_with_a_distinct_stored_name_is_still_adopted(tmp_path):
+    run = _run_with_projection(tmp_path)
+    source = tmp_path / "tool"
+    source.write_text(_good(tmp_path).read_text(encoding="utf-8"), encoding="utf-8")
+    assert triage.adopt_projection(run, projection_id="prj-tools", source=source) == []

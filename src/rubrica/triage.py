@@ -25,8 +25,8 @@ from rubrica import digest as digest_module
 from rubrica.artifacts import ArtifactError, read_json, sha256_of, write_json
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
-from rubrica.intake import _unique_artifact_id, classify
-from rubrica.paths import RunPaths
+from rubrica.intake import _unique_artifact_id, classify, planned_stored_name, stored_name
+from rubrica.paths import RunPaths, segment_key
 from rubrica.refs import UNSET, resolve_pointer
 
 # The core semantic point of this module, said in the one place a human
@@ -165,6 +165,23 @@ def check_acceptance(path: Path, acceptance: dict) -> list[Finding]:
                 report(f"pointer {pointer!r} does not resolve")
 
     return out
+
+
+def _admitted_candidate_ids(dispositions: object) -> set[str]:
+    """The candidate ids a list of dispositions admits -- the ones intake copies.
+
+    The same rule intake.admit_from_triage applies (`disposition == "admit"`),
+    read defensively because the list may come from an unvalidated record.
+    """
+    if not isinstance(dispositions, list):
+        return set()
+    return {
+        d["candidate_id"]
+        for d in dispositions
+        if isinstance(d, dict)
+        and d.get("disposition") == "admit"
+        and isinstance(d.get("candidate_id"), str)
+    }
 
 
 def adopt_projection(
@@ -424,12 +441,56 @@ def adopt_projection(
     # collide with `projection_id` (which _unique_artifact_id compares as a
     # string) so dropping it from the collision map loses nothing, and
     # check_catalogue already reports it as a finding of its own.
+    # Keyed by segment_key, the form _unique_artifact_id compares under: a
+    # model-minted `Orders-Capture` beside survey's `orders-capture` was kept
+    # as is, and intake then copied both into one file on macOS.
     used = {
-        c["candidate_id"]: 1
+        segment_key(c["candidate_id"]): 1
         for c in candidates
         if isinstance(c, dict) and isinstance(c.get("candidate_id"), str)
     }
     candidate_id = _unique_artifact_id(projection_id, used)
+
+    # A unique candidate_id is not a unique file in 00-inputs/: the stored name
+    # appends the source's suffix and a projection id may contain a dot, so
+    # `capture-json-0.json` adopted from a suffix-less file lands on the
+    # `capture-json-0.json` survey's `capture-json-0` element is stored as, and
+    # intake would refuse the admission. Refused here, where the id is chosen,
+    # against the record that minted it -- a stage wrote the projection id, so
+    # it is a finding, not a usage error. Each existing candidate is judged by
+    # the name its own candidate_id implies, which is what intake uses whenever
+    # no admitted id repeats; intake's own check is the backstop for the rest.
+    #
+    # Only candidates intake will actually copy can collide, so only those are
+    # compared: intake.admit_from_triage copies every `admit` disposition and
+    # nothing else (the triage schema has no other copying kind). A projection
+    # is usually named after its own source, a candidate the triage family
+    # declined as needs_projection and so never copied -- comparing against
+    # every candidate refused exactly that usual shape. Admissions come from
+    # two places until triage-seal folds them together: the triage record's
+    # dispositions and the earlier adoptions in 00-adoptions.json.
+    copied = _admitted_candidate_ids(triage_record.get("dispositions"))
+    copied |= _admitted_candidate_ids(
+        [a.get("disposition") for a in adoptions_list if isinstance(a, dict)]
+    )
+    implied = stored_name(candidate_id, source)
+    for existing in candidates:
+        if not (isinstance(existing, dict) and isinstance(existing.get("candidate_id"), str)):
+            continue
+        if existing["candidate_id"] not in copied:
+            continue
+        existing_name = planned_stored_name(existing, existing["candidate_id"])
+        if segment_key(existing_name) == segment_key(implied):
+            return [
+                Finding(
+                    run.triage,
+                    "refs",
+                    f"/projections/{projection_index}/projection_id",
+                    f"projection {projection_id!r} would be stored as 00-inputs/{implied}, the "
+                    f"same file as candidate {existing['candidate_id']!r} "
+                    f"({existing_name}); intake could not admit both",
+                )
+            ]
 
     kind = classify(source)
     # digest.digest_for_path, the same call survey makes for every corpus

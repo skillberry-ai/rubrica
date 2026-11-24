@@ -84,6 +84,13 @@ Prints the run directory on success; on the `--run` path, a non-empty result
 from checking the triage record against the catalogue prints as findings on
 exit 1 instead.
 
+Before copying anything, intake works out the name each input will be stored
+under in `00-inputs/` and refuses the whole intake if two of those names are
+one file ignoring case — copying both would let the second replace the first.
+On `--run` that is a finding against `00-catalogue.json` (exit 1); on
+`--input`, a usage error (exit 2), like a missing input. Either way nothing is
+copied.
+
 ```bash
 rubrica intake \
   --input path/to/api.json \
@@ -114,6 +121,24 @@ Prints `structural acceptance passed; the prose criterion is still a human's
 to judge` on a clean pass, or findings on exit 1 — structural acceptance is
 necessary and never sufficient; whether the file means what the projection
 asked for is still a human's call.
+
+The adopted candidate's `candidate_id` is the projection id, suffixed `-2`,
+`-3`, … if the catalogue already holds that id **ignoring case** — so a
+projection `Orders-Capture` beside a surveyed `orders-capture` is adopted as
+`Orders-Capture-2`, not as a second id for the same candidate.
+`intake` uses the same rule when it turns candidate ids and file names into
+artifact ids, and never hands out a suffixed id another input already has.
+
+A unique id does not by itself give a unique file: the stored name adds the
+file's suffix, and a projection id may contain a dot, so a projection
+`capture-json-0.json` adopted from a suffix-less file would be stored as the
+same `00-inputs/capture-json-0.json` as an admitted `capture-json-0`. That is
+refused with a finding against `00-triage.json` (exit 1), and nothing is
+written. Only candidates `intake` will copy are compared — those with an
+`admit` disposition in `00-triage.json` or an earlier adoption in
+`00-adoptions.json` — so a projection named after its own declined
+`needs_projection` source is adopted as usual. `intake` checks the same thing
+for every admitted input before it copies anything.
 
 ```bash
 rubrica adopt-projection --run runs/run-20260806-123005 \
@@ -492,7 +517,9 @@ Exits 1, one finding per line on stdout, naming the part at fault: a part that i
 unparseable, not a JSON object, or carrying no `scenarios` array; a scenario that
 is not an object or has no string id; two parts claiming one scenario id, which
 has to be caught here because members mint their own ids and the merged array
-would simply carry the collision twice; a score part that is unparseable, is not
+would simply carry the collision twice — compared ignoring case, since each id
+becomes a folder and file name and on a case-insensitive filesystem `sc-001` and
+`SC-001` are one, so a case-only repeat is the same finding, worded to say so; a score part that is unparseable, is not
 an object, or carries no `rulings` array; and a ruling that is not an object, has
 no string `scenario_id`, carries a status outside the ruling enum, omits the field
 that status requires, or names a scenario no propose part wrote. Two rulings for

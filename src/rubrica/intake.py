@@ -23,11 +23,17 @@ from rubrica.digest import is_message_list
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
 from rubrica.manifest import utc_stamp
-from rubrica.paths import RunPaths, is_safe_segment, safe_segment
+from rubrica.paths import RunPaths, is_safe_segment, safe_segment, segment_key
 from rubrica.refs import check_triage, resolve_pointer
 
 _SOURCE_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".go", ".rs", ".java", ".rb"}
 _DOC_SUFFIXES = {".md", ".rst", ".txt", ".adoc"}
+
+# The `maxLength` every id schema shares (catalogue-0.1.json, triage-0.1.json,
+# manifest-0.1.json). `_unique_artifact_id` budgets its collision suffix
+# against it, because a base already at the limit plus "-2" is an id the very
+# artifact it is written into then fails layer 1 on.
+MAX_ID_LENGTH = 128
 
 
 def slug(value: str) -> str:
@@ -53,6 +59,52 @@ def stored_name(artifact_id: str, source: Path) -> str:
     """
     candidate = f"{artifact_id}{Path(source).suffix.lower()}"
     return candidate if is_safe_segment(candidate) else artifact_id
+
+
+def planned_stored_name(candidate: dict, artifact_id: str) -> str:
+    """The name `materialise` will store this catalogue candidate under.
+
+    One spelling, shared by `materialise` itself, by `admit_from_triage`'s
+    collision check (which must know every name before anything is copied) and
+    by `adopt-projection`. A container element is always written as JSON; any
+    other candidate keeps its own path's suffix. A path that is not a string
+    gives no suffix rather than raising -- layer 1 owns that shape.
+    """
+    if candidate.get("origin") == "container_element":
+        return stored_name(artifact_id, Path("container-element.json"))
+    raw_path = candidate.get("path")
+    return stored_name(artifact_id, Path(raw_path) if isinstance(raw_path, str) else Path())
+
+
+def stored_name_collisions(named: list[tuple[str, str]]) -> list[tuple[str, str, str, str]]:
+    """`(first_id, first_name, repeat_id, repeat_name)` for each stored name already taken.
+
+    `named` is `(artifact_id, stored_as)` in copy order. Unique artifact ids do
+    not give unique file names, because the stored name appends a suffix and an
+    id may itself contain a dot: `capture-json-0` stored from a `.json` source
+    and a suffix-less `capture-json-0.json` are both `capture-json-0.json`, and
+    the second copy silently replaced the first (measured, on a run whose
+    projection id was model-minted). Compared under `paths.segment_key`, since
+    `orders.json` and `Orders.json` are one file on macOS too.
+    """
+    seen: dict[str, tuple[str, str]] = {}
+    out = []
+    for artifact_id, name in named:
+        key = segment_key(name)
+        if key in seen:
+            out.append((*seen[key], artifact_id, name))
+        else:
+            seen[key] = (artifact_id, name)
+    return out
+
+
+def _collision_message(first_id: str, first_name: str, repeat_id: str, repeat_name: str) -> str:
+    same = "" if first_name == repeat_name else " (the two names differ only in case)"
+    return (
+        f"inputs {first_id!r} and {repeat_id!r} would both be stored as "
+        f"00-inputs/{first_name}{same}, so the second copy would replace the first; "
+        "nothing was copied"
+    )
 
 
 def _json_or_none(path: Path):
@@ -125,10 +177,55 @@ def _unique_artifact_id(base: str, used: dict[str, int]) -> str:
     refs.check_admitted_inputs reverses this exact rule to recover a
     candidate_id from a manifest artifact_id, and two independent spellings
     of "suffix on collision" would make that reversal ambiguous.
+
+    `used` is keyed by `paths.segment_key`, not by exact text, and records
+    every id handed out -- suffixed ones too -- not only the bases. Both
+    halves were measured defects. Keyed on the base alone, `--input d1/x.md
+    d2/x.md x-md-2` gave the second `x.md` the suffix `x-md-2` and then kept
+    the literal `x-md-2` as is: two inputs with one id, intake exiting 0, and
+    the check-refs finding naming manifest.json, which no stage can repair.
+    Keyed on exact text, adopt-projection kept a model-minted `Orders-Capture`
+    beside survey's `orders-capture`, and intake then copied both into one
+    file on a case-insensitive disk. So a repeat takes the lowest suffix whose
+    key is still free. Where nothing collides the ids are exactly the old ones
+    (`x`, `x-2`, `x-3` ...), so existing runs and fixtures do not move.
+
+    The value under a base's key is the last suffix tried for it, so a third
+    repeat starts after the second's. A caller reserving ids it did not mint
+    here (adopt-projection, for the catalogue's existing candidates) stores
+    `segment_key(id): 1`.
+
+    A suffixed id never exceeds `MAX_ID_LENGTH`: the base is trimmed just
+    enough to make room for the suffix. Measured: adopt-projection on a
+    128-character projection id colliding with a 128-character candidate
+    minted a 130-character candidate_id, exited clean, and left
+    00-catalogue.json and 00-adoptions.json failing their own schema. The
+    trim happens only when it is needed, so any id that fits comes out exactly
+    as before. Trimming can make two bases share a stem, which is why the loop
+    tests every candidate against `used` rather than trusting the counter.
+    refs.check_admitted_inputs recovers a candidate_id by replaying this
+    function forwards, not by parsing a suffix off, so a trimmed id maps back
+    to its candidate the same way an untrimmed one does.
     """
-    count = used.get(base, 0) + 1
-    used[base] = count
-    return base if count == 1 else f"{base}-{count}"
+    key = segment_key(base)
+    if key not in used:
+        used[key] = 1
+        return base
+    count = used[key]
+    while True:
+        count += 1
+        suffix = f"-{count}"
+        room = MAX_ID_LENGTH - len(suffix)
+        # rstrip so a cut landing on a separator does not double it against the
+        # suffix's "-". Every id schema requires an alphanumeric first
+        # character, so the trimmed stem is never empty.
+        stem = base if len(base) <= room else base[:room].rstrip("-._")
+        candidate = f"{stem}{suffix}"
+        if segment_key(candidate) not in used:
+            break
+    used[key] = count
+    used[segment_key(candidate)] = 1
+    return candidate
 
 
 def _unique_ids(inputs: list[Path]) -> list[str]:
@@ -327,7 +424,7 @@ def materialise(run: RunPaths, *, candidate: dict, source_root: Path, artifact_i
         # a suffix from its `source` argument, and a container element is always
         # written as JSON, so a synthetic path supplies exactly that -- there is
         # no real source file to point at.
-        stored_as = stored_name(artifact_id, Path("container-element.json"))
+        stored_as = planned_stored_name(candidate, artifact_id)
         (run.inputs_dir / stored_as).write_bytes(body)
         return {
             "artifact_id": artifact_id,
@@ -344,7 +441,7 @@ def materialise(run: RunPaths, *, candidate: dict, source_root: Path, artifact_i
 
     raw_path = candidate["path"]
     source = Path(raw_path) if Path(raw_path).is_absolute() else Path(source_root) / raw_path
-    stored_as = stored_name(artifact_id, source)
+    stored_as = planned_stored_name(candidate, artifact_id)
     shutil.copy2(source, run.inputs_dir / stored_as)
     entry = {
         "artifact_id": artifact_id,
@@ -406,11 +503,22 @@ def intake(
         if not path.is_file():
             raise FileNotFoundError(f"input artifact does not exist: {path}")
 
+    # Every stored name is computed, and checked for a repeat, before the run is
+    # minted: a collision is the person's input set, exactly like a missing
+    # input above, so it is a UsageError (exit 2) that leaves nothing behind.
+    # slug() leaves no dot in an id, so this cannot fire today on this path; it
+    # is held here anyway so that a change to slug() cannot reopen the
+    # silent-overwrite defect stored_name_collisions describes.
+    ids = _unique_ids(inputs)
+    names = [stored_name(artifact_id, path) for path, artifact_id in zip(inputs, ids, strict=True)]
+    collisions = stored_name_collisions(list(zip(ids, names, strict=True)))
+    if collisions:
+        raise UsageError("intake refused: " + "; ".join(_collision_message(*c) for c in collisions))
+
     run, stamp = mint_run(runs_dir, now=now)
     run.inputs_dir.mkdir(parents=True)
     entries = []
-    for path, artifact_id in zip(inputs, _unique_ids(inputs), strict=True):
-        stored_as = stored_name(artifact_id, path)
+    for path, artifact_id, stored_as in zip(inputs, ids, names, strict=True):
         destination = run.inputs_dir / stored_as
         shutil.copy2(path, destination)
         entries.append(
@@ -665,12 +773,32 @@ def admit_from_triage(run: RunPaths) -> list[Finding]:
     if findings:
         return findings
 
+    # Every artifact id and stored name is fixed before the mkdir, for the
+    # reason the checks above are: a candidate set intake cannot copy without
+    # one file replacing another must leave no half-created run behind. The
+    # ids are minted here, once, and the loop below uses these same ones.
+    used: dict[str, int] = {}
+    artifact_ids = [_unique_artifact_id(c["candidate_id"], used) for c in admitted]
+    collisions = stored_name_collisions(
+        [
+            (artifact_id, planned_stored_name(candidate, artifact_id))
+            for candidate, artifact_id in zip(admitted, artifact_ids, strict=True)
+        ]
+    )
+    if collisions:
+        # A finding against the catalogue, not a UsageError: the ids are
+        # candidate ids a stage (or adopt-projection, from a model-minted
+        # projection id) wrote, so this is a defect in the run's own
+        # artifacts, and a stage defect must never surface as exit 2.
+        return [
+            Finding(run.catalogue, "refs", "/candidates", _collision_message(*c))
+            for c in collisions
+        ]
+
     run.inputs_dir.mkdir(parents=True)
     try:
         entries = []
-        used: dict[str, int] = {}
-        for candidate in admitted:
-            artifact_id = _unique_artifact_id(candidate["candidate_id"], used)
+        for candidate, artifact_id in zip(admitted, artifact_ids, strict=True):
             # A multi-root survey assigns root_index per corpus root (survey.py's
             # own per-root walk_corpus loop), so each admitted candidate resolves
             # against *its own* root rather than corpus_roots[0] -- defaulting to

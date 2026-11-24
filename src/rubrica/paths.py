@@ -190,6 +190,55 @@ def is_safe_segment(value: str) -> bool:
     return isinstance(value, str) and bool(_SAFE_SEGMENT.match(value)) and ".." not in value
 
 
+def segment_key(value: str) -> str:
+    """The form under which two ids name the same file on a case-insensitive disk.
+
+    Ids that stages write become file or folder names (a service id, a scenario
+    id, a subject id), and _SAFE_SEGMENT allows capitals, so on macOS `sc-1` and
+    `SC-1` are one `04-instances/` folder and the second write silently replaces
+    the first. Every check that refuses a repeated id compares under this key, so
+    a case-only repeat is the same finding as an exact one. One home, because
+    three readers each spelling `casefold()` themselves are three answers free to
+    drift.
+    """
+    return value.casefold()
+
+
+def duplicate_id_pairs(ids: list) -> list[tuple[str, str]]:
+    """`(first, repeat)` for every id an earlier id already took, by segment_key.
+
+    `first` is the earlier spelling and `repeat` this one's; they differ only when
+    the two differ only in case. Deduplicated and sorted, so a checker reports one
+    line per distinct pair. Non-string ids are skipped: an unhashable one would
+    raise, and layer 1 owns the shape.
+    """
+    first_spelling: dict[str, str] = {}
+    pairs: set[tuple[str, str]] = set()
+    for value in ids:
+        if not isinstance(value, str):
+            continue
+        key = segment_key(value)
+        if key in first_spelling:
+            pairs.add((first_spelling[key], value))
+        else:
+            first_spelling[key] = value
+    return sorted(pairs)
+
+
+def scenario_case_collision_message(first: str, repeat: str) -> str:
+    """The one wording for two scenario ids that differ only in case.
+
+    Shared by propose-seal (which refuses the parts) and check-refs (which reads
+    the sealed document), so both say the same thing about the same defect.
+    """
+    return (
+        f"scenario ids {first} and {repeat} differ only in case: on a case-insensitive "
+        f"filesystem they would share the one folder 04-instances/{first}/, the one file "
+        f"05-verdicts/{first}.json and one suite task folder, so one scenario overwrites "
+        "the other"
+    )
+
+
 def safe_segment(value: str) -> str:
     """Return `value` if it is safe to use as one path segment, else raise.
 

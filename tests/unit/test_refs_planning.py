@@ -559,6 +559,30 @@ def test_a_scenario_with_an_unknown_goal_is_reported(tmp_path):
     assert any("goal-ghost" in f.message for f in check_scenarios(run))
 
 
+def test_scenario_ids_differing_only_in_case_are_a_duplicate(tmp_path):
+    # 02-scenarios.json hand-edited past the seal: the same folder-sharing
+    # hazard, reported against the document that holds the ids.
+    run = _run(tmp_path, scenarios=True)
+    payload = minimal_scenarios()
+    copy = dict(payload["scenarios"][0])
+    copy["id"] = copy["id"].upper()
+    payload["scenarios"].append(copy)
+    write_json(run.scenarios, payload)
+    hits = [f for f in check_scenarios(run) if f.pointer == "/scenarios"]
+    assert len(hits) == 1
+    assert hits[0].artifact == run.scenarios
+    assert copy["id"] in hits[0].message and "differ only in case" in hits[0].message
+
+
+def test_an_exact_duplicate_scenario_id_is_still_reported(tmp_path):
+    run = _run(tmp_path, scenarios=True)
+    payload = minimal_scenarios()
+    payload["scenarios"].append(dict(payload["scenarios"][0]))
+    write_json(run.scenarios, payload)
+    hits = [f for f in check_scenarios(run) if f.pointer == "/scenarios"]
+    assert [h.message for h in hits] == [f"duplicate scenario id {payload['scenarios'][0]['id']!r}"]
+
+
 def test_a_duplicate_pointing_at_no_such_scenario_is_reported(tmp_path):
     run = _run(tmp_path, scenarios=True)
     payload = minimal_scenarios()

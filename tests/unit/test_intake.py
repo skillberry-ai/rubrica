@@ -200,6 +200,100 @@ def test_intake_disambiguates_colliding_artifact_ids(tmp_path):
     assert ids == ["api-json", "api-json-2"]
 
 
+def test_a_suffix_never_lands_on_an_id_another_input_already_has(tmp_path):
+    """Measured: `d1/x.md d2/x.md x-md-2` gave ids `x-md`, `x-md-2`, `x-md-2`,
+    intake exited 0, and check-refs then named manifest.json -- which no stage
+    can repair. Every id handed out is now remembered, suffixed ones too."""
+    from rubrica.refs import check_all
+
+    inputs = [
+        _write(tmp_path / "d1", "x.md", "# one\n"),
+        _write(tmp_path / "d2", "x.md", "# two\n"),
+        _write(tmp_path / "d3", "x-md-2", "# three\n"),
+    ]
+    run = intake(
+        inputs=inputs,
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=NOW,
+    )
+    ids = [e["artifact_id"] for e in read_json(run.manifest)["inputs"]]
+    assert len(set(ids)) == 3, ids
+    assert ids[:2] == ["x-md", "x-md-2"]
+    assert len(list(run.inputs_dir.iterdir())) == 3
+    assert check_all(run) == []
+
+
+def test_unique_artifact_id_compares_under_segment_key():
+    """Case-only repeats share one file on macOS, so they are repeats here too.
+    Plain lower-case runs keep exactly the ids they always had."""
+    from rubrica.intake import _unique_artifact_id
+
+    used: dict[str, int] = {}
+    assert [_unique_artifact_id(b, used) for b in ["a", "a", "a", "b"]] == ["a", "a-2", "a-3", "b"]
+    used = {}
+    assert [_unique_artifact_id(b, used) for b in ["Orders", "orders", "ORDERS-2"]] == [
+        "Orders",
+        "orders-2",
+        "ORDERS-2-2",
+    ]
+
+
+def test_unique_artifact_id_never_exceeds_the_id_length_limit():
+    """The id schemas cap ids at 128 characters. A base at the limit is trimmed
+    just enough to fit its suffix; ids that already fit are untouched; and two
+    long bases that trim onto one stem still come out distinct."""
+    from rubrica.intake import MAX_ID_LENGTH, _unique_artifact_id
+
+    used: dict[str, int] = {}
+    long_id = "a" * MAX_ID_LENGTH
+    out = [_unique_artifact_id(b, used) for b in [long_id] * 12]
+    assert out[0] == long_id
+    assert out[1] == "a" * 126 + "-2"
+    assert out[11] == "a" * 125 + "-12"
+    assert all(len(i) <= MAX_ID_LENGTH for i in out)
+    assert len({i.casefold() for i in out}) == len(out)
+
+    # Two different long bases sharing their first 126 characters trim onto the
+    # same stem; the second must still get an id of its own.
+    used = {}
+    a, b = "x" * 126 + "ab", "x" * 126 + "cd"
+    out = [_unique_artifact_id(i, used) for i in [a, a, b, b]]
+    assert out == [a, "x" * 126 + "-2", b, "x" * 126 + "-3"]
+
+    # A trim landing on a separator does not double it against the suffix.
+    used = {}
+    sep = "y" * 125 + "-zz"
+    assert _unique_artifact_id(sep, used) == sep
+    assert _unique_artifact_id(sep, used) == "y" * 125 + "-2"
+
+    # Short ids are exactly what they always were.
+    used = {}
+    assert [_unique_artifact_id(i, used) for i in ["x-md", "x-md", "x-md-2"]] == [
+        "x-md",
+        "x-md-2",
+        "x-md-2-2",
+    ]
+
+
+def test_a_case_only_pair_of_filenames_gets_distinct_ids(tmp_path):
+    run = intake(
+        inputs=[_write(tmp_path / "p", "A.md", "# A\n"), _write(tmp_path / "q", "a.md", "# a\n")],
+        runs_dir=tmp_path / "runs",
+        target_name="aap2",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=NOW,
+    )
+    ids = [e["artifact_id"] for e in read_json(run.manifest)["inputs"]]
+    assert len({i.casefold() for i in ids}) == 2, ids
+    assert len(list(run.inputs_dir.iterdir())) == 2
+
+
 def test_intake_records_the_limits_the_orchestrator_will_enforce(tmp_path):
     run = intake(
         inputs=[_write(tmp_path / "src", "api.json", {"tools": []})],
@@ -386,3 +480,158 @@ def test_classify_leaves_a_list_of_non_message_records_alone(tmp_path):
     producer a payload with no field it can read."""
     payload = [{"id": 1, "value": "a"}, {"id": 2, "value": "b"}, {"id": 3, "value": "c"}]
     assert classify(_write(tmp_path, "records.json", payload)) == "other"
+
+
+# --- T-136: a unique artifact id is not a unique stored file name -------------------------
+
+# The two pairs measured to collide: an id containing a dot beside a suffixed
+# one, and a case-only pair that is one file on a case-insensitive disk.
+_STORED_NAME_PAIRS = [
+    (("capture-json-0", "container-element.json"), ("capture-json-0.json", "tool")),
+    (("orders", "orders.json"), ("Orders.json", "tool")),
+]
+
+
+@pytest.mark.parametrize("first,repeat", _STORED_NAME_PAIRS)
+def test_the_measured_pairs_collide_under_segment_key(first, repeat):
+    from pathlib import Path
+
+    from rubrica.intake import stored_name, stored_name_collisions
+
+    named = [(aid, stored_name(aid, Path(src))) for aid, src in (first, repeat)]
+    collisions = stored_name_collisions(named)
+    assert [(c[0], c[2]) for c in collisions] == [(first[0], repeat[0])]
+
+
+def test_distinct_stored_names_are_not_collisions():
+    from rubrica.intake import stored_name_collisions
+
+    assert stored_name_collisions([("a", "a.json"), ("a-json", "a-json.json"), ("b", "b")]) == []
+
+
+def test_intake_input_refuses_a_stored_name_collision_and_mints_nothing(tmp_path, monkeypatch):
+    """slug() leaves no dot in an id, so the --input path is reached here by
+    forcing the ids; the guard is what keeps a future slug() change from
+    reopening the silent overwrite. A UsageError, like a missing input."""
+    import rubrica.intake as intake_module
+    from rubrica.errors import UsageError
+
+    one = _write(tmp_path / "src", "a.json", {"tools": []})
+    two = _write(tmp_path / "src", "b", "plain")
+    monkeypatch.setattr(intake_module, "_unique_ids", lambda inputs: ["orders", "Orders.json"])
+    runs = tmp_path / "runs"
+    with pytest.raises(UsageError, match=r"'orders' and 'Orders\.json'.*00-inputs/orders\.json"):
+        intake(
+            inputs=[one, two],
+            runs_dir=runs,
+            target_name="t",
+            target_interface="mcp",
+            max_rounds=2,
+            max_scenarios=8,
+            now=NOW,
+        )
+    assert not runs.exists() or not any(runs.iterdir())
+
+
+def _add_admitted_candidate(run, candidate_id, path):
+    from rubrica.artifacts import write_json
+
+    catalogue = read_json(run.catalogue)
+    template = next(c for c in catalogue["candidates"] if c["origin"] == "corpus")
+    catalogue["candidates"].append(
+        {**template, "candidate_id": candidate_id, "path": path, "kind": "other"}
+    )
+    write_json(run.catalogue, catalogue)
+    record = read_json(run.triage)
+    record["dispositions"].append(
+        {
+            "candidate_id": candidate_id,
+            "disposition": "admit",
+            "reason": "carries evidence of the target's shape",
+            "authority": "triage",
+        }
+    )
+    write_json(run.triage, record)
+
+
+@pytest.mark.parametrize("first,repeat", _STORED_NAME_PAIRS)
+def test_intake_run_refuses_admits_that_share_a_stored_file(tmp_path, first, repeat):
+    """The reproduction: two admitted candidates whose ids differ but whose
+    stored names are one file. Refused as findings against the catalogue
+    (exit 1, like intake --run's other catalogue refusals), nothing copied."""
+    from rubrica import intake as intake_module
+    from rubrica import refs
+    from tests.unit.test_admit import _surveyed_and_triaged
+
+    run = _surveyed_and_triaged(tmp_path)
+    if first[0] != "capture-json-0":  # capture-json-0 is already an admitted container element
+        _add_admitted_candidate(run, first[0], first[1])
+    _add_admitted_candidate(run, repeat[0], repeat[1])
+    assert refs.check_triage(run) == []
+
+    findings = intake_module.admit_from_triage(run)
+    assert len(findings) == 1
+    assert findings[0].artifact == run.catalogue
+    assert repr(first[0]) in findings[0].message and repr(repeat[0]) in findings[0].message
+    assert not run.inputs_dir.exists()
+    assert not run.manifest.exists()
+
+
+def test_intake_run_without_collisions_is_unchanged(tmp_path):
+    from rubrica import intake as intake_module
+    from tests.unit.test_admit import _surveyed_and_triaged
+
+    run = _surveyed_and_triaged(tmp_path)
+    assert intake_module.admit_from_triage(run) == []
+    names = sorted(e["stored_as"] for e in read_json(run.manifest)["inputs"])
+    assert names == ["capture-json-0.json", "capture-json-1.json", "readme-md.md"]
+
+
+@pytest.mark.parametrize("case_only", [False, True])
+def test_check_inputs_reports_a_repeated_stored_as(tmp_path, case_only):
+    from rubrica import refs
+    from rubrica.artifacts import write_json
+
+    one = _write(tmp_path / "src", "a.json", {"tools": []})
+    two = _write(tmp_path / "src", "b.json", {"tools": [1]})
+    run = intake(
+        inputs=[one, two],
+        runs_dir=tmp_path / "runs",
+        target_name="t",
+        target_interface="mcp",
+        max_rounds=2,
+        max_scenarios=8,
+        now=NOW,
+    )
+    assert refs.check_inputs(run) == []
+    manifest = read_json(run.manifest)
+    first = manifest["inputs"][0]["stored_as"]
+    manifest["inputs"][1]["stored_as"] = first.upper() if case_only else first
+    write_json(run.manifest, manifest)
+    at_pointer = [f for f in refs.check_inputs(run) if f.pointer == "/inputs/1/stored_as"]
+    # Picked by message, not by pointer alone: on a case-sensitive disk (Linux CI) the
+    # upper-cased name is also a file that does not exist, so check_inputs rightly
+    # adds a missing-copy finding at this same pointer. On macOS it is the same file.
+    repeats = [f for f in at_pointer if "the same file as /inputs/0" in f.message]
+    assert len(repeats) == 1
+    assert ("differing only in case" in repeats[0].message) is case_only
+    others = [f for f in at_pointer if f not in repeats]
+    if case_only and _is_case_sensitive(tmp_path):
+        assert len(others) == 1
+        assert "has no stored copy" in others[0].message
+    else:
+        assert others == []
+
+
+def _is_case_sensitive(directory):
+    """Whether `directory` sits on a filesystem that tells `a` and `A` apart.
+
+    Probed rather than guessed from the platform: macOS can mount a case-sensitive
+    volume and Linux can mount a case-insensitive one.
+    """
+    probe = directory / "case-probe"
+    probe.write_text("", encoding="utf-8")
+    try:
+        return not (directory / "CASE-PROBE").exists()
+    finally:
+        probe.unlink()
