@@ -17,8 +17,8 @@ container, a network, or an LLM call.
 **Precondition: emit must have run.** This module reads emitted packages, which
 nothing orders `validate --stage emit` before, so it uses `.get()` on their
 contents rather than indexing directly -- the same exception refs.check_suite
-documents. It indexes `manifest.json` directly, because that is a gated stage
-output.
+documents. It reads `manifest.json` through manifest.read_run_id, which refuses
+a manifest with no usable run_id as exit 2.
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ from rubrica.artifacts import ArtifactError, read_json, write_json
 from rubrica.emit import AGENT_TIMEOUT_SEC, VERIFIER_TIMEOUT_SEC
 from rubrica.errors import UsageError
 from rubrica.findings import Finding, format_findings
+from rubrica.manifest import read_run_id
 from rubrica.paths import RunPaths
 from rubrica.validate import validate_artifact
 
@@ -292,25 +293,38 @@ def _clear_transcripts(logs_dir: Path) -> str:
     return ""
 
 
+# How both subprocess calls below, and _decode on their timeout path, turn the
+# captured bytes into text. Bare text=True would decode strictly, so one byte
+# that is not valid UTF-8 -- on the agent's stdout or stderr, the one output
+# smoke cannot control, or the verifier's -- raises UnicodeDecodeError out of
+# subprocess.run. Only TimeoutExpired is caught there, so that one bad task
+# would end the whole smoke run as an [internal] exit 1 naming the wrong cause
+# and cost every remaining task its data. errors="replace" turns the byte into
+# U+FFFD and the task is scored like any other.
+_DECODE = {"encoding": "utf-8", "errors": "replace"}
+
+
 def _decode(output: str | bytes | None) -> str:
     """Normalise a subprocess's captured stream to str, treating None as empty.
 
-    Exists for TimeoutExpired.stdout/.stderr specifically: subprocess.run's
-    text=True decodes a *successful* communicate() return, but a timeout raises
-    from inside communicate() with the raw bytes it had collected so far, before
+    Exists for TimeoutExpired.stdout/.stderr specifically: subprocess.run
+    decodes a *successful* communicate() return, but a timeout raises from
+    inside communicate() with the raw bytes it had collected so far, before
     that decoding step runs -- so the partial output on a timeout is bytes even
     though the call asked for text. None means the process was killed before it
     produced anything at all -- a hung-from-the-start agent, most often.
 
-    utf-8 is hardcoded rather than left to locale.getencoding(): the agent's
-    stdout is stream-json by definition, which is UTF-8, so there is no
-    encoding to detect. errors="replace" keeps a stream cut mid-character by
-    the kill readable instead of raising on it.
+    It decodes exactly the way the successful path does (_DECODE below), so a
+    transcript reads the same whether or not the agent was killed. utf-8 is
+    hardcoded rather than left to locale.getencoding(): the agent's stdout is
+    stream-json by definition, which is UTF-8, so there is no encoding to
+    detect. errors="replace" keeps a stream cut mid-character by the kill
+    readable instead of raising on it.
     """
     if output is None:
         return ""
     if isinstance(output, bytes):
-        return output.decode("utf-8", errors="replace")
+        return output.decode(**_DECODE)
     return output
 
 
@@ -376,14 +390,14 @@ def run_agent(
             list(argv),
             cwd=task_dir,
             capture_output=True,
-            text=True,
+            **_DECODE,
             timeout=spec.timeout_sec,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        # CPython quirk, not a text=True bug in this code: on a timeout with
+        # CPython quirk, not a decoding bug in this code: on a timeout with
         # partial output, TimeoutExpired.stdout/.stderr carry raw bytes even
-        # though text=True was passed -- the newline/encoding translation that
+        # though an encoding was passed -- the newline/encoding translation that
         # normally runs happens only on communicate()'s *successful* return, a
         # path a timeout never reaches. Decode defensively rather than let a
         # hung agent's partial transcript raise TypeError instead of scoring.
@@ -464,7 +478,7 @@ def verify_package(
         completed = subprocess.run(  # nosec B603
             verifier_argv(task_dir, agent_logs=agent_logs, out_dir=out_dir),
             capture_output=True,
-            text=True,
+            **_DECODE,
             timeout=timeout_sec,
             env=scrubbed_env(),
             check=False,
@@ -736,10 +750,11 @@ def smoke_run(run: RunPaths, specs: tuple[AgentSpec, ...]) -> tuple[dict | None,
     the entire product.
     """
     # Read before anything runs. This raises ArtifactError on a directory with no
-    # manifest, which cli.py maps to exit 2 -- and reading it after the agent loop
+    # manifest, and UsageError on one that is not an object or has no run_id; cli.py
+    # maps both to exit 2 -- and reading it after the agent loop
     # would burn every agent invocation in the run before discovering that the
     # thing it was pointed at is not a run.
-    run_id = read_json(run.manifest)["run_id"]
+    run_id = read_run_id(run)
 
     findings: list[Finding] = []
     sids = run.scenario_ids_with_tasks()
@@ -842,9 +857,10 @@ def smoke_run(run: RunPaths, specs: tuple[AgentSpec, ...]) -> tuple[dict | None,
     verdict = verdict_for(tasks, summary, roles)
     report = {
         "schema_version": "0.1",
-        # Indexed directly: manifest.json is a gated stage output, and a directory
-        # without one is not a run. The ArtifactError becomes exit 2, which is the
-        # honest answer -- no repair to a stage would produce a manifest.
+        # Read through manifest.read_run_id above: manifest.json is intake's code
+        # output, and a directory without a usable one is not a run. The refusal
+        # becomes exit 2, which is the honest answer -- no repair to a stage would
+        # produce a manifest.
         "run_id": run_id,
         "agents": [
             {

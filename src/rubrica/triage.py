@@ -97,10 +97,19 @@ def check_acceptance(path: Path, acceptance: dict) -> list[Finding]:
     # harness-level "unreadable file", which is this module's one usage
     # error, not a structural finding -- so it must be raised before any
     # check below has a chance to turn it into one instead.
+    #
+    # UnicodeDecodeError is caught by name because it is a ValueError, not an
+    # OSError: under `except OSError` alone a file opening with b"\xff\xfe"
+    # escaped cli.py's adopt-projection block as a traceback -- exit 1 with
+    # empty stdout, both halves of the exit-code contract broken. `classify`
+    # below cannot hit the same error, since `intake._json_or_none` already
+    # catches it and the decode here has succeeded by then.
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise UsageError(f"cannot read projection source: {path} ({exc})") from exc
+    except UnicodeDecodeError as exc:
+        raise UsageError(f"projection source cannot be read as UTF-8 text: {path} ({exc})") from exc
 
     actual_kind = classify(path)
     # `acceptance["classifies_as"]` was a bare index, one function away from the

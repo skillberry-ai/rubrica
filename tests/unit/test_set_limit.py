@@ -249,6 +249,29 @@ def test_a_corrupt_limits_block_reaches_the_cli_as_exit_two(tmp_path, capsys):
     assert "corrupt" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("document", [[1, 2], "not a manifest"])
+def test_a_manifest_that_is_not_an_object_reaches_the_cli_as_exit_two(tmp_path, document, capsys):
+    """The whole-document form of the test above: a manifest.json that is a list
+    or a string once raised AttributeError on `.get`, which cli.py's catch-all
+    turned into an exit-1 `[internal]` finding. Exit 2, one stderr line, nothing
+    on stdout, and neither the manifest nor decisions.md written."""
+    run = build_toy_run(tmp_path / "runs", upto="intake")
+    write_json(run.manifest, document)
+    before = run.manifest.read_bytes()
+    decisions = run.root / "decisions.md"
+    decisions_before = decisions.read_bytes() if decisions.exists() else None
+
+    code = main(["set-limit", "--run", str(run.root), "--max-rounds", "3", "--reason", "probe"])
+
+    out, err = capsys.readouterr()
+    assert code == 2
+    assert out == ""
+    assert len(err.strip().splitlines()) == 1
+    assert "manifest.json" in err and "not an object" in err
+    assert run.manifest.read_bytes() == before
+    assert (decisions.read_bytes() if decisions.exists() else None) == decisions_before
+
+
 @pytest.mark.parametrize(
     "argv_limit",
     [

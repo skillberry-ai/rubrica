@@ -21,6 +21,7 @@ from typing import Any
 from rubrica.artifacts import ArtifactError, read_json, sha256_of, write_json
 from rubrica.errors import UsageError
 from rubrica.findings import Finding
+from rubrica.manifest import read_run_id
 from rubrica.paths import RunPaths
 
 # Fixed, so review is a trend line rather than a fresh opinion each time.
@@ -228,7 +229,7 @@ def sample_run(run: RunPaths, size: int = DEFAULT_SAMPLE_SIZE) -> tuple[list[dic
             f"--size must be at least 1, got {size}; a packet of no tasks cannot be told "
             "apart from a review that found nothing to say"
         )
-    run_id = read_json(run.manifest)["run_id"]
+    run_id = read_run_id(run)
     try:
         pool = candidates(run)
     except ArtifactError as exc:

@@ -485,6 +485,34 @@ def test_adopt_projection_via_the_cli_reports_an_unknown_projection_as_exit_two(
     assert captured.err.strip()
 
 
+def test_a_non_utf8_source_file_is_exit_two_and_leaves_the_catalogue_unchanged(tmp_path, capsys):
+    """UnicodeDecodeError is a ValueError, not an OSError, so check_acceptance's
+    `except OSError` let it escape main() as a traceback: exit 1, empty stdout.
+    An undecodable --file is a usage error, like a missing one."""
+    run = _run_with_projection(tmp_path)
+    bad = tmp_path / "src.md"
+    bad.write_bytes(b"\xff\xfe not utf-8 \x80\x81")
+    before = run.catalogue.read_bytes()
+    code = cli.main(
+        [
+            "adopt-projection",
+            "--run",
+            str(run.root),
+            "--projection",
+            "prj-tools",
+            "--file",
+            str(bad),
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.out == ""
+    lines = captured.err.strip().splitlines()
+    assert len(lines) == 1
+    assert "UTF-8" in lines[0]
+    assert run.catalogue.read_bytes() == before
+
+
 def test_an_acceptance_contract_with_no_classifies_as_is_a_finding_not_a_traceback(tmp_path):
     """`acceptance["classifies_as"]` was a bare index one function away from the
     guard that already existed for `acceptance` itself.
