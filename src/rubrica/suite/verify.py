@@ -676,16 +676,34 @@ def read_contract(path):
 
 
 def _read_logs(agent_logs):
-    """Concatenate every transcript file in the agent log directory.
+    """Concatenate every transcript file in the agent log directory. -> (text, problems).
 
     Globs *.jsonl and *.txt, so --out must not point at --agent-logs: a second
     run would otherwise read its own reward.txt back as transcript input.
+
+    Three log conditions are problems rather than an empty transcript, and
+    main() refuses on them exactly as it does on a contract problem: a log
+    directory that does not exist, one holding no transcript file at all, and a
+    transcript that cannot be read (a permissions failure, or a directory named
+    `*.jsonl`). Each used to be scored -- the first two as 0.0 with no note, the
+    third as a traceback with no reward-detail.json -- so a mis-mounted
+    --agent-logs (its default is a container path) read as an agent that failed
+    every task. A transcript *file* that exists and is empty is not a problem:
+    an agent that ran and printed nothing still scores, honestly, as nothing.
     """
-    parts = []
-    for pattern in ("*.jsonl", "*.txt"):
-        for path in sorted(Path(agent_logs).glob(pattern)):
+    logs = Path(agent_logs)
+    if not logs.is_dir():
+        return "", [f"agent log directory {logs} does not exist or is not a directory"]
+    paths = [path for pattern in ("*.jsonl", "*.txt") for path in sorted(logs.glob(pattern))]
+    if not paths:
+        return "", [f"agent log directory {logs} holds no *.jsonl or *.txt transcript"]
+    parts, problems = [], []
+    for path in paths:
+        try:
             parts.append(path.read_text(errors="replace"))
-    return "\n".join(parts)
+        except OSError as exc:
+            problems.append(f"agent transcript {path} could not be read: {exc}")
+    return "\n".join(parts), problems
 
 
 def main(argv=None):
@@ -703,11 +721,20 @@ def main(argv=None):
     contract, problems = read_contract(args.expected)
     if not problems:
         problems = _contract_problems(contract)
+    transcript = ""
+    if not problems:
+        # Read only once the contract is sound, so a refusal names the contract
+        # first; a log problem is refused on the same path below, because a 0.0
+        # over a log this verifier never read is as misleading as one over a
+        # contract it could not trust.
+        transcript, problems = _read_logs(args.agent_logs)
     if problems:
         # Refuse rather than write a misleading 0 -- or, for a weights
         # problem, an inflated reward that looks like a normal score. A
         # contract this verifier cannot read is a bypassed authoring gate, not
-        # a bad agent run, and scoring it would invert that conclusion. No
+        # a bad agent run, and scoring it would invert that conclusion; a log
+        # directory this verifier could not read is a mis-mounted or broken
+        # log, not an agent that failed, for the same reason. No
         # reward.txt is written, so the platform sees a missing reward
         # instead of a real one.
         message = "; ".join(problems)
@@ -715,7 +742,7 @@ def main(argv=None):
         print(f"verify.py: {message}", file=sys.stderr)
         return 2
 
-    calls, answer, ok, notes = parse_transcript(_read_logs(args.agent_logs))
+    calls, answer, ok, notes = parse_transcript(transcript)
     reward, detail = compute_reward(contract, calls, answer, ok)
     if notes:
         detail["transcript_notes"] = notes

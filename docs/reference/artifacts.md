@@ -978,6 +978,19 @@ file); `trajectory.operations[].tool`/`args` (the capability's `binding.tool`
 and `binding.fixed_args` merged with the scenario's own call arguments, not
 the world model's `capability_id` — a transcript never shows a capability id).
 
+The verifier **refuses rather than scores** when it cannot trust its inputs:
+it writes no `reward.txt` (so the platform sees a missing reward, not a 0),
+writes `reward-detail.json` as `{"error": "<reason>"}`, prints the same reason
+to stderr, and exits `2`. It refuses on a contract it cannot read or trust —
+unreadable or unparseable `expected.json`, a `contract` other than
+`rubrica/v1`, or any field its scoring reads being absent or mistyped — and on
+an agent log it cannot read: an `--agent-logs` directory that does not exist,
+one holding no `*.jsonl` or `*.txt` transcript file, or a transcript file that
+cannot be read (a permissions failure, or a directory named `*.jsonl`). A
+contract problem is named in preference to a log problem. A transcript file
+that exists and is empty is **not** a refusal: an agent that ran and printed
+nothing scores normally.
+
 ## `report`
 
 - **Schema:** `src/rubrica/schema/report-0.1.json`

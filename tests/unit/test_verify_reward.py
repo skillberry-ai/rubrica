@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -305,6 +306,74 @@ def test_main_refuses_weights_that_do_not_sum_to_one(tmp_path):
     error = json.loads((out / "reward-detail.json").read_text())["error"]
     assert "weights" in error
     assert "1.8" in error
+
+
+# -- the refuse path: an agent log this verifier could not read ---------------
+#
+# Each case used to score: a missing or transcript-less --agent-logs as 0.0 with
+# no note (so a mis-mounted log read as an agent that failed every task), and an
+# unreadable transcript as a traceback with no reward-detail.json at all.
+
+
+def _refuses_logs(expected, logs, out, expect_in_error):
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 2, "a log this verifier could not read must refuse, not score"
+    assert not (out / "reward.txt").exists(), "the platform must see a missing reward"
+    assert not (out / "reward.json").exists()
+    error = json.loads((out / "reward-detail.json").read_text())["error"]
+    assert expect_in_error in error, error
+    assert str(logs) in error, error
+    return error
+
+
+def test_main_refuses_a_missing_agent_log_directory(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    missing = logs.parent / "nonexistent"
+    _refuses_logs(expected, missing, out, "does not exist")
+
+
+def test_main_refuses_an_agent_log_directory_with_no_transcript(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    (logs / "transcript.jsonl").unlink()
+    (logs / "unrelated.log").write_text("not a transcript the verifier reads")
+    _refuses_logs(expected, logs, out, "holds no")
+
+
+def test_main_refuses_a_transcript_that_is_a_directory(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    (logs / "transcript.jsonl").unlink()
+    (logs / "x.jsonl").mkdir()
+    _refuses_logs(expected, logs, out, "could not be read")
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="chmod-based deny is bypassed under CAP_DAC_OVERRIDE (root)"
+)
+def test_main_refuses_an_unreadable_transcript(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(), WRONG_ANSWER_TRANSCRIPT)
+    transcript = logs / "transcript.jsonl"
+    transcript.chmod(0)
+    try:
+        _refuses_logs(expected, logs, out, "could not be read")
+    finally:
+        transcript.chmod(0o644)
+
+
+def test_main_still_scores_an_empty_transcript_file(tmp_path):
+    """An agent that ran and printed nothing is a real, low score -- not a refusal."""
+    expected, logs, out = _write_run(tmp_path, _contract(), "")
+    code = main(["--expected", str(expected), "--agent-logs", str(logs), "--out", str(out)])
+    assert code == 0
+    assert (out / "reward.txt").is_file()
+
+
+def test_a_contract_problem_is_named_ahead_of_a_log_problem(tmp_path):
+    expected, logs, out = _write_run(tmp_path, _contract(contract="bench/v2"), "")
+    code = main(
+        ["--expected", str(expected), "--agent-logs", str(logs / "gone"), "--out", str(out)]
+    )
+    assert code == 2
+    assert "bench/v2" in json.loads((out / "reward-detail.json").read_text())["error"]
 
 
 # -- the refuse path: every field compute_reward reads ----------------------

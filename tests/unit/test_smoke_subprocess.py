@@ -257,7 +257,8 @@ def test_the_transcript_globs_are_exactly_what_the_verifier_reads(tmp_path):
     for name in names:
         (logs / name).write_text(f"<marker:{name}>\n", encoding="utf-8")
 
-    read = verify._read_logs(logs)
+    read, problems = verify._read_logs(logs)
+    assert problems == []
     seen = {name for name in names if f"<marker:{name}>" in read}
     assert seen == {f"t{Path(pattern).suffix}" for pattern in _TRANSCRIPT_GLOBS}
 
