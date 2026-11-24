@@ -1546,3 +1546,21 @@ def test_scratch_state_inside_the_run_is_a_usage_error(tmp_path, var):
     run.mkdir()
     proc = _dispatch(tmp_path, "propose", str(run), run=run, **{var: str(run / "scratch")})
     assert proc.returncode == 2, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+
+
+def test_orchestrate_is_refused_as_a_stage_without_dispatching_a_model(tmp_path):
+    """`dispatch-stage.sh orchestrate` must exit 2 rather than run a crippled dispatch.
+
+    `rb-orchestrate/SKILL.md` exists, so the skill-file check alone accepted it, and
+    the dispatch that followed had no subagent ability and a deny list naming every
+    skill it exists to hand out. Run against the stub `claude` and outside
+    print-settings mode, so a refusal that came too late would show up as a stub
+    invocation on record.
+    """
+    proc, record = _dispatch_with_stub_claude(
+        tmp_path, "orchestrate", str(tmp_path / "run"), expect_exit=2
+    )
+    assert "orchestrate is not a stage" in proc.stderr
+    assert "docs/getting-started.md" in proc.stderr
+    assert not record.exists(), "the stub claude ran: a model would have been dispatched"
+    assert not (tmp_path / "lab" / "transcripts").exists()

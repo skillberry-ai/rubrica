@@ -70,6 +70,16 @@ if [ -z "$STAGE" ] || [ -z "$RUN_ARG" ]; then
 fi
 RUN=$(cd "$RUN_ARG" 2>/dev/null && pwd) || { echo "no such run directory: $RUN_ARG" >&2; exit 2; }
 
+# rb-orchestrate has a SKILL.md, so the existence check below would accept it, and
+# what came back was a crippled dispatch rather than a refusal: this harness grants
+# no subagent ability and denies every sibling skill directory, so an orchestrator
+# run through it can neither read nor hand out the skills it exists to dispatch.
+# Exit 2, because no retry of this command can make it work.
+if [ "$STAGE" = "orchestrate" ]; then
+  echo "orchestrate is not a stage and cannot be dispatched by this script; see 'The same run in one step' in docs/getting-started.md" >&2
+  exit 2
+fi
+
 SKILL_DIR="$REPO/src/rubrica/skills/rb-$STAGE"
 SKILL="$SKILL_DIR/SKILL.md"
 if [ ! -f "$SKILL" ]; then
