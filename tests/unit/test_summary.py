@@ -2090,6 +2090,61 @@ def test_utilisation_absent_reads_differently_from_the_no_world_model_absence(tm
     assert (one.what, one.why) != (other.what, other.why)
 
 
+def test_utilisation_names_one_unreadable_claims_file_and_stops_reading_complete(tmp_path):
+    """One claims file that is not JSON: the numbers stand, and the file is named.
+
+    Reproduced before the fix: with `notes-md.json` holding `{broken`, the page read
+    "91.7% -- 11 of 12 claims cited. Every input with claims contributed..." and
+    never mentioned notes-md, while `gate-brief --gate 1` on the same run said one
+    claims file was not counted. The page and the gate must read the same key.
+    """
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    (run.claims_dir / "notes-md.json").write_text("{broken", encoding="utf-8")
+    got = summary.utilisation(run)
+    assert isinstance(got, summary.Utilisation), "the readable files still have numbers"
+    assert got.unreadable == ["notes-md.json"]
+    assert all(row["artifact_id"] != "notes-md" for row in got.per_artifact)
+    page = summary.run_summary(run)
+    assert "notes-md.json" in page
+    assert "Every input with claims contributed" not in page, (
+        "'every input' is a claim about an input the page could not read"
+    )
+    assert re.search(r"claims cited, 1 claims file\(s\) unreadable", page), (
+        "the collapsed one-line count must not read complete either"
+    )
+    # A report, not a gate: the CLI still exits 0.
+    assert (
+        cli.main(["run-summary", "--run", str(run.root), "--output", str(tmp_path / "p.html")]) == 0
+    )
+
+
+def test_utilisation_with_every_claims_file_unreadable_is_not_no_world_model_yet(tmp_path):
+    """Every claims file broken, world model intact: a malformation, named.
+
+    Reproduced before the fix: the section said "Not present ... (no world model
+    yet)" on a page whose world-model section showed the sealed world model, which
+    sends a reader to re-run a seal that already ran.
+    """
+    from rubrica.paths import list_json
+
+    run = build_toy_run(tmp_path / "runs", upto="reconcile-seal")
+    names = [path.name for path in list_json(run.claims_dir)]
+    assert len(names) > 1, "the toy run must have several claims files to break"
+    for name in names:
+        (run.claims_dir / name).write_text("{broken", encoding="utf-8")
+    got = summary.utilisation(run)
+    assert isinstance(got, summary.Malformed), "the claims are on disk and unreadable"
+    assert got.why != "no world model yet"
+    for name in names:
+        assert name in got.why
+    page = summary.run_summary(run)
+    assert "no world model yet" not in page
+    assert all(name in page for name in names)
+    assert (
+        cli.main(["run-summary", "--run", str(run.root), "--output", str(tmp_path / "p.html")]) == 0
+    )
+
+
 def test_utilisation_exempts_a_zero_of_zero_input_the_gate_exempts(tmp_path):
     """`uncited` is `check_claim_utilisation`'s predicate, `total and cited == 0`.
 

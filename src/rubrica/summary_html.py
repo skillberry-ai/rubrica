@@ -661,12 +661,25 @@ def _utilisation(run: RunPaths):
         else '<span class="absent">no claim to cite</span>'
     )
     parts = [f"<p><b>{overall}</b> &mdash; {esc(got.cited)} of {esc(got.total)} claims cited.</p>"]
+    # Directly under the total, never below the table: the total is what a reader
+    # takes as the whole run, and it is not -- these files' claims are in neither
+    # number. Measured before this line existed: one truncated `notes-md.json` and
+    # the page said "11 of 12 claims cited, every input contributed", while
+    # `gate-brief --gate 1` on the same run said one claims file was not counted.
+    if got.unreadable:
+        parts.append(
+            f'<p class="malformed">{esc(len(got.unreadable))} claims file(s) in 01-claims/ '
+            "present but unreadable, not counted in the numbers above or the table below: "
+            f'<span class="mono">{esc(", ".join(got.unreadable))}</span></p>'
+        )
     if got.uncited:
         parts.append(
             f"<p>{esc(len(got.uncited))} input(s) contributed no cited claim: "
             f'<span class="mono">{esc(", ".join(got.uncited))}</span></p>'
         )
-    elif not got.waived:
+    elif not got.waived and not got.unreadable:
+        # Suppressed beside an unreadable claims file too: "every input" is a claim
+        # about inputs this page could not read.
         parts.append("<p>Every input with claims contributed at least one cited claim.</p>")
     # Named on their own line, never folded into the sentence above: a waived
     # zero-citation input is a finding a human read and ruled correct, so it is not
@@ -1498,9 +1511,16 @@ def _section_lines(run: RunPaths) -> dict[str, str]:
         return line
 
     def utilisation(util) -> str:
-        if util.pct is None:
-            return "no claim to cite"
-        return f"{util.pct:.1f}% of {util.total} claims cited"
+        line = (
+            "no claim to cite"
+            if util.pct is None
+            else f"{util.pct:.1f}% of {util.total} claims cited"
+        )
+        if util.unreadable:
+            # On the collapsed line too, for the header's reason in gate-brief: the
+            # one-line count is what a reader skims, so it must not read complete.
+            line += f", {len(util.unreadable)} claims file(s) unreadable"
+        return line
 
     def contradictions(cons) -> str:
         unresolved = cons.by_resolution.get("unresolved", 0)
