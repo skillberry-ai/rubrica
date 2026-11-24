@@ -501,7 +501,9 @@ def _contract_problems(contract):
       fail and a crashed agent scored as a completed one. A one-character typo
       in a two-value enum must not do that.
     - Weights that don't sum to 1.0 produce a reward outside [0, 1] that looks
-      like a normal, if unusually high, score. NaN reaches the same place through
+      like a normal, if unusually high, score. So do weights that sum to 1.0
+      but leave [0, 1] one by one: assertions=2.0, trajectory=-1.0 scored 2.0,
+      so each weight is range-checked too. NaN reaches the same place through
       the sum check itself -- see _is_number.
 
     All of these are bypassed-authoring-gate problems, not agent problems, so
@@ -630,8 +632,15 @@ def _contract_problems(contract):
         bad = [(name, value) for name, value in pairs if not _is_number(value)]
         for name, value in bad:
             problems.append(f"weights.{name} must be a finite number, got {value!r}")
+        # The sum alone does not keep the reward in [0, 1]: assertions=2.0 with
+        # trajectory=-1.0 sums to 1.0 and was measured scoring a passing run 2.0,
+        # which a platform reads as an ordinary score. Each weight must itself lie
+        # in [0, 1]; with the sum check, that bounds the combined score.
+        for name, value in pairs:
+            if _is_number(value) and not 0.0 <= float(value) <= 1.0:
+                problems.append(f"weights.{name} must be between 0 and 1, got {value!r}")
         if not bad:
-            total = float(pairs[0][1]) + float(pairs[1][1])
+            total = sum(float(value) for _, value in pairs)
             if abs(total - 1.0) > 1e-9:
                 problems.append(
                     f"weights must sum to 1.0, got assertions={pairs[0][1]!r} + "
